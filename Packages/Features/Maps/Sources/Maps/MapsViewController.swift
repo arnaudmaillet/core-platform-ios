@@ -3704,7 +3704,8 @@ extension MapsViewController: MKMapViewDelegate {
     enum MapCardCloseTarget: Equatable { case marker, placeCard }
 
     static func closeTarget(axis: ZoomDismissAxis, hasLanding: Bool) -> MapCardCloseTarget {
-        axis == .vertical && hasLanding ? .placeCard : .marker
+        // Up or down, a place feed closes onto its page (#685).
+        axis.landsBeneath && hasLanding ? .placeCard : .marker
     }
 
     /// Where a place page goes when a vertical dismissal commits: beneath the
@@ -4126,7 +4127,7 @@ extension MapsViewController: MKMapViewDelegate {
         // no page at all, the hero keeps every photograph it had.
         let gallerySource = gallery as? any ZoomTransitionSource
         slide.heroClaimsAxis = { [weak gallerySource] axis in
-            axis != .vertical || gallerySource?.zoomLandingAcceptsHero != false
+            !axis.landsBeneath || gallerySource?.zoomLandingAcceptsHero != false
         }
         // ⚠️ THE DEFAULT AXES, deliberately restored. Restricting the window
         // to `[.vertical]` made a horizontal grab a percent-driven SLIDE, and
@@ -4140,7 +4141,7 @@ extension MapsViewController: MKMapViewDelegate {
         // with the marker origin's `dismissalDidEnd` as the landing's
         // backstop — exactly as the hero's own return does.
         slide.onWillBeginPop = { [weak nav, weak feed, gallery] axis in
-            guard axis == .vertical, let gallery, let nav, let feed,
+            guard axis.landsBeneath, let gallery, let nav, let feed,
                   let plan = Self.stack(
                       nav.viewControllers, inserting: gallery, beneath: feed
                   )

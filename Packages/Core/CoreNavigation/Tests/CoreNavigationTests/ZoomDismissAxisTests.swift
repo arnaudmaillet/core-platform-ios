@@ -102,4 +102,12 @@ struct ZoomDismissAxisTests {
         #expect(ZoomDismissAxis.upward.offset(along: 200, across: 10) == CGPoint(x: 10, y: -200),
                 "the window follows the finger up")
     }
+
+    /// A swipe up lands where a swipe down does (#685): beneath the feed when
+    /// a place page is there; a horizontal close lands on the source.
+    @Test func upwardLandsWhereDownwardDoes() {
+        #expect(ZoomDismissAxis.vertical.landsBeneath)
+        #expect(ZoomDismissAxis.upward.landsBeneath)
+        #expect(!ZoomDismissAxis.horizontal.landsBeneath)
+    }
 }
