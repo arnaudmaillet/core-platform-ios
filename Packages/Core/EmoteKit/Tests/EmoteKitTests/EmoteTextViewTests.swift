@@ -192,9 +192,21 @@ struct EmoteTextViewTests {
         let view = try #require(field.emoteViews.first)
         #expect(!view.showsStill, "the glyph stands in for the art on its way")
         #expect(!view.isShowingArt)
+        // ⚠️ THE FIELD'S VIEW, READ AFRESH EVERY LOOK: a layout pass may place
+        // the emote again in a new view (the old one leaves the window and
+        // drops its request) — holding the first view watched one that would
+        // never get its art (CI, Xcode 26). The bounce is counted on every
+        // view the emote had.
+        var seen: [ObjectIdentifier: EmoteAttachmentView] = [ObjectIdentifier(view): view]
         // A bake on a starved runner can take a while: many looks, no clock.
-        #expect(await settle(looks: 8_000) { view.isShowingArt }, "the art never came")
-        #expect(view.bounceInCount == 1, "the art landed without its bounce")
+        let landed = await settle(looks: 8_000) {
+            guard let current = field.emoteViews.first else { return false }
+            seen[ObjectIdentifier(current)] = current
+            return current.isShowingArt
+        }
+        let states = seen.values.map(\.debugState).joined(separator: " | ")
+        #expect(landed, "the art never came: \(field.emoteViews.count) view(s), \(states)")
+        #expect(seen.values.map(\.bounceInCount).reduce(0, +) >= 1, "the art landed without its bounce: \(states)")
     }
 
     /// ⚠️ THE APP-WIDE BUDGET HOLDS: past it, emotes hold their art's poster

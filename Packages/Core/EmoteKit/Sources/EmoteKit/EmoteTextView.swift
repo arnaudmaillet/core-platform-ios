@@ -663,6 +663,11 @@ final class EmoteAttachmentView: UIView {
     var showsStill: Bool { !still.isHidden }
     /// The art on show, held on its poster frame for want of a slot (#731).
     var showsPosterArt: Bool { waitingArt != nil && !player.isHidden }
+    /// What the view holds, in a word each — for a test's failure message.
+    var debugState: String {
+        "still=\(showsStill) art=\(isShowingArt) poster=\(showsPosterArt) pending=\(request != nil) "
+            + "window=\(window != nil) slot=\(holdsSlot) bounces=\(bounceInCount) size=\(bounds.size)"
+    }
 }
 
 extension EmoteAttachmentView: EmotePlaybackWaiting {
