@@ -122,6 +122,10 @@ struct MapCardCloseTargetTests {
     /// map, so both close onto the marker.
     @Test func everyOtherAxisClosesOntoTheMarker() {
         #expect(MapsViewController.closeTarget(axis: .horizontal, hasLanding: true) == .marker)
+        // ⚠️ UP DOES WHAT DOWN DOES on a place feed (#685): the place page.
+        #expect(MapsViewController.closeTarget(axis: .upward, hasLanding: true) == .placeCard)
+        // ...and on a marker with no page, both land on the marker.
+        #expect(MapsViewController.closeTarget(axis: .upward, hasLanding: false) == .marker)
     }
 
     /// ⚠️ AND WITH NO PLACE PAGE THERE IS NOTHING ELSE IT COULD BE. A single

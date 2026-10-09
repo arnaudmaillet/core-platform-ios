@@ -900,7 +900,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // and one per opened post.
             dismissal.prepareForDismissal = { [weak landing, weak dismissal] axis in
                 guard let dismissal else { return }
-                guard axis == .vertical else {
+                // Up or down, a place feed closes onto its page (#685).
+                guard axis.landsBeneath else {
                     dismissal.revealGeometry = markerGeometry
                     return
                 }
@@ -925,7 +926,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             let staged = dismissal.onWillBeginPop
             dismissal.onWillBeginPop = { [weak nav, weak destination] axis in
                 staged?(axis)
-                guard axis == .vertical, let nav, let destination,
+                guard axis.landsBeneath, let nav, let destination,
                       !nav.viewControllers.contains(landing),
                       let feedIndex = nav.viewControllers.firstIndex(of: destination)
                 else { return }
