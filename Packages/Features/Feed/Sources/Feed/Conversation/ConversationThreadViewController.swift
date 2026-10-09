@@ -260,20 +260,33 @@ final class ConversationThreadViewController: UIViewController {
         guard hasRenderedContent, let day = dayOnScreen() else { return showDayItem(false) }
         if day != dayShown {
             dayShown = day
-            let old = dayItem
             dayItem = makeDayItem(day)
-            // A change of day while it shows morphs, glass to glass — on the
-            // next turn, out of any `performWithoutAnimation` (see
-            // `showDayItem`).
-            if dayItemShown {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.dayItemShown else { return }
-                    self.placeMuteItem(replacing: old, animated: true)
-                }
-            }
+            // A change of day while it shows morphs, glass to glass.
+            if dayItemShown { scheduleDayPlacement() }
         }
         showDayItem(true)
     }
+
+    /// Puts the bar's day where the state says, ONCE, on the next turn
+    /// (#756):
+    /// - the next turn: this runs from scrolls and layouts that a diffable
+    ///   `apply(animatingDifferences: false)` drives inside
+    ///   `performWithoutAnimation`, which swallowed the transition;
+    /// - once: opening on a long thread, the item appears and changes day in
+    ///   the same turn, and a second `setRightBarButtonItems` cut the first
+    ///   one's appearance short — the item popped in on the device.
+    private func scheduleDayPlacement() {
+        guard view.window != nil else { return placeMuteItem() }
+        guard !dayPlacementScheduled else { return }
+        dayPlacementScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.dayPlacementScheduled = false
+            self.placeMuteItem(animated: true)
+        }
+    }
+
+    private var dayPlacementScheduled = false
 
     private func makeDayItem(_ day: Date) -> UIBarButtonItem {
         let title = DayTitleFormatter.title(for: day)
@@ -318,15 +331,8 @@ final class ConversationThreadViewController: UIViewController {
     private func showDayItem(_ shown: Bool) {
         guard shown != dayItemShown else { return }
         dayItemShown = shown
-        guard view.window != nil else { return placeMuteItem() }
-        // UIKit's own bar-item appearance, not a pop (#755) — on the NEXT
-        // turn (#756): this runs from scrolls and layouts that a diffable
-        // `apply(animatingDifferences: false)` drives inside
-        // `performWithoutAnimation`, which swallowed the transition.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.dayItemShown == shown else { return }
-            self.placeMuteItem(animated: true)
-        }
+        // UIKit's own bar-item appearance, not a pop (#755, #756).
+        scheduleDayPlacement()
     }
 
     /// Scrolls to the start of the bar's day — its chip in the flow, then
@@ -608,18 +614,36 @@ final class ConversationThreadViewController: UIViewController {
     /// The bell takes the corner, right of the points badge (#719): `[0]` is
     /// the trailing edge, and a fixed space keeps the two bubbles apart.
     private func placeMuteItem(replacing old: UIBarButtonItem? = nil, animated: Bool = false) {
-        var items = (navigationItem.rightBarButtonItems ?? [])
-            .filter { $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== dayItem && $0 !== daySpacer }
+        let current = navigationItem.rightBarButtonItems ?? []
+        var items = current.filter {
+            $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== daySpacer && !Self.isDayItem($0)
+        }
         // `[0]` is the trailing edge: the bell takes the corner, the day
         // stands left of it (#750).
         var trailing: [UIBarButtonItem] = []
         if mode == .full, muted != nil { trailing.append(muteItem) }
-        if mode == .full, dayItemShown {
+        // A day placement on its way, animated: an unanimated placement (the
+        // bell's first) leaves the day as it stands rather than popping it in.
+        let day = dayPlacementScheduled && !animated ? current.first(where: Self.isDayItem)
+            : (dayItemShown ? dayItem : nil)
+        if mode == .full, let day {
             if !trailing.isEmpty { trailing.append(daySpacer) }
-            trailing.append(dayItem)
+            trailing.append(day)
         }
         items = trailing + (items.isEmpty || trailing.isEmpty ? [] : [muteSpacer]) + items
+        // The same items again would restart — and cut short — a transition
+        // already running (#756).
+        guard items.count != current.count || zip(items, current).contains(where: { $0 !== $1 }) else { return }
+        if animated { debugAnimatedBarPlacements += 1 }
         navigationItem.setRightBarButtonItems(items, animated: animated)
+    }
+
+    /// How many animated placements the bar took. Tests.
+    private(set) var debugAnimatedBarPlacements = 0
+
+    /// Any day item — the one on show, or one a change of day replaced.
+    private static func isDayItem(_ item: UIBarButtonItem) -> Bool {
+        item.identifier?.hasPrefix("conversation.day.") == true
     }
 
     /// The bell for `muted`: a tap toggles, a long press offers how long

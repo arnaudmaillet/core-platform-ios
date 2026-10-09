@@ -209,6 +209,53 @@ struct ConversationThreadViewControllerTests {
         #expect(!screen.debugDayItem.shown, "a day in the bar before any chip went under the header")
     }
 
+    /// ⚠️ ONE PLACEMENT PER TURN (#756). Opening on a long thread, the
+    /// tail pin's passes showed the day and changed it in one turn; two
+    /// `setRightBarButtonItems` back to back cut the first one's appearance
+    /// short, and the item popped in on the device.
+    @Test func theDayAppearsInOnePlacementEvenWhenItChangesInTheSameTurn() async throws {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        let messages = (0..<60).map { index -> ConversationThreadMessage in
+            ConversationThreadMessage(
+                id: "m\(index)", senderID: ProfileID(index.isMultiple(of: 2) ? "me" : "them"),
+                body: "Message \(index)",
+                sentAt: (index < 30 ? yesterday : today).addingTimeInterval(Double(index % 30) * 60),
+                isMine: index.isMultiple(of: 2), quote: nil
+            )
+        }
+        let (screen, _, _, window) = makeScreen(phase: .content(messages))
+        defer { window.isHidden = true }
+        screen.view.layoutIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        let tail = stream.contentOffset.y
+
+        // The start: no day.
+        stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
+        screen.scrollViewDidScroll(stream)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(!screen.debugDayItem.inBar)
+        let before = screen.debugAnimatedBarPlacements
+
+        // One turn: yesterday's chip under the header, then the tail.
+        let chip = try #require(stream.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: 0)
+        ))
+        stream.setContentOffset(CGPoint(x: 0, y: chip.frame.maxY + 40 - screen.view.safeAreaInsets.top), animated: false)
+        screen.scrollViewDidScroll(stream)
+        #expect(screen.debugDayItem.title == "Yesterday", "guard: the day showed mid-turn")
+        stream.setContentOffset(CGPoint(x: 0, y: tail), animated: false)
+        screen.scrollViewDidScroll(stream)
+        #expect(screen.debugDayItem.title == "Today")
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(screen.debugAnimatedBarPlacements - before == 1, "the appearance was placed again and cut short")
+        #expect(screen.debugDayItem.inBar)
+        let days = screen.navigationItem.rightBarButtonItems?.filter { $0.identifier?.hasPrefix("conversation.day.") == true }
+        #expect(days?.count == 1)
+    }
+
     /// ⚠️ NO FROSTED TOP (asked 2026-10-02). The thread drew its own 132pt
     /// frost band under the window's status-bar blur — a blur over a blur.
     /// The only band left on the screen is the composer's footer, below the
