@@ -396,9 +396,15 @@ struct ConversationThreadSendAndMuteTests {
     private final class Graph: SocialGraphReading, SocialGraphWriting, @unchecked Sendable {
         var relation: FollowRelation
         var refuses = false
+        /// How long a read takes — a read still out when a follow lands.
+        var readDelay: Duration = .zero
         private(set) var follows: [ProfileID] = []
         init(_ relation: FollowRelation) { self.relation = relation }
-        func followRelation(to profileID: ProfileID) async throws -> FollowRelation { relation }
+        func followRelation(to profileID: ProfileID) async throws -> FollowRelation {
+            let answer = relation
+            if readDelay > .zero { try? await Task.sleep(for: readDelay) }
+            return answer
+        }
         func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
             if refuses { throw CancellationError() }
             if following { follows.append(profileID) }
@@ -417,6 +423,24 @@ struct ConversationThreadSendAndMuteTests {
         window.isHidden = false
         screen.view.layoutIfNeeded()
         return (screen, driver, window)
+    }
+
+    /// ⚠️ A READ SENT BEFORE A FOLLOW NEVER UNDOES IT (#752): the screen
+    /// re-reads on every appearance, and its answer could land after the
+    /// follow it predates.
+    @Test func aStaleRelationAnswerNeverUndoesAFollow() async {
+        let graph = Graph(.notFollowing)
+        let (screen, driver, window) = makeScreen(graph: graph)
+        defer { window.isHidden = true }
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
+        #expect(await settle { screen.debugPeerFollowBadge == .follow })
+
+        graph.readDelay = .milliseconds(300)
+        screen.resolvePeerRelation(refresh: true)
+        screen.followPeer(ProfileID("them"))
+        #expect(await settle { graph.follows == [ProfileID("them")] })
+        try? await Task.sleep(for: .milliseconds(450))
+        #expect(screen.debugPeerFollowBadge == .following, "the read from before the follow put the + back")
     }
 
     /// A refused follow puts the "+" back.

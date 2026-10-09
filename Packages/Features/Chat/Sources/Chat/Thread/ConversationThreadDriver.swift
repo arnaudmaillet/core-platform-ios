@@ -232,11 +232,12 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         peer = ConversationThreadPerson(id: id, name: peer.name, avatarURL: nil)
         onPeerChange?(peer)
         guard let id, let avatars else { return }
-        // The face and the @handle (#752) come from the same profile read.
+        // The face and the @handle (#752) come from the same profile read —
+        // one after the other, so the second is the first's cache: together,
+        // both missed it and the profile was read twice.
         Task { [weak self] in
-            async let urls = avatars.avatarURLs(for: [id])
-            async let handles = avatars.handles(for: [id])
-            let (url, handle) = await (urls[id], handles[id])
+            let url = await avatars.avatarURLs(for: [id])[id]
+            let handle = await avatars.handles(for: [id])[id]
             guard let self, url != nil || handle != nil, self.peer.id == id else { return }
             self.peer = ConversationThreadPerson(id: id, name: self.peer.name, avatarURL: url, handle: handle)
             self.onPeerChange?(self.peer)

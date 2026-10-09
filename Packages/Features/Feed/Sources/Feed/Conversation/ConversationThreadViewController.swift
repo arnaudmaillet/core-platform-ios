@@ -127,6 +127,9 @@ final class ConversationThreadViewController: UIViewController {
     /// Whom `peerRelation` was asked for, so a peer is asked once.
     private var relationAskedFor: ProfileID?
     private var followInFlight = false
+    /// Bumped by every ask and every follow: an answer from before either
+    /// is stale — a read sent before a follow undid the follow (#752).
+    private var relationGeneration = 0
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
     /// First content arrived before the stream had a height to pin against —
@@ -289,11 +292,14 @@ final class ConversationThreadViewController: UIViewController {
     /// on the device just after the push. A placement due mid-transition
     /// waits for its end, then animates.
     private func placeDayAfterTransition() {
-        if let coordinator = transitionCoordinator {
-            coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-                // Off the completion's turn, which still belongs to the transition.
-                DispatchQueue.main.async { self?.placeDayAfterTransition() }
-            }
+        // A coordinator that does not queue the completion (`false`) would
+        // leave the placement pending for good — every later day change
+        // returning early: place it now instead.
+        if let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               // Off the completion's turn, which still belongs to the transition.
+               DispatchQueue.main.async { self?.placeDayAfterTransition() }
+           }) {
             return
         }
         dayPlacementScheduled = false
@@ -988,7 +994,10 @@ final class ConversationThreadViewController: UIViewController {
         cell.mediaView.configure(message.media, delivery: message.delivery, pipeline: imagePipeline)
         // A text message of the viewer's shows whether it is on its way
         // (#719); a failed one is sent again by a tap.
-        cell.setDelivery(message.isMine && message.media == nil ? message.delivery : nil)
+        cell.setDelivery(
+            message.isMine && message.media == nil ? message.delivery : nil,
+            time: Self.timeFormatter.string(from: message.sentAt)
+        )
         if message.isMine, message.media == nil, message.delivery == .failed {
             cell.row.onReplyTap = { [weak self] in self?.driver.retry(messageID) }
         }
@@ -1401,9 +1410,11 @@ extension ConversationThreadViewController {
         guard mode == .full, socialGraph != nil, let followRelations, let id = peer.id,
               refresh || relationAskedFor != id, !followInFlight else { return }
         relationAskedFor = id
+        relationGeneration += 1
+        let generation = relationGeneration
         Task { [weak self] in
             guard let relation = try? await followRelations.followRelation(to: id) else { return }
-            guard let self, self.peer.id == id, !self.followInFlight else { return }
+            guard let self, self.peer.id == id, !self.followInFlight, self.relationGeneration == generation else { return }
             self.setPeerRelation(relation)
         }
     }
@@ -1427,12 +1438,15 @@ extension ConversationThreadViewController {
         guard let socialGraph, peer.id == id, !followInFlight, let before = peerRelation,
               SnapAuthorIdentityView.FollowBadge(before) == .follow else { return }
         followInFlight = true
+        relationGeneration += 1
         setPeerRelation(before.settingFollow(true))
         Task { [weak self] in
             let accepted = (try? await socialGraph.setFollowing(true, for: id)) != nil
             guard let self else { return }
             self.followInFlight = false
             if !accepted, self.peer.id == id { self.setPeerRelation(before) }
+            // The peer changed mid-follow: its relation was never asked.
+            if self.peer.id != id { self.resolvePeerRelation() }
         }
     }
 

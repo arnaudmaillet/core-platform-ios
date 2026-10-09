@@ -112,8 +112,12 @@ final class ThreadRowCell: UICollectionViewCell {
     /// with a small spinner just right of its time, a failed one at full ink
     /// with a red mark there (tap to retry), a delivered one plainly. Text
     /// rows only — a photo or video draws its own (`ThreadMediaView`).
-    func setDelivery(_ delivery: ConversationThreadDelivery?) {
+    /// `time`: what the line will say once delivered — its width is held
+    /// while the spinner or the mark stands in it (see `reserveHeaderWidth`).
+    func setDelivery(_ delivery: ConversationThreadDelivery?, time: String? = nil) {
         installDeliveryIndicatorsIfNeeded()
+        let awaiting = delivery == .sending || delivery == .failed
+        reserveHeaderWidth(awaiting ? time.map { (row.headerTextLabel.text ?? "") + $0 } : nil)
         let wasSending = self.delivery == .sending
         self.delivery = delivery == .sent ? nil : delivery
         row.alpha = delivery == .sending ? Self.sendingAlpha : 1
@@ -217,6 +221,7 @@ final class ThreadRowCell: UICollectionViewCell {
         // The time bounces in where the spinner was, on the same beat as the
         // spinner leaving; the line takes it back once it has landed.
         let prefix = String(full.dropLast(time.count))
+        reserveHeaderWidth(full)
         label.text = prefix
         timeReveal.font = label.font
         timeReveal.textColor = label.textColor
@@ -235,6 +240,7 @@ final class ThreadRowCell: UICollectionViewCell {
         } completion: { _ in
             self.isBouncingInTime = false
             label.text = full
+            self.reserveHeaderWidth(nil)
             self.timeReveal.isHidden = true
         }
     }
@@ -245,6 +251,28 @@ final class ThreadRowCell: UICollectionViewCell {
     /// The time while it bounces in, drawn over its own place in the line.
     private let timeReveal = UILabel()
     private var timeRevealLeading: NSLayoutConstraint?
+
+    /// ⚠️ THE LINE KEEPS ITS FULL WIDTH WHILE THE TIME IS AWAY (#753). With
+    /// a reply's quote on the header line the label hugs its text, so the
+    /// spinner, the mark and the time's reveal — all drawn at the text's end
+    /// — landed on the quote, and the quote jumped when the time came back.
+    /// Holding the width of the full line keeps the quote where it will be.
+    private lazy var headerWidthFloor: NSLayoutConstraint = {
+        let floor = row.headerTextLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
+        // Over the label's and the quote's compression (749, 700).
+        floor.priority = .defaultHigh
+        floor.isActive = true
+        return floor
+    }()
+
+    private func reserveHeaderWidth(_ text: String?) {
+        let width = text.map { ceil(Self.textWidth($0, in: row.headerTextLabel)) } ?? 0
+        guard headerWidthFloor.constant != width else { return }
+        headerWidthFloor.constant = width
+    }
+
+    /// The width the header line holds. Tests.
+    var debugHeaderWidthFloor: CGFloat { headerWidthFloor.constant }
 
     private static func textWidth(_ text: String, in label: UILabel) -> CGFloat {
         (text as NSString).size(withAttributes: [.font: label.font as Any]).width
