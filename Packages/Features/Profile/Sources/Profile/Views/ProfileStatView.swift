@@ -36,8 +36,9 @@ final class ProfileStatView: UIControl {
         accessibilityTraits = .staticText
         accessibilityLabel = caption
 
-        // Capped, then fitted (#482): four of these share one row, and at
-        // accessibility sizes an uncapped headline left "…" in every cell.
+        // Capped, then fitted (#482): each has a quarter of the identity
+        // column (#687), and at accessibility sizes an uncapped headline
+        // left "…" in every cell.
         valueLabel.font = .scaledSystemFont(ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24)
         valueLabel.adjustsFontForContentSizeCategory = true
         valueLabel.adjustsFontSizeToFitWidth = true
