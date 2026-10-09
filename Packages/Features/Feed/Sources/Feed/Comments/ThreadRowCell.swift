@@ -12,7 +12,8 @@ import UIKit
 ///  - a clear LIFT PLATE stands behind the row, outset by the platter's
 ///    padding, so the preview has room around the text and its bounds ARE the
 ///    lifted shape (see `LiftedPreview` for why that must hold);
-///  - an optional quote strip above the row, for a reply in a conversation;
+///  - an optional quote on the row's header line, right of the time, for a
+///    reply in a conversation (#753);
 ///  - an optional photo or video under it, for a conversation's media
 ///    message (#681).
 final class ThreadRowCell: UICollectionViewCell {
@@ -24,7 +25,7 @@ final class ThreadRowCell: UICollectionViewCell {
     /// A media message's photo or video (#681); hidden otherwise.
     let mediaView = ThreadMediaView()
     private let liftPlate = UIView()
-    private let quoteView = ThreadQuoteView()
+    private let quoteView = ThreadQuoteView(indented: false)
     /// A text message of the viewer's on its way (#719): a small spinner at
     /// the row's trailing edge; a failed one wears the red mark instead.
     private let sendingSpinner = UIActivityIndicatorView(style: .medium)
@@ -51,7 +52,10 @@ final class ThreadRowCell: UICollectionViewCell {
         contentView.addSubview(liftPlate)
 
         quoteView.isHidden = true
-        let stack = UIStackView(arrangedSubviews: [quoteView, row, mediaView])
+        // On the header line, right of the time (#753, the owner's call
+        // 2026-10-09) — not a line of its own above the row.
+        row.installHeaderAccessory(quoteView)
+        let stack = UIStackView(arrangedSubviews: [row, mediaView])
         stack.axis = .vertical
         stack.spacing = Spacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -339,9 +343,10 @@ final class ThreadRowCell: UICollectionViewCell {
     }
 }
 
-/// The one line above a reply that says what it answers:
-/// `▎Ava  Are you around?` — indented to the row's text column, quiet, and a
-/// tap target that takes the reader to the original.
+/// What a reply answers: `▎Ava  Are you around?` — quiet, and a tap target
+/// that takes the reader to the original. On a conversation's row it rides
+/// the header line, right of the time (#753, `indented: false`); indented,
+/// it is a line of its own at the row's text column.
 final class ThreadQuoteView: UIView {
     var onTap: (() -> Void)?
 
@@ -351,7 +356,7 @@ final class ThreadQuoteView: UIView {
     /// type-driven size.
     private var barLeading: NSLayoutConstraint?
 
-    init() {
+    init(indented: Bool = true) {
         super.init(frame: .zero)
         bar.backgroundColor = .tertiaryLabel
         bar.layer.cornerRadius = 1
@@ -364,22 +369,33 @@ final class ThreadQuoteView: UIView {
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(bar)
         addSubview(label)
+        let padding: CGFloat = indented ? 2 : 0
         let leading = bar.leadingAnchor.constraint(
-            equalTo: leadingAnchor, constant: CommentRowView.avatarSize + CommentRowView.avatarGap
+            equalTo: leadingAnchor, constant: indented ? CommentRowView.avatarSize + CommentRowView.avatarGap : 0
         )
         barLeading = leading
-        registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (quote: ThreadQuoteView, _: UITraitCollection) in
-            quote.barLeading?.constant = CommentRowView.avatarSize(for: quote.traitCollection) + CommentRowView.avatarGap
+        if indented {
+            registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (quote: ThreadQuoteView, _: UITraitCollection) in
+                quote.barLeading?.constant = CommentRowView.avatarSize(for: quote.traitCollection) + CommentRowView.avatarGap
+            }
         }
+        // Inline, the label IS the view's width, so a stack can stretch or
+        // truncate it; indented, it hugs its text within the line.
+        label.setContentHuggingPriority(UILayoutPriority(249), for: .horizontal)
+        label.setContentCompressionResistancePriority(UILayoutPriority(700), for: .horizontal)
         NSLayoutConstraint.activate([
             leading,
             bar.widthAnchor.constraint(equalToConstant: 2),
             bar.topAnchor.constraint(equalTo: topAnchor, constant: 2),
             bar.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
             label.leadingAnchor.constraint(equalTo: bar.trailingAnchor, constant: Spacing.sm),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            indented
+                ? label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor)
+                : label.trailingAnchor.constraint(equalTo: trailingAnchor),
+            // Inline, no padding: the header line keeps the height it has
+            // without a quote.
+            label.topAnchor.constraint(equalTo: topAnchor, constant: padding),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -padding),
         ])
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
         isAccessibilityElement = true

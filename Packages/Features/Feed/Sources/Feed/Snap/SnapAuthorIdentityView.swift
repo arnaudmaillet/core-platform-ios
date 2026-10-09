@@ -67,6 +67,18 @@ final class SnapAuthorIdentityView: UIView {
             case .friends: "Friends"
             }
         }
+
+        /// What the pill draws for where the viewer stands — ONE rule for a
+        /// post's author and a conversation's correspondent (#752).
+        init(_ relation: FollowRelation) {
+            self = switch relation {
+            case .notFollowing, .followedBy: .follow
+            case .following: .following
+            case .mutual: .friends
+            // A pending request is the profile screen's to withdraw.
+            case .viewer, .blocked, .requested: .none
+            }
+        }
     }
 
     /// Matches the bar's standard control height.
@@ -485,10 +497,9 @@ final class SnapAuthorIdentityView: UIView {
     /// The face `setPerson` last asked for — the arrival guard for its fetch.
     private var personAvatarURL: URL?
 
-    /// What the trailing glyph says. A conversation draws none from its header
-    /// (the correspondent's profile is one tap away, and that is where
-    /// following lives); the snap feed draws the viewer's relation to the
-    /// author, and none for the viewer themself or while it does not know.
+    /// What the trailing glyph says: the viewer's relation to the author (the
+    /// snap feed) or to the correspondent (a conversation, #752), and none
+    /// for the viewer themself or while it does not know.
     ///
     /// `animated`: the glyph changes through the author's own blur (the "+"
     /// turning into the followed mark after a tap), and a badge set in the

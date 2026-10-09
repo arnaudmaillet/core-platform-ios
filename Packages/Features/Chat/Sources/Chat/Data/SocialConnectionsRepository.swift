@@ -70,6 +70,14 @@ public protocol PeerAvatarProviding: Sendable {
     /// The avatar for each id that has one. Ids absent from the result have no
     /// avatar, or could not be read; both mean "keep the initials".
     func avatarURLs(for ids: [ProfileID]) async -> [ProfileID: URL]
+    /// The raw @handle (no "@") for each id whose profile could be read
+    /// (#752). Same rule: absent means "show none".
+    func handles(for ids: [ProfileID]) async -> [ProfileID: String]
+}
+
+public extension PeerAvatarProviding {
+    /// No handles: a provider that only knows faces shows the name alone.
+    func handles(for ids: [ProfileID]) async -> [ProfileID: String] { [:] }
 }
 
 public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProviding {
@@ -181,6 +189,15 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
                   let url = URL(string: view.avatarURL), !view.avatarURL.isEmpty
             else { return }
             result[id] = url
+        }
+    }
+
+    /// From the same `GetProfileById` read as the avatar, and its cache.
+    public func handles(for ids: [ProfileID]) async -> [ProfileID: String] {
+        await hydrateProfiles(for: ids)
+        return ids.reduce(into: [:]) { result, id in
+            guard let view = profileCache[id], !view.handle.isEmpty else { return }
+            result[id] = view.handle
         }
     }
 

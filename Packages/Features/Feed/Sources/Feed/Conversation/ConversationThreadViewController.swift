@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
@@ -115,6 +116,17 @@ final class ConversationThreadViewController: UIViewController {
     /// while the swap waited for its rise: they land plainly (#725).
     private var deliveredEarly: Set<String> = []
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
+
+    // MARK: The relation (#752)
+
+    /// The pill's relation glyph, as a vertical post's author pill draws it:
+    /// "+" (a tap follows), following, friends. Nil graphs draw none.
+    private let socialGraph: (any SocialGraphWriting)?
+    private let followRelations: (any SocialGraphReading)?
+    private var peerRelation: FollowRelation?
+    /// Whom `peerRelation` was asked for, so a peer is asked once.
+    private var relationAskedFor: ProfileID?
+    private var followInFlight = false
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
     /// First content arrived before the stream had a height to pin against —
@@ -139,12 +151,16 @@ final class ConversationThreadViewController: UIViewController {
         driver: any ConversationThreadDriving,
         mode: ConversationThreadMode,
         prefill: String,
-        imagePipeline: ImagePipeline
+        imagePipeline: ImagePipeline,
+        socialGraph: (any SocialGraphWriting)? = nil,
+        followRelations: (any SocialGraphReading)? = nil
     ) {
         self.driver = driver
         self.mode = mode
         self.prefill = prefill
         self.imagePipeline = imagePipeline
+        self.socialGraph = socialGraph
+        self.followRelations = followRelations
         super.init(nibName: nil, bundle: nil)
         // In the initializer: a navigation controller reads it when the push
         // begins, and `viewDidLoad` can run inside that same push.
@@ -183,6 +199,8 @@ final class ConversationThreadViewController: UIViewController {
         // Before the bars first lay it out, not only after: a budget that
         // arrives late is a bar that has already collapsed into a `•••`.
         fitTrailingRun()
+        // Back from their profile, the relation may have moved.
+        resolvePeerRelation(refresh: true)
     }
 
     override func viewIsAppearing(_ animated: Bool) {
@@ -533,6 +551,7 @@ final class ConversationThreadViewController: UIViewController {
         peerPill.setFollowBadge(.none)
         peerPill.setOverMedia(false)
         peerPill.onAuthorTapped = { [weak self] _ in self?.driver.didTapIdentity() }
+        peerPill.onFollowTapped = { [weak self] id in self?.followPeer(id) }
         // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
         // in the bar.
         var items = pillRidesToolbar ? [] : [UIBarButtonItem(customView: peerPill)]
@@ -953,9 +972,14 @@ final class ConversationThreadViewController: UIViewController {
         peer = person
         // Named for VoiceOver, not drawn: no title in the bar.
         view.accessibilityLabel = person.name.isEmpty ? nil : "Conversation with \(person.name)"
+        // The @handle under the name once known (#752), as a vertical post's
+        // author pill wears it.
+        let meta = person.handle.map { "@\($0)" } ?? ""
         peerPill.setPerson(
-            id: person.id, name: person.name, meta: "", avatarURL: person.avatarURL, pipeline: imagePipeline
+            id: person.id, name: person.name, meta: meta, avatarURL: person.avatarURL, pipeline: imagePipeline
         )
+        if person.id != relationAskedFor { setPeerRelation(nil) }
+        resolvePeerRelation()
         fitTrailingRun()
         if hasRenderedContent { applySnapshot(animated: false) }
     }
@@ -1261,4 +1285,67 @@ extension ConversationThreadViewController: UICollectionViewDelegate {
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         flashPending()
     }
+}
+
+extension ConversationThreadViewController {
+    /// The correspondent pill's lines that show, top to bottom (#752). Tests.
+    var debugPeerPillLines: [String] {
+        func labels(in view: UIView) -> [UILabel] {
+            if view is MonogramAvatarView { return [] } // the face's initials
+            return (view as? UILabel).map { [$0] } ?? view.subviews.flatMap { labels(in: $0) }
+        }
+        return labels(in: peerPill)
+            .filter { !$0.isHidden && !($0.text ?? "").isEmpty }
+            .sorted { $0.convert($0.bounds, to: peerPill).minY < $1.convert($1.bounds, to: peerPill).minY }
+            .compactMap(\.text)
+    }
+}
+
+// MARK: - The correspondent's relation (#752)
+
+extension ConversationThreadViewController {
+    /// Asks the graph where the viewer stands with the correspondent: once
+    /// per peer, or again with `refresh`. The answer on show keeps drawing
+    /// until the new one lands.
+    func resolvePeerRelation(refresh: Bool = false) {
+        guard mode == .full, socialGraph != nil, let followRelations, let id = peer.id,
+              refresh || relationAskedFor != id, !followInFlight else { return }
+        relationAskedFor = id
+        Task { [weak self] in
+            guard let relation = try? await followRelations.followRelation(to: id) else { return }
+            guard let self, self.peer.id == id, !self.followInFlight else { return }
+            self.setPeerRelation(relation)
+        }
+    }
+
+    private func setPeerRelation(_ relation: FollowRelation?) {
+        peerRelation = relation
+        let badge = relation.map(SnapAuthorIdentityView.FollowBadge.init) ?? .none
+        peerPill.setFollowBadge(badge, animated: view.window != nil)
+        fitTrailingRun()
+    }
+
+    /// The "+": follows the correspondent, optimistically, as the feed's
+    /// author pill does; a refusal puts the relation back.
+    func followPeer(_ id: ProfileID) {
+        MemberGates.perform(.follow(handle: peer.handle), from: self) { [weak self] in
+            self?.commitFollow(id)
+        }
+    }
+
+    private func commitFollow(_ id: ProfileID) {
+        guard let socialGraph, peer.id == id, !followInFlight, let before = peerRelation,
+              SnapAuthorIdentityView.FollowBadge(before) == .follow else { return }
+        followInFlight = true
+        setPeerRelation(before.settingFollow(true))
+        Task { [weak self] in
+            let accepted = (try? await socialGraph.setFollowing(true, for: id)) != nil
+            guard let self else { return }
+            self.followInFlight = false
+            if !accepted, self.peer.id == id { self.setPeerRelation(before) }
+        }
+    }
+
+    /// The pill's relation glyph. Tests.
+    var debugPeerFollowBadge: SnapAuthorIdentityView.FollowBadge { peerPill.followBadge }
 }

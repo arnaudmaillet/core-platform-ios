@@ -219,7 +219,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     }
 
     private func adoptPeer(name: String) {
-        peer = ConversationThreadPerson(id: peer.id, name: name, avatarURL: peer.avatarURL)
+        peer = ConversationThreadPerson(id: peer.id, name: name, avatarURL: peer.avatarURL, handle: peer.handle)
         onPeerChange?(peer)
         // Quotes of the peer's messages were signed with a placeholder until now.
         if let lastMessages {
@@ -232,10 +232,13 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         peer = ConversationThreadPerson(id: id, name: peer.name, avatarURL: nil)
         onPeerChange?(peer)
         guard let id, let avatars else { return }
+        // The face and the @handle (#752) come from the same profile read.
         Task { [weak self] in
-            let url = await avatars.avatarURLs(for: [id])[id]
-            guard let self, let url, self.peer.id == id else { return }
-            self.peer = ConversationThreadPerson(id: id, name: self.peer.name, avatarURL: url)
+            async let urls = avatars.avatarURLs(for: [id])
+            async let handles = avatars.handles(for: [id])
+            let (url, handle) = await (urls[id], handles[id])
+            guard let self, url != nil || handle != nil, self.peer.id == id else { return }
+            self.peer = ConversationThreadPerson(id: id, name: self.peer.name, avatarURL: url, handle: handle)
             self.onPeerChange?(self.peer)
         }
     }

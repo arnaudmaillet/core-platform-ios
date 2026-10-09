@@ -1770,13 +1770,7 @@ final class SnapFeedViewController: UIViewController {
     func followBadge(for author: ProfileID?) -> SnapAuthorIdentityView.FollowBadge {
         guard socialGraph != nil, let author,
               let relation = followRelationsByAuthor[author] else { return .none }
-        return switch relation {
-        case .notFollowing, .followedBy: .follow
-        case .following: .following
-        case .mutual: .friends
-        // A pending request is the profile screen's to withdraw.
-        case .viewer, .blocked, .requested: .none
-        }
+        return SnapAuthorIdentityView.FollowBadge(relation)
     }
 
     /// Whether the pill offers "+" for `author`.

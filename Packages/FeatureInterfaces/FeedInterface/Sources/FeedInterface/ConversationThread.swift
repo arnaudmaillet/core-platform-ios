@@ -120,11 +120,14 @@ public struct ConversationThreadPerson: Equatable, Sendable {
     public let id: ProfileID?
     public let name: String
     public let avatarURL: URL?
+    /// The raw @handle, without the "@" (#752). Nil until known.
+    public let handle: String?
 
-    public init(id: ProfileID?, name: String, avatarURL: URL?) {
+    public init(id: ProfileID?, name: String, avatarURL: URL?, handle: String? = nil) {
         self.id = id
         self.name = name
         self.avatarURL = avatarURL
+        self.handle = handle
     }
 }
 
