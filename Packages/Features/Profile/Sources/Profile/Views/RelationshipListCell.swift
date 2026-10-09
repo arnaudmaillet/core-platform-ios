@@ -70,12 +70,16 @@ final class RelationshipListCell: UICollectionViewListCell {
             let category = traits.preferredContentSizeCategory
             if let cached, cached.category == category { return cached.width }
             let actions: [ProfileRelationshipsViewModel.RowAction] = [.follow, .followBack, .following, .requested]
-            let width = actions.compactMap(RelationshipListCell.buttonConfiguration(for:)).map { configuration in
+            // ⚠️ TYPED BY HAND: Xcode 26 (CI) inferred the closure's result as
+            // Double and would not convert it into the cache's CGFloat tuple.
+            let widths: [CGFloat] = actions.compactMap(RelationshipListCell.buttonConfiguration(for:)).map { configuration in
                 let probe = UIButton(type: .system)
                 probe.configuration = configuration
-                return ceil(probe.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width)
-            }.max() ?? 0
-            cached = (category, width)
+                let fitted: CGFloat = probe.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+                return fitted.rounded(.up)
+            }
+            let width: CGFloat = widths.max() ?? 0
+            cached = (category: category, width: width)
             return width
         }
 
