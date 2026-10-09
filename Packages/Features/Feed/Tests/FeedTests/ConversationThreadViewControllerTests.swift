@@ -129,14 +129,17 @@ struct ConversationThreadViewControllerTests {
         _ = (window, peekWindow)
     }
 
-    /// ⚠️ The system's own edge effect would draw under the nav bar — a fade
-    /// on iOS 26, a hard band with a hairline cutting a message in half on
-    /// iOS 27 (measured). It is hidden: the window's status-bar band is the
-    /// only material up there. See `prefersClearTopEdge`.
-    @Test func theStreamRunsUnderTheHeaderWithNoSystemEffect() throws {
+    /// ⚠️ THE SOFT TOP-EDGE BLUR COVERS THE HEADER (#741, the owner's call
+    /// 2026-10-09, as on Notifications). STATED `.soft`: left `.automatic`,
+    /// iOS 27 drew a hard band with a hairline cutting a message in half
+    /// (measured) — the reason it used to be hidden. The stream is the bar's
+    /// content scroll view, so the effect tracks it.
+    @Test func theHeaderSoftensIntoTheSystemsTopEdgeBlur() throws {
         let (screen, _, _, _) = makeScreen()
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
-        #expect(stream.topEdgeEffect.isHidden)
+        #expect(!stream.topEdgeEffect.isHidden, "the header has no blur under it")
+        #expect(stream.topEdgeEffect.style == .soft, "not the soft effect: \(stream.topEdgeEffect.style)")
+        #expect(screen.contentScrollView(for: .top) === stream, "the bar tracks another scroll view")
     }
 
     /// ⚠️ NO FROSTED TOP (asked 2026-10-02). The thread drew its own 132pt

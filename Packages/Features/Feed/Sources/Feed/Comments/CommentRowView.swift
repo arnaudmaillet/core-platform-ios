@@ -70,6 +70,9 @@ final class CommentRowView: UIView {
     private let avatarImageView = AvatarImageView()
     /// The in-flight avatar fetch, cancelled on reuse.
     private var avatarTask: Task<Void, Never>?
+    /// The picture on show, so the same one is not dropped and fetched
+    /// again (#743).
+    private var shownAvatarURL: URL?
     /// REUSE GUARD, and it must be an identity check rather than
     /// cancellation alone: a recycled row can outlive its own fetch, and
     /// without this a slow avatar lands on whichever comment the row has
@@ -153,6 +156,8 @@ final class CommentRowView: UIView {
     var bodyTextLabel: UILabel { bodyLabel }
     /// The name · time line, for what sits beside the time (#725).
     var headerTextLabel: UILabel { headerLabel }
+    /// The avatar's picture on show, nil while the monogram shows. Tests.
+    var debugAvatarImage: UIImage? { avatarImageView.image }
 
     /// A conversation's messages carry no ♥: there is nothing to like them
     /// with on the wire, and a control that does nothing is worse than none.
@@ -267,6 +272,7 @@ final class CommentRowView: UIView {
         avatarTask = nil
         representedID = nil
         avatarImageView.image = nil
+        shownAvatarURL = nil
         // ⚠️ BACK TO A COMMENT. A row that stood in for a caption has its reply
         // tap, its menu and its like control switched off, and a recycled cell
         // that inherited that would be a comment nobody could interact with —
@@ -309,11 +315,23 @@ final class CommentRowView: UIView {
     ///   caption, which is not one. The guard is the same either way: what a
     ///   recycled row must never do is paint a picture fetched for the row it
     ///   used to be.
+    /// ⚠️ NO EMPTY FRAME FOR A PICTURE ALREADY IN HAND (#743). The row used to
+    /// clear its picture and fetch it again on every configure — even when
+    /// the same picture was on screen, or in the pipeline's memory — so a new
+    /// cell (a delivered message taking its pending row's place) blinked to
+    /// its monogram for a frame. The same picture stays; a cached one lands
+    /// at once; only a picture not in memory is fetched.
     private func loadAvatar(_ url: URL?, for id: String?, using pipeline: ImagePipeline?) {
         avatarTask?.cancel()
         avatarTask = nil
+        if let url, url == shownAvatarURL, avatarImageView.image != nil { return }
+        shownAvatarURL = url
         avatarImageView.image = nil
         guard let url, let pipeline else { return }
+        if let cached = pipeline.cachedImage(for: url) {
+            avatarImageView.image = cached
+            return
+        }
         avatarTask = Task { [weak self] in
             let image = try? await pipeline.image(for: url)
             guard let self, let image, !Task.isCancelled, self.representedID == id else { return }
