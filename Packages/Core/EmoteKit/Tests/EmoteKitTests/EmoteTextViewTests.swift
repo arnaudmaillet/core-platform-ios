@@ -181,11 +181,15 @@ struct EmoteTextViewTests {
     /// ⚠️ NOTHING BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): while its art
     /// is made its place is empty — no glyph — and the art bounces in.
     @Test func anAnimatedEmoteOnItsWayShowsNothingThenBouncesIn() async throws {
-        let engine = EmoteEngine(diskCache: nil, animationProvider: { emote in
+        let engine = EmoteEngine(diskCache: nil)
+        // ⚠️ THE ART ARRIVES ON THE TEST'S CLOCK, NOT THE BAKE QUEUE'S: that
+        // queue is one serial queue for the whole process, and on a starved
+        // CI runner this bake waited behind every parallel suite's — the art
+        // never came in 110 s (develop @ 84857202).
+        engine.artProvider = { _, side, _ in
             try? await Task.sleep(for: .milliseconds(300))
-            return await EmoteEngine.bundledAnimation(for: emote)
-        })
-        // An emoji: its loop is a Lottie, made by the provider above.
+            return EmoteLabelTests.syntheticArt(side: side)
+        }
         let (field, window) = hostedField("cold 🔥", engine: engine)
         defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 1 })

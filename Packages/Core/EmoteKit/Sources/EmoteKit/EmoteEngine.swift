@@ -86,6 +86,14 @@ public final class EmoteEngine {
     typealias AnimationProvider = @MainActor (Emote) async -> LottieAnimation?
     let animationProvider: AnimationProvider
 
+    /// The art itself, when a test needs it to arrive at a time of its own
+    /// choosing — set, it answers every request in place of the disk and the
+    /// bake. ⚠️ The bake runs on ONE serial queue shared by the whole
+    /// process: on a starved CI runner a test's bake waited behind every
+    /// parallel suite's for over 110 s and its art "never came".
+    typealias ArtProvider = @MainActor (Emote, Int, Motion) async -> AnimatedIconArt?
+    var artProvider: ArtProvider?
+
     private let cache = NSCache<NSString, ArtBox>()
     private let diskCache: EmoteDiskCache?
     private var pending: [String: Pending] = [:]
@@ -218,6 +226,7 @@ public final class EmoteEngine {
     }
 
     private func produce(_ emote: Emote, pixelSide: Int, motion: Motion) async -> AnimatedIconArt? {
+        if let artProvider { return await artProvider(emote, pixelSide, motion) }
         if case .icon(let id) = emote.source {
             guard let art = try? await iconCatalog?.art(for: id) else { return nil }
             // The map's sheets are drawn on white paper (`EmoteIconMatte`).
