@@ -22,7 +22,9 @@ final class TextCompletionStrip: UIView {
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         super.init(frame: .zero)
         // The emote strip's Liquid Glass capsule (#720).
-        let glass = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        let effect = UIGlassEffect(style: .regular)
+        effect.isInteractive = true
+        let glass = UIVisualEffectView(effect: effect)
         glass.cornerConfiguration = .capsule()
         glass.clipsToBounds = true
         glass.frame = bounds

@@ -50,7 +50,11 @@ final class EmoteSuggestionStrip: UIView {
 
         // Glass as the system draws it: the capsule is `cornerConfiguration`,
         // which UIKit animates with the frame, not a layer radius.
-        glass.effect = UIGlassEffect(style: .regular)
+        // Interactive (#730): the system's press response — the stretch and
+        // lensing under a finger — is what says the capsule is touchable.
+        let effect = UIGlassEffect(style: .regular)
+        effect.isInteractive = true
+        glass.effect = effect
         glass.cornerConfiguration = .capsule()
         // Tiles scrolling past a capped strip's ends stay inside the capsule.
         glass.clipsToBounds = true
@@ -75,6 +79,8 @@ final class EmoteSuggestionStrip: UIView {
 
     /// Whether the container is Liquid Glass. Internal for tests.
     var isGlass: Bool { glass.effect is UIGlassEffect }
+    /// Whether the glass answers a touch natively (#730). Internal for tests.
+    var isInteractiveGlass: Bool { (glass.effect as? UIGlassEffect)?.isInteractive == true }
 
     /// Shows `emotes`, or collapses to nothing for an empty list.
     ///

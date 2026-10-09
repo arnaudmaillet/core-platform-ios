@@ -179,7 +179,11 @@ public final class EmotePickerView: UIInputView {
         super.didMoveToWindow()
         if window == nil { playback.stop() }
         guard window != nil, sectionBarGlass.effect == nil else { return }
-        sectionBarGlass.effect = UIGlassEffect(style: .regular)
+        // Interactive (#730): the section bar is a control, and the native
+        // press response (stretch, lensing) is its affordance.
+        let effect = UIGlassEffect(style: .regular)
+        effect.isInteractive = true
+        sectionBarGlass.effect = effect
     }
 
     override public func layoutSubviews() {

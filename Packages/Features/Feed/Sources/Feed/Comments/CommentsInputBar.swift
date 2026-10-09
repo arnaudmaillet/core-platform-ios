@@ -926,7 +926,11 @@ final class CommentsInputBar: UIView {
         runComposerKeyboardQAIfAsked()
         #endif
         if field.effect == nil {
-            field.effect = UIGlassEffect()
+            // Interactive (#730): the field answers a touch the way the
+            // avatar bubble beside it does — the native stretch and lensing.
+            let glass = UIGlassEffect()
+            glass.isInteractive = true
+            field.effect = glass
         }
         if avatarBubble.effect == nil {
             let glass = UIGlassEffect(style: .regular)

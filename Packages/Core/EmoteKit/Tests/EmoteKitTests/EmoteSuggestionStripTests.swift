@@ -40,6 +40,7 @@ struct EmoteSuggestionStripTests {
         defer { window.isHidden = true }
         let strip = keyboard.suggestionStrip
         #expect(strip.isGlass, "the strip is not Liquid Glass")
+        #expect(strip.isInteractiveGlass, "the strip's glass has no native press response (#730)")
 
         type("gg :lol", in: textView)
         let few = keyboard.suggestionIDs.count
@@ -62,6 +63,17 @@ struct EmoteSuggestionStripTests {
         // One match is a round capsule's worth, not a full-width bar.
         #expect(EmoteSuggestionStrip.fittingWidth(count: 1) < 60)
         #expect(EmoteSuggestionStrip.fittingWidth(count: 0) == 0)
+    }
+
+    /// The emote keyboard's section bar answers a touch natively (#730).
+    @Test func theKeyboardsSectionBarIsInteractiveGlass() {
+        let (_, keyboard, window) = make()
+        defer { window.isHidden = true }
+        let panel = keyboard.panel
+        window.addSubview(panel)
+        let effect = panel.sectionBarGlass.effect as? UIGlassEffect
+        #expect(effect != nil, "the section bar is not glass")
+        #expect(effect?.isInteractive == true, "the section bar's glass has no native press response")
     }
 
     /// Narrowing the query removes tiles and shrinks the capsule in ONE
