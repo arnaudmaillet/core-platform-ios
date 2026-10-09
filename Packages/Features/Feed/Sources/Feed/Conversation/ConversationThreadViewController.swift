@@ -660,6 +660,10 @@ final class ConversationThreadViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: animated)
     }
 
+    private func isAwaitingDelivery(_ message: ConversationThreadMessage) -> Bool {
+        message.isMine && message.media == nil && message.delivery != .sent
+    }
+
     /// What a message's row was last configured with, so a render can tell
     /// the rows that changed from the ones that did not (#725).
     private struct RowSignature: Equatable {
@@ -706,7 +710,9 @@ final class ConversationThreadViewController: UIViewController {
                 id: message.id,
                 authorID: message.senderID,
                 authorName: name,
-                metaText: Self.timeFormatter.string(from: message.sentAt),
+                // A text of the viewer's on its way, or failed, has no time
+                // yet: the spinner or the mark stands in its place (#725).
+                metaText: isAwaitingDelivery(message) ? "" : Self.timeFormatter.string(from: message.sentAt),
                 body: message.body,
                 avatarURL: name == "Member" ? nil : author.avatarURL
             ),
@@ -738,7 +744,7 @@ final class ConversationThreadViewController: UIViewController {
             arrivalStarts[messageID] = CACurrentMediaTime()
             cell.playArrival()
         } else if deliveredIDs.remove(messageID) != nil {
-            cell.playDelivered()
+            cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt))
         }
         cell.mediaView.onTap = message.media == nil ? nil : { [weak self, weak cell] in
             guard let self, let cell else { return }
@@ -778,7 +784,7 @@ final class ConversationThreadViewController: UIViewController {
             let row = pending.remove(at: index)
             guard let path = dataSource.indexPath(for: .message(row.id)),
                   let cell = collectionView.cellForItem(at: path) as? ThreadRowCell else { continue }
-            cell.playDelivered(carryingSpinner: false)
+            cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt), carryingSpinner: false)
             deliveredEarly.insert(message.id)
         }
     }

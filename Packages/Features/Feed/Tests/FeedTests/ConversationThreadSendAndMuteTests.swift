@@ -243,9 +243,10 @@ struct ConversationThreadSendAndMuteTests {
         #expect(landed.row.alpha == 1)
     }
 
-    /// The spinner is small and sits just right of the time; delivered, it
-    /// scales out.
-    @Test func theSpinnerSitsRightOfTheTimeAndScalesOut() async throws {
+    /// While the message is on its way the spinner stands in its time's
+    /// place (`You · ◌`), small; delivered, it scales out and the time takes
+    /// the place back.
+    @Test func theSpinnerStandsInTheTimesPlaceAndScalesOut() async throws {
         let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
         let (screen, driver, window) = makeScreen(phase: .content([pending]))
         defer { window.isHidden = true }
@@ -256,10 +257,11 @@ struct ConversationThreadSendAndMuteTests {
         #expect(row.isBouncingInSpinner, "the spinner did not bounce in")
         spinner.layer.removeAllAnimations()
         let header = row.row.headerTextLabel
+        #expect(header.text == "You · ", "the time shows while the message is on its way: \(header.text ?? "-")")
         let headerFrame = header.convert(header.bounds, to: row.contentView)
-        let textEnd = headerFrame.minX + min(header.intrinsicContentSize.width, header.bounds.width)
-        #expect(spinner.frame.minX >= textEnd, "the spinner overlaps the time: \(spinner.frame) header \(headerFrame) end \(textEnd) text \(header.text ?? "-")")
-        #expect(spinner.frame.minX - textEnd < 8, "the spinner is not beside the time")
+        let prefixWidth = ("You · " as NSString).size(withAttributes: [.font: header.font as Any]).width
+        let timeStart = headerFrame.minX + prefixWidth
+        #expect(abs(spinner.frame.minX - timeStart) < 2, "the spinner is not where the time goes: \(spinner.frame) vs \(timeStart)")
         #expect(abs(spinner.center.y - headerFrame.midY) < 1, "\(spinner.center) vs \(headerFrame)")
         #expect(spinner.frame.width < 14, "the spinner is a control's size, not the time's")
 
@@ -269,5 +271,9 @@ struct ConversationThreadSendAndMuteTests {
         screen.view.layoutIfNeeded()
         let delivered = try #require(cell("Message p1", in: screen))
         #expect(delivered.isScalingOutSpinner, "the spinner did not scale out on delivery")
+        #expect(delivered.isBouncingInTime, "the time did not bounce in with the spinner leaving")
+        #expect(await settle { !delivered.isBouncingInTime })
+        let time = try #require(delivered.row.headerTextLabel.text)
+        #expect(time.hasPrefix("You · ") && time.count > "You · ".count, "the time did not come back: \(time)")
     }
 }
