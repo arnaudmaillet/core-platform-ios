@@ -111,7 +111,9 @@ final class ProfileRelationshipListViewController: UIViewController {
             cell.onAction = { [weak self] in
                 guard let self else { return }
                 switch row.action {
-                case .following: self.confirmUnfollow(row)
+                // At once, no "Unfollow @handle?" sheet (#726): the morph
+                // into Follow is the confirmation, and a tap puts it back.
+                case .following, .requested: self.viewModel.toggleFollow(id)
                 case .follow, .followBack:
                     MemberGates.perform(.follow(handle: nil), from: self) { [weak self] in
                         self?.viewModel.toggleFollow(id)
@@ -279,30 +281,6 @@ final class ProfileRelationshipListViewController: UIViewController {
         var updated = dataSource.snapshot()
         updated.reconfigureItems(refreshable)
         dataSource.apply(updated, animatingDifferences: false)
-    }
-
-    /// Removing a follower is destructive and silent on the other side, so it
-    /// asks first and names the person — the same standard the profile's block
-    /// action holds itself to.
-    /// Unfollowing asks first (#717): Following is a fact, and a slip of the
-    /// thumb on a long list shouldn't undo it.
-    private func confirmUnfollow(_ row: ProfileRelationshipsViewModel.Row) {
-        let sheet = UIAlertController(
-            title: "Unfollow \(row.handle)?",
-            message: nil,
-            preferredStyle: .actionSheet
-        )
-        sheet.addAction(UIAlertAction(title: "Unfollow", style: .destructive) { [weak self] _ in
-            self?.viewModel.toggleFollow(row.id)
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        // iPad: anchor to the row that spawned it.
-        if let index = dataSource.indexPath(for: .person(row.id)),
-           let cell = collectionView.cellForItem(at: index) {
-            sheet.popoverPresentationController?.sourceView = cell
-            sheet.popoverPresentationController?.sourceRect = cell.bounds
-        }
-        present(sheet, animated: true)
     }
 
     /// How many loading rows it takes to reach the bottom of the screen from

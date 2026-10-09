@@ -264,10 +264,11 @@ struct ProfileRepositoryTests {
         let (blocking, _) = makeRepositoryWithGraph(status: .blocking)
         #expect(try await blocking.relationship(for: ProfileID("prof-3")) == .other(isFollowing: false, isBlocked: true))
 
-        // `.blockedBy` is the inbound direction and is deliberately NOT
-        // surfaced: the viewer must not learn they were blocked.
+        // `.blockedBy` is the inbound direction: never SAID (the viewer is
+        // not told they were blocked), but the profile offers no Follow it
+        // could not honour (#726).
         let (blockedBy, _) = makeRepositoryWithGraph(status: .blockedBy)
-        #expect(try await blockedBy.relationship(for: ProfileID("prof-3")) == .other(isFollowing: false, isBlocked: false))
+        #expect(try await blockedBy.relationship(for: ProfileID("prof-3")) == .cannotFollow)
     }
 
     @Test func blockSendsViewerAsActorAndTargetProfile() async throws {

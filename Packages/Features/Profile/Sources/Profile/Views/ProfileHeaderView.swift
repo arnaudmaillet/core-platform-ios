@@ -99,7 +99,12 @@ final class ProfileHeaderView: UIView {
     private let likesStat = ProfileStatView(caption: "Likes")
     private let messageButton = UIButton(configuration: .filled())
     private let editButton = UIButton(configuration: .filled())
-    private let followButton = UIButton(configuration: .filled())
+    /// Morphs between Follow, Following and Requested (#726): the content
+    /// through a blur, the capsule on a spring, a native press.
+    private let followButton = MorphingButton(configuration: .filled())
+    /// What the capsule last showed, so a change of state morphs and a first
+    /// answer simply lands.
+    private var shownFollowState: ProfileViewModel.FollowButton?
     private let qrCodeButton = UIButton(configuration: .filled())
     private let moreButton = UIButton(configuration: .filled())
     private var columnTopConstraint: NSLayoutConstraint?
@@ -771,6 +776,7 @@ final class ProfileHeaderView: UIView {
     /// call to action.
     func configureAction(_ state: ProfileViewModel.FollowButton) {
         layoutRevision += 1
+        defer { shownFollowState = state }
         switch state {
         case .follow, .following, .requested:
             followButton.isHidden = false
@@ -780,7 +786,8 @@ final class ProfileHeaderView: UIView {
             case .requested: "Requested"
             default: "Following"
             }
-            followButton.configuration = config
+            let changes = [.follow, .following, .requested].contains(shownFollowState) && shownFollowState != state
+            followButton.morph(to: config, animated: changes)
             followButton.accessibilityLabel = config.title
             // Tapping Requested withdraws it; say so to VoiceOver.
             followButton.accessibilityHint = state == .requested ? "Withdraws your follow request." : nil
@@ -792,6 +799,11 @@ final class ProfileHeaderView: UIView {
             followButton.isHidden = true
             messageButton.isHidden = true
             editButton.isHidden = false
+        case .unavailable:
+            // No Follow where following is impossible (#726); Message stays.
+            followButton.isHidden = true
+            messageButton.isHidden = false
+            editButton.isHidden = true
         case .hidden:
             // ⚠️ NOT YET KNOWN IS NOT "FOLLOW". The capsule used to open on a
             // prominent Follow — "the statistical prior" — and a followed

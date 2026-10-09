@@ -84,6 +84,10 @@ public enum ProfileRelationship: Equatable, Sendable {
     /// is pending (social_graph.v1 `REQUESTED`, backend #655) → "Requested",
     /// which withdraws it. Never blocked: a block drops pending requests.
     case requested
+    /// Someone else's profile the viewer CANNOT follow — they block the viewer
+    /// (`blockedBy`) → no Follow at all (#726). Not said in words: platforms
+    /// don't tell you, they just don't offer it.
+    case cannotFollow
 }
 
 /// How widely a profile is exposed, mirroring `profile.v1.ProfileVisibility`.
@@ -363,6 +367,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
 
         let status = try await relationStatus(from: viewer, to: profileID)
         if status == .requested { return .requested }
+        if status == .blockedBy { return .cannotFollow }
         // `.mutual` also means the viewer follows the target. `.blocking`
         // is exclusive with the follow states on the wire (blocking tears
         // the edges down), so a blocked profile reports isFollowing false —
