@@ -118,8 +118,8 @@ public final class ConversationViewModel {
     private var peerName = ""
     /// The message currently being replied to; folded into the next send.
     private var replyingToID: String?
-    /// Photos and videos of the viewer's on their way (or failed), drawn
-    /// after the transcript in the order they were picked (#681).
+    /// The viewer's messages on their way (or failed) — photos and videos
+    /// (#681) and text (#719) — drawn after the transcript in the order sent.
     private var pendingSends: [PendingSend] = []
     private var pendingCount = 0
     /// Pending sends being delivered now — never twice at once.
@@ -132,10 +132,21 @@ public final class ConversationViewModel {
 
     private struct PendingSend {
         let id: String
-        let upload: ChatMediaUpload
+        /// What is sent: a photo or video, or text.
+        let payload: Payload
         let replyTo: String?
         let createdAt: Date
         var failed = false
+
+        enum Payload {
+            case media(ChatMediaUpload)
+            case text(String)
+        }
+
+        var isText: Bool {
+            if case .text = payload { return true }
+            return false
+        }
     }
 
     /// Messages deleted this session. chat.v1 has no DeleteMessage RPC
@@ -248,44 +259,31 @@ public final class ConversationViewModel {
         reload()
     }
 
-    /// Sends a message and appends it, carrying the active reply reference if
-    /// any. Empty/whitespace input is ignored. The reply state clears up front,
-    /// so the compose preview collapses as the bubble flies out.
+    /// Sends a message, carrying the active reply reference if any.
+    /// Empty/whitespace input is ignored. The reply state clears up front, so
+    /// the compose preview collapses as the message flies out.
+    ///
+    /// ⚠️ OPTIMISTIC SINCE #719: the message is drawn at once as a pending
+    /// one, on its way (`delivery == .sending`), and turns into the delivered
+    /// message — or into a failed one with a retry (`retry`) — rather than
+    /// appearing only once the server has answered.
     public func send(_ text: String) {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, !isSending else { return }
         let replyTo = replyingToID
         cancelReply()
+        pendingCount += 1
+        let pendingID = "pending-\(pendingCount)"
+        pendingSends.append(PendingSend(id: pendingID, payload: .text(body), replyTo: replyTo, createdAt: Date()))
+        emit()
         setSending(true)
         Task { [weak self] in
             guard let self else { return }
-            // A draft's conversation may still be being created. The send joins
-            // the resolution the screen already started rather than beginning
-            // one of its own — the wait lands here, on a message the viewer has
-            // committed to, instead of on the tap that opened the screen.
-            guard let id = await self.resolveConversation().value else {
-                self.setSending(false)
-                self.onActionNotice?(
-                    "Couldn't send",
-                    "This conversation couldn't be started. Please try again."
-                )
-                return
-            }
-            do {
-                let message = try await self.repository.send(body, to: id, replyingTo: replyTo)
-                self.messages.append(message)
+            if self.senderID.rawValue.isEmpty, let me = try? await self.repository.viewerProfileID() {
+                self.senderID = me
                 self.emit()
-                // Only reached when the send succeeded, so there is nothing to
-                // roll back — an optimistic bubble the server rejected never
-                // gets this far.
-                self.onDidSendMessage?(id, message)
-                await self.markRead(id, upTo: message.id)
-            } catch {
-                // Said, not dropped: a refused or failed message used to
-                // vanish without a word.
-                let notice = Self.sendFailureNotice(error)
-                self.onActionNotice?(notice.title, notice.message)
             }
+            await self.deliver(pendingID)
             self.setSending(false)
         }
     }
@@ -304,7 +302,7 @@ public final class ConversationViewModel {
             let id = "pending-\(pendingCount)"
             ids.append(id)
             pendingSends.append(PendingSend(
-                id: id, upload: upload, replyTo: index == 0 ? replyTo : nil, createdAt: Date()
+                id: id, payload: .media(upload), replyTo: index == 0 ? replyTo : nil, createdAt: Date()
             ))
         }
         emit()
@@ -319,7 +317,7 @@ public final class ConversationViewModel {
         }
     }
 
-    /// Sends a failed photo or video again.
+    /// Sends a failed message again — text or a photo or video.
     public func retry(_ messageID: String) {
         guard let index = pendingSends.firstIndex(where: { $0.id == messageID }), pendingSends[index].failed else { return }
         pendingSends[index].failed = false
@@ -332,28 +330,39 @@ public final class ConversationViewModel {
               !delivering.contains(pendingID) else { return }
         delivering.insert(pendingID)
         defer { delivering.remove(pendingID) }
+        // A draft's conversation may still be being created. The send joins
+        // the resolution the screen already started rather than beginning one
+        // of its own — the wait lands on a message the viewer has committed to.
         guard let id = await resolveConversation().value else {
             markFailed(pendingID)
             return
         }
         do {
-            let message = try await repository.send(
-                media: pending.upload, caption: "", to: id, replyingTo: pending.replyTo
-            )
-            pendingSends.removeAll { $0.id == pendingID }
-            if let preview = pending.upload.preview {
-                localPreviews[message.id] = preview
-                if let media = message.media, let url = media.kind == .video ? media.posterURL : media.url {
-                    onDidUploadMedia?(preview, url)
+            let message: ChatMessage
+            switch pending.payload {
+            case .text(let body):
+                message = try await repository.send(body, to: id, replyingTo: pending.replyTo)
+            case .media(let upload):
+                message = try await repository.send(
+                    media: upload, caption: "", to: id, replyingTo: pending.replyTo
+                )
+                if let preview = upload.preview {
+                    localPreviews[message.id] = preview
+                    if let media = message.media, let url = media.kind == .video ? media.posterURL : media.url {
+                        onDidUploadMedia?(preview, url)
+                    }
                 }
             }
+            pendingSends.removeAll { $0.id == pendingID }
             messages.append(message)
             emit()
             onDidSendMessage?(id, message)
             await markRead(id, upTo: message.id)
         } catch {
             markFailed(pendingID)
-            if (error as? ChatError) == .messagesRefused {
+            // A refusal is said; a failed text says so too, as it always did
+            // — the failed row offers the retry.
+            if (error as? ChatError) == .messagesRefused || pending.isText {
                 let notice = Self.sendFailureNotice(error)
                 onActionNotice?(notice.title, notice.message)
             }
@@ -576,8 +585,16 @@ public final class ConversationViewModel {
         let previews = localPreviews
         let shown = deletedMessageIDs.isEmpty ? messages : messages.filter { !deletedMessageIDs.contains($0.id) }
         let models = shown.map { MessageDisplayModel(message: $0, preview: previews[$0.id]) }
-        let pending = pendingSends.map {
-            MessageDisplayModel(pending: $0.id, upload: $0.upload, sender: senderID, sentAt: $0.createdAt, failed: $0.failed)
+        let pending = pendingSends.map { send -> MessageDisplayModel in
+            switch send.payload {
+            case .media(let upload):
+                MessageDisplayModel(pending: send.id, upload: upload, sender: senderID, sentAt: send.createdAt, failed: send.failed)
+            case .text(let body):
+                MessageDisplayModel(
+                    pending: send.id, text: body, replyTo: send.replyTo, sender: senderID,
+                    sentAt: send.createdAt, failed: send.failed
+                )
+            }
         }
         phase = .content(models + pending)
     }

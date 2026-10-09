@@ -161,6 +161,10 @@ public protocol ConversationThreadDriving: AnyObject {
     /// while there is no conversation to pin (a draft whose conversation has
     /// not resolved yet). Fired on every change, wherever it was made.
     var onPinnedChange: ((Bool?) -> Void)? { get set }
+    /// Whether the viewer muted the conversation's pushes (#719): the thread's
+    /// bell. Nil while there is no conversation to mute. Fired on every
+    /// change, wherever it was made.
+    var onMutedChange: ((Bool?) -> Void)? { get set }
     /// An older page of history is on its way (true) or has answered (false):
     /// the screen shows it at the top of the thread (#600).
     var onLoadingOlderChange: ((Bool) -> Void)? { get set }
@@ -180,6 +184,9 @@ public protocol ConversationThreadDriving: AnyObject {
     /// Pins the conversation, or unpins it. A no-op while there is nothing to
     /// pin (`onPinnedChange` said nil).
     func togglePinned()
+    /// Mutes the conversation, or unmutes it (#719). A no-op while there is
+    /// nothing to mute (`onMutedChange` said nil).
+    func toggleMuted()
     /// Whether the footer offers the camera and the library (#681).
     var sendsMedia: Bool { get }
     /// Lets the viewer pick (or capture) a photo or video, presented over
@@ -190,6 +197,12 @@ public protocol ConversationThreadDriving: AnyObject {
 }
 
 public extension ConversationThreadDriving {
+    /// Drivers with no mute (#719): no bell.
+    var onMutedChange: ((Bool?) -> Void)? {
+        get { nil }
+        set {}
+    }
+    func toggleMuted() {}
     /// Drivers with no older history to page through.
     func loadOlder() {}
     /// Drivers that send text only.

@@ -87,10 +87,38 @@ final class ConversationThreadViewController: UIViewController {
     private let peerPill = SnapAuthorIdentityView()
     private let walletBadge = WalletBadgeButton()
     private var walletBadgeItem: UIBarButtonItem?
+    /// The conversation's mute (#719), at the bar's trailing corner beside
+    /// the points badge: `bell`, or `bell.slash` once muted. Hidden while
+    /// there is nothing to mute (a draft).
+    private lazy var muteItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "bell"),
+            primaryAction: UIAction { [weak self] _ in self?.driver.toggleMuted() }
+        )
+        item.tintColor = .label
+        item.accessibilityLabel = "Notifications"
+        return item
+    }()
+    /// Keeps the bell and the badge two bubbles.
+    private let muteSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
+    /// What the bell shows; nil hides it.
+    private var muted: Bool?
     private let walletObservers = NotificationObserverTokenBag()
 
     private var phase: ConversationThreadPhase = .loading
     private var messagesByID: [String: ConversationThreadMessage] = [:]
+    /// The viewer's messages that just appeared on their way — they rise into
+    /// place as their cell is configured (#719).
+    private var arrivingIDs: Set<String> = []
+    /// Messages that just replaced their pending row — they come up to full
+    /// ink rather than cross-fading in (#719).
+    private var deliveredIDs: Set<String> = []
+    /// When each pending message began to rise: a delivery that lands
+    /// mid-rise (a fast server) waits for the rise to land rather than
+    /// swapping the row — and the stream's scroll — out from under it.
+    private var arrivalStarts: [String: CFTimeInterval] = [:]
+    /// The phase held back until a rise lands; the newest one wins.
+    private var deferredPhase: ConversationThreadPhase?
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
@@ -452,6 +480,32 @@ final class ConversationThreadViewController: UIViewController {
             items += items.isEmpty ? [item] : [.fixedSpace(Spacing.sm), item]
         }
         navigationItem.rightBarButtonItems = items
+        placeMuteItem()
+    }
+
+    /// The bell takes the corner, right of the points badge (#719): `[0]` is
+    /// the trailing edge, and a fixed space keeps the two bubbles apart.
+    private func placeMuteItem() {
+        var items = (navigationItem.rightBarButtonItems ?? []).filter { $0 !== muteItem && $0 !== muteSpacer }
+        if mode == .full, muted != nil {
+            items = [muteItem] + (items.isEmpty ? [] : [muteSpacer]) + items
+        }
+        navigationItem.rightBarButtonItems = items
+    }
+
+    /// The bell follows the conversation's mute; it appears once there is a
+    /// conversation to mute and leaves if there is none.
+    private func renderMuted(_ muted: Bool?) {
+        let wasShown = self.muted != nil
+        self.muted = muted
+        if let muted {
+            muteItem.image = UIImage(systemName: muted ? "bell.slash" : "bell")
+            muteItem.accessibilityValue = muted ? "Muted" : "On"
+        }
+        if wasShown != (muted != nil) {
+            placeMuteItem()
+            fitTrailingRun()
+        }
     }
 
     private func configureStatusLabel() {
@@ -475,6 +529,7 @@ final class ConversationThreadViewController: UIViewController {
         driver.onReplyStateChange = { [weak self] draft in self?.renderReply(draft) }
         driver.onActionNotice = { [weak self] title, message in self?.presentNotice(title, message) }
         driver.onPinnedChange = { [weak self] pinned in self?.renderPinned(pinned) }
+        driver.onMutedChange = { [weak self] muted in self?.renderMuted(muted) }
         driver.onLoadingOlderChange = { [weak self] loading in self?.setLoadingOlder(loading) }
     }
 
@@ -500,6 +555,18 @@ final class ConversationThreadViewController: UIViewController {
     // MARK: - Render
 
     private func render(_ phase: ConversationThreadPhase) {
+        if let wait = riseStillLanding(before: phase) {
+            let pending = deferredPhase
+            deferredPhase = phase
+            guard pending == nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+                guard let self, let held = self.deferredPhase else { return }
+                self.deferredPhase = nil
+                self.render(held)
+            }
+            return
+        }
+        deferredPhase = nil
         self.phase = phase
         switch phase {
         case .loading:
@@ -509,14 +576,18 @@ final class ConversationThreadViewController: UIViewController {
             statusLabel.isHidden = hasRenderedContent
         case .content(let messages):
             statusLabel.isHidden = true
+            let before = messagesByID
             messagesByID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            noteSendTransitions(from: before, to: messages)
         }
 
         let isFirstContent = !hasRenderedContent
         // Older history landing above (#600): applied without animation and
         // with the message under the reader's eye held where it is.
         let anchor = olderHistoryAnchor(for: phase)
-        applySnapshot(animated: hasRenderedContent && anchor == nil)
+        // A pending row turning into its delivered message is a swap, not a
+        // change: animated, the two cross-fade (#719).
+        applySnapshot(animated: hasRenderedContent && anchor == nil && deliveredIDs.isEmpty)
         if let anchor { hold(anchor) }
         guard case .content(let messages) = phase else { return }
         hasRenderedContent = true
@@ -525,9 +596,13 @@ final class ConversationThreadViewController: UIViewController {
         let newest = messages.last
         let newestChanged = newest?.id != newestID
         newestID = newest?.id
+        // A delivered message taking its pending row's place is where the
+        // stream already is: no second scroll (#719).
+        let newestSwapped = newest.map { swappedIDs.contains($0.id) } ?? false
+        swappedIDs = []
         if isFirstContent {
             pinToTail()
-        } else if newestChanged, newest?.isMine == true || isNearBottom {
+        } else if newestChanged, !newestSwapped, newest?.isMine == true || isNearBottom {
             scrollToBottom(animated: true)
         }
     }
@@ -610,10 +685,59 @@ final class ConversationThreadViewController: UIViewController {
             cell.setQuote(nil)
         }
         cell.mediaView.configure(message.media, delivery: message.delivery, pipeline: imagePipeline)
+        // A text message of the viewer's shows whether it is on its way
+        // (#719); a failed one is sent again by a tap.
+        cell.setDelivery(message.isMine && message.media == nil ? message.delivery : nil)
+        if message.isMine, message.media == nil, message.delivery == .failed {
+            cell.row.onReplyTap = { [weak self] in self?.driver.retry(messageID) }
+        }
+        if arrivingIDs.remove(messageID) != nil {
+            arrivalStarts[messageID] = CACurrentMediaTime()
+            cell.playArrival()
+        } else if deliveredIDs.remove(messageID) != nil {
+            cell.playDelivered()
+        }
         cell.mediaView.onTap = message.media == nil ? nil : { [weak self, weak cell] in
             guard let self, let cell else { return }
             self.tapMedia(of: messageID, in: cell)
         }
+    }
+
+    /// Which of the viewer's messages just appeared on their way, and which
+    /// just replaced their pending row (#719) — for `configure` to animate.
+    private func noteSendTransitions(
+        from before: [String: ConversationThreadMessage], to messages: [ConversationThreadMessage]
+    ) {
+        guard hasRenderedContent else { return }
+        var goneSending = before.values.filter { $0.isMine && $0.delivery == .sending && messagesByID[$0.id] == nil }
+        for message in messages where message.isMine && before[message.id] == nil {
+            if message.delivery == .sending {
+                arrivingIDs.insert(message.id)
+            } else if message.delivery == .sent,
+                      let index = goneSending.firstIndex(where: { $0.body == message.body && $0.media == nil }) {
+                goneSending.remove(at: index)
+                deliveredIDs.insert(message.id)
+                swappedIDs.insert(message.id)
+            }
+        }
+        arrivalStarts = arrivalStarts.filter { messagesByID[$0.key] != nil }
+    }
+
+    /// Delivered messages that took a pending row's place in this render.
+    private var swappedIDs: Set<String> = []
+
+    /// How long until the rise of a pending message this phase would retire
+    /// lands; nil when nothing is mid-rise.
+    private func riseStillLanding(before phase: ConversationThreadPhase) -> TimeInterval? {
+        guard case .content(let messages) = phase, !arrivalStarts.isEmpty else { return nil }
+        let ids = Set(messages.map(\.id))
+        let now = CACurrentMediaTime()
+        let waits = arrivalStarts.compactMap { id, start -> TimeInterval? in
+            guard !ids.contains(id) else { return nil }
+            let left = ThreadRowCell.arrivalDuration - (now - start)
+            return left > 0 ? left : nil
+        }
+        return waits.max()
     }
 
     private func adoptPeer(_ person: ConversationThreadPerson) {
@@ -849,6 +973,8 @@ final class ConversationThreadViewController: UIViewController {
             let badge = walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
             budget -= badge + itemPadding + Spacing.sm
         }
+        // The bell beside it (#719).
+        if mode == .full, muted != nil { budget -= 44 + itemPadding + Spacing.sm }
         peerPill.setWidthBudget(budget)
     }
 

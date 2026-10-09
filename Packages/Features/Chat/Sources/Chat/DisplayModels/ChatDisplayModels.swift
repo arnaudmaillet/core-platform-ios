@@ -137,4 +137,16 @@ public struct MessageDisplayModel: Equatable, Sendable, Identifiable {
         )
         delivery = failed ? .failed : .sending
     }
+
+    /// A text message of the viewer's on its way, or failed (#719).
+    init(pending id: String, text: String, replyTo: String?, sender: ProfileID, sentAt: Date, failed: Bool) {
+        self.id = id
+        senderID = sender
+        body = text
+        self.sentAt = sentAt
+        isMine = true
+        replyToID = replyTo
+        media = nil
+        delivery = failed ? .failed : .sending
+    }
 }
