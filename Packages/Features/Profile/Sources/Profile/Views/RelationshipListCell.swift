@@ -162,9 +162,8 @@ final class RelationshipListCell: UICollectionViewListCell {
 
     /// The row's decision, styled to the app's existing follow affordance (the
     /// inbox's suggestion rows): a small capsule, filled while it is an
-    /// invitation and grey once it states a fact. Remove is destructive-tinted
-    /// but stays grey-filled — it is a quiet administrative action on your own
-    /// list, not an alarm.
+    /// invitation (Follow, Follow Back) and grey once it states a fact
+    /// (Following).
     private static func buttonConfiguration(
         for action: ProfileRelationshipsViewModel.RowAction
     ) -> UIButton.Configuration? {
@@ -176,13 +175,12 @@ final class RelationshipListCell: UICollectionViewListCell {
         case .follow:
             configuration = .borderedProminent()
             title = "Follow"
+        case .followBack:
+            configuration = .borderedProminent()
+            title = "Follow Back"
         case .following:
             configuration = .gray()
             title = "Following"
-        case .remove:
-            configuration = .gray()
-            configuration.baseForegroundColor = .systemRed
-            title = "Remove"
         }
         configuration.cornerStyle = .capsule
         configuration.buttonSize = .small
@@ -200,7 +198,7 @@ final class RelationshipListCell: UICollectionViewListCell {
         case .inert: nil
         case .follow: "Follow \(row.displayName)"
         case .following: "Unfollow \(row.displayName)"
-        case .remove: "Remove \(row.displayName) from your followers"
+        case .followBack: "Follow \(row.displayName) back"
         }
     }
 

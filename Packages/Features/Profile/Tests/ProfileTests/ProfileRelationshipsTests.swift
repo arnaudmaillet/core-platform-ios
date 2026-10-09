@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import Foundation
 import Testing
+import UIKit
 @testable import Profile
 
 @MainActor
@@ -512,29 +513,56 @@ struct ProfileRelationshipsViewModelTests {
         #expect(await provider.followCalls.isEmpty)
     }
 
-    // MARK: Remove
+    // MARK: Each tab's button (#717)
 
-    @Test func removeIsOfferedOnlyOnYourOwnFollowersListAndOnlyWhenSupported() async {
-        let supported = StubRelationshipsProvider(
-            followers: [person("ava")], following: [person("kenji")], supportsFollowerRemoval: true
+    /// ⚠️ YOUR OWN FOLLOWERS READ FOLLOW BACK / FOLLOWING, NEVER REMOVE (the
+    /// owner's call 2026-10-09); Following and Friends read Following.
+    @Test func eachOwnListOffersTheRelationship() async {
+        let provider = StubRelationshipsProvider(
+            followers: [person("ava"), person("kenji", viewerFollows: true)],
+            following: [person("kenji", viewerFollows: true)],
+            supportsFollowerRemoval: true
         )
-        let own = ProfileRelationshipsViewModel(subject: subject(isSelf: true), repository: supported)
-        let ownPhases = phaseRecorder(own)
+        let own = ProfileRelationshipsViewModel(subject: subject(isSelf: true), repository: provider)
+        let phases = phaseRecorder(own)
         own.viewDidLoad()
-        await settle(until: { !rows(ownPhases).isEmpty })
-        #expect(rows(ownPhases).first?.action == .remove)
+        await settle(until: { rows(phases).count == 2 })
+        #expect(rows(phases).map(\.action) == [.followBack, .following])
 
-        // Same list, other direction: Remove is a followers-list action.
         own.selectDirection(.following)
-        await settle(until: { rows(ownPhases).first?.id.rawValue == "kenji" })
-        #expect(rows(ownPhases).first?.action == .follow)
+        await settle(until: { rows(phases).first?.id.rawValue == "kenji" && rows(phases).count == 1 })
+        #expect(rows(phases).map(\.action) == [.following])
 
-        // Someone else's followers: never.
-        let other = ProfileRelationshipsViewModel(subject: subject(), repository: supported)
+        // Someone else's followers: Follow / Following, no Follow Back.
+        let other = ProfileRelationshipsViewModel(subject: subject(), repository: provider)
         let otherPhases = phaseRecorder(other)
         other.viewDidLoad()
-        await settle(until: { !rows(otherPhases).isEmpty })
-        #expect(rows(otherPhases).first?.action == .follow)
+        await settle(until: { rows(otherPhases).count == 2 })
+        #expect(rows(otherPhases).map(\.action) == [.follow, .following])
+    }
+
+    /// ⚠️ A ROW'S BUTTON IS ITS OWN LIST'S, WHATEVER TAB IS SELECTED. Every
+    /// list re-renders on a tab change; the Following list must not wear the
+    /// followers list's button while Followers is selected, nor flip.
+    @Test func aListsButtonsDoNotFollowTheSelectedTab() async {
+        let provider = StubRelationshipsProvider(
+            followers: [person("ava")],
+            following: [person("kenji", viewerFollows: true)]
+        )
+        let own = ProfileRelationshipsViewModel(subject: subject(isSelf: true), repository: provider)
+        var followingActions: [[ProfileRelationshipsViewModel.RowAction]] = []
+        own.onPhaseChange = { direction, phase in
+            guard direction == .following, case .content(let rows, _) = phase else { return }
+            followingActions.append(rows.map(\.action))
+        }
+        own.viewDidLoad()
+        own.selectDirection(.following)
+        await settle(until: { !followingActions.isEmpty })
+        own.selectDirection(.followers)
+        own.selectDirection(.friends)
+        await settle()
+        #expect(!followingActions.isEmpty)
+        #expect(followingActions.allSatisfy { $0 == [.following] }, "\(followingActions)")
     }
 
     @Test func removeIsAbsentWhereTheBackendCannotHonorIt() async {
@@ -548,7 +576,7 @@ struct ProfileRelationshipsViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { !rows(phases).isEmpty })
 
-        #expect(rows(phases).first?.action == .follow)
+        #expect(rows(phases).first?.action == .followBack)
         viewModel.removeFollower(ProfileID("ava"))
         await settle()
         #expect(await provider.removeCalls.isEmpty)
@@ -857,5 +885,31 @@ struct ProfileRelationshipsViewModelTests {
         await settle(until: { rows(phases).count == 3 })
 
         #expect(rows(phases).map(\.monogram) == ["AM", "LK", "C"])
+    }
+}
+
+/// ⚠️ THE SKELETON IS LAID OUT FROM ITS FIRST FRAME (#717): every bone has its
+/// width, and the row its final height, before anything animates — the bones
+/// used to grow from nothing on the device.
+@MainActor
+struct RelationshipSkeletonLayoutTests {
+    @Test func skeletonRowsAreLaidOutOnTheirFirstPass() throws {
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(isSelf: true), repository: StubRelationshipsProvider(followers: [])
+        )
+        let list = ProfileRelationshipListViewController(direction: .followers, viewModel: viewModel, imagePipeline: nil)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 700))
+        window.rootViewController = list
+        window.isHidden = false
+        defer { window.isHidden = true }
+        list.view.layoutIfNeeded()
+        list.render(.loading)
+        list.view.layoutIfNeeded()
+        let cells = list.collectionView.visibleCells.compactMap { $0 as? RelationshipSkeletonCell }
+        try #require(!cells.isEmpty, "no skeleton rows")
+        for cell in cells {
+            #expect(abs(cell.bounds.height - 64) < 1, "row height \(cell.bounds.height)")
+            #expect(cell.debugBoneWidths.allSatisfy { $0 > 0 }, "bones \(cell.debugBoneWidths)")
+        }
     }
 }
