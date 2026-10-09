@@ -55,7 +55,8 @@ struct EmoteTextViewTests {
     /// field.
     @Test func thePlainTextComesBackByteForByte() {
         let text = "hot 🔥 take :lol: and :LOL: :nope: 👍🏽 end"
-        let (field, _) = hostedField(text)
+        let (field, window) = hostedField(text)
+        defer { window.isHidden = true }
         #expect(field.plainText == text)
         #expect(field.textLayoutManager != nil, "the field fell back to TextKit 1")
         // 🔥, :lol:, :LOL: are emotes; an unknown code and a skin-toned thumb stay text.
@@ -66,7 +67,8 @@ struct EmoteTextViewTests {
     /// Ranges map between the plain text and the storage; a bound inside an
     /// emote's source takes the whole emote.
     @Test func rangesMapThroughTheEmotes() {
-        let (field, _) = hostedField("a:lol:b")
+        let (field, window) = hostedField("a:lol:b")
+        defer { window.isHidden = true }
         #expect(field.textStorage.length == 3)
         #expect(field.plainRange(forStorage: NSRange(location: 2, length: 1)) == NSRange(location: 6, length: 1))
         #expect(field.storageRange(forPlain: NSRange(location: 1, length: 5)) == NSRange(location: 1, length: 1))
@@ -78,7 +80,8 @@ struct EmoteTextViewTests {
     /// A code typed by hand becomes the emote as its colon closes, the
     /// caret staying after it; the text is unchanged.
     @Test func typingACodeTurnsItIntoTheEmote() {
-        let (field, _) = hostedField("ha :lol")
+        let (field, window) = hostedField("ha :lol")
+        defer { window.isHidden = true }
         // What a keystroke does to the storage; the edit's end converts.
         func type(_ text: String) {
             let caret = field.selectedRange.location
@@ -101,7 +104,8 @@ struct EmoteTextViewTests {
 
     /// Undo walks back through the conversion first, then the typing.
     @Test func undoTurnsTheEmoteBackIntoText() throws {
-        let (field, _) = hostedField("ha :lol:")
+        let (field, window) = hostedField("ha :lol:")
+        defer { window.isHidden = true }
         let undo = try #require(field.undoManager)
         undo.removeAllActions()
         field.textStorage.replaceCharacters(in: NSRange(location: field.textStorage.length, length: 0), with: NSAttributedString(string: " :lol:", attributes: [.font: font]))
@@ -118,7 +122,8 @@ struct EmoteTextViewTests {
 
     /// Copy gives the plain text — never an image.
     @Test func copyGivesTheCodesAndEmoji() {
-        let (field, _) = hostedField("x :lol: 🔥 y")
+        let (field, window) = hostedField("x :lol: 🔥 y")
+        defer { window.isHidden = true }
         field.selectedRange = NSRange(location: 0, length: field.textStorage.length)
         // A private pasteboard: reading the general one asks to paste.
         let pasteboard = UIPasteboard.withUniqueName()
@@ -129,7 +134,8 @@ struct EmoteTextViewTests {
 
     /// VoiceOver hears a house emote's name, an emoji as itself.
     @Test func voiceOverReadsTheEmoteNotAnAttachment() {
-        let (field, _) = hostedField("ok :lol: 🔥")
+        let (field, window) = hostedField("ok :lol: 🔥")
+        defer { window.isHidden = true }
         #expect(field.accessibilityValue == "ok lol 🔥")
     }
 
@@ -137,6 +143,7 @@ struct EmoteTextViewTests {
     /// the same line of plain text, so the field's growth never jumps.
     @Test func anEmoteNeverMakesItsLineTaller() {
         let (field, window) = hostedField("hello :lol: there 🔥")
+        defer { window.isHidden = true }
         let plain = UITextView(frame: field.frame)
         plain.font = font
         plain.text = "hello x there y"
@@ -155,7 +162,7 @@ struct EmoteTextViewTests {
     @Test func eachEmotePlaysInPlace() async throws {
         let engine = try warmEngine(["noto:1f525", "lol"])
         let (field, window) = hostedField("hot 🔥 take :lol:", engine: engine)
-        _ = window
+        defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 2 })
         #expect(field.emoteViews.allSatisfy { $0.isShowingArt })
         #expect(field.emoteViews.allSatisfy { !$0.showsStill })
@@ -165,7 +172,7 @@ struct EmoteTextViewTests {
     @Test func aColdEmoteShowsItsStill() async throws {
         let engine = EmoteEngine(diskCache: nil, animationProvider: { _ in nil })
         let (field, window) = hostedField("cold :lol:", engine: engine)
-        _ = window
+        defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 1 })
         #expect(field.emoteViews.allSatisfy { $0.showsStill })
         #expect(!field.emoteViews.contains { $0.isShowingArt })
@@ -178,7 +185,7 @@ struct EmoteTextViewTests {
         let engine = try warmEngine(["noto:1f525"])
         engine.maxAnimatedEmotes = 3
         let (field, window) = hostedField(String(repeating: "🔥 ", count: 8), engine: engine)
-        _ = window
+        defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 8 })
         #expect(field.emoteViews.filter { $0.isShowingArt }.count == 3)
         #expect(field.emoteViews.filter { $0.showsStill }.count == 5)
@@ -186,13 +193,20 @@ struct EmoteTextViewTests {
 
     /// Under Reduce Motion an emoji keeps its still glyph and a house emote
     /// shows its still art; nothing holds an animation slot.
-    @Test func reduceMotionShowsStills() async throws {
+    ///
+    /// ⚠️ SYNCHRONOUS, AND IT MUST STAY SO: `forcedPolicy` is process-wide and
+    /// the other suites of this target run beside this one on the main
+    /// thread. An `await` while it is `.still` handed the picker and strip
+    /// suites their turn with motion off, and their tiles never advanced —
+    /// the EmoteKit lane went red three runs in a row after #713. A warm
+    /// engine places and presents in the layout pass, so nothing here waits.
+    @Test func reduceMotionShowsStills() throws {
         AnimatedIconView.forcedPolicy = .still
         defer { AnimatedIconView.forcedPolicy = nil }
         let engine = try warmEngine(["noto:1f525", "lol"])
         let (field, window) = hostedField("🔥 :lol:", engine: engine)
-        _ = window
-        try #require(await settle { field.emoteViews.count == 2 })
+        defer { window.isHidden = true }
+        try #require(field.emoteViews.count == 2)
         let views = field.emoteViews
         #expect(views[0].showsStill && !views[0].isShowingArt, "the emoji left its glyph")
         #expect(views[1].isShowingArt, "the house emote shows no art")
@@ -203,7 +217,8 @@ struct EmoteTextViewTests {
     /// scroll view lays out on every frame of a scroll. Only an edit, or a
     /// new width, places them again.
     @Test func scrollingTheFieldPlacesNothing() throws {
-        let (field, _) = hostedField(String(repeating: "line :lol: 🔥\n", count: 40))
+        let (field, window) = hostedField(String(repeating: "line :lol: 🔥\n", count: 40))
+        defer { window.isHidden = true }
         field.frame.size.height = 120
         field.layoutIfNeeded()
         let placed = field.placementPasses
@@ -225,7 +240,8 @@ struct EmoteTextViewTests {
     /// The panel writes through the plain text: a pick lands at the caret as
     /// the emote, and backspace takes it whole.
     @Test func thePanelPicksAndDeletesWholeEmotes() throws {
-        let (field, _) = hostedField("hello world")
+        let (field, window) = hostedField("hello world")
+        defer { window.isHidden = true }
         let keyboard = EmoteKeyboard(
             textView: field, engine: field.engine,
             recents: EmoteRecents(defaults: UserDefaults(suiteName: UUID().uuidString)!)
