@@ -34,18 +34,26 @@ struct ProfileTabsTests {
         #expect(ProfileTab.publicTabs.contains(.reactions) == false)
     }
 
-    /// ⚠️ ONE PAGE (#631): Activity, Gallery and Short were one corpus
-    /// filtered three ways, and the For You list draws its cards and its
-    /// mosaic together — so anyone else's profile is the one list, Posts.
-    @Test func someoneElsesProfileIsOneList() {
-        #expect(ProfileTab.publicTabs == [.format(.activity)])
-        #expect(ProfileTab.format(.activity).title == "Posts")
+    /// ⚠️ THREE PAGES (#696): anyone else's profile is Posts · Reposts ·
+    /// Tagged, each its own list, where it was one list and a top filter.
+    @Test func someoneElsesProfileIsPostsRepostsTagged() {
+        #expect(ProfileTab.publicTabs == [.format(.activity), .reposts, .tagged])
+        #expect(ProfileTab.publicTabs.map(\.title) == ["Posts", "Reposts", "Tagged"])
     }
 
-    /// Posts comes first on your own too, so the list a viewer knows from
-    /// every other profile is where theirs opens.
-    @Test func theExistingTabsKeepTheirPlaces() {
-        #expect(Array(ProfileTab.ownTabs.prefix(1)) == ProfileTab.publicTabs)
+    /// Posts comes first on both, so a profile opens on the list a viewer
+    /// knows from every other one.
+    @Test func postsComesFirstOnBoth() {
+        #expect(ProfileTab.ownTabs.first == .format(.activity))
+        #expect(ProfileTab.publicTabs.first == .format(.activity))
+    }
+
+    /// Reposts and Tagged load more as they scroll, like Posts; Saved and
+    /// Liked arrive whole.
+    @Test func thePublishedPagesPage() {
+        #expect(ProfileTab.publicTabs.allSatisfy { $0.pages })
+        #expect(!ProfileTab.saved.pages && !ProfileTab.reactions.pages)
+        #expect(ProfileTab.reposts.format == nil && ProfileTab.tagged.format == nil)
     }
 
     /// Posts is For You's Discover list; Saved and Liked stay timelines; the
@@ -55,6 +63,9 @@ struct ProfileTabsTests {
         #expect(ProfileGalleryPagerView.style(for: .saved) == .list)
         #expect(ProfileGalleryPagerView.style(for: .reactions) == .list)
         #expect(ProfileGalleryPagerView.style(for: .format(.media)) == .grid)
+        // Someone else's Reposts and Tagged are For You lists too (#696).
+        #expect(ProfileGalleryPagerView.style(for: .reposts) == .discover)
+        #expect(ProfileGalleryPagerView.style(for: .tagged) == .discover)
     }
 
     // MARK: - Which axis they are on
@@ -98,7 +109,7 @@ struct ProfileTabsTests {
     /// the pager has pages indexes past the end on the last tab.
     @Test func thePagerBuildsOnePageForEachTab() {
         #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 3)
-        #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 1)
+        #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 3)
     }
 
     /// And the new pages join the same coordinator as the old: each keeps its

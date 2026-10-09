@@ -164,7 +164,9 @@ final class ProfileGalleryPagerView: UIView {
                 onVerticalScroll?(offset)
             }
             page.onPullToRefresh = { [weak self] in self?.onPullToRefresh?() }
-            if case .format = page.tab {
+            // Every page that pages: the format pages and, on someone else's
+            // profile, Reposts and Tagged (#696). Saved and Liked do not.
+            if page.tab.pages {
                 page.onNearEnd = { [weak self] in
                     guard let self, page === pages[activeIndex] else { return }
                     onNearEnd?()
@@ -192,7 +194,7 @@ final class ProfileGalleryPagerView: UIView {
     /// The shape a tab's page takes.
     static func style(for tab: ProfileTab) -> ProfileGalleryGridView.Style {
         switch tab {
-        case .format(.activity): .discover
+        case .format(.activity), .reposts, .tagged: .discover
         case .format(.media): .grid
         case .format(.short), .saved, .reactions: .list
         }
@@ -202,7 +204,7 @@ final class ProfileGalleryPagerView: UIView {
         for (index, tab) in pageOrder.enumerated() {
             // Whether more pages are coming decides the Discover list's tail
             // chunk, so it is told before the posts.
-            pages[index].setCorpusComplete(snapshot.isComplete)
+            pages[index].setCorpusComplete(snapshot.isComplete(for: tab))
             pages[index].render(snapshot.state(for: tab))
         }
     }

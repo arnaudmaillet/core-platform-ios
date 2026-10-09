@@ -874,7 +874,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             attempt(30)
         }
         // `-profile-tab <posts|saved|liked>` selects a tab on the viewer's own
-        // profile — the only one with more than Posts since #631.
+        // profile, `<posts|reposts|tagged>` on someone else's (#696).
         if let position = arguments.firstIndex(of: "-profile-tab"),
            position + 1 < arguments.count {
             let wanted = arguments[position + 1]
@@ -2099,13 +2099,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // large title has nowhere to go under an immersive banner.
         navigationItem.largeTitleDisplayMode = .never
 
-        // The content-source filter leads the bar on BOTH profiles, behind
-        // the shell's bell on the tab root:
+        // The content-source filter leads the bar on YOUR OWN profile only,
+        // behind the shell's bell on the tab root. Someone else's profile has
+        // no filter: its sources are pages at the foot (#696).
         //   tab root  [bell][source] … [coins][switcher gear]
-        //   pushed    [back][source] … [coins]
+        //   pushed    [back] … [bell][coins]
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
-        let leading = [leadingAccessoryItem, sourceMenuItem].compactMap { $0 }
+        let source = viewModel.isOwnProfile ? sourceMenuItem : nil
+        let leading = [leadingAccessoryItem, source].compactMap { $0 }
         if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
             navigationItem.leftBarButtonItems = leading
         }
@@ -2522,9 +2524,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// / Tagged are questions about what this profile published, and there is
     /// no answer to any of them about a post somebody else wrote.
     private func adoptTab(_ tab: ProfileTab) {
-        if let format = tab.format {
-            viewModel.setGalleryFormat(format)
-        }
+        viewModel.setActiveTab(tab)
         // The source filter only means something on a format tab — it filters
         // WITHIN one — so it goes when there is no format to filter.
         sourceMenuItem.isHidden = tab.format == nil
@@ -2925,7 +2925,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             if viewModel.hasGallery {
                 skeletonViewportFill?.isActive = true
                 galleryPager.render(ProfileViewModel.GallerySnapshot(
-                    activity: .loading, media: .loading, isComplete: false
+                    activity: .loading, media: .loading, isComplete: false,
+                    reposts: .loading, tagged: .loading,
+                    repostsComplete: false, taggedComplete: false
                 ))
             }
 
@@ -3111,10 +3113,21 @@ extension ProfileViewController {
     /// Fed from here as pages land (`onGalleryChange`), under the same
     /// source, and its posts open through `openGalleryPost` measured against
     /// ITS mosaic, so a close lands on the tile it left from.
+    /// What "View all" pushes is the page on screen's media (#696): on
+    /// someone else's profile Reposts and Tagged have their own.
+    private var mediaGalleryTitle: String {
+        switch tabs[galleryPager.activePageIndex] {
+        case .reposts: "Reposted Media"
+        case .tagged: "Tagged Media"
+        default: ProfileTab.format(.media).title
+        }
+    }
+
     func pushMediaGallery() {
         guard navigationController?.transitionCoordinator == nil else { return }
         let gallery = ProfileMediaGalleryViewController(
-            imagePipeline: imagePipeline, videoPlayback: videoPlayback, handle: currentHandle
+            imagePipeline: imagePipeline, videoPlayback: videoPlayback, handle: currentHandle,
+            title: mediaGalleryTitle
         )
         gallery.loadViewIfNeeded()
         gallery.render(lastGallerySnapshot?.media ?? .loading)

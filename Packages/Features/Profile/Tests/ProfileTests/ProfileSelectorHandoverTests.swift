@@ -182,19 +182,21 @@ struct ProfileSelectorHandoverTests {
         }
     }
 
-    // MARK: - Someone else's profile (#631)
+    // MARK: - Someone else's profile (#696)
 
-    /// ⚠️ NO SELECTOR ON ANYONE ELSE'S PROFILE. It has one page — Posts, the
-    /// For You-style list — and a strip with one segment would be a label
-    /// pretending to be a control. The source filter stays: it narrows that
-    /// list.
-    @Test func someoneElsesProfileHasNoSelector() async {
+    /// ⚠️ POSTS · REPOSTS · TAGGED AT THE FOOT, NO FILTER UP TOP (#696).
+    /// Someone else's sources are pages now, switched by the selector or a
+    /// swipe, so the bar's source filter is gone. It opens on Posts.
+    @Test func someoneElsesProfileHasPostsRepostsTaggedAtTheFoot() async {
         guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
-        #expect(screen.selectorAccessory == nil, "a one-page profile placed a selector")
-        #expect(screen.debugPageCount == 1)
+        let band = try? #require(screen.selectorAccessory?.hostView)
+        #expect(band?.subviews.contains { $0 is PagedTabBar } == true, "no selector at the foot")
+        #expect(screen.debugTabTitles == ["Posts", "Reposts", "Tagged"])
+        #expect(screen.debugPageCount == 3)
+        #expect(screen.debugActivePageIndex == 0, "it does not open on Posts")
         #expect(screen.navigationItem.leftBarButtonItems?
-            .contains { $0.accessibilityLabel == "Content source" && !$0.isHidden } == true,
-            "the source filter must still narrow the list")
+            .contains { $0.accessibilityLabel == "Content source" } != true,
+            "someone else's profile kept the source filter")
     }
 
     /// The viewer's own keeps Posts | Saved | Liked.
@@ -206,12 +208,20 @@ struct ProfileSelectorHandoverTests {
         #expect(screen.debugPageCount == 3)
     }
 
-    /// With no page to the left — there is only one — a drag anywhere on a
-    /// pushed profile may dismiss it: the plain pushed-screen rule.
-    @Test func aSelectorlessPushedProfileDismissesFromAnywhere() async {
+    /// On Posts, with no page to its left, a drag anywhere dismisses a
+    /// pushed profile; on Reposts or Tagged a rightward swipe is the previous
+    /// page, and only the edge dismisses (#696).
+    @Test func aPushedProfileDismissesFromAnywhereOnlyOnPosts() async {
         guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
         #expect(ProfileDismissalPolicy.allowsFullWidthDismissal(
             activeIndex: screen.debugActivePageIndex, isPushed: true
         ))
+        for index in [1, 2] {
+            screen.selectTab(at: index)
+            #expect(screen.debugActivePageIndex == index)
+            #expect(!ProfileDismissalPolicy.allowsFullWidthDismissal(
+                activeIndex: screen.debugActivePageIndex, isPushed: true
+            ), "page \(index) dismissed full-width")
+        }
     }
 }
