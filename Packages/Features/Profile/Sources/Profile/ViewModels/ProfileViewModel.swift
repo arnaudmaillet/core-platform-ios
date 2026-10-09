@@ -1333,7 +1333,9 @@ public final class ProfileViewModel {
 
     /// The pages last handed to the view — what `renderGallery` compares a
     /// new answer against.
-    private var publishedGallery: GallerySnapshot?
+    /// The pages last published — what a screen bound after the gallery
+    /// landed renders first (#742: its tabs follow what the sources hold).
+    public private(set) var publishedGallery: GallerySnapshot?
 
     /// Rebuilds the Saved page from the pile the viewer has curated.
     ///

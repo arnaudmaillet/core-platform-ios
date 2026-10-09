@@ -29,14 +29,18 @@ final class ProfileGalleryPagerView: UIView {
     /// Pager order == selector order. Set at init, because how many pages
     /// there are depends on whose profile this is: the viewer's own carries
     /// Saved and Liked, everyone else's does not.
-    let pageOrder: [ProfileTab]
+    /// The tabs on show, in order: every tab the profile has, less the
+    /// sources with nothing in them (#742, `setVisibleTabs`).
+    private(set) var pageOrder: [ProfileTab]
+    /// Every tab the profile has, whether shown or not.
+    private let allTabs: [ProfileTab]
 
     var onItemTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
     /// A card's comment chip — see `ProfileGalleryGridView.onItemCommentsTapped`.
     var onItemCommentsTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
     /// Handed to every page — one screen, one undo window.
     var staking: PostCardStaking? {
-        didSet { pages.forEach { $0.staking = staking } }
+        didSet { allPages.forEach { $0.staking = staking } }
     }
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
@@ -96,7 +100,13 @@ final class ProfileGalleryPagerView: UIView {
     /// layout pass landing mid-drag snaps the pages back under the finger while
     /// the pill keeps following it.
     private var isScrubbing = false
-    private let pages: [ProfileGalleryGridView]
+    /// The pages on show, in `pageOrder`. Every page is built up front
+    /// (`allPages`) and configured alike; only these are laid out and paged.
+    private var pages: [ProfileGalleryGridView]
+    private let allPages: [ProfileGalleryGridView]
+    /// The horizontal chain the shown pages hang from — rebuilt when a tab
+    /// comes or goes.
+    private var chainConstraints: [NSLayoutConstraint] = []
     private var activeIndex = 0 {
         didSet { syncAutoplay() }
     }
@@ -111,7 +121,8 @@ final class ProfileGalleryPagerView: UIView {
         bookmarks: PostBookmarkStore? = nil
     ) {
         pageOrder = tabs
-        pages = tabs.map { tab in
+        allTabs = tabs
+        let built = tabs.map { tab in
             ProfileGalleryGridView(
                 imagePipeline: imagePipeline,
                 // Posts is For You's list (#631). Saved and Liked are whatever
@@ -122,6 +133,8 @@ final class ProfileGalleryPagerView: UIView {
                 bookmarks: bookmarks
             )
         }
+        allPages = built
+        pages = built
         super.init(frame: .zero)
 
         scrollView.isPagingEnabled = true
@@ -139,21 +152,7 @@ final class ProfileGalleryPagerView: UIView {
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.pin(to: self)
 
-        let content = scrollView.contentLayoutGuide
-        let frame = scrollView.frameLayoutGuide
-        var leading = content.leadingAnchor
-        for page in pages {
-            scrollView.addSubview(page)
-            page.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                page.topAnchor.constraint(equalTo: content.topAnchor),
-                page.leadingAnchor.constraint(equalTo: leading),
-                page.widthAnchor.constraint(equalTo: frame.widthAnchor),
-                // Every page is exactly one viewport tall. This is the line the
-                // whole refactor turns on.
-                page.heightAnchor.constraint(equalTo: frame.heightAnchor)
-            ])
-            leading = page.trailingAnchor
+        for page in allPages {
             page.onItemTapped = { [weak self] post, stream in self?.onItemTapped?(post, stream) }
             page.onItemCommentsTapped = { [weak self] post, stream in
                 guard let self else { return }
@@ -182,14 +181,61 @@ final class ProfileGalleryPagerView: UIView {
                 onPullReleased?(distance)
             }
         }
-        NSLayoutConstraint.activate([
-            leading.constraint(equalTo: content.trailingAnchor),
-            content.heightAnchor.constraint(equalTo: frame.heightAnchor)
-        ])
+        installPages()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Hangs the shown pages side by side, one viewport each, and takes the
+    /// others out of the scroll view.
+    private func installPages() {
+        NSLayoutConstraint.deactivate(chainConstraints)
+        chainConstraints = []
+        for page in allPages where !pages.contains(where: { $0 === page }) {
+            page.setAutoplayActive(false)
+            page.removeFromSuperview()
+        }
+        let content = scrollView.contentLayoutGuide
+        let frame = scrollView.frameLayoutGuide
+        var leading = content.leadingAnchor
+        for page in pages {
+            if page.superview !== scrollView { scrollView.addSubview(page) }
+            page.translatesAutoresizingMaskIntoConstraints = false
+            chainConstraints += [
+                page.topAnchor.constraint(equalTo: content.topAnchor),
+                page.leadingAnchor.constraint(equalTo: leading),
+                page.widthAnchor.constraint(equalTo: frame.widthAnchor),
+                // Every page is exactly one viewport tall. This is the line the
+                // whole refactor turns on.
+                page.heightAnchor.constraint(equalTo: frame.heightAnchor)
+            ]
+            leading = page.trailingAnchor
+        }
+        chainConstraints += [
+            leading.constraint(equalTo: content.trailingAnchor),
+            content.heightAnchor.constraint(equalTo: frame.heightAnchor)
+        ]
+        NSLayoutConstraint.activate(chainConstraints)
+    }
+
+    /// Shows `tabs` — in the profile's own order — and only them (#742): a
+    /// source with nothing in it has no page. The page being read stays
+    /// where it is; if it is the one going, Posts takes its place.
+    func setVisibleTabs(_ tabs: [ProfileTab]) {
+        let ordered = allTabs.filter(tabs.contains)
+        guard !ordered.isEmpty, ordered != pageOrder else { return }
+        let active = pageOrder.indices.contains(activeIndex) ? pageOrder[activeIndex] : ordered[0]
+        pageOrder = ordered
+        pages = ordered.compactMap { tab in allTabs.firstIndex(of: tab).map { allPages[$0] } }
+        installPages()
+        let index = ordered.firstIndex(of: active) ?? 0
+        activeIndex = index
+        layoutIfNeeded()
+        scrollView.contentOffset = CGPoint(x: CGFloat(index) * scrollView.bounds.width, y: 0)
+        publishActiveScrollView()
+        reportVerticalOffset()
+    }
 
     /// The shape a tab's page takes.
     static func style(for tab: ProfileTab) -> ProfileGalleryGridView.Style {
@@ -201,11 +247,11 @@ final class ProfileGalleryPagerView: UIView {
     }
 
     func render(_ snapshot: ProfileViewModel.GallerySnapshot) {
-        for (index, tab) in pageOrder.enumerated() {
+        for (index, tab) in allTabs.enumerated() {
             // Whether more pages are coming decides the Discover list's tail
             // chunk, so it is told before the posts.
-            pages[index].setCorpusComplete(snapshot.isComplete(for: tab))
-            pages[index].render(snapshot.state(for: tab))
+            allPages[index].setCorpusComplete(snapshot.isComplete(for: tab))
+            allPages[index].render(snapshot.state(for: tab))
         }
     }
 
@@ -239,7 +285,7 @@ final class ProfileGalleryPagerView: UIView {
 
     /// The chrome that stays over the pages when the header has scrolled away.
     func setStickyTopOcclusion(_ height: CGFloat) {
-        pages.forEach { $0.setStickyTopOcclusion(height) }
+        allPages.forEach { $0.setStickyTopOcclusion(height) }
     }
 
     #if DEBUG
@@ -317,18 +363,18 @@ final class ProfileGalleryPagerView: UIView {
     /// How far the pages' content starts below their own top — the height of
     /// the header floating over them.
     func setContentTopInset(_ inset: CGFloat) {
-        pages.forEach { $0.setContentTopInset(inset) }
+        allPages.forEach { $0.setContentTopInset(inset) }
     }
 
     /// Clearance below the last row — the tab bar, the tray, the transparent
     /// bar's glass capsules.
     func setContentBottomInset(_ inset: CGFloat) {
-        pages.forEach { $0.setContentBottomInset(inset) }
+        allPages.forEach { $0.setContentBottomInset(inset) }
     }
 
     /// How far every page must be able to travel — the header's distance.
     func setMinimumScrollTravel(_ travel: CGFloat) {
-        pages.forEach { $0.setMinimumScrollTravel(travel) }
+        allPages.forEach { $0.setMinimumScrollTravel(travel) }
     }
 
     /// The active page's vertical offset.
@@ -412,7 +458,7 @@ final class ProfileGalleryPagerView: UIView {
     /// Where a release rests while the header is on screen — the same
     /// detents on every page, since the header is one object.
     func setSnapDetents(_ detents: [CGFloat]) {
-        for page in pages { page.snapDetents = detents }
+        for page in allPages { page.snapDetents = detents }
     }
 
     /// Where a page should sit, given where the screen currently is.
