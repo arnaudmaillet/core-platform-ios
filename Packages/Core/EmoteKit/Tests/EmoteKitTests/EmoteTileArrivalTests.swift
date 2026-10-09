@@ -31,12 +31,9 @@ struct EmoteTileArrivalTests {
         tile.configure(lol, engine: engine, prefersAnimation: true)
         #expect(!tile.showsGlyph, "a glyph stands in for the art on its way")
         #expect(!tile.isShowingArt)
-        var bounced = false
-        #expect(await settle {
-            bounced = bounced || tile.isBouncingIn
-            return tile.isShowingArt
-        }, "the art never came")
-        #expect(bounced || tile.isBouncingIn, "the art landed without its bounce")
+        // A bake on a starved runner can take a while: many looks, no clock.
+        #expect(await settle(looks: 8_000) { tile.isShowingArt }, "the art never came")
+        #expect(tile.bounceInCount == 1, "the art landed without its bounce")
         #expect(!tile.showsGlyph)
     }
 
@@ -47,7 +44,7 @@ struct EmoteTileArrivalTests {
         let (tile, window) = hostedTile()
         defer { window.isHidden = true }
         tile.configure(lol, engine: engine, prefersAnimation: true)
-        #expect(await settle { tile.showsGlyph }, "an emote with no art showed nothing")
+        #expect(await settle(looks: 8_000) { tile.showsGlyph }, "an emote with no art showed nothing")
         #expect(!tile.isShowingArt)
     }
 
@@ -61,6 +58,6 @@ struct EmoteTileArrivalTests {
         defer { window.isHidden = true }
         tile.configure(lol, engine: engine, prefersAnimation: true)
         #expect(tile.isShowingArt)
-        #expect(!tile.isBouncingIn, "art already there bounced in")
+        #expect(tile.bounceInCount == 0, "art already there bounced in")
     }
 }

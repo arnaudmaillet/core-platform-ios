@@ -610,6 +610,7 @@ final class EmoteAttachmentView: UIView {
     private func bounceIn() {
         guard !UIAccessibility.isReduceMotionEnabled else { return }
         isBouncingIn = true
+        bounceInCount += 1
         player.layer.removeAllAnimations()
         player.alpha = 0
         player.transform = CGAffineTransform(scaleX: 0.3, y: 0.3)
@@ -624,6 +625,9 @@ final class EmoteAttachmentView: UIView {
 
     /// Whether the art is landing with its bounce. Internal for tests.
     private(set) var isBouncingIn = false
+    /// How many times the art has bounced in — what a test reads, rather
+    /// than catching the half-second bounce in flight. Internal for tests.
+    private(set) var bounceInCount = 0
 
     private func stop() {
         request?.cancel()

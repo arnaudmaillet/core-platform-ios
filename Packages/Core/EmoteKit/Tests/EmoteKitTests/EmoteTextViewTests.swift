@@ -192,12 +192,9 @@ struct EmoteTextViewTests {
         let view = try #require(field.emoteViews.first)
         #expect(!view.showsStill, "the glyph stands in for the art on its way")
         #expect(!view.isShowingArt)
-        var bounced = false
-        #expect(await settle {
-            bounced = bounced || view.isBouncingIn
-            return view.isShowingArt
-        }, "the art never came")
-        #expect(bounced || view.isBouncingIn, "the art landed without its bounce")
+        // A bake on a starved runner can take a while: many looks, no clock.
+        #expect(await settle(looks: 8_000) { view.isShowingArt }, "the art never came")
+        #expect(view.bounceInCount == 1, "the art landed without its bounce")
     }
 
     /// ⚠️ THE APP-WIDE BUDGET HOLDS: past it, emotes hold their art's poster

@@ -135,6 +135,7 @@ public final class EmoteTileView: UIView {
     private func bounceIn() {
         guard window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
         isBouncingIn = true
+        bounceInCount += 1
         player.layer.removeAllAnimations()
         player.alpha = 0
         player.transform = CGAffineTransform(scaleX: 0.3, y: 0.3)
@@ -149,6 +150,9 @@ public final class EmoteTileView: UIView {
 
     /// Whether the art is arriving with its bounce. Internal for tests.
     private(set) var isBouncingIn = false
+    /// How many times the art has bounced in — what a test reads, rather
+    /// than catching the half-second bounce in flight. Internal for tests.
+    private(set) var bounceInCount = 0
     /// Whether the system glyph shows. Internal for tests.
     var showsGlyph: Bool { !glyphLabel.isHidden }
 
