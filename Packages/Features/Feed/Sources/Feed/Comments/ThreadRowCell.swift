@@ -99,6 +99,11 @@ final class ThreadRowCell: UICollectionViewCell {
         timeReveal.layer.removeAllAnimations()
         timeReveal.isHidden = true
         isBouncingInTime = false
+        // ⚠️ A pending row's cell can come straight back as its delivered
+        // message (the swap is unanimated, #756) while its spinner is still
+        // scaling out: the delivery stays with the row that played it.
+        isScalingOutSpinner = false
+        isBouncingInSpinner = false
         setDelivery(nil)
     }
 
