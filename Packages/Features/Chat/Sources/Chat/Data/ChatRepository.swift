@@ -224,6 +224,9 @@ public protocol ChatProviding: ViewerIdentityProviding {
     /// Mutes the conversation's pushes for the viewer, or unmutes them
     /// (chat.v1 `MuteConversation`, #654) — the thread's bell (#719).
     func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws
+    /// Mutes until `until` (nil: until turned back on) — the bell's long-press
+    /// durations (#729, `MuteConversation.until_ms`).
+    func setMuted(_ muted: Bool, until: Date?, for conversationID: ConversationID) async throws
     /// The direct-message conversation with `profileID`, reusing an existing
     /// 1:1 conversation or creating one.
     func directConversation(with profileID: ProfileID) async throws -> ConversationID
@@ -232,6 +235,11 @@ public protocol ChatProviding: ViewerIdentityProviding {
 extension ChatProviding {
     /// Providers with no mute to write (fakes): the inbox keeps it locally.
     public func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {}
+
+    /// Providers with no durations: a mute is a mute.
+    public func setMuted(_ muted: Bool, until: Date?, for conversationID: ConversationID) async throws {
+        try await setMuted(muted, for: conversationID)
+    }
 
     /// Providers that don't page: everything they have, once.
     public func loadMessagesPage(in conversationID: ConversationID, before pageToken: String?) async throws -> MessagePage {
@@ -445,11 +453,17 @@ public actor ChatRepository: ChatProviding {
     }
 
     public func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {
+        try await setMuted(muted, until: nil, for: conversationID)
+    }
+
+    public func setMuted(_ muted: Bool, until: Date?, for conversationID: ConversationID) async throws {
         let viewer = try await resolveViewerProfileID()
         var request = Chat_V1_MuteConversationRequest()
         request.conversationID = conversationID.rawValue
         request.memberID = viewer.rawValue
         request.muted = muted
+        // 0 is "until turned back on".
+        request.untilMs = muted ? until.map { Int64($0.timeIntervalSince1970 * 1000) } ?? 0 : 0
         let response = await chatClient.muteConversation(request: request, headers: [:])
         if let error = response.error {
             throw ChatError.transport(message: error.message ?? "code \(error.code)")

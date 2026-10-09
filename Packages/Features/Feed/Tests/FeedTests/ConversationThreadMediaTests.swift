@@ -64,8 +64,7 @@ struct ConversationThreadMediaTests {
         let driver = MediaDriver(sendsMedia: sendsMedia, messages: messages)
         let screen = ConversationThreadViewController(
             driver: driver, mode: .full, prefill: "",
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            wallet: nil, makeWalletSheet: nil
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))

@@ -387,16 +387,21 @@ final class InboxCatalog {
     /// Mutes or unmutes the conversation (#719): at once on screen, written
     /// through `MuteConversation`, and put back if the server refuses.
     func toggleMute(_ id: ConversationID) {
-        let nowMuted = !muted.contains(id)
-        muted.formSymmetricDifference([id])
+        setMute(id, muted: !muted.contains(id), until: nil)
+    }
+
+    /// Mutes until `until` — nil: until turned back on — or unmutes (#729).
+    func setMute(_ id: ConversationID, muted mute: Bool, until: Date?) {
+        let wasMuted = muted.contains(id)
+        if mute { muted.insert(id) } else { muted.remove(id) }
         mutesInFlight.insert(id)
         emit()
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await self.repository.setMuted(nowMuted, for: id)
+                try await self.repository.setMuted(mute, until: until, for: id)
             } catch {
-                if nowMuted { self.muted.remove(id) } else { self.muted.insert(id) }
+                if wasMuted { self.muted.insert(id) } else { self.muted.remove(id) }
                 self.emit()
             }
             self.mutesInFlight.remove(id)

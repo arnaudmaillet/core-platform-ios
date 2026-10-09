@@ -60,17 +60,21 @@ public final class ToastView: UIView {
     ///   - symbol: an optional SF Symbol leading the text.
     ///   - host: the view to present in. Pass the view controller's `view`;
     ///     the capsule pins to its safe area, so it clears tab and tool bars.
+    ///   - floor: what the capsule stands on instead of the safe area — the
+    ///     top of a composer resting on it, which would otherwise cover it
+    ///     (#729).
     public static func present(
         _ message: String,
         symbol: String? = "checkmark.circle.fill",
-        in host: UIView
+        in host: UIView,
+        above floor: NSLayoutYAxisAnchor? = nil
     ) {
         host.viewWithTag(hostTag).flatMap { $0 as? ToastView }?.dismiss(animated: false)
 
         let toast = ToastView(message: message, symbol: symbol)
         toast.tag = hostTag
         let slide = toast.bottomAnchor.constraint(
-            equalTo: host.safeAreaLayoutGuide.bottomAnchor,
+            equalTo: floor ?? host.safeAreaLayoutGuide.bottomAnchor,
             constant: -Metrics.bottomGap + Metrics.travel
         )
         toast.slide = slide

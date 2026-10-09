@@ -45,8 +45,6 @@ final class ConversationThreadViewController: UIViewController {
     private let mode: ConversationThreadMode
     private let prefill: String
     private let imagePipeline: ImagePipeline
-    private let wallet: WalletStore?
-    private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     private let headerPolicy = HeaderPolicy()
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
@@ -85,25 +83,19 @@ final class ConversationThreadViewController: UIViewController {
     /// is out; an idle spinner redraws the screen every frame (#580).
     private let olderSpinner = UIActivityIndicatorView(style: .medium)
     private let peerPill = SnapAuthorIdentityView()
-    private let walletBadge = WalletBadgeButton()
-    private var walletBadgeItem: UIBarButtonItem?
     /// The conversation's mute (#719), at the bar's trailing corner beside
     /// the points badge: `bell`, or `bell.slash` once muted. Hidden while
     /// there is nothing to mute (a draft).
-    private lazy var muteItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "bell"),
-            primaryAction: UIAction { [weak self] _ in self?.driver.toggleMuted() }
-        )
-        item.tintColor = .label
-        item.accessibilityLabel = "Notifications"
-        return item
-    }()
+    ///
+    /// ⚠️ ONE ITEM PER STATE, EACH WITH ITS OWN IDENTIFIER (#729). Two bar
+    /// items with one identifier are the same item to UIKit, and swap in a
+    /// frame; distinct identifiers get the native Liquid Glass morph when
+    /// one replaces the other (`setRightBarButtonItems(_:animated:)`).
+    private var muteItem = UIBarButtonItem()
     /// Keeps the bell and the badge two bubbles.
     private let muteSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// What the bell shows; nil hides it.
     private var muted: Bool?
-    private let walletObservers = NotificationObserverTokenBag()
 
     private var phase: ConversationThreadPhase = .loading
     private var messagesByID: [String: ConversationThreadMessage] = [:]
@@ -147,16 +139,12 @@ final class ConversationThreadViewController: UIViewController {
         driver: any ConversationThreadDriving,
         mode: ConversationThreadMode,
         prefill: String,
-        imagePipeline: ImagePipeline,
-        wallet: WalletStore?,
-        makeWalletSheet: (@MainActor () -> UIViewController)?
+        imagePipeline: ImagePipeline
     ) {
         self.driver = driver
         self.mode = mode
         self.prefill = prefill
         self.imagePipeline = imagePipeline
-        self.wallet = wallet
-        self.makeWalletSheet = makeWalletSheet
         super.init(nibName: nil, bundle: nil)
         // In the initializer: a navigation controller reads it when the push
         // begins, and `viewDidLoad` can run inside that same push.
@@ -451,8 +439,9 @@ final class ConversationThreadViewController: UIViewController {
         navigationItem.standardAppearance = appearance
         navigationItem.scrollEdgeAppearance = appearance
         navigationItem.compactAppearance = appearance
-        // `title` still feeds back labels; the centre stays empty.
-        navigationItem.titleView = UIView()
+        // The correspondent's name is the header's title (#738), as the
+        // owner wants it read at a glance; it also feeds back labels.
+        navigationItem.titleView = nil
 
         peerPill.setFollowBadge(.none)
         peerPill.setOverMedia(false)
@@ -460,56 +449,117 @@ final class ConversationThreadViewController: UIViewController {
         // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
         // in the bar.
         var items = pillRidesToolbar ? [] : [UIBarButtonItem(customView: peerPill)]
-        if mode == .full, wallet != nil {
-            walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
-            if makeWalletSheet != nil {
-                walletBadge.addAction(UIAction { [weak self] _ in
-                    self?.presentWalletSheet()
-                }, for: .primaryActionTriggered)
-            }
-            let item = UIBarButtonItem(customView: walletBadge)
-            walletBadgeItem = item
-            // A grown count needs a FRESH item — re-adding the same one hands
-            // the bar the same frozen wrapper (the feed's measured finding).
-            walletBadge.onFittedWidthChange = { [weak self] in self?.refreshWalletItem() }
-            refreshWalletBadge()
-            walletObservers.tokens = [
-                NotificationCenter.default.addObserver(
-                    forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-                ) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.refreshWalletBadge() }
-                },
-            ]
-            items += items.isEmpty ? [item] : [.fixedSpace(Spacing.sm), item]
-        }
+        // No points badge on a conversation (#738): the bell alone trails.
         navigationItem.rightBarButtonItems = items
         placeMuteItem()
     }
 
     /// The bell takes the corner, right of the points badge (#719): `[0]` is
     /// the trailing edge, and a fixed space keeps the two bubbles apart.
-    private func placeMuteItem() {
-        var items = (navigationItem.rightBarButtonItems ?? []).filter { $0 !== muteItem && $0 !== muteSpacer }
+    private func placeMuteItem(replacing old: UIBarButtonItem? = nil, animated: Bool = false) {
+        var items = (navigationItem.rightBarButtonItems ?? [])
+            .filter { $0 !== muteItem && $0 !== muteSpacer && $0 !== old }
         if mode == .full, muted != nil {
             items = [muteItem] + (items.isEmpty ? [] : [muteSpacer]) + items
         }
-        navigationItem.rightBarButtonItems = items
+        navigationItem.setRightBarButtonItems(items, animated: animated)
+    }
+
+    /// The bell for `muted`: a tap toggles, a long press offers how long
+    /// (#729). Its identifier names its state, so the bar morphs between
+    /// the two.
+    private func makeMuteItem(muted: Bool) -> UIBarButtonItem {
+        let item = UIBarButtonItem(
+            title: nil,
+            image: UIImage(systemName: muted ? "bell.slash" : "bell"),
+            primaryAction: UIAction { [weak self] _ in self?.setMuted(!muted, until: nil) },
+            menu: muteMenu(muted: muted)
+        )
+        item.identifier = muted ? Self.mutedBellID : Self.bellID
+        item.tintColor = .label
+        item.accessibilityLabel = "Notifications"
+        item.accessibilityValue = muted ? "Muted" : "On"
+        return item
+    }
+
+    static let bellID = "conversation.bell"
+    static let mutedBellID = "conversation.bell.muted"
+
+    /// How long a mute lasts, as the long press offers it (#729).
+    static let muteDurations: [(title: String, toast: String, seconds: TimeInterval?)] = [
+        ("For 1 Hour", "Muted for 1 hour", 3_600),
+        ("For 8 Hours", "Muted for 8 hours", 8 * 3_600),
+        ("For 1 Day", "Muted for 1 day", 86_400),
+        ("For 1 Week", "Muted for 1 week", 7 * 86_400),
+        ("Until I Turn It Back On", "Notifications muted", nil),
+    ]
+
+    private func muteMenu(muted: Bool) -> UIMenu {
+        let durations = Self.muteDurations.map { duration in
+            UIAction(title: duration.title) { [weak self] _ in
+                self?.setMuted(true, until: duration.seconds.map { Date().addingTimeInterval($0) }, toast: duration.toast)
+            }
+        }
+        let mute = UIMenu(title: muted ? "Mute Again" : "Mute Notifications", image: UIImage(systemName: "bell.slash"),
+                          options: muted ? [] : .displayInline, children: durations)
+        guard muted else { return UIMenu(children: [mute]) }
+        let unmute = UIAction(title: "Unmute", image: UIImage(systemName: "bell")) { [weak self] _ in
+            self?.setMuted(false, until: nil)
+        }
+        return UIMenu(children: [unmute, mute])
+    }
+
+    /// Mutes or unmutes through the driver, and says so (#729): the same
+    /// bottom toast as "You're signed in".
+    private func setMuted(_ mute: Bool, until: Date?, toast: String? = nil) {
+        driver.setMuted(mute, until: until)
+        ToastView.present(
+            toast ?? (mute ? "Notifications muted" : "Notifications on"),
+            symbol: mute ? "bell.slash.fill" : "bell.fill",
+            in: view,
+            // Over the composer, which rests where the toast would.
+            above: composeBar.inputRowTopAnchor
+        )
     }
 
     /// The bell follows the conversation's mute; it appears once there is a
     /// conversation to mute and leaves if there is none.
     private func renderMuted(_ muted: Bool?) {
-        let wasShown = self.muted != nil
+        let was = self.muted
         self.muted = muted
-        if let muted {
-            muteItem.image = UIImage(systemName: muted ? "bell.slash" : "bell")
-            muteItem.accessibilityValue = muted ? "Muted" : "On"
+        guard let muted else {
+            if was != nil {
+                placeMuteItem()
+                fitTrailingRun()
+            }
+            return
         }
-        if wasShown != (muted != nil) {
-            placeMuteItem()
-            fitTrailingRun()
-        }
+        guard was != muted else { return }
+        let old = muteItem
+        muteItem = makeMuteItem(muted: muted)
+        // A first appearance lands; a change morphs, glass to glass.
+        placeMuteItem(replacing: old, animated: was != nil)
+        if was == nil { fitTrailingRun() }
     }
+
+    #if DEBUG
+    /// The bell on the bar, nil while there is none. Tests.
+    var debugMuteItem: UIBarButtonItem? {
+        navigationItem.rightBarButtonItems?.first { $0 === muteItem }
+    }
+
+    /// What a tap on the bell does. Tests.
+    func debugTapBell() {
+        guard let muted else { return }
+        setMuted(!muted, until: nil)
+    }
+
+    /// What picking the long-press menu's `index`th duration does. Tests.
+    func debugPickMuteDuration(_ index: Int) {
+        let duration = Self.muteDurations[index]
+        setMuted(true, until: duration.seconds.map { Date().addingTimeInterval($0) }, toast: duration.toast)
+    }
+    #endif
 
     private func configureStatusLabel() {
         statusLabel.font = .appFont(forTextStyle: .body)
@@ -808,7 +858,7 @@ final class ConversationThreadViewController: UIViewController {
 
     private func adoptPeer(_ person: ConversationThreadPerson) {
         peer = person
-        title = person.name
+        title = person.name.isEmpty ? nil : person.name
         peerPill.setPerson(
             id: person.id, name: person.name, meta: "", avatarURL: person.avatarURL, pipeline: imagePipeline
         )
@@ -1016,7 +1066,7 @@ final class ConversationThreadViewController: UIViewController {
     // MARK: - Bars
 
     /// The peer pill's share of the nav bar: the bar less its margins, the
-    /// back button, and the wallet badge when there is one. Measured, and
+    /// back button, and the bell when there is one. Measured, and
     /// applied before the bar first lays the run out (see `viewWillAppear`).
     /// Whether the peer pill is the toolbar's leading item (#671): on the full
     /// thread, which has a toolbar; a preview keeps it in the bar.
@@ -1035,41 +1085,9 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         var budget = bar - 16 * 2 - (36 + itemPadding) - itemPadding
-        if walletBadgeItem != nil {
-            let badge = walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-            budget -= badge + itemPadding + Spacing.sm
-        }
         // The bell beside it (#719).
         if mode == .full, muted != nil { budget -= 44 + itemPadding + Spacing.sm }
         peerPill.setWidthBudget(budget)
-    }
-
-    private func refreshWalletBadge() {
-        guard let wallet else { return }
-        let snapshot = wallet.snapshot()
-        walletBadge.update(
-            balance: snapshot.balance,
-            claimAvailable: makeWalletSheet != nil && snapshot.claimAvailable,
-            claimProgress: snapshot.claimCountdown.map {
-                WalletBadgeButton.ClaimProgress(fraction: $0.fraction, remaining: $0.remaining)
-            }
-        )
-    }
-
-    private func refreshWalletItem() {
-        guard let old = walletBadgeItem,
-              var items = navigationItem.rightBarButtonItems,
-              let index = items.firstIndex(of: old) else { return }
-        let fresh = UIBarButtonItem(customView: walletBadge)
-        walletBadgeItem = fresh
-        items[index] = fresh
-        navigationItem.rightBarButtonItems = items
-        fitTrailingRun()
-    }
-
-    private func presentWalletSheet() {
-        guard let makeWalletSheet, presentedViewController == nil else { return }
-        present(makeWalletSheet(), animated: true)
     }
 
     // MARK: - Misc
