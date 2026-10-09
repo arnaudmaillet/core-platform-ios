@@ -214,9 +214,86 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         syncBottomClearance()
+        syncDayItem()
         // After the clearance, in the same pass: see `pinToTail`.
         if owesTailPin { pinToTail() }
     }
+
+    /// Where a day's first message rests after a tap on the bar's day,
+    /// below the bar's bottom: the stream's own top breath (#750).
+    static var dayStartLanding: CGFloat { SnapCommentsLayout.streamTopBreath }
+
+    /// The day on screen, as a bar item left of the bell (#750) — the
+    /// thread's ONE day chip: a system glass bubble, interactive. A tap
+    /// scrolls to that day's first message, as a search section's pill does.
+    private lazy var dayItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            title: nil, image: nil,
+            primaryAction: UIAction { [weak self] _ in self?.scrollToDayStart() }
+        )
+        item.tintColor = .label
+        return item
+    }()
+    private let daySpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
+    private var dayItemShown = false
+    private var dayShown: Date?
+
+    /// The day of the first message under the bar.
+    private func syncDayItem() {
+        guard mode == .full else { return }
+        guard hasRenderedContent, let day = dayOnScreen() else { return showDayItem(false) }
+        if day != dayShown {
+            dayShown = day
+            let title = DayTitleFormatter.title(for: day)
+            dayItem.title = title
+            dayItem.accessibilityLabel = title
+            dayItem.accessibilityHint = "Scrolls to the first message of the day"
+        }
+        showDayItem(true)
+    }
+
+    private func dayOnScreen() -> Date? {
+        let line = view.safeAreaInsets.top
+        let probe = collectionView.convert(CGPoint(x: collectionView.bounds.midX, y: line), from: view)
+        let below = collectionView.indexPathsForVisibleItems.sorted().first { path in
+            guard let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { return false }
+            return frame.maxY > probe.y
+        }
+        guard let path = below, case .day(let day) = dataSource.sectionIdentifier(for: path.section) else {
+            return nil
+        }
+        return day
+    }
+
+    private func showDayItem(_ shown: Bool) {
+        guard shown != dayItemShown else { return }
+        dayItemShown = shown
+        placeMuteItem()
+    }
+
+    /// Scrolls to the first message of the bar's day, landing just below
+    /// the bar (#750).
+    private func scrollToDayStart() {
+        guard let day = dayShown,
+              let section = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .day(day)),
+              collectionView.numberOfItems(inSection: section) > 0,
+              let frame = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: section))?.frame
+        else { return }
+        let landing = view.safeAreaInsets.top + Self.dayStartLanding
+        let insets = collectionView.adjustedContentInset
+        let maxOffset = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+        let offset = min(max(frame.minY - landing, -insets.top), maxOffset)
+        collectionView.setContentOffset(CGPoint(x: 0, y: offset), animated: true)
+    }
+
+    /// Whether the bar's day shows, and what it says. Tests.
+    var debugDayItem: (shown: Bool, title: String?) {
+        let shown = navigationItem.rightBarButtonItems?.contains { $0 === dayItem } ?? false
+        return (shown, dayItem.title)
+    }
+
+    /// What a tap on the bar's day does. Tests.
+    func debugTapDayItem() { scrollToDayStart() }
 
     // MARK: - Setup
 
@@ -225,14 +302,12 @@ final class ConversationThreadViewController: UIViewController {
         collectionView.alwaysBounceVertical = true
         collectionView.keyboardDismissMode = .interactive
         collectionView.contentInset.top = SnapCommentsLayout.streamTopBreath
-        // UIKit's soft top-edge blur under the bar (#741, the owner's call
-        // 2026-10-09): messages scrolling up under the title and the bell
-        // soften into it, as on Notifications — stated, not `.automatic`, so
-        // a change of UIKit default cannot turn it into the hard band. The
-        // stream is named the bar's content scroll view, so the effect is
-        // drawn where the bar's pocket meets THIS list.
-        collectionView.topEdgeEffect.style = .soft
-        setContentScrollView(collectionView, for: .top)
+        // ⚠️ NO BLUR UNDER THE HEADER (#750, the owner's call 2026-10-09,
+        // back from #741): the messages run up under the day and the bell
+        // as on every other screen; the window's status-bar blur
+        // (`StatusBarBlurView`) is the only material up there. See
+        // `prefersClearTopEdge`.
+        collectionView.prefersClearTopEdge()
         collectionView.delegate = self
         // No pull-to-refresh (asked 2026-10-02): a conversation is live — what
         // arrives is pushed into it — and a loader at the top of the thread
@@ -261,6 +336,7 @@ final class ConversationThreadViewController: UIViewController {
 
     private func makeLayout() -> UICollectionViewCompositionalLayout {
         let policy = headerPolicy
+        let isFull = mode == .full
         return UICollectionViewCompositionalLayout { _, environment in
             var config = UICollectionLayoutListConfiguration(appearance: .plain)
             config.showsSeparators = false
@@ -269,7 +345,11 @@ final class ConversationThreadViewController: UIViewController {
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0, leading: Spacing.lg, bottom: 0, trailing: Spacing.lg
             )
-            if policy.daySections {
+            // ⚠️ ONE DAY CHIP ON A FULL THREAD (#750, the owner's call
+            // 2026-10-09): no chip in the flow — the bar's day item says
+            // which day is on screen. A peek has no bar, so it keeps its
+            // pinned chips.
+            if policy.daySections, !isFull {
                 // The day chip, pinned while its day's rows scroll under it.
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: NSCollectionLayoutSize(
@@ -444,9 +524,11 @@ final class ConversationThreadViewController: UIViewController {
         navigationItem.standardAppearance = appearance
         navigationItem.scrollEdgeAppearance = appearance
         navigationItem.compactAppearance = appearance
-        // The correspondent's name is the header's title (#738), as the
-        // owner wants it read at a glance; it also feeds back labels.
+        // ⚠️ NO TITLE SHOWN IN THE CENTRE (#750, the owner's call 2026-10-09,
+        // over #738): the correspondent is the toolbar's pill; the bar
+        // carries the day and the bell.
         navigationItem.titleView = nil
+        navigationItem.title = nil
 
         peerPill.setFollowBadge(.none)
         peerPill.setOverMedia(false)
@@ -463,10 +545,16 @@ final class ConversationThreadViewController: UIViewController {
     /// the trailing edge, and a fixed space keeps the two bubbles apart.
     private func placeMuteItem(replacing old: UIBarButtonItem? = nil, animated: Bool = false) {
         var items = (navigationItem.rightBarButtonItems ?? [])
-            .filter { $0 !== muteItem && $0 !== muteSpacer && $0 !== old }
-        if mode == .full, muted != nil {
-            items = [muteItem] + (items.isEmpty ? [] : [muteSpacer]) + items
+            .filter { $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== dayItem && $0 !== daySpacer }
+        // `[0]` is the trailing edge: the bell takes the corner, the day
+        // stands left of it (#750).
+        var trailing: [UIBarButtonItem] = []
+        if mode == .full, muted != nil { trailing.append(muteItem) }
+        if mode == .full, dayItemShown {
+            if !trailing.isEmpty { trailing.append(daySpacer) }
+            trailing.append(dayItem)
         }
+        items = trailing + (items.isEmpty || trailing.isEmpty ? [] : [muteSpacer]) + items
         navigationItem.setRightBarButtonItems(items, animated: animated)
     }
 
@@ -863,7 +951,8 @@ final class ConversationThreadViewController: UIViewController {
 
     private func adoptPeer(_ person: ConversationThreadPerson) {
         peer = person
-        title = person.name.isEmpty ? nil : person.name
+        // Named for VoiceOver, not drawn: no title in the bar.
+        view.accessibilityLabel = person.name.isEmpty ? nil : "Conversation with \(person.name)"
         peerPill.setPerson(
             id: person.id, name: person.name, meta: "", avatarURL: person.avatarURL, pipeline: imagePipeline
         )
@@ -1155,6 +1244,7 @@ extension ConversationThreadViewController: UICollectionViewDelegate {
     /// the screen's programmatic moves (the tail pin, a quote jump) never do —
     /// and never in a peek.
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        syncDayItem()
         guard mode == .full, hasRenderedContent, scrollView.isTracking || scrollView.isDecelerating,
               scrollView.contentOffset.y + scrollView.adjustedContentInset.top < scrollView.bounds.height
         else { return }

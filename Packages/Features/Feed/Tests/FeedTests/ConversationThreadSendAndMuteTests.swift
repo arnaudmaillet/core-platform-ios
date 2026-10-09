@@ -134,14 +134,16 @@ struct ConversationThreadSendAndMuteTests {
         #expect(screen.navigationItem.rightBarButtonItems?.filter { $0.customView != nil }.isEmpty == true)
     }
 
-    /// The correspondent's name is the header's title.
-    @Test func theCorrespondentsNameIsTheTitle() {
+    /// No title in the centre (#750, over #738): the correspondent is the
+    /// toolbar's pill. The screen keeps their name for VoiceOver.
+    @Test func theHeaderShowsNoTitle() {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
-        #expect(screen.navigationItem.titleView == nil, "a blank view hides the title")
-        #expect(screen.title == "Ava")
+        #expect(screen.navigationItem.titleView == nil)
+        #expect(screen.navigationItem.title == nil, "the bar draws a title")
         driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava Moreau", avatarURL: nil))
-        #expect(screen.title == "Ava Moreau", "the title did not follow the correspondent")
+        #expect(screen.navigationItem.title == nil, "the bar draws the correspondent")
+        #expect(screen.view.accessibilityLabel == "Conversation with Ava Moreau", "VoiceOver lost the correspondent")
     }
 
     // MARK: - The bell's transition, durations and toast (#729)
