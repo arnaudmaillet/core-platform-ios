@@ -137,13 +137,16 @@ struct ConversationThreadViewControllerTests {
         #expect(stream.topEdgeEffect.isHidden, "a blur under the header")
     }
 
-    /// ⚠️ THE DAY IS A BAR ITEM LEFT OF THE BELL (#750): the thread's one
-    /// day chip, none in the flow; a tap scrolls to the day's first message.
+    /// ⚠️ THE DAY IS A BAR ITEM LEFT OF THE BELL (#750), and the flow keeps
+    /// its own day chips, NOT sticky (#755); a tap on the bar's day scrolls
+    /// to that day's chip. Each day is its own item under its own
+    /// identifier, so a change of day morphs.
     @Test func theDayIsABarItemLeftOfTheBell() throws {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
         let messages = (0..<60).map { index -> ConversationThreadMessage in
-            let day = index < 30 ? calendar.date(byAdding: .day, value: -1, to: today)! : today
+            let day = index < 30 ? yesterday : today
             return ConversationThreadMessage(
                 id: "m\(index)", senderID: ProfileID(index.isMultiple(of: 2) ? "me" : "them"),
                 body: "Message \(index)", sentAt: day.addingTimeInterval(Double(index % 30) * 60),
@@ -154,27 +157,40 @@ struct ConversationThreadViewControllerTests {
         defer { window.isHidden = true }
         screen.view.layoutIfNeeded()
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
-        #expect(Self.descendants(of: screen.view).filter { $0 is DayPillHeaderView }.isEmpty,
-                "a day chip in the flow besides the bar's")
 
         // At the tail: today, as a bar item.
         let tail = screen.debugDayItem
         #expect(tail.shown, "no day in the bar")
         #expect(tail.title == "Today")
+        #expect(tail.item.identifier == ConversationThreadViewController.dayItemID(today))
 
-        // A tap lands today's first message just below the bar.
+        // Yesterday's chip scrolled away with its day: not sticky.
+        let visibleTop = stream.contentOffset.y + stream.adjustedContentInset.top
+        let yesterdayChip = try #require(stream.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: 0)
+        ))
+        #expect(yesterdayChip.frame.maxY < visibleTop, "the chip pinned to the top: \(yesterdayChip.frame)")
+
+        // A tap lands today's chip just below the bar.
         screen.debugTapDayItem()
         stream.setContentOffset(stream.contentOffset, animated: false)
         stream.layoutIfNeeded()
-        let firstToday = try #require(stream.layoutAttributesForItem(at: IndexPath(item: 0, section: 1)))
-        let landed = stream.convert(firstToday.frame, to: screen.view).minY - screen.view.safeAreaInsets.top
-        #expect(abs(landed - ConversationThreadViewController.dayStartLanding) < 2, "today's first message landed at \(landed)")
+        let todayChip = try #require(stream.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: 1)
+        ))
+        let landed = stream.convert(todayChip.frame, to: screen.view).minY - screen.view.safeAreaInsets.top
+        #expect(abs(landed - ConversationThreadViewController.dayStartLanding) < 2, "today's chip landed at \(landed)")
 
-        // At the top of the history, the first day.
+        // At the top of the history, the first day — a new item, a new
+        // identifier: the bar morphs rather than retitles.
         stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
         stream.layoutIfNeeded()
         screen.scrollViewDidScroll(stream)
-        #expect(screen.debugDayItem.title == "Yesterday")
+        let top = screen.debugDayItem
+        #expect(top.title == "Yesterday")
+        #expect(top.item !== tail.item, "the day was retitled in place: no morph")
+        #expect(top.item.identifier == ConversationThreadViewController.dayItemID(yesterday))
+        #expect(top.item.identifier != tail.item.identifier)
     }
 
     /// ⚠️ NO FROSTED TOP (asked 2026-10-02). The thread drew its own 132pt

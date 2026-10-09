@@ -241,17 +241,15 @@ final class ConversationThreadViewController: UIViewController {
     /// below the bar's bottom: the stream's own top breath (#750).
     static var dayStartLanding: CGFloat { SnapCommentsLayout.streamTopBreath }
 
-    /// The day on screen, as a bar item left of the bell (#750) — the
-    /// thread's ONE day chip: a system glass bubble, interactive. A tap
-    /// scrolls to that day's first message, as a search section's pill does.
-    private lazy var dayItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: nil, image: nil,
-            primaryAction: UIAction { [weak self] _ in self?.scrollToDayStart() }
-        )
-        item.tintColor = .label
-        return item
-    }()
+    /// The day on screen, as a bar item left of the bell (#750): a system
+    /// glass bubble, interactive. A tap scrolls to that day's first message,
+    /// as a search section's pill does. The flow keeps its own day chips,
+    /// unpinned (#755).
+    ///
+    /// ⚠️ ONE ITEM PER DAY, EACH WITH ITS OWN IDENTIFIER (#755), as the bell
+    /// (#729): a title edited in place swaps in a frame; a new item under a
+    /// new identifier gets the native Liquid Glass morph.
+    private var dayItem = UIBarButtonItem()
     private let daySpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     private var dayItemShown = false
     private var dayShown: Date?
@@ -262,12 +260,29 @@ final class ConversationThreadViewController: UIViewController {
         guard hasRenderedContent, let day = dayOnScreen() else { return showDayItem(false) }
         if day != dayShown {
             dayShown = day
-            let title = DayTitleFormatter.title(for: day)
-            dayItem.title = title
-            dayItem.accessibilityLabel = title
-            dayItem.accessibilityHint = "Scrolls to the first message of the day"
+            let old = dayItem
+            dayItem = makeDayItem(day)
+            // A change of day while it shows morphs, glass to glass.
+            if dayItemShown { placeMuteItem(replacing: old, animated: true) }
         }
         showDayItem(true)
+    }
+
+    private func makeDayItem(_ day: Date) -> UIBarButtonItem {
+        let title = DayTitleFormatter.title(for: day)
+        let item = UIBarButtonItem(
+            title: title, image: nil,
+            primaryAction: UIAction { [weak self] _ in self?.scrollToDayStart() }
+        )
+        item.identifier = Self.dayItemID(day)
+        item.tintColor = .label
+        item.accessibilityLabel = title
+        item.accessibilityHint = "Scrolls to the first message of the day"
+        return item
+    }
+
+    static func dayItemID(_ day: Date) -> String {
+        "conversation.day.\(Int(day.timeIntervalSince1970))"
     }
 
     private func dayOnScreen() -> Date? {
@@ -286,17 +301,22 @@ final class ConversationThreadViewController: UIViewController {
     private func showDayItem(_ shown: Bool) {
         guard shown != dayItemShown else { return }
         dayItemShown = shown
-        placeMuteItem()
+        // UIKit's own bar-item appearance, not a pop (#755) — once on screen.
+        placeMuteItem(animated: view.window != nil)
     }
 
-    /// Scrolls to the first message of the bar's day, landing just below
-    /// the bar (#750).
+    /// Scrolls to the start of the bar's day — its chip in the flow, then
+    /// its first message — landing just below the bar (#750, #755).
     private func scrollToDayStart() {
         guard let day = dayShown,
               let section = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .day(day)),
-              collectionView.numberOfItems(inSection: section) > 0,
-              let frame = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: section))?.frame
+              collectionView.numberOfItems(inSection: section) > 0
         else { return }
+        let start = IndexPath(item: 0, section: section)
+        let chip = collectionView.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: start
+        )?.frame
+        guard let frame = chip ?? collectionView.layoutAttributesForItem(at: start)?.frame else { return }
         let landing = view.safeAreaInsets.top + Self.dayStartLanding
         let insets = collectionView.adjustedContentInset
         let maxOffset = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
@@ -305,9 +325,9 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// Whether the bar's day shows, and what it says. Tests.
-    var debugDayItem: (shown: Bool, title: String?) {
+    var debugDayItem: (shown: Bool, title: String?, item: UIBarButtonItem) {
         let shown = navigationItem.rightBarButtonItems?.contains { $0 === dayItem } ?? false
-        return (shown, dayItem.title)
+        return (shown, dayItem.title, dayItem)
     }
 
     /// What a tap on the bar's day does. Tests.
@@ -363,12 +383,8 @@ final class ConversationThreadViewController: UIViewController {
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0, leading: Spacing.lg, bottom: 0, trailing: Spacing.lg
             )
-            // ⚠️ ONE DAY CHIP ON A FULL THREAD (#750, the owner's call
-            // 2026-10-09): no chip in the flow — the bar's day item says
-            // which day is on screen. A peek has no bar, so it keeps its
-            // pinned chips.
-            if policy.daySections, !isFull {
-                // The day chip, pinned while its day's rows scroll under it.
+            if policy.daySections {
+                // The day chip where each day starts.
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: NSCollectionLayoutSize(
                         widthDimension: .fractionalWidth(1), heightDimension: .estimated(36)
@@ -376,7 +392,11 @@ final class ConversationThreadViewController: UIViewController {
                     elementKind: DayPillHeaderView.elementKind,
                     alignment: .top
                 )
-                header.pinToVisibleBounds = true
+                // ⚠️ NOT STICKY ON A FULL THREAD (#755, the owner's call
+                // 2026-10-09): the chip scrolls with its day; the bar's day
+                // item says which day is on screen. A peek has no bar, so
+                // its chip stays pinned.
+                header.pinToVisibleBounds = !isFull
                 header.zIndex = 2
                 section.boundarySupplementaryItems = [header]
             }
