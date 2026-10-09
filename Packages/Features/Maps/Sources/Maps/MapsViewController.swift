@@ -3349,12 +3349,17 @@ extension MapsViewController: MKMapViewDelegate {
     /// ⚠️ INTENT, NOT PROXIMITY. No player is started for a marker nobody
     /// touches, and this one belongs to the post's page, not to the marker
     /// (`GeoDiscoveryRepository.previewVideoURL`'s rule stands).
+    /// Whether a marker tap only closes the open offer and opens nothing
+    /// (#686). Pure, for tests.
+    static func markerTapClosesOffer(offerOpen: Bool) -> Bool { offerOpen }
+
     private func beginPlaybackWarm(for annotation: MapAnnotation) {
         // ⚠️ NOT `pin.kind == .video`: production classifies every media pin
         // `.photo` (`GeoDiscoveryRepository.kind(for:)`), sheet-wearing ones
         // included. Whether there is a clip to warm is the POST's answer, and
         // the feed gives it (`FlightPlaybackWarm.warmableClip`).
-        guard openGate.canOpen, playbackWarm?.postID != annotation.pin.postID else { return }
+        // No warm under an open offer: the tap will only close it (#686).
+        guard offerSheet == nil, openGate.canOpen, playbackWarm?.postID != annotation.pin.postID else { return }
         endPlaybackWarm(opened: false)
         let time = warmMediaTime(for: annotation)
         // The marker the map prerolled: its player is already decoded and
@@ -3425,6 +3430,7 @@ extension MapsViewController: MKMapViewDelegate {
     private func updateIdlePreroll() {
         guard !idlePrerollRested else { return }
         guard view.window != nil, activeTransition == nil, playbackWarm == nil, !isRegionTransitioning,
+              offerSheet == nil,
               UIApplication.shared.applicationState == .active else {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -3519,6 +3525,15 @@ extension MapsViewController: MKMapViewDelegate {
     }
 
     private func openAnnotation(_ annotation: any MKAnnotation, thumbnail: UIImage?) {
+        // ⚠️ AN OPEN OFFER SWALLOWS THE TAP (#686), as a tap on the map does:
+        // tapping away is "no thanks". Here, ahead of everything, so the
+        // instant tap, MapKit's `didSelect`, VoiceOver and the DEBUG hooks all
+        // meet it. A sheet already on its way down still swallows it — a fast
+        // second tap must not open a post during the descent.
+        if Self.markerTapClosesOffer(offerOpen: offerSheet != nil) {
+            closeOffer(returning: true)
+            return
+        }
         guard openGate.canOpen else { return }
         let postIDs = Self.postIDs(of: annotation)
         guard !postIDs.isEmpty else { return }
