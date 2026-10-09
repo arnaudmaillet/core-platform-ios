@@ -13,6 +13,10 @@ private func post(_ id: String, _ kind: GalleryPost.Kind = .photo, at ms: Int64)
     GalleryPost(id: PostID(id), kind: kind, isRepost: false, thumbnailURL: nil, caption: id, publishedAtMS: ms)
 }
 
+private func repost(_ id: String, at ms: Int64) -> GalleryPost {
+    GalleryPost(id: PostID(id), kind: .photo, isRepost: true, thumbnailURL: nil, caption: id, publishedAtMS: ms)
+}
+
 private struct GalleryStubError: Error {}
 
 /// Serves each corpus's pages by token (nil = the first) and records every ask.
@@ -100,8 +104,12 @@ struct GalleryPagingTests {
         return posts.map(\.id.rawValue)
     }
 
-    private func open(_ gallery: PagedGallery) async throws -> (ProfileViewModel, Shown) {
-        let viewModel = ProfileViewModel(repository: OneProfile(), gallery: gallery, source: .profile(ProfileID("prof-1")))
+    /// Your own profile by default: these tests drive the source filter,
+    /// which only your own has since #696.
+    private func open(
+        _ gallery: PagedGallery, source: ProfileViewModel.Source = .currentUser
+    ) async throws -> (ProfileViewModel, Shown) {
+        let viewModel = ProfileViewModel(repository: OneProfile(), gallery: gallery, source: source)
         let shown = Shown()
         viewModel.onGalleryChange = { shown.snapshot = $0 }
         viewModel.viewDidLoad()
@@ -129,6 +137,28 @@ struct GalleryPagingTests {
         viewModel.loadMoreGallery() // the end: nothing left to ask
         await settle()
         #expect(await gallery.authoredAsks == [nil, "a2"])
+    }
+
+    /// ⚠️ SOMEONE ELSE'S REPOSTS PAGE PAGES THROUGH A RUN OF PLAIN POSTS
+    /// (#696): Posts and Reposts split one authored cursor, and pages of
+    /// plain posts add nothing to Reposts — so, on screen, it keeps asking
+    /// until a repost arrives, rather than stalling empty.
+    @Test func aRepostsPageKeepsPagingPastPlainPosts() async throws {
+        let gallery = PagedGallery(authored: [
+            nil: GalleryPage(posts: [post("a", at: 100), post("b", at: 90)], nextPageToken: "a2"),
+            "a2": GalleryPage(posts: [post("c", at: 80), post("d", at: 70)], nextPageToken: "a3"),
+            "a3": GalleryPage(posts: [post("e", at: 60)], nextPageToken: "a4"),
+            "a4": GalleryPage(posts: [repost("r", at: 50)], nextPageToken: nil),
+        ])
+        let (viewModel, shown) = try await open(gallery, source: .profile(ProfileID("prof-1")))
+        #expect(ids(shown.snapshot?.activity) == ["a", "b"])
+
+        viewModel.setActiveTab(.reposts)
+        try #require(await settle { ids(shown.snapshot?.reposts) == ["r"] })
+        #expect(await gallery.authoredAsks == [nil, "a2", "a3", "a4"])
+        #expect(shown.snapshot?.repostsComplete == true)
+        // Posts kept every plain post the run brought, reposts excluded.
+        #expect(ids(shown.snapshot?.activity) == ["a", "b", "c", "d", "e"])
     }
 
     /// All merges two corpora that page on their own: it shows only down to

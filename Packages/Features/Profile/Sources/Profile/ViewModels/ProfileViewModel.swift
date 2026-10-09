@@ -108,6 +108,14 @@ public final class ProfileViewModel {
         /// the shape is right when a seam arrives; what it shows until then is
         /// the truth about what can be known.
         public var reactions: GalleryPageState = .empty(message: "")
+        /// Someone else's reposts and the posts that tag them, each its own
+        /// page (#696). Absent on your own profile.
+        public var reposts: GalleryPageState = .empty(message: "")
+        public var tagged: GalleryPageState = .empty(message: "")
+        /// Whether no further page is coming for Reposts and for Tagged: each
+        /// follows its own corpus, apart from `isComplete`.
+        public var repostsComplete = true
+        public var taggedComplete = true
 
         public func state(for tab: ProfileTab) -> GalleryPageState {
             switch tab {
@@ -117,6 +125,17 @@ public final class ProfileViewModel {
             case .format(.short): .empty(message: "")
             case .saved: saved
             case .reactions: reactions
+            case .reposts: reposts
+            case .tagged: tagged
+            }
+        }
+
+        /// Whether `tab`'s list has every page it will get.
+        public func isComplete(for tab: ProfileTab) -> Bool {
+            switch tab {
+            case .reposts: repostsComplete
+            case .tagged: taggedComplete
+            default: isComplete
             }
         }
     }
@@ -300,6 +319,8 @@ public final class ProfileViewModel {
     // MARK: Gallery state
 
     public private(set) var galleryFilter = GalleryFilter()
+    /// Someone else's profile: the page on screen's source (`gallerySource`).
+    private var pushedPageSource: GalleryFilter.Source = .posts
     /// The authored fetch (Posts + Reposts split it) and the tagged fetch,
     /// cached so selector/kind changes recompute locally without round trips.
     /// nil = in flight (page shows loading); a failure records instead.
@@ -986,6 +1007,34 @@ public final class ProfileViewModel {
         fillEmptyGalleryTab()
     }
 
+    /// The page on screen. Format pages set the format (above); on someone
+    /// else's profile the page also picks the corpus the paging, "View all"
+    /// and a feed's continuation read (#696).
+    public func setActiveTab(_ tab: ProfileTab) {
+        if let format = tab.format { setGalleryFormat(format) }
+        guard !isOwnProfile else { return }
+        let source: GalleryFilter.Source = switch tab {
+        case .reposts: .reposts
+        case .tagged: .tagged
+        default: .posts
+        }
+        guard source != pushedPageSource else { return }
+        pushedPageSource = source
+        // The media "View all" shows, and an empty page fills itself.
+        renderGallery()
+    }
+
+    /// The source the page on screen reads.
+    ///
+    /// ⚠️ SOMEONE ELSE'S PROFILE IGNORES THE GLOBAL SOURCE (#696): its pages
+    /// ARE the sources — Posts (own posts, reposts excluded), Reposts,
+    /// Tagged — so it always opens on Posts, whatever the viewer last chose
+    /// on their own profile. Your own profile keeps the top filter and its
+    /// global preference.
+    var gallerySource: GalleryFilter.Source {
+        isOwnProfile ? galleryFilter.source : pushedPageSource
+    }
+
     /// The global source modifier: recomputes every page locally, without
     /// touching the active format tab; persists globally like the format.
     public func setGallerySource(_ source: GalleryFilter.Source) {
@@ -1108,8 +1157,10 @@ public final class ProfileViewModel {
 
     /// The tokens the active source reads through: authored for Posts and
     /// Reposts, tagged for Tagged, both for All.
-    private func galleryTokensToFollow() -> (authored: String?, tagged: String?) {
-        let source = galleryFilter.source
+    private func galleryTokensToFollow(
+        _ source: GalleryFilter.Source? = nil
+    ) -> (authored: String?, tagged: String?) {
+        let source = source ?? gallerySource
         return (
             source == .tagged ? nil : authoredToken,
             source == .all || source == .tagged ? taggedToken : nil
@@ -1200,10 +1251,13 @@ public final class ProfileViewModel {
     /// page land ABOVE tiles already on screen. So All shows only down to the
     /// later of the unfinished corpora's oldest posts — where both are known
     /// — and every page from then on only adds below.
-    private func galleryTiles(_ format: GalleryFilter.Format) -> [GalleryPost] {
-        let filter = GalleryFilter(format: format, source: galleryFilter.source)
+    private func galleryTiles(
+        _ format: GalleryFilter.Format, source: GalleryFilter.Source? = nil
+    ) -> [GalleryPost] {
+        let source = source ?? gallerySource
+        let filter = GalleryFilter(format: format, source: source)
         let tiles = filter.tiles(authored: authoredCache ?? [], tagged: taggedCache ?? [])
-        guard galleryFilter.source == .all, let frontier = allFrontier else { return tiles }
+        guard source == .all, let frontier = allFrontier else { return tiles }
         return tiles.filter { $0.publishedAtMS >= frontier }
     }
 
@@ -1220,13 +1274,14 @@ public final class ProfileViewModel {
     private func renderGallery() {
         guard gallery != nil else { return }
 
-        let source = galleryFilter.source
-        // Which fetches the active source depends on: All needs both, Tagged
-        // its own, Posts/Reposts the authored one. A page is loading/failed
-        // only when a fetch it actually reads is.
-        let readsAuthored = source != .tagged
-        let readsTagged = source == .all || source == .tagged
-        func page(_ format: GalleryFilter.Format) -> GalleryPageState {
+        // Which fetches a source depends on: All needs both, Tagged its own,
+        // Posts/Reposts the authored one. A page is loading/failed only when
+        // a fetch it actually reads is.
+        func page(
+            _ format: GalleryFilter.Format, _ source: GalleryFilter.Source, emptyMessage: String? = nil
+        ) -> GalleryPageState {
+            let readsAuthored = source != .tagged
+            let readsTagged = source == .all || source == .tagged
             if (readsAuthored && authoredFailed) || (readsTagged && taggedFailed) {
                 return .failed(message: "Couldn't load. Pull to retry.")
             }
@@ -1234,21 +1289,40 @@ public final class ProfileViewModel {
                 return .loading
             }
             let filter = GalleryFilter(format: format, source: source)
-            let tiles = galleryTiles(format)
+            let tiles = galleryTiles(format, source: source)
             guard tiles.isEmpty else { return .content(tiles) }
             // Nothing YET is not nothing: with pages still to load, a tab
             // that none of the loaded posts fill is still loading — or, its
             // last page having failed, says so.
-            if galleryTokensToFollow() == (nil, nil) { return .empty(message: Self.emptyMessage(for: filter)) }
+            if galleryTokensToFollow(source) == (nil, nil) {
+                return .empty(message: emptyMessage ?? Self.emptyMessage(for: filter))
+            }
             return galleryMorePausedByFailure ? .failed(message: "Couldn't load. Pull to retry.") : .loading
         }
 
-        let snapshot = GallerySnapshot(
-            activity: page(.activity),
-            media: page(.media),
-            isComplete: galleryTokensToFollow() == (nil, nil),
-            saved: savedPage
-        )
+        let snapshot: GallerySnapshot
+        if isOwnProfile {
+            let source = galleryFilter.source
+            snapshot = GallerySnapshot(
+                activity: page(.activity, source),
+                media: page(.media, source),
+                isComplete: galleryTokensToFollow(source) == (nil, nil),
+                saved: savedPage
+            )
+        } else {
+            // Three pages, three sources (#696); the media "View all" pushes
+            // is the page on screen's. The empty pages let their tab speak
+            // (`ProfileTab.emptyState`), Posts saying what it holds here.
+            snapshot = GallerySnapshot(
+                activity: page(.activity, .posts, emptyMessage: "Posts will appear here."),
+                media: page(.media, pushedPageSource),
+                isComplete: galleryTokensToFollow(.posts) == (nil, nil),
+                reposts: page(.activity, .reposts, emptyMessage: ""),
+                tagged: page(.activity, .tagged, emptyMessage: ""),
+                repostsComplete: galleryTokensToFollow(.reposts) == (nil, nil),
+                taggedComplete: galleryTokensToFollow(.tagged) == (nil, nil)
+            )
+        }
         fillEmptyGalleryTab()
         // The same pages again is no news: a revalidation that agrees with
         // the screen must cost the screen nothing.

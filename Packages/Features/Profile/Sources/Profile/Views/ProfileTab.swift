@@ -1,3 +1,4 @@
+import DesignSystem
 import PostGrid
 
 /// A page in the profile's pager.
@@ -18,6 +19,12 @@ public enum ProfileTab: Equatable, Sendable {
     case saved
     /// Posts the viewer reacted to. Own profile only, same reason.
     case reactions
+    /// Someone else's reposts, alone (#696): their authored corpus split on
+    /// `isRepost`. Pushed profile only.
+    case reposts
+    /// Posts by others that mention them (#696): the tagged corpus. Pushed
+    /// profile only.
+    case tagged
 
     /// What the selector calls it.
     ///
@@ -34,6 +41,17 @@ public enum ProfileTab: Equatable, Sendable {
         case .format(.short): "Short"
         case .saved: "Saved"
         case .reactions: "Liked"
+        case .reposts: "Reposts"
+        case .tagged: "Tagged"
+        }
+    }
+
+    /// Whether the page loads more as it scrolls: the published-content
+    /// pages. Saved and Liked arrive whole.
+    var pages: Bool {
+        switch self {
+        case .format, .reposts, .tagged: true
+        case .saved, .reactions: false
         }
     }
 
@@ -45,19 +63,18 @@ public enum ProfileTab: Equatable, Sendable {
         return nil
     }
 
-    /// What anyone else's profile shows: one list, every post, laid out like
-    /// For You (#631). One page means no selector at all.
-    ///
-    /// It was three — Activity, Gallery, Short — and they were one corpus
-    /// filtered three ways on the client (every post, media, text), from when
-    /// each format had a layout of its own. The For You list draws cards and
-    /// mosaic together, so the three became the one list and its "View all".
-    public static let publicTabs: [ProfileTab] = [.format(.activity)]
+    /// What anyone else's profile shows: Posts | Reposts | Tagged, three
+    /// pages with the selector at the foot (#696, the owner's call
+    /// 2026-10-08). Each is its own list, laid out like For You: Posts is
+    /// their own posts WITHOUT reposts, Reposts only those, Tagged others'
+    /// posts that mention them. It was one list narrowed by a top source
+    /// filter (#631) — "it is no longer a sort".
+    public static let publicTabs: [ProfileTab] = [.format(.activity), .reposts, .tagged]
 
     /// What the viewer sees on their own: Posts | Saved | Liked. Saved and
     /// Liked are other corpora, so a selector stays (the owner's call,
-    /// 2026-10-07).
-    public static let ownTabs: [ProfileTab] = publicTabs + [.saved, .reactions]
+    /// 2026-10-07). The own Posts keeps the top source filter (#696).
+    public static let ownTabs: [ProfileTab] = [.format(.activity), .saved, .reactions]
 }
 
 // MARK: - What a tab says when it is empty
@@ -89,6 +106,10 @@ extension ProfileTab {
             ("bookmark", "No Saved Posts", "Posts you bookmark will appear here.")
         case .reactions:
             ("heart", "No Reactions Yet", "Posts you react to or like will show up here.")
+        case .reposts:
+            (PostActionSymbol.repost, "No Reposts Yet", "Reposts will appear here.")
+        case .tagged:
+            ("at", "No Tagged Posts", "Posts that mention them will appear here.")
         }
     }
 }

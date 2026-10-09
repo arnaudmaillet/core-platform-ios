@@ -200,7 +200,8 @@ struct PostMetadataTests {
 @MainActor
 struct ProfileGalleryViewModelTests {
     private func makeViewModel(
-        gallery: StubGalleryProvider = StubGalleryProvider(authored: authored, tagged: tagged)
+        gallery: StubGalleryProvider = StubGalleryProvider(authored: authored, tagged: tagged),
+        source: ProfileViewModel.Source = .profile(ProfileID("prof-1"))
     ) -> (ProfileViewModel, () -> [ProfileViewModel.GallerySnapshot]) {
         let profile = UserProfile(
             id: ProfileID("prof-1"),
@@ -217,7 +218,7 @@ struct ProfileGalleryViewModelTests {
         let viewModel = ProfileViewModel(
             repository: StubProfileProvider(profile),
             gallery: gallery,
-            source: .profile(ProfileID("prof-1"))
+            source: source
         )
         let box = Box<ProfileViewModel.GallerySnapshot>()
         viewModel.onGalleryChange = { box.append($0) }
@@ -256,10 +257,11 @@ struct ProfileGalleryViewModelTests {
         #expect(box.items.isEmpty)
     }
 
-    /// Posts (every post) and the media its "View all" pushes (#631).
+    /// Your own Posts (every post, under the source filter) and the media
+    /// its "View all" pushes (#631).
     @Test func landsWithPostsAndTheirMediaResolved() async {
         let gallery = StubGalleryProvider(authored: authored, tagged: tagged)
-        let (viewModel, snapshots) = makeViewModel(gallery: gallery)
+        let (viewModel, snapshots) = makeViewModel(gallery: gallery, source: .currentUser)
 
         viewModel.viewDidLoad()
         await settle()
@@ -285,9 +287,10 @@ struct ProfileGalleryViewModelTests {
         #expect(await gallery.lastTaggedHandle == "ada")
     }
 
+    /// Your own profile's source filter (someone else's has none, #696).
     @Test func sourceModifierRecomputesEveryPageLocally() async {
         let gallery = StubGalleryProvider(authored: authored, tagged: tagged)
-        let (viewModel, snapshots) = makeViewModel(gallery: gallery)
+        let (viewModel, snapshots) = makeViewModel(gallery: gallery, source: .currentUser)
         viewModel.viewDidLoad()
         await settle()
 
@@ -308,6 +311,52 @@ struct ProfileGalleryViewModelTests {
         // No refetch: the source axis filters the cached datasets.
         #expect(await gallery.authoredCalls == 1)
         #expect(await gallery.taggedCalls == 1)
+    }
+
+    /// SOMEONE ELSE'S PROFILE: three pages, three sources (#696). Posts is
+    /// their own posts without reposts, Reposts only those, Tagged others'
+    /// posts that mention them — from the same two fetches, and whatever the
+    /// global source preference says.
+    @Test func someoneElsesPagesArePostsRepostsAndTagged() async throws {
+        let gallery = StubGalleryProvider(authored: authored, tagged: tagged)
+        let (viewModel, snapshots) = makeViewModel(gallery: gallery)
+        viewModel.viewDidLoad()
+        await settle { snapshots().last.map { $0.tagged != .loading && $0.activity != .loading } ?? false }
+        let snapshot = try #require(snapshots().last)
+
+        func ids(_ state: ProfileViewModel.GalleryPageState) -> [String] {
+            guard case .content(let posts) = state else { return [] }
+            return posts.map(\.id.rawValue)
+        }
+        #expect(ids(snapshot.activity) == ["p-photo", "p-video", "p-text"])
+        #expect(ids(snapshot.reposts) == ["r-photo", "r-video"])
+        #expect(ids(snapshot.tagged) == ["t-photo", "t-text"])
+        #expect(snapshot.isComplete && snapshot.repostsComplete && snapshot.taggedComplete)
+        #expect(await gallery.authoredCalls == 1)
+        #expect(await gallery.taggedCalls == 1)
+
+        // "View all" pushes the page on screen's media.
+        #expect(ids(snapshot.media) == ["p-photo", "p-video"])
+        viewModel.setActiveTab(.reposts)
+        let onReposts = try #require(snapshots().last)
+        #expect(ids(onReposts.media) == ["r-photo", "r-video"])
+        viewModel.setActiveTab(.tagged)
+        let onTagged = try #require(snapshots().last)
+        #expect(ids(onTagged.media) == ["t-photo"])
+    }
+
+    /// A page with nothing says so in its own words: the model leaves the
+    /// tab's copy to speak.
+    @Test func someoneElsesEmptyPagesLetTheirTabSpeak() async throws {
+        let gallery = StubGalleryProvider(authored: authored.filter { !$0.isRepost }, tagged: [])
+        let (viewModel, snapshots) = makeViewModel(gallery: gallery)
+        viewModel.viewDidLoad()
+        await settle { snapshots().last.map { $0.tagged != .loading } ?? false }
+        let snapshot = try #require(snapshots().last)
+        #expect(snapshot.reposts == .empty(message: ""))
+        #expect(snapshot.tagged == .empty(message: ""))
+        #expect(ProfileTab.reposts.emptyState.title == "No Reposts Yet")
+        #expect(ProfileTab.tagged.emptyState.title == "No Tagged Posts")
     }
 
     @Test func formatSelectionIsPureStateWithNoFetch() async {

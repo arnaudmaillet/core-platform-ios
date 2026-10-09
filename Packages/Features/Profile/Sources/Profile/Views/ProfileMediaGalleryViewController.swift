@@ -52,9 +52,14 @@ final class ProfileMediaGalleryViewController: UIViewController {
     var onClose: (() -> Void)?
 
     private let handle: String?
+    private let galleryTitle: String
 
-    init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?, handle: String?) {
+    init(
+        imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?, handle: String?,
+        title: String = ProfileTab.format(.media).title
+    ) {
         self.handle = handle
+        self.galleryTitle = title
         grid = ProfileGalleryGridView(
             imagePipeline: imagePipeline, style: .grid, tab: .format(.media), videoPlayback: videoPlayback
         )
@@ -67,7 +72,7 @@ final class ProfileMediaGalleryViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = Surface.page
-        navigationItem.title = ProfileTab.format(.media).title
+        navigationItem.title = galleryTitle
         navigationItem.subtitle = handle
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
