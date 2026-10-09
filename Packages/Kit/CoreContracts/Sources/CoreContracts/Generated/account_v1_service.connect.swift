@@ -186,6 +186,62 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     /// the caller's account.
     @available(iOS 13, *)
     func `findProfilesByContacts`(request: Account_V1_FindProfilesByContactsRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_FindProfilesByContactsResponse>
+
+    /// An invite code to share (shown or as a QR code): 10 characters, single
+    /// use, 24 hours. `role` is the caller's side. ACC-3002 when the caller's
+    /// age does not fit it (or is unknown).
+    @available(iOS 13, *)
+    func `createSupervisionInvite`(request: Account_V1_CreateSupervisionInviteRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_SupervisionInviteView>
+
+    /// Accepts an invite: the caller takes the other side. ACC-3001 unknown,
+    /// used or expired code; ACC-3002 the caller's age does not fit;
+    /// ACC-3003 the teen already has two supervisors; ACC-3006 one's own code.
+    @available(iOS 13, *)
+    func `acceptSupervisionInvite`(request: Account_V1_AcceptSupervisionInviteRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_SupervisionView>
+
+    /// The caller's supervisions, both sides: its supervisors (as a teen) and
+    /// the teens it supervises.
+    @available(iOS 13, *)
+    func `listSupervisions`(request: Account_V1_ListSupervisionsRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_ListSupervisionsResponse>
+
+    /// Ends the caller's supervision with `other_account_id` (either side
+    /// may; the other is told) and returns those left. ACC-3005 when there is
+    /// none.
+    @available(iOS 13, *)
+    func `endSupervision`(request: Account_V1_EndSupervisionRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_ListSupervisionsResponse>
+
+    /// A supervisor sets its teen's limits. ACC-3005 when the caller does not
+    /// supervise `teen_account_id`; ACC-9001 a daily limit outside 15–1440.
+    @available(iOS 13, *)
+    func `setSupervisionLimits`(request: Account_V1_SetSupervisionLimitsRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_SupervisionLimitsView>
+
+    /// A teen's limits, for the teen (`teen_account_id` empty) or one of its
+    /// supervisors. ACC-3005 for anyone else.
+    @available(iOS 13, *)
+    func `getSupervisionLimits`(request: Account_V1_GetSupervisionLimitsRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_SupervisionLimitsView>
+
+    /// The app reports its time on the app (at most 15 minutes per report)
+    /// and learns whether today's limit is reached — all devices together,
+    /// the day in the given IANA zone. Counted only under a daily limit.
+    @available(iOS 13, *)
+    func `reportScreenTime`(request: Account_V1_ReportScreenTimeRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_ScreenTimeView>
+
+    /// Limits, the last days of screen time and the teen's profiles.
+    @available(iOS 13, *)
+    func `getSupervisionOverview`(request: Account_V1_GetSupervisionOverviewRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_SupervisionOverview>
+
+    /// One page of a teen's profile's following, followers or blocked
+    /// profiles. ACC-3005 when `profile_id` is not the teen's. A supervisor
+    /// the teen blocked is never listed (a page may be one short).
+    @available(iOS 13, *)
+    func `listSupervisedConnections`(request: Account_V1_ListSupervisedConnectionsRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_ListSupervisedConnectionsResponse>
+
+    /// One page of the reports the teen made, newest first: who or what,
+    /// when and the decision — never the teen's own words, never a
+    /// self_harm, csam or ncii report, nor one about a supervisor's content
+    /// (the teen still sees all of theirs with moderation's ListMyReports).
+    @available(iOS 13, *)
+    func `listSupervisedReports`(request: Account_V1_ListSupervisedReportsRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_ListSupervisedReportsResponse>
 }
 
 /// Concrete implementation of `Account_V1_AccountServiceClientInterface`.
@@ -366,6 +422,56 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
         return await self.client.unary(path: "/account.v1.AccountService/FindProfilesByContacts", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `createSupervisionInvite`(request: Account_V1_CreateSupervisionInviteRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_SupervisionInviteView> {
+        return await self.client.unary(path: "/account.v1.AccountService/CreateSupervisionInvite", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `acceptSupervisionInvite`(request: Account_V1_AcceptSupervisionInviteRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_SupervisionView> {
+        return await self.client.unary(path: "/account.v1.AccountService/AcceptSupervisionInvite", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listSupervisions`(request: Account_V1_ListSupervisionsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_ListSupervisionsResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/ListSupervisions", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `endSupervision`(request: Account_V1_EndSupervisionRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_ListSupervisionsResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/EndSupervision", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setSupervisionLimits`(request: Account_V1_SetSupervisionLimitsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_SupervisionLimitsView> {
+        return await self.client.unary(path: "/account.v1.AccountService/SetSupervisionLimits", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getSupervisionLimits`(request: Account_V1_GetSupervisionLimitsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_SupervisionLimitsView> {
+        return await self.client.unary(path: "/account.v1.AccountService/GetSupervisionLimits", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `reportScreenTime`(request: Account_V1_ReportScreenTimeRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_ScreenTimeView> {
+        return await self.client.unary(path: "/account.v1.AccountService/ReportScreenTime", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getSupervisionOverview`(request: Account_V1_GetSupervisionOverviewRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_SupervisionOverview> {
+        return await self.client.unary(path: "/account.v1.AccountService/GetSupervisionOverview", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listSupervisedConnections`(request: Account_V1_ListSupervisedConnectionsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_ListSupervisedConnectionsResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/ListSupervisedConnections", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listSupervisedReports`(request: Account_V1_ListSupervisedReportsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_ListSupervisedReportsResponse> {
+        return await self.client.unary(path: "/account.v1.AccountService/ListSupervisedReports", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let createAccount = Connect.MethodSpec(name: "CreateAccount", service: "account.v1.AccountService", type: .unary)
@@ -402,6 +508,16 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
             public static let updateConsents = Connect.MethodSpec(name: "UpdateConsents", service: "account.v1.AccountService", type: .unary)
             public static let listAccountsByStatus = Connect.MethodSpec(name: "ListAccountsByStatus", service: "account.v1.AccountService", type: .unary)
             public static let findProfilesByContacts = Connect.MethodSpec(name: "FindProfilesByContacts", service: "account.v1.AccountService", type: .unary)
+            public static let createSupervisionInvite = Connect.MethodSpec(name: "CreateSupervisionInvite", service: "account.v1.AccountService", type: .unary)
+            public static let acceptSupervisionInvite = Connect.MethodSpec(name: "AcceptSupervisionInvite", service: "account.v1.AccountService", type: .unary)
+            public static let listSupervisions = Connect.MethodSpec(name: "ListSupervisions", service: "account.v1.AccountService", type: .unary)
+            public static let endSupervision = Connect.MethodSpec(name: "EndSupervision", service: "account.v1.AccountService", type: .unary)
+            public static let setSupervisionLimits = Connect.MethodSpec(name: "SetSupervisionLimits", service: "account.v1.AccountService", type: .unary)
+            public static let getSupervisionLimits = Connect.MethodSpec(name: "GetSupervisionLimits", service: "account.v1.AccountService", type: .unary)
+            public static let reportScreenTime = Connect.MethodSpec(name: "ReportScreenTime", service: "account.v1.AccountService", type: .unary)
+            public static let getSupervisionOverview = Connect.MethodSpec(name: "GetSupervisionOverview", service: "account.v1.AccountService", type: .unary)
+            public static let listSupervisedConnections = Connect.MethodSpec(name: "ListSupervisedConnections", service: "account.v1.AccountService", type: .unary)
+            public static let listSupervisedReports = Connect.MethodSpec(name: "ListSupervisedReports", service: "account.v1.AccountService", type: .unary)
         }
     }
 }

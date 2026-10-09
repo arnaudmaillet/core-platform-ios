@@ -56,6 +56,13 @@ public protocol Media_V1_MediaServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `listAssetsByOwner`(request: Media_V1_ListAssetsByOwnerRequest, headers: Connect.Headers) async -> ResponseMessage<Media_V1_ListAssetsByOwnerResponse>
 
+    /// MESH ONLY (#777): staff review of verification evidence — a short-lived
+    /// signed GET (MEDIA_SIGNED_URL_TTL_SECS) to a READY private document.
+    /// Anything else (another kind, not ready, quarantined, deleted) is
+    /// NOT_FOUND.
+    @available(iOS 13, *)
+    func `getPrivateDocumentURL`(request: Media_V1_GetPrivateDocumentUrlRequest, headers: Connect.Headers) async -> ResponseMessage<Media_V1_GetPrivateDocumentUrlResponse>
+
     /// Owner-initiated hard delete. Refused (PERMISSION_DENIED, MED-7003) while a
     /// legal hold is active.
     @available(iOS 13, *)
@@ -111,6 +118,11 @@ public final class Media_V1_MediaServiceClient: Media_V1_MediaServiceClientInter
     }
 
     @available(iOS 13, *)
+    public func `getPrivateDocumentURL`(request: Media_V1_GetPrivateDocumentUrlRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Media_V1_GetPrivateDocumentUrlResponse> {
+        return await self.client.unary(path: "/media.v1.MediaService/GetPrivateDocumentUrl", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `deleteAsset`(request: Media_V1_DeleteAssetRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Media_V1_DeleteAssetResponse> {
         return await self.client.unary(path: "/media.v1.MediaService/DeleteAsset", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -137,6 +149,7 @@ public final class Media_V1_MediaServiceClient: Media_V1_MediaServiceClientInter
             public static let abortUpload = Connect.MethodSpec(name: "AbortUpload", service: "media.v1.MediaService", type: .unary)
             public static let getAsset = Connect.MethodSpec(name: "GetAsset", service: "media.v1.MediaService", type: .unary)
             public static let listAssetsByOwner = Connect.MethodSpec(name: "ListAssetsByOwner", service: "media.v1.MediaService", type: .unary)
+            public static let getPrivateDocumentURL = Connect.MethodSpec(name: "GetPrivateDocumentUrl", service: "media.v1.MediaService", type: .unary)
             public static let deleteAsset = Connect.MethodSpec(name: "DeleteAsset", service: "media.v1.MediaService", type: .unary)
             public static let resolveDelivery = Connect.MethodSpec(name: "ResolveDelivery", service: "media.v1.MediaService", type: .unary)
             public static let batchResolveDelivery = Connect.MethodSpec(name: "BatchResolveDelivery", service: "media.v1.MediaService", type: .unary)

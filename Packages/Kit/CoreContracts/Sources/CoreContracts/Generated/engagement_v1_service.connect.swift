@@ -11,15 +11,6 @@ import SwiftProtobuf
 
 public protocol Engagement_V1_EngagementServiceClientInterface: Sendable {
 
-    /// Adds or replaces the calling profile's reaction on a post.
-    /// Atomic in Redis via Lua; asynchronously durable via Kafka → ScyllaDB.
-    @available(iOS 13, *)
-    func `upsertReaction`(request: Engagement_V1_UpsertReactionRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_CommandResponse>
-
-    /// Removes the calling profile's reaction from a post.
-    @available(iOS 13, *)
-    func `removeReaction`(request: Engagement_V1_RemoveReactionRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_CommandResponse>
-
     /// Increments the view counter for a post. Fire-and-forget on the hot path.
     @available(iOS 13, *)
     func `recordView`(request: Engagement_V1_RecordViewRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_CommandResponse>
@@ -28,14 +19,28 @@ public protocol Engagement_V1_EngagementServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `recordShare`(request: Engagement_V1_RecordShareRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_CommandResponse>
 
-    /// Returns the full engagement snapshot (scores + counters) from Redis.
+    /// A post's likes (#665: a like is a point, staked in the wallet:
+    /// wallet.Stake) and its view, share and comment counters.
     @available(iOS 13, *)
     func `getPostEngagement`(request: Engagement_V1_GetPostEngagementRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_PostEngagementView>
 
-    /// A profile's reactions (which posts, which reaction, when), paged by post
-    /// id. Mesh only (never on the edge): the GDPR data export (#653).
+    /// The likes of up to 100 posts and comments (#665: a like is a point
+    /// staked in the wallet): each one's count — 0 and `hidden` on a post whose
+    /// author hides like counts (#809), unless the reader is the author — and
+    /// the reader's own likes (a member: its account's; 0 otherwise).
     @available(iOS 13, *)
-    func `listReactionsByProfile`(request: Engagement_V1_ListReactionsByProfileRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListReactionsByProfileResponse>
+    func `batchGetLikes`(request: Engagement_V1_BatchGetLikesRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_BatchGetLikesResponse>
+
+    /// What an account liked (each post or comment, its points, when), paged
+    /// by target. Mesh only (never on the edge): the GDPR data export (#653).
+    @available(iOS 13, *)
+    func `listLikesByAccount`(request: Engagement_V1_ListLikesByAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListLikesByAccountResponse>
+
+    /// An account's position on posts and comments: its points, the target's
+    /// like count just before its first like, and the count now. Mesh only:
+    /// the wallet's stake settlement (#665).
+    @available(iOS 13, *)
+    func `getLikePositions`(request: Engagement_V1_GetLikePositionsRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_GetLikePositionsResponse>
 }
 
 /// Concrete implementation of `Engagement_V1_EngagementServiceClientInterface`.
@@ -44,16 +49,6 @@ public final class Engagement_V1_EngagementServiceClient: Engagement_V1_Engageme
 
     public init(client: Connect.ProtocolClientInterface) {
         self.client = client
-    }
-
-    @available(iOS 13, *)
-    public func `upsertReaction`(request: Engagement_V1_UpsertReactionRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_CommandResponse> {
-        return await self.client.unary(path: "/engagement.v1.EngagementService/UpsertReaction", idempotencyLevel: .unknown, request: request, headers: headers)
-    }
-
-    @available(iOS 13, *)
-    public func `removeReaction`(request: Engagement_V1_RemoveReactionRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_CommandResponse> {
-        return await self.client.unary(path: "/engagement.v1.EngagementService/RemoveReaction", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -72,18 +67,28 @@ public final class Engagement_V1_EngagementServiceClient: Engagement_V1_Engageme
     }
 
     @available(iOS 13, *)
-    public func `listReactionsByProfile`(request: Engagement_V1_ListReactionsByProfileRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ListReactionsByProfileResponse> {
-        return await self.client.unary(path: "/engagement.v1.EngagementService/ListReactionsByProfile", idempotencyLevel: .unknown, request: request, headers: headers)
+    public func `batchGetLikes`(request: Engagement_V1_BatchGetLikesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_BatchGetLikesResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/BatchGetLikes", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listLikesByAccount`(request: Engagement_V1_ListLikesByAccountRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ListLikesByAccountResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/ListLikesByAccount", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `getLikePositions`(request: Engagement_V1_GetLikePositionsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_GetLikePositionsResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/GetLikePositions", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     public enum Metadata {
         public enum Methods {
-            public static let upsertReaction = Connect.MethodSpec(name: "UpsertReaction", service: "engagement.v1.EngagementService", type: .unary)
-            public static let removeReaction = Connect.MethodSpec(name: "RemoveReaction", service: "engagement.v1.EngagementService", type: .unary)
             public static let recordView = Connect.MethodSpec(name: "RecordView", service: "engagement.v1.EngagementService", type: .unary)
             public static let recordShare = Connect.MethodSpec(name: "RecordShare", service: "engagement.v1.EngagementService", type: .unary)
             public static let getPostEngagement = Connect.MethodSpec(name: "GetPostEngagement", service: "engagement.v1.EngagementService", type: .unary)
-            public static let listReactionsByProfile = Connect.MethodSpec(name: "ListReactionsByProfile", service: "engagement.v1.EngagementService", type: .unary)
+            public static let batchGetLikes = Connect.MethodSpec(name: "BatchGetLikes", service: "engagement.v1.EngagementService", type: .unary)
+            public static let listLikesByAccount = Connect.MethodSpec(name: "ListLikesByAccount", service: "engagement.v1.EngagementService", type: .unary)
+            public static let getLikePositions = Connect.MethodSpec(name: "GetLikePositions", service: "engagement.v1.EngagementService", type: .unary)
         }
     }
 }

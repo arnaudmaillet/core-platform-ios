@@ -54,6 +54,11 @@ public protocol Chat_V1_ChatServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `markRead`(request: Chat_V1_MarkReadRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
 
+    /// The member's pushes from the conversation, off for a while or until
+    /// they unmute (#654). The member's own setting; NOT_FOUND to a non-member.
+    @available(iOS 13, *)
+    func `muteConversation`(request: Chat_V1_MuteConversationRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
+
     /// ── Member-Plane signals (presence/typing) ──────────────────────────────
     @available(iOS 13, *)
     func `sendTyping`(request: Chat_V1_SendTypingRequest, headers: Connect.Headers) async -> ResponseMessage<Chat_V1_CommandResponse>
@@ -162,6 +167,11 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `muteConversation`(request: Chat_V1_MuteConversationRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_CommandResponse> {
+        return await self.client.unary(path: "/chat.v1.ChatService/MuteConversation", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `sendTyping`(request: Chat_V1_SendTypingRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Chat_V1_CommandResponse> {
         return await self.client.unary(path: "/chat.v1.ChatService/SendTyping", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -224,6 +234,7 @@ public final class Chat_V1_ChatServiceClient: Chat_V1_ChatServiceClientInterface
             public static let unsubscribe = Connect.MethodSpec(name: "Unsubscribe", service: "chat.v1.ChatService", type: .unary)
             public static let sendMessage = Connect.MethodSpec(name: "SendMessage", service: "chat.v1.ChatService", type: .unary)
             public static let markRead = Connect.MethodSpec(name: "MarkRead", service: "chat.v1.ChatService", type: .unary)
+            public static let muteConversation = Connect.MethodSpec(name: "MuteConversation", service: "chat.v1.ChatService", type: .unary)
             public static let sendTyping = Connect.MethodSpec(name: "SendTyping", service: "chat.v1.ChatService", type: .unary)
             public static let heartbeat = Connect.MethodSpec(name: "Heartbeat", service: "chat.v1.ChatService", type: .unary)
             public static let getHistory = Connect.MethodSpec(name: "GetHistory", service: "chat.v1.ChatService", type: .unary)

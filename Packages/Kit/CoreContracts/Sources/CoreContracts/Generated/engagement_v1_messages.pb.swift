@@ -20,36 +20,6 @@ fileprivate nonisolated struct _GeneratedWithProtocGenSwiftVersion: SwiftProtobu
   typealias Version = _2
 }
 
-public nonisolated struct Engagement_V1_UpsertReactionRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var postID: String = String()
-
-  public var profileID: String = String()
-
-  public var kind: Engagement_V1_ReactionKind = .unspecified
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Engagement_V1_RemoveReactionRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var postID: String = String()
-
-  public var profileID: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
 public nonisolated struct Engagement_V1_RecordViewRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -86,23 +56,6 @@ public nonisolated struct Engagement_V1_GetPostEngagementRequest: Sendable {
   public init() {}
 }
 
-public nonisolated struct Engagement_V1_ListReactionsByProfileRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var profileID: String = String()
-
-  public var limit: Int32 = 0
-
-  /// The `next_page_token` of the previous page (empty: the first).
-  public var pageToken: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
 public nonisolated struct Engagement_V1_CommandResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -117,22 +70,7 @@ public nonisolated struct Engagement_V1_CommandResponse: Sendable {
   public init() {}
 }
 
-/// Per-reaction-kind score entry.
-public nonisolated struct Engagement_V1_ReactionScoreEntry: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var kind: Engagement_V1_ReactionKind = .unspecified
-
-  public var score: Int64 = 0
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-/// Full engagement snapshot for a post. All counts are sourced from Redis.
+/// A post's engagement: its likes and its counters, from Redis.
 public nonisolated struct Engagement_V1_PostEngagementView: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -140,44 +78,179 @@ public nonisolated struct Engagement_V1_PostEngagementView: Sendable {
 
   public var postID: String = String()
 
-  public var reactionScores: [Engagement_V1_ReactionScoreEntry] = []
-
-  public var totalWeightedScore: Int64 = 0
-
   public var viewCount: Int64 = 0
 
   public var shareCount: Int64 = 0
 
   public var commentCount: Int64 = 0
 
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
+  /// Likes (#665: a like is a point): the points staked on the post (0 when
+  /// `likes_hidden`), and the reader's own.
+  public var likeCount: Int64 = 0
 
-  public init() {}
-}
+  public var myLikes: Int64 = 0
 
-/// One reaction of a profile (#653).
-public nonisolated struct Engagement_V1_ProfileReactionView: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var postID: String = String()
-
-  public var kind: Engagement_V1_ReactionKind = .unspecified
-
-  public var reactedAtMs: Int64 = 0
+  /// The author hides like counts (#809) and the reader is not the author.
+  public var likesHidden: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 }
 
-public nonisolated struct Engagement_V1_ListReactionsByProfileResponse: Sendable {
+/// What a like lands on.
+public nonisolated struct Engagement_V1_LikeTarget: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  public var reactions: [Engagement_V1_ProfileReactionView] = []
+  public var target: Engagement_V1_LikeTarget.OneOf_Target? = nil
+
+  public var postID: String {
+    get {
+      if case .postID(let v)? = target {return v}
+      return String()
+    }
+    set {target = .postID(newValue)}
+  }
+
+  public var commentID: String {
+    get {
+      if case .commentID(let v)? = target {return v}
+      return String()
+    }
+    set {target = .commentID(newValue)}
+  }
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Target: Equatable, Sendable {
+    case postID(String)
+    case commentID(String)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct Engagement_V1_BatchGetLikesRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// At most 100.
+  public var targets: [Engagement_V1_LikeTarget] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One target's likes, as the reader sees them.
+public nonisolated struct Engagement_V1_LikeView: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var target: Engagement_V1_LikeTarget {
+    get {_target ?? Engagement_V1_LikeTarget()}
+    set {_target = newValue}
+  }
+  /// Returns true if `target` has been explicitly set.
+  public var hasTarget: Bool {self._target != nil}
+  /// Clears the value of `target`. Subsequent reads from it will return its default value.
+  public mutating func clearTarget() {self._target = nil}
+
+  /// Points staked on it (0 when `hidden`).
+  public var count: Int64 = 0
+
+  /// The reader's own.
+  public var mine: Int64 = 0
+
+  public var hidden: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _target: Engagement_V1_LikeTarget? = nil
+}
+
+public nonisolated struct Engagement_V1_BatchGetLikesResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// In the request's order.
+  public var likes: [Engagement_V1_LikeView] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One post or comment an account liked (#653, #665).
+public nonisolated struct Engagement_V1_AccountLikeView: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var target: Engagement_V1_LikeTarget {
+    get {_target ?? Engagement_V1_LikeTarget()}
+    set {_target = newValue}
+  }
+  /// Returns true if `target` has been explicitly set.
+  public var hasTarget: Bool {self._target != nil}
+  /// Clears the value of `target`. Subsequent reads from it will return its default value.
+  public mutating func clearTarget() {self._target = nil}
+
+  /// The account's points on it.
+  public var total: Int64 = 0
+
+  /// The profile that liked last.
+  public var profileID: String = String()
+
+  public var likedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_likedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_likedAt = newValue}
+  }
+  /// Returns true if `likedAt` has been explicitly set.
+  public var hasLikedAt: Bool {self._likedAt != nil}
+  /// Clears the value of `likedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearLikedAt() {self._likedAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _target: Engagement_V1_LikeTarget? = nil
+  fileprivate var _likedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
+public nonisolated struct Engagement_V1_ListLikesByAccountRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  /// Default 100, capped at 500.
+  public var limit: Int32 = 0
+
+  /// The `next_page_token` of the previous page (empty: the first).
+  public var pageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Engagement_V1_ListLikesByAccountResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var likes: [Engagement_V1_AccountLikeView] = []
 
   /// Empty on the last page.
   public var nextPageToken: String = String()
@@ -187,84 +260,77 @@ public nonisolated struct Engagement_V1_ListReactionsByProfileResponse: Sendable
   public init() {}
 }
 
+public nonisolated struct Engagement_V1_GetLikePositionsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  /// At most 100.
+  public var targets: [Engagement_V1_LikeTarget] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One account's position on a post or comment (#665).
+public nonisolated struct Engagement_V1_LikePosition: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var target: Engagement_V1_LikeTarget {
+    get {_target ?? Engagement_V1_LikeTarget()}
+    set {_target = newValue}
+  }
+  /// Returns true if `target` has been explicitly set.
+  public var hasTarget: Bool {self._target != nil}
+  /// Clears the value of `target`. Subsequent reads from it will return its default value.
+  public mutating func clearTarget() {self._target = nil}
+
+  /// The account's points on it (0: none).
+  public var total: Int64 = 0
+
+  /// The target's like count just before the account's first like. Absent
+  /// when it has none, or for a like recorded before arrivals were kept.
+  public var countOnArrival: Int64 {
+    get {_countOnArrival ?? 0}
+    set {_countOnArrival = newValue}
+  }
+  /// Returns true if `countOnArrival` has been explicitly set.
+  public var hasCountOnArrival: Bool {self._countOnArrival != nil}
+  /// Clears the value of `countOnArrival`. Subsequent reads from it will return its default value.
+  public mutating func clearCountOnArrival() {self._countOnArrival = nil}
+
+  /// The target's like count now.
+  public var countNow: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _target: Engagement_V1_LikeTarget? = nil
+  fileprivate var _countOnArrival: Int64? = nil
+}
+
+public nonisolated struct Engagement_V1_GetLikePositionsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// In the request's order.
+  public var positions: [Engagement_V1_LikePosition] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "engagement.v1"
-
-nonisolated extension Engagement_V1_UpsertReactionRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".UpsertReactionRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
-      case 3: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.postID.isEmpty {
-      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
-    }
-    if !self.profileID.isEmpty {
-      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 2)
-    }
-    if self.kind != .unspecified {
-      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 3)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Engagement_V1_UpsertReactionRequest, rhs: Engagement_V1_UpsertReactionRequest) -> Bool {
-    if lhs.postID != rhs.postID {return false}
-    if lhs.profileID != rhs.profileID {return false}
-    if lhs.kind != rhs.kind {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Engagement_V1_RemoveReactionRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".RemoveReactionRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.postID.isEmpty {
-      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
-    }
-    if !self.profileID.isEmpty {
-      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 2)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Engagement_V1_RemoveReactionRequest, rhs: Engagement_V1_RemoveReactionRequest) -> Bool {
-    if lhs.postID != rhs.postID {return false}
-    if lhs.profileID != rhs.profileID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
 
 nonisolated extension Engagement_V1_RecordViewRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RecordViewRequest"
@@ -356,46 +422,6 @@ nonisolated extension Engagement_V1_GetPostEngagementRequest: SwiftProtobuf.Mess
   }
 }
 
-nonisolated extension Engagement_V1_ListReactionsByProfileRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ListReactionsByProfileRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}limit\0\u{3}page_token\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
-      case 2: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.profileID.isEmpty {
-      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
-    }
-    if self.limit != 0 {
-      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 2)
-    }
-    if !self.pageToken.isEmpty {
-      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 3)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Engagement_V1_ListReactionsByProfileRequest, rhs: Engagement_V1_ListReactionsByProfileRequest) -> Bool {
-    if lhs.profileID != rhs.profileID {return false}
-    if lhs.limit != rhs.limit {return false}
-    if lhs.pageToken != rhs.pageToken {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
 nonisolated extension Engagement_V1_CommandResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CommandResponse"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}success\0\u{1}message\0")
@@ -431,44 +457,9 @@ nonisolated extension Engagement_V1_CommandResponse: SwiftProtobuf.Message, Swif
   }
 }
 
-nonisolated extension Engagement_V1_ReactionScoreEntry: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ReactionScoreEntry"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}score\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
-      case 2: try { try decoder.decodeSingularInt64Field(value: &self.score) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.kind != .unspecified {
-      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 1)
-    }
-    if self.score != 0 {
-      try visitor.visitSingularInt64Field(value: self.score, fieldNumber: 2)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Engagement_V1_ReactionScoreEntry, rhs: Engagement_V1_ReactionScoreEntry) -> Bool {
-    if lhs.kind != rhs.kind {return false}
-    if lhs.score != rhs.score {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
 nonisolated extension Engagement_V1_PostEngagementView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PostEngagementView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}reaction_scores\0\u{3}total_weighted_score\0\u{3}view_count\0\u{3}share_count\0\u{3}comment_count\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{4}\u{3}view_count\0\u{3}share_count\0\u{3}comment_count\0\u{3}like_count\0\u{3}my_likes\0\u{3}likes_hidden\0\u{b}reaction_scores\0\u{b}total_weighted_score\0\u{c}\u{2}\u{1}\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -477,11 +468,12 @@ nonisolated extension Engagement_V1_PostEngagementView: SwiftProtobuf.Message, S
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
-      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.reactionScores) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.totalWeightedScore) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.viewCount) }()
       case 5: try { try decoder.decodeSingularInt64Field(value: &self.shareCount) }()
       case 6: try { try decoder.decodeSingularInt64Field(value: &self.commentCount) }()
+      case 7: try { try decoder.decodeSingularInt64Field(value: &self.likeCount) }()
+      case 8: try { try decoder.decodeSingularInt64Field(value: &self.myLikes) }()
+      case 9: try { try decoder.decodeSingularBoolField(value: &self.likesHidden) }()
       default: break
       }
     }
@@ -490,12 +482,6 @@ nonisolated extension Engagement_V1_PostEngagementView: SwiftProtobuf.Message, S
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
     if !self.postID.isEmpty {
       try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
-    }
-    if !self.reactionScores.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.reactionScores, fieldNumber: 2)
-    }
-    if self.totalWeightedScore != 0 {
-      try visitor.visitSingularInt64Field(value: self.totalWeightedScore, fieldNumber: 3)
     }
     if self.viewCount != 0 {
       try visitor.visitSingularInt64Field(value: self.viewCount, fieldNumber: 4)
@@ -506,24 +492,34 @@ nonisolated extension Engagement_V1_PostEngagementView: SwiftProtobuf.Message, S
     if self.commentCount != 0 {
       try visitor.visitSingularInt64Field(value: self.commentCount, fieldNumber: 6)
     }
+    if self.likeCount != 0 {
+      try visitor.visitSingularInt64Field(value: self.likeCount, fieldNumber: 7)
+    }
+    if self.myLikes != 0 {
+      try visitor.visitSingularInt64Field(value: self.myLikes, fieldNumber: 8)
+    }
+    if self.likesHidden != false {
+      try visitor.visitSingularBoolField(value: self.likesHidden, fieldNumber: 9)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Engagement_V1_PostEngagementView, rhs: Engagement_V1_PostEngagementView) -> Bool {
     if lhs.postID != rhs.postID {return false}
-    if lhs.reactionScores != rhs.reactionScores {return false}
-    if lhs.totalWeightedScore != rhs.totalWeightedScore {return false}
     if lhs.viewCount != rhs.viewCount {return false}
     if lhs.shareCount != rhs.shareCount {return false}
     if lhs.commentCount != rhs.commentCount {return false}
+    if lhs.likeCount != rhs.likeCount {return false}
+    if lhs.myLikes != rhs.myLikes {return false}
+    if lhs.likesHidden != rhs.likesHidden {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
-nonisolated extension Engagement_V1_ProfileReactionView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ProfileReactionView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}kind\0\u{3}reacted_at_ms\0")
+nonisolated extension Engagement_V1_LikeTarget: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".LikeTarget"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}comment_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -531,39 +527,56 @@ nonisolated extension Engagement_V1_ProfileReactionView: SwiftProtobuf.Message, 
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
-      case 2: try { try decoder.decodeSingularEnumField(value: &self.kind) }()
-      case 3: try { try decoder.decodeSingularInt64Field(value: &self.reactedAtMs) }()
+      case 1: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.target != nil {try decoder.handleConflictingOneOf()}
+          self.target = .postID(v)
+        }
+      }()
+      case 2: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.target != nil {try decoder.handleConflictingOneOf()}
+          self.target = .commentID(v)
+        }
+      }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.postID.isEmpty {
-      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
-    }
-    if self.kind != .unspecified {
-      try visitor.visitSingularEnumField(value: self.kind, fieldNumber: 2)
-    }
-    if self.reactedAtMs != 0 {
-      try visitor.visitSingularInt64Field(value: self.reactedAtMs, fieldNumber: 3)
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.target {
+    case .postID?: try {
+      guard case .postID(let v)? = self.target else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    }()
+    case .commentID?: try {
+      guard case .commentID(let v)? = self.target else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Engagement_V1_ProfileReactionView, rhs: Engagement_V1_ProfileReactionView) -> Bool {
-    if lhs.postID != rhs.postID {return false}
-    if lhs.kind != rhs.kind {return false}
-    if lhs.reactedAtMs != rhs.reactedAtMs {return false}
+  public static func ==(lhs: Engagement_V1_LikeTarget, rhs: Engagement_V1_LikeTarget) -> Bool {
+    if lhs.target != rhs.target {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
-nonisolated extension Engagement_V1_ListReactionsByProfileResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ListReactionsByProfileResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reactions\0\u{3}next_page_token\0")
+nonisolated extension Engagement_V1_BatchGetLikesRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".BatchGetLikesRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}targets\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -571,7 +584,205 @@ nonisolated extension Engagement_V1_ListReactionsByProfileResponse: SwiftProtobu
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.reactions) }()
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.targets) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.targets.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.targets, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Engagement_V1_BatchGetLikesRequest, rhs: Engagement_V1_BatchGetLikesRequest) -> Bool {
+    if lhs.targets != rhs.targets {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Engagement_V1_LikeView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".LikeView"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}target\0\u{1}count\0\u{1}mine\0\u{1}hidden\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._target) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.count) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.mine) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.hidden) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._target {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.count != 0 {
+      try visitor.visitSingularInt64Field(value: self.count, fieldNumber: 2)
+    }
+    if self.mine != 0 {
+      try visitor.visitSingularInt64Field(value: self.mine, fieldNumber: 3)
+    }
+    if self.hidden != false {
+      try visitor.visitSingularBoolField(value: self.hidden, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Engagement_V1_LikeView, rhs: Engagement_V1_LikeView) -> Bool {
+    if lhs._target != rhs._target {return false}
+    if lhs.count != rhs.count {return false}
+    if lhs.mine != rhs.mine {return false}
+    if lhs.hidden != rhs.hidden {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Engagement_V1_BatchGetLikesResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".BatchGetLikesResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}likes\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.likes) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.likes.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.likes, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Engagement_V1_BatchGetLikesResponse, rhs: Engagement_V1_BatchGetLikesResponse) -> Bool {
+    if lhs.likes != rhs.likes {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Engagement_V1_AccountLikeView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AccountLikeView"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}target\0\u{1}total\0\u{3}profile_id\0\u{3}liked_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._target) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.total) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._likedAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._target {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.total != 0 {
+      try visitor.visitSingularInt64Field(value: self.total, fieldNumber: 2)
+    }
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 3)
+    }
+    try { if let v = self._likedAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Engagement_V1_AccountLikeView, rhs: Engagement_V1_AccountLikeView) -> Bool {
+    if lhs._target != rhs._target {return false}
+    if lhs.total != rhs.total {return false}
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs._likedAt != rhs._likedAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Engagement_V1_ListLikesByAccountRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListLikesByAccountRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}limit\0\u{3}page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 2)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Engagement_V1_ListLikesByAccountRequest, rhs: Engagement_V1_ListLikesByAccountRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Engagement_V1_ListLikesByAccountResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListLikesByAccountResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}likes\0\u{3}next_page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.likes) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
       default: break
       }
@@ -579,8 +790,8 @@ nonisolated extension Engagement_V1_ListReactionsByProfileResponse: SwiftProtobu
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.reactions.isEmpty {
-      try visitor.visitRepeatedMessageField(value: self.reactions, fieldNumber: 1)
+    if !self.likes.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.likes, fieldNumber: 1)
     }
     if !self.nextPageToken.isEmpty {
       try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
@@ -588,9 +799,123 @@ nonisolated extension Engagement_V1_ListReactionsByProfileResponse: SwiftProtobu
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Engagement_V1_ListReactionsByProfileResponse, rhs: Engagement_V1_ListReactionsByProfileResponse) -> Bool {
-    if lhs.reactions != rhs.reactions {return false}
+  public static func ==(lhs: Engagement_V1_ListLikesByAccountResponse, rhs: Engagement_V1_ListLikesByAccountResponse) -> Bool {
+    if lhs.likes != rhs.likes {return false}
     if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Engagement_V1_GetLikePositionsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetLikePositionsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}targets\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.targets) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.targets.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.targets, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Engagement_V1_GetLikePositionsRequest, rhs: Engagement_V1_GetLikePositionsRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.targets != rhs.targets {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Engagement_V1_LikePosition: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".LikePosition"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}target\0\u{1}total\0\u{3}count_on_arrival\0\u{3}count_now\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._target) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.total) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self._countOnArrival) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.countNow) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._target {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    if self.total != 0 {
+      try visitor.visitSingularInt64Field(value: self.total, fieldNumber: 2)
+    }
+    try { if let v = self._countOnArrival {
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 3)
+    } }()
+    if self.countNow != 0 {
+      try visitor.visitSingularInt64Field(value: self.countNow, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Engagement_V1_LikePosition, rhs: Engagement_V1_LikePosition) -> Bool {
+    if lhs._target != rhs._target {return false}
+    if lhs.total != rhs.total {return false}
+    if lhs._countOnArrival != rhs._countOnArrival {return false}
+    if lhs.countNow != rhs.countNow {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Engagement_V1_GetLikePositionsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetLikePositionsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}positions\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.positions) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.positions.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.positions, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Engagement_V1_GetLikePositionsResponse, rhs: Engagement_V1_GetLikePositionsResponse) -> Bool {
+    if lhs.positions != rhs.positions {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

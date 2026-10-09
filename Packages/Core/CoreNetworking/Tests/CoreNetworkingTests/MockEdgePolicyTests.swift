@@ -24,11 +24,14 @@ struct MockEdgePolicyTests {
         )
     }
 
-    private func reaction(on postID: String) -> Engagement_V1_UpsertReactionRequest {
-        var request = Engagement_V1_UpsertReactionRequest()
+    /// A like: one point staked in the wallet (#676) — the member write.
+    private func like(on postID: String) -> Wallet_V1_StakeRequest {
+        var request = Wallet_V1_StakeRequest()
+        request.accountID = MockAuthService.accountID
+        request.profileID = "prof-1"
         request.postID = postID
-        request.profileID = "prof-guest-probe"
-        request.kind = .heart
+        request.points = 1
+        request.idempotencyKey = "probe-" + UUID().uuidString.prefix(8)
         return request
     }
 
@@ -55,8 +58,8 @@ struct MockEdgePolicyTests {
     }
 
     @Test func aGuestsWriteIsRefusedUnauthenticated() async {
-        let response = await Engagement_V1_EngagementServiceClient(client: client(token: "gt-1"))
-            .upsertReaction(request: reaction(on: somePostID), headers: [:])
+        let response = await Wallet_V1_WalletServiceClient(client: client(token: "gt-1"))
+            .stake(request: like(on: somePostID), headers: [:])
         #expect(response.error?.code == .unauthenticated)
     }
 
@@ -67,9 +70,23 @@ struct MockEdgePolicyTests {
     }
 
     @Test func aMembersWritePasses() async {
-        let response = await Engagement_V1_EngagementServiceClient(client: client(token: "at-1"))
-            .upsertReaction(request: reaction(on: somePostID), headers: [:])
-        #expect(response.error?.code != .unauthenticated)
+        let response = await Wallet_V1_WalletServiceClient(client: client(token: "at-1"))
+            .stake(request: like(on: somePostID), headers: [:])
+        #expect(response.error == nil)
+    }
+
+    /// Like counts are `public_read` (#676): a guest reads them, with no
+    /// points of its own.
+    @Test func aGuestReadsLikeCounts() async throws {
+        var target = Engagement_V1_LikeTarget()
+        target.postID = somePostID
+        var request = Engagement_V1_BatchGetLikesRequest()
+        request.targets = [target]
+        let response = await Engagement_V1_EngagementServiceClient(client: client(token: "gt-1"))
+            .batchGetLikes(request: request, headers: [:])
+        let view = try #require(response.message?.likes.first)
+        #expect(view.count > 0)
+        #expect(view.mine == 0)
     }
 
     @Test func aGuestMayReport() {
@@ -118,9 +135,10 @@ struct MockEdgePolicyTests {
 
     @Test func theEdgeIsOpenUnlessAskedFor() async {
         let open = MockBackend()
-        let response = await Engagement_V1_EngagementServiceClient(
+        // A members-only read, with no token at all: answered.
+        let response = await Notification_V1_NotificationServiceClient(
             client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: open.bff)
-        ).upsertReaction(request: reaction(on: open.dataset.posts[0].postID), headers: [:])
+        ).getUnreadCount(request: Notification_V1_GetUnreadCountRequest(), headers: [:])
         #expect(response.error?.code != .unauthenticated)
     }
 }

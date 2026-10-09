@@ -884,6 +884,28 @@ public nonisolated struct Moderation_V1_ReportView: Sendable {
   fileprivate var _reportedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
 }
 
+public nonisolated struct Moderation_V1_ListReportsByReporterRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The member (account id) who filed the reports.
+  public var reporterID: String = String()
+
+  /// Default 20, capped at 50.
+  public var pageSize: Int32 = 0
+
+  /// Opaque cursor from a previous response; empty for the first page.
+  public var pageToken: String = String()
+
+  /// Reports about content of these accounts are left out (at most 10).
+  public var hiddenAccountIds: [String] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct Moderation_V1_ListMyReportsResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -2498,6 +2520,51 @@ nonisolated extension Moderation_V1_ReportView: SwiftProtobuf.Message, SwiftProt
     if lhs.status != rhs.status {return false}
     if lhs._reportedAt != rhs._reportedAt {return false}
     if lhs.decisionID != rhs.decisionID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Moderation_V1_ListReportsByReporterRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListReportsByReporterRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}reporter_id\0\u{3}page_size\0\u{3}page_token\0\u{3}hidden_account_ids\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.reporterID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.pageSize) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      case 4: try { try decoder.decodeRepeatedStringField(value: &self.hiddenAccountIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.reporterID.isEmpty {
+      try visitor.visitSingularStringField(value: self.reporterID, fieldNumber: 1)
+    }
+    if self.pageSize != 0 {
+      try visitor.visitSingularInt32Field(value: self.pageSize, fieldNumber: 2)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 3)
+    }
+    if !self.hiddenAccountIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.hiddenAccountIds, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Moderation_V1_ListReportsByReporterRequest, rhs: Moderation_V1_ListReportsByReporterRequest) -> Bool {
+    if lhs.reporterID != rhs.reporterID {return false}
+    if lhs.pageSize != rhs.pageSize {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.hiddenAccountIds != rhs.hiddenAccountIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -40,6 +40,13 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
   /// A video attached to a post — adaptive-streaming ladder (manifest + poster).
   /// Contract-first: not yet accepted for upload (see the enum note above).
   case video // = 3
+
+  /// Evidence for a profile verification request (#777): JPEG, PNG, HEIC or
+  /// PDF, ≤ 10 MiB. Private: no renditions, never returned by ResolveDelivery /
+  /// BatchResolveDelivery (NOT_FOUND / omitted), metadata to its owner only,
+  /// a short-lived signed link to staff over the mesh (GetPrivateDocumentUrl).
+  /// Purged 30 days after the request's decision, and with the account.
+  case privateDocument // = 4
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -52,6 +59,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     case 1: self = .avatar
     case 2: self = .postImage
     case 3: self = .video
+    case 4: self = .privateDocument
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -62,6 +70,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     case .avatar: return 1
     case .postImage: return 2
     case .video: return 3
+    case .privateDocument: return 4
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -72,6 +81,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     .avatar,
     .postImage,
     .video,
+    .privateDocument,
   ]
 
 }
@@ -271,7 +281,7 @@ public nonisolated enum Media_V1_DeliveryVisibility: SwiftProtobuf.Enum, Swift.C
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Media_V1_MediaKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_KIND_UNSPECIFIED\0\u{1}MEDIA_KIND_AVATAR\0\u{1}MEDIA_KIND_POST_IMAGE\0\u{1}MEDIA_KIND_VIDEO\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_KIND_UNSPECIFIED\0\u{1}MEDIA_KIND_AVATAR\0\u{1}MEDIA_KIND_POST_IMAGE\0\u{1}MEDIA_KIND_VIDEO\0\u{1}MEDIA_KIND_PRIVATE_DOCUMENT\0")
 }
 
 nonisolated extension Media_V1_AssetState: SwiftProtobuf._ProtoNameProviding {

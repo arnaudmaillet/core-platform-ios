@@ -294,6 +294,189 @@ public nonisolated enum Account_V1_ContactChannel: SwiftProtobuf.Enum, Swift.Cas
 
 }
 
+/// A side of a family supervision (#670).
+public nonisolated enum Account_V1_SupervisionRole: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// A parent: a known adult (18+ by date of birth).
+  case supervisor // = 1
+
+  /// A teen aged 13 to 17.
+  case teen // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .supervisor
+    case 2: self = .teen
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .supervisor: return 1
+    case .teen: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Account_V1_SupervisionRole] = [
+    .unspecified,
+    .supervisor,
+    .teen,
+  ]
+
+}
+
+/// The loosest audience a supervisor allows for messages or comments (#670):
+/// the teen may pick it or anything stricter.
+public nonisolated enum Account_V1_AudienceFloor: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// No floor.
+  case unspecified // = 0
+  case followers // = 1
+  case mutuals // = 2
+  case noOne // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .followers
+    case 2: self = .mutuals
+    case 3: self = .noOne
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .followers: return 1
+    case .mutuals: return 2
+    case .noOne: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Account_V1_AudienceFloor] = [
+    .unspecified,
+    .followers,
+    .mutuals,
+    .noOne,
+  ]
+
+}
+
+/// Which of a supervised teen's profile connections to list (#670).
+public nonisolated enum Account_V1_SupervisedConnectionKind: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// The profiles it follows.
+  case following // = 1
+
+  /// The profiles following it.
+  case followers // = 2
+
+  /// The profiles it blocked.
+  case blocked // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .following
+    case 2: self = .followers
+    case 3: self = .blocked
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .following: return 1
+    case .followers: return 2
+    case .blocked: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Account_V1_SupervisedConnectionKind] = [
+    .unspecified,
+    .following,
+    .followers,
+    .blocked,
+  ]
+
+}
+
+/// What became of a report a supervised teen made (#670).
+public nonisolated enum Account_V1_SupervisedReportOutcome: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case underReview // = 1
+
+  /// The content or account was acted on.
+  case actionTaken // = 2
+  case noViolation // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .underReview
+    case 2: self = .actionTaken
+    case 3: self = .noViolation
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .underReview: return 1
+    case .actionTaken: return 2
+    case .noViolation: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Account_V1_SupervisedReportOutcome] = [
+    .unspecified,
+    .underReview,
+    .actionTaken,
+    .noViolation,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Account_V1_AccountStatus: SwiftProtobuf._ProtoNameProviding {
@@ -314,4 +497,20 @@ nonisolated extension Account_V1_AgeBracket: SwiftProtobuf._ProtoNameProviding {
 
 nonisolated extension Account_V1_ContactChannel: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONTACT_CHANNEL_UNSPECIFIED\0\u{1}CONTACT_CHANNEL_EMAIL\0\u{1}CONTACT_CHANNEL_PHONE\0")
+}
+
+nonisolated extension Account_V1_SupervisionRole: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUPERVISION_ROLE_UNSPECIFIED\0\u{1}SUPERVISION_ROLE_SUPERVISOR\0\u{1}SUPERVISION_ROLE_TEEN\0")
+}
+
+nonisolated extension Account_V1_AudienceFloor: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AUDIENCE_FLOOR_UNSPECIFIED\0\u{1}AUDIENCE_FLOOR_FOLLOWERS\0\u{1}AUDIENCE_FLOOR_MUTUALS\0\u{1}AUDIENCE_FLOOR_NO_ONE\0")
+}
+
+nonisolated extension Account_V1_SupervisedConnectionKind: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUPERVISED_CONNECTION_KIND_UNSPECIFIED\0\u{1}SUPERVISED_CONNECTION_KIND_FOLLOWING\0\u{1}SUPERVISED_CONNECTION_KIND_FOLLOWERS\0\u{1}SUPERVISED_CONNECTION_KIND_BLOCKED\0")
+}
+
+nonisolated extension Account_V1_SupervisedReportOutcome: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SUPERVISED_REPORT_OUTCOME_UNSPECIFIED\0\u{1}SUPERVISED_REPORT_OUTCOME_UNDER_REVIEW\0\u{1}SUPERVISED_REPORT_OUTCOME_ACTION_TAKEN\0\u{1}SUPERVISED_REPORT_OUTCOME_NO_VIOLATION\0")
 }

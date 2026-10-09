@@ -113,10 +113,12 @@ struct AuthEndToEndTests {
         #expect(token.hasPrefix("gt-"))
         #expect(await manager.currentState() == .unauthenticated)
 
-        var like = Engagement_V1_UpsertReactionRequest()
+        // A like is a point staked in the wallet (#676): a member write.
+        var like = Wallet_V1_StakeRequest()
         like.postID = getPost.postID
-        like.kind = .heart
-        let write = await Engagement_V1_EngagementServiceClient(client: reads).upsertReaction(request: like, headers: [:])
+        like.points = 1
+        like.idempotencyKey = "guest-probe-1"
+        let write = await Wallet_V1_WalletServiceClient(client: reads).stake(request: like, headers: [:])
         #expect(write.error?.code == .unauthenticated, "a guest token is a read pass")
     }
 

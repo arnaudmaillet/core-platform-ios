@@ -22,7 +22,9 @@ let package = Package(
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/PostGrid"),
-        .package(path: "../../Core/ShareSheet")
+        .package(path: "../../Core/ShareSheet"),
+        // A like batch's `first_tap_at` is a `Google_Protobuf_Timestamp` (#676).
+        .package(url: "https://github.com/apple/swift-protobuf.git", from: "1.28.0")
     ],
     targets: [
         .target(
@@ -48,7 +50,8 @@ let package = Package(
                 "CoreNetworking",
                 "PostGrid",
                 // The place page's QR bubble opens the profile's share sheet.
-                "ShareSheet"
+                "ShareSheet",
+                .product(name: "SwiftProtobuf", package: "swift-protobuf")
             ]
         ),
         .testTarget(

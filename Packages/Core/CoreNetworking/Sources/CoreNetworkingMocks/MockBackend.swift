@@ -81,6 +81,8 @@ public struct MockBackend: Sendable {
             seedsFollowRequests: ProcessInfo.processInfo.arguments.contains("-mock-follow-requests")
         )
         MockEngagementService(store: counterStore).register(on: bff)
+        // A like is a point staked in the wallet (#676).
+        MockWalletService(store: counterStore, dataset: dataset).register(on: bff)
         MockCounterService(store: counterStore).register(on: bff)
         MockMediaService(store: blobStore).register(on: bff)
         // A post mentioning someone outside their "Who Can Mention" is

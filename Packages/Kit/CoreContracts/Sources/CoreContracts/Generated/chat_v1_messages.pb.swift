@@ -380,6 +380,26 @@ public nonisolated struct Chat_V1_MarkReadRequest: Sendable {
   public init() {}
 }
 
+public nonisolated struct Chat_V1_MuteConversationRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var conversationID: String = String()
+
+  public var memberID: String = String()
+
+  /// false: unmute (until_ms is ignored).
+  public var muted: Bool = false
+
+  /// When the mute ends (within a year); 0: until unmuted.
+  public var untilMs: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public nonisolated struct Chat_V1_SendTypingRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -581,6 +601,12 @@ public nonisolated struct Chat_V1_InboxEntryView: Sendable {
 
   /// The caller's own request, awaiting the peer's answer.
   public var request: Bool = false
+
+  /// The caller muted the conversation's pushes (#654) …
+  public var muted: Bool = false
+
+  /// … until then; 0 when until they unmute.
+  public var mutedUntilMs: Int64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1582,6 +1608,51 @@ nonisolated extension Chat_V1_MarkReadRequest: SwiftProtobuf.Message, SwiftProto
   }
 }
 
+nonisolated extension Chat_V1_MuteConversationRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".MuteConversationRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{3}member_id\0\u{1}muted\0\u{3}until_ms\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.conversationID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.memberID) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.muted) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.untilMs) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.conversationID.isEmpty {
+      try visitor.visitSingularStringField(value: self.conversationID, fieldNumber: 1)
+    }
+    if !self.memberID.isEmpty {
+      try visitor.visitSingularStringField(value: self.memberID, fieldNumber: 2)
+    }
+    if self.muted != false {
+      try visitor.visitSingularBoolField(value: self.muted, fieldNumber: 3)
+    }
+    if self.untilMs != 0 {
+      try visitor.visitSingularInt64Field(value: self.untilMs, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Chat_V1_MuteConversationRequest, rhs: Chat_V1_MuteConversationRequest) -> Bool {
+    if lhs.conversationID != rhs.conversationID {return false}
+    if lhs.memberID != rhs.memberID {return false}
+    if lhs.muted != rhs.muted {return false}
+    if lhs.untilMs != rhs.untilMs {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Chat_V1_SendTypingRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SendTypingRequest"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{3}member_id\0")
@@ -1999,7 +2070,7 @@ nonisolated extension Chat_V1_MessagePreview: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Chat_V1_InboxEntryView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".InboxEntryView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{1}kind\0\u{3}peer_id\0\u{3}last_activity_ms\0\u{3}last_message\0\u{1}unread\0\u{1}request\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{1}kind\0\u{3}peer_id\0\u{3}last_activity_ms\0\u{3}last_message\0\u{1}unread\0\u{1}request\0\u{1}muted\0\u{3}muted_until_ms\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2014,6 +2085,8 @@ nonisolated extension Chat_V1_InboxEntryView: SwiftProtobuf.Message, SwiftProtob
       case 5: try { try decoder.decodeSingularMessageField(value: &self._lastMessage) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self.unread) }()
       case 7: try { try decoder.decodeSingularBoolField(value: &self.request) }()
+      case 8: try { try decoder.decodeSingularBoolField(value: &self.muted) }()
+      case 9: try { try decoder.decodeSingularInt64Field(value: &self.mutedUntilMs) }()
       default: break
       }
     }
@@ -2045,6 +2118,12 @@ nonisolated extension Chat_V1_InboxEntryView: SwiftProtobuf.Message, SwiftProtob
     if self.request != false {
       try visitor.visitSingularBoolField(value: self.request, fieldNumber: 7)
     }
+    if self.muted != false {
+      try visitor.visitSingularBoolField(value: self.muted, fieldNumber: 8)
+    }
+    if self.mutedUntilMs != 0 {
+      try visitor.visitSingularInt64Field(value: self.mutedUntilMs, fieldNumber: 9)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -2056,6 +2135,8 @@ nonisolated extension Chat_V1_InboxEntryView: SwiftProtobuf.Message, SwiftProtob
     if lhs._lastMessage != rhs._lastMessage {return false}
     if lhs.unread != rhs.unread {return false}
     if lhs.request != rhs.request {return false}
+    if lhs.muted != rhs.muted {return false}
+    if lhs.mutedUntilMs != rhs.mutedUntilMs {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

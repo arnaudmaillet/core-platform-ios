@@ -17,6 +17,12 @@ private struct AuthenticatedSessionStub: AuthSessionProviding {
     func logout() async {}
 }
 
+/// A member's bearer: the mock's like reads and `wallet.Stake` know the
+/// caller by it (#676).
+private struct MemberToken: AuthTokenProviding {
+    func validAccessToken() async throws -> String? { "at-1" }
+}
+
 /// Drives the full read path — repository → generated clients → real
 /// ProtocolClient → MockBFF — with production wire bytes, in-process.
 struct FeedRepositoryTests {
@@ -25,15 +31,26 @@ struct FeedRepositoryTests {
         let store = MockCounterStore(dataset: dataset)
         MockSocialServices(dataset: dataset).register(on: bff)
         MockEngagementService(store: store).register(on: bff)
+        MockWalletService(store: store, dataset: dataset).register(on: bff)
         MockCounterService(store: store).register(on: bff)
-        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let client = ConnectClientFactory.makeAuthenticated(
+            host: "https://mock.bff.local", tokenProvider: MemberToken(), httpClient: bff
+        )
+        let session = AuthenticatedSessionStub()
+        let viewer = ViewerSession(authSession: session) { account in
+            try await AccountProfilesReader.profileIDs(
+                ofAccount: account.rawValue, using: Profile_V1_ProfileServiceClient(client: client)
+            ).map { ProfileID($0) }
+        }
         let repository = FeedRepository(
             timelineClient: Timeline_V1_TimelineServiceClient(client: client),
             postClient: Post_V1_PostServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             counterClient: Counter_V1_CounterServiceClient(client: client),
             engagementClient: Engagement_V1_EngagementServiceClient(client: client),
-            authSession: AuthenticatedSessionStub(),
+            likeStaking: WalletLikeStaking(walletClient: Wallet_V1_WalletServiceClient(client: client), viewer: viewer),
+            authSession: session,
+            viewer: viewer,
             snapshotStore: nil
         )
         return (repository, bff)
@@ -118,32 +135,46 @@ struct FeedRepositoryTests {
         #expect(callsAfterSecond - callsAfterFirst == newAuthors.count)
     }
 
-    @Test func pagesHydrateLikeCountsWithOneBatchedCounterRead() async throws {
+    @Test func pagesHydrateLikeCountsWithOneBatchedRead() async throws {
         let (repository, bff) = makeRepository()
 
         let page = try await repository.loadFirstPage()
 
         // Seeded store: every hydrated entry carries a nonzero count.
         #expect(page.entries.allSatisfy { $0.likeCount > 0 })
-        let counterCalls = bff.recordedRequests.filter { $0.path == "/counter.v1.CounterService/BatchGetCounters" }
-        #expect(counterCalls.count == 1) // batched, not per-post
+        // engagement.v1 `BatchGetLikes` since #676: batched, not per-post.
+        let likeReads = bff.recordedRequests.filter { $0.path == "/engagement.v1.EngagementService/BatchGetLikes" }
+        #expect(likeReads.count == 1)
     }
 
-    @Test func likeRoundTripMutatesAuthoritativeCounts() async throws {
-        let (repository, _) = makeRepository()
+    /// ⚠️ A LIKE IS A POINT (#676): each like stakes one through
+    /// `wallet.Stake` and adds one to the count `BatchGetLikes` reads back.
+    /// There is no unlike.
+    @Test func eachLikeStakesAPointTheCountReadsBack() async throws {
+        let (repository, bff) = makeRepository()
         _ = try await repository.loadFirstPage() // resolves the viewer profile
-        let postID = PostID("post-0000")
+        let postID = try #require(MockSocialDataset().posts.first {
+            MockSocialDataset().accountID(for: $0.authorProfileID) != MockAuthService.accountID
+        }).postID.asPostID
         let before = try await repository.likeCounts(for: [postID])[postID] ?? 0
 
-        try await repository.setLiked(true, for: postID)
+        try await repository.like(postID)
         #expect(try await repository.likeCounts(for: [postID])[postID] == before + 1)
+        try await repository.like(postID)
+        #expect(try await repository.likeCounts(for: [postID])[postID] == before + 2)
+        #expect(bff.recordedRequests.contains { $0.path == "/wallet.v1.WalletService/Stake" })
+        #expect(!bff.recordedRequests.contains { $0.path.contains("Reaction") })
+    }
 
-        // Idempotent per (post, viewer): a second upsert must not double-count.
-        try await repository.setLiked(true, for: postID)
-        #expect(try await repository.likeCounts(for: [postID])[postID] == before + 1)
-
-        try await repository.setLiked(false, for: postID)
-        #expect(try await repository.likeCounts(for: [postID])[postID] == before)
+    /// One's own post is refused (`OWN_CONTENT`): the like throws, so the
+    /// caller rolls back.
+    @Test func likingOnesOwnPostIsRefused() async throws {
+        let (repository, _) = makeRepository()
+        _ = try await repository.loadFirstPage()
+        let own = try #require(MockSocialDataset().posts.first {
+            MockSocialDataset().accountID(for: $0.authorProfileID) == MockAuthService.accountID
+        }).postID.asPostID
+        await #expect(throws: LikeRefused(outcome: .ownContent)) { try await repository.like(own) }
     }
 
     @Test func viewerProfileIsResolvedOnceViaAccountLookup() async throws {
@@ -197,4 +228,8 @@ struct FeedRepositoryTests {
         _ = try await repository.loadPost(ids[0])
         #expect(getPostCount(bff) == 2) // tap after warming hits the cache, no new fetch
     }
+}
+
+private extension String {
+    var asPostID: PostID { PostID(self) }
 }

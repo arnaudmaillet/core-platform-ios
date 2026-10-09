@@ -1072,6 +1072,7 @@ public nonisolated struct Profile_V1_VerificationRequestView: Sendable {
 
   public var category: Profile_V1_VerificationKind = .unspecified
 
+  /// Web links (`http(s)://`).
   public var documents: [String] = []
 
   public var status: Profile_V1_VerificationRequestStatus = .unspecified
@@ -1083,13 +1084,20 @@ public nonisolated struct Profile_V1_VerificationRequestView: Sendable {
 
   public var decidedAtMs: Int64 = 0
 
+  /// Media asset ids of the requester's private documents (#777); staff read
+  /// them through media's mesh-only `GetPrivateDocumentUrl`.
+  public var privateDocumentIds: [String] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 }
 
-/// Ask for a badge with 1–5 supporting documents (media keys). PRF-5001 if
-/// already verified, PRF-5002 if a request is pending.
+/// Ask for a badge with 1–5 pieces of evidence in all: web links and/or
+/// private documents (#777). PRF-5001 if already verified, PRF-5002 if a request
+/// is pending, PRF-9001 if a link is not `http(s)://` (or the count is not 1–5),
+/// PRF-5004 if a private document is not the caller's own ready
+/// `MEDIA_KIND_PRIVATE_DOCUMENT`, PRF-5005 (retryable) if media cannot be asked.
 public nonisolated struct Profile_V1_RequestVerificationRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1099,7 +1107,12 @@ public nonisolated struct Profile_V1_RequestVerificationRequest: Sendable {
 
   public var category: Profile_V1_VerificationKind = .unspecified
 
+  /// Web links: `http://` or `https://`, ≤ 512 characters each.
   public var documents: [String] = []
+
+  /// Media asset ids of `MEDIA_KIND_PRIVATE_DOCUMENT` uploads, READY. Kept
+  /// 30 days after the decision, then purged by media.
+  public var privateDocumentIds: [String] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -3006,7 +3019,7 @@ nonisolated extension Profile_V1_SetAccountTypeRequest: SwiftProtobuf.Message, S
 
 nonisolated extension Profile_V1_VerificationRequestView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".VerificationRequestView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}category\0\u{1}documents\0\u{1}status\0\u{1}reason\0\u{3}submitted_at_ms\0\u{3}decided_at_ms\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}category\0\u{1}documents\0\u{1}status\0\u{1}reason\0\u{3}submitted_at_ms\0\u{3}decided_at_ms\0\u{3}private_document_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3021,6 +3034,7 @@ nonisolated extension Profile_V1_VerificationRequestView: SwiftProtobuf.Message,
       case 5: try { try decoder.decodeSingularStringField(value: &self.reason) }()
       case 6: try { try decoder.decodeSingularInt64Field(value: &self.submittedAtMs) }()
       case 7: try { try decoder.decodeSingularInt64Field(value: &self.decidedAtMs) }()
+      case 8: try { try decoder.decodeRepeatedStringField(value: &self.privateDocumentIds) }()
       default: break
       }
     }
@@ -3048,6 +3062,9 @@ nonisolated extension Profile_V1_VerificationRequestView: SwiftProtobuf.Message,
     if self.decidedAtMs != 0 {
       try visitor.visitSingularInt64Field(value: self.decidedAtMs, fieldNumber: 7)
     }
+    if !self.privateDocumentIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.privateDocumentIds, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3059,6 +3076,7 @@ nonisolated extension Profile_V1_VerificationRequestView: SwiftProtobuf.Message,
     if lhs.reason != rhs.reason {return false}
     if lhs.submittedAtMs != rhs.submittedAtMs {return false}
     if lhs.decidedAtMs != rhs.decidedAtMs {return false}
+    if lhs.privateDocumentIds != rhs.privateDocumentIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -3066,7 +3084,7 @@ nonisolated extension Profile_V1_VerificationRequestView: SwiftProtobuf.Message,
 
 nonisolated extension Profile_V1_RequestVerificationRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".RequestVerificationRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}category\0\u{1}documents\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}category\0\u{1}documents\0\u{3}private_document_ids\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3077,6 +3095,7 @@ nonisolated extension Profile_V1_RequestVerificationRequest: SwiftProtobuf.Messa
       case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
       case 2: try { try decoder.decodeSingularEnumField(value: &self.category) }()
       case 3: try { try decoder.decodeRepeatedStringField(value: &self.documents) }()
+      case 4: try { try decoder.decodeRepeatedStringField(value: &self.privateDocumentIds) }()
       default: break
       }
     }
@@ -3092,6 +3111,9 @@ nonisolated extension Profile_V1_RequestVerificationRequest: SwiftProtobuf.Messa
     if !self.documents.isEmpty {
       try visitor.visitRepeatedStringField(value: self.documents, fieldNumber: 3)
     }
+    if !self.privateDocumentIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.privateDocumentIds, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3099,6 +3121,7 @@ nonisolated extension Profile_V1_RequestVerificationRequest: SwiftProtobuf.Messa
     if lhs.profileID != rhs.profileID {return false}
     if lhs.category != rhs.category {return false}
     if lhs.documents != rhs.documents {return false}
+    if lhs.privateDocumentIds != rhs.privateDocumentIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

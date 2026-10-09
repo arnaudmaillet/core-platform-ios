@@ -232,23 +232,24 @@ public final class PostDetailViewModel {
 
     public var engagementState: EngagementState { engagement }
 
-    /// Optimistic like toggle: flip immediately, roll back if the server
-    /// rejects. One in-flight mutation at a time.
-    public func toggleLike() {
+    /// Optimistic like: one point on the post (#676), shown at once, taken
+    /// back if it does not land. Final — there is no unlike. One in flight
+    /// at a time.
+    public func like() {
         guard let engagementProvider, let postID, !likeInFlight else { return }
-        engagement.isLiked.toggle()
-        engagement.likeCount = max(0, engagement.likeCount + (engagement.isLiked ? 1 : -1))
+        let wasLiked = engagement.isLiked
+        engagement.isLiked = true
+        engagement.likeCount += 1
         likeInFlight = true
         onEngagementChange?(engagement)
 
-        let liked = engagement.isLiked
         Task { [weak self] in
             guard let self else { return }
             do {
-                try await engagementProvider.setLiked(liked, for: postID)
+                try await engagementProvider.like(postID)
             } catch {
-                self.engagement.isLiked = !liked
-                self.engagement.likeCount = max(0, self.engagement.likeCount + (liked ? -1 : 1))
+                self.engagement.isLiked = wasLiked
+                self.engagement.likeCount = max(0, self.engagement.likeCount - 1)
                 self.onEngagementChange?(self.engagement)
             }
             self.likeInFlight = false

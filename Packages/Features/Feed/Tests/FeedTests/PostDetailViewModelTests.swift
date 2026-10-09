@@ -25,12 +25,12 @@ private final class DetailFeedProvider: FeedProviding, @unchecked Sendable {
 }
 
 private final class SpyEngagement: EngagementProviding, @unchecked Sendable {
-    var setLikedError: Error?
+    var likeError: Error?
     private let lock = NSLock()
-    private(set) var calls: [(liked: Bool, id: PostID)] = []
-    func setLiked(_ liked: Bool, for postID: PostID) async throws {
-        lock.withLock { calls.append((liked, postID)) }
-        if let setLikedError { throw setLikedError }
+    private(set) var calls: [PostID] = []
+    func like(_ postID: PostID) async throws {
+        lock.withLock { calls.append(postID) }
+        if let likeError { throw likeError }
     }
     func likeCounts(for postIDs: [PostID]) async throws -> [PostID: Int64] { [:] }
 }
@@ -121,7 +121,8 @@ struct PostDetailViewModelTests {
         }
     }
 
-    @Test func toggleLikeIsOptimisticAndCallsEngagement() async {
+    /// A like is a point (#676): shown at once, committed, never undone.
+    @Test func aLikeIsOptimisticAndCallsEngagement() async {
         let engagement = SpyEngagement()
         let viewModel = PostDetailViewModel(
             postID: PostID("post-1"),
@@ -133,16 +134,16 @@ struct PostDetailViewModelTests {
         viewModel.viewDidLoad()
         await settle()
 
-        viewModel.toggleLike()
+        viewModel.like()
         #expect(lastEngagement == .init(likeCount: 11, isLiked: true))
 
         await settle()
-        #expect(engagement.calls.map(\.liked) == [true])
+        #expect(engagement.calls == [PostID("post-1")])
     }
 
     @Test func failedLikeRollsBack() async {
         let engagement = SpyEngagement()
-        engagement.setLikedError = LikeError()
+        engagement.likeError = LikeError()
         let viewModel = PostDetailViewModel(
             postID: PostID("post-1"),
             repository: DetailFeedProvider(.success(entry(likes: 10))),
@@ -153,7 +154,7 @@ struct PostDetailViewModelTests {
         viewModel.viewDidLoad()
         await settle()
 
-        viewModel.toggleLike()
+        viewModel.like()
         await settle()
 
         #expect(lastEngagement == .init(likeCount: 10, isLiked: false))
