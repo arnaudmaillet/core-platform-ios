@@ -142,7 +142,7 @@ struct ConversationThreadViewControllerTests {
     /// last chip gone under the header — none at the conversation's start.
     /// A tap scrolls to that day's chip. Each day is its own item under its
     /// own identifier, so a change of day morphs.
-    @Test func theDayIsABarItemLeftOfTheBell() throws {
+    @Test func theDayIsABarItemLeftOfTheBell() async throws {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
@@ -195,6 +195,12 @@ struct ConversationThreadViewControllerTests {
         #expect(middle.item !== tail.item, "the day was retitled in place: no morph")
         #expect(middle.item.identifier == ConversationThreadViewController.dayItemID(yesterday))
         #expect(middle.item.identifier != tail.item.identifier)
+        // ⚠️ In the bar a turn later (#756): placed from inside a diffable
+        // apply, it lost UIKit's appearance transition and morph.
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(screen.debugDayItem.inBar)
+        #expect(screen.navigationItem.rightBarButtonItems?.last === middle.item, "the day is not left of the bell")
+        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === tail.item }, "both days in the bar")
 
         // At the start of the conversation no chip has gone under: no item.
         stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)

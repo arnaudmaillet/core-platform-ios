@@ -332,6 +332,9 @@ struct ConversationThreadSendAndMuteTests {
             screen.view.layoutIfNeeded()
             return screen.debugConfiguredIDs.contains("t1")
         })
+        // ⚠️ A SWAP, NOT A CHANGE (#756): animated, the pending row and its
+        // delivered one cross-faded — the row and its avatar dimmed.
+        #expect(screen.debugLastApplyAnimated == false, "the swap cross-faded")
         let landed = try #require(cell("Message p1", in: screen))
         #expect(!landed.isScalingOutSpinner, "the delivered row played the delivery twice")
         #expect(!landed.sendingSpinnerView.isAnimating)

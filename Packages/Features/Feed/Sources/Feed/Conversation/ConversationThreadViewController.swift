@@ -262,8 +262,15 @@ final class ConversationThreadViewController: UIViewController {
             dayShown = day
             let old = dayItem
             dayItem = makeDayItem(day)
-            // A change of day while it shows morphs, glass to glass.
-            if dayItemShown { placeMuteItem(replacing: old, animated: true) }
+            // A change of day while it shows morphs, glass to glass — on the
+            // next turn, out of any `performWithoutAnimation` (see
+            // `showDayItem`).
+            if dayItemShown {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.dayItemShown else { return }
+                    self.placeMuteItem(replacing: old, animated: true)
+                }
+            }
         }
         showDayItem(true)
     }
@@ -311,8 +318,15 @@ final class ConversationThreadViewController: UIViewController {
     private func showDayItem(_ shown: Bool) {
         guard shown != dayItemShown else { return }
         dayItemShown = shown
-        // UIKit's own bar-item appearance, not a pop (#755) — once on screen.
-        placeMuteItem(animated: view.window != nil)
+        guard view.window != nil else { return placeMuteItem() }
+        // UIKit's own bar-item appearance, not a pop (#755) — on the NEXT
+        // turn (#756): this runs from scrolls and layouts that a diffable
+        // `apply(animatingDifferences: false)` drives inside
+        // `performWithoutAnimation`, which swallowed the transition.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.dayItemShown == shown else { return }
+            self.placeMuteItem(animated: true)
+        }
     }
 
     /// Scrolls to the start of the bar's day — its chip in the flow, then
@@ -335,9 +349,10 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// Whether the bar's day shows, and what it says. Tests.
-    var debugDayItem: (shown: Bool, title: String?, item: UIBarButtonItem) {
-        let shown = navigationItem.rightBarButtonItems?.contains { $0 === dayItem } ?? false
-        return (shown, dayItem.title, dayItem)
+    /// `inBar`: whether the bar holds it yet — a turn after `shown`.
+    var debugDayItem: (shown: Bool, title: String?, item: UIBarButtonItem, inBar: Bool) {
+        let inBar = navigationItem.rightBarButtonItems?.contains { $0 === dayItem } ?? false
+        return (dayItemShown, dayItem.title, dayItem, inBar)
     }
 
     /// What a tap on the bar's day does. Tests.
@@ -784,8 +799,11 @@ final class ConversationThreadViewController: UIViewController {
         // with the message under the reader's eye held where it is.
         let anchor = olderHistoryAnchor(for: phase)
         // A pending row turning into its delivered message is a swap, not a
-        // change: animated, the two cross-fade (#719).
-        applySnapshot(animated: hasRenderedContent && anchor == nil && deliveredIDs.isEmpty)
+        // change: animated, the two cross-fade (#719). ⚠️ `swappedIDs`, not
+        // `deliveredIDs`: a delivery that landed mid-rise plays on the
+        // pending row and never enters `deliveredIDs` — and its swap
+        // cross-faded, a dim on the row and its avatar (#756).
+        applySnapshot(animated: hasRenderedContent && anchor == nil && swappedIDs.isEmpty)
         if let anchor { hold(anchor) }
         guard case .content(let messages) = phase else { return }
         hasRenderedContent = true
@@ -849,8 +867,12 @@ final class ConversationThreadViewController: UIViewController {
             }
             snapshot.reconfigureItems(stale)
         }
+        debugLastApplyAnimated = animated
         dataSource.apply(snapshot, animatingDifferences: animated)
     }
+
+    /// Whether the last render animated its differences. Tests.
+    private(set) var debugLastApplyAnimated: Bool?
 
     private func isAwaitingDelivery(_ message: ConversationThreadMessage) -> Bool {
         message.isMine && message.media == nil && message.delivery != .sent
