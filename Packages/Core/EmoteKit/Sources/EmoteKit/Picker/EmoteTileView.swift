@@ -112,12 +112,45 @@ public final class EmoteTileView: UIView {
             return
         }
         guard prefersAnimation || !emote.isUnicodeEmoji else { return }
+        // ⚠️ NOTHING BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): the slot
+        // stays empty — no system glyph standing in — and the art arrives
+        // with a bounce. The glyph comes back only if no art does.
+        glyphLabel.isHidden = true
+        var answeredAtOnce = true
         request = engine.requestArt(for: emote, pixelSide: Self.pixelSide, motion: motion) { [weak self] art in
             guard let self, self.emote?.id == emote.id else { return }
             self.request = nil
-            if let art { self.present(art, motion: motion) }
+            if let art {
+                self.present(art, motion: motion)
+                if !answeredAtOnce { self.bounceIn() }
+            } else {
+                self.glyphLabel.isHidden = false
+            }
+        }
+        answeredAtOnce = false
+    }
+
+    /// The art arriving after the tile showed: from nothing, past its size
+    /// and back, fading in (#731).
+    private func bounceIn() {
+        guard window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
+        isBouncingIn = true
+        player.layer.removeAllAnimations()
+        player.alpha = 0
+        player.transform = CGAffineTransform(scaleX: 0.3, y: 0.3)
+        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.55,
+                       initialSpringVelocity: 0.6, options: [.allowUserInteraction]) {
+            self.player.alpha = 1
+            self.player.transform = .identity
+        } completion: { _ in
+            self.isBouncingIn = false
         }
     }
+
+    /// Whether the art is arriving with its bounce. Internal for tests.
+    private(set) var isBouncingIn = false
+    /// Whether the system glyph shows. Internal for tests.
+    var showsGlyph: Bool { !glyphLabel.isHidden }
 
     /// Dresses the art still on its poster frame, and plays it from there if
     /// the owner wants it moving.
@@ -146,6 +179,13 @@ public final class EmoteTileView: UIView {
         } else {
             hold()
         }
+    }
+
+    /// A tile meant to play that was denied a slot tries again (#731): the
+    /// panel plays at rest, so no start comes along to retry it.
+    func retryPlay() {
+        guard isPlaying, !holdsSlot else { return }
+        play()
     }
 
     /// Plays on from the frame on show, if a slot is free. A loop being
@@ -205,6 +245,10 @@ public final class EmoteTileView: UIView {
         request = nil
         player.setArt(nil)
         player.isHidden = true
+        player.layer.removeAllAnimations()
+        player.alpha = 1
+        player.transform = .identity
+        isBouncingIn = false
         glyphLabel.isHidden = false
         isShowingArt = false
         artMoves = false

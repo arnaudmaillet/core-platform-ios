@@ -84,6 +84,10 @@ public final class EmotePickerView: UIInputView {
         )
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: Self.makeLayout())
         playback = EmoteScrollPlayback(collectionView: collectionView)
+        // The keyboard's emotes loop from the moment they show (#731), within
+        // the slot budget — the owner's call over #559's still-at-rest rule,
+        // which the strip and the feed's rail keep.
+        playback.playsAtRest = true
         super.init(
             frame: CGRect(x: 0, y: 0, width: 0, height: panelHeight),
             inputViewStyle: .keyboard
@@ -319,7 +323,7 @@ extension EmotePickerView: UICollectionViewDataSource, UICollectionViewDelegate 
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: EmoteTileCell.reuseID, for: indexPath)
         (cell as? EmoteTileCell)?.configure(
             sections[indexPath.section].emotes[indexPath.item], engine: engine,
-            prefersAnimation: true, playing: playback.isScrolling
+            prefersAnimation: true, playing: playback.dressesPlaying
         )
         return cell
     }

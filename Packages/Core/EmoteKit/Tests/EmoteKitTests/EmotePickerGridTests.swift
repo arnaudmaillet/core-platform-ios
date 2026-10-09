@@ -23,10 +23,17 @@ struct EmotePickerGridTests {
         return engine
     }
 
-    private func hosted(_ engine: EmoteEngine, recents: [Emote] = []) -> (EmotePickerView, UIWindow) {
+    /// `playsAtRest: false` hosts the panel on the strip's and the rail's
+    /// rule (#559: play while scrolling, finish the loop, rest) — the shared
+    /// `EmoteScrollPlayback` rules are pinned through it; the keyboard itself
+    /// plays at rest (#731).
+    private func hosted(
+        _ engine: EmoteEngine, recents: [Emote] = [], playsAtRest: Bool = true
+    ) -> (EmotePickerView, UIWindow) {
         let window = UIWindow(frame: CGRect(origin: .zero, size: CGSize(width: 402, height: 874)))
         window.isHidden = false
         let panel = EmotePickerView(engine: engine)
+        panel.scrollPlaybackForTesting.playsAtRest = playsAtRest
         panel.reload(recents: recents)
         panel.frame = CGRect(origin: CGPoint(x: 0, y: 874 - Self.panelSize.height), size: Self.panelSize)
         window.addSubview(panel)
@@ -148,32 +155,79 @@ struct EmotePickerGridTests {
 
     // MARK: - What plays
 
-    /// At rest no tile plays and none holds a slot; every displayed tile is
-    /// on its poster frame.
-    @Test func atRestNoTilePlays() throws {
+    /// ⚠️ THE KEYBOARD'S EMOTES LOOP FROM THE MOMENT THEY SHOW (#731, the
+    /// owner's call over #559's still-at-rest rule): at rest every displayed
+    /// tile plays, each holding a slot, and tiles a jump brings in play too.
+    @Test func atRestTheKeyboardsTilesLoop() throws {
         let engine = warmEngine(art: EmoteStripTests.sheetArt(frames: 8, step: 0.1, blank: 2))
         let (panel, window) = hosted(engine)
         defer { tearDown(window) }
         let tiles = panel.displayedTiles
         try #require(!tiles.isEmpty)
         #expect(!panel.isScrolling)
-        #expect(tiles.allSatisfy { $0.isShowingArt && !$0.isAnimating && $0.player.isPaused })
-        #expect(tiles.allSatisfy { $0.player.displayedFrame == 2 }, "the poster, not a blank opening frame")
-        #expect(engine.playingTileCount == 0)
+        #expect(tiles.allSatisfy { $0.isAnimating }, "a tile at rest is still")
+        #expect(engine.playingTileCount == tiles.count)
 
-        // Tiles brought in by a jump set in code are still too.
         scroll(panel, to: 900)
         let shown = panel.displayedTiles
         try #require(!shown.isEmpty)
-        #expect(shown.allSatisfy { $0.isShowingArt && !$0.isAnimating })
+        #expect(shown.allSatisfy { $0.isAnimating }, "a tile brought in by a jump is still")
+        #expect(engine.playingTileCount == shown.count, "the slots follow the screen")
     }
+
+    /// A scroll's end does not still them: the loops go on.
+    @Test func aScrollsEndLeavesTheKeyboardLooping() async throws {
+        let engine = warmEngine(art: EmoteStripTests.sheetArt(frames: 20, step: 0.03))
+        let (panel, window) = hosted(engine)
+        defer { tearDown(window) }
+        let grid = panel.collectionView
+        panel.scrollViewWillBeginDragging(grid)
+        panel.scrollViewDidEndDecelerating(grid)
+        let tile = try #require(panel.displayedTiles.first)
+        #expect(tile.isAnimating)
+        #expect(!tile.player.isFinishingLoop, "the loop is being played out to a rest")
+        // Still moving well after a loop's length.
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(tile.isAnimating, "the tile came to rest")
+    }
+
+    /// The budget still caps them; a tile denied a slot tries again when
+    /// the grid moves.
+    @Test func theBudgetStillCapsTheKeyboard() throws {
+        let engine = warmEngine()
+        engine.maxPlayingTiles = 3
+        let (panel, window) = hosted(engine)
+        defer { tearDown(window) }
+        try #require(panel.displayedTiles.count > 3, "more tiles than slots")
+        #expect(panel.displayedTiles.filter(\.isAnimating).count == 3)
+        #expect(engine.playingTileCount == 3)
+        scroll(panel, to: 900)
+        let grid = panel.collectionView
+        panel.scrollViewWillBeginDragging(grid)
+        panel.scrollViewDidEndDecelerating(grid)
+        #expect(engine.playingTileCount <= 3)
+        #expect(panel.displayedTiles.filter(\.isAnimating).count == engine.playingTileCount,
+                "a slot is held by a tile off screen")
+    }
+
+    /// Leaving the window holds nothing: no slot, no art.
+    @Test func leavingTheWindowReleasesEverySlot() throws {
+        let engine = warmEngine()
+        let (panel, window) = hosted(engine)
+        defer { tearDown(window) }
+        try #require(engine.playingTileCount > 0)
+        panel.removeFromSuperview()
+        #expect(engine.playingTileCount == 0, "a keyboard taken down kept playing")
+    }
+
+    // MARK: - The shared rule (#559), through a panel hosted on it
 
     /// From the drag's start to the end of the glide every displayed tile
     /// plays — the whole screen of them, the ones scrolled in meanwhile too;
     /// once the grid stops, none.
     @Test func displayedTilesPlayOnlyWhileTheGridScrolls() async throws {
         let engine = warmEngine()
-        let (panel, window) = hosted(engine)
+        let (panel, window) = hosted(engine, playsAtRest: false)
         defer { tearDown(window) }
         let grid = panel.collectionView
 
@@ -213,7 +267,7 @@ struct EmotePickerGridTests {
         // #559: an emote never stops posed mid-gesture. A 0.6 s loop keeps
         // the wait short; frames are waited for, never timed.
         let frames = 20
-        let (panel, window) = hosted(warmEngine(art: EmoteStripTests.sheetArt(frames: frames, step: 0.03)))
+        let (panel, window) = hosted(warmEngine(art: EmoteStripTests.sheetArt(frames: frames, step: 0.03)), playsAtRest: false)
         defer { tearDown(window) }
         let grid = panel.collectionView
         let tile = try #require(panel.displayedTiles.first)
@@ -244,7 +298,7 @@ struct EmotePickerGridTests {
     /// Scrolling again before the loop ends just carries on: no restart.
     @Test func scrollingAgainBeforeTheLoopEndsCarriesOn() async throws {
         let frames = 20
-        let (panel, window) = hosted(warmEngine(art: EmoteStripTests.sheetArt(frames: frames, step: 0.03)))
+        let (panel, window) = hosted(warmEngine(art: EmoteStripTests.sheetArt(frames: frames, step: 0.03)), playsAtRest: false)
         defer { tearDown(window) }
         let grid = panel.collectionView
         let tile = try #require(panel.displayedTiles.first)
@@ -271,7 +325,7 @@ struct EmotePickerGridTests {
     /// A touch that stops the glide tells the delegate nothing; the grid
     /// still comes to rest.
     @Test func aStoppedGlideComesToRestWithoutADelegateCall() async throws {
-        let (panel, window) = hosted(warmEngine())
+        let (panel, window) = hosted(warmEngine(), playsAtRest: false)
         defer { tearDown(window) }
         panel.scrollViewWillBeginDragging(panel.collectionView)
         #expect(panel.displayedTiles.allSatisfy { $0.isAnimating })
