@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import DesignSystem
 import FeedInterface
@@ -115,6 +116,20 @@ final class ConversationThreadViewController: UIViewController {
     /// while the swap waited for its rise: they land plainly (#725).
     private var deliveredEarly: Set<String> = []
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
+
+    // MARK: The relation (#752)
+
+    /// The pill's relation glyph, as a vertical post's author pill draws it:
+    /// "+" (a tap follows), following, friends. Nil graphs draw none.
+    private let socialGraph: (any SocialGraphWriting)?
+    private let followRelations: (any SocialGraphReading)?
+    private var peerRelation: FollowRelation?
+    /// Whom `peerRelation` was asked for, so a peer is asked once.
+    private var relationAskedFor: ProfileID?
+    private var followInFlight = false
+    /// Bumped by every ask and every follow: an answer from before either
+    /// is stale — a read sent before a follow undid the follow (#752).
+    private var relationGeneration = 0
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
     /// First content arrived before the stream had a height to pin against —
@@ -139,12 +154,16 @@ final class ConversationThreadViewController: UIViewController {
         driver: any ConversationThreadDriving,
         mode: ConversationThreadMode,
         prefill: String,
-        imagePipeline: ImagePipeline
+        imagePipeline: ImagePipeline,
+        socialGraph: (any SocialGraphWriting)? = nil,
+        followRelations: (any SocialGraphReading)? = nil
     ) {
         self.driver = driver
         self.mode = mode
         self.prefill = prefill
         self.imagePipeline = imagePipeline
+        self.socialGraph = socialGraph
+        self.followRelations = followRelations
         super.init(nibName: nil, bundle: nil)
         // In the initializer: a navigation controller reads it when the push
         // begins, and `viewDidLoad` can run inside that same push.
@@ -183,6 +202,8 @@ final class ConversationThreadViewController: UIViewController {
         // Before the bars first lay it out, not only after: a budget that
         // arrives late is a bar that has already collapsed into a `•••`.
         fitTrailingRun()
+        // Back from their profile, the relation may have moved.
+        resolvePeerRelation(refresh: true)
     }
 
     override func viewIsAppearing(_ animated: Bool) {
@@ -223,62 +244,129 @@ final class ConversationThreadViewController: UIViewController {
     /// below the bar's bottom: the stream's own top breath (#750).
     static var dayStartLanding: CGFloat { SnapCommentsLayout.streamTopBreath }
 
-    /// The day on screen, as a bar item left of the bell (#750) — the
-    /// thread's ONE day chip: a system glass bubble, interactive. A tap
-    /// scrolls to that day's first message, as a search section's pill does.
-    private lazy var dayItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            title: nil, image: nil,
-            primaryAction: UIAction { [weak self] _ in self?.scrollToDayStart() }
-        )
-        item.tintColor = .label
-        return item
-    }()
+    /// The day on screen, as a bar item left of the bell (#750): a system
+    /// glass bubble, interactive. A tap scrolls to that day's first message,
+    /// as a search section's pill does. The flow keeps its own day chips,
+    /// unpinned (#755).
+    ///
+    /// ⚠️ ONE ITEM PER DAY, EACH WITH ITS OWN IDENTIFIER (#755), as the bell
+    /// (#729): a title edited in place swaps in a frame; a new item under a
+    /// new identifier gets the native Liquid Glass morph.
+    private var dayItem = UIBarButtonItem()
     private let daySpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     private var dayItemShown = false
     private var dayShown: Date?
 
-    /// The day of the first message under the bar.
+    /// The day of the last chip gone under the header; none before one has.
     private func syncDayItem() {
         guard mode == .full else { return }
         guard hasRenderedContent, let day = dayOnScreen() else { return showDayItem(false) }
         if day != dayShown {
             dayShown = day
-            let title = DayTitleFormatter.title(for: day)
-            dayItem.title = title
-            dayItem.accessibilityLabel = title
-            dayItem.accessibilityHint = "Scrolls to the first message of the day"
+            dayItem = makeDayItem(day)
+            // A change of day while it shows morphs, glass to glass.
+            if dayItemShown { scheduleDayPlacement() }
         }
         showDayItem(true)
     }
 
+    /// Puts the bar's day where the state says, ONCE, on the next turn
+    /// (#756):
+    /// - the next turn: this runs from scrolls and layouts that a diffable
+    ///   `apply(animatingDifferences: false)` drives inside
+    ///   `performWithoutAnimation`, which swallowed the transition;
+    /// - once: opening on a long thread, the item appears and changes day in
+    ///   the same turn, and a second `setRightBarButtonItems` cut the first
+    ///   one's appearance short — the item popped in on the device.
+    private func scheduleDayPlacement() {
+        guard view.window != nil else { return placeMuteItem() }
+        guard !dayPlacementScheduled else { return }
+        dayPlacementScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            self?.placeDayAfterTransition()
+        }
+    }
+
+    /// ⚠️ NOT DURING A PUSH (#756): items set while the bar is in its push
+    /// transition land with it, unanimated, when it ends — the day popped in
+    /// on the device just after the push. A placement due mid-transition
+    /// waits for its end, then animates.
+    private func placeDayAfterTransition() {
+        // A coordinator that does not queue the completion (`false`) would
+        // leave the placement pending for good — every later day change
+        // returning early: place it now instead.
+        if let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               // Off the completion's turn, which still belongs to the transition.
+               DispatchQueue.main.async { self?.placeDayAfterTransition() }
+           }) {
+            return
+        }
+        dayPlacementScheduled = false
+        placeMuteItem(animated: true)
+    }
+
+    private var dayPlacementScheduled = false
+
+    private func makeDayItem(_ day: Date) -> UIBarButtonItem {
+        let title = DayTitleFormatter.title(for: day)
+        let item = UIBarButtonItem(
+            title: title, image: nil,
+            primaryAction: UIAction { [weak self] _ in self?.scrollToDayStart() }
+        )
+        item.identifier = Self.dayItemID(day)
+        item.tintColor = .label
+        item.accessibilityLabel = title
+        item.accessibilityHint = "Scrolls to the first message of the day"
+        return item
+    }
+
+    static func dayItemID(_ day: Date) -> String {
+        "conversation.day.\(Int(day.timeIntervalSince1970))"
+    }
+
+    /// ⚠️ THE DAY OF THE LAST CHIP THAT WENT UNDER THE HEADER (#755, the
+    /// owner's call 2026-10-09), not the day of the first message: the bar
+    /// takes over a chip once it has scrolled away. At the start of the
+    /// conversation no chip has gone under yet, so there is no item; on a
+    /// long conversation opened at its tail, it is the current day's.
     private func dayOnScreen() -> Date? {
         let line = view.safeAreaInsets.top
         let probe = collectionView.convert(CGPoint(x: collectionView.bounds.midX, y: line), from: view)
-        let below = collectionView.indexPathsForVisibleItems.sorted().first { path in
-            guard let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { return false }
-            return frame.maxY > probe.y
+        let sections = dataSource.snapshot().sectionIdentifiers
+        var passed: Date?
+        for (index, section) in sections.enumerated() {
+            guard case .day(let day) = section,
+                  let chip = collectionView.layoutAttributesForSupplementaryElement(
+                      ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: index)
+                  )?.frame
+            else { continue }
+            // Under the header once its middle is past the bar's bottom.
+            guard chip.midY <= probe.y else { break }
+            passed = day
         }
-        guard let path = below, case .day(let day) = dataSource.sectionIdentifier(for: path.section) else {
-            return nil
-        }
-        return day
+        return passed
     }
 
     private func showDayItem(_ shown: Bool) {
         guard shown != dayItemShown else { return }
         dayItemShown = shown
-        placeMuteItem()
+        // UIKit's own bar-item appearance, not a pop (#755, #756).
+        scheduleDayPlacement()
     }
 
-    /// Scrolls to the first message of the bar's day, landing just below
-    /// the bar (#750).
+    /// Scrolls to the start of the bar's day — its chip in the flow, then
+    /// its first message — landing just below the bar (#750, #755).
     private func scrollToDayStart() {
         guard let day = dayShown,
               let section = dataSource.snapshot().sectionIdentifiers.firstIndex(of: .day(day)),
-              collectionView.numberOfItems(inSection: section) > 0,
-              let frame = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: section))?.frame
+              collectionView.numberOfItems(inSection: section) > 0
         else { return }
+        let start = IndexPath(item: 0, section: section)
+        let chip = collectionView.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: start
+        )?.frame
+        guard let frame = chip ?? collectionView.layoutAttributesForItem(at: start)?.frame else { return }
         let landing = view.safeAreaInsets.top + Self.dayStartLanding
         let insets = collectionView.adjustedContentInset
         let maxOffset = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
@@ -287,9 +375,10 @@ final class ConversationThreadViewController: UIViewController {
     }
 
     /// Whether the bar's day shows, and what it says. Tests.
-    var debugDayItem: (shown: Bool, title: String?) {
-        let shown = navigationItem.rightBarButtonItems?.contains { $0 === dayItem } ?? false
-        return (shown, dayItem.title)
+    /// `inBar`: whether the bar holds it yet — a turn after `shown`.
+    var debugDayItem: (shown: Bool, title: String?, item: UIBarButtonItem, inBar: Bool) {
+        let inBar = navigationItem.rightBarButtonItems?.contains { $0 === dayItem } ?? false
+        return (dayItemShown, dayItem.title, dayItem, inBar)
     }
 
     /// What a tap on the bar's day does. Tests.
@@ -345,12 +434,8 @@ final class ConversationThreadViewController: UIViewController {
             section.contentInsets = NSDirectionalEdgeInsets(
                 top: 0, leading: Spacing.lg, bottom: 0, trailing: Spacing.lg
             )
-            // ⚠️ ONE DAY CHIP ON A FULL THREAD (#750, the owner's call
-            // 2026-10-09): no chip in the flow — the bar's day item says
-            // which day is on screen. A peek has no bar, so it keeps its
-            // pinned chips.
-            if policy.daySections, !isFull {
-                // The day chip, pinned while its day's rows scroll under it.
+            if policy.daySections {
+                // The day chip where each day starts.
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: NSCollectionLayoutSize(
                         widthDimension: .fractionalWidth(1), heightDimension: .estimated(36)
@@ -358,7 +443,11 @@ final class ConversationThreadViewController: UIViewController {
                     elementKind: DayPillHeaderView.elementKind,
                     alignment: .top
                 )
-                header.pinToVisibleBounds = true
+                // ⚠️ NOT STICKY ON A FULL THREAD (#755, the owner's call
+                // 2026-10-09): the chip scrolls with its day; the bar's day
+                // item says which day is on screen. A peek has no bar, so
+                // its chip stays pinned.
+                header.pinToVisibleBounds = !isFull
                 header.zIndex = 2
                 section.boundarySupplementaryItems = [header]
             }
@@ -533,6 +622,7 @@ final class ConversationThreadViewController: UIViewController {
         peerPill.setFollowBadge(.none)
         peerPill.setOverMedia(false)
         peerPill.onAuthorTapped = { [weak self] _ in self?.driver.didTapIdentity() }
+        peerPill.onFollowTapped = { [weak self] id in self?.followPeer(id) }
         // The pill is the toolbar's (#671); a preview (no toolbar) keeps it
         // in the bar.
         var items = pillRidesToolbar ? [] : [UIBarButtonItem(customView: peerPill)]
@@ -544,18 +634,36 @@ final class ConversationThreadViewController: UIViewController {
     /// The bell takes the corner, right of the points badge (#719): `[0]` is
     /// the trailing edge, and a fixed space keeps the two bubbles apart.
     private func placeMuteItem(replacing old: UIBarButtonItem? = nil, animated: Bool = false) {
-        var items = (navigationItem.rightBarButtonItems ?? [])
-            .filter { $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== dayItem && $0 !== daySpacer }
+        let current = navigationItem.rightBarButtonItems ?? []
+        var items = current.filter {
+            $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== daySpacer && !Self.isDayItem($0)
+        }
         // `[0]` is the trailing edge: the bell takes the corner, the day
         // stands left of it (#750).
         var trailing: [UIBarButtonItem] = []
         if mode == .full, muted != nil { trailing.append(muteItem) }
-        if mode == .full, dayItemShown {
+        // A day placement on its way, animated: an unanimated placement (the
+        // bell's first) leaves the day as it stands rather than popping it in.
+        let day = dayPlacementScheduled && !animated ? current.first(where: Self.isDayItem)
+            : (dayItemShown ? dayItem : nil)
+        if mode == .full, let day {
             if !trailing.isEmpty { trailing.append(daySpacer) }
-            trailing.append(dayItem)
+            trailing.append(day)
         }
         items = trailing + (items.isEmpty || trailing.isEmpty ? [] : [muteSpacer]) + items
+        // The same items again would restart — and cut short — a transition
+        // already running (#756).
+        guard items.count != current.count || zip(items, current).contains(where: { $0 !== $1 }) else { return }
+        if animated { debugAnimatedBarPlacements += 1 }
         navigationItem.setRightBarButtonItems(items, animated: animated)
+    }
+
+    /// How many animated placements the bar took. Tests.
+    private(set) var debugAnimatedBarPlacements = 0
+
+    /// Any day item — the one on show, or one a change of day replaced.
+    private static func isDayItem(_ item: UIBarButtonItem) -> Bool {
+        item.identifier?.hasPrefix("conversation.day.") == true
     }
 
     /// The bell for `muted`: a tap toggles, a long press offers how long
@@ -735,8 +843,11 @@ final class ConversationThreadViewController: UIViewController {
         // with the message under the reader's eye held where it is.
         let anchor = olderHistoryAnchor(for: phase)
         // A pending row turning into its delivered message is a swap, not a
-        // change: animated, the two cross-fade (#719).
-        applySnapshot(animated: hasRenderedContent && anchor == nil && deliveredIDs.isEmpty)
+        // change: animated, the two cross-fade (#719). ⚠️ `swappedIDs`, not
+        // `deliveredIDs`: a delivery that landed mid-rise plays on the
+        // pending row and never enters `deliveredIDs` — and its swap
+        // cross-faded, a dim on the row and its avatar (#756).
+        applySnapshot(animated: hasRenderedContent && anchor == nil && swappedIDs.isEmpty)
         if let anchor { hold(anchor) }
         guard case .content(let messages) = phase else { return }
         hasRenderedContent = true
@@ -800,8 +911,12 @@ final class ConversationThreadViewController: UIViewController {
             }
             snapshot.reconfigureItems(stale)
         }
+        debugLastApplyAnimated = animated
         dataSource.apply(snapshot, animatingDifferences: animated)
     }
+
+    /// Whether the last render animated its differences. Tests.
+    private(set) var debugLastApplyAnimated: Bool?
 
     private func isAwaitingDelivery(_ message: ConversationThreadMessage) -> Bool {
         message.isMine && message.media == nil && message.delivery != .sent
@@ -879,7 +994,10 @@ final class ConversationThreadViewController: UIViewController {
         cell.mediaView.configure(message.media, delivery: message.delivery, pipeline: imagePipeline)
         // A text message of the viewer's shows whether it is on its way
         // (#719); a failed one is sent again by a tap.
-        cell.setDelivery(message.isMine && message.media == nil ? message.delivery : nil)
+        cell.setDelivery(
+            message.isMine && message.media == nil ? message.delivery : nil,
+            time: Self.timeFormatter.string(from: message.sentAt)
+        )
         if message.isMine, message.media == nil, message.delivery == .failed {
             cell.row.onReplyTap = { [weak self] in self?.driver.retry(messageID) }
         }
@@ -953,9 +1071,14 @@ final class ConversationThreadViewController: UIViewController {
         peer = person
         // Named for VoiceOver, not drawn: no title in the bar.
         view.accessibilityLabel = person.name.isEmpty ? nil : "Conversation with \(person.name)"
+        // The @handle under the name once known (#752), as a vertical post's
+        // author pill wears it.
+        let meta = person.handle.map { "@\($0)" } ?? ""
         peerPill.setPerson(
-            id: person.id, name: person.name, meta: "", avatarURL: person.avatarURL, pipeline: imagePipeline
+            id: person.id, name: person.name, meta: meta, avatarURL: person.avatarURL, pipeline: imagePipeline
         )
+        if person.id != relationAskedFor { setPeerRelation(nil) }
+        resolvePeerRelation()
         fitTrailingRun()
         if hasRenderedContent { applySnapshot(animated: false) }
     }
@@ -1261,4 +1384,72 @@ extension ConversationThreadViewController: UICollectionViewDelegate {
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         flashPending()
     }
+}
+
+extension ConversationThreadViewController {
+    /// The correspondent pill's lines that show, top to bottom (#752). Tests.
+    var debugPeerPillLines: [String] {
+        func labels(in view: UIView) -> [UILabel] {
+            if view is MonogramAvatarView { return [] } // the face's initials
+            return (view as? UILabel).map { [$0] } ?? view.subviews.flatMap { labels(in: $0) }
+        }
+        return labels(in: peerPill)
+            .filter { !$0.isHidden && !($0.text ?? "").isEmpty }
+            .sorted { $0.convert($0.bounds, to: peerPill).minY < $1.convert($1.bounds, to: peerPill).minY }
+            .compactMap(\.text)
+    }
+}
+
+// MARK: - The correspondent's relation (#752)
+
+extension ConversationThreadViewController {
+    /// Asks the graph where the viewer stands with the correspondent: once
+    /// per peer, or again with `refresh`. The answer on show keeps drawing
+    /// until the new one lands.
+    func resolvePeerRelation(refresh: Bool = false) {
+        guard mode == .full, socialGraph != nil, let followRelations, let id = peer.id,
+              refresh || relationAskedFor != id, !followInFlight else { return }
+        relationAskedFor = id
+        relationGeneration += 1
+        let generation = relationGeneration
+        Task { [weak self] in
+            guard let relation = try? await followRelations.followRelation(to: id) else { return }
+            guard let self, self.peer.id == id, !self.followInFlight, self.relationGeneration == generation else { return }
+            self.setPeerRelation(relation)
+        }
+    }
+
+    private func setPeerRelation(_ relation: FollowRelation?) {
+        peerRelation = relation
+        let badge = relation.map(SnapAuthorIdentityView.FollowBadge.init) ?? .none
+        peerPill.setFollowBadge(badge, animated: view.window != nil)
+        fitTrailingRun()
+    }
+
+    /// The "+": follows the correspondent, optimistically, as the feed's
+    /// author pill does; a refusal puts the relation back.
+    func followPeer(_ id: ProfileID) {
+        MemberGates.perform(.follow(handle: peer.handle), from: self) { [weak self] in
+            self?.commitFollow(id)
+        }
+    }
+
+    private func commitFollow(_ id: ProfileID) {
+        guard let socialGraph, peer.id == id, !followInFlight, let before = peerRelation,
+              SnapAuthorIdentityView.FollowBadge(before) == .follow else { return }
+        followInFlight = true
+        relationGeneration += 1
+        setPeerRelation(before.settingFollow(true))
+        Task { [weak self] in
+            let accepted = (try? await socialGraph.setFollowing(true, for: id)) != nil
+            guard let self else { return }
+            self.followInFlight = false
+            if !accepted, self.peer.id == id { self.setPeerRelation(before) }
+            // The peer changed mid-follow: its relation was never asked.
+            if self.peer.id != id { self.resolvePeerRelation() }
+        }
+    }
+
+    /// The pill's relation glyph. Tests.
+    var debugPeerFollowBadge: SnapAuthorIdentityView.FollowBadge { peerPill.followBadge }
 }

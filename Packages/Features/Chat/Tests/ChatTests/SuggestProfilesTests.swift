@@ -91,6 +91,21 @@ struct SuggestProfilesRepositoryTests {
         #expect(Array(whole.prefix(2)) == first)
         #expect(whole.count <= SocialConnectionsRepository.suggestionLimit)
     }
+
+    /// A conversation's @handle (#752) comes from the same profile read as
+    /// its face: one `GetProfileById` for both.
+    @Test func theHandleAndTheFaceShareOneProfileRead() async throws {
+        let (baseline, _) = makeRepository()
+        let known = try #require(try await baseline.suggestions(limit: 1).first, "guard: a profile to read")
+
+        let (repository, bff) = makeRepository()
+        _ = await repository.avatarURLs(for: [known.id])
+        let handles = await repository.handles(for: [known.id, ProfileID("nobody")])
+
+        #expect(handles == [known.id: known.handle])
+        let reads = bff.recordedRequests.map(\.path).filter { $0.hasSuffix("/GetProfileById") }
+        #expect(reads.count == 2, "one read per profile, cached for the handle: \(reads)")
+    }
 }
 
 // MARK: - The view model: a page, then the whole list

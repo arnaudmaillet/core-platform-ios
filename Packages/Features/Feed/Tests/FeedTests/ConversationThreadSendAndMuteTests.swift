@@ -332,6 +332,9 @@ struct ConversationThreadSendAndMuteTests {
             screen.view.layoutIfNeeded()
             return screen.debugConfiguredIDs.contains("t1")
         })
+        // ⚠️ A SWAP, NOT A CHANGE (#756): animated, the pending row and its
+        // delivered one cross-faded — the row and its avatar dimmed.
+        #expect(screen.debugLastApplyAnimated == false, "the swap cross-faded")
         let landed = try #require(cell("Message p1", in: screen))
         #expect(!landed.isScalingOutSpinner, "the delivered row played the delivery twice")
         #expect(!landed.sendingSpinnerView.isAnimating)
@@ -370,5 +373,110 @@ struct ConversationThreadSendAndMuteTests {
         #expect(await settle { !delivered.isBouncingInTime })
         let time = try #require(delivered.row.headerTextLabel.text)
         #expect(time.hasPrefix("You · ") && time.count > "You · ".count, "the time did not come back: \(time)")
+    }
+
+    // MARK: - The correspondent's @handle (#752)
+
+    /// The pill wears the @handle under the name once it is known, as a
+    /// vertical post's author pill does; nothing under it before.
+    @Test func thePeerPillShowsTheHandleUnderTheName() {
+        let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava Moreau", avatarURL: nil))
+        window.layoutIfNeeded()
+        #expect(screen.debugPeerPillLines == ["Ava Moreau"], "\(screen.debugPeerPillLines)")
+        driver.onPeerChange?(ConversationThreadPerson(
+            id: ProfileID("them"), name: "Ava Moreau", avatarURL: nil, handle: "ava.moreau"
+        ))
+        window.layoutIfNeeded()
+        #expect(screen.debugPeerPillLines == ["Ava Moreau", "@ava.moreau"], "\(screen.debugPeerPillLines)")
+    }
+
+    /// Where the viewer stands with them, and the follows asked for.
+    private final class Graph: SocialGraphReading, SocialGraphWriting, @unchecked Sendable {
+        var relation: FollowRelation
+        var refuses = false
+        /// How long a read takes — a read still out when a follow lands.
+        var readDelay: Duration = .zero
+        private(set) var follows: [ProfileID] = []
+        init(_ relation: FollowRelation) { self.relation = relation }
+        func followRelation(to profileID: ProfileID) async throws -> FollowRelation {
+            let answer = relation
+            if readDelay > .zero { try? await Task.sleep(for: readDelay) }
+            return answer
+        }
+        func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
+            if refuses { throw CancellationError() }
+            if following { follows.append(profileID) }
+        }
+    }
+
+    private func makeScreen(graph: Graph) -> (ConversationThreadViewController, Driver, UIWindow) {
+        let driver = Driver(initial: .content([Self.message("m1", mine: false, minutes: 1)]), muted: false)
+        let screen = ConversationThreadViewController(
+            driver: driver, mode: .full, prefill: "",
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            socialGraph: graph, followRelations: graph
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = UINavigationController(rootViewController: screen)
+        window.isHidden = false
+        screen.view.layoutIfNeeded()
+        return (screen, driver, window)
+    }
+
+    /// ⚠️ A READ SENT BEFORE A FOLLOW NEVER UNDOES IT (#752): the screen
+    /// re-reads on every appearance, and its answer could land after the
+    /// follow it predates.
+    @Test func aStaleRelationAnswerNeverUndoesAFollow() async {
+        let graph = Graph(.notFollowing)
+        let (screen, driver, window) = makeScreen(graph: graph)
+        defer { window.isHidden = true }
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
+        #expect(await settle { screen.debugPeerFollowBadge == .follow })
+
+        graph.readDelay = .milliseconds(300)
+        screen.resolvePeerRelation(refresh: true)
+        screen.followPeer(ProfileID("them"))
+        #expect(await settle { graph.follows == [ProfileID("them")] })
+        try? await Task.sleep(for: .milliseconds(450))
+        #expect(screen.debugPeerFollowBadge == .following, "the read from before the follow put the + back")
+    }
+
+    /// A refused follow puts the "+" back.
+    @Test func aRefusedFollowPutsThePlusBack() async {
+        let graph = Graph(.notFollowing)
+        graph.refuses = true
+        let (screen, driver, window) = makeScreen(graph: graph)
+        defer { window.isHidden = true }
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
+        #expect(await settle { screen.debugPeerFollowBadge == .follow })
+        screen.followPeer(ProfileID("them"))
+        #expect(screen.debugPeerFollowBadge == .following, "no optimistic follow")
+        #expect(await settle { screen.debugPeerFollowBadge == .follow }, "the refusal stuck")
+    }
+
+    /// The pill draws the relation as a vertical post's author pill does —
+    /// someone who follows the viewer gets "+", and a tap makes friends.
+    @Test func thePeerPillDrawsTheRelationAndTheFollowFollows() async {
+        let graph = Graph(.followedBy)
+        let (screen, driver, window) = makeScreen(graph: graph)
+        defer { window.isHidden = true }
+
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava", avatarURL: nil))
+        #expect(await settle { screen.debugPeerFollowBadge == .follow }, "\(screen.debugPeerFollowBadge)")
+
+        screen.followPeer(ProfileID("them"))
+        #expect(screen.debugPeerFollowBadge == .friends, "following someone who follows back is a friend")
+        #expect(await settle { graph.follows == [ProfileID("them")] })
+    }
+
+    /// The rule is the post pill's own: one mapping for both.
+    @Test func theRelationMapsAsOnAPost() {
+        typealias Badge = SnapAuthorIdentityView.FollowBadge
+        #expect(Badge(.notFollowing) == .follow)
+        #expect(Badge(.following) == .following)
+        #expect(Badge(.mutual) == .friends)
+        #expect(Badge(.viewer) == .none)
     }
 }

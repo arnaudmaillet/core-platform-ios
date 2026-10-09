@@ -99,6 +99,32 @@ struct ConversationThreadDriverTests {
         #expect(peer?.id == ProfileID("them"))
     }
 
+    /// Faces and handles, as `SocialConnectionsRepository` reads them.
+    private struct Profiles: PeerAvatarProviding {
+        func avatarURLs(for ids: [ProfileID]) async -> [ProfileID: URL] { [:] }
+        func handles(for ids: [ProfileID]) async -> [ProfileID: String] {
+            ids.contains(ProfileID("them")) ? [ProfileID("them"): "ava.moreau"] : [:]
+        }
+    }
+
+    /// The peer's @handle (#752) arrives from their profile, for a
+    /// conversation and for a draft alike.
+    @Test(arguments: [false, true])
+    func thePeerGainsTheirHandle(draft: Bool) async {
+        let stub = Stub(messages: Self.seed)
+        let viewModel = draft
+            ? ConversationViewModel(target: .draft(peer: ProfileID("them"), displayName: "Ava"), repository: stub)
+            : ConversationViewModel(conversationID: ConversationID("c1"), repository: stub)
+        let driver = ConversationThreadDriver(viewModel: viewModel, viewer: stub, avatars: Profiles())
+        var peer: ConversationThreadPerson?
+        driver.onPeerChange = { peer = $0 }
+        driver.viewDidLoad()
+        await settle { peer?.handle != nil }
+        #expect(peer?.handle == "ava.moreau")
+        #expect(peer?.name == "Ava")
+        #expect(peer?.id == ProfileID("them"))
+    }
+
     @Test func actionsReachTheViewModel() async {
         let (stub, driver) = makeDriver()
         var last: [ConversationThreadMessage] = []

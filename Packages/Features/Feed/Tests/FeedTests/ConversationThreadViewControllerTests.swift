@@ -137,13 +137,17 @@ struct ConversationThreadViewControllerTests {
         #expect(stream.topEdgeEffect.isHidden, "a blur under the header")
     }
 
-    /// ⚠️ THE DAY IS A BAR ITEM LEFT OF THE BELL (#750): the thread's one
-    /// day chip, none in the flow; a tap scrolls to the day's first message.
-    @Test func theDayIsABarItemLeftOfTheBell() throws {
+    /// ⚠️ THE DAY IS A BAR ITEM LEFT OF THE BELL (#750), and the flow keeps
+    /// its own day chips, NOT sticky (#755). The item says the day of the
+    /// last chip gone under the header — none at the conversation's start.
+    /// A tap scrolls to that day's chip. Each day is its own item under its
+    /// own identifier, so a change of day morphs.
+    @Test func theDayIsABarItemLeftOfTheBell() async throws {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
         let messages = (0..<60).map { index -> ConversationThreadMessage in
-            let day = index < 30 ? calendar.date(byAdding: .day, value: -1, to: today)! : today
+            let day = index < 30 ? yesterday : today
             return ConversationThreadMessage(
                 id: "m\(index)", senderID: ProfileID(index.isMultiple(of: 2) ? "me" : "them"),
                 body: "Message \(index)", sentAt: day.addingTimeInterval(Double(index % 30) * 60),
@@ -154,27 +158,102 @@ struct ConversationThreadViewControllerTests {
         defer { window.isHidden = true }
         screen.view.layoutIfNeeded()
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
-        #expect(Self.descendants(of: screen.view).filter { $0 is DayPillHeaderView }.isEmpty,
-                "a day chip in the flow besides the bar's")
 
         // At the tail: today, as a bar item.
         let tail = screen.debugDayItem
         #expect(tail.shown, "no day in the bar")
         #expect(tail.title == "Today")
+        #expect(tail.item.identifier == ConversationThreadViewController.dayItemID(today))
 
-        // A tap lands today's first message just below the bar.
+        // Yesterday's chip scrolled away with its day: not sticky.
+        let visibleTop = stream.contentOffset.y + stream.adjustedContentInset.top
+        let yesterdayChip = try #require(stream.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: 0)
+        ))
+        #expect(yesterdayChip.frame.maxY < visibleTop, "the chip pinned to the top: \(yesterdayChip.frame)")
+
+        // A tap lands today's chip just below the bar.
         screen.debugTapDayItem()
         stream.setContentOffset(stream.contentOffset, animated: false)
         stream.layoutIfNeeded()
-        let firstToday = try #require(stream.layoutAttributesForItem(at: IndexPath(item: 0, section: 1)))
-        let landed = stream.convert(firstToday.frame, to: screen.view).minY - screen.view.safeAreaInsets.top
-        #expect(abs(landed - ConversationThreadViewController.dayStartLanding) < 2, "today's first message landed at \(landed)")
+        let todayChip = try #require(stream.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: 1)
+        ))
+        let landed = stream.convert(todayChip.frame, to: screen.view).minY - screen.view.safeAreaInsets.top
+        #expect(abs(landed - ConversationThreadViewController.dayStartLanding) < 2, "today's chip landed at \(landed)")
 
-        // At the top of the history, the first day.
+        // Yesterday's chip under the header, today's still below: yesterday
+        // — a new item, a new identifier: the bar morphs, never retitles.
+        let barBottom = stream.convert(CGPoint(x: 0, y: screen.view.safeAreaInsets.top), from: screen.view).y
+            - stream.contentOffset.y
+        stream.setContentOffset(CGPoint(x: 0, y: yesterdayChip.frame.maxY + 40 - barBottom), animated: false)
+        stream.layoutIfNeeded()
+        screen.scrollViewDidScroll(stream)
+        let middle = screen.debugDayItem
+        #expect(middle.shown)
+        #expect(middle.title == "Yesterday")
+        #expect(middle.item !== tail.item, "the day was retitled in place: no morph")
+        #expect(middle.item.identifier == ConversationThreadViewController.dayItemID(yesterday))
+        #expect(middle.item.identifier != tail.item.identifier)
+        // ⚠️ In the bar a turn later (#756): placed from inside a diffable
+        // apply, it lost UIKit's appearance transition and morph.
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(screen.debugDayItem.inBar)
+        #expect(screen.navigationItem.rightBarButtonItems?.last === middle.item, "the day is not left of the bell")
+        #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === tail.item }, "both days in the bar")
+
+        // At the start of the conversation no chip has gone under: no item.
         stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
         stream.layoutIfNeeded()
         screen.scrollViewDidScroll(stream)
-        #expect(screen.debugDayItem.title == "Yesterday")
+        #expect(!screen.debugDayItem.shown, "a day in the bar before any chip went under the header")
+    }
+
+    /// ⚠️ ONE PLACEMENT PER TURN (#756). Opening on a long thread, the
+    /// tail pin's passes showed the day and changed it in one turn; two
+    /// `setRightBarButtonItems` back to back cut the first one's appearance
+    /// short, and the item popped in on the device.
+    @Test func theDayAppearsInOnePlacementEvenWhenItChangesInTheSameTurn() async throws {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+        let messages = (0..<60).map { index -> ConversationThreadMessage in
+            ConversationThreadMessage(
+                id: "m\(index)", senderID: ProfileID(index.isMultiple(of: 2) ? "me" : "them"),
+                body: "Message \(index)",
+                sentAt: (index < 30 ? yesterday : today).addingTimeInterval(Double(index % 30) * 60),
+                isMine: index.isMultiple(of: 2), quote: nil
+            )
+        }
+        let (screen, _, _, window) = makeScreen(phase: .content(messages))
+        defer { window.isHidden = true }
+        screen.view.layoutIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        let tail = stream.contentOffset.y
+
+        // The start: no day.
+        stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
+        screen.scrollViewDidScroll(stream)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(!screen.debugDayItem.inBar)
+        let before = screen.debugAnimatedBarPlacements
+
+        // One turn: yesterday's chip under the header, then the tail.
+        let chip = try #require(stream.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: 0)
+        ))
+        stream.setContentOffset(CGPoint(x: 0, y: chip.frame.maxY + 40 - screen.view.safeAreaInsets.top), animated: false)
+        screen.scrollViewDidScroll(stream)
+        #expect(screen.debugDayItem.title == "Yesterday", "guard: the day showed mid-turn")
+        stream.setContentOffset(CGPoint(x: 0, y: tail), animated: false)
+        screen.scrollViewDidScroll(stream)
+        #expect(screen.debugDayItem.title == "Today")
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(screen.debugAnimatedBarPlacements - before == 1, "the appearance was placed again and cut short")
+        #expect(screen.debugDayItem.inBar)
+        let days = screen.navigationItem.rightBarButtonItems?.filter { $0.identifier?.hasPrefix("conversation.day.") == true }
+        #expect(days?.count == 1)
     }
 
     /// ⚠️ NO FROSTED TOP (asked 2026-10-02). The thread drew its own 132pt

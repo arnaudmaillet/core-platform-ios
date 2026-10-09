@@ -165,6 +165,25 @@ final class CommentRowView: UIView {
         likeButton.isHidden = hidden
     }
 
+    private var headerRow: UIStackView?
+    /// Keeps its own tap, as the avatar does (see the gesture delegate).
+    private weak var headerAccessory: UIView?
+
+    /// A view on the header line, right after the name and time (#753): a
+    /// reply's quote in a conversation. Installed once; the accessory hides
+    /// itself when it has nothing to say, and the line closes up.
+    ///
+    /// It takes the line's spare width and gives way first — its hugging and
+    /// compression sit under the header label's, so the time never
+    /// truncates for it.
+    func installHeaderAccessory(_ accessory: UIView) {
+        guard let headerRow, accessory.superview == nil else { return }
+        accessory.setContentHuggingPriority(UILayoutPriority(249), for: .horizontal)
+        accessory.setContentCompressionResistancePriority(UILayoutPriority(700), for: .horizontal)
+        headerRow.insertArrangedSubview(accessory, at: 1)
+        headerAccessory = accessory
+    }
+
     /// Test/preview convenience: build and configure in one step.
     convenience init(model: CommentDisplayModel) {
         self.init()
@@ -405,6 +424,7 @@ final class CommentRowView: UIView {
         likeButton.setContentHuggingPriority(.required, for: .horizontal)
         likeButton.setContentCompressionResistancePriority(.required, for: .horizontal)
         let headerRow = UIStackView(arrangedSubviews: [headerLabel, likeButton])
+        self.headerRow = headerRow
         headerRow.axis = .horizontal
         headerRow.alignment = .center
         headerRow.spacing = Spacing.sm
@@ -603,13 +623,14 @@ final class CommentCell: UICollectionViewCell {
 
 extension CommentRowView: UIGestureRecognizerDelegate {
     /// The row-tap filter: the reply trigger yields wherever a touch
-    /// belongs to a control (the like button) or the avatar — their
-    /// actions stay exclusive instead of firing alongside the reply.
+    /// belongs to a control (the like button), the avatar or the header's
+    /// accessory (a reply's quote, #753) — their actions stay exclusive
+    /// instead of firing alongside the reply.
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
         guard gestureRecognizer.view === self else { return true }
         var view = touch.view
         while let current = view, current !== self {
-            if current is UIControl || current === avatarView { return false }
+            if current is UIControl || current === avatarView || current === headerAccessory { return false }
             view = current.superview
         }
         return true

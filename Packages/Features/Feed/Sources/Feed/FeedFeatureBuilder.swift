@@ -133,7 +133,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             driver: driver,
             mode: mode,
             prefill: prefill,
-            imagePipeline: imagePipeline
+            imagePipeline: imagePipeline,
+            socialGraph: socialGraph,
+            followRelations: followRelations
         )
     }
 
