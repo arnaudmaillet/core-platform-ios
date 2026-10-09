@@ -103,9 +103,8 @@ struct ProfileSelectorHandoverTests {
         guard let screen = await loadedScreen() else { return }
         #expect(screen.toolbarItems?.isEmpty != false,
                 "a toolbar and an accessory both claim the bottom and neither yields")
-        let band = try? #require(screen.selectorAccessory?.hostView)
-        #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1,
-                "the format selector is not in the band")
+        let strip = try? #require(screen.floatingSelector)
+        #expect(strip?.superview === screen.view, "the format selector is not at the foot")
         #expect(screen.navigationItem.leftBarButtonItems?
             .contains { $0.accessibilityLabel == "Content source" } == true,
             "the source filter is not leading the bar")
@@ -189,8 +188,7 @@ struct ProfileSelectorHandoverTests {
     /// swipe, so the bar's source filter is gone. It opens on Posts.
     @Test func someoneElsesProfileHasPostsRepostsTaggedAtTheFoot() async {
         guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
-        let band = try? #require(screen.selectorAccessory?.hostView)
-        #expect(band?.subviews.contains { $0 is PagedTabBar } == true, "no selector at the foot")
+        #expect(screen.floatingSelector?.superview === screen.view, "no selector at the foot")
         #expect(screen.debugTabTitles == ["Posts", "Reposts", "Tagged"])
         #expect(screen.debugPageCount == 3)
         #expect(screen.debugActivePageIndex == 0, "it does not open on Posts")
@@ -202,10 +200,23 @@ struct ProfileSelectorHandoverTests {
     /// The viewer's own keeps Posts | Saved | Liked.
     @Test func yourOwnProfileKeepsPostsSavedLiked() async {
         guard let screen = await loadedScreen() else { return }
-        let band = try? #require(screen.selectorAccessory?.hostView)
-        #expect(band?.subviews.contains { $0 is PagedTabBar } == true, "the strip is not in the band")
+        #expect(screen.floatingSelector?.superview === screen.view, "the strip is not at the foot")
         #expect(screen.debugTabTitles == ["Posts", "Saved", "Liked"])
         #expect(screen.debugPageCount == 3)
+    }
+
+    /// ⚠️ AT ITS INTRINSIC WIDTH (#718): as wide as its titles, centred, with
+    /// its own glass — not a full-width band. On both profiles.
+    @Test(arguments: [false, true])
+    func theSelectorTakesItsIntrinsicWidth(pushed: Bool) async throws {
+        guard let screen = await loadedScreen(source: pushed ? .profile(ProfileID("prof-2")) : .currentUser)
+        else { return }
+        screen.view.layoutIfNeeded()
+        let strip = try #require(screen.floatingSelector)
+        #expect(strip.hosting == .standalone, "the strip has no glass of its own")
+        #expect(strip.frame.width < screen.view.bounds.width - 100, "the strip spans the screen: \(strip.frame)")
+        #expect(abs(strip.frame.midX - screen.view.bounds.midX) < 1, "the strip is not centred")
+        #expect(strip.frame.maxY <= screen.view.bounds.maxY, "the strip is off the screen")
     }
 
     /// On Posts, with no page to its left, a drag anywhere dismisses a

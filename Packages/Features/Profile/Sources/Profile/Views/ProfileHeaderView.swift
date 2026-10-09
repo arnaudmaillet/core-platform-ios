@@ -1423,10 +1423,10 @@ final class ProfileHeaderView: UIView {
         // a poster — the blur and the page's tone climbing it together.
         var fade = HeroBannerFade.geometry(identityTop: avatar.minY, foot: foot)
         if bannerFormat == .poster {
-            // The geometry the blur's levels are laid on. A poster draws no
-            // opaque fade over it any more (#688, `ProfileBannerView
-            // .setFormat`): the blur alone, the type read off the picture.
-            fade = HeroBannerFade.shoulderedGeometry(identityTop: avatar.minY, foot: foot)
+            // The blur's levels on the shouldered container; the page's tone
+            // only over the blur's last 30 % (#718), no shoulder: the type
+            // stands on the blur, the foot melts into the page.
+            fade = Self.posterFade(identityTop: avatar.minY, foot: foot)
         }
         if bannerFormat == .band {
             // ⚠️ A BAND NO LONGER BLURS, AND ITS RAMP IS BLACK (user, 5
@@ -1441,6 +1441,19 @@ final class ProfileHeaderView: UIView {
         }
         bannerView.setFade(fade)
         updateInkTones()
+    }
+
+    /// Where a poster's opaque fade starts: this far down the blur's run.
+    static let posterRampStartFraction: CGFloat = 0.7
+
+    /// A poster's fade (#718): the blur as shouldered, and the page's tone
+    /// over the blur's last `1 − posterRampStartFraction` only.
+    static func posterFade(identityTop: CGFloat, foot: CGFloat) -> HeroBannerFade.Geometry {
+        var fade = HeroBannerFade.shoulderedGeometry(identityTop: identityTop, foot: foot)
+        fade.rampStart = fade.blurStart + (fade.blurFull - fade.blurStart) * posterRampStartFraction
+        fade.rampEnd = fade.blurFull
+        fade.rampShoulder = nil
+        return fade
     }
 }
 

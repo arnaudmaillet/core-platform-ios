@@ -90,6 +90,21 @@ struct ListPrivacyTests {
         _ = try await fixture.lists.relationships(for: hider, direction: .followers, pageToken: "", limit: 20)
     }
 
+    /// ⚠️ THE LIST IS HIDDEN, NOT ITS NUMBER (#718, the owner's call
+    /// 2026-10-09): a hidden Following still counts on the profile, read from
+    /// the relation status rather than from the list nobody may sample.
+    @Test func aHiddenListStillShowsItsCount() async throws {
+        let fixture = makeFixture()
+        let viewerFollows = fixture.dataset.followingByProfileID[MockSocialDataset.viewerProfileID] ?? []
+        let hider = ProfileID(fixture.dataset.authors.map(\.profileID).first { id in
+            !fixture.dataset.isRelationshipsPrivate(id) && !viewerFollows.contains(id) && id != "prof-4"
+        }!)
+        let profile = try await fixture.profiles.profile(id: hider)
+        let following = Int64(fixture.dataset.followingByProfileID[hider.rawValue]?.count ?? 0)
+        #expect(profile.followingCount == .exact(following), "\(profile.followingCount)")
+        #expect(profile.followerCount != .unavailable)
+    }
+
     /// RemoveFollower drops the row for good, and they no longer follow.
     @Test func removingAFollowerUndoesTheirFollow() async throws {
         let fixture = makeFixture()

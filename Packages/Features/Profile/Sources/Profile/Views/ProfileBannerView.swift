@@ -154,11 +154,11 @@ final class ProfileBannerView: UIView {
     /// black whatever the appearance rather than on the page's tone. The
     /// ground the name's ink is read off follows (`pageTone`).
     ///
-    /// ⚠️ A POSTER WEARS THE BLUR ALONE (#688, the owner's call 2026-10-08):
-    /// no opaque fade between the picture and the profile. The type may read
-    /// less well over a busy cover, and the picture's edge may show at the
-    /// foot — both accepted. The ink is still read off the picture
-    /// (`rampsToPage = false`), so it stays the most legible one there is.
+    /// ⚠️ A POSTER'S OPAQUE FADE IS ONLY ITS FOOT (#718, the owner's call
+    /// 2026-10-09, after #688 took it away entirely): the page's tone arrives
+    /// over the last 30 % of the blur's run, so the picture's edge melts into
+    /// the page while the type above stands on the blur alone. Its geometry is
+    /// `ProfileHeaderView.placeBannerFade`'s; the ink reads the ground with it.
     func setFormat(_ format: ProfileBannerFormat) {
         self.format = format
         let band = format == .band
@@ -166,9 +166,6 @@ final class ProfileBannerView: UIView {
         let tone: UIColor = band ? Self.bandRampTone : Surface.page
         ramp.tone = tone
         picture.pageTone = tone
-        let poster = format == .poster
-        ramp.isHidden = poster
-        picture.rampsToPage = !poster
     }
 
     /// The tone a band's ramp lands on: black, fixed.

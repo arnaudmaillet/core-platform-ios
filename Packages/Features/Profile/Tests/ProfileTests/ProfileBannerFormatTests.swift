@@ -114,12 +114,14 @@ struct ProfileBannerFormatTests {
         #expect(abs(fade.blurFull - foot) < 0.5)
         #expect(abs(fade.rampEnd - foot) < 0.5)
         #expect(abs(avatar.minY - fade.blurStart - HeroBannerFade.blurLead) < 0.5)
-        // Shouldered on both: the ramp's tone eased in just above the
-        // container, already half there at its top — on a band (black, and
-        // no blur since 5 October 2026) it is all that closes the picture's
-        // spread under the name.
-        #expect(abs((fade.rampShoulder ?? .nan) - fade.blurStart) < 0.5)
-        #expect(abs(fade.rampStart - (fade.blurStart - HeroBannerFade.shoulderRise)) < 0.5)
+        // A band's ramp is shouldered: eased in just above the container,
+        // already half there at its top — with no blur (5 October 2026) it is
+        // all that closes the picture's spread under the name. A poster's is
+        // its foot only (#718, `aPostersFadeCoversTheBlursLastThirtyPercent`).
+        if format == .band {
+            #expect(abs((fade.rampShoulder ?? .nan) - fade.blurStart) < 0.5)
+            #expect(abs(fade.rampStart - (fade.blurStart - HeroBannerFade.shoulderRise)) < 0.5)
+        }
         #expect(header.debugBannerShowsBlur == (format == .poster))
         // The blur is next to nothing under the name: sigma under 3.5pt.
         let spans = HeroBannerFade.levelSpans(fade)
@@ -140,15 +142,31 @@ struct ProfileBannerFormatTests {
         let fade = try #require(header.debugBannerFade)
         #expect(abs(fade.blurFull - banner.maxY) < 0.5)
         #expect(header.debugBannerShowsBlur)
-        #expect(!header.debugBannerShowsRamp, "a poster draws the opaque fade")
     }
 
-    /// Only a poster lost its fade (#688): a band keeps its black one, and
-    /// a header with no picture is as it was.
+    /// ⚠️ A POSTER'S OPAQUE FADE IS ITS FOOT ONLY (#718, the owner's call
+    /// 2026-10-09): clear over the blur's first 70 %, whole at the banner's
+    /// foot, no shoulder under the type.
+    @Test func aPostersFadeCoversTheBlursLastThirtyPercent() throws {
+        let header = header(format: .poster)
+        let fade = try #require(header.debugBannerFade)
+        let run = fade.blurFull - fade.blurStart
+        #expect(abs(fade.rampStart - (fade.blurStart + run * 0.7)) < 0.5)
+        #expect(abs(fade.rampEnd - fade.blurFull) < 0.5)
+        #expect(fade.rampShoulder == nil)
+        #expect(HeroBannerFade.rampAlpha(at: fade.rampStart - 1, geometry: fade) == 0)
+        #expect(HeroBannerFade.rampAlpha(at: header.debugNameFrame.maxY, geometry: fade) == 0,
+                "the page's tone reaches up under the name")
+        #expect(HeroBannerFade.rampAlpha(at: fade.blurFull, geometry: fade) > 0.99)
+        #expect(header.debugBannerShowsRamp)
+    }
+
+    /// Every shape keeps its fade layer; a band's is black (#718 brought the
+    /// poster's back, at its foot).
     @Test(arguments: [ProfileBannerFormat.band, .poster, .none])
-    func onlyAPosterDropsTheFade(format: ProfileBannerFormat) {
+    func everyShapeKeepsItsFade(format: ProfileBannerFormat) {
         let header = header(format: format, picture: format != .none)
-        #expect(header.debugBannerShowsRamp == (format != .poster))
+        #expect(header.debugBannerShowsRamp)
         // `.none` hides the whole banner; its layers are as they always were.
         if format != .none {
             #expect(header.debugBannerShowsBlur == (format == .poster))

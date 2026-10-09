@@ -77,13 +77,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// The strip's home when the tab bar is under this screen. Nil on a pushed
     /// profile, where the bottom toolbar carries it instead.
     ///
-    /// ⚠️ INSTALLED ON APPEAR, REMOVED ON DISAPPEAR. `bottomAccessory` belongs
-    /// to the tab bar controller with no per-tab scope, so a band left up
-    /// floats over whatever is pushed on top and over the next tab.
-    /// Internal, not private, so the tests can assert what is IN the band —
-    /// the arrangement moved out of `toolbarItems`, which a test could read,
-    /// into a content view UIKit owns.
-    private(set) var selectorAccessory: SelectorAccessory?
+    /// The selector's foot: above the tab bar, or above the home indicator on
+    /// a pushed profile. Set from the bar's cover on every layout pass.
+    private var selectorBottom: NSLayoutConstraint?
+    /// The selector standing at the foot, when there is one (more than one
+    /// page). Internal for tests.
+    var floatingSelector: PagedTabBar? { selectorBottom == nil ? nil : selectorBar }
     /// The gallery's format selector — the SAME `PagedTabBar` For You and
     /// Messages wear, so a viewer meets one selector in three places rather
     /// than three selectors doing one job.
@@ -518,19 +517,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // idempotent with the one in `viewDidAppear`, which stays as the
         // backstop for the paths the policy declines (a scrub that has not
         // committed, a flight that owns the chrome).
+        // No accessory to install any more: the selector floats in this
+        // screen's own view (#718, `placeSelectors`).
         installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
-            guard let self else { return }
-            selectorAccessory?.install(into: tabBarController,
-                                   // ⚠️ THE TAB ROOT ONLY. A pushed profile keeps
-                                   // `hidesBottomBarWhenPushed`, so there is no bar
-                                   // under it to collapse — and the behaviour is
-                                   // SHELL-WIDE, so arming it from a screen that
-                                   // cannot use it gives every other tab a
-                                   // minimizing bar and this one nothing.
-                                   minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                       alongside: transitionCoordinator)
-        }
+                                         handsOver: tabBarController?.bottomAccessory != nil) {}
 
         // ⚠️ **The dock is not optional on a tab ROOT.** Whatever hid it — a post
         // that flew out of this grid, a flight caught and reversed, a pop this
@@ -609,7 +599,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         setStackGesturesEnabled(true)
         // Stops as this screen is covered — including by the post it just
         // opened, whose own player is what should be heard.
@@ -629,13 +618,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        // The BACKSTOP, on UIKit's own animation like every other install
-        // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
-        // and a committed close install from `viewWillAppear` and find nothing
-        // to do here.
-        selectorAccessory?.install(into: tabBarController,
-                                   minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
-                                   alongside: transitionCoordinator)
         #if DEBUG
         verifyRevealClearsSelector()
         #endif
@@ -1206,10 +1188,18 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // nothing was ever reported for it; `floatingBarCover` is what covers
         // it on purpose, and it is the reason removing the tray does not put a
         // revealed tile back behind the bar.
-        let bottom = max(
-            floatingBarCover,
+        let cover = floatingBarCover
+        var bottom = max(
+            cover,
             view.safeAreaInsets.bottom + (viewModel.hasGallery ? 8 : 0)
         )
+        // The floating selector (#718) stands on the bar's cover, and the
+        // pages scroll clear of it.
+        if let selectorBottom {
+            selectorBottom.constant = -(cover + Self.selectorGap)
+            view.bringSubviewToFront(selectorBar)
+            bottom = cover + Self.selectorGap + selectorBar.bounds.height + Self.selectorGap
+        }
         galleryPager.setContentBottomInset(bottom)
         // The pages are inset by the header floating over them, so their content
         // starts below it rather than behind it. Applied here because the
@@ -2619,13 +2609,34 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     ///
     /// ⚠️ ONE PAGE, NO SELECTOR (#631). Anyone else's profile has only Posts,
     /// and a strip with one segment is a label pretending to be a control.
+    ///
+    /// ⚠️ **AT ITS INTRINSIC WIDTH, SO NOT A `UITabAccessory` ANY MORE (#718,
+    /// the owner's call 2026-10-09).** The accessory's container — the capsule
+    /// UIKit draws — always spans the bar's width (360pt on a 402pt phone,
+    /// measured), so a strip in it could only ever read as a full-width bar.
+    /// The owner wants it as wide as its titles, like the relations screen's
+    /// selector. So the strip floats in this screen's own view, carrying its
+    /// own glass (`.standalone`), hugging its segments, centred just above the
+    /// tab bar (or the home indicator on a pushed profile) — `layoutPages`
+    /// keeps its foot on the bar's cover and the pages clear of it.
     private func placeSelectors() {
         guard viewModel.hasGallery, tabs.count > 1 else { return }
         selectorTouchProbe.attach(to: selectorBar)
-        // `hosting` and `fillsWidth` are the host's to set — see
-        // `SelectorAccessoryHost`, which is where the reasons for both live.
-        selectorAccessory = SelectorAccessory(strip: selectorBar)
+        selectorBar.hosting = .standalone
+        selectorBar.fillsWidth = false
+        selectorBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(selectorBar)
+        let bottom = selectorBar.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        NSLayoutConstraint.activate([
+            bottom,
+            selectorBar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            selectorBar.widthAnchor.constraint(lessThanOrEqualTo: view.widthAnchor, constant: -Spacing.lg * 2)
+        ])
+        selectorBottom = bottom
     }
+
+    /// The gap between the floating selector and the bar under it.
+    private static let selectorGap: CGFloat = 8
 
     /// ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER — see `SelectorTouchProbe`.
     private lazy var selectorTouchProbe = SelectorTouchProbe { [weak self] isTouching in
