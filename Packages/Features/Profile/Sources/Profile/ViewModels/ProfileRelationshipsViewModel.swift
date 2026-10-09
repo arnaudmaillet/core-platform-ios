@@ -68,10 +68,11 @@ public final class ProfileRelationshipsViewModel {
     public nonisolated enum RowAction: Equatable, Sendable {
         case inert
         case follow
+        /// On the viewer's OWN followers list: they follow you, you don't
+        /// follow them (#717).
+        case followBack
+        /// You follow them; tapping it unfollows, after a confirmation.
         case following
-        /// Only on the viewer's OWN followers list, and only where the backend
-        /// supports it — see `ProfileRelationshipsProviding.supportsFollowerRemoval`.
-        case remove
     }
 
     /// One rendered row.
@@ -513,10 +514,13 @@ public final class ProfileRelationshipsViewModel {
         }
         // The paging spinner belongs to the unfiltered list; showing it under a
         // filtered result would promise more matches are coming.
-        return .content(rows: visible.map(row), isAppending: state.isAppending && query.isEmpty)
+        return .content(
+            rows: visible.map { row(for: $0, in: direction) },
+            isAppending: state.isAppending && query.isEmpty
+        )
     }
 
-    private func row(for relation: ProfileRelation) -> Row {
+    private func row(for relation: ProfileRelation, in direction: RelationshipDirection) -> Row {
         Row(
             id: relation.id,
             displayName: relation.displayName,
@@ -524,22 +528,25 @@ public final class ProfileRelationshipsViewModel {
             monogram: Self.monogram(for: relation),
             avatarURL: relation.avatarURL,
             isVerified: relation.isVerified,
-            action: action(for: relation),
+            action: action(for: relation, in: direction),
             isViewer: relation.isViewer
         )
     }
 
-    /// The viewer's own row never offers an action. On the viewer's own
-    /// followers list a *removable* follower gets Remove — the destructive
-    /// action outranks Follow there, because "who can see my posts" is the
-    /// decision that list exists to serve. Everywhere else it's the follow
-    /// toggle.
-    private func action(for relation: ProfileRelation) -> RowAction {
+    /// The viewer's own row never offers an action; every other row offers
+    /// the relationship — Follow, or Following (which unfollows). On your OWN
+    /// followers list it reads Follow Back (#717, the owner's call
+    /// 2026-10-09: no Remove there any more).
+    ///
+    /// ⚠️ THE ROW'S OWN LIST, NOT THE SELECTED TAB. All three lists are
+    /// mounted at once and every one re-renders on a tab change; reading the
+    /// selected `direction` here gave the Following and Friends rows the
+    /// followers list's button for as long as Followers was selected, and
+    /// flipped them mid-swipe (seen on the device, 2026-10-09).
+    private func action(for relation: ProfileRelation, in list: RelationshipDirection) -> RowAction {
         if relation.isViewer { return .inert }
-        if subject.isSelf, direction == .followers, repository.supportsFollowerRemoval {
-            return .remove
-        }
-        return relation.viewerFollows ? .following : .follow
+        if relation.viewerFollows { return .following }
+        return subject.isSelf && list == .followers ? .followBack : .follow
     }
 
     /// Initials for the identity disc: first letters of the display name's
@@ -644,9 +651,8 @@ public final class ProfileRelationshipsViewModel {
     /// can't deliver. Same bargain as `-profile-block-demo`.
     public func qaActivateFirstRowAction() {
         guard let relation = states[direction]?.relations.first(where: { !$0.isViewer }) else { return }
-        switch action(for: relation) {
-        case .remove: removeFollower(relation.id)
-        case .follow, .following: toggleFollow(relation.id)
+        switch action(for: relation, in: direction) {
+        case .follow, .followBack, .following: toggleFollow(relation.id)
         case .inert: break
         }
     }

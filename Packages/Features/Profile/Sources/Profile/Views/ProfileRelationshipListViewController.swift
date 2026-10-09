@@ -38,12 +38,14 @@ final class ProfileRelationshipListViewController: UIViewController {
     private let viewModel: ProfileRelationshipsViewModel
     private let imagePipeline: ImagePipeline?
 
-    private var collectionView: UICollectionView!
+    private(set) var collectionView: UICollectionView!
     private let refreshControl = UIRefreshControl()
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var rowsByID: [ProfileID: ProfileRelationshipsViewModel.Row] = [:]
     private var phase: ProfileRelationshipsViewModel.Phase = .loading
     private var hasRenderedContent = false
+    /// Whether the list on screen is the skeleton.
+    private var showsSkeleton = false
 
     init(
         direction: RelationshipDirection,
@@ -109,8 +111,8 @@ final class ProfileRelationshipListViewController: UIViewController {
             cell.onAction = { [weak self] in
                 guard let self else { return }
                 switch row.action {
-                case .remove: self.confirmRemoveFollower(row)
-                case .follow, .following:
+                case .following: self.confirmUnfollow(row)
+                case .follow, .followBack:
                     MemberGates.perform(.follow(handle: nil), from: self) { [weak self] in
                         self?.viewModel.toggleFollow(id)
                     }
@@ -122,6 +124,11 @@ final class ProfileRelationshipListViewController: UIViewController {
         let skeletonRegistration = UICollectionView.CellRegistration<RelationshipSkeletonCell, Int> {
             cell, _, index in
             cell.configure(at: index)
+            // ⚠️ LAID OUT BEFORE ANY ANIMATION SEES IT (#717): its bones are
+            // sized off the text column's width, which is only known once the
+            // row is laid out — an insertion animated from there grew the
+            // bones from nothing in front of the viewer.
+            UIView.performWithoutAnimation { cell.layoutIfNeeded() }
         }
 
         let pagingRegistration = UICollectionView.CellRegistration<RelationshipPagingCell, Int> {
@@ -236,8 +243,19 @@ final class ProfileRelationshipListViewController: UIViewController {
         // Animate only once there is something to animate *from*, and only
         // while on screen — an off-screen apply replays its animation the next
         // time the screen is pushed.
-        dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
+        //
+        // ⚠️ NEVER ACROSS THE SKELETON (#717). Skeleton ↔ rows is a swap, not a
+        // change: animated, the outgoing and incoming cells cross-fade and
+        // slide past each other, and for a beat a row showed its button with
+        // no name, or a bone row a real button — the "dead" states the owner
+        // saw on the device. Only rows changing among rows animate.
+        let crossesSkeleton = placeholders > 0 || showsSkeleton
+        dataSource.apply(
+            snapshot,
+            animatingDifferences: hasRenderedContent && view.window != nil && !crossesSkeleton
+        )
         hasRenderedContent = true
+        showsSkeleton = placeholders > 0
 
         // Rows already on screen keep their old closure and display model after
         // an in-place change (a follow toggle mutates the row, not the item id),
@@ -266,14 +284,16 @@ final class ProfileRelationshipListViewController: UIViewController {
     /// Removing a follower is destructive and silent on the other side, so it
     /// asks first and names the person — the same standard the profile's block
     /// action holds itself to.
-    private func confirmRemoveFollower(_ row: ProfileRelationshipsViewModel.Row) {
+    /// Unfollowing asks first (#717): Following is a fact, and a slip of the
+    /// thumb on a long list shouldn't undo it.
+    private func confirmUnfollow(_ row: ProfileRelationshipsViewModel.Row) {
         let sheet = UIAlertController(
-            title: "Remove \(row.handle)?",
-            message: "They'll stop following you. They aren't notified, and they can follow you again.",
+            title: "Unfollow \(row.handle)?",
+            message: nil,
             preferredStyle: .actionSheet
         )
-        sheet.addAction(UIAlertAction(title: "Remove", style: .destructive) { [weak self] _ in
-            self?.viewModel.removeFollower(row.id)
+        sheet.addAction(UIAlertAction(title: "Unfollow", style: .destructive) { [weak self] _ in
+            self?.viewModel.toggleFollow(row.id)
         })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         // iPad: anchor to the row that spawned it.

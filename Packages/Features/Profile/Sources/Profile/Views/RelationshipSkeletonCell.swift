@@ -96,6 +96,9 @@ final class RelationshipSkeletonCell: UICollectionViewListCell {
         )
         NSLayoutConstraint.activate([nameWidth, handleWidth])
     }
+
+    /// The bones' widths as laid out now. Internal for tests.
+    var debugBoneWidths: [CGFloat] { [avatar, name, handle, action].map(\.bounds.width) }
 }
 
 /// The footer row under the last loaded page: a spinner that says the list is
