@@ -265,6 +265,23 @@ final class ProfileHeaderView: UIView {
     /// tray; on a band they are on the page.
     private var bodyInkOnPicture: CGFloat = 0
 
+    /// One of the counter row's four equal cells (#687): `stat` centred in
+    /// it, never wider than it. A hidden stat leaves the cell — and so its
+    /// neighbours' places — as they were.
+    private static func statCell(holding stat: ProfileStatView) -> UIView {
+        let cell = UIView()
+        stat.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(stat)
+        NSLayoutConstraint.activate([
+            stat.centerXAnchor.constraint(equalTo: cell.centerXAnchor),
+            stat.leadingAnchor.constraint(greaterThanOrEqualTo: cell.leadingAnchor),
+            stat.trailingAnchor.constraint(lessThanOrEqualTo: cell.trailingAnchor),
+            stat.topAnchor.constraint(equalTo: cell.topAnchor),
+            stat.bottomAnchor.constraint(equalTo: cell.bottomAnchor),
+        ])
+        return cell
+    }
+
     private func applyIdentityInk(force: Bool = false) {
         let onPicture = bannerFormat == .none ? 0 : bannerView.visibility
         if force || onPicture != identityInkOnPicture {
@@ -423,6 +440,12 @@ final class ProfileHeaderView: UIView {
     var debugAvatarFrame: CGRect { avatarView.convert(avatarView.bounds, to: self) }
     var debugTrayFrame: CGRect { actionRowForDebug?.convert(actionRowForDebug!.bounds, to: self) ?? .zero }
     var debugStatsFrame: CGRect { statsRow.convert(statsRow.bounds, to: self) }
+    /// The counter row's four cells, leading to trailing (#687).
+    var debugStatCellFrames: [CGRect] { statsRow.arrangedSubviews.map { $0.convert($0.bounds, to: self) } }
+    /// Followers, Following, Likes — each counter's frame, nil while hidden.
+    var debugStatFrames: [CGRect?] {
+        [followersStat, followingStat, likesStat].map { $0.isHidden ? nil : $0.convert($0.bounds, to: self) }
+    }
     /// The two halves beside the avatar: name + handle, then the counters.
     var debugNameHalfFrame: CGRect {
         identityColumn.arrangedSubviews[0].convert(identityColumn.arrangedSubviews[0].bounds, to: self)
@@ -1105,18 +1128,21 @@ final class ProfileHeaderView: UIView {
             )
         }
 
-        // The 3-metric counter row, in the identity row's bottom half: under
-        // the name, leading-aligned with it, each column as wide as its
-        // caption — equal cells across the half centred the first number
-        // away from the name's edge. The trailing spacer takes the rest.
+        // The counter row (#687, the owner's call 2026-10-08): the identity
+        // column's whole width, beside the avatar and under the name, in FOUR
+        // EQUAL CELLS — Followers, Following and Likes in the first three,
+        // each centred in its cell, the fourth kept for a metric to come.
+        // Each counter sits in a cell of its own, so one with no value (a
+        // hidden like count) leaves its cell empty and the others stay put;
+        // a counter never grows past its cell (it shrinks to fit inside it).
         for stat in [followersStat, followingStat, likesStat] {
-            statsRow.addArrangedSubview(stat)
+            statsRow.addArrangedSubview(Self.statCell(holding: stat))
         }
         statsRow.addArrangedSubview(UIView())
         statsRow.axis = .horizontal
         statsRow.alignment = .center
-        statsRow.distribution = .fill
-        statsRow.spacing = Spacing.xl
+        statsRow.distribution = .fillEqually
+        statsRow.spacing = 0
 
         // Type hierarchy of the identity block, three clear steps: title3
         // semibold display name (the block's anchor; SF applies its tighter
