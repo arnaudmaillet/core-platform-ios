@@ -2357,6 +2357,18 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                     isPushed: nav.viewControllers.first !== self
                 )
             }
+            // ⚠️ AND THE CAROUSEL UNDER THE DRAG (#691). This screen is not a
+            // `ZoomTransitionDestination`, so the slide never asked it — and on
+            // photograph 2/3 one rightward drag both paged the carousel back
+            // and dragged the profile off. Asked at the drag's origin.
+            slideDismissal.permitsDrag = { origin, axis, view in
+                guard axis == .horizontal else { return true }
+                return ProfileDismissalPolicy.dragMayDismiss(originX: origin.x) {
+                    MediaCarouselTouchRouting.dragPassesThroughCarousel(
+                        at: origin, in: view, towardsPageDelta: -1
+                    )
+                }
+            }
             slideDismissal.attach(to: self)
             if let pan = slideDismissal.dismissalPan {
                 galleryPager.horizontalPan.require(toFail: pan)

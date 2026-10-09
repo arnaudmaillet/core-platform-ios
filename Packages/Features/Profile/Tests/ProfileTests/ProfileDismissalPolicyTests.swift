@@ -45,4 +45,16 @@ struct ProfileDismissalPolicyTests {
         )
         #expect(ProfileDismissalPolicy.allowsEdgeDismissal(isPushed: false) == false)
     }
+
+    /// ⚠️ A CAROUSEL WITH A PHOTOGRAPH TO THE LEFT KEEPS THE DRAG (#691): mid-
+    /// screen, the profile closes only when the drag passes through what is
+    /// under it; from the edge strip it always closes.
+    @Test func aCarouselWithAPreviousPhotoKeepsTheDrag() {
+        #expect(!ProfileDismissalPolicy.dragMayDismiss(originX: 200) { false }, "photo 2/3: the profile moved")
+        #expect(ProfileDismissalPolicy.dragMayDismiss(originX: 200) { true }, "photo 1/3: the profile did not close")
+        var asked = false
+        #expect(ProfileDismissalPolicy.dragMayDismiss(originX: 10) { asked = true; return false },
+                "the edge strip lost the drag to a carousel")
+        #expect(!asked, "the edge is absolute — the carousel is not even asked")
+    }
 }
