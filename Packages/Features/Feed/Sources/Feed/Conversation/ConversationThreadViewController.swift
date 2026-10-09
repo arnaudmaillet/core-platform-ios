@@ -254,7 +254,7 @@ final class ConversationThreadViewController: UIViewController {
     private var dayItemShown = false
     private var dayShown: Date?
 
-    /// The day of the first message under the bar.
+    /// The day of the last chip gone under the header; none before one has.
     private func syncDayItem() {
         guard mode == .full else { return }
         guard hasRenderedContent, let day = dayOnScreen() else { return showDayItem(false) }
@@ -285,17 +285,27 @@ final class ConversationThreadViewController: UIViewController {
         "conversation.day.\(Int(day.timeIntervalSince1970))"
     }
 
+    /// ⚠️ THE DAY OF THE LAST CHIP THAT WENT UNDER THE HEADER (#755, the
+    /// owner's call 2026-10-09), not the day of the first message: the bar
+    /// takes over a chip once it has scrolled away. At the start of the
+    /// conversation no chip has gone under yet, so there is no item; on a
+    /// long conversation opened at its tail, it is the current day's.
     private func dayOnScreen() -> Date? {
         let line = view.safeAreaInsets.top
         let probe = collectionView.convert(CGPoint(x: collectionView.bounds.midX, y: line), from: view)
-        let below = collectionView.indexPathsForVisibleItems.sorted().first { path in
-            guard let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { return false }
-            return frame.maxY > probe.y
+        let sections = dataSource.snapshot().sectionIdentifiers
+        var passed: Date?
+        for (index, section) in sections.enumerated() {
+            guard case .day(let day) = section,
+                  let chip = collectionView.layoutAttributesForSupplementaryElement(
+                      ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: index)
+                  )?.frame
+            else { continue }
+            // Under the header once its middle is past the bar's bottom.
+            guard chip.midY <= probe.y else { break }
+            passed = day
         }
-        guard let path = below, case .day(let day) = dataSource.sectionIdentifier(for: path.section) else {
-            return nil
-        }
-        return day
+        return passed
     }
 
     private func showDayItem(_ shown: Bool) {

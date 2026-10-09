@@ -138,9 +138,10 @@ struct ConversationThreadViewControllerTests {
     }
 
     /// ⚠️ THE DAY IS A BAR ITEM LEFT OF THE BELL (#750), and the flow keeps
-    /// its own day chips, NOT sticky (#755); a tap on the bar's day scrolls
-    /// to that day's chip. Each day is its own item under its own
-    /// identifier, so a change of day morphs.
+    /// its own day chips, NOT sticky (#755). The item says the day of the
+    /// last chip gone under the header — none at the conversation's start.
+    /// A tap scrolls to that day's chip. Each day is its own item under its
+    /// own identifier, so a change of day morphs.
     @Test func theDayIsABarItemLeftOfTheBell() throws {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
@@ -181,16 +182,25 @@ struct ConversationThreadViewControllerTests {
         let landed = stream.convert(todayChip.frame, to: screen.view).minY - screen.view.safeAreaInsets.top
         #expect(abs(landed - ConversationThreadViewController.dayStartLanding) < 2, "today's chip landed at \(landed)")
 
-        // At the top of the history, the first day — a new item, a new
-        // identifier: the bar morphs rather than retitles.
+        // Yesterday's chip under the header, today's still below: yesterday
+        // — a new item, a new identifier: the bar morphs, never retitles.
+        let barBottom = stream.convert(CGPoint(x: 0, y: screen.view.safeAreaInsets.top), from: screen.view).y
+            - stream.contentOffset.y
+        stream.setContentOffset(CGPoint(x: 0, y: yesterdayChip.frame.maxY + 40 - barBottom), animated: false)
+        stream.layoutIfNeeded()
+        screen.scrollViewDidScroll(stream)
+        let middle = screen.debugDayItem
+        #expect(middle.shown)
+        #expect(middle.title == "Yesterday")
+        #expect(middle.item !== tail.item, "the day was retitled in place: no morph")
+        #expect(middle.item.identifier == ConversationThreadViewController.dayItemID(yesterday))
+        #expect(middle.item.identifier != tail.item.identifier)
+
+        // At the start of the conversation no chip has gone under: no item.
         stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
         stream.layoutIfNeeded()
         screen.scrollViewDidScroll(stream)
-        let top = screen.debugDayItem
-        #expect(top.title == "Yesterday")
-        #expect(top.item !== tail.item, "the day was retitled in place: no morph")
-        #expect(top.item.identifier == ConversationThreadViewController.dayItemID(yesterday))
-        #expect(top.item.identifier != tail.item.identifier)
+        #expect(!screen.debugDayItem.shown, "a day in the bar before any chip went under the header")
     }
 
     /// ⚠️ NO FROSTED TOP (asked 2026-10-02). The thread drew its own 132pt
