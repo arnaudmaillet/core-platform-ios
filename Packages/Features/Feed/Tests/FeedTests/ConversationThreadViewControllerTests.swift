@@ -128,17 +128,53 @@ struct ConversationThreadViewControllerTests {
         _ = (window, peekWindow)
     }
 
-    /// ⚠️ THE SOFT TOP-EDGE BLUR COVERS THE HEADER (#741, the owner's call
-    /// 2026-10-09, as on Notifications). STATED `.soft`: left `.automatic`,
-    /// iOS 27 drew a hard band with a hairline cutting a message in half
-    /// (measured) — the reason it used to be hidden. The stream is the bar's
-    /// content scroll view, so the effect tracks it.
-    @Test func theHeaderSoftensIntoTheSystemsTopEdgeBlur() throws {
+    /// ⚠️ NO BLUR UNDER THE HEADER (#750, the owner's call 2026-10-09, back
+    /// from #741): as on every other screen, only the window's status-bar
+    /// blur is up there — the stream clears its own top edge.
+    @Test func theHeaderHasNoBlurOfItsOwn() throws {
         let (screen, _, _, _) = makeScreen()
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
-        #expect(!stream.topEdgeEffect.isHidden, "the header has no blur under it")
-        #expect(stream.topEdgeEffect.style == .soft, "not the soft effect: \(stream.topEdgeEffect.style)")
-        #expect(screen.contentScrollView(for: .top) === stream, "the bar tracks another scroll view")
+        #expect(stream.topEdgeEffect.isHidden, "a blur under the header")
+    }
+
+    /// ⚠️ THE DAY IS A BAR ITEM LEFT OF THE BELL (#750): the thread's one
+    /// day chip, none in the flow; a tap scrolls to the day's first message.
+    @Test func theDayIsABarItemLeftOfTheBell() throws {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let messages = (0..<60).map { index -> ConversationThreadMessage in
+            let day = index < 30 ? calendar.date(byAdding: .day, value: -1, to: today)! : today
+            return ConversationThreadMessage(
+                id: "m\(index)", senderID: ProfileID(index.isMultiple(of: 2) ? "me" : "them"),
+                body: "Message \(index)", sentAt: day.addingTimeInterval(Double(index % 30) * 60),
+                isMine: index.isMultiple(of: 2), quote: nil
+            )
+        }
+        let (screen, _, _, window) = makeScreen(phase: .content(messages))
+        defer { window.isHidden = true }
+        screen.view.layoutIfNeeded()
+        let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
+        #expect(Self.descendants(of: screen.view).filter { $0 is DayPillHeaderView }.isEmpty,
+                "a day chip in the flow besides the bar's")
+
+        // At the tail: today, as a bar item.
+        let tail = screen.debugDayItem
+        #expect(tail.shown, "no day in the bar")
+        #expect(tail.title == "Today")
+
+        // A tap lands today's first message just below the bar.
+        screen.debugTapDayItem()
+        stream.setContentOffset(stream.contentOffset, animated: false)
+        stream.layoutIfNeeded()
+        let firstToday = try #require(stream.layoutAttributesForItem(at: IndexPath(item: 0, section: 1)))
+        let landed = stream.convert(firstToday.frame, to: screen.view).minY - screen.view.safeAreaInsets.top
+        #expect(abs(landed - ConversationThreadViewController.dayStartLanding) < 2, "today's first message landed at \(landed)")
+
+        // At the top of the history, the first day.
+        stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
+        stream.layoutIfNeeded()
+        screen.scrollViewDidScroll(stream)
+        #expect(screen.debugDayItem.title == "Yesterday")
     }
 
     /// ⚠️ NO FROSTED TOP (asked 2026-10-02). The thread drew its own 132pt
