@@ -123,7 +123,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     /// A conversation, drawn by the text post's screen. Chat drives it; the
-    /// bars, the wallet and the image pipeline are Feed's.
+    /// bars and the image pipeline are Feed's.
     public func makeConversationThreadViewController(
         driver: any ConversationThreadDriving,
         mode: ConversationThreadMode,
@@ -133,9 +133,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             driver: driver,
             mode: mode,
             prefill: prefill,
-            imagePipeline: imagePipeline,
-            wallet: wallet,
-            makeWalletSheet: makeWalletSheet
+            imagePipeline: imagePipeline
         )
     }
 

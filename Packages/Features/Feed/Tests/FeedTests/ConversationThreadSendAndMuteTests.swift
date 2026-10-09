@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import FeedInterface
 import Foundation
 import MediaCore
@@ -52,6 +53,12 @@ struct ConversationThreadSendAndMuteTests {
             self.muted = !muted
             onMutedChange?(self.muted)
         }
+        private(set) var mutes: [(muted: Bool, until: Date?)] = []
+        func setMuted(_ muted: Bool, until: Date?) {
+            mutes.append((muted, until))
+            self.muted = muted
+            onMutedChange?(muted)
+        }
     }
 
     private static func message(
@@ -70,8 +77,7 @@ struct ConversationThreadSendAndMuteTests {
         let driver = Driver(initial: phase, muted: muted)
         let screen = ConversationThreadViewController(
             driver: driver, mode: .full, prefill: "",
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            wallet: nil, makeWalletSheet: nil
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = UINavigationController(rootViewController: screen)
@@ -108,12 +114,99 @@ struct ConversationThreadSendAndMuteTests {
         #expect(item.primaryAction != nil, "the bell does nothing")
         driver.toggleMuted()
         #expect(driver.muted == true)
-        #expect(item.image == UIImage(systemName: "bell.slash"))
-        #expect(item.accessibilityValue == "Muted")
+        let muted = try #require(bell(screen))
+        #expect(muted.image == UIImage(systemName: "bell.slash"))
+        #expect(muted.accessibilityValue == "Muted")
 
         // Unmuted from elsewhere (the inbox's menu): the glyph follows.
         driver.onMutedChange?(false)
-        #expect(item.image == UIImage(systemName: "bell"))
+        #expect(bell(screen)?.image == UIImage(systemName: "bell"))
+    }
+
+    // MARK: - The header (#738)
+
+    /// No points badge: the bell (and its spacer) is all that trails.
+    @Test func theHeaderHasNoPointsBadge() {
+        let (screen, _, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        let customViews = (screen.navigationItem.rightBarButtonItems ?? []).compactMap(\.customView)
+        #expect(!customViews.contains { $0 is WalletBadgeButton }, "the points badge is still in the bar")
+        #expect(screen.navigationItem.rightBarButtonItems?.filter { $0.customView != nil }.isEmpty == true)
+    }
+
+    /// The correspondent's name is the header's title.
+    @Test func theCorrespondentsNameIsTheTitle() {
+        let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        #expect(screen.navigationItem.titleView == nil, "a blank view hides the title")
+        #expect(screen.title == "Ava")
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava Moreau", avatarURL: nil))
+        #expect(screen.title == "Ava Moreau", "the title did not follow the correspondent")
+    }
+
+    // MARK: - The bell's transition, durations and toast (#729)
+
+    /// ⚠️ A STATE IS ITS OWN ITEM, WITH ITS OWN IDENTIFIER: one identifier
+    /// for both swaps in a frame; two get the native glass morph.
+    @Test func eachBellStateIsItsOwnItemForTheGlassMorph() throws {
+        let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        let on = try #require(bell(screen))
+        driver.toggleMuted()
+        let off = try #require(bell(screen))
+        #expect(on !== off, "the bell was edited in place: no morph")
+        #expect(on.identifier != off.identifier, "one identifier for both states: no morph")
+        #expect(on.identifier == ConversationThreadViewController.bellID)
+        #expect(off.identifier == ConversationThreadViewController.mutedBellID)
+    }
+
+    /// A long press offers the durations; each mutes until that time.
+    @Test func theLongPressMenuOffersDurations() throws {
+        let (screen, _, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        let menu = try #require(bell(screen)?.menu, "the bell has no long-press menu")
+        let titles = Self.leafTitles(menu)
+        #expect(titles == ConversationThreadViewController.muteDurations.map(\.title))
+        #expect(ConversationThreadViewController.muteDurations.map(\.seconds) == [3_600, 28_800, 86_400, 604_800, nil])
+    }
+
+    /// Muted, the menu leads with Unmute.
+    @Test func aMutedBellOffersUnmuteFirst() throws {
+        let (screen, _, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]), muted: true)
+        defer { window.isHidden = true }
+        let menu = try #require(bell(screen)?.menu)
+        #expect(Self.leafTitles(menu).first == "Unmute")
+    }
+
+    private static func leafTitles(_ menu: UIMenu) -> [String] {
+        menu.children.flatMap { element -> [String] in
+            if let sub = element as? UIMenu { return leafTitles(sub) }
+            return [element.title]
+        }
+    }
+
+    /// Muting says so at the foot of the screen, as signing in does.
+    @Test func muteShowsAToast() throws {
+        let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        #expect(bell(screen)?.primaryAction != nil)
+        screen.debugTapBell()
+        #expect(driver.mutes.last?.muted == true)
+        #expect(driver.mutes.last?.until == nil, "a tap mutes until turned back on")
+        #expect(Self.firstToast(in: screen.view) != nil, "no toast confirmed the mute")
+
+        // A duration mutes until that time.
+        screen.debugPickMuteDuration(0)
+        let until = try #require(driver.mutes.last?.until, "a duration muted for ever")
+        #expect(abs(until.timeIntervalSinceNow - 3_600) < 5)
+    }
+
+    private static func firstToast(in view: UIView) -> ToastView? {
+        if let toast = view as? ToastView { return toast }
+        for subview in view.subviews {
+            if let toast = firstToast(in: subview) { return toast }
+        }
+        return nil
     }
 
     /// A draft has nothing to mute: no bell until there is a conversation.

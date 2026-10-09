@@ -182,7 +182,9 @@ public final class MockChatService: @unchecked Sendable {
         // Remembered per member (#719), so the thread's bell and the inbox's
         // mute survive a reload as they do on the fleet.
         bff.register(path: "/chat.v1.ChatService/MuteConversation") { [self] (request: Chat_V1_MuteConversationRequest) in
-            store.setMuted(request.muted, in: request.conversationID, for: request.memberID)
+            store.setMuted(
+                request.muted, until: request.untilMs, in: request.conversationID, for: request.memberID
+            )
             return .success(Chat_V1_CommandResponse())
         }
         bff.register(path: "/chat.v1.ChatService/Subscribe") { (_: Chat_V1_SubscribeRequest) in
@@ -467,17 +469,22 @@ public final class MockChatService: @unchecked Sendable {
         }
 
         private var joined: [String: [String]] = [:]
-        /// conversationID → the members who muted it.
-        private var mutes: [String: Set<String>] = [:]
+        /// conversationID → member → muted until (ms since 1970; 0 is "until
+        /// turned back on").
+        private var mutes: [String: [String: Int64]] = [:]
 
-        func setMuted(_ muted: Bool, in conversationID: String, for memberID: String) {
+        func setMuted(_ muted: Bool, until: Int64, in conversationID: String, for memberID: String) {
             lock.withLock {
-                if muted { mutes[conversationID, default: []].insert(memberID) } else { mutes[conversationID]?.remove(memberID) }
+                if muted { mutes[conversationID, default: [:]][memberID] = until } else { mutes[conversationID]?[memberID] = nil }
             }
         }
 
+        /// Muted, and the mute not yet expired (#729).
         func isMuted(_ conversationID: String, for memberID: String) -> Bool {
-            lock.withLock { mutes[conversationID]?.contains(memberID) == true }
+            lock.withLock {
+                guard let until = mutes[conversationID]?[memberID] else { return false }
+                return until == 0 || until > Int64(Date().timeIntervalSince1970 * 1000)
+            }
         }
 
         func join(_ member: String, to conversationID: String) {

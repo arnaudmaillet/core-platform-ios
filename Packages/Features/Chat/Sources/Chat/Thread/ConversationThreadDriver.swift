@@ -125,6 +125,12 @@ final class ConversationThreadDriver: ConversationThreadDriving {
 
     /// Mutes the conversation, or unmutes it (#719). A no-op while there is
     /// nothing to mute (`onMutedChange` said nil).
+    /// Mutes until `until` (nil: until turned back on), or unmutes (#729).
+    func setMuted(_ muted: Bool, until: Date?) {
+        guard let pins, let id = viewModel.currentConversationID else { return }
+        pins.setMute(id, muted: muted, until: until)
+    }
+
     func toggleMuted() {
         guard let pins, let id = viewModel.currentConversationID else { return }
         pins.toggleMute(id)

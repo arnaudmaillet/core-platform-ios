@@ -187,6 +187,9 @@ public protocol ConversationThreadDriving: AnyObject {
     /// Mutes the conversation, or unmutes it (#719). A no-op while there is
     /// nothing to mute (`onMutedChange` said nil).
     func toggleMuted()
+    /// Mutes until `until` — nil: until turned back on — or unmutes (#729):
+    /// the bell's long-press durations.
+    func setMuted(_ muted: Bool, until: Date?)
     /// Whether the footer offers the camera and the library (#681).
     var sendsMedia: Bool { get }
     /// Lets the viewer pick (or capture) a photo or video, presented over
@@ -203,6 +206,7 @@ public extension ConversationThreadDriving {
         set {}
     }
     func toggleMuted() {}
+    func setMuted(_ muted: Bool, until: Date?) {}
     /// Drivers with no older history to page through.
     func loadOlder() {}
     /// Drivers that send text only.

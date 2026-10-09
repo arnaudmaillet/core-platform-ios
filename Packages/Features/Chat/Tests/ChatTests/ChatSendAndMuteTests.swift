@@ -48,7 +48,10 @@ struct ChatSendAndMuteTests {
         guard case .content(let delivered) = phases.last else { return }
         #expect(delivered.filter { $0.body == "hello" }.count == 1, "the pending row outlived its delivery")
         #expect(delivered.last?.id == "t1")
-        #expect(sending.last == false)
+        // Waited for, not read: the send marks the conversation read after
+        // the delivered message lands, and the button stops spinning after
+        // that await.
+        #expect(await settle { sending.last == false }, "the send button kept spinning")
     }
 
     /// A failed text stays, says so, and is sent again by a retry.
@@ -165,6 +168,36 @@ struct ChatSendAndMuteTests {
         #expect(reloaded.first { $0.id == first.id }?.isMuted == true, "the mute did not come back")
         try await repository.setMuted(false, for: first.id)
         #expect(try await repository.loadConversations().first { $0.id == first.id }?.isMuted == false)
+
+        // A mute for a while (#729): muted until then, unmuted after.
+        try await repository.setMuted(true, until: Date().addingTimeInterval(3_600), for: first.id)
+        #expect(try await repository.loadConversations().first { $0.id == first.id }?.isMuted == true)
+        try await repository.setMuted(true, until: Date().addingTimeInterval(-1), for: first.id)
+        #expect(try await repository.loadConversations().first { $0.id == first.id }?.isMuted == false,
+                "an expired mute still mutes")
+    }
+
+    /// The bell's durations reach the contract: the driver mutes until a
+    /// time, through the inbox (#729).
+    @Test func aDurationMutesUntilThatTime() async {
+        let provider = TextStubProvider(failures: 0)
+        let catalog = InboxCatalog(repository: provider)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
+        let driver = ConversationThreadDriver(viewModel: viewModel, viewer: provider, avatars: nil, pins: catalog)
+        var reported: [Bool?] = []
+        driver.onMutedChange = { reported.append($0) }
+        driver.viewDidLoad()
+        let until = Date().addingTimeInterval(8 * 3_600)
+        driver.setMuted(true, until: until)
+        #expect(reported.last == true)
+        var untils: [Date?] = []
+        for _ in 0..<200 where untils.isEmpty {
+            untils = await provider.untils
+            if untils.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        }
+        #expect(untils.first??.timeIntervalSince1970 == until.timeIntervalSince1970, "the duration was dropped")
+        driver.setMuted(false, until: nil)
+        #expect(reported.last == false)
     }
 
     private struct Session: AuthSessionProviding {
@@ -226,5 +259,10 @@ private actor TextStubProvider: ChatProviding {
     func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {
         mutes.append(MuteCall(id: conversationID.rawValue, muted: muted))
         if refusesMute { throw ChatError.transport(message: "refused") }
+    }
+    private(set) var untils: [Date?] = []
+    func setMuted(_ muted: Bool, until: Date?, for conversationID: ConversationID) async throws {
+        untils.append(until)
+        try await setMuted(muted, for: conversationID)
     }
 }
