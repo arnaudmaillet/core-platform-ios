@@ -21,11 +21,10 @@ final class TextCompletionStrip: UIView {
         layout.sectionInset = UIEdgeInsets(top: 5, left: 10, bottom: 5, right: 10)
         collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         super.init(frame: .zero)
-        clipsToBounds = true
-        layer.cornerRadius = Self.height / 2
-        layer.cornerCurve = .continuous
-
-        let glass = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
+        // The emote strip's Liquid Glass capsule (#720).
+        let glass = UIVisualEffectView(effect: UIGlassEffect(style: .regular))
+        glass.cornerConfiguration = .capsule()
+        glass.clipsToBounds = true
         glass.frame = bounds
         glass.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(glass)
@@ -35,9 +34,9 @@ final class TextCompletionStrip: UIView {
         collectionView.register(TextCompletionChip.self, forCellWithReuseIdentifier: TextCompletionChip.reuseID)
         collectionView.dataSource = self
         collectionView.delegate = self
-        collectionView.frame = bounds
+        collectionView.frame = glass.contentView.bounds
         collectionView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        addSubview(collectionView)
+        glass.contentView.addSubview(collectionView)
         accessibilityIdentifier = "text-completions"
         isHidden = true
     }
