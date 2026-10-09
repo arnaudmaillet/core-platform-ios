@@ -2,6 +2,7 @@ import CoreModels
 import DesignSystem
 import MediaCore
 import PostGrid
+import ProfileInterface
 import Testing
 import UIKit
 @testable import Profile
@@ -63,7 +64,8 @@ struct ProfileSelectorHandoverTests {
     /// A loaded screen with its view up — the selectors are only placed once
     /// the profile has a gallery to filter.
     private func loadedScreen(
-        source: ProfileViewModel.Source = .currentUser
+        source: ProfileViewModel.Source = .currentUser,
+        trayPlacement: ProfileTrayPlacement = .navigationToolbar
     ) async -> ProfileViewController? {
         let viewModel = ProfileViewModel(repository: GalleryProvider(), gallery: EmptyGallery(), source: source)
         viewModel.viewDidLoad()
@@ -78,7 +80,8 @@ struct ProfileSelectorHandoverTests {
         let screen = ProfileViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            onLogout: nil
+            onLogout: nil,
+            trayPlacement: trayPlacement
         )
         screen.loadViewIfNeeded()
         screen.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
@@ -86,28 +89,39 @@ struct ProfileSelectorHandoverTests {
         return screen
     }
 
-    /// ⚠️ **A PUSHED PROFILE PRESENTS NO TOOLBAR AT ALL NOW.** The selector and
-    /// the source filter shared one, and fought over it — `placeSelectors`
-    /// prepended the strip and `placeSourceTray` assigned the tray outright,
-    /// last writer won, and the screen shipped with a filter glyph on the right
-    /// and an empty space where the format tabs belong. Neither is in a toolbar
-    /// any more: the strip is in a `UITabAccessory` (which a pushed screen CAN
-    /// host — measured on the search results, `env=regular`, a 360x48 container
-    /// at the foot, with `hidesBottomBarWhenPushed` set) and the filter leads
-    /// the navigation bar.
+    /// ⚠️ **A PUSHED PROFILE'S STRIP IS A BOTTOM-LEADING TOOLBAR ITEM
+    /// (#728).** The owner's call: the tab root keeps its `UITabAccessory`, a
+    /// pushed profile carries the strip in the stack's toolbar at the leading
+    /// corner, at its intrinsic width, on the item's own platter — the
+    /// relations screen's arrangement. The source filter still leads the
+    /// navigation bar.
     ///
-    /// The empty `toolbarItems` is load-bearing rather than incidental:
-    /// `SnapFeedViewController.successorUsesToolbar` reads it to decide whether
-    /// to leave the shared toolbar up when a post pushed from here is popped.
-    @Test func aPushedProfilePresentsNoToolbarItems() async {
+    /// The non-empty `toolbarItems` is load-bearing:
+    /// `SnapFeedViewController.successorUsesToolbar` reads it to leave the
+    /// shared toolbar up when a post pushed from here is popped.
+    @Test func aPushedProfileHostsTheSelectorBottomLeading() async {
         guard let screen = await loadedScreen() else { return }
-        #expect(screen.toolbarItems?.isEmpty != false,
-                "a toolbar and an accessory both claim the bottom and neither yields")
-        let strip = try? #require(screen.floatingSelector)
-        #expect(strip?.superview === screen.view, "the format selector is not at the foot")
+        let items = screen.toolbarItems ?? []
+        #expect(items.count == 2)
+        #expect(items.first === screen.selectorItem, "the strip does not lead the toolbar")
+        #expect(items.first?.customView is PagedTabBar, "the leading item is not the format selector")
+        #expect((items.first?.customView as? PagedTabBar)?.hosting == .platter,
+                "the strip draws a capsule inside the item's platter")
+        #expect(screen.selectorAccessory == nil, "a pushed profile hung a tab accessory")
         #expect(screen.navigationItem.leftBarButtonItems?
             .contains { $0.accessibilityLabel == "Content source" } == true,
             "the source filter is not leading the bar")
+    }
+
+    /// The Profile tab's root keeps the strip in the tab bar's accessory, as
+    /// it always had (#728) — no toolbar.
+    @Test func theTabRootHostsTheSelectorInTheTabAccessory() async {
+        guard let screen = await loadedScreen(trayPlacement: .aboveBottomSafeArea) else { return }
+        let band = try? #require(screen.selectorAccessory?.hostView)
+        #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1,
+                "the format selector is not in the band")
+        #expect(screen.toolbarItems?.isEmpty != false, "the tab root raised a toolbar")
+        #expect(screen.selectorItem == nil)
     }
 
     /// ⚠️ **WITHOUT THIS THE FILTER REPLACES THE BACK BUTTON**, and UIKit
@@ -188,7 +202,7 @@ struct ProfileSelectorHandoverTests {
     /// swipe, so the bar's source filter is gone. It opens on Posts.
     @Test func someoneElsesProfileHasPostsRepostsTaggedAtTheFoot() async {
         guard let screen = await loadedScreen(source: .profile(ProfileID("prof-2"))) else { return }
-        #expect(screen.floatingSelector?.superview === screen.view, "no selector at the foot")
+        #expect(screen.selectorItem?.customView is PagedTabBar, "no selector at the foot")
         #expect(screen.debugTabTitles == ["Posts", "Reposts", "Tagged"])
         #expect(screen.debugPageCount == 3)
         #expect(screen.debugActivePageIndex == 0, "it does not open on Posts")
@@ -200,23 +214,9 @@ struct ProfileSelectorHandoverTests {
     /// The viewer's own keeps Posts | Saved | Liked.
     @Test func yourOwnProfileKeepsPostsSavedLiked() async {
         guard let screen = await loadedScreen() else { return }
-        #expect(screen.floatingSelector?.superview === screen.view, "the strip is not at the foot")
+        #expect(screen.selectorItem?.customView is PagedTabBar, "the strip is not at the foot")
         #expect(screen.debugTabTitles == ["Posts", "Saved", "Liked"])
         #expect(screen.debugPageCount == 3)
-    }
-
-    /// ⚠️ AT ITS INTRINSIC WIDTH (#718): as wide as its titles, centred, with
-    /// its own glass — not a full-width band. On both profiles.
-    @Test(arguments: [false, true])
-    func theSelectorTakesItsIntrinsicWidth(pushed: Bool) async throws {
-        guard let screen = await loadedScreen(source: pushed ? .profile(ProfileID("prof-2")) : .currentUser)
-        else { return }
-        screen.view.layoutIfNeeded()
-        let strip = try #require(screen.floatingSelector)
-        #expect(strip.hosting == .standalone, "the strip has no glass of its own")
-        #expect(strip.frame.width < screen.view.bounds.width - 100, "the strip spans the screen: \(strip.frame)")
-        #expect(abs(strip.frame.midX - screen.view.bounds.midX) < 1, "the strip is not centred")
-        #expect(strip.frame.maxY <= screen.view.bounds.maxY, "the strip is off the screen")
     }
 
     /// On Posts, with no page to its left, a drag anywhere dismisses a
