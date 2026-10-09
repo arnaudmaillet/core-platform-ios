@@ -1,5 +1,6 @@
 import CoreNavigation
 import ProfileInterface
+import DesignSystem
 import UIKit
 
 /// Owns the Profile tab: the signed-in viewer's own profile as a root
@@ -26,7 +27,7 @@ import UIKit
 @MainActor
 final class ProfileTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
-    let navigationController = UINavigationController()
+    let navigationController: UINavigationController = ChevronBackNavigationController()
 
     private let container: AppContainer
     /// The shell's bell, minted into this header's leading edge — the ROOT's

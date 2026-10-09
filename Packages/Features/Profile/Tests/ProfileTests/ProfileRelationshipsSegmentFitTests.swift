@@ -57,6 +57,14 @@ struct ProfileRelationshipsSegmentFitTests {
         controller.tabBar.currentTitles
     }
 
+    /// A profile pushed from this screen shows the chevron alone, not
+    /// "Back" beside it (#727).
+    @Test("The screen lends a chevron-only back button")
+    func lendsAChevronOnlyBackButton() {
+        let controller = makeController(followers: .exact(3), following: .exact(4), width: DeviceWidth.regular)
+        #expect(controller.navigationItem.backButtonDisplayMode == .minimal)
+    }
+
     @Test("Small counts fit on the narrowest supported device")
     func smallCountsFitEverywhere() {
         let controller = makeController(

@@ -516,7 +516,8 @@ final class ProfileRelationshipsViewController: UIViewController {
         // surrendered for.
         navigationItem.title = viewModel.title
         navigationItem.largeTitleDisplayMode = .never
-        navigationItem.backButtonTitle = "Back"
+        // Chevron only, never "Back" beside it (#727).
+        navigationItem.backButtonDisplayMode = .minimal
         navigationItem.accessibilityLabel = viewModel.title
         configureToolbar()
     }

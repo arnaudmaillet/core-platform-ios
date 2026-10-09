@@ -1,5 +1,6 @@
 import CoreNavigation
 import FeedInterface
+import DesignSystem
 import UIKit
 
 /// Owns the For You tab: the curated discovery grid as a root destination, on
@@ -18,7 +19,7 @@ import UIKit
 @MainActor
 final class ForYouTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
-    let navigationController = UINavigationController()
+    let navigationController: UINavigationController = ChevronBackNavigationController()
 
     private let container: AppContainer
     /// The shell's bell, minted into this header's leading edge.

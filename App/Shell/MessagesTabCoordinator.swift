@@ -1,5 +1,6 @@
 import ChatInterface
 import CoreNavigation
+import DesignSystem
 import UIKit
 
 /// Owns the Messages tab: the paged inbox (All / Requests / Suggestions),
@@ -8,7 +9,7 @@ import UIKit
 @MainActor
 final class MessagesTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
-    let navigationController = UINavigationController()
+    let navigationController: UINavigationController = ChevronBackNavigationController()
 
     private let container: AppContainer
     /// The shell's bell, minted into this header's leading edge.
