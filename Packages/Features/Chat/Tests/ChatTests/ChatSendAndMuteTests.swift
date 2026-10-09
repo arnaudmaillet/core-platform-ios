@@ -1,0 +1,230 @@
+import AuthInterface
+import CoreContracts
+import CoreModels
+import CoreNetworking
+import CoreNetworkingMocks
+import FeedInterface
+import Foundation
+import Testing
+@testable import Chat
+
+/// A text message on its way (#719) — drawn at once, delivered or failed with
+/// a retry — and the conversation's mute, written through chat.v1.
+@MainActor
+struct ChatSendAndMuteTests {
+    private func settle(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<400 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return condition()
+    }
+
+    // MARK: - Sending
+
+    /// ⚠️ OPTIMISTIC: the text is on screen before the server answers, on its
+    /// way, then turns into the delivered message — once, not twice.
+    @Test func aTextShowsAtOnceThenIsDelivered() async throws {
+        let provider = TextStubProvider(failures: 0)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        var sending: [Bool] = []
+        viewModel.onSendingChange = { sending.append($0) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        viewModel.send("  hello  ")
+        guard case .content(let pending) = phases.last else { Issue.record("no content"); return }
+        let bubble = try #require(pending.last, "the message waited for the server")
+        #expect(bubble.body == "hello")
+        #expect(bubble.isMine)
+        #expect(bubble.delivery == .sending)
+        #expect(sending.last == true, "the send button does not spin")
+
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .sent } else { false }
+        }, "the message was never delivered")
+        guard case .content(let delivered) = phases.last else { return }
+        #expect(delivered.filter { $0.body == "hello" }.count == 1, "the pending row outlived its delivery")
+        #expect(delivered.last?.id == "t1")
+        #expect(sending.last == false)
+    }
+
+    /// A failed text stays, says so, and is sent again by a retry.
+    @Test func aFailedTextIsRetried() async throws {
+        let provider = TextStubProvider(failures: 1)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        var notices: [String] = []
+        viewModel.onActionNotice = { title, _ in notices.append(title) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        viewModel.send("hello")
+        guard case .content(let pending) = phases.last, let bubble = pending.last else {
+            Issue.record("no pending bubble"); return
+        }
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .failed } else { false }
+        }, "a failed send did not stay on screen")
+        #expect(!notices.isEmpty, "a failed text was not said")
+
+        viewModel.retry(bubble.id)
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .sent } else { false }
+        }, "the retry did not deliver")
+        guard case .content(let delivered) = phases.last else { return }
+        #expect(delivered.map(\.body) == ["hello"])
+        #expect(await provider.sentBodies == ["hello", "hello"])
+    }
+
+    /// The driver hands the screen the delivery of a text, as it does a photo's.
+    @Test func theDriverForwardsATextsDelivery() async {
+        let provider = TextStubProvider(failures: 0)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
+        let driver = ConversationThreadDriver(viewModel: viewModel, viewer: provider, avatars: nil)
+        var last: [ConversationThreadMessage] = []
+        driver.onPhaseChange = { phase in if case .content(let messages) = phase { last = messages } }
+        driver.viewDidLoad()
+        _ = await settle { false }
+        driver.send("hi")
+        #expect(last.last?.body == "hi")
+        #expect(last.last?.delivery == .sending)
+        #expect(await settle { last.last?.delivery == .sent })
+    }
+
+    // MARK: - Muting
+
+    /// The bell is the inbox's mute: toggled from the thread it writes
+    /// through `setMuted`, and a toggle from the inbox reaches the screen.
+    @Test func theBellIsTheInboxsMuteAndWritesThrough() async {
+        let provider = TextStubProvider(failures: 0)
+        let catalog = InboxCatalog(repository: provider)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
+        let driver = ConversationThreadDriver(viewModel: viewModel, viewer: provider, avatars: nil, pins: catalog)
+        var reported: [Bool?] = []
+        driver.onMutedChange = { reported.append($0) }
+        driver.viewDidLoad()
+        #expect(reported == [false], "the screen hears the mute from its first frame")
+
+        driver.toggleMuted()
+        #expect(catalog.isMuted(ConversationID("c1")), "the toggle waited for the server")
+        #expect(reported == [false, true])
+        var mutes: [MuteCall] = []
+        for _ in 0..<400 where mutes.isEmpty {
+            mutes = await provider.mutes
+            if mutes.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        }
+        #expect(mutes == [MuteCall(id: "c1", muted: true)], "the mute was not written through")
+
+        catalog.toggleMute(ConversationID("c1"))
+        #expect(reported == [false, true, false])
+
+        // Another conversation's mute is not this screen's news.
+        catalog.toggleMute(ConversationID("c2"))
+        #expect(reported == [false, true, false])
+    }
+
+    /// A refused mute is put back.
+    @Test func aRefusedMuteIsRolledBack() async {
+        let provider = TextStubProvider(failures: 0, refusesMute: true)
+        let catalog = InboxCatalog(repository: provider)
+        catalog.toggleMute(ConversationID("c1"))
+        #expect(catalog.isMuted(ConversationID("c1")))
+        #expect(await settle { !catalog.isMuted(ConversationID("c1")) }, "a refused mute stayed on")
+    }
+
+    /// The server's mute reaches the inbox on load (`InboxEntryView.muted`).
+    @Test func theServersMuteIsAdopted() async {
+        let provider = TextStubProvider(failures: 0, mutedOnServer: ["c1"])
+        let catalog = InboxCatalog(repository: provider)
+        catalog.reload()
+        #expect(await settle { catalog.isMuted(ConversationID("c1")) }, "the server's mute was ignored")
+        #expect(!catalog.isMuted(ConversationID("c2")))
+    }
+
+    /// End to end on the mock BFF: `MuteConversation` is remembered and
+    /// `ListInbox` gives it back.
+    @Test func theMockRemembersAMute() async throws {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockSocialServices(dataset: dataset).register(on: bff)
+        MockChatService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = ChatRepository(
+            chatClient: Chat_V1_ChatServiceClient(client: client),
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            authSession: Session()
+        )
+        let first = try #require(try await repository.loadConversations().first)
+        #expect(!first.isMuted)
+        try await repository.setMuted(true, for: first.id)
+        let reloaded = try await repository.loadConversations()
+        #expect(reloaded.first { $0.id == first.id }?.isMuted == true, "the mute did not come back")
+        try await repository.setMuted(false, for: first.id)
+        #expect(try await repository.loadConversations().first { $0.id == first.id }?.isMuted == false)
+    }
+
+    private struct Session: AuthSessionProviding {
+        func currentState() async -> AuthState { .authenticated(AccountID(MockAuthService.accountID)) }
+        func stateUpdates() async -> AsyncStream<AuthState> {
+            AsyncStream { $0.yield(.authenticated(AccountID(MockAuthService.accountID))); $0.finish() }
+        }
+        func logout() async {}
+    }
+}
+
+struct MuteCall: Equatable {
+    let id: String
+    let muted: Bool
+}
+
+/// Fails the first `failures` text sends, then delivers; records mutes.
+private actor TextStubProvider: ChatProviding {
+    private var failures: Int
+    private let refusesMute: Bool
+    private let mutedOnServer: Set<String>
+    private var count = 0
+    private(set) var sentBodies: [String] = []
+    private(set) var mutes: [MuteCall] = []
+
+    init(failures: Int, refusesMute: Bool = false, mutedOnServer: Set<String> = []) {
+        self.failures = failures
+        self.refusesMute = refusesMute
+        self.mutedOnServer = mutedOnServer
+    }
+
+    func viewerProfileID() async throws -> ProfileID { ProfileID("me") }
+    func loadConversations() async throws -> [Conversation] {
+        ["c1", "c2"].map { id in
+            Conversation(
+                id: ConversationID(id), title: id, lastMessage: "", lastActivityAt: Date(),
+                isMuted: mutedOnServer.contains(id)
+            )
+        }
+    }
+    func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] { [] }
+    func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
+        sentBodies.append(body)
+        try await Task.sleep(for: .milliseconds(20))
+        if failures > 0 {
+            failures -= 1
+            throw ChatError.transport(message: "offline")
+        }
+        count += 1
+        return ChatMessage(id: "t\(count)", senderID: ProfileID("me"), body: body, createdAt: Date(), isMine: true)
+    }
+    func send(
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+    ) async throws -> ChatMessage {
+        throw ChatError.mediaUpload(message: "unused")
+    }
+    func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws {}
+    func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("c") }
+    func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {
+        mutes.append(MuteCall(id: conversationID.rawValue, muted: muted))
+        if refusesMute { throw ChatError.transport(message: "refused") }
+    }
+}

@@ -179,6 +179,12 @@ public final class MockChatService: @unchecked Sendable {
             store.join(request.profileID, to: request.conversationID)
             return .success(Chat_V1_CommandResponse())
         }
+        // Remembered per member (#719), so the thread's bell and the inbox's
+        // mute survive a reload as they do on the fleet.
+        bff.register(path: "/chat.v1.ChatService/MuteConversation") { [self] (request: Chat_V1_MuteConversationRequest) in
+            store.setMuted(request.muted, in: request.conversationID, for: request.memberID)
+            return .success(Chat_V1_CommandResponse())
+        }
         bff.register(path: "/chat.v1.ChatService/Subscribe") { (_: Chat_V1_SubscribeRequest) in
             .success(Chat_V1_CommandResponse())
         }
@@ -207,6 +213,7 @@ public final class MockChatService: @unchecked Sendable {
             entry.peerID = members[id] ?? ""
             let latest = history.max { $0.createdAtMs < $1.createdAtMs }
             entry.lastActivityMs = latest?.createdAtMs ?? nowMs
+            entry.muted = store.isMuted(id, for: viewer)
             if let latest {
                 var preview = Chat_V1_MessagePreview()
                 preview.messageID = latest.messageID
@@ -460,6 +467,18 @@ public final class MockChatService: @unchecked Sendable {
         }
 
         private var joined: [String: [String]] = [:]
+        /// conversationID → the members who muted it.
+        private var mutes: [String: Set<String>] = [:]
+
+        func setMuted(_ muted: Bool, in conversationID: String, for memberID: String) {
+            lock.withLock {
+                if muted { mutes[conversationID, default: []].insert(memberID) } else { mutes[conversationID]?.remove(memberID) }
+            }
+        }
+
+        func isMuted(_ conversationID: String, for memberID: String) -> Bool {
+            lock.withLock { mutes[conversationID]?.contains(memberID) == true }
+        }
 
         func join(_ member: String, to conversationID: String) {
             lock.withLock {

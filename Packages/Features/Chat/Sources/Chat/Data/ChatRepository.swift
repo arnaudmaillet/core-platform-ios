@@ -65,6 +65,9 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     /// the badge reads "20+" and means it. Zero exactly when `isUnread` is
     /// false, so the two can never disagree about whether anything is waiting.
     public let unreadCount: Int
+    /// The viewer muted the conversation's pushes (chat.v1 `InboxEntryView
+    /// .muted`, #654) — the thread's bell (#719).
+    public let isMuted: Bool
 
     public init(
         id: ConversationID,
@@ -76,7 +79,8 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         lastMessageIsMine: Bool = false,
         lastMessageID: String = "",
         isUnread: Bool = false,
-        unreadCount: Int = 0
+        unreadCount: Int = 0,
+        isMuted: Bool = false
     ) {
         self.id = id
         self.title = title
@@ -88,6 +92,7 @@ public struct Conversation: Equatable, Sendable, Identifiable {
         self.lastMessageID = lastMessageID
         self.isUnread = isUnread
         self.unreadCount = unreadCount
+        self.isMuted = isMuted
     }
 
     /// The DM correspondent: the single other member. `nil` for group shapes,
@@ -216,12 +221,18 @@ public protocol ChatProviding: ViewerIdentityProviding {
         media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
     ) async throws -> ChatMessage
     func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws
+    /// Mutes the conversation's pushes for the viewer, or unmutes them
+    /// (chat.v1 `MuteConversation`, #654) — the thread's bell (#719).
+    func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws
     /// The direct-message conversation with `profileID`, reusing an existing
     /// 1:1 conversation or creating one.
     func directConversation(with profileID: ProfileID) async throws -> ConversationID
 }
 
 extension ChatProviding {
+    /// Providers with no mute to write (fakes): the inbox keeps it locally.
+    public func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {}
+
     /// Providers that don't page: everything they have, once.
     public func loadMessagesPage(in conversationID: ConversationID, before pageToken: String?) async throws -> MessagePage {
         guard pageToken == nil else { return MessagePage(messages: [], olderPageToken: nil) }
@@ -428,8 +439,21 @@ public actor ChatRepository: ChatProviding {
                 viewer: viewer,
                 viewerLastRead: viewerLastRead,
                 isUnread: entry.unread
-            )
+            ),
+            isMuted: entry.muted
         )
+    }
+
+    public func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {
+        let viewer = try await resolveViewerProfileID()
+        var request = Chat_V1_MuteConversationRequest()
+        request.conversationID = conversationID.rawValue
+        request.memberID = viewer.rawValue
+        request.muted = muted
+        let response = await chatClient.muteConversation(request: request, headers: [:])
+        if let error = response.error {
+            throw ChatError.transport(message: error.message ?? "code \(error.code)")
+        }
     }
 
     // MARK: - Messages

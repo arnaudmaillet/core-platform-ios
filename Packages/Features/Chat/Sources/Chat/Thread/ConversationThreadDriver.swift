@@ -26,6 +26,7 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)?
     var onActionNotice: ((String, String) -> Void)?
     var onPinnedChange: ((Bool?) -> Void)?
+    var onMutedChange: ((Bool?) -> Void)?
     var onLoadingOlderChange: ((Bool) -> Void)?
 
     /// What the viewer's own rows are signed with.
@@ -51,6 +52,9 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     /// conversation alone (another row read, a reload) says nothing.
     private var forwardedPin: Bool?
     private var hasForwardedPin = false
+    /// What `onMutedChange` last said (#719), on the same rule.
+    private var forwardedMute: Bool?
+    private var hasForwardedMute = false
 
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
     /// The last transcript, kept so a late peer name re-signs the quotes.
@@ -85,7 +89,10 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         // Every catalog change re-reads this conversation's pin — a toggle
         // from here or from the inbox's own menu, and a draft resolving into
         // a conversation (the builder refreshes the catalog when it does).
-        pinObservation = pins?.observe { [weak self] _ in self?.forwardPinned() }
+        pinObservation = pins?.observe { [weak self] _ in
+            self?.forwardPinned()
+            self?.forwardMuted()
+        }
     }
 
     func viewDidLoad() {
@@ -95,6 +102,8 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         // the screen was listening.
         hasForwardedPin = false
         forwardPinned()
+        hasForwardedMute = false
+        forwardMuted()
         resolveViewer()
         viewModel.viewDidLoad()
     }
@@ -112,6 +121,22 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         hasForwardedPin = true
         forwardedPin = pinned
         onPinnedChange?(pinned)
+    }
+
+    /// Mutes the conversation, or unmutes it (#719). A no-op while there is
+    /// nothing to mute (`onMutedChange` said nil).
+    func toggleMuted() {
+        guard let pins, let id = viewModel.currentConversationID else { return }
+        pins.toggleMute(id)
+    }
+
+    /// This conversation's mute, or nil while there is no conversation.
+    private func forwardMuted() {
+        let muted = viewModel.currentConversationID.flatMap { id in pins.map { $0.isMuted(id) } }
+        guard !hasForwardedMute || muted != forwardedMute else { return }
+        hasForwardedMute = true
+        forwardedMute = muted
+        onMutedChange?(muted)
     }
 
     func refresh() { viewModel.refresh() }

@@ -1,4 +1,5 @@
 import DesignSystem
+import FeedInterface
 import UIKit
 
 /// A comment row that can be LIFTED into a context menu — the cell a
@@ -24,6 +25,16 @@ final class ThreadRowCell: UICollectionViewCell {
     let mediaView = ThreadMediaView()
     private let liftPlate = UIView()
     private let quoteView = ThreadQuoteView()
+    /// A text message of the viewer's on its way (#719): a small spinner at
+    /// the row's trailing edge; a failed one wears the red mark instead.
+    private let sendingSpinner = UIActivityIndicatorView(style: .medium)
+    private let failedMark = UIImageView(image: UIImage(systemName: "exclamationmark.circle.fill"))
+    /// What the row says of its delivery now; nil for a delivered or someone
+    /// else's message. Internal for tests.
+    private(set) var delivery: ConversationThreadDelivery?
+
+    /// How faded a message on its way is drawn.
+    static let sendingAlpha: CGFloat = 0.55
     private var selection: SelectableTextOverlay?
 
     /// The quote strip was tapped — the host scrolls to the original.
@@ -79,6 +90,58 @@ final class ThreadRowCell: UICollectionViewCell {
     }
 
     /// Shows (or, with nil, hides) the message this one answers.
+    /// The row's delivery state (#719): a message on its way is drawn faded
+    /// with a spinner, a failed one at full ink with a red mark (tap to
+    /// retry), a delivered one plainly. Text rows only — a photo or video
+    /// draws its own (`ThreadMediaView`).
+    func setDelivery(_ delivery: ConversationThreadDelivery?) {
+        installDeliveryIndicatorsIfNeeded()
+        self.delivery = delivery == .sent ? nil : delivery
+        row.alpha = delivery == .sending ? Self.sendingAlpha : 1
+        if delivery == .sending { sendingSpinner.startAnimating() } else { sendingSpinner.stopAnimating() }
+        failedMark.isHidden = delivery != .failed
+        accessibilityValue = switch delivery {
+        case .sending: "Sending"
+        case .failed: "Not sent. Tap to try again."
+        default: nil
+        }
+    }
+
+    /// The message rises into place from the composer (#719): a short spring
+    /// up and in, landing at its on-its-way ink.
+    func playArrival() {
+        contentView.transform = CGAffineTransform(translationX: 0, y: 24)
+        contentView.alpha = 0
+        UIView.animate(withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.78,
+                       initialSpringVelocity: 0.4, options: [.allowUserInteraction]) {
+            self.contentView.transform = .identity
+            self.contentView.alpha = 1
+        }
+    }
+
+    /// Delivered: the faded message comes up to full ink.
+    func playDelivered() {
+        row.alpha = Self.sendingAlpha
+        UIView.animate(withDuration: 0.25) { self.row.alpha = 1 }
+    }
+
+    private var installedDeliveryIndicators = false
+    private func installDeliveryIndicatorsIfNeeded() {
+        guard !installedDeliveryIndicators else { return }
+        installedDeliveryIndicators = true
+        sendingSpinner.hidesWhenStopped = true
+        failedMark.tintColor = .systemRed
+        failedMark.isHidden = true
+        for view in [sendingSpinner, failedMark] as [UIView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(view)
+            NSLayoutConstraint.activate([
+                view.trailingAnchor.constraint(equalTo: row.trailingAnchor),
+                view.topAnchor.constraint(equalTo: row.topAnchor, constant: 2)
+            ])
+        }
+    }
+
     func setQuote(_ quote: (author: String, snippet: String)?) {
         quoteView.isHidden = quote == nil
         if let quote { quoteView.configure(author: quote.author, snippet: quote.snippet) }

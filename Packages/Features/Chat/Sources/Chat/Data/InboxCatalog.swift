@@ -111,7 +111,11 @@ final class InboxCatalog {
     static let maxEmptyPagesInARow = 5
 
     private var pinned: Set<ConversationID> = []
+    /// Muted conversations: the server's word (`Conversation.isMuted`), with
+    /// the viewer's toggles laid over it while they are on their way.
     private var muted: Set<ConversationID> = []
+    /// Toggles not yet answered: a load in the meantime keeps the toggle.
+    private var mutesInFlight: Set<ConversationID> = []
     /// Conversations whose read cursor has moved but whose `last_read` the
     /// server hasn't reflected back yet.
     ///
@@ -314,6 +318,10 @@ final class InboxCatalog {
     }
 
     private func setRows(_ rows: [Conversation], of folder: InboxFolder) {
+        // The server's mutes (#719), except where a toggle is on its way.
+        for row in rows where !mutesInFlight.contains(row.id) {
+            if row.isMuted { muted.insert(row.id) } else { muted.remove(row.id) }
+        }
         switch folder {
         case .inbox: conversations = rows
         case .requests: requestRows = rows
@@ -376,9 +384,23 @@ final class InboxCatalog {
         emit()
     }
 
+    /// Mutes or unmutes the conversation (#719): at once on screen, written
+    /// through `MuteConversation`, and put back if the server refuses.
     func toggleMute(_ id: ConversationID) {
+        let nowMuted = !muted.contains(id)
         muted.formSymmetricDifference([id])
+        mutesInFlight.insert(id)
         emit()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.repository.setMuted(nowMuted, for: id)
+            } catch {
+                if nowMuted { self.muted.remove(id) } else { self.muted.insert(id) }
+                self.emit()
+            }
+            self.mutesInFlight.remove(id)
+        }
     }
 
     /// Removes conversations from the inbox (context menu or batch edit). The
