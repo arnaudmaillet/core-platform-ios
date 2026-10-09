@@ -119,6 +119,9 @@ final class ConversationThreadViewController: UIViewController {
     private var arrivalStarts: [String: CFTimeInterval] = [:]
     /// The phase held back until a rise lands; the newest one wins.
     private var deferredPhase: ConversationThreadPhase?
+    /// Delivered messages whose pending row already played the delivery
+    /// while the swap waited for its rise: they land plainly (#725).
+    private var deliveredEarly: Set<String> = []
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
@@ -556,6 +559,9 @@ final class ConversationThreadViewController: UIViewController {
 
     private func render(_ phase: ConversationThreadPhase) {
         if let wait = riseStillLanding(before: phase) {
+            // The server answered mid-rise: the spinner goes at once — the
+            // row it sits in is swapped once the rise has landed.
+            playEarlyDeliveries(in: phase)
             let pending = deferredPhase
             deferredPhase = phase
             guard pending == nil else { return }
@@ -636,16 +642,57 @@ final class ConversationThreadViewController: UIViewController {
                 }
                 snapshot.appendItems([.message(message.id)], toSection: .day(day))
             }
-            // Rows already on screen re-render in place: a name, a face or a
-            // quote can change under a message whose identity did not.
-            let surviving = snapshot.itemIdentifiers.filter { previous.indexOfItem($0) != nil }
-            snapshot.reconfigureItems(surviving)
+            // Rows already on screen re-render in place when what they show
+            // changed: a name, a face or a quote under a message whose
+            // identity did not.
+            //
+            // ⚠️ ONLY THOSE (#725). Reconfiguring every surviving row on every
+            // render re-ran each row's configure — avatars back to initials
+            // until their picture hydrated, emotes restarted — so sending a
+            // message blinked the whole transcript.
+            let stale = snapshot.itemIdentifiers.filter { item in
+                guard previous.indexOfItem(item) != nil, case .message(let id) = item,
+                      let message = messagesByID[id] else { return false }
+                return renderedRows[id] != rowSignature(for: message)
+            }
+            snapshot.reconfigureItems(stale)
         }
         dataSource.apply(snapshot, animatingDifferences: animated)
     }
 
+    private func isAwaitingDelivery(_ message: ConversationThreadMessage) -> Bool {
+        message.isMine && message.media == nil && message.delivery != .sent
+    }
+
+    /// What a message's row was last configured with, so a render can tell
+    /// the rows that changed from the ones that did not (#725).
+    private struct RowSignature: Equatable {
+        let message: ConversationThreadMessage
+        let author: ConversationThreadPerson
+        let isGroupMember: Bool
+    }
+
+    private var renderedRows: [String: RowSignature] = [:]
+
+    private func rowSignature(for message: ConversationThreadMessage) -> RowSignature {
+        RowSignature(
+            message: message,
+            author: message.isMine ? viewer : peer,
+            isGroupMember: !message.isMine && peer.id == nil && !peer.name.isEmpty
+        )
+    }
+
+    #if DEBUG
+    /// Every row configured, in order — what a render re-drew (#725). Tests.
+    var debugConfiguredIDs: [String] = []
+    #endif
+
     private func configure(_ cell: ThreadRowCell, messageID: String) {
         guard let message = messagesByID[messageID] else { return }
+        renderedRows[messageID] = rowSignature(for: message)
+        #if DEBUG
+        debugConfiguredIDs.append(messageID)
+        #endif
         let author = message.isMine ? viewer : peer
         let name: String
         if message.isMine {
@@ -663,7 +710,9 @@ final class ConversationThreadViewController: UIViewController {
                 id: message.id,
                 authorID: message.senderID,
                 authorName: name,
-                metaText: Self.timeFormatter.string(from: message.sentAt),
+                // A text of the viewer's on its way, or failed, has no time
+                // yet: the spinner or the mark stands in its place (#725).
+                metaText: isAwaitingDelivery(message) ? "" : Self.timeFormatter.string(from: message.sentAt),
                 body: message.body,
                 avatarURL: name == "Member" ? nil : author.avatarURL
             ),
@@ -695,7 +744,7 @@ final class ConversationThreadViewController: UIViewController {
             arrivalStarts[messageID] = CACurrentMediaTime()
             cell.playArrival()
         } else if deliveredIDs.remove(messageID) != nil {
-            cell.playDelivered()
+            cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt))
         }
         cell.mediaView.onTap = message.media == nil ? nil : { [weak self, weak cell] in
             guard let self, let cell else { return }
@@ -716,11 +765,28 @@ final class ConversationThreadViewController: UIViewController {
             } else if message.delivery == .sent,
                       let index = goneSending.firstIndex(where: { $0.body == message.body && $0.media == nil }) {
                 goneSending.remove(at: index)
-                deliveredIDs.insert(message.id)
+                if deliveredEarly.remove(message.id) == nil { deliveredIDs.insert(message.id) }
                 swappedIDs.insert(message.id)
             }
         }
         arrivalStarts = arrivalStarts.filter { messagesByID[$0.key] != nil }
+        renderedRows = renderedRows.filter { messagesByID[$0.key] != nil }
+    }
+
+    /// The pending rows a held-back phase delivers play their delivery now.
+    private func playEarlyDeliveries(in phase: ConversationThreadPhase) {
+        guard case .content(let messages) = phase else { return }
+        var pending = messagesByID.values.filter { $0.isMine && $0.delivery == .sending && $0.media == nil }
+        for message in messages where message.isMine && message.delivery == .sent && messagesByID[message.id] == nil
+            && !deliveredEarly.contains(message.id) {
+            guard let index = pending.firstIndex(where: { $0.body == message.body && !messages.map(\.id).contains($0.id) })
+            else { continue }
+            let row = pending.remove(at: index)
+            guard let path = dataSource.indexPath(for: .message(row.id)),
+                  let cell = collectionView.cellForItem(at: path) as? ThreadRowCell else { continue }
+            cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt), carryingSpinner: false)
+            deliveredEarly.insert(message.id)
+        }
     }
 
     /// Delivered messages that took a pending row's place in this render.
