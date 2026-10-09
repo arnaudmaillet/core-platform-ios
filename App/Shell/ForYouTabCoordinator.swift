@@ -46,6 +46,11 @@ final class ForYouTabCoordinator: TabCoordinator {
             self?.apply(presentation)
         }
         navigationController.viewControllers = [forYou]
+        // ⚠️ LOADED WITHOUT BEING SHOWN (#748). The tab item's badge comes from
+        // the screen's counts, bound and loaded in its `viewDidLoad`: never
+        // opened, it never counted, and the badge stayed blank until For You
+        // was selected. Loaded a beat later, off the launch's first frame.
+        DispatchQueue.main.async { [weak forYou] in forYou?.loadViewIfNeeded() }
         // The header reads `[bell][lens] … [coins][search]`: the bell leads,
         // ahead of the lens the screen composes itself, and — like the balance
         // — reaches it through the screen for the reason given just below.

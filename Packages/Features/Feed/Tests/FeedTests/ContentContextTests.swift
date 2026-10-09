@@ -1,4 +1,5 @@
 import CoreModels
+import FeedInterface
 import Foundation
 import MediaCore
 import PostGrid
@@ -257,6 +258,22 @@ struct ContentContextMenuTests {
             makeSnapFeed: { _ in UIViewController() },
             prewarm: { _ in }
         )
+    }
+
+    /// ⚠️ LOADED, NEVER SHOWN, STILL PUBLISHED (#748): the shell loads For You
+    /// at launch so its tab item wears its badge before the tab is opened —
+    /// which only works if a loaded screen publishes with no appearance.
+    @Test func aLoadedScreenPublishesItsTabPresentationWithoutAppearing() async {
+        let screen = makeScreen()
+        var presentations: [ForYouTabPresentation] = []
+        screen.onTabPresentationChange = { presentations.append($0) }
+        screen.loadViewIfNeeded()
+        for _ in 0..<200 where presentations.isEmpty {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(screen.view.window == nil)
+        #expect(!presentations.isEmpty, "a loaded, unshown For You told the tab item nothing")
     }
 
     @Test func theMenuOffersEveryContext() {
