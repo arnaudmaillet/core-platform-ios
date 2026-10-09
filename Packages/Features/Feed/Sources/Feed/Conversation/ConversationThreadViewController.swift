@@ -237,9 +237,14 @@ final class ConversationThreadViewController: UIViewController {
         collectionView.alwaysBounceVertical = true
         collectionView.keyboardDismissMode = .interactive
         collectionView.contentInset.top = SnapCommentsLayout.streamTopBreath
-        // No effect under the bar: the rows run up under the pills untouched — see
-        // `prefersClearTopEdge`.
-        collectionView.prefersClearTopEdge()
+        // UIKit's soft top-edge blur under the bar (#741, the owner's call
+        // 2026-10-09): messages scrolling up under the title and the bell
+        // soften into it, as on Notifications — stated, not `.automatic`, so
+        // a change of UIKit default cannot turn it into the hard band. The
+        // stream is named the bar's content scroll view, so the effect is
+        // drawn where the bar's pocket meets THIS list.
+        collectionView.topEdgeEffect.style = .soft
+        setContentScrollView(collectionView, for: .top)
         collectionView.delegate = self
         // No pull-to-refresh (asked 2026-10-02): a conversation is live — what
         // arrives is pushed into it — and a loader at the top of the thread
