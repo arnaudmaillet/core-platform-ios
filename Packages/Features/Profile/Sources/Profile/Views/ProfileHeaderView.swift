@@ -456,6 +456,7 @@ final class ProfileHeaderView: UIView {
     var debugBannerIsHidden: Bool { bannerView.isHidden }
     var debugBannerShowsBlur: Bool { bannerView.debugShowsBlur }
     var debugBannerRampTone: UIColor { bannerView.debugRampTone }
+    var debugBannerShowsRamp: Bool { bannerView.debugShowsRamp }
     var debugTrayButtons: [UIButton] {
         [followButton, messageButton, editButton, mapPinButton, qrCodeButton, moreButton]
     }
@@ -1494,10 +1495,9 @@ final class ProfileHeaderView: UIView {
         // a poster — the blur and the page's tone climbing it together.
         var fade = HeroBannerFade.geometry(identityTop: avatar.minY, foot: foot)
         if bannerFormat == .poster {
-            // The whole block stands on the picture from the container's
-            // top, where the blur is still nil: the page's tone is already
-            // half there under the name (user, 30 September 2026: "start
-            // the opacity a bit earlier, without touching the blur").
+            // The geometry the blur's levels are laid on. A poster draws no
+            // opaque fade over it any more (#688, `ProfileBannerView
+            // .setFormat`): the blur alone, the type read off the picture.
             fade = HeroBannerFade.shoulderedGeometry(identityTop: avatar.minY, foot: foot)
         }
         if bannerFormat == .band {

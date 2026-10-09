@@ -112,11 +112,15 @@ struct ProfileIdentityInkTests {
     /// ladder of levels, gentle enough now to leave the stripes under it;
     /// a photograph's band measures ≥ 7:1, `-profile-ink-audit` on prof-0),
     /// and on the crossover grey in the dark the page arriving under the
-    /// handle's foot takes it to 4.49. A poster clears everywhere: half
-    /// the page's tone under its type (the shoulder) closes the spread.
+    /// handle's foot takes it to 4.49.
+    ///
+    /// ⚠️ A POSTER OVER A BUSY PICTURE NO LONGER CLEARS (#688, accepted by
+    /// the owner 2026-10-08): it wears the blur alone, with no half of the
+    /// page's tone under its type to close the stripes' spread. The user
+    /// picks a cover that reads. Over a calm one it still clears.
     @Test(arguments: Picture.allCases, [UIUserInterfaceStyle.light, .dark])
     func theTypeClearsAAOverAnyPicture(picture: Picture, style: UIUserInterfaceStyle) throws {
-        for band in [false, true] {
+        for band in [false, true] where band || picture != .stripes {
             let size = band ? CGSize(width: 160, height: 90) : CGSize(width: 90, height: 160)
             let header = header(picture: picture.image(size: size), style: style)
             #expect(header.bannerFormat == (band ? .band : .poster))
@@ -168,15 +172,17 @@ struct ProfileIdentityInkTests {
 
     /// The blur's shape, read off a busy picture: next to nothing under the
     /// name — the stripes still show behind it, worst pixel far from the
-    /// typical one — and calm by a poster's bio, half way down, where the
-    /// stripes are gone and the bio clears AA.
+    /// typical one — and calmer by a poster's bio, half way down, where the
+    /// bio's typical pixel clears AA. Its worst one does not since the
+    /// poster lost its fade (#688): the stripes' edges still show.
     @Test func theBlurIsNilUnderTheNameAndCalmsTheBio() throws {
         let header = header(picture: Picture.stripes.image(), style: .light)
         let contrast = try #require(header.debugIdentityContrast())
         #expect(contrast.name.median - contrast.name.min > 1, "name \(contrast.name)")
         let body = try #require(header.debugBodyContrast())
         let bio = try #require(body.first { $0.0 == "bio" })
-        #expect(bio.1.min >= 4.5, "bio \(bio.1)")
+        #expect(bio.1.median >= 4.5, "bio \(bio.1)")
+        #expect(bio.1.median > contrast.name.median, "the blur does not calm the bio")
     }
 
     /// The instrument can see a failure: the WRONG ink on a name. If this
@@ -215,25 +221,17 @@ struct ProfileIdentityInkTests {
         #expect(bare.debugNameShadowOpacity == 0)
     }
 
-    /// The poster fades as it scrolls up and its type goes back to the
-    /// page's ink. With half the page under the name (the shoulder), a
-    /// poster wears the page's side of the inks whatever its picture — so
-    /// the way back is seamless: the ink is the page's colour all the way.
+    /// The poster's ink follows its PICTURE (#688): with no page tone under
+    /// the name any more, dark ink over a light cover and light over a dark
+    /// one, in either appearance. As the poster scrolls away its type goes
+    /// back to the page's ink.
     @Test(arguments: [UIUserInterfaceStyle.light, .dark])
     func theInkFollowsThePosterAway(style: UIUserInterfaceStyle) throws {
         for picture in [Picture.white, .black] {
             let header = header(picture: picture.image(), style: style)
-            #expect(header.debugInkTones.name == (style == .dark ? .light : .dark), "\(picture)")
-            let page = ProfileHeaderView.pageNameInk.resolvedColor(with: header.traitCollection)
-            for travel in [0, 0.5, 1] as [CGFloat] {
-                header.setTravelled(header.posterFadeOutTravel * travel)
-                var red: CGFloat = 0
-                var pageRed: CGFloat = 0
-                header.debugNameInk.resolvedColor(with: header.traitCollection)
-                    .getRed(&red, green: nil, blue: nil, alpha: nil)
-                page.getRed(&pageRed, green: nil, blue: nil, alpha: nil)
-                #expect(abs(red - pageRed) < 0.02, "\(picture) travel \(travel)")
-            }
+            #expect(header.bannerFormat == .poster)
+            #expect(header.debugInkTones.name == (picture == .white ? .dark : .light), "\(picture)")
+            header.setTravelled(header.posterFadeOutTravel)
             #expect(header.debugNameInk == ProfileHeaderView.pageNameInk)
             #expect(header.debugNameShadowOpacity == 0)
         }
@@ -289,8 +287,9 @@ struct ProfileIdentityInkTests {
 
     /// On a poster the blur's levels are all showing once the picture is in,
     /// each fading in below the one before, the strongest whole only at the
-    /// foot — a band shows none (5 October 2026). The ramp is shouldered on
-    /// both, half there under the name and whole at the banner's foot.
+    /// foot — a band shows none (5 October 2026). A band's ramp is
+    /// shouldered, half there under the name and whole at the banner's foot;
+    /// a poster draws no ramp at all (#688).
     @Test(arguments: [false, true])
     func theBlurAndThePageClimbToTheFoot(band: Bool) throws {
         let size = band ? CGSize(width: 160, height: 90) : CGSize(width: 90, height: 160)
@@ -317,6 +316,8 @@ struct ProfileIdentityInkTests {
             #expect(levels[levels.count - 1].start > name.minY)
         }
 
+        #expect(header.debugBannerShowsRamp == band)
+        guard band else { return }
         let banner = header.debugBannerFrame
         let locations = header.debugBannerRampLocations
         let alphas = header.debugBannerRampAlphas
