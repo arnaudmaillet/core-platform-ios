@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import DesignSystem
 import UIKit
 
 /// Notifications as a LEFT DRAWER behind the whole shell — the tab bar
@@ -38,7 +39,7 @@ final class NotificationsDrawer {
         onDidOpen: @escaping () -> Void
     ) {
         self.tabBarController = tabBarController
-        let navigation = UINavigationController(rootViewController: list)
+        let navigation = ChevronBackNavigationController(rootViewController: list)
         navigation.navigationBar.prefersLargeTitles = true
         container = SideDrawerContainerViewController(main: tabBarController, drawer: navigation)
         container.dimmingAccessibilityLabel = "Close notifications"

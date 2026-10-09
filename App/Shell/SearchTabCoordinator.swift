@@ -1,5 +1,6 @@
 import CoreNavigation
 import SearchInterface
+import DesignSystem
 import UIKit
 
 /// Owns the Search tab: people search, whose results route to profiles.
@@ -10,7 +11,7 @@ import UIKit
 @MainActor
 final class SearchTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
-    let navigationController = UINavigationController()
+    let navigationController: UINavigationController = ChevronBackNavigationController()
 
     private let container: AppContainer
 

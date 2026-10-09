@@ -17,7 +17,7 @@ import UIKit
 @MainActor
 final class ExploreTabCoordinator: TabCoordinator {
     var childCoordinators: [Coordinator] = []
-    let navigationController = UINavigationController()
+    let navigationController: UINavigationController = ChevronBackNavigationController()
 
     private let container: AppContainer
     private let notificationsButtonItem: UIBarButtonItem
