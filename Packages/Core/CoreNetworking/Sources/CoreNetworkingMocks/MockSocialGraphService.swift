@@ -131,6 +131,11 @@ public final class MockSocialGraphService: @unchecked Sendable {
             response.actorID = request.actorID
             response.targetID = request.targetID
             let edge = Edge(follower: request.actorID, followee: request.targetID)
+            // Someone who blocks the actor can't be followed (#726), as on
+            // the fleet.
+            if lock.withLock({ blocksByActorID[request.targetID]?.contains(request.actorID) == true }) {
+                return .failure(ConnectError(code: .permissionDenied, message: "SGR-1003: blocked"))
+            }
             // A private profile is asked, not followed — unless the edge
             // already exists. Following a now-public profile clears an old
             // request, as on the fleet.

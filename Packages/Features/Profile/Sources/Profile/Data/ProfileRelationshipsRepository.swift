@@ -37,6 +37,12 @@ public struct ProfileRelation: Equatable, Sendable, Identifiable {
     public let isVerified: Bool
     public var viewerFollows: Bool
     public let isViewer: Bool
+    /// The viewer asked to follow this PRIVATE profile and the request is
+    /// pending (#726) → "Requested", which withdraws it.
+    public var viewerRequested: Bool
+    /// False once the server refused the viewer's follow (they block the
+    /// viewer): the row offers no Follow at all (#726).
+    public var canFollow: Bool
 
     public init(
         id: ProfileID,
@@ -45,7 +51,9 @@ public struct ProfileRelation: Equatable, Sendable, Identifiable {
         avatarURL: URL?,
         isVerified: Bool,
         viewerFollows: Bool,
-        isViewer: Bool
+        isViewer: Bool,
+        viewerRequested: Bool = false,
+        canFollow: Bool = true
     ) {
         self.id = id
         self.handle = handle
@@ -54,6 +62,8 @@ public struct ProfileRelation: Equatable, Sendable, Identifiable {
         self.isVerified = isVerified
         self.viewerFollows = viewerFollows
         self.isViewer = isViewer
+        self.viewerRequested = viewerRequested
+        self.canFollow = canFollow
     }
 }
 
@@ -77,6 +87,9 @@ public enum RelationshipsError: Error, Equatable, Sendable {
     /// failure: it is an *answer*, and the UI shows the private state rather
     /// than a retry affordance.
     case forbidden
+    /// The server refused the follow: the target blocks the viewer (#726).
+    /// An answer, not a failure — the row stops offering Follow.
+    case cannotFollow
 }
 
 /// Whether the viewer may see a profile's relationship lists.
@@ -165,7 +178,7 @@ public protocol ProfileRelationshipsProviding: Sendable {
 ///    lifetime, and intersected. This is the same trade
 ///    `SocialConnectionsRepository.followedPeers` makes for the inbox, for the
 ///    same reason: one request covers a list of any length.
-public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
+public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, FollowRequestSending {
     /// How much of the viewer's own follow list is sampled to decide row
     /// states. Beyond this a row can render "Follow" for someone the viewer
     /// already follows — self-correcting on tap, and far cheaper than the
@@ -405,7 +418,9 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
                 avatarURL: URL(string: view.avatarURL),
                 isVerified: view.verified,
                 viewerFollows: viewerFollowing.contains(view.profileID),
-                isViewer: view.profileID == viewerID?.rawValue
+                isViewer: view.profileID == viewerID?.rawValue,
+                viewerRequested: requestedIDs.contains(view.profileID),
+                canFollow: !unfollowableIDs.contains(view.profileID)
             )
         }
     }
@@ -437,6 +452,65 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding {
     }
 
     // MARK: - Mutations
+
+    /// Pending requests the viewer made from this screen, and the profiles
+    /// that refused a follow — rows rendered after a reload keep saying so
+    /// (#726).
+    private var requestedIDs: Set<String> = []
+    private var unfollowableIDs: Set<String> = []
+
+    /// Follows, or asks a PRIVATE profile (#726): the outcome says which.
+    ///
+    /// ⚠️ A REQUEST IS NOT A FOLLOW. `setFollowing(true)` folded a pending
+    /// request into the follow set, so the row read "Following", fell back to
+    /// "Follow Back" on the next load, and the next tap was refused — the
+    /// request already pending — as "Couldn't follow this profile". A request
+    /// already pending is now the answer `.requested`, and a refusal
+    /// (`PERMISSION_DENIED`: they block the viewer) is `.cannotFollow`.
+    public func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
+        guard let viewerID = await viewer.viewerProfileID() else {
+            throw RelationshipsError.transport(message: "no viewer profile")
+        }
+        var request = SocialGraph_V1_FollowRequest()
+        request.actorID = viewerID.rawValue
+        request.targetID = profileID.rawValue
+        let response = await socialGraphClient.follow(request: request, headers: [:])
+        if let error = response.error {
+            switch error.code {
+            case .alreadyExists:
+                requestedIDs.insert(profileID.rawValue)
+                return .requested
+            case .permissionDenied, .failedPrecondition:
+                unfollowableIDs.insert(profileID.rawValue)
+                throw RelationshipsError.cannotFollow
+            default:
+                throw RelationshipsError.transport(message: error.message ?? "code \(error.code)")
+            }
+        }
+        if response.message?.requested == true {
+            requestedIDs.insert(profileID.rawValue)
+            return .requested
+        }
+        guard response.message?.success == true else {
+            throw RelationshipsError.transport(message: "command rejected")
+        }
+        let change = FollowChange(profileID: profileID, isFollowing: true)
+        fold(change)
+        followEvents?.publish(change)
+        return .following
+    }
+
+    /// Withdraws the viewer's pending request to `profileID` (#726).
+    public func cancelFollowRequest(to profileID: ProfileID) async throws {
+        guard let viewerID = await viewer.viewerProfileID() else {
+            throw RelationshipsError.transport(message: "no viewer profile")
+        }
+        var request = SocialGraph_V1_CancelFollowRequestRequest()
+        request.actorID = viewerID.rawValue
+        request.targetID = profileID.rawValue
+        try Self.ensureAccepted(await socialGraphClient.cancelFollowRequest(request: request, headers: [:]))
+        requestedIDs.remove(profileID.rawValue)
+    }
 
     public func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
         guard let viewerID = await viewer.viewerProfileID() else {

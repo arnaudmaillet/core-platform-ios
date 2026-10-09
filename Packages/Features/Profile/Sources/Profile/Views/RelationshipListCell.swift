@@ -1,3 +1,4 @@
+import CoreModels
 import DesignSystem
 import MediaCore
 import UIKit
@@ -24,22 +25,21 @@ final class RelationshipListCell: UICollectionViewListCell {
         }
     }
 
-    /// Host for the trailing button, sized to the **longest title the column
-    /// can ever show** rather than to the title currently in it.
+    /// Host for the trailing button, as wide as the **longest title the
+    /// column can ever show**, the button inside it pinned to its trailing
+    /// edge at its own title's width.
     ///
-    /// Forwarding the button's own intrinsic size does not work, twice over. A
-    /// `UIButton.Configuration` is resolved at the button's next update pass,
-    /// not on assignment, so right after a title change the button still
-    /// reports the old size; and the accessory reserves `.actual` width when it
-    /// is installed, so a later correction doesn't reach it. Together they
-    /// rendered "Following" wrapped to three lines inside a pill still sized
-    /// for "Follow" — visible the first time a row was toggled.
+    /// The host's constant width keeps every row's accessory the same, so
+    /// the accessory never has to be resized after it is installed (it
+    /// reserves `.actual` width once). The button inside resizes freely —
+    /// on a spring, through `MorphingButton` (#726) — and every pill keeps
+    /// one right edge.
     ///
-    /// A constant width fixes both by removing the resize entirely, and it is
-    /// what the design wanted anyway: every pill in the list shares one right
-    /// edge instead of stepping in and out with the verb.
+    /// ⚠️ THE LONGEST OF ALL THE TITLES (#726). The width used to be measured
+    /// from "Following" alone; "Follow Back" (#717) is longer, and wrapped onto
+    /// two lines inside a host one word too narrow.
     private final class ActionAccessoryView: UIView {
-        let button = UIButton(type: .system)
+        let button = MorphingButton(frame: .zero)
 
         override var intrinsicContentSize: CGSize {
             CGSize(width: Self.reservedWidth(for: traitCollection), height: UIView.noIntrinsicMetric)
@@ -47,29 +47,44 @@ final class RelationshipListCell: UICollectionViewListCell {
 
         init() {
             super.init(frame: .zero)
-            button.pin(to: self)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(button)
+            NSLayoutConstraint.activate([
+                button.trailingAnchor.constraint(equalTo: trailingAnchor),
+                button.topAnchor.constraint(equalTo: topAnchor),
+                button.bottomAnchor.constraint(equalTo: bottomAnchor),
+                button.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor)
+            ])
         }
 
         @available(*, unavailable)
         required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-        /// Measured from a real configured button — the capsule's content
+        /// Measured from real configured buttons — the capsule's content
         /// insets aren't knowable by arithmetic — and memoized per content-size
-        /// category, so it costs one probe per Dynamic Type setting rather than
-        /// one per row. "Following" is the longest of the three titles.
+        /// category, so it costs one probe per title per Dynamic Type setting
+        /// rather than per row.
         private static var cached: (category: UIContentSizeCategory, width: CGFloat)?
 
         private static func reservedWidth(for traits: UITraitCollection) -> CGFloat {
             let category = traits.preferredContentSizeCategory
             if let cached, cached.category == category { return cached.width }
-            let probe = UIButton(type: .system)
-            probe.configuration = RelationshipListCell.buttonConfiguration(for: .following)
-            // Forces the configuration to resolve, which the assignment alone
-            // does not.
-            let width = probe.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-            cached = (category, width)
+            let actions: [ProfileRelationshipsViewModel.RowAction] = [.follow, .followBack, .following, .requested]
+            // ⚠️ TYPED BY HAND: Xcode 26 (CI) inferred the closure's result as
+            // Double and would not convert it into the cache's CGFloat tuple.
+            let widths: [CGFloat] = actions.compactMap(RelationshipListCell.buttonConfiguration(for:)).map { configuration in
+                let probe = UIButton(type: .system)
+                probe.configuration = configuration
+                let fitted: CGFloat = probe.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+                return fitted.rounded(.up)
+            }
+            let width: CGFloat = widths.max() ?? 0
+            cached = (category: category, width: width)
             return width
         }
+
+        /// The widest title's width. Internal for tests.
+        static func debugReservedWidth(for traits: UITraitCollection) -> CGFloat { reservedWidth(for: traits) }
     }
 
     /// Built once per cell and handed back on every configure — accessories
@@ -81,6 +96,15 @@ final class RelationshipListCell: UICollectionViewListCell {
     private let monogramView = MonogramAvatarView()
     private let avatarView = AvatarImageView()
     private let actionHost = ActionAccessoryView()
+    /// Who the row shows and the action it offers them: a change for the same
+    /// person morphs the button, a new person does not.
+    private var shownProfileID: ProfileID?
+    private var shownAction: ProfileRelationshipsViewModel.RowAction?
+
+    /// The trailing button. Internal for tests.
+    var debugActionButton: MorphingButton { actionHost.button }
+    /// The width every row reserves for its button. Internal for tests.
+    var debugReservedActionWidth: CGFloat { ActionAccessoryView.debugReservedWidth(for: traitCollection) }
 
     /// Invoked when the trailing button is tapped. Reset on reuse so a recycled
     /// cell can never act on the person it used to show.
@@ -144,7 +168,10 @@ final class RelationshipListCell: UICollectionViewListCell {
             ))
         ]
         if let action = Self.buttonConfiguration(for: row.action) {
-            actionHost.button.configuration = action
+            // The same person changing state morphs (#726); a new person —
+            // a reused cell — takes theirs at once.
+            let changes = shownProfileID == row.id && shownAction != nil && shownAction != row.action
+            actionHost.button.morph(to: action, animated: changes)
             actionHost.button.accessibilityLabel = Self.actionLabel(for: row)
             accessories.append(.customView(configuration: .init(
                 customView: actionHost,
@@ -153,6 +180,8 @@ final class RelationshipListCell: UICollectionViewListCell {
             )))
         }
         self.accessories = accessories
+        shownProfileID = row.id
+        shownAction = row.action
 
         // VoiceOver hears the badge too — it is the whole point of the badge,
         // and it must not be a sighted-only cue.
@@ -181,6 +210,9 @@ final class RelationshipListCell: UICollectionViewListCell {
         case .following:
             configuration = .gray()
             title = "Following"
+        case .requested:
+            configuration = .gray()
+            title = "Requested"
         }
         configuration.cornerStyle = .capsule
         configuration.buttonSize = .small
@@ -199,6 +231,7 @@ final class RelationshipListCell: UICollectionViewListCell {
         case .follow: "Follow \(row.displayName)"
         case .following: "Unfollow \(row.displayName)"
         case .followBack: "Follow \(row.displayName) back"
+        case .requested: "Withdraw your request to \(row.displayName)"
         }
     }
 

@@ -71,8 +71,12 @@ public final class ProfileRelationshipsViewModel {
         /// On the viewer's OWN followers list: they follow you, you don't
         /// follow them (#717).
         case followBack
-        /// You follow them; tapping it unfollows, after a confirmation.
+        /// You follow them; tapping it unfollows — at once, no confirmation
+        /// (#726).
         case following
+        /// You asked to follow their private profile and it is pending;
+        /// tapping it withdraws the request (#726).
+        case requested
     }
 
     /// One rendered row.
@@ -341,9 +345,18 @@ public final class ProfileRelationshipsViewModel {
 
     /// Follow / unfollow from a row. Optimistic, matching the profile header's
     /// own toggle: flip immediately, roll back if the server rejects.
+    ///
+    /// ⚠️ A FOLLOW CAN BE A REQUEST (#726). Through `FollowRequestSending` a
+    /// private profile's answer turns the row into Requested — which a tap
+    /// withdraws — and a refusal takes the row's Follow away for good,
+    /// quietly: it is an answer, not a failure to retry.
     public func toggleFollow(_ profileID: ProfileID) {
-        guard let relation = relation(for: profileID), !relation.isViewer else { return }
+        guard let relation = relation(for: profileID), !relation.isViewer, relation.canFollow else { return }
         guard !mutating.contains(profileID) else { return }
+        if let requests = repository as? any FollowRequestSending {
+            if relation.viewerRequested { return withdrawRequest(to: profileID, through: requests) }
+            if !relation.viewerFollows { return follow(profileID, through: requests) }
+        }
 
         let target = !relation.viewerFollows
         mutating.insert(profileID)
@@ -544,8 +557,10 @@ public final class ProfileRelationshipsViewModel {
     /// followers list's button for as long as Followers was selected, and
     /// flipped them mid-swipe (seen on the device, 2026-10-09).
     private func action(for relation: ProfileRelation, in list: RelationshipDirection) -> RowAction {
-        if relation.isViewer { return .inert }
+        // No Follow where following is impossible (#726): they refused it.
+        if relation.isViewer || !relation.canFollow { return .inert }
         if relation.viewerFollows { return .following }
+        if relation.viewerRequested { return .requested }
         return subject.isSelf && list == .followers ? .followBack : .follow
     }
 
@@ -621,11 +636,67 @@ public final class ProfileRelationshipsViewModel {
     /// profile routinely appears in both lists, and leaving the other tab's
     /// copy stale would show two different answers for one relationship.
     private func applyFollow(_ following: Bool, to profileID: ProfileID) {
+        update(profileID) { $0.viewerFollows = following }
+    }
+
+    /// Edits `profileID`'s row in every list it appears in, then renders.
+    private func update(_ profileID: ProfileID, _ change: (inout ProfileRelation) -> Void) {
         for key in states.keys {
-            guard let index = states[key]?.relations.firstIndex(where: { $0.id == profileID }) else { continue }
-            states[key]?.relations[index].viewerFollows = following
+            guard let index = states[key]?.relations.firstIndex(where: { $0.id == profileID }),
+                  var relation = states[key]?.relations[index] else { continue }
+            change(&relation)
+            states[key]?.relations[index] = relation
         }
         emit()
+    }
+
+    /// Follow through the request-aware path (#726): the button morphs ONCE,
+    /// to the server's answer — Following, or Requested for a private
+    /// profile — and goes away on a refusal.
+    ///
+    /// ⚠️ NOT OPTIMISTIC. An optimistic Following that a private profile then
+    /// corrected to Requested played two morphs back to back, the second
+    /// over the first's blur (filmed). The press already answers the tap.
+    private func follow(_ profileID: ProfileID, through requests: any FollowRequestSending) {
+        mutating.insert(profileID)
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                switch try await requests.follow(profileID) {
+                case .following:
+                    self.applyFollow(true, to: profileID)
+                case .requested:
+                    self.update(profileID) {
+                        $0.viewerFollows = false
+                        $0.viewerRequested = true
+                    }
+                }
+            } catch RelationshipsError.cannotFollow {
+                self.update(profileID) {
+                    $0.viewerFollows = false
+                    $0.canFollow = false
+                }
+            } catch {
+                self.onActionResult?(.failed(message: "Couldn't follow this profile."))
+            }
+            self.mutating.remove(profileID)
+        }
+    }
+
+    /// Withdraws a pending request (#726): optimistic, put back on failure.
+    private func withdrawRequest(to profileID: ProfileID, through requests: any FollowRequestSending) {
+        mutating.insert(profileID)
+        update(profileID) { $0.viewerRequested = false }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await requests.cancelFollowRequest(to: profileID)
+            } catch {
+                self.update(profileID) { $0.viewerRequested = true }
+                self.onActionResult?(.failed(message: "Couldn't withdraw your request."))
+            }
+            self.mutating.remove(profileID)
+        }
     }
 
     // MARK: - Debug hooks
@@ -652,7 +723,7 @@ public final class ProfileRelationshipsViewModel {
     public func qaActivateFirstRowAction() {
         guard let relation = states[direction]?.relations.first(where: { !$0.isViewer }) else { return }
         switch action(for: relation, in: direction) {
-        case .follow, .followBack, .following: toggleFollow(relation.id)
+        case .follow, .followBack, .following, .requested: toggleFollow(relation.id)
         case .inert: break
         }
     }

@@ -30,9 +30,14 @@ public final class ProfileViewModel {
         /// A private profile the viewer asked to follow (#396); tapping it
         /// withdraws the request.
         case requested
+        /// Someone else's profile the viewer cannot follow (#726): no Follow,
+        /// Message and the menu stay.
+        case unavailable
 
         /// Someone else's profile, whatever the follow state.
-        var isOtherProfile: Bool { self == .follow || self == .following || self == .requested }
+        var isOtherProfile: Bool {
+            self == .follow || self == .following || self == .requested || self == .unavailable
+        }
     }
 
     /// The map-favorite star beside Message.
@@ -658,7 +663,7 @@ public final class ProfileViewModel {
     /// meanwhile is followed, one that turned private is asked.
     public func toggleFollow() {
         guard let profile, !followInFlight else { return }
-        guard followButton.isOtherProfile else { return }
+        guard followButton.isOtherProfile, followButton != .unavailable else { return }
         if let requests = repository as? any FollowRequestSending {
             switch followButton {
             case .requested: return withdrawRequest(on: profile, through: requests)
@@ -1539,6 +1544,11 @@ public final class ProfileViewModel {
             isMutual = false
             isBlocked = false
             followButton = .requested
+        case .cannotFollow:
+            isFollowing = false
+            isMutual = false
+            isBlocked = false
+            followButton = .unavailable
         }
         isRelationshipSettled = true
     }
@@ -1548,10 +1558,12 @@ public final class ProfileViewModel {
     /// they just made.
     private func rememberRelationship() {
         guard let id = profile?.id, followButton.isOtherProfile else { return }
-        cache?.store(
-            followButton == .requested ? .requested : .other(isFollowing: isFollowing, isMutual: isMutual, isBlocked: isBlocked),
-            for: id
-        )
+        let relationship: ProfileRelationship = switch followButton {
+        case .requested: .requested
+        case .unavailable: .cannotFollow
+        default: .other(isFollowing: isFollowing, isMutual: isMutual, isBlocked: isBlocked)
+        }
+        cache?.store(relationship, for: id)
     }
 
     /// Applies a follow state everywhere it shows: the button and the
