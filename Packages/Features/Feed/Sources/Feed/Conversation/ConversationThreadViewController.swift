@@ -113,6 +113,12 @@ final class ConversationThreadViewController: UIViewController {
     /// Messages that just replaced their pending row — they come up to full
     /// ink rather than cross-fading in (#719).
     private var deliveredIDs: Set<String> = []
+    /// When each pending message began to rise: a delivery that lands
+    /// mid-rise (a fast server) waits for the rise to land rather than
+    /// swapping the row — and the stream's scroll — out from under it.
+    private var arrivalStarts: [String: CFTimeInterval] = [:]
+    /// The phase held back until a rise lands; the newest one wins.
+    private var deferredPhase: ConversationThreadPhase?
     private var peer = ConversationThreadPerson(id: nil, name: "", avatarURL: nil)
     private var viewer = ConversationThreadPerson(id: nil, name: "You", avatarURL: nil)
     private var hasRenderedContent = false
@@ -549,6 +555,18 @@ final class ConversationThreadViewController: UIViewController {
     // MARK: - Render
 
     private func render(_ phase: ConversationThreadPhase) {
+        if let wait = riseStillLanding(before: phase) {
+            let pending = deferredPhase
+            deferredPhase = phase
+            guard pending == nil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
+                guard let self, let held = self.deferredPhase else { return }
+                self.deferredPhase = nil
+                self.render(held)
+            }
+            return
+        }
+        deferredPhase = nil
         self.phase = phase
         switch phase {
         case .loading:
@@ -578,9 +596,13 @@ final class ConversationThreadViewController: UIViewController {
         let newest = messages.last
         let newestChanged = newest?.id != newestID
         newestID = newest?.id
+        // A delivered message taking its pending row's place is where the
+        // stream already is: no second scroll (#719).
+        let newestSwapped = newest.map { swappedIDs.contains($0.id) } ?? false
+        swappedIDs = []
         if isFirstContent {
             pinToTail()
-        } else if newestChanged, newest?.isMine == true || isNearBottom {
+        } else if newestChanged, !newestSwapped, newest?.isMine == true || isNearBottom {
             scrollToBottom(animated: true)
         }
     }
@@ -670,6 +692,7 @@ final class ConversationThreadViewController: UIViewController {
             cell.row.onReplyTap = { [weak self] in self?.driver.retry(messageID) }
         }
         if arrivingIDs.remove(messageID) != nil {
+            arrivalStarts[messageID] = CACurrentMediaTime()
             cell.playArrival()
         } else if deliveredIDs.remove(messageID) != nil {
             cell.playDelivered()
@@ -686,15 +709,35 @@ final class ConversationThreadViewController: UIViewController {
         from before: [String: ConversationThreadMessage], to messages: [ConversationThreadMessage]
     ) {
         guard hasRenderedContent else { return }
-        let goneSending = before.values.filter { $0.isMine && $0.delivery == .sending && messagesByID[$0.id] == nil }
+        var goneSending = before.values.filter { $0.isMine && $0.delivery == .sending && messagesByID[$0.id] == nil }
         for message in messages where message.isMine && before[message.id] == nil {
             if message.delivery == .sending {
                 arrivingIDs.insert(message.id)
             } else if message.delivery == .sent,
-                      goneSending.contains(where: { $0.body == message.body && $0.media == nil }) {
+                      let index = goneSending.firstIndex(where: { $0.body == message.body && $0.media == nil }) {
+                goneSending.remove(at: index)
                 deliveredIDs.insert(message.id)
+                swappedIDs.insert(message.id)
             }
         }
+        arrivalStarts = arrivalStarts.filter { messagesByID[$0.key] != nil }
+    }
+
+    /// Delivered messages that took a pending row's place in this render.
+    private var swappedIDs: Set<String> = []
+
+    /// How long until the rise of a pending message this phase would retire
+    /// lands; nil when nothing is mid-rise.
+    private func riseStillLanding(before phase: ConversationThreadPhase) -> TimeInterval? {
+        guard case .content(let messages) = phase, !arrivalStarts.isEmpty else { return nil }
+        let ids = Set(messages.map(\.id))
+        let now = CACurrentMediaTime()
+        let waits = arrivalStarts.compactMap { id, start -> TimeInterval? in
+            guard !ids.contains(id) else { return nil }
+            let left = ThreadRowCell.arrivalDuration - (now - start)
+            return left > 0 ? left : nil
+        }
+        return waits.max()
     }
 
     private func adoptPeer(_ person: ConversationThreadPerson) {

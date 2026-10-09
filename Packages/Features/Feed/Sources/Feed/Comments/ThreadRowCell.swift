@@ -87,6 +87,12 @@ final class ThreadRowCell: UICollectionViewCell {
         mediaView.onTap = nil
         liftPlate.layer.removeAllAnimations()
         liftPlate.backgroundColor = .clear
+        // A rise or a delivery fade in flight does not follow the cell.
+        contentView.layer.removeAllAnimations()
+        row.layer.removeAllAnimations()
+        contentView.transform = .identity
+        contentView.alpha = 1
+        setDelivery(nil)
     }
 
     /// Shows (or, with nil, hides) the message this one answers.
@@ -107,12 +113,16 @@ final class ThreadRowCell: UICollectionViewCell {
         }
     }
 
+    static let arrivalDuration: TimeInterval = 0.45
+    static let arrivalRise: CGFloat = 24
+
     /// The message rises into place from the composer (#719): a short spring
-    /// up and in, landing at its on-its-way ink.
+    /// up and in, landing at its on-its-way ink. A delivery that comes back
+    /// sooner waits for it to land (`ConversationThreadViewController`).
     func playArrival() {
-        contentView.transform = CGAffineTransform(translationX: 0, y: 24)
+        contentView.transform = CGAffineTransform(translationX: 0, y: Self.arrivalRise)
         contentView.alpha = 0
-        UIView.animate(withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.78,
+        UIView.animate(withDuration: Self.arrivalDuration, delay: 0, usingSpringWithDamping: 0.78,
                        initialSpringVelocity: 0.4, options: [.allowUserInteraction]) {
             self.contentView.transform = .identity
             self.contentView.alpha = 1
