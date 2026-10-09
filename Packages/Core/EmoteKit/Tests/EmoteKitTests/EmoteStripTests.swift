@@ -188,6 +188,12 @@ struct EmoteStripTests {
         let tile = try #require(strip.displayedTiles.first)
         #expect(tile.player.displayedFrame == 0)
 
+        // ⚠️ THE GRID COUNTS AS MOVING until the scroll is ended by hand
+        // (#621): without it the settle watch ends the scroll after 250 ms and
+        // the tile plays its one loop out and rests on frame 0 — a starved
+        // runner that misses that single pass can never see a frame move.
+        // Moving, the tile loops and every pass is another chance.
+        strip.scrollPlaybackForTesting.gridIsMoving = { _ in true }
         strip.scrollViewWillBeginDragging(grid)
         // Two waits, so a failure says which half broke: the drag starting
         // the tile, or the tile leaving its poster frame.

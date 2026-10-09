@@ -219,10 +219,19 @@ struct EmotePickerGridTests {
         let tile = try #require(panel.displayedTiles.first)
         #expect(tile.player.displayedFrame == 0)
 
+        // ⚠️ THE GRID COUNTS AS MOVING until the scroll is ended by hand
+        // (#621): without it the settle watch ends the scroll after 250 ms and
+        // the tile plays its one loop out and rests on frame 0 — a starved
+        // runner that misses that single pass can never see a frame move.
+        // Moving, the tile loops and every pass is another chance.
+        panel.scrollPlaybackForTesting.gridIsMoving = { _ in true }
         panel.scrollViewWillBeginDragging(grid)
+        try #require(await settle { tile.isAnimating }, "the drag did not start the tile")
+        // Any frame past the poster: a 0.3 s window (frames 1…10) is narrower
+        // than a starved main thread's gaps (see EmoteStripTests).
         try #require(
-            await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) },
-            "the tile reaches the first half of its loop"
+            await settle { (tile.player.displayedFrame ?? 0) != 0 },
+            "the tile never left its poster frame"
         )
         panel.scrollViewDidEndDecelerating(grid)
         #expect(tile.isAnimating, "it plays out its loop instead of freezing")
@@ -247,7 +256,8 @@ struct EmotePickerGridTests {
         panel.scrollPlaybackForTesting.gridIsMoving = { _ in true }
 
         panel.scrollViewWillBeginDragging(grid)
-        try #require(await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) })
+        // Any frame past the poster, not a 0.3 s window (see EmoteStripTests).
+        try #require(await settle { (tile.player.displayedFrame ?? 0) != 0 })
         panel.scrollViewDidEndDecelerating(grid)
         let before = try #require(tile.player.displayedFrame)
         panel.scrollViewWillBeginDragging(grid)
