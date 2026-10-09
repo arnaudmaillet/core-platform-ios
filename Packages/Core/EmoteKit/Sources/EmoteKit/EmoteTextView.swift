@@ -1,3 +1,4 @@
+import DesignSystem
 import MediaCore
 import UIKit
 
@@ -207,7 +208,8 @@ open class EmoteTextView: UITextView {
     private func attachmentString(
         _ emote: Emote, source: String, attributes: [NSAttributedString.Key: Any]
     ) -> NSAttributedString {
-        let font = (attributes[.font] as? UIFont) ?? self.font ?? .preferredFont(forTextStyle: .body)
+        // The app's scaled body, capped like every other text (ScaledFontTests).
+        let font = (attributes[.font] as? UIFont) ?? self.font ?? .appFont(forTextStyle: .body)
         let attachment = EmoteAttachment(emote: emote, source: source, font: font, engine: engine)
         let string = NSMutableAttributedString(attachment: attachment)
         // The line's attributes ride along, so the caret beside an emote is
