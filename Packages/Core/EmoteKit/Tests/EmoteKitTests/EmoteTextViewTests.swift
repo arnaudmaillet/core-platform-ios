@@ -168,17 +168,49 @@ struct EmoteTextViewTests {
         #expect(field.emoteViews.allSatisfy { !$0.showsStill })
     }
 
-    /// Before the art, the still glyph shows — never a blank.
-    @Test func aColdEmoteShowsItsStill() async throws {
+    /// An emote with no art to be had keeps its glyph once that is known.
+    @Test func anEmoteWithNoArtShowsItsStill() async throws {
         let engine = EmoteEngine(diskCache: nil, animationProvider: { _ in nil })
         let (field, window) = hostedField("cold :lol:", engine: engine)
         defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 1 })
-        #expect(field.emoteViews.allSatisfy { $0.showsStill })
+        #expect(await settle { field.emoteViews.allSatisfy { $0.showsStill } }, "no art, and no glyph either")
         #expect(!field.emoteViews.contains { $0.isShowingArt })
     }
 
-    /// ⚠️ THE APP-WIDE BUDGET HOLDS: past it, emotes keep their still.
+    /// ⚠️ NOTHING BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): while its art
+    /// is made its place is empty — no glyph — and the art bounces in.
+    @Test func anAnimatedEmoteOnItsWayShowsNothingThenBouncesIn() async throws {
+        let engine = EmoteEngine(diskCache: nil, animationProvider: { emote in
+            try? await Task.sleep(for: .milliseconds(300))
+            return await EmoteEngine.bundledAnimation(for: emote)
+        })
+        // An emoji: its loop is a Lottie, made by the provider above.
+        let (field, window) = hostedField("cold 🔥", engine: engine)
+        defer { window.isHidden = true }
+        try #require(await settle { field.emoteViews.count == 1 })
+        let view = try #require(field.emoteViews.first)
+        #expect(!view.showsStill, "the glyph stands in for the art on its way")
+        #expect(!view.isShowingArt)
+        // ⚠️ THE FIELD'S VIEW, READ AFRESH EVERY LOOK: a layout pass may place
+        // the emote again in a new view (the old one leaves the window and
+        // drops its request) — holding the first view watched one that would
+        // never get its art (CI, Xcode 26). The bounce is counted on every
+        // view the emote had.
+        var seen: [ObjectIdentifier: EmoteAttachmentView] = [ObjectIdentifier(view): view]
+        // A bake on a starved runner can take a while: many looks, no clock.
+        let landed = await settle(looks: 8_000) {
+            guard let current = field.emoteViews.first else { return false }
+            seen[ObjectIdentifier(current)] = current
+            return current.isShowingArt
+        }
+        let states = seen.values.map(\.debugState).joined(separator: " | ")
+        #expect(landed, "the art never came: \(field.emoteViews.count) view(s), \(states)")
+        #expect(seen.values.map(\.bounceInCount).reduce(0, +) >= 1, "the art landed without its bounce: \(states)")
+    }
+
+    /// ⚠️ THE APP-WIDE BUDGET HOLDS: past it, emotes hold their art's poster
+    /// frame (#731) — the animated icon, still, not the glyph.
     @Test func theBudgetCapsAnimations() async throws {
         // An emoji: a house icon's art is one sheet for both motions, so the
         // warm engine's still would stand in for its loop.
@@ -188,7 +220,8 @@ struct EmoteTextViewTests {
         defer { window.isHidden = true }
         try #require(await settle { field.emoteViews.count == 8 })
         #expect(field.emoteViews.filter { $0.isShowingArt }.count == 3)
-        #expect(field.emoteViews.filter { $0.showsStill }.count == 5)
+        #expect(field.emoteViews.filter { $0.showsPosterArt }.count == 5, "past the budget, not the art's poster")
+        #expect(field.emoteViews.filter { $0.showsStill }.isEmpty, "a glyph behind an animated emote")
     }
 
     /// Under Reduce Motion an emoji keeps its still glyph and a house emote

@@ -563,19 +563,37 @@ final class EmoteAttachmentView: UIView {
         // Motion off: an emoji's still IS the glyph already showing.
         if motion == .still, emote.isUnicodeEmoji { return }
         let side = EmoteEngine.pixelSide(forPoints: bounds.width, scale: window?.screen.scale ?? 3)
+        var answeredAtOnce = true
+        var answered = false
         request = engine.requestArt(for: emote, pixelSide: side, motion: motion) { [weak self] art in
+            answered = true
             guard let self else { return }
             self.request = nil
-            guard let art, self.window != nil else { return }
+            guard let art, self.window != nil else {
+                // No art after all: the glyph is all there is.
+                self.still.isHidden = false
+                return
+            }
             self.present(art)
+            if !answeredAtOnce { self.bounceIn() }
         }
+        answeredAtOnce = false
+        // ⚠️ NOTHING BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): while the art
+        // is being made the emote's place stays empty — no still glyph — and
+        // the art bounces in when it lands.
+        if !answered, motion == .loop { still.isHidden = true }
     }
 
     private func present(_ art: AnimatedIconArt) {
         let animates = motion == .loop && art.frameCount > 1
         if animates, !holdsSlot {
             guard engine.acquirePlaybackSlot(waiter: self) else {
+                // No slot to play in: the art itself, held on its poster
+                // frame — not the glyph — until one frees (#731).
                 waitingArt = art
+                player.setArt(art, phase: art.posterFrame(), paused: true)
+                player.isHidden = false
+                still.isHidden = true
                 return
             }
             holdsSlot = true
@@ -587,12 +605,40 @@ final class EmoteAttachmentView: UIView {
         isShowingArt = true
     }
 
+    /// The art landing after the emote showed: from nothing, past its size
+    /// and back, fading in (#731).
+    private func bounceIn() {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        isBouncingIn = true
+        bounceInCount += 1
+        player.layer.removeAllAnimations()
+        player.alpha = 0
+        player.transform = CGAffineTransform(scaleX: 0.3, y: 0.3)
+        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.55,
+                       initialSpringVelocity: 0.6, options: [.allowUserInteraction]) {
+            self.player.alpha = 1
+            self.player.transform = .identity
+        } completion: { _ in
+            self.isBouncingIn = false
+        }
+    }
+
+    /// Whether the art is landing with its bounce. Internal for tests.
+    private(set) var isBouncingIn = false
+    /// How many times the art has bounced in — what a test reads, rather
+    /// than catching the half-second bounce in flight. Internal for tests.
+    private(set) var bounceInCount = 0
+
     private func stop() {
         request?.cancel()
         request = nil
         waitingArt = nil
         player.setArt(nil)
         player.isHidden = true
+        player.layer.removeAllAnimations()
+        player.alpha = 1
+        player.transform = .identity
+        isBouncingIn = false
         still.isHidden = false
         isShowingArt = false
         if holdsSlot {
@@ -615,6 +661,13 @@ final class EmoteAttachmentView: UIView {
     // MARK: - Test seams
 
     var showsStill: Bool { !still.isHidden }
+    /// The art on show, held on its poster frame for want of a slot (#731).
+    var showsPosterArt: Bool { waitingArt != nil && !player.isHidden }
+    /// What the view holds, in a word each — for a test's failure message.
+    var debugState: String {
+        "still=\(showsStill) art=\(isShowingArt) poster=\(showsPosterArt) pending=\(request != nil) "
+            + "window=\(window != nil) slot=\(holdsSlot) bounces=\(bounceInCount) size=\(bounds.size)"
+    }
 }
 
 extension EmoteAttachmentView: EmotePlaybackWaiting {

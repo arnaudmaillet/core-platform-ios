@@ -30,6 +30,13 @@ public final class EmoteScrollPlayback {
     private let displayedTiles: @MainActor () -> [EmoteTileView]
     /// From a drag's start to the end of its glide.
     public private(set) var isScrolling = false
+    /// The tiles play at rest too, looping for as long as they show (#731,
+    /// the emote keyboard): a scroll's end no longer stills them. The
+    /// slot budget still caps how many move; one denied tries again at the
+    /// next scroll's start and end.
+    public var playsAtRest = false
+    /// Whether a tile brought on screen now should be dressed playing.
+    public var dressesPlaying: Bool { isScrolling || playsAtRest }
     /// While scrolling: ends it when a touch stopped the glide, which tells
     /// the delegate nothing.
     private var settleWatch: Task<Void, Never>?
@@ -77,8 +84,14 @@ public final class EmoteScrollPlayback {
     private func setScrolling(_ scrolling: Bool, finishingLoops: Bool = false) {
         guard scrolling != isScrolling else { return }
         isScrolling = scrolling
-        for tile in displayedTiles() {
-            tile.setPlaying(scrolling, finishingLoop: finishingLoops)
+        // Playing at rest: a scroll changes nothing but a retry for the
+        // tiles still waiting on a slot. Only leaving the window stills them.
+        if playsAtRest, scrolling || finishingLoops {
+            displayedTiles().forEach { $0.retryPlay() }
+        } else {
+            for tile in displayedTiles() {
+                tile.setPlaying(scrolling, finishingLoop: finishingLoops)
+            }
         }
         settleWatch?.cancel()
         settleWatch = nil
