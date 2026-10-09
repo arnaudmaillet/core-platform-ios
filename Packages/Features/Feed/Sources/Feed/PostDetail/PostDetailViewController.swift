@@ -950,6 +950,10 @@ final class PostDetailViewController: UIViewController {
         onPullDismissDrive = handler
     }
     private var onPullDismissDrive: ((CommentsInputBar.PageSwipePhase, CGFloat, CGFloat) -> Void)?
+
+    /// Closes a menu the host has on show over this list (the comments' sort
+    /// menu) and answers whether there was one (#759).
+    var closesMenuOnShow: (() -> Bool)?
     /// Set once a released pull has committed, so the spring-back that
     /// follows cannot drive the transition backwards over the dismissal
     /// already in flight.
@@ -2461,6 +2465,15 @@ extension PostDetailViewController: UICollectionViewDelegate {
     /// top, so a drag anywhere else reports zero and drives nothing.
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         if threadChrome { rowContextMenu.endTextSelection() }
+        // ⚠️ A MENU ON SHOW TAKES THE GESTURE (#759): the drag closes it and
+        // ends there — it neither scrolls nor arms the pull-down close, whose
+        // animation fought the menu's own.
+        if closesMenuOnShow?() == true {
+            isPullDismissArmed = false
+            scrollView.panGestureRecognizer.isEnabled = false
+            scrollView.panGestureRecognizer.isEnabled = true
+            return
+        }
         // INTENT, decided once per drag: only a gesture that starts at the
         // top is a dismissal. A drag that begins mid-list and scrolls up
         // into the top is someone reading — it still bounces, because that
