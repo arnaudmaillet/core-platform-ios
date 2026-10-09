@@ -280,10 +280,24 @@ final class ConversationThreadViewController: UIViewController {
         guard !dayPlacementScheduled else { return }
         dayPlacementScheduled = true
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.dayPlacementScheduled = false
-            self.placeMuteItem(animated: true)
+            self?.placeDayAfterTransition()
         }
+    }
+
+    /// ⚠️ NOT DURING A PUSH (#756): items set while the bar is in its push
+    /// transition land with it, unanimated, when it ends — the day popped in
+    /// on the device just after the push. A placement due mid-transition
+    /// waits for its end, then animates.
+    private func placeDayAfterTransition() {
+        if let coordinator = transitionCoordinator {
+            coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+                // Off the completion's turn, which still belongs to the transition.
+                DispatchQueue.main.async { self?.placeDayAfterTransition() }
+            }
+            return
+        }
+        dayPlacementScheduled = false
+        placeMuteItem(animated: true)
     }
 
     private var dayPlacementScheduled = false
