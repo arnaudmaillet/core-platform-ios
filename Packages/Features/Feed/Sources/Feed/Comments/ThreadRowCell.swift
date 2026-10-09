@@ -97,24 +97,57 @@ final class ThreadRowCell: UICollectionViewCell {
 
     /// Shows (or, with nil, hides) the message this one answers.
     /// The row's delivery state (#719): a message on its way is drawn faded
-    /// with a spinner, a failed one at full ink with a red mark (tap to
-    /// retry), a delivered one plainly. Text rows only — a photo or video
-    /// draws its own (`ThreadMediaView`).
+    /// with a small spinner just right of its time, a failed one at full ink
+    /// with a red mark there (tap to retry), a delivered one plainly. Text
+    /// rows only — a photo or video draws its own (`ThreadMediaView`).
     func setDelivery(_ delivery: ConversationThreadDelivery?) {
         installDeliveryIndicatorsIfNeeded()
+        let wasSending = self.delivery == .sending
         self.delivery = delivery == .sent ? nil : delivery
         row.alpha = delivery == .sending ? Self.sendingAlpha : 1
-        if delivery == .sending { sendingSpinner.startAnimating() } else { sendingSpinner.stopAnimating() }
         failedMark.isHidden = delivery != .failed
         accessibilityValue = switch delivery {
         case .sending: "Sending"
         case .failed: "Not sent. Tap to try again."
         default: nil
         }
+        placeDeliveryIndicators()
+        guard delivery == .sending else {
+            sendingSpinner.layer.removeAllAnimations()
+            sendingSpinner.stopAnimating()
+            sendingSpinner.transform = Self.spinnerScale
+            sendingSpinner.alpha = 1
+            return
+        }
+        sendingSpinner.startAnimating()
+        if !wasSending { bounceInSpinner() }
     }
+
+    /// The spinner arrives with a bounce: from nothing, past its size and
+    /// back (#725).
+    private func bounceInSpinner() {
+        isBouncingInSpinner = true
+        sendingSpinner.layer.removeAllAnimations()
+        sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
+        sendingSpinner.alpha = 0
+        UIView.animate(withDuration: 0.5, delay: 0.08, usingSpringWithDamping: 0.5,
+                       initialSpringVelocity: 0.8, options: [.allowUserInteraction]) {
+            self.sendingSpinner.transform = Self.spinnerScale
+            self.sendingSpinner.alpha = 1
+        } completion: { _ in
+            self.isBouncingInSpinner = false
+        }
+    }
+
+    /// Whether the spinner is on its way in. Internal for tests.
+    private(set) var isBouncingInSpinner = false
 
     static let arrivalDuration: TimeInterval = 0.45
     static let arrivalRise: CGFloat = 24
+    /// The spinner is drawn at the time's size, not a control's (#725).
+    static let spinnerScale = CGAffineTransform(scaleX: 0.6, y: 0.6)
+    /// Room between the time and the spinner or the mark.
+    static let indicatorGap: CGFloat = 4
 
     /// The message rises into place from the composer (#719): a short spring
     /// up and in, landing at its on-its-way ink. A delivery that comes back
@@ -129,10 +162,58 @@ final class ThreadRowCell: UICollectionViewCell {
         }
     }
 
-    /// Delivered: the faded message comes up to full ink.
-    func playDelivered() {
-        row.alpha = Self.sendingAlpha
-        UIView.animate(withDuration: 0.25) { self.row.alpha = 1 }
+    /// Delivered: the faded message comes up to full ink and its spinner —
+    /// carried over from the pending row it replaces — scales out (#725).
+    ///
+    /// `carryingSpinner: false` plays it on the pending row itself, the
+    /// moment the server answers — from wherever its spinner is, mid
+    /// bounce-in included — while its delivered row waits to take its place.
+    func playDelivered(carryingSpinner: Bool = true) {
+        installDeliveryIndicatorsIfNeeded()
+        if carryingSpinner {
+            row.alpha = Self.sendingAlpha
+            sendingSpinner.transform = Self.spinnerScale
+            sendingSpinner.alpha = 1
+            sendingSpinner.startAnimating()
+            placeDeliveryIndicators()
+            layoutIfNeeded()
+        }
+        delivery = nil
+        accessibilityValue = nil
+        isBouncingInSpinner = false
+        isScalingOutSpinner = true
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
+            self.row.alpha = 1
+            self.sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
+            self.sendingSpinner.alpha = 0
+        } completion: { _ in
+            self.isScalingOutSpinner = false
+            guard self.delivery != .sending else { return }
+            self.sendingSpinner.stopAnimating()
+            self.sendingSpinner.transform = Self.spinnerScale
+            self.sendingSpinner.alpha = 1
+        }
+    }
+
+    /// Whether the spinner is on its way out. Internal for tests.
+    private(set) var isScalingOutSpinner = false
+
+    var sendingSpinnerView: UIActivityIndicatorView { sendingSpinner }
+
+    /// The spinner's and the mark's leading edges, from the time line's.
+    private var spinnerLeading: NSLayoutConstraint?
+    private var markLeading: NSLayoutConstraint?
+
+    /// Just right of the time's text: the line is a stretching label, so the
+    /// text's own width places them, not the label's frame (#725).
+    private func placeDeliveryIndicators() {
+        let label = row.headerTextLabel
+        let textWidth = label.text.map { ($0 as NSString).size(withAttributes: [.font: label.font as Any]).width } ?? 0
+        let drawn = sendingSpinner.intrinsicContentSize.width * Self.spinnerScale.a
+        // The spinner is laid out at its natural size and drawn scaled about
+        // its centre: its frame starts half the difference before what shows.
+        spinnerLeading?.constant = ceil(textWidth) + Self.indicatorGap - (sendingSpinner.intrinsicContentSize.width - drawn) / 2
+        markLeading?.constant = ceil(textWidth) + Self.indicatorGap
     }
 
     private var installedDeliveryIndicators = false
@@ -140,16 +221,20 @@ final class ThreadRowCell: UICollectionViewCell {
         guard !installedDeliveryIndicators else { return }
         installedDeliveryIndicators = true
         sendingSpinner.hidesWhenStopped = true
+        sendingSpinner.transform = Self.spinnerScale
         failedMark.tintColor = .systemRed
+        failedMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
         failedMark.isHidden = true
+        let label = row.headerTextLabel
         for view in [sendingSpinner, failedMark] as [UIView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             contentView.addSubview(view)
-            NSLayoutConstraint.activate([
-                view.trailingAnchor.constraint(equalTo: row.trailingAnchor),
-                view.topAnchor.constraint(equalTo: row.topAnchor, constant: 2)
-            ])
+            view.centerYAnchor.constraint(equalTo: label.centerYAnchor).isActive = true
         }
+        spinnerLeading = sendingSpinner.leadingAnchor.constraint(equalTo: label.leadingAnchor)
+        markLeading = failedMark.leadingAnchor.constraint(equalTo: label.leadingAnchor)
+        spinnerLeading?.isActive = true
+        markLeading?.isActive = true
     }
 
     func setQuote(_ quote: (author: String, snippet: String)?) {

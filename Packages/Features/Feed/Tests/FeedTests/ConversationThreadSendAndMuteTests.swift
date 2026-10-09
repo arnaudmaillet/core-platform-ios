@@ -166,4 +166,108 @@ struct ConversationThreadSendAndMuteTests {
         #expect(driver.retried == ["p1"])
         #expect(driver.replies.isEmpty, "a failed message was answered instead of retried")
     }
+
+    // MARK: - No flicker (#725)
+
+    private func settle(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<400 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return condition()
+    }
+
+    /// ⚠️ Sending re-draws the sent row and nothing else: the rest of the
+    /// transcript used to be reconfigured on every render — avatars back to
+    /// initials, emotes restarted — and the whole screen blinked.
+    @Test func sendingRedrawsOnlyTheSentRow() async throws {
+        let them = Self.message("m1", mine: false, minutes: 1)
+        let mine = Self.message("m2", mine: true, minutes: 2)
+        let (screen, driver, window) = makeScreen(phase: .content([them, mine]))
+        defer { window.isHidden = true }
+        screen.debugConfiguredIDs = []
+
+        let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
+        driver.onPhaseChange?(.content([them, mine, pending]))
+        screen.view.layoutIfNeeded()
+        #expect(cell("Message p1", in: screen) != nil)
+
+        let delivered = ConversationThreadMessage(
+            id: "t1", senderID: ProfileID("me"), body: "Message p1", sentAt: pending.sentAt, isMine: true, quote: nil
+        )
+        driver.onPhaseChange?(.content([them, mine, delivered]))
+        #expect(await settle {
+            screen.view.layoutIfNeeded()
+            return screen.debugConfiguredIDs.contains("t1")
+        }, "the delivered message never landed")
+        #expect(Set(screen.debugConfiguredIDs).isSubset(of: ["p1", "t1"]),
+                "sending re-drew other rows: \(screen.debugConfiguredIDs)")
+
+        // A real change still reaches the rows it concerns: the peer's new
+        // name re-signs their messages, not the viewer's.
+        screen.debugConfiguredIDs = []
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("them"), name: "Ava M.", avatarURL: nil))
+        screen.view.layoutIfNeeded()
+        #expect(screen.debugConfiguredIDs.contains("m1"))
+        #expect(!screen.debugConfiguredIDs.contains("m2"))
+        #expect(!screen.debugConfiguredIDs.contains("t1"))
+    }
+
+    /// Delivered mid bounce-in: the spinner scales out at once, on the row
+    /// still rising, and the delivered row then lands plainly in its place.
+    @Test func aDeliveryMidBounceScalesTheSpinnerOutAtOnce() async throws {
+        let them = Self.message("m1", mine: false, minutes: 1)
+        let (screen, driver, window) = makeScreen(phase: .content([them]))
+        defer { window.isHidden = true }
+        let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
+        driver.onPhaseChange?(.content([them, pending]))
+        screen.view.layoutIfNeeded()
+        let rising = try #require(cell("Message p1", in: screen))
+        #expect(rising.isBouncingInSpinner)
+
+        driver.onPhaseChange?(.content([them, ConversationThreadMessage(
+            id: "t1", senderID: ProfileID("me"), body: "Message p1", sentAt: pending.sentAt, isMine: true, quote: nil
+        )]))
+        #expect(rising.isScalingOutSpinner, "the spinner waited for the rise before leaving")
+        #expect(!rising.isBouncingInSpinner)
+        #expect(rising.row.alpha == 1)
+
+        screen.debugConfiguredIDs = []
+        #expect(await settle {
+            screen.view.layoutIfNeeded()
+            return screen.debugConfiguredIDs.contains("t1")
+        })
+        let landed = try #require(cell("Message p1", in: screen))
+        #expect(!landed.isScalingOutSpinner, "the delivered row played the delivery twice")
+        #expect(!landed.sendingSpinnerView.isAnimating)
+        #expect(landed.row.alpha == 1)
+    }
+
+    /// The spinner is small and sits just right of the time; delivered, it
+    /// scales out.
+    @Test func theSpinnerSitsRightOfTheTimeAndScalesOut() async throws {
+        let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
+        let (screen, driver, window) = makeScreen(phase: .content([pending]))
+        defer { window.isHidden = true }
+        let row = try #require(cell("Message p1", in: screen))
+        row.layoutIfNeeded()
+        let spinner = row.sendingSpinnerView
+        #expect(spinner.isAnimating)
+        #expect(row.isBouncingInSpinner, "the spinner did not bounce in")
+        spinner.layer.removeAllAnimations()
+        let header = row.row.headerTextLabel
+        let headerFrame = header.convert(header.bounds, to: row.contentView)
+        let textEnd = headerFrame.minX + min(header.intrinsicContentSize.width, header.bounds.width)
+        #expect(spinner.frame.minX >= textEnd, "the spinner overlaps the time: \(spinner.frame) header \(headerFrame) end \(textEnd) text \(header.text ?? "-")")
+        #expect(spinner.frame.minX - textEnd < 8, "the spinner is not beside the time")
+        #expect(abs(spinner.center.y - headerFrame.midY) < 1, "\(spinner.center) vs \(headerFrame)")
+        #expect(spinner.frame.width < 14, "the spinner is a control's size, not the time's")
+
+        driver.onPhaseChange?(.content([ConversationThreadMessage(
+            id: "t1", senderID: ProfileID("me"), body: "Message p1", sentAt: pending.sentAt, isMine: true, quote: nil
+        )]))
+        screen.view.layoutIfNeeded()
+        let delivered = try #require(cell("Message p1", in: screen))
+        #expect(delivered.isScalingOutSpinner, "the spinner did not scale out on delivery")
+    }
 }

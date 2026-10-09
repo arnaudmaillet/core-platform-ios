@@ -151,6 +151,8 @@ final class CommentRowView: UIView {
 
     /// The body's label — what Select Text lays its overlay over.
     var bodyTextLabel: UILabel { bodyLabel }
+    /// The name · time line, for what sits beside the time (#725).
+    var headerTextLabel: UILabel { headerLabel }
 
     /// A conversation's messages carry no ♥: there is nothing to like them
     /// with on the wire, and a control that does nothing is worse than none.
