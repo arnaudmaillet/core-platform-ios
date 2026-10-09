@@ -94,19 +94,18 @@ struct ProfileBannerShapeTests {
         #expect(abs(short.posterFadeOutTravel - (short.posterClearance - Spacing.md)) < 0.5)
     }
 
-    /// A poster wears the blur alone (#688): no opaque fade between the
-    /// picture and the profile.
-    @Test func aPosterWearsItsBlurAndNoFade() {
+    /// A poster wears its blur, and an opaque fade at its foot only (#718).
+    @Test func aPosterWearsItsBlurAndAFadeAtItsFoot() {
         let poster = header(picture: CGSize(width: 900, height: 1600))
         #expect(poster.debugBannerShowsBlur)
-        #expect(!poster.debugBannerShowsRamp, "a poster draws the opaque fade")
+        #expect(poster.debugBannerShowsRamp, "a poster lost its foot's fade")
     }
 
     @Test func aBandDoesNotBlurAndFadesToBlack() {
         let band = header(picture: CGSize(width: 1600, height: 900))
         #expect(band.bannerFormat == .band)
         #expect(!band.debugBannerShowsBlur, "the band still blurs")
-        #expect(band.debugBannerShowsRamp, "a band lost its fade (#688 is posters only)")
+        #expect(band.debugBannerShowsRamp, "a band lost its fade")
         #expect(band.debugBannerRampTone == .black, "the band's ramp follows the page")
         #expect(band.debugBannerBlurLevels.isEmpty, "blur levels are drawn")
         // Still a band's height: on the avatar's midline, not the poster's 80%.

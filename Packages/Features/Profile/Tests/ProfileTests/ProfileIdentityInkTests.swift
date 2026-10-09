@@ -316,8 +316,7 @@ struct ProfileIdentityInkTests {
             #expect(levels[levels.count - 1].start > name.minY)
         }
 
-        #expect(header.debugBannerShowsRamp == band)
-        guard band else { return }
+        #expect(header.debugBannerShowsRamp)
         let banner = header.debugBannerFrame
         let locations = header.debugBannerRampLocations
         let alphas = header.debugBannerRampAlphas
@@ -335,9 +334,14 @@ struct ProfileIdentityInkTests {
         // clear above it, thin under the name, whole at the foot — drawn as
         // the curve the ground is read with.
         #expect(alpha(at: fade.rampStart - 4) == 0)
-        // The shoulder under the name, on both shapes: with no blur, a
-        // band's black ramp is what closes the picture's spread under its type.
-        #expect(alpha(at: name.minY) >= HeroBannerFade.shoulderAlpha - 0.05)
+        // The shoulder under a band's name: with no blur, its black ramp is
+        // what closes the picture's spread under its type. A poster's ramp is
+        // its foot only (#718): nothing under the name.
+        if band {
+            #expect(alpha(at: name.minY) >= HeroBannerFade.shoulderAlpha - 0.05)
+        } else {
+            #expect(alpha(at: name.minY) < 0.01)
+        }
         let handle = header.debugHandleFrame.midY
         #expect(abs(alpha(at: handle) - HeroBannerFade.rampAlpha(at: handle, geometry: fade)) < 0.02)
         #expect(alpha(at: banner.maxY) > 0.99)

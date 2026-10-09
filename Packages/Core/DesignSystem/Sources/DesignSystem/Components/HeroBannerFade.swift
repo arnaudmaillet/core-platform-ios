@@ -18,13 +18,13 @@ import UIKit
 ///        35   12   3.5K           page ink on the page
 /// ```
 ///
-/// ⚠️ **A PROFILE'S POSTER NO LONGER WEARS THE FADE (#688).** The owner's
-/// call (2026-10-08): on a vertical cover, the blur alone — the type may
-/// read less well over a busy picture, and the picture's edge may show at
-/// the foot; both accepted, the user choosing their cover. The profile hides
-/// its `HeroBannerRampView` on a poster and its picture reads the ground
-/// without it (`HeroBannerPictureView.rampsToPage`). What follows still holds
-/// wherever the ramp is drawn — a band, a place page.
+/// ⚠️ **A PROFILE'S POSTER WEARS THE FADE AT ITS FOOT ONLY (#688 → #718).**
+/// The owner's call (2026-10-08) took the opaque fade off a vertical cover,
+/// the blur alone; on 2026-10-09 a light one came back over the blur's last
+/// 30 % only (`ProfileHeaderView.posterFade`), so the picture melts into the
+/// page while the type above stands on the blur — it may read less well over
+/// a busy cover, which stays accepted. What follows holds for the band and
+/// the place page, whose ramp climbs the whole container.
 ///
 /// ⚠️ **THE FADE IS UNDER THE BLUR, AND BOTH ARE NEEDED.** #331 replaced the
 /// long opacity ramp with the blur and kept only a 12pt seam of page tone:
@@ -222,9 +222,9 @@ public enum HeroBannerFade {
     public static let rampCurveExponent: CGFloat = 3
 
     /// How much of the page's tone already stands under the type on a
-    /// shouldered ramp (`shoulderedGeometry`). A profile's poster no longer
-    /// draws its ramp (#688), so the contrast measured below holds for a band
-    /// and a place page, not for it.
+    /// shouldered ramp (`shoulderedGeometry`). A profile's poster has no
+    /// shoulder any more (its ramp is only the blur's last 30 %, #718), so the
+    /// contrast measured below holds for a band and a place page, not for it.
     ///
     /// ⚠️ THE USER'S CALL AFTER #335's AUDIT (30 September 2026): "start the
     /// OPACITY effect a bit earlier, without touching the blur". With the
@@ -785,11 +785,6 @@ public final class HeroBannerPictureView: UIView {
     /// page the header sits on. Only read here to tell the type what it
     /// stands on (`groundPixels`); the ramp draws it.
     public var pageTone: UIColor = Surface.page
-    /// Whether a page-toned ramp lies over this picture (`HeroBannerRampView`,
-    /// over the same `fade`), so the ground read under the type includes it
-    /// (`groundPixels`). False for a profile's poster, which wears the blur
-    /// alone (#688): the type is read against the picture itself.
-    public var rampsToPage = true
 
     /// The ground behind `rect` (this view's coordinates at rest — a stretch
     /// changes nothing under the type) — the blurred
@@ -849,7 +844,7 @@ public final class HeroBannerPictureView: UIView {
             // The row's middle, back in this view's space: the crop's rows
             // run top-down from `pixelRect`'s, `scale` points apart.
             let y = origin.y + (pixelRect.minY + CGFloat(row) + 0.5) * scale
-            let alpha = rampsToPage ? Float(HeroBannerFade.rampAlpha(at: y, geometry: fade)) : 0
+            let alpha = Float(HeroBannerFade.rampAlpha(at: y, geometry: fade))
             for column in 0..<width {
                 let index = (row * width + column) * 4
                 let picture = SIMD3(

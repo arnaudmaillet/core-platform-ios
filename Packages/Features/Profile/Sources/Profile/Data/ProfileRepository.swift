@@ -789,8 +789,10 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         // A list hidden from this viewer (list privacy, backend #720) is an
         // empty page that counts nothing: "—", not "0".
         guard let body = response.message, !body.hidden else {
-            logger.info("follower count unavailable for \(id.rawValue, privacy: .public)")
-            return .unavailable
+            // ⚠️ THE LIST IS HIDDEN, NOT ITS NUMBER (#718, the owner's call
+            // 2026-10-09): the count comes from the relation status, which
+            // carries it whatever the list's audience.
+            return await relationStatusCounts(for: id)?.followers ?? .unavailable
         }
         return .fromSample(count: body.followers.count, hasMore: !body.nextPageToken.isEmpty)
     }
@@ -801,10 +803,28 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         request.limit = edgeSampleLimit
         let response = await socialGraphClient.listFollowing(request: request, headers: [:])
         guard let body = response.message, !body.hidden else {
-            logger.info("following count unavailable for \(id.rawValue, privacy: .public)")
-            return .unavailable
+            return await relationStatusCounts(for: id)?.following ?? .unavailable
         }
         return .fromSample(count: body.following.count, hasMore: !body.nextPageToken.isEmpty)
+    }
+
+    /// A profile's follower and following counts from `GetRelationStatus`
+    /// (`target_followers_count` / `target_following_count`), which answers
+    /// them even when its owner hides the lists themselves. Nil when it can't
+    /// be asked (a guest) or doesn't answer.
+    private func relationStatusCounts(for id: ProfileID) async -> (followers: CountEstimate, following: CountEstimate)? {
+        guard let viewer = try? await resolveViewerProfileID() else {
+            logger.info("relation counts unavailable for \(id.rawValue, privacy: .public)")
+            return nil
+        }
+        var request = SocialGraph_V1_GetRelationStatusRequest()
+        request.actorID = viewer.rawValue
+        request.targetID = id.rawValue
+        guard let view = await socialGraphClient.getRelationStatus(request: request, headers: [:]).message else {
+            logger.info("relation counts unavailable for \(id.rawValue, privacy: .public)")
+            return nil
+        }
+        return (.exact(view.targetFollowersCount), .exact(view.targetFollowingCount))
     }
 
     private static func makeProfile(
