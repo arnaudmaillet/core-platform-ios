@@ -320,7 +320,9 @@ final class CommentsInputBar: UIView {
     // Effect set on window attach: materializing one in init contacts the
     // render server and stalls headless CI simulators (see ci memory).
     private let field = UIVisualEffectView(effect: nil)
-    private let textView = UITextView()
+    /// Plays its emotes in place while composing (#699); read and written
+    /// through `plainText`, the emoji and `:code:`s that are sent.
+    private let textView = EmoteTextView()
     private let placeholderLabel = UILabel()
     /// The emote panel and the inline `:query` strip for this field; its
     /// smiley sits at the field's trailing end, where iMessage keeps its own.
@@ -947,9 +949,9 @@ final class CommentsInputBar: UIView {
     }
 
     private func sendTapped() {
-        let text = textView.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = textView.plainText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isSending else { return }
-        textView.text = ""
+        textView.plainText = ""
         textViewDidChange(textView)
         #if DEBUG
         if Self.logsRise { debugLogKeyboardStep("sent \"\(text)\"") }
@@ -962,9 +964,9 @@ final class CommentsInputBar: UIView {
     /// restoration; routes through the delegate path so the toggle and
     /// the field height stay honest.
     var draftText: String {
-        get { textView.text ?? "" }
+        get { textView.plainText }
         set {
-            textView.text = newValue
+            textView.plainText = newValue
             textViewDidChange(textView)
         }
     }
@@ -1011,14 +1013,14 @@ final class CommentsInputBar: UIView {
         if textView.isFirstResponder {
             textView.insertText(text)
         } else {
-            textView.text = (textView.text ?? "") + text
+            textView.plainText += text
         }
         textViewDidChange(textView)
     }
 
     /// Whether the field holds something to send.
     private var hasDraft: Bool {
-        !textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !textView.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// The field button's tap: send over a draft (nothing while one is in
@@ -1040,7 +1042,7 @@ final class CommentsInputBar: UIView {
         // An idle dismissal (keyboard retired over an empty field) resets
         // any armed reply state — the host clears its target so a later
         // composition starts top-level, not silently bound to a thread.
-        if !open, textView.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !open, textView.plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             onIdleDismiss?()
         }
     }
@@ -1223,6 +1225,8 @@ final class CommentsInputBar: UIView {
                 self?.draftText = text
                 report("typed")
             }
+            // `-composer-draft-keep`: the draft stays, to be looked at.
+            guard !arguments.contains("-composer-draft-keep") else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
                 self?.draftText = ""
                 report("cleared")
@@ -1872,7 +1876,7 @@ extension CommentsInputBar: UITextViewDelegate {
         placeholderLabel.isHidden = textView.hasText
         updateFieldAction()
         updateFieldHeight(animated: true)
-        onTextChange?(textView.text ?? "")
+        onTextChange?(self.textView.plainText)
     }
 }
 

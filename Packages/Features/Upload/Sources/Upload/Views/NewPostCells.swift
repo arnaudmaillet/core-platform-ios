@@ -930,7 +930,9 @@ final class NewPostCaptionCell: UICollectionViewListCell {
         static let emoteToggleSide: CGFloat = 30
     }
 
-    private let field = UITextView()
+    /// Plays its emotes in place while composing (#699); read and written
+    /// through `plainText`, the emoji and `:code:`s that are posted.
+    private let field = EmoteTextView()
     private let placeholder = UILabel()
     /// The emote panel and the inline `:query` strip. Its smiley sits in the
     /// caption's bottom trailing corner; the text wraps short of it.
@@ -986,7 +988,7 @@ final class NewPostCaptionCell: UICollectionViewListCell {
 
     func configure(text: String, onChange: @escaping (String) -> Void) {
         self.onChange = onChange
-        if field.text != text { field.text = text }
+        if field.plainText != text { field.plainText = text }
         placeholder.isHidden = field.hasText
         resize()
     }
@@ -1049,7 +1051,7 @@ extension NewPostCaptionCell: UITextViewDelegate {
     func textViewDidChange(_ textView: UITextView) {
         placeholder.isHidden = textView.hasText
         resize()
-        onChange?(textView.text ?? "")
+        onChange?(field.plainText)
         keepCaretVisible()
     }
 

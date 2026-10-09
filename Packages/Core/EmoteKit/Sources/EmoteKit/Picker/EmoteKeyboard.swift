@@ -32,11 +32,14 @@ import UIKit
 ///
 /// ## What the field shows
 ///
-/// ⚠️ **STATIC WHILE COMPOSING.** An editable `UITextView` draws its own text
-/// and offers no hook to leave a glyph undrawn under an animation, so the
-/// field shows emoji as the system's still glyphs and house emotes as their
-/// `:code:`, which is also what is sent. They animate once posted, on every
-/// surface that shows them.
+/// ⚠️ **ANIMATED IN AN `EmoteTextView`, STATIC IN A PLAIN `UITextView`
+/// (#699).** A plain text view draws its own text and offers no hook to
+/// leave a glyph undrawn under an animation, so it shows emoji as the
+/// system's still glyphs and house emotes as their `:code:`. An
+/// `EmoteTextView` holds each emote as one attachment that plays in place;
+/// this keyboard then reads and writes its PLAIN text (`plainText`,
+/// `replacePlain`), so what is sent is the same `:code:`s and emoji either
+/// way.
 @MainActor
 public final class EmoteKeyboard: NSObject {
     public let toggleButton = UIButton(type: .system)
@@ -168,46 +171,70 @@ public final class EmoteKeyboard: NSObject {
 
     /// Inserts `emote` at the caret (replacing any selection) and remembers it.
     public func pick(_ emote: Emote) {
-        guard let textView else { return }
-        replace(textView.selectedRange, with: emote.insertionText)
+        guard textView != nil else { return }
+        replace(plainSelection, with: emote.insertionText)
         recents.record(emote)
     }
 
     /// One backspace: a whole `:code:` or one whole emoji, or the selection.
     public func deleteBackward() {
-        guard let textView else { return }
-        let selection = textView.selectedRange
+        guard textView != nil else { return }
+        let selection = plainSelection
         if selection.length > 0 {
             replace(selection, with: "")
         } else if let range = EmoteComposing.deletionRange(
-            in: textView.text ?? "", caret: selection.location, catalog: engine.catalog
+            in: plainText, caret: selection.location, catalog: engine.catalog
         ) {
             replace(range, with: "")
         }
     }
 
     private func startSearch() {
-        guard let textView else { return }
+        guard textView != nil else { return }
         if isShowingPanel { toggle() }
         // A search is a `:` that opens a word.
-        let text = (textView.text ?? "") as NSString
-        let caret = min(textView.selectedRange.location, text.length)
+        let text = plainText as NSString
+        let caret = min(plainSelection.location, text.length)
         let before = caret > 0 ? text.substring(with: text.rangeOfComposedCharacterSequence(at: caret - 1)) : ""
-        replace(textView.selectedRange, with: EmoteComposing.opensWord(after: before) ? ":" : " :")
+        replace(plainSelection, with: EmoteComposing.opensWord(after: before) ? ":" : " :")
     }
 
     private func acceptSuggestion(_ emote: Emote) {
-        guard let textView,
-              let query = EmoteComposing.inlineQuery(in: textView.text ?? "", caret: textView.selectedRange.location)
+        guard textView != nil,
+              let query = EmoteComposing.inlineQuery(in: plainText, caret: plainSelection.location)
         else { return }
         replace(query.range, with: emote.insertionText)
         recents.record(emote)
     }
 
-    /// Replaces `range` as typing would: through the delegate's veto, with the
-    /// typing attributes, the caret after the insertion, and the delegate told.
+    // MARK: - The field's text
+
+    /// The field, when it animates its emotes (#699): its storage holds one
+    /// attachment per emote, so everything here reads and writes its PLAIN
+    /// text — the emoji and `:code:`s — and maps ranges through it.
+    private var emoteField: EmoteTextView? { textView as? EmoteTextView }
+
+    /// The text as sent: the emoji and `:code:`s, whatever the field draws.
+    private var plainText: String {
+        emoteField?.plainText ?? textView?.text ?? ""
+    }
+
+    /// The selection, in `plainText`'s coordinates.
+    private var plainSelection: NSRange {
+        emoteField?.plainSelectedRange ?? textView?.selectedRange ?? NSRange(location: 0, length: 0)
+    }
+
+    /// Replaces `range` of the plain text as typing would: through the
+    /// delegate's veto, with the typing attributes, the caret after the
+    /// insertion, and the delegate told.
     private func replace(_ range: NSRange, with text: String) {
         guard let textView else { return }
+        if let emoteField {
+            guard emoteField.replacePlain(range, with: text) else { return }
+            refreshSuggestions()
+            textView.scrollRangeToVisible(textView.selectedRange)
+            return
+        }
         let length = ((textView.text ?? "") as NSString).length
         let range = NSRange(location: min(range.location, length),
                             length: min(range.length, length - min(range.location, length)))
@@ -235,8 +262,8 @@ public final class EmoteKeyboard: NSObject {
             hideCompletions()
             return
         }
-        let text = textView.text ?? ""
-        let caret = textView.selectedRange.location
+        let text = plainText
+        let caret = plainSelection.location
         // One token is typed at a time: an emote query wins, then a handle
         // or a tag.
         if suggestsInline, let query = EmoteComposing.inlineQuery(in: text, caret: caret) {
@@ -300,8 +327,8 @@ public final class EmoteKeyboard: NSObject {
     }
 
     private func typedToken() -> PartialTextEntity? {
-        guard let textView else { return nil }
-        return TextEntityScanner.partialToken(in: textView.text ?? "", caret: textView.selectedRange.location)
+        guard textView != nil else { return nil }
+        return TextEntityScanner.partialToken(in: plainText, caret: plainSelection.location)
     }
 
     private func hideCompletions() {
