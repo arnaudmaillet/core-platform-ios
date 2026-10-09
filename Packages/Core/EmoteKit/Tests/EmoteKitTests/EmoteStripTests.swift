@@ -189,9 +189,18 @@ struct EmoteStripTests {
         #expect(tile.player.displayedFrame == 0)
 
         strip.scrollViewWillBeginDragging(grid)
+        // Two waits, so a failure says which half broke: the drag starting
+        // the tile, or the tile leaving its poster frame.
+        try #require(await settle { tile.isAnimating }, "the drag did not start the tile")
+        // ⚠️ ANY FRAME PAST THE POSTER, NOT "THE FIRST HALF". The narrow
+        // window (frames 1…10 of a 0.6 s loop: 0.3 s) was sampled by a wait
+        // that can be held off the main thread for longer than that on a
+        // starved CI runner, and missed it every time round (develop
+        // backstop at a2952398). The checks below are synchronous with the
+        // end of the scroll, so wherever the loop is, it is still playing.
         try #require(
-            await settle { (1...frames / 2).contains(tile.player.displayedFrame ?? 0) },
-            "the tile reaches the first half of its loop"
+            await settle { (tile.player.displayedFrame ?? 0) != 0 },
+            "the tile never left its poster frame"
         )
         strip.scrollViewDidEndDecelerating(grid)
         #expect(tile.isAnimating, "it plays out its loop instead of freezing")
