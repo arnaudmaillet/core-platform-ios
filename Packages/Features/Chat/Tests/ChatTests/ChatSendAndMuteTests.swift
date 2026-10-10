@@ -168,6 +168,27 @@ struct ChatSendAndMuteTests {
         #expect(mutedWhenAnswered.items == [false], "the refusal was answered before the rollback")
     }
 
+    /// Muting from the inbox's row menu says so once the server has (#803):
+    /// it used to show nothing at all.
+    @Test func anInboxMuteIsAnsweredInWords() async {
+        let provider = TextStubProvider(failures: 0)
+        let list = ConversationListViewModel(repository: provider)
+        let answers = Answers()
+        var messages: [String] = []
+        list.onMuteAnswered = { message, _, confirmed in
+            messages.append(message)
+            answers.items.append(confirmed)
+        }
+        list.toggleMute(ConversationID("c1"))
+        #expect(messages.isEmpty, "answered before the server")
+        #expect(await settle { !answers.items.isEmpty })
+        #expect(messages == ["Notifications muted"])
+        #expect(answers.items == [true])
+
+        #expect(ConversationListViewModel.muteAnswer(muting: false, confirmed: true) == "Notifications on")
+        #expect(ConversationListViewModel.muteAnswer(muting: true, confirmed: false) == "Couldn't mute notifications")
+    }
+
     /// What a completion answered, read after an await.
     @MainActor
     private final class Answers {

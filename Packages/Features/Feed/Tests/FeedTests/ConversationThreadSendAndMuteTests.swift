@@ -223,6 +223,15 @@ struct ConversationThreadSendAndMuteTests {
         #expect(abs(until.timeIntervalSinceNow - 3_600) < 5)
     }
 
+    /// A message's Copy says so (#803): the pasteboard is off-screen.
+    @Test func copyingAMessageShowsACopiedToast() throws {
+        let (screen, _, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        #expect(Self.firstToast(in: screen.view) == nil)
+        screen.confirmCopied()
+        #expect(Self.firstToast(in: screen.view)?.style == .confirmation, "the copy said nothing")
+    }
+
     /// A refused mute puts the bell back and says it failed (#802).
     @Test func aRefusedMuteRollsBackWithAFailureToast() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))

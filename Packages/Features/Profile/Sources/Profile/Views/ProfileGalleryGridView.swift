@@ -806,6 +806,8 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                     guard let cell else { return }
                     MemberGates.perform(.save, from: cell) { [weak cell] in
                         _ = bookmarks.toggle(post.id.rawValue)
+                        // The fill says it; the hand feels it (#803).
+                        Feedback.toggled()
                         cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
                     }
                 }

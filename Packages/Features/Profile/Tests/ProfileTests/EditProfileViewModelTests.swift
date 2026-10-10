@@ -63,6 +63,13 @@ struct EditProfileViewModelTests {
         try? await Task.sleep(for: .milliseconds(50))
     }
 
+    /// Waits for what the test is about rather than for the clock.
+    private func settle(until condition: () -> Bool) async {
+        for _ in 0..<400 where !condition() {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
     @Test func prefillsFieldsFromCurrentProfile() async {
         let viewModel = EditProfileViewModel(repository: EditStubProvider(profile: viewerProfile()), onSaved: {})
         var lastPhase: EditProfileViewModel.Phase?
@@ -166,6 +173,36 @@ struct EditProfileViewModelTests {
             Issue.record("expected failed save state, got \(String(describing: lastSaveState))")
             return
         }
+    }
+
+    /// A save that lands says so (#803): `.saved`, which the editor shows as
+    /// "Profile saved" — and only once the server has answered.
+    @Test func aSuccessfulSaveEndsSaved() async {
+        let provider = EditStubProvider(profile: viewerProfile())
+        let viewModel = EditProfileViewModel(repository: provider, onSaved: {})
+        var states: [EditProfileViewModel.SaveState] = []
+        viewModel.onSaveStateChange = { states.append($0) }
+
+        viewModel.saveMetadata(.init(displayName: "Ada", username: "ada", bio: "", website: "", links: []))
+        #expect(states == [.saving], "confirmed before the server answered")
+        await settle(until: { states.last == .saved })
+
+        #expect(states == [.saving, .saved])
+    }
+
+    /// Two quick edits confirm once, when both are on the server.
+    @Test func queuedSavesConfirmOnceWhenTheLastLands() async {
+        let provider = EditStubProvider(profile: viewerProfile())
+        let viewModel = EditProfileViewModel(repository: provider, onSaved: {})
+        var states: [EditProfileViewModel.SaveState] = []
+        viewModel.onSaveStateChange = { states.append($0) }
+
+        viewModel.saveMetadata(.init(displayName: "Ada", username: "ada", bio: "", website: "", links: []))
+        viewModel.saveUsername("ada2")
+        await settle(until: { states.last == .saved })
+
+        #expect(states.filter { $0 == .saved }.count == 1, "\(states)")
+        #expect(states.last == .saved)
     }
 
     @Test func sequentialSavesAllRun() async {

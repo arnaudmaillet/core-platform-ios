@@ -298,6 +298,33 @@ struct CountryShopViewControllerTests {
         #expect(row.isSelected)
     }
 
+    /// A refused pack says why (#803) — it used to be a vibration with no
+    /// words — in a failure toast over the shop.
+    @Test func aRefusedPackSaysWhy() throws {
+        let access = FakeAccess()
+        access.gems = 70
+        let packs = FakePacks(access: access)
+        let shop = CountryShopViewController(access: access, stakePacks: packs)
+        shop.loadViewIfNeeded()
+        shop.buyStakePack()
+        #expect(Self.toast(in: shop.view) == nil, "a bought pack raised a toast over its own row")
+
+        #expect(shop.buyStakePack() == .packStillActive(shotsLeft: 3))
+        let toast = try #require(Self.toast(in: shop.view), "the refusal was a vibration with no words")
+        #expect(toast.style == .failure)
+
+        #expect(CountryShopViewController.refusalMessage(for: .packStillActive(shotsLeft: 3))
+                == "Your pack is still active, 3 left")
+        #expect(CountryShopViewController.refusalMessage(for: .insufficientGems(needed: 50, have: 20))
+                == "30 more gems needed")
+        #expect(CountryShopViewController.refusalMessage(for: .bought(shots: 3, remainingGems: 20)) == nil)
+    }
+
+    private static func toast(in view: UIView) -> ToastView? {
+        if let toast = view as? ToastView { return toast }
+        return view.subviews.lazy.compactMap { toast(in: $0) }.first
+    }
+
     /// Without one — the fleet — there is no Boosts section at all.
     @Test func noSellerNoBoosts() {
         let shop = makeShop()

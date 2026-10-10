@@ -715,6 +715,13 @@ final class ConversationThreadViewController: UIViewController {
         return UIMenu(children: [unmute, mute])
     }
 
+    /// A message's Copy says so (#803): the pasteboard is off-screen, and a
+    /// menu that closes on nothing reads as a tap that missed. Over the
+    /// composer, as the mute's toast is. Internal for tests.
+    func confirmCopied() {
+        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: composeBar.inputRowTopAnchor)
+    }
+
     /// Mutes or unmutes through the driver, and says so (#729): the same
     /// bottom toast as "You're signed in".
     ///
@@ -1128,8 +1135,9 @@ final class ConversationThreadViewController: UIViewController {
         let reply = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) {
             [weak self] _ in self?.driver.beginReply(to: id)
         }
-        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
+        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
             UIPasteboard.general.string = message.body
+            self?.confirmCopied()
         }
         let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
             [weak self] _ in self?.selectText(of: id)

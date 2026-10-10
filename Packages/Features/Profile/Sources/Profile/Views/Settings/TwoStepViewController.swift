@@ -516,9 +516,11 @@ final class TwoStepEnrollmentViewController: UIViewController {
         }
     }
 
+    /// A copy has no evidence on screen, so it says so (#803): a vibration
+    /// alone left the author unsure the key was taken.
     private func copyKey() {
         UIPasteboard.general.string = enrollment.secret
-        HapticSelection().selectionChanged()
+        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self)
     }
 
     @objc private func confirm() {
@@ -644,8 +646,9 @@ final class BackupCodesViewController: UIViewController {
             guard let self else { return }
             switch dataSource.itemIdentifier(for: indexPath) {
             case .copy:
-                UIPasteboard.general.string = Self.plainText(codes)
-                HapticSelection().selectionChanged()
+                copyToPasteboard(Self.plainText(codes))
+                // Said, not only felt (#803): nothing on screen shows a copy.
+                Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self)
             case .share:
                 let sheet = UIActivityViewController(activityItems: [Self.plainText(codes)], applicationActivities: nil)
                 sheet.popoverPresentationController?.sourceView = collectionView.cellForItem(at: indexPath)
@@ -658,6 +661,10 @@ final class BackupCodesViewController: UIViewController {
 
     private var dataSource: AnyObject?
     private var selectRow: ((IndexPath) -> Void)?
+    /// Where Copy puts the codes. Swappable for tests: ⚠️ the general
+    /// pasteboard in a package test host blocked the main actor until the
+    /// run's time limit.
+    var copyToPasteboard: (String) -> Void = { UIPasteboard.general.string = $0 }
 }
 
 extension BackupCodesViewController: UICollectionViewDelegate {

@@ -93,6 +93,23 @@ struct FeedbackTests {
         }
     }
 
+    /// A toast sourced from the tab shell — a sheet's presenter once the
+    /// sheet has gone, "Posted" (#803) — goes to the selected tab, whose safe
+    /// area clears the tab bar; the shell's view does not.
+    @Test func aTabShellHandsItsToastToTheSelectedTab() {
+        let tabs = UITabBarController()
+        let first = UINavigationController(rootViewController: UIViewController())
+        tabs.viewControllers = [first, UIViewController()]
+        tabs.selectedIndex = 0
+        hosting(tabs) {
+            #expect(Feedback.host(for: tabs) === first)
+            _ = recordingHaptics {
+                let toast = Feedback.success("Posted", from: tabs)
+                #expect(toast.superview === first.view)
+            }
+        }
+    }
+
     /// A screen out of any window keeps its own view: nothing better to guess.
     @Test func aScreenOutOfAWindowHostsItsOwnToast() {
         let screen = UIViewController()
@@ -135,6 +152,22 @@ struct FeedbackTests {
                 Feedback.info("Hidden from this feed", from: screen)
             }
             #expect(played.isEmpty)
+        }
+    }
+
+    /// A toggle that shows on its control (a bookmark) plays the light tap
+    /// and draws nothing (#803).
+    @Test func aToggledStatePlaysALightTapAndNoToast() {
+        let (root, screen) = shell()
+        hosting(root) {
+            let previous = Feedback.playToggleHaptic
+            var taps = 0
+            Feedback.playToggleHaptic = { taps += 1 }
+            defer { Feedback.playToggleHaptic = previous }
+            let notifications = recordingHaptics { Feedback.toggled() }
+            #expect(taps == 1)
+            #expect(notifications.isEmpty, "a toggle played a notification haptic")
+            #expect(!screen.view.subviews.contains { $0 is ToastView })
         }
     }
 

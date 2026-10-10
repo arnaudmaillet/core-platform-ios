@@ -505,13 +505,30 @@ public final class CountryShopViewController: UIViewController {
     func buyStakePack() -> StakePackPurchase? {
         guard let stakePacks, !access.purchasesRestricted else { return nil }
         let outcome = stakePacks.buyPack()
-        switch outcome {
-        case .bought:
+        if let refusal = Self.refusalMessage(for: outcome) {
+            // A refusal says WHY (#803): it used to be a vibration with no
+            // words, which reads as a tap that missed. The failure toast
+            // carries the error haptic.
+            Feedback.failure(refusal, from: self)
+        } else {
+            // Bought: the row turns into "Active — N left" on the spot, so
+            // the hand only needs to feel it.
             HapticNotification().notificationOccurred(.success)
-        case .packStillActive, .insufficientGems:
-            HapticNotification().notificationOccurred(.error)
         }
         return outcome
+    }
+
+    /// Why the store refused a pack, in the toast's words — nil when it was
+    /// bought.
+    static func refusalMessage(for outcome: StakePackPurchase) -> String? {
+        switch outcome {
+        case .bought:
+            return nil
+        case .packStillActive(let shotsLeft):
+            return "Your pack is still active, \(shotsLeft) left"
+        case .insufficientGems(let needed, let have):
+            return "\(max(needed - have, 1)) more gems needed"
+        }
     }
 
     private func flag(for country: CountryAtlas.Country) -> UIImage {

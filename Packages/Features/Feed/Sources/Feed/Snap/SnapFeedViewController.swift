@@ -2117,6 +2117,8 @@ final class SnapFeedViewController: UIViewController {
     private func toggleBookmark(for id: PostID) {
         MemberGates.perform(.save, from: self) { [weak self] in
             self?.bookmarks.toggle(id.rawValue)
+            // The fill says it; the hand feels it (#803).
+            Feedback.toggled()
             self?.refreshBookmarkGlyph(for: id)
         }
     }

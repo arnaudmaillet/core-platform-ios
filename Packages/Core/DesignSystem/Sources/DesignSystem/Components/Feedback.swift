@@ -97,6 +97,22 @@ public enum Feedback {
         show(.info, message, symbol: symbol, from: source, above: floor)
     }
 
+    /// A state that shows on the control itself — a bookmark filling — was
+    /// toggled: a light tap and NO toast (#803). The glyph already says what
+    /// happened; a toast would repeat it over the content, but the hand still
+    /// deserves to feel that the press landed.
+    public static func toggled() {
+        playToggleHaptic()
+    }
+
+    /// Plays the toggle's light impact. Swappable for tests, like
+    /// `playHaptic`.
+    static var playToggleHaptic: () -> Void = {
+        toggleImpact.impactOccurred()
+    }
+
+    private static let toggleImpact = HapticImpact(style: .light)
+
     /// Plays a kind's haptic. Swappable so a test can see which one played
     /// without a device; always restored by the test that swaps it.
     static var playHaptic: (UINotificationFeedbackGenerator.FeedbackType) -> Void = { type in
@@ -138,8 +154,12 @@ public enum Feedback {
     ///
     /// The walk stops under an alert (an alert's view is not somewhere to
     /// draw) and under a screen already on its way out.
+    ///
+    /// A tab shell is never the host itself, for the same safe-area reason:
+    /// a toast sourced from it (a sheet's presenter, after the sheet has gone
+    /// — "Posted", #803) goes to its selected tab, which clears the tab bar.
     public static func host(for source: UIViewController) -> UIViewController {
-        guard let root = source.viewIfLoaded?.window?.rootViewController else { return source }
+        guard let root = source.viewIfLoaded?.window?.rootViewController else { return intoSelectedTab(source) }
         var top = root
         while let presented = top.presentedViewController,
               !presented.isBeingDismissed,
@@ -148,9 +168,15 @@ public enum Feedback {
         }
         var ancestor: UIViewController? = source
         while let current = ancestor {
-            if current === top { return source }
+            if current === top { return intoSelectedTab(source) }
             ancestor = current.parent
         }
-        return top
+        return intoSelectedTab(top)
+    }
+
+    private static func intoSelectedTab(_ host: UIViewController) -> UIViewController {
+        guard let tabs = host as? UITabBarController, let selected = tabs.selectedViewController,
+              selected.isViewLoaded else { return host }
+        return selected
     }
 }

@@ -522,6 +522,8 @@ final class ForYouRailsView: UIView {
             MemberGates.perform(.save, from: cell) { [weak self, weak cell] in
                 guard let self else { return }
                 _ = bookmarks.toggle(post.id.rawValue)
+                // The fill says it; the hand feels it (#803).
+                Feedback.toggled()
                 cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
             }
         }

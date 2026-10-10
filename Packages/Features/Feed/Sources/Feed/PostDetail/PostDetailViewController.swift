@@ -1854,8 +1854,10 @@ final class PostDetailViewController: UIViewController {
     private func rowMenu(at indexPath: IndexPath) -> UIMenu? {
         guard case .comment(let id) = streamDataSource.itemIdentifier(for: indexPath),
               let model = streamModels[id] else { return nil }
-        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
+        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
             UIPasteboard.general.string = model.body
+            // Said (#803): nothing on screen shows a copy.
+            self?.confirmCopied()
         }
         let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
             [weak self] _ in
@@ -2496,6 +2498,13 @@ final class PostDetailViewController: UIViewController {
     private func clearReplyState() {
         replyTarget = nil
         composeBar.setReplyPlaceholder(name: nil)
+    }
+
+    /// A comment's Copy says so (#803) — over the composer, which rests where
+    /// the toast would, as in a conversation. Internal for tests.
+    func confirmCopied() {
+        let floor = composeBar.superview != nil && !composeBar.isHidden ? composeBar.inputRowTopAnchor : nil
+        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: floor)
     }
 
     private func presentCommentShare(_ model: CommentDisplayModel) {

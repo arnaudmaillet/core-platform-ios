@@ -37,6 +37,10 @@ public final class EditProfileViewModel {
     public nonisolated enum SaveState: Equatable, Sendable {
         case idle
         case saving
+        /// Every queued save has landed (#803): the screen says "Profile
+        /// saved". Edits apply per field with no Done button, so nothing else
+        /// told the author the server had taken them.
+        case saved
         case failed(message: String)
     }
 
@@ -137,21 +141,31 @@ public final class EditProfileViewModel {
 
     /// Serializes a save behind any in-flight one so none are dropped. On
     /// success refreshes the profile underneath; on failure surfaces `.failed`.
+    ///
+    /// `.saved` waits for the LAST queued save: two quick edits confirm once,
+    /// when both are on the server, not once per field.
     private func performSave(_ operation: @escaping (any ProfileProviding) async throws -> Void) {
         let previous = saveTask
         let repository = repository
         saveState = .saving
+        savesInFlight += 1
         saveTask = Task { [weak self] in
             await previous?.value
             do {
                 try await operation(repository)
-                self?.saveState = .idle
-                self?.onSaved()
+                guard let self else { return }
+                self.savesInFlight -= 1
+                self.saveState = self.savesInFlight == 0 ? .saved : .saving
+                self.onSaved()
             } catch {
+                self?.savesInFlight -= 1
                 self?.saveState = .failed(message: "Couldn't save. Please try again.")
             }
         }
     }
+
+    /// Saves queued or on their way.
+    private var savesInFlight = 0
 
     private static func trimmed(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
