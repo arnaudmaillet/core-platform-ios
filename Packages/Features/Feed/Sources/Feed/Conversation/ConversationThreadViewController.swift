@@ -309,7 +309,7 @@ final class ConversationThreadViewController: UIViewController {
     private var dayPlacementScheduled = false
 
     private func makeDayItem(_ day: Date) -> UIBarButtonItem {
-        let title = DayTitleFormatter.title(for: day)
+        let title = DayTitleFormatter.title(for: day, now: dayClock())
         let item = UIBarButtonItem(
             title: title, image: nil,
             primaryAction: UIAction { [weak self] _ in self?.scrollToDayStart() }
@@ -320,6 +320,11 @@ final class ConversationThreadViewController: UIViewController {
         item.accessibilityHint = "Scrolls to the first message of the day"
         return item
     }
+
+    /// What "now" is for the day titles — the clock, unless a test fixes it.
+    /// ⚠️ A run crossing midnight read the clock twice, the seed's day and the
+    /// title's on either side of it: "October 8" where "Yesterday" was due.
+    var dayClock: () -> Date = Date.init
 
     static func dayItemID(_ day: Date) -> String {
         "conversation.day.\(Int(day.timeIntervalSince1970))"
@@ -486,7 +491,7 @@ final class ConversationThreadViewController: UIViewController {
             guard let self,
                   case .day(let day) = self.dataSource.sectionIdentifier(for: indexPath.section)
             else { return }
-            header.configure(title: DayTitleFormatter.title(for: day))
+            header.configure(title: DayTitleFormatter.title(for: day, now: dayClock()))
         }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(
             collectionView: collectionView
