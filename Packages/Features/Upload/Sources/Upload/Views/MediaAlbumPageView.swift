@@ -65,13 +65,21 @@ final class MediaAlbumPageView: UIView {
 
     private(set) var items: [MediaLibraryItem] = []
     /// Whether this album has been asked for at all. A page that has never
-    /// loaded shows nothing rather than "this album is empty", which would be a
-    /// claim it cannot yet make.
+    /// loaded shows its bones rather than "this album is empty", which would be
+    /// a claim it cannot yet make.
     private(set) var hasLoaded = false
 
     private var grid: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     private let emptyState = EmptyStateView()
+    /// ⚠️ **EVERY PAGE WEARS ITS BONES UNTIL ITS ALBUM LANDS (#831).** Only the
+    /// first album used to: the picker's own skeleton stood in while the library
+    /// answered and was then gone for good, so every other album opened on a
+    /// blank page for as long as its fetch took — a swipe landed on nothing. The
+    /// bones are the tiles' (`MediaAlbumSkeletonView`: same gutter, side and
+    /// corner), and they leave by the charter's cross-fade (P10) as the tiles
+    /// arrive under them.
+    private let skeleton = MediaAlbumSkeletonView()
 
     /// This page has been filled but its tiles have not sprung in yet. Consumed
     /// by `playReveal()`, which the picker calls once the page is genuinely on
@@ -113,6 +121,11 @@ final class MediaAlbumPageView: UIView {
     /// page. Reading the inset is how "the first row is not hidden under the
     /// notice" gets checked without measuring pixels.
     var debugNoticeReserve: CGFloat { grid.contentInset.top }
+
+    /// Whether the page's bones stand in for its album — what a test reads.
+    var debugShowsPlaceholders: Bool { skeleton.superview != nil && skeleton.alpha == 1 }
+    /// How many bones stand in, once laid out — what a test reads.
+    var debugPlaceholderCount: Int { skeleton.superview == nil ? 0 : skeleton.debugBoneCount }
     #endif
 
     /// Which album this page is currently showing, so the session can remember
@@ -199,6 +212,9 @@ final class MediaAlbumPageView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         configureGrid()
+        // Over the grid, under the empty state — which only a loaded album
+        // can show, by which time the bones are leaving.
+        skeleton.pin(to: self)
         emptyState.isHidden = true
         emptyState.isUserInteractionEnabled = false
         emptyState.pin(to: self)
@@ -248,6 +264,10 @@ final class MediaAlbumPageView: UIView {
         // complete.
         grid.alpha = awaitingReveal ? 0 : 1
         dataSource.apply(snapshot, animatingDifferences: false)
+        // Bones out, album in — removed rather than hidden: nothing brings them
+        // back, and shimmering layers over the album would keep animating for
+        // nothing.
+        skeleton.fadeOutSkeleton(removing: true)
         // ⚠️ THE OFFSET IS READ AFTER A LAYOUT PASS, NOT BEFORE ONE.
         // `adjustedContentInset` is only final once the grid has been laid out
         // inside the bars above and below it. Read on the way in it is short by
@@ -396,6 +416,7 @@ final class MediaAlbumPageView: UIView {
     func setNoticeReserve(_ reserved: CGFloat) {
         grid.contentInset.top = reserved
         grid.verticalScrollIndicatorInsets.top = reserved
+        skeleton.topReserve = reserved
     }
 
     /// Re-runs the cell registration for these identifiers, for the tiles whose

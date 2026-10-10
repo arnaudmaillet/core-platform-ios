@@ -341,6 +341,46 @@ struct MediaPickerTests {
         #expect(videosOnly, "the Videos album, fetched on arrival: \(screen.picker.debugItems)")
     }
 
+    /// ⚠️ **NO BLANK PAGE ON AN ALBUM SWITCH (#831).** Only the first album
+    /// used to wear bones; every other page was empty until its fetch landed.
+    /// The frame right after the switch, before the fetch has answered, is the
+    /// one that matters.
+    @Test func anAlbumSwitchedToWearsItsBonesUntilItsItemsLand() async throws {
+        let screen = try await open(Self.library(photos: 7, videos: 3))
+        defer {
+            screen.window.isHidden = true
+            screen.window.rootViewController = nil
+        }
+        screen.window.layoutIfNeeded()
+        let pager = try #require(screen.picker.debugPager)
+        #expect(screen.picker.debugPageShowsPlaceholders(at: 0) == false, "the first album has landed")
+        #expect(screen.picker.debugPageShowsPlaceholders(at: 1), "the next one has not been asked for")
+
+        pager.setActivePage(1, animated: false)
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.picker.debugPageShowsPlaceholders(at: 1), "its first frame is bones, not a blank page")
+        #expect(screen.picker.debugPagePlaceholderCount(at: 1) > 0, "laid out as tiles")
+        #expect(screen.picker.debugIsLoading, "and the screen says it is working")
+
+        try await settle(until: { screen.picker.debugItems.count == 3 })
+        #expect(screen.picker.debugItems.count == 3)
+        #expect(screen.picker.debugPageShowsPlaceholders(at: 1) == false, "the bones leave as the tiles land")
+    }
+
+    /// A page on its own: bones from its first frame, gone once it is filled —
+    /// even with nothing in it, where the empty state takes over.
+    @Test func aPageWearsBonesUntilItIsFilled() {
+        let page = MediaAlbumPageView(frame: CGRect(x: 0, y: 0, width: 390, height: 700))
+        page.layoutIfNeeded()
+        #expect(page.debugShowsPlaceholders)
+        #expect(page.debugPlaceholderCount > 0)
+
+        page.setItems([], albumID: "empty")
+
+        #expect(page.debugShowsPlaceholders == false)
+    }
+
     @Test func theAlbumStripRidesTheToolbar() async throws {
         let screen = try await open(Self.library(photos: 3))
 
