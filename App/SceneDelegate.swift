@@ -1,3 +1,6 @@
+#if DEBUG
+import CoreNetworkingMocks
+#endif
 import DesignSystem
 import UIKit
 
@@ -22,7 +25,23 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // it is set.
         ScrollIndicatorStyle.hideAppWide()
 
+        #if DEBUG
+        // Shake for the mock network's switch (#790).
+        let shakeWindow = DebugShakeWindow(windowScene: windowScene)
+        let container = AppContainer.shared
+        if container.environment == .mock {
+            shakeWindow.onShake = { [weak shakeWindow] in
+                guard var top = shakeWindow?.rootViewController else { return }
+                while let presented = top.presentedViewController { top = presented }
+                NetworkConditionsMenu.present(
+                    from: top, faults: container.mockNetworkFaults, bff: container.mockBackend.bff
+                )
+            }
+        }
+        let window: UIWindow = shakeWindow
+        #else
         let window = UIWindow(windowScene: windowScene)
+        #endif
         // Taps in a bar's area never reach the content under it; pans still
         // scroll it (#562).
         window.addGestureRecognizer(BarTapShield())

@@ -61,12 +61,22 @@ public final class MockBlobStore: @unchecked Sendable {
 /// store, returning a synthetic ETag — standing in for the object-store PUT.
 public struct MockMediaUploadTransport: MediaUploadTransport {
     private let store: MockBlobStore
+    private let faults: MockNetworkFaults?
 
-    public init(store: MockBlobStore) {
+    public init(store: MockBlobStore, faults: MockNetworkFaults? = nil) {
         self.store = store
+        self.faults = faults
     }
 
     public func upload(_ data: Data, using ticket: MediaUploadTicket) async throws -> String {
+        // The PUT bypasses the BFF, so the fault switchboard is asked here too
+        // (#790): offline, or a failed PUT at the configured rate.
+        if faults?.isOffline == true {
+            throw MediaUploadError.transport("The Internet connection appears to be offline.")
+        }
+        if faults?.failsUpload() == true {
+            throw MediaUploadError.transport("simulated upload failure")
+        }
         guard data.count <= ticket.maxSizeBytes else {
             throw MediaUploadError.payloadTooLarge(limit: ticket.maxSizeBytes)
         }

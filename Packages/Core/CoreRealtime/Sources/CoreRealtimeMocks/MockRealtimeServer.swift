@@ -18,8 +18,19 @@ public final class MockRealtimeServer: RealtimeTransport, @unchecked Sendable {
     private var pongNonces: [UInt64] = []
     private var connects = 0
     private var tokens: [String] = []
+    private var refusing = false
 
     public init() {}
+
+    /// The mock network is down (#790): connections are refused, as a real
+    /// socket finds no route. Switching it on drops the live connection.
+    public var refusesConnections: Bool {
+        get { lock.withLock { refusing } }
+        set {
+            lock.withLock { refusing = newValue }
+            if newValue { dropConnection() }
+        }
+    }
 
     public var connectCount: Int { lock.withLock { connects } }
     public var receivedTokens: [String] { lock.withLock { tokens } }
@@ -32,6 +43,7 @@ public final class MockRealtimeServer: RealtimeTransport, @unchecked Sendable {
     // MARK: - RealtimeTransport (client side calls these)
 
     public func connect(edgeToken: String) async throws -> AsyncStream<RealtimeTransportEvent> {
+        if refusesConnections { throw URLError(.notConnectedToInternet) }
         let (stream, continuation) = AsyncStream.makeStream(of: RealtimeTransportEvent.self)
         lock.withLock {
             connects += 1
