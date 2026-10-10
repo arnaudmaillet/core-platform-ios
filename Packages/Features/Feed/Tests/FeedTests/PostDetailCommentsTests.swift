@@ -25,7 +25,9 @@ private final class PrefetchedCommentsProvider: CommentsProviding, @unchecked Se
 
     nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? { entries }
     func loadComments(for postID: PostID) async throws -> [CommentEntry] { entries }
-    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
         throw CommentsError.transport(message: "not used")
     }
 }
@@ -39,7 +41,9 @@ private actor StubCommentsProvider: CommentsProviding {
 
     func loadComments(for postID: PostID) async throws -> [CommentEntry] { comments }
 
-    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
         addedBodies.append(body)
         addedParentIDs.append(parentID)
         let entry = CommentEntry(
@@ -48,6 +52,31 @@ private actor StubCommentsProvider: CommentsProviding {
         )
         comments.insert(entry, at: 0)
         return entry
+    }
+}
+
+/// Fails the first `failures` comments, then takes them; records the id
+/// every attempt was sent under (#795).
+private actor FlakyCommentsProvider: CommentsProviding {
+    private var failures: Int
+    private(set) var sentIDs: [String] = []
+
+    init(failures: Int) { self.failures = failures }
+
+    func loadComments(for postID: PostID) async throws -> [CommentEntry] { [] }
+
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
+        sentIDs.append(commentID)
+        if failures > 0 {
+            failures -= 1
+            throw CommentsError.transport(message: "the answer was lost")
+        }
+        return CommentEntry(
+            id: commentID, authorID: ProfileID("prof-me"), authorName: "Me", authorHandle: "me",
+            body: body, createdAt: Date(timeIntervalSince1970: 100), parentID: parentID
+        )
     }
 }
 
@@ -165,6 +194,46 @@ struct PostDetailCommentsTests {
         // Parent → its replies (existing first, the new one appended) → next top.
         #expect(models.map(\.id) == ["c1", "c1-r0", "new", "c2"])
         #expect(models.first { $0.id == "new" }?.isReply == true)
+    }
+
+    /// ⚠️ A RETRIED COMMENT GOES OUT UNDER THE ID IT FAILED WITH (#795).
+    /// comment.v1's `comment_id` is the idempotency key: a fresh one per
+    /// attempt let a retry after a lost answer post the comment twice. Text
+    /// that changed is another comment, and takes another id.
+    @Test func aRetriedCommentReusesItsIdAndAnEditedOneDoesNot() async {
+        let provider = FlakyCommentsProvider(failures: 2)
+        let viewModel = makeViewModel(provider)
+        var failures = 0
+        viewModel.onCommentFailed = { _, _ in failures += 1 }
+        var lastComments: PostDetailViewModel.CommentsState?
+        viewModel.onCommentsChange = { lastComments = $0 }
+        viewModel.viewDidLoad()
+        await settle { if case .loaded = lastComments { true } else { false } }
+
+        viewModel.submitComment("same words")
+        await settle { failures == 1 }
+        viewModel.submitComment("  same words ")
+        await settle { failures == 2 }
+        viewModel.submitComment("other words")
+        await settle {
+            if case .loaded(let models) = lastComments { return !models.isEmpty }
+            return false
+        }
+
+        let ids = await provider.sentIDs
+        #expect(ids.count == 3, "attempts: \(ids)")
+        guard ids.count == 3 else { return }
+        #expect(ids[0] == ids[1], "the retry went out under a new id: \(ids)")
+        #expect(ids[2] != ids[0], "edited text reused the failed comment's id")
+
+        // Landed, the id is spent: the same words again are a new comment.
+        viewModel.submitComment("other words")
+        await settle {
+            if case .loaded(let models) = lastComments { return models.count == 2 }
+            return false
+        }
+        let after = await provider.sentIDs
+        #expect(after.count == 4 && after[3] != after[2], "a delivered comment's id was reused: \(after)")
     }
 
     /// Trending is THREAD-ranked by the engagement comment.v1 carries

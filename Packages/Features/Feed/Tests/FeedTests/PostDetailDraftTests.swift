@@ -35,7 +35,9 @@ struct PostDetailDraftTests {
             return []
         }
         func viewerIdentity() async -> ViewerIdentity? { viewer }
-        func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+        func addComment(
+            _ body: String, to postID: PostID, parentID: String?, commentID: String
+        ) async throws -> CommentEntry {
             added.append(postID)
             return CommentEntry(
                 id: "comment-\(added.count)", authorID: ProfileID("prof-me"), authorName: "Demo Viewer",

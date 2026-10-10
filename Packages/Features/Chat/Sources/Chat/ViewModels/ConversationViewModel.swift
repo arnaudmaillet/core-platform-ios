@@ -144,7 +144,15 @@ public final class ConversationViewModel {
         var failed = false
 
         enum Payload {
-            case media(ChatMediaUpload)
+            /// The picture or clip, and the media.v1 idempotency key its
+            /// upload goes under (#795).
+            ///
+            /// ⚠️ **MINTED WITH THE BUBBLE, NOT WITH THE ATTEMPT.** `retry`
+            /// sends the same payload again, key included, so a message whose
+            /// first answer was lost replays its upload instead of storing
+            /// the picture a second time. (Text has no key: chat.v1
+            /// `SendMessage` carries none — see `ChatRepository.sendMessage`.)
+            case media(ChatMediaUpload, uploadKey: String)
             case text(String)
         }
 
@@ -321,7 +329,8 @@ public final class ConversationViewModel {
             let id = "pending-\(pendingCount)"
             ids.append(id)
             pendingSends.append(PendingSend(
-                id: id, payload: .media(upload), replyTo: index == 0 ? replyTo : nil, createdAt: Date()
+                id: id, payload: .media(upload, uploadKey: UUID().uuidString),
+                replyTo: index == 0 ? replyTo : nil, createdAt: Date()
             ))
         }
         emit()
@@ -361,9 +370,9 @@ public final class ConversationViewModel {
             switch pending.payload {
             case .text(let body):
                 message = try await repository.send(body, to: id, replyingTo: pending.replyTo)
-            case .media(let upload):
+            case .media(let upload, let uploadKey):
                 message = try await repository.send(
-                    media: upload, caption: "", to: id, replyingTo: pending.replyTo
+                    media: upload, caption: "", to: id, replyingTo: pending.replyTo, idempotencyKey: uploadKey
                 )
                 if let preview = upload.preview {
                     localPreviews[message.id] = preview
@@ -606,7 +615,7 @@ public final class ConversationViewModel {
         let models = shown.map { MessageDisplayModel(message: $0, preview: previews[$0.id]) }
         let pending = pendingSends.map { send -> MessageDisplayModel in
             switch send.payload {
-            case .media(let upload):
+            case .media(let upload, _):
                 MessageDisplayModel(pending: send.id, upload: upload, sender: senderID, sentAt: send.createdAt, failed: send.failed)
             case .text(let body):
                 MessageDisplayModel(

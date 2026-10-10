@@ -329,7 +329,8 @@ private actor GatedMuteProvider: ChatProviding {
         throw ChatError.transport(message: "unused")
     }
     func send(
-        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?,
+        idempotencyKey: String
     ) async throws -> ChatMessage {
         throw ChatError.mediaUpload(message: "unused")
     }
@@ -379,7 +380,8 @@ private actor TextStubProvider: ChatProviding {
         return ChatMessage(id: "t\(count)", senderID: ProfileID("me"), body: body, createdAt: Date(), isMine: true)
     }
     func send(
-        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?,
+        idempotencyKey: String
     ) async throws -> ChatMessage {
         throw ChatError.mediaUpload(message: "unused")
     }

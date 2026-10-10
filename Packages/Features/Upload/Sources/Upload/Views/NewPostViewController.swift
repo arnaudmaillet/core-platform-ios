@@ -168,6 +168,19 @@ final class NewPostViewController: UIViewController {
     /// is rebuilt on every "Next".
     private let draft: PostDraft
 
+    /// media.v1's idempotency key for each chosen item's upload, by item id
+    /// (#795) — minted on the first publish, handed back by every retry.
+    ///
+    /// ⚠️ **PER ITEM ON THIS SCREEN, AND THAT IS WHAT MAKES REUSE SAFE.** A
+    /// failed publish rebuilds every `PickedImage`/`PickedVideo` from the
+    /// library, so a key minted with them was a new one per attempt, and a
+    /// retry after a lost answer uploaded every picture again. Held here it
+    /// survives the retry; and since `edits` is fixed for this screen's life
+    /// (a step back to the editor builds a new screen), a key can never be
+    /// reused for a picture the author has since changed — a replay would
+    /// answer with the OLD asset.
+    private var uploadKeys: [MediaLibraryItem.ID: String] = [:]
+
     #if DEBUG
     private var hasRunTheDebugScript = false
     /// Internal for tests: who was asked to end the flow — the sheet's
@@ -1225,7 +1238,8 @@ final class NewPostViewController: UIViewController {
                         )
                         media.append(.video(PickedVideo(
                             sourceURL: file, keptPieces: plan.segments,
-                            finish: plan.finish, soundtrack: plan.soundtrack, artwork: plan.artwork
+                            finish: plan.finish, soundtrack: plan.soundtrack, artwork: plan.artwork,
+                            uploadKey: uploadKey(for: item.id)
                         )))
                         continue
                     }
@@ -1253,7 +1267,7 @@ final class NewPostViewController: UIViewController {
                     let edited = edits[item.id] ?? .untouched
                     let stills = await Self.stickerArt(for: edited, motion: .still)
                     let baked = edited.applied(to: image, artwork: stills)
-                    media.append(.image(PickedImage(baked)))
+                    media.append(.image(PickedImage(baked, uploadKey: uploadKey(for: item.id))))
                 }
                 let entry = try await composer.publish(media: media, caption: caption, as: nil)
                 onPublished(entry)
@@ -1273,6 +1287,15 @@ final class NewPostViewController: UIViewController {
                 present(Self.failureAlert(error), animated: true)
             }
         }
+    }
+
+    /// The item's upload key: the one an earlier attempt used, or a new one
+    /// kept for the next (see `uploadKeys`).
+    private func uploadKey(for id: MediaLibraryItem.ID) -> String {
+        if let key = uploadKeys[id] { return key }
+        let key = UUID().uuidString
+        uploadKeys[id] = key
+        return key
     }
 
     /// The baked frames of the stickers an edit lays over its picture — nil

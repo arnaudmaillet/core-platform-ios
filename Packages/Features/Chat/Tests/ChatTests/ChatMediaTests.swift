@@ -80,7 +80,9 @@ struct ChatMediaTests {
     @Test func aPhotoIsUploadedThenSentAsAMediaMessage() async throws {
         let repository = repository()
         let conversation = try await repository.directConversation(with: ProfileID("prof-31"))
-        let sent = try await repository.send(media: .image(Self.solid()), caption: "", to: conversation, replyingTo: nil)
+        let sent = try await repository.send(
+            media: .image(Self.solid()), caption: "", to: conversation, replyingTo: nil, idempotencyKey: "k"
+        )
         let media = try #require(sent.media, "the sent message carries no media")
         #expect(media.kind == .image)
         #expect(media.pixelWidth == 40 && media.pixelHeight == 30)
@@ -97,7 +99,9 @@ struct ChatMediaTests {
         let conversation = try await repository.directConversation(with: ProfileID("prof-31"))
         let before = try await repository.loadMessages(in: conversation).count
         await #expect {
-            _ = try await repository.send(media: .image(Self.solid()), caption: "", to: conversation, replyingTo: nil)
+            _ = try await repository.send(
+                media: .image(Self.solid()), caption: "", to: conversation, replyingTo: nil, idempotencyKey: "k"
+            )
         } throws: { error in
             if case .mediaUpload = error as? ChatError { return true }
             return false
@@ -159,6 +163,42 @@ struct ChatMediaTests {
         #expect(uploaded.count == 1, "the delivered picture did not reach the image cache")
     }
 
+    /// ⚠️ A RETRIED PHOTO GOES UP UNDER THE KEY ITS BUBBLE WAS SENT WITH
+    /// (#795). A key minted per attempt let a retry after a lost answer store
+    /// the picture twice; and two photos sent together are two intents, so
+    /// they must NOT share one.
+    @Test func aRetriedPhotoReusesItsBubblesKeyAndTwoPhotosDoNotShareOne() async throws {
+        let provider = MediaStubProvider(failures: 1)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        viewModel.send(media: [.image(Self.solid())])
+        guard case .content(let pending) = phases.last, let bubble = pending.last else {
+            Issue.record("no pending bubble"); return
+        }
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .failed } else { false }
+        })
+        viewModel.retry(bubble.id)
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .sent } else { false }
+        })
+
+        viewModel.send(media: [.image(Self.solid())])
+        var keys: [String] = []
+        for _ in 0..<400 where keys.count < 3 {
+            keys = await provider.keys
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try #require(keys.count == 3, "attempts: \(keys)")
+        #expect(keys[0] == keys[1], "the retry went up under a new key: \(keys)")
+        #expect(keys[2] != keys[0], "a second photo reused the first one's key")
+        #expect(!keys[0].isEmpty)
+    }
+
     /// The driver spells it for the screen: media, delivery, and whether the
     /// footer offers the camera and the library.
     @Test func theDriverForwardsMediaAndDelivery() async throws {
@@ -187,10 +227,12 @@ private struct FailingTransport: MediaUploadTransport {
     func upload(_ data: Data, using ticket: MediaUploadTicket) async throws -> String { throw Refused() }
 }
 
-/// Fails the first `failures` media sends, then delivers.
+/// Fails the first `failures` media sends, then delivers; records the key
+/// every attempt was made under.
 private actor MediaStubProvider: ChatProviding {
     private var failures: Int
     private var count = 0
+    private(set) var keys: [String] = []
 
     init(failures: Int) { self.failures = failures }
 
@@ -201,8 +243,10 @@ private actor MediaStubProvider: ChatProviding {
         ChatMessage(id: "t", senderID: ProfileID("me"), body: body, createdAt: Date(), isMine: true)
     }
     func send(
-        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?,
+        idempotencyKey: String
     ) async throws -> ChatMessage {
+        keys.append(idempotencyKey)
         if failures > 0 {
             failures -= 1
             throw ChatError.mediaUpload(message: "offline")

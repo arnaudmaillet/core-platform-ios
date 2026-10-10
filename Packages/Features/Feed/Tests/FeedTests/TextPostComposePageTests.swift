@@ -62,7 +62,9 @@ struct TextPostComposePageTests {
                 return pages[postID] ?? []
             }
         }
-        func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+        func addComment(
+            _ body: String, to postID: PostID, parentID: String?, commentID: String
+        ) async throws -> CommentEntry {
             lock.withLock { addedTo.append(postID) }
             return CommentEntry(
                 id: "comment-1", authorID: ProfileID("prof-me"), authorName: "Demo Viewer",

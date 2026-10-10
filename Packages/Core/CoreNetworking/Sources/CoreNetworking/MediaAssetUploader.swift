@@ -67,12 +67,23 @@ public struct MediaAssetUploader: Sendable {
     ///
     /// `kind`: media.v1 has no video or chat kind yet, so everything goes as
     /// `.postImage`; the mock routes on `declaredMimeType`.
+    ///
+    /// ⚠️ **`idempotencyKey` BELONGS TO THE ASSET THE USER CHOSE, NOT TO THIS
+    /// CALL (#795).** It used to be minted here, a fresh UUID per call — so a
+    /// retry after a lost answer (the ticket issued, the bytes stored, the
+    /// commit applied, and only the response gone) reserved a SECOND asset and
+    /// uploaded everything again. The caller mints it once per picture or clip
+    /// (a chat bubble, a carousel item) and hands the same key to every retry
+    /// of it, so media.v1 can answer a replay with the asset it already has.
+    /// No default on purpose: a default is exactly the per-call key this
+    /// replaced.
     public func upload(
         _ payload: Payload,
         ownerID: String,
         mimeType: String,
         sizeBytes: UInt64,
         sha256: String,
+        idempotencyKey: String,
         kind: Media_V1_MediaKind = .postImage
     ) async throws -> Asset {
         var ticketRequest = Media_V1_IssueUploadTicketRequest()
@@ -81,7 +92,7 @@ public struct MediaAssetUploader: Sendable {
         ticketRequest.declaredMimeType = mimeType
         ticketRequest.declaredSizeBytes = sizeBytes
         ticketRequest.contentSha256 = sha256
-        ticketRequest.idempotencyKey = UUID().uuidString
+        ticketRequest.idempotencyKey = idempotencyKey
 
         let ticketResponse = await mediaClient.issueUploadTicket(request: ticketRequest, headers: [:])
         guard let ticketBody = ticketResponse.message else {

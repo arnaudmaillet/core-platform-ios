@@ -157,7 +157,16 @@ public protocol CommentsProviding: Sendable {
     /// Posts a comment as the viewer and returns the created entry.
     /// `parentID` nil posts top-level; non-nil posts a level-2 reply under
     /// that top-level comment (comment.v1's two-depth contract).
-    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry
+    ///
+    /// ⚠️ **`commentID` IS THE IDEMPOTENCY KEY, AND IT BELONGS TO THE DRAFT
+    /// (#795).** comment.v1 takes a client-supplied `comment_id`; it used to
+    /// be a fresh UUID per CALL, so a retry after a lost answer posted the
+    /// comment twice. The caller mints it once per comment the viewer wrote
+    /// and sends it again with every retry of that comment
+    /// (`PostDetailViewModel.unsent`).
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry
     /// The viewer's identity as last resolved, or nil — never a fetch.
     /// Synchronous for the one screen whose bars wear the viewer before
     /// anything has loaded: the Text Post page, whose author IS the viewer.
@@ -188,6 +197,11 @@ public extension CommentsProviding {
     func viewerIdentity() async -> ViewerIdentity? { nil }
     /// Default: nothing to adopt, for providers with no notion of a viewer.
     func setActiveViewer(_ id: ProfileID) async {}
+    /// A one-shot comment, with nothing to retry: a key of its own. A
+    /// screen that offers a retry mints the key itself and keeps it (#795).
+    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+        try await addComment(body, to: postID, parentID: parentID, commentID: UUID().uuidString)
+    }
 }
 
 /// Reads/writes top-level comments via comment.v1, hydrating author names via
@@ -301,11 +315,15 @@ public actor CommentsRepository: CommentsProviding {
         return CommentPage(entries: entries, nextPageToken: nextToken.isEmpty ? nil : nextToken)
     }
 
-    public func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+    public func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
         let viewer = try await resolveViewerProfileID(forWrite: "addComment")
 
         var request = Comment_V1_CreateCommentRequest()
-        request.commentID = UUID().uuidString // client-supplied id for idempotency
+        // Client-supplied, and the caller's: the same id on every retry of
+        // one comment is what lets the server recognise the replay (#795).
+        request.commentID = commentID
         request.postID = postID.rawValue
         request.authorID = viewer.rawValue
         request.parentID = parentID ?? ""

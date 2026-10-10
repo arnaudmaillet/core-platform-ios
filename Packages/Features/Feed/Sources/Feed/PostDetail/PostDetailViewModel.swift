@@ -96,6 +96,17 @@ public final class PostDetailViewModel {
     private let now: @Sendable () -> Date
 
     private var comments: [CommentEntry] = []
+    /// The comment that failed last — its text, its parent and the id it was
+    /// sent under — kept so that sending it again is a RETRY (#795).
+    ///
+    /// ⚠️ **THE ID IS comment.v1's IDEMPOTENCY KEY.** A failure is not proof
+    /// the server didn't take it: the write can land and only the answer be
+    /// lost. The failed text goes back into the composer
+    /// (`onCommentFailed`), and when the viewer sends that same text under
+    /// the same parent it goes under the same id, so the server answers with
+    /// the comment it already has instead of posting a twin. Edited text, or
+    /// another parent, is a new comment and takes a new id.
+    private var unsent: (body: String, parentID: String?, commentID: String)?
     /// Where the next page of comments starts; nil when there is none, or
     /// before the first page has answered (#589).
     private var nextPageToken: String?
@@ -330,15 +341,25 @@ public final class PostDetailViewModel {
         guard !body.isEmpty, !isComposing else { return }
         if let draft { return publish(body, through: draft) }
         guard let commentsProvider, let postID else { return }
+        let commentID: String
+        if let unsent, unsent.body == body, unsent.parentID == parentID {
+            commentID = unsent.commentID
+        } else {
+            commentID = UUID().uuidString
+        }
         setComposing(true)
         Task { [weak self] in
             guard let self else { return }
             do {
-                let entry = try await commentsProvider.addComment(body, to: postID, parentID: parentID)
+                let entry = try await commentsProvider.addComment(
+                    body, to: postID, parentID: parentID, commentID: commentID
+                )
+                self.unsent = nil
                 self.insertSubmitted(entry)
                 self.emitComments()
                 self.setComposing(false)
             } catch {
+                self.unsent = (body, parentID, commentID)
                 self.setComposing(false)
                 self.onCommentFailed?(body, (error as? CommentsError) == .notAllowed)
             }

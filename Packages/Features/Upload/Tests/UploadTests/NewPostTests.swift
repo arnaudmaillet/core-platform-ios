@@ -260,6 +260,10 @@ struct NewPostTests {
         }
 
         private(set) var calls: [Call] = []
+        /// Publishes to fail before one succeeds — each still recorded (#795).
+        private var failures: Int
+
+        init(failures: Int = 0) { self.failures = failures }
 
         func publish(
             media: [ComposeMedia], caption: String, as author: AuthorSummary?
@@ -280,6 +284,10 @@ struct NewPostTests {
                 mediaCount: media.count, caption: caption,
                 images: pictures, kinds: kinds, videos: clips
             ))
+            if failures > 0 {
+                failures -= 1
+                throw ComposeError.transport("the answer was lost")
+            }
             let by = author ?? AuthorSummary(
                 id: ProfileID("first"), handle: "first", displayName: "First", avatarURL: nil
             )
@@ -335,10 +343,10 @@ struct NewPostTests {
         edits: [String: MediaEdits] = [:],
         reducesMotion: Bool = false,
         landed: Bool = true,
-        photoLibrary: StubPhotoLibrary = StubPhotoLibrary()
+        photoLibrary: StubPhotoLibrary = StubPhotoLibrary(),
+        composer: RecordingComposer = RecordingComposer()
     ) -> Screen {
         let library = StubLibrary()
-        let composer = RecordingComposer()
         let preview = StubPreview()
         let handed = Handed()
         let post = NewPostViewController(
@@ -496,6 +504,33 @@ struct NewPostTests {
         let pixel = try #require(Self.centrePixel(of: picture.image))
         #expect(pixel.r > pixel.g + 60, "still the red the library answered with: \(pixel)")
         #expect(pixel.r > pixel.b + 60, "untouched, not levelled: \(pixel)")
+    }
+
+    /// ⚠️ **A RETRIED POST UPLOADS EACH PICTURE UNDER THE KEY IT FIRST WENT UP
+    /// WITH (#795).** A failed publish rebuilds every picture from the library;
+    /// a key minted with them was a new one per attempt, so a retry after a
+    /// lost answer stored every picture again. Two pictures are two assets and
+    /// never share a key.
+    @Test func aRetriedPostReusesEachPicturesUploadKey() async throws {
+        let screen = open(Self.items(2), composer: RecordingComposer(failures: 1))
+        let postButton = try #require(screen.post.navigationItem.rightBarButtonItems?.first)
+
+        screen.post.debugTapPost()
+        try await settle(until: { postButton.isEnabled == false })
+        try await settle(until: { postButton.isEnabled })
+        screen.post.debugTapPost()
+        var calls: [RecordingComposer.Call] = []
+        for _ in 0..<3000 where calls.count < 2 {
+            calls = await screen.composer.calls
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        try #require(calls.count == 2, "publishes: \(calls.count)")
+        let first = calls[0].images.map(\.uploadKey)
+        let retry = calls[1].images.map(\.uploadKey)
+        #expect(first.count == 2)
+        #expect(retry == first, "the retry uploaded under new keys")
+        #expect(Set(first).count == 2, "two pictures shared one key")
     }
 
     /// ⚠️ **THE CROP MUST REACH THE UPLOAD TOO, AND NOTHING ASSERTED THAT UNTIL
