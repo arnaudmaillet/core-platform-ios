@@ -59,6 +59,9 @@ public final class NotificationsViewModel {
     private var items: [NotificationItem] = []
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var load: Task<Void, Never>?
     private var hasLoaded = false
     /// Where the next page starts; nil when there are no more.
@@ -126,11 +129,17 @@ public final class NotificationsViewModel {
     /// find a way to retry, screen by screen.
     private func armRecovery() {
         guard recovery == nil else { return }
-        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.recoverFromOutage() }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
     }
 
     private func recoverFromOutage() {
-        refresh()
+        // Only what failed: a refresh replaces the list with its first page,
+        // collapsing a viewer three pages deep.
+        if case .failed = phase {
+            refresh()
+        } else if pageFailed {
+            retryPage()
+        }
     }
 
     public func refresh() {

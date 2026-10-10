@@ -1,5 +1,6 @@
 import CoreModels
 import Foundation
+import CoreNetworking
 import Testing
 @testable import Notifications
 
@@ -114,6 +115,31 @@ struct NotificationsPagingTests {
 
         #expect(rowIDs(viewModel, phase()) == ["n0", "n1", "n2"])
         #expect(await provider.tokens() == [nil, "p2", "p3"])
+    }
+
+    /// ⚠️ THE NETWORK COMES BACK, THE FAILED PAGE LOADS (#793) — and only
+    /// it: the rows already loaded stay, the viewer is not sent back to page 1.
+    @Test func aFailedPageLoadsWhenTheNetworkReturns() async throws {
+        let provider = PagedProvider([
+            nil: page(0...1, next: "p2"),
+            "p2": page(2...3, next: nil),
+        ])
+        await provider.failOnce("p2")
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
+        let viewModel = NotificationsViewModel(repository: provider)
+        viewModel.connectivity = monitor
+        var last: NotificationsViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
+        viewModel.viewDidLoad()
+        try #require(await settle { last?.content != nil })
+        viewModel.loadNextPageIfNeeded()
+        try #require(await settle { viewModel.pageFooter == .retry })
+
+        monitor.report(online: false)
+        monitor.report(online: true)
+
+        try #require(await settle { rowIDs(viewModel, last).count == 4 })
+        #expect(await provider.tokens() == [nil, "p2", "p2"], "recovery restarted from page 1")
     }
 
     /// A failed page waits for "Try Again" — nearing the end again does not

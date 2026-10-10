@@ -158,7 +158,7 @@ struct FeedViewModelTests {
     @Test func aFailedTimelineReloadsWhenTheNetworkReturns() async {
         let provider = FakeFeedProvider()
         provider.pages[""] = .failure(.transport(message: "offline"))
-        let monitor = ConnectivityMonitor()
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
         let viewModel = FeedViewModel(repository: provider)
         viewModel.connectivity = monitor
         async let failed = collectStates(viewModel) {

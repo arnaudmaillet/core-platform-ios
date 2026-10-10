@@ -220,6 +220,9 @@ public final class ProfileViewModel {
     private var shareToken: String?
 
     private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
@@ -545,6 +548,21 @@ public final class ProfileViewModel {
     /// fetch revalidates the gallery instead of resetting it.
     private var galleryWasSeeded = false
 
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        // Only a failed profile: every live one (the tab's, every pushed
+        // one) revalidating at once on each recovery was a storm.
+        guard case .failed = phase else { return }
+        refresh()
+    }
+
     /// Pull-to-refresh. Coalesced: a refresh while one is in flight is ignored.
     ///
     /// ⚠️ A REFRESH NEVER FALLS BACK TO BONES. The grid revalidates in place:
@@ -552,21 +570,6 @@ public final class ProfileViewModel {
     /// back identical publish nothing at all. It used to reset the corpora,
     /// so every pull blanked all three pages to their skeletons and rebuilt
     /// them under a cross-dissolve a moment later — the release's hitch.
-    /// Reloads after an outage (#793): what failed while the network was gone
-    /// comes back on its own when it returns — the viewer no longer has to
-    /// find a way to retry, screen by screen.
-    private func armRecovery() {
-        guard recovery == nil else { return }
-        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.recoverFromOutage() }
-    }
-
-    private func recoverFromOutage() {
-        // A refresh revalidates in place (it never falls back to bones), so
-        // a profile on screen picks up what changed while it was offline, and
-        // a failed one loads.
-        refresh()
-    }
-
     public func refresh() {
         guard load == nil else { return }
         reload(galleryRevalidates: true)

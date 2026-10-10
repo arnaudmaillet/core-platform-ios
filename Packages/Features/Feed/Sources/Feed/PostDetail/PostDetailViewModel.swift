@@ -122,6 +122,9 @@ public final class PostDetailViewModel {
     private var isComposing = false
 
     private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
@@ -229,7 +232,7 @@ public final class PostDetailViewModel {
     /// find a way to retry, screen by screen.
     private func armRecovery() {
         guard recovery == nil else { return }
-        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.recoverFromOutage() }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
     }
 
     private func recoverFromOutage() {

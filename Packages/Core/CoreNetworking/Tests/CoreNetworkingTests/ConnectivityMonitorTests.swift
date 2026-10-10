@@ -7,7 +7,7 @@ import Testing
 @MainActor
 struct ConnectivityMonitorTests {
     @Test func aRecoveryIsAnnouncedOncePerOfflineToOnlineEdge() {
-        let monitor = ConnectivityMonitor()
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
         var recoveries = 0
         let observation = monitor.onRecovery { recoveries += 1 }
 
@@ -25,7 +25,7 @@ struct ConnectivityMonitorTests {
     }
 
     @Test func aReleasedObservationHearsNothing() {
-        let monitor = ConnectivityMonitor()
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
         var recoveries = 0
         var observation: RecoveryObservation? = monitor.onRecovery { recoveries += 1 }
         _ = observation
@@ -35,5 +35,21 @@ struct ConnectivityMonitorTests {
         monitor.report(online: true)
 
         #expect(recoveries == 0)
+    }
+
+    /// A loss shorter than its grace is never announced: no capsule blip, no
+    /// recovery storm.
+    @Test func aBlipShorterThanTheGraceIsNeverAnnounced() {
+        let monitor = ConnectivityMonitor(offlineGrace: 60)
+        var recoveries = 0
+        let observation = monitor.onRecovery { recoveries += 1 }
+
+        monitor.report(online: false)
+        #expect(monitor.isOnline, "a loss was announced before its grace")
+        monitor.report(online: true)
+
+        #expect(monitor.isOnline)
+        #expect(recoveries == 0)
+        withExtendedLifetime(observation) {}
     }
 }

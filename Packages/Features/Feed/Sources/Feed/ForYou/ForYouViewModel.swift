@@ -194,6 +194,9 @@ public final class ForYouViewModel {
     private var discovery: [GalleryPost]?
     private var discoveryToken: String?
     private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     /// Whether the repository answered with a discovery corpus of its own.
     private var hasDiscovery = false
     /// The instant this session counts from, frozen the first time a corpus
@@ -246,12 +249,13 @@ public final class ForYouViewModel {
     /// find a way to retry, screen by screen.
     private func armRecovery() {
         guard recovery == nil else { return }
-        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.recoverFromOutage() }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
     }
 
     private func recoverFromOutage() {
-        // Only a corpus that never arrived: `refresh` drops a loaded one.
-        guard discovery == nil else { return }
+        // Only a corpus that never arrived, or a failure: `refresh` drops a
+        // loaded one.
+        guard corpus == nil || failure != nil else { return }
         loadFirstPage(reset: false)
     }
 

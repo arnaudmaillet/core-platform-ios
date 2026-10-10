@@ -29,8 +29,14 @@ public final class ConnectivityMonitor {
     public private(set) var isOnline = true
 
     private var pathMonitor: NWPathMonitor?
+    /// How long a loss must last before it is announced: a flapping network
+    /// blipped the capsule and set every store reloading on each edge.
+    private let offlineGrace: TimeInterval
+    private var pendingOffline: DispatchWorkItem?
 
-    public init() {}
+    public init(offlineGrace: TimeInterval = 1.5) {
+        self.offlineGrace = offlineGrace
+    }
 
     /// Follows the system's network path. Idempotent.
     public func startMonitoringSystemPath() {
@@ -47,6 +53,25 @@ public final class ConnectivityMonitor {
     /// Records whether the network is reachable now, announcing a change and,
     /// on the way back, the recovery.
     public func report(online: Bool) {
+        if online {
+            // A loss that never lasted its grace was never announced.
+            pendingOffline?.cancel()
+            pendingOffline = nil
+        } else if offlineGrace > 0, isOnline, pendingOffline == nil {
+            let work = DispatchWorkItem { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.pendingOffline = nil
+                    self?.apply(online: false)
+                }
+            }
+            pendingOffline = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + offlineGrace, execute: work)
+            return
+        }
+        apply(online: online)
+    }
+
+    private func apply(online: Bool) {
         guard online != isOnline else { return }
         isOnline = online
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)

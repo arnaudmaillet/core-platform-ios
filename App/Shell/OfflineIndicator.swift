@@ -32,19 +32,20 @@ final class OfflineIndicator: UIView {
         let indicator = OfflineIndicator()
         let overlay: UIWindow = window.windowScene.map { PassthroughWindow(windowScene: $0) }
             ?? PassthroughWindow(frame: window.bounds)
-        // ⚠️ A BAND, NOT THE SCREEN: a full-screen window above the app's
-        // would take over the status bar's appearance (the feed's light
-        // style). The band sits under the bar's row of bubbles.
-        let statusBottom = window.windowScene?.statusBarManager?.statusBarFrame.maxY ?? 54
-        overlay.frame = CGRect(x: 0, y: statusBottom + 50, width: window.bounds.width, height: 56)
         overlay.windowLevel = .normal + 1
+        // The app's own appearance and text size, as every window it makes.
+        AppearancePreference.apply(to: [overlay])
+        CareModePreference.apply(to: [overlay])
         overlay.backgroundColor = .clear
         let host = UIViewController()
         host.view.backgroundColor = .clear
         host.view.isUserInteractionEnabled = false
         overlay.rootViewController = host
-        overlay.isHidden = false
+        // Up only while the capsule is: an idle second window would answer UI
+        // tests' window queries and VoiceOver's touch exploration.
+        overlay.isHidden = true
         indicator.overlay = overlay
+        indicator.mainWindow = window
         indicator.constrain(in: host.view) { parent in
             indicator.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             // The band is under the bar's row of bubbles; placed at the safe
@@ -64,6 +65,17 @@ final class OfflineIndicator: UIView {
 
     /// The window the indicator lives in; kept alive with it.
     private var overlay: UIWindow?
+    private weak var mainWindow: UIWindow?
+
+    /// ⚠️ A BAND, NOT THE SCREEN: a full-screen window above the app's would
+    /// take over the status bar's appearance (the feed's light style). The
+    /// band sits under the bar's row of bubbles, re-measured each time it
+    /// shows — rotation and iPad multitasking change both.
+    private func placeOverlay() {
+        guard let overlay, let mainWindow else { return }
+        let top = mainWindow.safeAreaInsets.top
+        overlay.frame = CGRect(x: 0, y: top + 50, width: mainWindow.bounds.width, height: 56)
+    }
 
     private init() {
         super.init(frame: .zero)
@@ -140,6 +152,8 @@ final class OfflineIndicator: UIView {
         let reducesMotion = UIAccessibility.isReduceMotionEnabled
         let offstage = CGAffineTransform(translationX: 0, y: -24).scaledBy(x: 0.9, y: 0.9)
         if visible {
+            placeOverlay()
+            overlay?.isHidden = false
             isHidden = false
             if !reducesMotion { transform = offstage }
         }
@@ -151,6 +165,7 @@ final class OfflineIndicator: UIView {
             guard !self.shown else { return }
             self.isHidden = true
             self.transform = .identity
+            self.overlay?.isHidden = true
         }
         guard animated else {
             changes()

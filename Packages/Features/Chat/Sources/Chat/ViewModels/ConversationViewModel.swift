@@ -112,6 +112,9 @@ public final class ConversationViewModel {
     private var hasOlderPages = false
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
     private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var isSending = false
     private var load: Task<Void, Never>?
     /// The DM correspondent, once known — the header identity's destination.
@@ -209,7 +212,7 @@ public final class ConversationViewModel {
     /// find a way to retry, screen by screen.
     private func armRecovery() {
         guard recovery == nil else { return }
-        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.recoverFromOutage() }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
     }
 
     private func recoverFromOutage() {

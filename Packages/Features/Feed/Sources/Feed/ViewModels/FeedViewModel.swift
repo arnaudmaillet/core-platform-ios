@@ -232,7 +232,9 @@ public final class FeedViewModel {
     }
 
     private func recoverFromOutage() {
-        guard case .failed = phase else { return }
+        // A pull already on its way is the answer; cancelling it would flash
+        // the failure again.
+        guard case .failed = phase, initialLoad == nil else { return }
         refresh()
     }
 
