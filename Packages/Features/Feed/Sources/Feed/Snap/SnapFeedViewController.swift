@@ -3811,8 +3811,17 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// ⚠️ A PAGE DRIVE STANDS DOWN FOR THE CLOSE (#770): at the last post the
+    /// upward close claims the drive's own drags (`upwardCloseTerritory`), and
+    /// the two would otherwise move the page at once. The close's pop is
+    /// running from the moment it begins — THIS stack's pop, not a sheet
+    /// presented or dismissed over the feed (`isTransitioningItsStack`).
+    private var pageDriveYieldsToClose: Bool {
+        navigationController?.isTransitioningItsStack == true
+    }
+
     private func beginPageDrive() {
-        guard commentsEngagedID != nil else { return }
+        guard commentsEngagedID != nil, !pageDriveYieldsToClose else { return }
         // Interrupt any in-flight settle: seize the CURRENT on-screen offset
         // (presentation layer) so a re-grab mid-settle doesn't jump.
         let live = collectionView.layer.presentation()?.bounds.origin.y ?? collectionView.contentOffset.y
@@ -3823,6 +3832,13 @@ final class SnapFeedViewController: UIViewController {
 
     private func updatePageDrive(translation dy: CGFloat) {
         guard let start = pageDriveStartOffset else { return }
+        if pageDriveYieldsToClose {
+            // The same drag is closing the screen: the page goes back where
+            // it was, and the release settles nothing.
+            collectionView.contentOffset.y = start
+            pageDriveStartOffset = nil
+            return
+        }
         // Drag up (dy < 0) advances toward the next post (offset grows).
         // FORWARD-ONLY: downward travel rubber-bands against the drive's own
         // origin page rather than previewing the previous post — the floor is
@@ -6700,17 +6716,44 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
         let point = collectionView.convert(location, from: view)
         guard let hit = collectionView.hitTest(point, with: nil) else { return true }
-        for current in sequence(first: hit, next: { $0.superview }) {
-            if current is SnapShortcutRailView || current is SnapRailBoostButton
-                || current is CommentsInputBar {
-                return false
-            }
-            if current is SnapCommentsContainerView {
-                let stream = commentsContentVC as? PostDetailViewController
-                return commentsEngagementIsResting && stream?.streamIsAtBottom == true
-            }
+        let inPageDriveBand = commentsEngagedID != nil && engagedCell().map { cell in
+            cell.cardSwipeRegionContains(cell.contentView.convert(point, from: collectionView))
+        } == true
+        switch Self.upwardCloseTerritory(from: hit, inPageDriveBand: inPageDriveBand) {
+        case .refuses:
+            return false
+        case .closes:
+            return true
+        case .streamDecides:
+            let stream = commentsContentVC as? PostDetailViewController
+            return commentsEngagementIsResting && stream?.streamIsAtBottom == true
         }
-        return true
+    }
+
+    enum UpwardCloseTerritory: Equatable {
+        case refuses, closes, streamDecides
+    }
+
+    /// Who an upward drag at the list's end belongs to, by where it landed.
+    /// Pure walk-up, for tests.
+    ///
+    /// ⚠️ THE PAGE DRIVE'S TERRITORY CLOSES (#770). On an engaged text page the
+    /// pager is disabled; the only drags that page are the composer bar's and
+    /// the header band's, which hand-move the pager (`drivePageSwipe`). At the
+    /// last post that drive has nowhere to go: refused here, the drag lifted
+    /// the whole page and dropped it back, and the feed never closed (filmed
+    /// on a device, the last card of For You's Following rail). There the
+    /// close takes it, and the drive stands down (`pageDriveYieldsToClose`).
+    ///
+    /// The rail keeps its own drags; the stream below the band yields only
+    /// at its bottom — the downward grab's rule, mirrored.
+    static func upwardCloseTerritory(from hit: UIView, inPageDriveBand: Bool) -> UpwardCloseTerritory {
+        for current in sequence(first: hit, next: { $0.superview }) {
+            if current is SnapShortcutRailView || current is SnapRailBoostButton { return .refuses }
+            if current is CommentsInputBar { return .closes }
+            if current is SnapCommentsContainerView { return inPageDriveBand ? .closes : .streamDecides }
+        }
+        return .closes
     }
 
     /// The horizontal grab's gate, which exists because a post's media can now
