@@ -841,13 +841,28 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
     /// `blockOffset` moves the block off the row's centre — down when
     /// positive — for a row whose centre is not the centre of the space the
     /// reader sees as empty. The owner keeps it within the row's slack.
-    func configure(symbolName: String, title: String, subtitle: String, height: CGFloat, blockOffset: CGFloat = 0) {
+    ///
+    /// `actionTitle` and `action`: the block's button — the failed stream's
+    /// Try Again (#798). Both or neither; `blockHeight` must be asked with the
+    /// same `actionTitle`, or the row is sized for a block without it.
+    func configure(
+        symbolName: String,
+        title: String,
+        subtitle: String,
+        height: CGFloat,
+        blockOffset: CGFloat = 0,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
         targetHeight = max(0, height)
         // The view centres the block in its own box, so moving one edge of the
         // box by twice the offset moves the block by the offset.
         emptyTop.constant = max(0, blockOffset * 2)
         emptyBottom.constant = min(0, blockOffset * 2)
-        empty.configure(symbolName: symbolName, title: title, subtitle: subtitle)
+        empty.configure(
+            symbolName: symbolName, title: title, subtitle: subtitle,
+            actionTitle: actionTitle, actionHandler: action
+        )
         // No implicit animation may attach to the setup pass: this runs
         // inside the engagement's animation block on the resting-engagement
         // path, and an animatable layout here is a block sliding into place
@@ -874,6 +889,7 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
         symbolName: String,
         title: String,
         subtitle: String,
+        actionTitle: String? = nil,
         width: CGFloat,
         contentSizeCategory: UIContentSizeCategory
     ) -> CGFloat {
@@ -887,7 +903,12 @@ final class CommentsEmptyPageCell: UICollectionViewCell {
             view.updateTraitsIfNeeded()
             sizing = (contentSizeCategory, view)
         }
-        view.configure(symbolName: symbolName, title: title, subtitle: subtitle)
+        // The button shows only with a handler behind it, so the measurement
+        // hands it an inert one: what is measured is the block the row draws.
+        view.configure(
+            symbolName: symbolName, title: title, subtitle: subtitle,
+            actionTitle: actionTitle, actionHandler: actionTitle == nil ? nil : {}
+        )
         return ceil(view.systemLayoutSizeFitting(
             CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required,

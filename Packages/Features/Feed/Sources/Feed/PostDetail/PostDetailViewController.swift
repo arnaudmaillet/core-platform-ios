@@ -162,6 +162,9 @@ final class PostDetailViewController: UIViewController {
     /// `playStagedReveal`.
     private var stagedReveals: [UIView] = []
     private var commentsLoaded = false
+    /// The first page of comments failed with nothing to show (#798): the
+    /// empty row says so, with a Try Again, instead of "No comments yet".
+    private var commentsFailed = false
     private var streamModels: [String: CommentDisplayModel] = [:]
     /// The full-mode post section (header/media/engagement), built once
     /// and hosted by the stream's leading cell.
@@ -1440,7 +1443,31 @@ final class PostDetailViewController: UIViewController {
         // bar when pushed, the panel header when sheeted) — the inline
         // section header would duplicate it.
         commentsHeaderLabel.isHidden = mode == .commentsOnly
-        guard case .loaded(let models) = state else { return }
+        let models: [CommentDisplayModel]
+        switch state {
+        case .loaded(let loaded):
+            models = loaded
+        case .failed:
+            // The empty row, in its failed words (`emptyPageCopy`): the stream
+            // has nothing, and the reason is a failure, not an empty post.
+            commentsFailed = true
+            latestComments = []
+            streamModels = [:]
+            commentsLoaded = true
+            applyStream(animated: hasAppliedStream)
+            return
+        case .loading:
+            // Ordinarily ignored: a refresh over loaded comments keeps them on
+            // screen. A Try Again from the failed row is the exception — the
+            // row goes back to bones, so the answer arrives the way a first
+            // load's does (`revealLoadedComments`).
+            guard commentsFailed else { return }
+            commentsFailed = false
+            commentsLoaded = false
+            applyStream(animated: hasAppliedStream)
+            return
+        }
+        commentsFailed = false
         latestComments = models
         let previous = streamModels
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -1671,8 +1698,15 @@ final class PostDetailViewController: UIViewController {
         // layout — but in comments-only the comments ARE the page, so its
         // emptiness is the page's emptiness, and that is exactly what
         // `EmptyStateView` is for.
-        let emptyNoteCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
+        let emptyNoteCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
+            [weak self] cell, _, _ in
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+            let failed = self?.commentsFailed ?? false
+            self?.renderedEmptyNoteFailed = failed
+            if failed, let self {
+                self.installFailedNote(in: cell.contentView)
+                return
+            }
             let empty = UILabel()
             empty.text = "No comments yet. Be the first."
             empty.font = .appFont(forTextStyle: .subheadline)
@@ -1704,7 +1738,9 @@ final class PostDetailViewController: UIViewController {
                 title: fit.copy.title,
                 subtitle: fit.copy.subtitle,
                 height: fit.height,
-                blockOffset: fit.blockOffset
+                blockOffset: fit.blockOffset,
+                actionTitle: fit.copy.actionTitle,
+                action: fit.copy.actionTitle == nil ? nil : { [weak self] in self?.viewModel.retryComments() }
             )
             // What the cell was actually given — see `applyStream`.
             self?.renderedEmptyPageFit = fit
@@ -1919,6 +1955,14 @@ final class PostDetailViewController: UIViewController {
            !rendered.matches(currentEmptyPageFit()) {
             snapshot.reconfigureItems([.emptyState])
         }
+        // The full mode's one-line note has no fit to compare, only its two
+        // wordings (#798): empty, or failed with a Try Again.
+        if let renderedFailed = renderedEmptyNoteFailed, renderedFailed != commentsFailed,
+           snapshot.itemIdentifiers.contains(.emptyState),
+           streamDataSource.snapshot().itemIdentifiers.contains(.emptyState),
+           !snapshot.reconfiguredItemIdentifiers.contains(.emptyState) {
+            snapshot.reconfigureItems([.emptyState])
+        }
         hasAppliedStream = true
         nearEndItems = Self.nearEndItems(of: snapshot.itemIdentifiers)
         streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
@@ -1945,6 +1989,8 @@ final class PostDetailViewController: UIViewController {
         let symbol: String
         let title: String
         let subtitle: String
+        /// The block's button — only the failed stream's Try Again (#798).
+        var actionTitle: String?
     }
 
     static let commentsEmptyPageCopy = EmptyPageCopy(
@@ -1962,8 +2008,58 @@ final class PostDetailViewController: UIViewController {
         subtitle: "Your first message becomes the post."
     )
 
+    /// The first page of comments failed with nothing on screen (#798). The
+    /// SAME row as the empty page — same fit, same place — in other words,
+    /// because what the reader needs is the reason the stream is empty, and
+    /// the way out of it.
+    static let commentsFailedPageCopy = EmptyPageCopy(
+        symbol: "exclamationmark.triangle",
+        title: PostDetailViewModel.commentsFailureMessage,
+        subtitle: "Check your connection and try again.",
+        actionTitle: "Try Again"
+    )
+
     private var emptyPageCopy: EmptyPageCopy {
-        viewModel.isDraft ? Self.draftEmptyPageCopy : Self.commentsEmptyPageCopy
+        if commentsFailed { return Self.commentsFailedPageCopy }
+        return viewModel.isDraft ? Self.draftEmptyPageCopy : Self.commentsEmptyPageCopy
+    }
+
+    /// What the full mode's note last said: failed (true) or empty.
+    private var renderedEmptyNoteFailed: Bool?
+
+    /// The full mode's failed note (#798): one line and its Try Again, at the
+    /// note's own size — the comments are a section under the post here, not
+    /// the page.
+    private func installFailedNote(in contentView: UIView) {
+        let label = UILabel()
+        label.text = "\(PostDetailViewModel.commentsFailureMessage)."
+        label.font = .appFont(forTextStyle: .subheadline)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 0
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = "Try Again"
+        configuration.contentInsets = .zero
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.appFont(forTextStyle: .subheadline)
+            return attributes
+        }
+        let retry = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
+            self?.viewModel.retryComments()
+        })
+        let stack = UIStackView(arrangedSubviews: [label, retry])
+        stack.axis = .vertical
+        stack.alignment = .leading
+        stack.spacing = Spacing.xs
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
     }
 
     /// What the empty page was last configured with.
@@ -2251,6 +2347,7 @@ final class PostDetailViewController: UIViewController {
             symbolName: copy.symbol,
             title: copy.title,
             subtitle: copy.subtitle,
+            actionTitle: copy.actionTitle,
             width: width,
             contentSizeCategory: contentSizeCategory ?? traitCollection.preferredContentSizeCategory
         )
