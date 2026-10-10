@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// WHETHER A HORIZONTAL DRAG THAT LANDS ON A CAROUSEL BELONGS TO IT.
@@ -58,6 +59,15 @@ public enum MediaCarouselTouchRouting {
     public static func dragPassesThroughCarousel(
         at point: CGPoint, in host: UIView, towardsPageDelta pageDelta: Int
     ) -> Bool {
+        // ⚠️ A VIEW THAT OWNS ITS HORIZONTAL DRAG KEEPS IT (#771): the
+        // carousel's page indicator sits BESIDE the carousel, not inside it,
+        // so the walk below found no carousel and passed its scrub straight
+        // to the screen's dismissal.
+        if let hit = host.hitTest(point, with: nil),
+           sequence(first: hit, next: { $0.superview }).prefix(while: { $0 !== host })
+               .contains(where: { $0 is HorizontalDragOwning }) {
+            return false
+        }
         guard let carousel = carousel(at: point, in: host) else { return true }
         return !carousel.hasTravel(towardsPageDelta: pageDelta)
     }

@@ -255,4 +255,27 @@ struct RowMediaTravelTests {
         #expect(cell.mediaHasTravel(towardsPageDelta: -1) == false)
         #expect(cell.mediaHasTravel(towardsPageDelta: 1) == false)
     }
+
+    /// ⚠️ THE PAGE INDICATOR OWNS ITS DRAG (#771): it sits beside the carousel,
+    /// so the carousel walk found nothing and let the scrub pass through to
+    /// the screen's dismissal. A drag on it never passes through — and while it
+    /// scrubs, every other pan waits for it.
+    @Test func theIndicatorKeepsItsScrubFromEveryOtherPan() {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 300))
+        let indicator = MediaPageIndicatorView()
+        indicator.frame = CGRect(x: 16, y: 250, width: 80, height: 28)
+        host.addSubview(indicator)
+        host.layoutIfNeeded()
+        let onIt = CGPoint(x: 40, y: 264)
+
+        #expect(!MediaCarouselTouchRouting.dragPassesThroughCarousel(at: onIt, in: host, towardsPageDelta: -1))
+        #expect(MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: CGPoint(x: 300, y: 40), in: host, towardsPageDelta: -1
+        ), "a drag beside it still passes through")
+
+        let pan = UIPanGestureRecognizer()
+        host.addGestureRecognizer(pan)
+        #expect(indicator.gestureRecognizer(indicator.scrubGesture, shouldBeRequiredToFailBy: pan))
+        #expect(!indicator.gestureRecognizer(indicator.scrubGesture, shouldBeRequiredToFailBy: UITapGestureRecognizer()))
+    }
 }
