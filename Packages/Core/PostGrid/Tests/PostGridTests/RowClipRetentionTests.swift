@@ -477,7 +477,9 @@ struct RowClipRetentionTests {
 
         // The row scrolls away, still mid-fling.
         coordinator.update(candidates: [], allowingStarts: false)
-        for _ in 0..<200 { await Task.yield() }
+        // Drained until it holds or gives up: a warm-up issued by the last
+        // reconcile lands on the far side of an await and undoes itself there.
+        await settle(until: { pool.activePlayerCount == 0 }, tries: 2000)
 
         #expect(pool.activePlayerCount == 0, "a row nobody owns kept its players")
     }
@@ -507,7 +509,7 @@ struct RowClipRetentionTests {
         // coordinator released early would make this pass for the wrong reason
         // — or, as it did, fail for one.
         withExtendedLifetime(coordinator) { cell.prepareForReuse() }
-        for _ in 0..<200 { await Task.yield() }
+        await settle(until: { pool.activePlayerCount == 0 }, tries: 2000)
 
         #expect(pool.activePlayerCount == 0, "a recycled row kept its players")
     }
