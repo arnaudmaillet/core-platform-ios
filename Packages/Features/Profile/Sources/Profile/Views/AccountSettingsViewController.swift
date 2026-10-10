@@ -188,7 +188,7 @@ final class AccountSettingsViewController: UIViewController {
         Task { [weak self] in
             guard let self else { return }
             guard await viewModel.load() == false else { return }
-            ToastView.present("Couldn't load your account details", symbol: "exclamationmark.triangle", in: view)
+            Feedback.failure("Couldn't load your account details", from: self)
         }
     }
 

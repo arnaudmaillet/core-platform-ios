@@ -222,7 +222,7 @@ final class SecurityCheckupViewController: UIViewController {
     private func retry(_ part: SecurityCheckupViewModel.Part) {
         Task { [weak self] in
             guard let self, await viewModel.reload(part) == false else { return }
-            ToastView.present("Couldn't load this check", symbol: "exclamationmark.triangle", in: view)
+            Feedback.failure("Couldn't load this check", from: self)
         }
     }
 

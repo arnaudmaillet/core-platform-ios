@@ -150,7 +150,7 @@ final class DataExportViewController: UIViewController {
     private func retryLoad() {
         Task { [weak self] in
             guard let self, await viewModel.load() == false else { return }
-            ToastView.present("Couldn't check your data download", symbol: "exclamationmark.triangle", in: view)
+            Feedback.failure("Couldn't check your data download", from: self)
         }
     }
 }

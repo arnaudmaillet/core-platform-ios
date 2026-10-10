@@ -98,7 +98,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
             let succeeded = await ageCheck.read()
             applySnapshot()
             if isRetry, !succeeded {
-                ToastView.present("Couldn't load your account's age", symbol: "exclamationmark.triangle", in: view)
+                Feedback.failure("Couldn't load your account's age", from: self)
             }
         }
     }

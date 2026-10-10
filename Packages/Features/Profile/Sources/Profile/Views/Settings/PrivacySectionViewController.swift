@@ -398,7 +398,7 @@ final class PrivacySectionViewController: UIViewController {
     private func retry(_ side: PrivacySectionViewModel.SideSetting) {
         Task { [weak self] in
             guard let self, await viewModel.reload(side) == false else { return }
-            ToastView.present("Couldn't load this setting", symbol: "exclamationmark.triangle", in: view)
+            Feedback.failure("Couldn't load this setting", from: self)
         }
     }
 

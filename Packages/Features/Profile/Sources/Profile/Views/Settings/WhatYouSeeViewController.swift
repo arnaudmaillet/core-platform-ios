@@ -120,7 +120,7 @@ final class WhatYouSeeViewController: UIViewController {
             self.teen = teen ?? self.teen
             phase = next
             if wasFailed, next == .failed {
-                ToastView.present("Couldn't load these settings", symbol: "exclamationmark.triangle", in: view)
+                Feedback.failure("Couldn't load these settings", from: self)
             }
         }
         loadInterests()
