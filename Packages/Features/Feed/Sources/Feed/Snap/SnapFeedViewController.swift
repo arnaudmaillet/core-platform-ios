@@ -122,6 +122,9 @@ final class SnapFeedViewController: UIViewController {
     /// the SAME shell-owned sheet the map's badge opens, injected so the
     /// two entries can never diverge. Nil keeps the badge display-only.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    /// The boost flow on the current post — the wallet's verdicts, the
+    /// session undo and the anchors' context (`SnapBoostController`).
+    private let boost: SnapBoostController
 
     /// id → display model; lookups only, never measurement.
     /// The colour this screen wears while it has NO PAGES.
@@ -477,6 +480,7 @@ final class SnapFeedViewController: UIViewController {
         self.makeCommentsPanelContent = makeCommentsPanelContent
         self.makeRestingCommentsPanelContent = makeRestingCommentsPanelContent
         self.wallet = wallet
+        self.boost = SnapBoostController(wallet: wallet)
         self.makeWalletSheet = makeWalletSheet
         self.reporting = reporting
         self.followStore = SnapAuthorFollowStore(writer: socialGraph, reader: followRelations)
@@ -1233,13 +1237,8 @@ final class SnapFeedViewController: UIViewController {
             (cell as? SnapCellLifecycle)?.releaseRetainedNeighbourClips()
         }
         // Leaving the screen finalizes the session's boosts, same as paging
-        // away — "undo until you move on", and you just moved on. (The
-        // retained timeline can come back to the same post; the spend is
-        // still final: the window is the visit, not the post.)
-        // The taps are committed now, not 10 s after the last one (#676).
-        if let id = sessionBoostID { wallet?.commitStakes(on: id.rawValue) }
-        sessionBoostID = nil
-        sessionBoostAmount = 0
+        // away (`SnapBoostController.finalize`).
+        boost.finalize()
     }
 
     // MARK: - Setup
@@ -1426,12 +1425,11 @@ final class SnapFeedViewController: UIViewController {
                 // the balance can still afford, and whether any of it is
                 // still session-undoable — a recycled cell for a boosted
                 // post gets its receipt back.
-                if let wallet = self.wallet {
-                    cell.setBoostTotal(wallet.boostTotal(forTarget: id.rawValue))
+                if let total = self.boost.boostTotal(on: id),
+                   let context = self.boost.anchorContext(for: id) {
+                    cell.setBoostTotal(total)
                     cell.setBoostContext(
-                        balance: wallet.stakeableBalance,
-                        undoable: self.sessionBoostID == id ? self.sessionBoostAmount : 0,
-                        stakeShots: wallet.stakeShots
+                        balance: context.balance, undoable: context.undoable, stakeShots: context.stakeShots
                     )
                 }
                 cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
@@ -2520,20 +2518,10 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Boost
 
-    /// The active post's UNDOABLE spend: what this screen has boosted onto
-    /// it while it stayed the active page. Paging away FINALIZES it — the
-    /// lifecycle's resign hook clears the tally — which is the product
-    /// rule stated as ownership: the undo window IS the post's time on
-    /// screen. One post at a time, because only one post is on screen.
-    private var sessionBoostID: PostID?
-    private var sessionBoostAmount = 0
-
-    /// One boost spend, wallet-first: the debit lands synchronously (or is
-    /// refused) before any pixel moves, so the feedback can never promise a
-    /// state the balance doesn't have. Haptics here with the verdict —
-    /// constructed inline, the codebase's idiom — visuals on the cell that
-    /// asked. A nil wallet (unwired host) drops the tap silently; the mock
-    /// store is always wired in the app itself.
+    /// One boost spend, wallet-first (`SnapBoostController.stake`). Haptics
+    /// here with the verdict — constructed inline, the codebase's idiom —
+    /// visuals on the cell that asked. A nil wallet (unwired host) drops the
+    /// tap silently; the mock store is always wired in the app itself.
     private func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
         MemberGates.perform(.like, from: self) { [weak self, weak feedbackCell] in
             self?.commitBoost(on: id, spend: spend, feedbackCell: feedbackCell)
@@ -2541,19 +2529,9 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func commitBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
-        guard let wallet else { return }
-        let outcome = wallet.stake(spend, on: id.rawValue)
-        switch outcome {
-        case .boosted(_, let targetTotal, let spent):
-            // `spent`, never the request: a near-cap boost is CLAMPED to
-            // the remainder, and the tally/float must say what actually
-            // left the wallet.
-            if sessionBoostID == id {
-                sessionBoostAmount += spent
-            } else {
-                sessionBoostID = id
-                sessionBoostAmount = spent
-            }
+        guard let verdict = boost.stake(spend, on: id) else { return }
+        switch verdict {
+        case .boosted(let targetTotal, let spent):
             HapticImpact(style: .medium).impactOccurred()
             // Receipt before theatre: the anchor flips to (or grows) its
             // number face, then the "+N" float rises off it.
@@ -2561,58 +2539,39 @@ final class SnapFeedViewController: UIViewController {
             feedbackCell?.playBoostConfirmation(amount: spent)
             refreshVisibleBoostControls()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
+            if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
                 print("[wallet] boosted post=\(id.rawValue) requested=\(spend) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance) shots=\(wallet.stakeShots)")
             }
             #endif
-        case .insufficientBalance(let balance):
+        case .refused(let refusal):
             HapticNotification().notificationOccurred(.error)
             feedbackCell?.playBoostDenied()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-                print("[wallet] boost DENIED post=\(id.rawValue) spend=\(spend) balance=\(balance) shots=\(wallet.stakeShots)")
-            }
-            #endif
-        case .targetCapReached(let targetTotal):
-            HapticNotification().notificationOccurred(.error)
-            feedbackCell?.playBoostDenied()
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-                print("[wallet] boost CAP post=\(id.rawValue) targetTotal=\(targetTotal)")
-            }
-            #endif
-        case .noShotsLeft, .shotDoesNotFit:
-            // The menu offers a shot only with a pack loaded and room on the
-            // post for all of it; a stale menu (the pack emptied, the post
-            // filled on another surface) or `-wallet-demo-shot` lands here.
-            HapticNotification().notificationOccurred(.error)
-            feedbackCell?.playBoostDenied()
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-                print("[wallet] shot REFUSED post=\(id.rawValue) outcome=\(outcome) shots=\(wallet.stakeShots)")
+            if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
+                switch refusal {
+                case .insufficientBalance(let balance):
+                    print("[wallet] boost DENIED post=\(id.rawValue) spend=\(spend) balance=\(balance) shots=\(wallet.stakeShots)")
+                case .targetCapReached(let targetTotal):
+                    print("[wallet] boost CAP post=\(id.rawValue) targetTotal=\(targetTotal)")
+                case .noShotsLeft, .shotDoesNotFit:
+                    print("[wallet] shot REFUSED post=\(id.rawValue) outcome=\(refusal) shots=\(wallet.stakeShots)")
+                }
             }
             #endif
         }
     }
 
-    /// Takes back the whole session spend on `id` — the menu's Undo entry.
-    /// Session-scoped by construction: the guard requires the tally to
-    /// still name this post, and the tally dies the moment the post resigns
-    /// the active page.
+    /// Takes back the whole session spend on `id` — the menu's Undo entry
+    /// (`SnapBoostController.undo`).
     private func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
-        guard let wallet, sessionBoostID == id, sessionBoostAmount > 0,
-              let result = wallet.undoBoost(targetID: id.rawValue, amount: sessionBoostAmount)
-        else { return }
-        let refunded = sessionBoostAmount
-        sessionBoostID = nil
-        sessionBoostAmount = 0
+        guard let refund = boost.undo(on: id) else { return }
         HapticImpact(style: .light).impactOccurred()
-        feedbackCell?.setBoostTotal(result.targetTotal, animated: true)
-        feedbackCell?.playBoostRefund(amount: refunded)
+        feedbackCell?.setBoostTotal(refund.targetTotal, animated: true)
+        feedbackCell?.playBoostRefund(amount: refund.refunded)
         refreshVisibleBoostControls()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-            print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refunded) targetTotal=\(result.targetTotal) balance=\(result.newBalance)")
+            print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refund.refunded) targetTotal=\(refund.targetTotal) balance=\(refund.newBalance)")
         }
         #endif
     }
@@ -2700,17 +2659,13 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func refreshVisibleBoostControls() {
-        guard let wallet else { return }
-        let balance = wallet.stakeableBalance
-        let shots = wallet.stakeShots
+        guard boost.wallet != nil else { return }
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard orderedIDs.indices.contains(indexPath.item),
-                  let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
-            let id = orderedIDs[indexPath.item]
+                  let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell,
+                  let context = boost.anchorContext(for: orderedIDs[indexPath.item]) else { continue }
             cell.setBoostContext(
-                balance: balance,
-                undoable: sessionBoostID == id ? sessionBoostAmount : 0,
-                stakeShots: shots
+                balance: context.balance, undoable: context.undoable, stakeShots: context.stakeShots
             )
         }
     }
@@ -4155,12 +4110,10 @@ final class SnapFeedViewController: UIViewController {
             // it keeps its player and simply stops advancing.
             lifecycleCell(at: resign)?.didResignActive(releasingPlayback: false)
             // Paging away FINALIZES the session's boosts: the undo window
-            // is the post's time on screen, and it just ended.
-            if orderedIDs.indices.contains(resign), sessionBoostID == orderedIDs[resign] {
-                // …and commits its taps (#676).
-                wallet?.commitStakes(on: orderedIDs[resign].rawValue)
-                sessionBoostID = nil
-                sessionBoostAmount = 0
+            // is the post's time on screen, and it just ended — and commits
+            // its taps (#676).
+            if orderedIDs.indices.contains(resign) {
+                boost.pageResigned(orderedIDs[resign])
             }
             // An engagement is PAGE-SCOPED: the engaged page resigning
             // retires it instantly (a belt for interrupted teardowns —
@@ -6421,7 +6374,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         chrome.setSoundFace(soundFace(for: model))
         // The replica's boost anchor wears the same face as the live one —
         // a boosted post must not flash back to the glyph mid-flight.
-        chrome.setBoostTotal(wallet?.boostTotal(forTarget: model.id.rawValue) ?? 0)
+        chrome.setBoostTotal(boost.boostTotal(on: model.id) ?? 0)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
             print("[flight-chrome] \(model.id.rawValue) hasMedia=\(model.mediaURL != nil)"
