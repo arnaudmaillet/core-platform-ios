@@ -158,6 +158,12 @@ final class SearchViewController: UIViewController {
         viewModel.onPhaseChange = { [weak self] phase in
             self?.render(phase)
         }
+        // ⚠️ A REFINE SCREEN DRAWS THE PHASE IT WAS BORN INTO. Its field was
+        // filled, and the typeahead for it asked for, in
+        // `configureSearchAffordance` — before the line above, so that phase
+        // went to the results screen's handler and this list stayed blank
+        // until the debounced `Suggest` answered, a round trip later (#827).
+        if case .refine = mode { render(viewModel.currentPhase) }
         viewModel.onQueryTextChange = { [weak self] text in
             // Recorded as already reported BEFORE the assignment: setting the
             // field re-enters `updateSearchResults`, and without this the
@@ -1113,4 +1119,10 @@ extension SearchViewController: UITextFieldDelegate {
         submitCurrentQuery()
         return true
     }
+}
+
+extension SearchViewController {
+    /// Internal for tests: what the list holds, section by section.
+    var debugSections: [SearchSection] { dataSource?.snapshot().sectionIdentifiers ?? [] }
+    var debugItems: [SearchItem] { dataSource?.snapshot().itemIdentifiers ?? [] }
 }

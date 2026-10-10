@@ -29,6 +29,10 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
 
     private lazy var logInCell = makeLinkCell(title: "Already have an account? Log in")
 
+    /// The method whose sign-in is running (Sign in with Apple): its row
+    /// carries a spinner until the call ends (#827).
+    private(set) var workingMethod: SignInMethod?
+
     init() {
         super.init(style: .insetGrouped)
     }
@@ -67,8 +71,32 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
             content.imageProperties.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body)
             cell.contentConfiguration = content
             cell.accessibilityTraits = .button
+            showWorking(on: cell, for: method)
             return cell
         }
+    }
+
+    /// Puts the spinner on `method`'s row, or takes it off every row with nil.
+    /// The coordinator locks the screen itself; this is only what it shows.
+    func setWorking(_ method: SignInMethod?) {
+        workingMethod = method
+        guard isViewLoaded else { return }
+        for (index, section) in sections.enumerated() {
+            guard case .method(let candidate) = section,
+                  let cell = tableView.cellForRow(at: IndexPath(row: 0, section: index))
+            else { continue }
+            showWorking(on: cell, for: candidate)
+        }
+    }
+
+    private func showWorking(on cell: UITableViewCell, for method: SignInMethod) {
+        guard method == workingMethod else {
+            cell.accessoryView = nil
+            return
+        }
+        let spinner = UIActivityIndicatorView(style: .medium)
+        spinner.startAnimating()
+        cell.accessoryView = spinner
     }
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

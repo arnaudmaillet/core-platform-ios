@@ -1,4 +1,5 @@
 import CoreText
+import Synchronization
 import Testing
 import UIKit
 @testable import StickerKit
@@ -83,5 +84,74 @@ struct EmojiCatalogTests {
 
         #expect(EmojiCatalog.search("  ").count == EmojiCatalog.all.count)
         #expect(EmojiCatalog.search("zzqx").isEmpty)
+    }
+}
+
+/// #827: the catalogue is built once, off the main actor, and asking whether
+/// it is ready never builds it.
+struct EmojiCatalogLoaderTests {
+    /// Every build the loader ran, and whether it ran on the main thread.
+    private final class BuildProbe: Sendable {
+        private let threads = Mutex<[Bool]>([])
+        var builds: Int { threads.withLock { $0.count } }
+        var anyOnMain: Bool { threads.withLock { $0.contains(true) } }
+        func record() { threads.withLock { $0.append(Thread.isMainThread) } }
+    }
+
+    private static func loader(_ probe: BuildProbe) -> EmojiCatalogLoader {
+        EmojiCatalogLoader {
+            probe.record()
+            return EmojiCatalog.search("grinning")
+        }
+    }
+
+    @MainActor
+    @Test func askingFromTheMainActorBeforeAnyBuildBuildsNothing() {
+        let probe = BuildProbe()
+        let loader = Self.loader(probe)
+
+        #expect(loader.ready == nil)
+        #expect(probe.builds == 0, "reading `ready` ran the build")
+    }
+
+    @MainActor
+    @Test func aLoadFromTheMainActorBuildsOffIt() async {
+        let probe = BuildProbe()
+        let loader = Self.loader(probe)
+
+        let built = await loader.load()
+
+        #expect(!built.isEmpty)
+        #expect(probe.builds == 1)
+        #expect(!probe.anyOnMain, "the build ran on the main thread")
+        #expect(loader.ready == built)
+    }
+
+    @Test func concurrentLoadsShareOneBuild() async {
+        let probe = BuildProbe()
+        let loader = Self.loader(probe)
+        loader.prewarm()
+
+        async let first = loader.load()
+        async let second = loader.load()
+        let third = await loader.load()
+        let all = await [first, second, third]
+
+        #expect(all.allSatisfy { $0 == third })
+        #expect(probe.builds == 1, "\(probe.builds) builds")
+        #expect(await loader.load() == third)
+        #expect(probe.builds == 1, "a load after the build ran it again")
+    }
+
+    /// The shared loader builds the real catalogue.
+    @Test func theSharedLoaderLoadsTheWholeCatalogue() async {
+        #expect(await EmojiCatalog.load() == EmojiCatalog.all)
+        #expect(EmojiCatalog.ready == EmojiCatalog.all)
+    }
+
+    @Test func aSearchOverALoadedListMatchesTheCataloguesOwn() {
+        let entries = EmojiCatalog.all
+        #expect(EmojiCatalog.search("grin fa", in: entries) == EmojiCatalog.search("grin fa"))
+        #expect(EmojiCatalog.search("  ", in: entries).count == entries.count)
     }
 }
