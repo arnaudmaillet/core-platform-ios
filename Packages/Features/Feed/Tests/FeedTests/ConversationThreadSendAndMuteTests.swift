@@ -305,8 +305,8 @@ struct ConversationThreadSendAndMuteTests {
 
     // MARK: - No flicker (#725)
 
-    private func settle(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<400 {
+    private func settle(attempts: Int = 400, _ condition: () -> Bool) async -> Bool {
+        for _ in 0..<attempts {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
         }
@@ -351,10 +351,17 @@ struct ConversationThreadSendAndMuteTests {
 
     /// Delivered mid bounce-in: the spinner scales out at once, on the row
     /// still rising, and the delivered row then lands plainly in its place.
+    ///
+    /// ⚠️ THE RISE'S CLOCK IS STOPPED. On the media clock, a starved runner
+    /// took more than the rise's 0.45 s to get from the send to the delivery,
+    /// so the delivery was no longer "mid-rise" and took the plain swap
+    /// (CI run 38083564047).
     @Test func aDeliveryMidBounceScalesTheSpinnerOutAtOnce() async throws {
         let them = Self.message("m1", mine: false, minutes: 1)
         let (screen, driver, window) = makeScreen(phase: .content([them]))
         defer { window.isHidden = true }
+        let sentAt: CFTimeInterval = 1_000
+        screen.mediaTime = { sentAt }
         let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
         driver.onPhaseChange?(.content([them, pending]))
         screen.view.layoutIfNeeded()
@@ -368,11 +375,13 @@ struct ConversationThreadSendAndMuteTests {
         #expect(!rising.isBouncingInSpinner)
         #expect(rising.row.alpha == 1)
 
+        // The rise lands: the held delivery swaps the row in.
+        screen.mediaTime = { sentAt + ThreadRowCell.arrivalDuration + 1 }
         screen.debugConfiguredIDs = []
-        #expect(await settle {
+        #expect(await settle(attempts: 2_000) {
             screen.view.layoutIfNeeded()
             return screen.debugConfiguredIDs.contains("t1")
-        })
+        }, "the held delivery never swapped in")
         // ⚠️ A SWAP, NOT A CHANGE (#756): animated, the pending row and its
         // delivered one cross-faded — the row and its avatar dimmed.
         #expect(screen.debugLastApplyAnimated == false, "the swap cross-faded")

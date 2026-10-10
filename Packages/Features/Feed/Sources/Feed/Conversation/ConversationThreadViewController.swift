@@ -111,6 +111,9 @@ final class ConversationThreadViewController: UIViewController {
     /// mid-rise (a fast server) waits for the rise to land rather than
     /// swapping the row — and the stream's scroll — out from under it.
     private var arrivalStarts: [String: CFTimeInterval] = [:]
+    /// The clock a rise is timed on. Tests stop it, so whether a delivery
+    /// lands mid-rise never hangs on how fast the test runs.
+    var mediaTime: () -> CFTimeInterval = CACurrentMediaTime
     /// The phase held back until a rise lands; the newest one wins.
     private var deferredPhase: ConversationThreadPhase?
     /// Delivered messages whose pending row already played the delivery
@@ -1040,7 +1043,7 @@ final class ConversationThreadViewController: UIViewController {
             cell.row.onReplyTap = { [weak self] in self?.driver.retry(messageID) }
         }
         if arrivingIDs.remove(messageID) != nil {
-            arrivalStarts[messageID] = CACurrentMediaTime()
+            arrivalStarts[messageID] = mediaTime()
             cell.playArrival()
         } else if deliveredIDs.remove(messageID) != nil {
             cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt))
@@ -1096,7 +1099,7 @@ final class ConversationThreadViewController: UIViewController {
     private func riseStillLanding(before phase: ConversationThreadPhase) -> TimeInterval? {
         guard case .content(let messages) = phase, !arrivalStarts.isEmpty else { return nil }
         let ids = Set(messages.map(\.id))
-        let now = CACurrentMediaTime()
+        let now = mediaTime()
         let waits = arrivalStarts.compactMap { id, start -> TimeInterval? in
             guard !ids.contains(id) else { return nil }
             let left = ThreadRowCell.arrivalDuration - (now - start)
