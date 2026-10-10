@@ -3083,7 +3083,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // picture belonging to a different post.
         mediaCard.clearPausedMarks()
         pauseGlyphSuppressedByEngagement = false
-        playback.cancelScrubResume()
+        playback.reset()
         stopPlayheadFeed()
         // ⚠️ A held chrome must never ride a recycled cell. A flight that is
         // cancelled, or a dismissal that ends the page instead of landing it,

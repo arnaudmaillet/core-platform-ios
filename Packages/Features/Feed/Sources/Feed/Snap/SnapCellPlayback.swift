@@ -168,7 +168,9 @@ final class SnapCellPlayback: NSObject {
     private var lastPlayheadTrace: CFTimeInterval = 0
     #endif
 
-    @objc private func publishPlayhead() {
+    /// One beat of the feed. Internal, not private, so a test can tick it
+    /// without waiting for the display.
+    @objc func publishPlayhead() {
         // The page this feeds is gone (the link holds this object, not the
         // cell): nothing is left to draw into, so the beat stops.
         guard let view = surface() else {
@@ -293,8 +295,18 @@ final class SnapCellPlayback: NSObject {
     /// paused, paused.
     private var resumesAfterScrub = false
 
-    /// A recycled page owes no resume to the drag of the post it showed.
-    func cancelScrubResume() {
+    /// A recycled page owes nothing to the post it showed: no resume to its
+    /// hold, its sheet or its drag, and no preview it was waiting for.
+    ///
+    /// ⚠️ ALL OF THEM, not only the drag's (#857). Before, only
+    /// `resumesAfterScrub` was cleared, so a cell recycled mid-hold kept
+    /// `isHeldPaused`, and the next post's hold ending in `.failed` or
+    /// `.cancelled` resumed a clip the viewer had paused.
+    func reset() {
+        isHeldPaused = false
+        isSheetPaused = false
+        wantedPreviewFraction = nil
+        isFetchingPreview = false
         resumesAfterScrub = false
     }
 

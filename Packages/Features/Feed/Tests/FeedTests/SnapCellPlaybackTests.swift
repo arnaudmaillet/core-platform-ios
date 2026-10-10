@@ -199,10 +199,65 @@ struct SnapCellPlaybackTests {
         let (playback, pool, page) = await Self.playingPage()
 
         playback.beginScrub()
-        playback.cancelScrubResume()
+        playback.reset()
         playback.endScrub(at: nil)
 
         #expect(pool.isAdvancing(in: page.surface) == false)
+    }
+
+    // MARK: - The recycle
+
+    @Test func aRecycledPageOwesNoResumeToAHoldBeforeIt() async {
+        let (playback, pool, page) = await Self.playingPage()
+
+        playback.beginHold()
+        playback.reset()
+        // The next post's hold ending in `.failed` or `.cancelled`.
+        playback.endHold()
+
+        #expect(pool.isAdvancing(in: page.surface) == false)
+    }
+
+    @Test func aRecycledPageOwesNoResumeToASheetBeforeIt() async {
+        let (playback, pool, page) = await Self.playingPage()
+
+        playback.setCovered(true, on: page.surface)
+        playback.reset()
+        playback.setCovered(false, on: page.surface)
+
+        #expect(pool.isAdvancing(in: page.surface) == false)
+    }
+
+    @Test func aRecycledPageFetchesItsFirstPreviewAtOnce() async {
+        let (playback, _, _) = await Self.playingPage()
+        var loading: [Bool] = []
+        playback.onScrubPreviewLoading = { loading.append($0) }
+
+        playback.updateScrubPreview(0.2)
+        playback.reset()
+        playback.updateScrubPreview(0.7)
+
+        // The old post's fetch in flight does not hold the new one back.
+        #expect(loading == [true, true])
+        await Self.settle { loading.last == false }
+    }
+
+    @Test func theFeedStopsItselfOnceItsPageIsGone() async {
+        let pool = VideoPlaybackController(source: StubSource(), poolSize: 2, capacity: 2)
+        var page: Page? = Page(surface: VideoRenderView())
+        let playback = SnapCellPlayback(
+            surface: { [weak page] in page?.surface },
+            isActive: { true }
+        )
+        playback.pool = pool
+        playback.startPlayheadFeed()
+        #expect(playback.isFeedingPlayhead)
+
+        page = nil
+        playback.publishPlayhead()
+
+        #expect(page == nil)
+        #expect(playback.isFeedingPlayhead == false)
     }
 
     // MARK: - The scrub preview
