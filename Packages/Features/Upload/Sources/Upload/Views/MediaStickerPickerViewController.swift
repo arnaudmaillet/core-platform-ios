@@ -181,6 +181,11 @@ final class MediaStickerPickerViewController: UIViewController {
                 snapshot.appendItems(Array(Set(EmojiCatalog.search(trimmed, in: emoji).map(\.glyph))).sorted())
             }
         }
+        // An empty shelf says why to VoiceOver, rather than being a silent
+        // gap where the emoji will be.
+        let waiting = shelf == .emoji && emoji == nil
+        grid.isAccessibilityElement = waiting
+        grid.accessibilityLabel = waiting ? String(localized: "Loading emoji") : nil
         let headed = shelf == .emoji && query.trimmingCharacters(in: .whitespaces).isEmpty
         grid.setCollectionViewLayout(
             Self.layout(side: shelf == .stickers ? Metrics.sticker : Metrics.emoji, headed: headed),
@@ -312,6 +317,8 @@ extension MediaStickerPickerViewController {
     /// Internal for tests: what the grid holds, section by section.
     var debugItems: [String] { dataSource?.snapshot().itemIdentifiers ?? [] }
     var debugSections: [String] { dataSource?.snapshot().sectionIdentifiers ?? [] }
+    /// What VoiceOver reads on the grid itself: nil when its cells speak.
+    var debugGridAccessibilityLabel: String? { grid.isAccessibilityElement ? grid.accessibilityLabel : nil }
     func debugShow(_ shelf: Shelf) {
         shelves.selectedSegmentIndex = shelf.rawValue
         shelfChanged()

@@ -69,9 +69,6 @@ enum SearchItem: Hashable {
     case suggested(ProfileID)
     /// A shimmering placeholder while the corpus is in flight.
     case suggestedSkeleton(Int)
-    /// A shimmering person row while a submitted search is in flight: the
-    /// results' own shape, so the answer replaces it without moving (P8).
-    case resultSkeleton(Int)
 }
 
 /// The compositional layout the Search screen is laid out by.

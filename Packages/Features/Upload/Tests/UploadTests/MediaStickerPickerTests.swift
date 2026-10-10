@@ -43,12 +43,14 @@ struct MediaStickerPickerTests {
 
         picker.debugShow(.emoji)
         #expect(picker.debugItems.isEmpty, "the shelf was filled before the load could land")
+        #expect(picker.debugGridAccessibilityLabel == "Loading emoji")
 
         // On STATE, a look budget rather than a deadline.
         for _ in 0..<500 where picker.debugItems.isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(picker.debugItems == sample.map(\.glyph))
+        #expect(picker.debugGridAccessibilityLabel == nil, "the grid hides its cells from VoiceOver")
     }
 
     @Test func aSearchKeepsOnlyWhatMatches() async {

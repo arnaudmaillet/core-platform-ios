@@ -16,6 +16,7 @@ private actor GatedSignUp: SignUpPerforming {
     private(set) var verifications = 0
     private(set) var nonces = 0
     private(set) var signedInAccount: PendingAccount?
+    private(set) var signedInWith: SignInCredential?
     private var waiting: [CheckedContinuation<Bool, Never>] = []
 
     /// Requests held at the gate right now.
@@ -27,6 +28,11 @@ private actor GatedSignUp: SignUpPerforming {
         waiting = []
     }
 
+    /// Lets only the request held last through, answered.
+    func openLatest() {
+        waiting.popLast()?.resume(returning: false)
+    }
+
     private func gate() async throws {
         let fails = await withCheckedContinuation { waiting.append($0) }
         if fails { throw Refused() }
@@ -34,8 +40,9 @@ private actor GatedSignUp: SignUpPerforming {
 
     func startVerification(_ channel: VerificationChannel, to destination: String, locale: String) async throws -> VerificationChallenge {
         verifications += 1
+        let number = verifications
         try await gate()
-        return VerificationChallenge(id: "ch-\(verifications)", channel: channel, destination: destination, expiresIn: 600, resendAfter: 30)
+        return VerificationChallenge(id: "ch-\(number)", channel: channel, destination: destination, expiresIn: 600, resendAfter: 30)
     }
 
     func startFederatedSignIn() async throws -> String {
@@ -44,7 +51,10 @@ private actor GatedSignUp: SignUpPerforming {
         return "nonce-\(nonces)"
     }
 
-    func signIn(_ credential: SignInCredential) async throws -> CodeSignIn { .existing(account) }
+    func signIn(_ credential: SignInCredential) async throws -> CodeSignIn {
+        signedInWith = credential
+        return .existing(account)
+    }
     func signUp(_ credential: SignInCredential, details: SignUpDetails) async throws -> SignUpOutcome { .created(account) }
     func completeSignIn(_ account: PendingAccount) async { signedInAccount = account }
     func completeSecondStep(_ challenge: SecondStepChallenge, code: String) async throws -> PendingAccount { account }
@@ -129,6 +139,13 @@ struct AuthBusyStateTests {
 
     /// The code step, reached by an email code the gate let through.
     private func codeStep(_ signUp: GatedSignUp) async throws -> VerificationCodeViewController {
+        try await codeFlow(signUp).code
+    }
+
+    /// The stack, its email step, and the code step on top.
+    private func codeFlow(_ signUp: GatedSignUp) async throws -> (
+        navigation: UINavigationController, email: EmailEntryViewController, code: VerificationCodeViewController
+    ) {
         let navigation = try start(signUp, picking: .email)
         let email = try #require(navigation.topViewController as? EmailEntryViewController)
         email.onContinue?("nina@example.com")
@@ -137,7 +154,7 @@ struct AuthBusyStateTests {
         try #require(await settle { navigation.topViewController is VerificationCodeViewController })
         let code = try #require(navigation.topViewController as? VerificationCodeViewController)
         code.loadViewIfNeeded()
-        return code
+        return (navigation, email, code)
     }
 
     private func resendRowIsWorking(_ code: VerificationCodeViewController) -> Bool {
@@ -171,6 +188,32 @@ struct AuthBusyStateTests {
         await signUp.open(failing: true)
         try #require(await settle { !resendRowIsWorking(code) }, "the resend link never cleared after a failure")
         #expect(code.trailingRows.first?.isUserInteractionEnabled == true)
+    }
+
+    /// A resend that lands after a code went to another address must not put
+    /// the old challenge back under the new code step.
+    @Test func aLateResendLeavesANewerCodeAlone() async throws {
+        let signUp = GatedSignUp()
+        let (navigation, email, code) = try await codeFlow(signUp)
+
+        code.onResend?() // ch-2, for nina, held
+        try #require(await settle { await signUp.held == 1 })
+        navigation.popViewController(animated: false)
+        email.onContinue?("other@example.com") // ch-3, held behind it
+        try #require(await settle { await signUp.held == 2 })
+
+        await signUp.openLatest()
+        try #require(await settle {
+            (navigation.topViewController as? VerificationCodeViewController).map { $0 !== code } ?? false
+        }, "the new code step never arrived")
+        let newer = try #require(navigation.topViewController as? VerificationCodeViewController)
+        await signUp.open() // the stale resend lands now
+        try #require(await settle { await signUp.held == 0 })
+        await letStrayCallsLand()
+
+        newer.onSubmit?("123456")
+        try #require(await settle { await signUp.signedInWith != nil })
+        #expect(await signUp.signedInWith == .code(challengeID: "ch-3", code: "123456"))
     }
 
     // MARK: Sign in with Apple

@@ -305,6 +305,11 @@ final class LoginFlowCoordinator {
                 let fresh = try await signUp.startVerification(
                     current.channel, to: current.destination, locale: Locale.current.identifier(.bcp47)
                 )
+                // ⚠️ ONLY OVER THE CHALLENGE IT WAS ASKED FOR. Going back and
+                // sending a code to another address while this was out made a
+                // newer challenge; a late resend must not put the old one back
+                // under the code step now showing.
+                guard self?.challenge?.id == current.id else { return }
                 self?.challenge = fresh
                 step?.codeResent(resendAfter: fresh.resendAfter)
             } catch {
