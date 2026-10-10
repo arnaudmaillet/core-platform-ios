@@ -73,7 +73,7 @@ final class SecuritySettingsViewController: UIViewController {
         // list replaced by an error row.
         viewModel.onRefreshFailed = { [weak self] in
             guard let self else { return }
-            ToastView.present("Couldn't refresh your sessions", symbol: "exclamationmark.triangle", in: view)
+            Feedback.failure("Couldn't refresh your sessions", from: self)
         }
         applySnapshot()
         Task { await viewModel.load() }
