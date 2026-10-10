@@ -3431,6 +3431,8 @@ final class SnapFeedViewController: UIViewController {
             // TOOLBAR, not just the home indicator.
             bottomInset: view.safeAreaInsets.bottom
         )
+        // An open sort menu takes the next drag on the list (#759).
+        detail?.closesMenuOnShow = { [weak self] in self?.commentSortButton.closeMenu() ?? false }
         // Dragging the list down from its top collapses back to media — the
         // sheet gesture. MEDIA pages only: a text engagement is the page's
         // permanent resting state, so there is nothing to collapse to.
@@ -3733,6 +3735,9 @@ final class SnapFeedViewController: UIViewController {
     /// whole time; nothing structural moves in either direction.
     private func dismissComments() {
         guard let engagedID = commentsEngagedID else { return }
+        // An open sort menu closes first, and alone (#759): the ✕, a tap on
+        // the media strip — any close path while it is up.
+        if commentSortButton.closeMenu() { return }
         // BELT: a text-only post's engagement is undismissable (the
         // permanent resting state — collapsing it would strand the page
         // on its empty shell). No UI path should reach here for text

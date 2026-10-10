@@ -138,6 +138,43 @@ final class SnapCommentSortButton: UIButton {
         apply(.recent)
     }
 
+    // MARK: - The menu on show (#759)
+
+    /// Whether the order menu is up. ⚠️ A gesture outside it — the list's
+    /// pull-down close, a tap on the media — closes the menu FIRST and does
+    /// nothing else: running both put two animations on top of each other.
+    private(set) var isMenuVisible = false
+
+    override func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        willDisplayMenuFor configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        super.contextMenuInteraction(interaction, willDisplayMenuFor: configuration, animator: animator)
+        isMenuVisible = true
+    }
+
+    override func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        willEndFor configuration: UIContextMenuConfiguration,
+        animator: (any UIContextMenuInteractionAnimating)?
+    ) {
+        super.contextMenuInteraction(interaction, willEndFor: configuration, animator: animator)
+        isMenuVisible = false
+    }
+
+    /// Closes the menu if it is up; whether it was.
+    @discardableResult
+    func closeMenu() -> Bool {
+        guard isMenuVisible else { return false }
+        contextMenuInteraction?.dismissMenu()
+        isMenuVisible = false
+        return true
+    }
+
+    /// Marks the menu as up, as UIKit's presentation would. Tests.
+    func debugMarkMenuVisible() { isMenuVisible = true }
+
     private func apply(_ new: Order) {
         order = new
         var config = configuration
