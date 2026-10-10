@@ -114,4 +114,34 @@ struct ShowsAppTabBarTests {
         let nav = UINavigationController(rootViewController: UIViewController())
         #expect(nav.showsAppTabBar(for: nil) == false)
     }
+
+    /// ⚠️ A DEFERRED BAND INSTALL RUNS ONLY FOR A SCREEN STILL ON SHOW (#758):
+    /// a screen popped before its push committed or landed must not install
+    /// its band (and arm the bar's collapse) over the screen beneath.
+    @MainActor
+    @Test func onlyTheScreenOnShowMayStillClaimTheBottom() {
+        let root = UIViewController()
+        let nav = UINavigationController(rootViewController: root)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = nav
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let pushed = UIViewController()
+        let child = UIViewController()
+        pushed.addChild(child)
+        pushed.view.addSubview(child.view)
+        child.didMove(toParent: pushed)
+        nav.pushViewController(pushed, animated: false)
+        nav.view.layoutIfNeeded()
+
+        #expect(pushed.isStillTheScreenOnShow)
+        #expect(child.isStillTheScreenOnShow, "a screen nested in the top one counts as it")
+        #expect(!root.isStillTheScreenOnShow, "a screen under the top one is not on show")
+
+        nav.popViewController(animated: false)
+        nav.view.layoutIfNeeded()
+        #expect(!pushed.isStillTheScreenOnShow, "a popped screen may no longer claim the bottom")
+        #expect(root.isStillTheScreenOnShow)
+        #expect(!UIViewController().isStillTheScreenOnShow, "off-window")
+    }
 }

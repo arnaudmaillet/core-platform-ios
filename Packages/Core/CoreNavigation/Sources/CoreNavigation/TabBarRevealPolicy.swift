@@ -315,6 +315,16 @@ public extension UIViewController {
                                           handsOver: Bool = false,
                                           _ install: @escaping @MainActor () -> Void) {
         let coordinator = transitionCoordinator
+        // ⚠️ A DEFERRED INSTALL RUNS ONLY FOR A SCREEN STILL ON SHOW (#758).
+        // A screen left before its transition committed or landed (a push
+        // popped straight back) used to install its band — and arm the bar's
+        // collapse — after its own `viewWillDisappear` had removed it: nobody
+        // was left to release the arm, and the screen beneath (For You, which
+        // has no band) collapsed the bar as it scrolled.
+        let installIfStillShown = { [weak self] in
+            guard let self, self.isStillTheScreenOnShow else { return }
+            install()
+        }
         switch TabBarRevealPolicy.timing(
             returnsFromFullBleed: hasActiveFlight || isReturningFromDocklessScreen,
             isTransitioning: coordinator != nil,
@@ -329,7 +339,7 @@ public extension UIViewController {
             install()
         case .whenTransitionCommits:
             guard let coordinator else { return install() }
-            coordinator.whenCommitted { install() }
+            coordinator.whenCommitted { installIfStillShown() }
         case .afterTransition:
             // The close's owner showed the bar before the pop: the band rides
             // in with it. Otherwise it waits for the bar's own backstop.
@@ -337,9 +347,21 @@ public extension UIViewController {
                 install()
             } else {
                 guard let coordinator else { return install() }
-                coordinator.whenLanded { install() }
+                coordinator.whenLanded { installIfStillShown() }
             }
         }
+    }
+}
+
+@MainActor
+extension UIViewController {
+    /// In a window, and the top of its navigation stack when it has one — what
+    /// a deferred bottom-chrome install checks before it claims the slot.
+    var isStillTheScreenOnShow: Bool {
+        guard viewIfLoaded?.window != nil else { return false }
+        guard let stack = navigationController else { return true }
+        // A screen nested in a container counts as its container.
+        return sequence(first: self as UIViewController, next: \.parent).contains { $0 === stack.topViewController }
     }
 }
 

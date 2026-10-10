@@ -262,6 +262,42 @@ struct SelectorAccessoryTests {
         #expect(controller.tabBarMinimizeBehavior == .never)
     }
 
+    /// ⚠️ A LEAKED ARM IS GIVEN BACK BY A BARE SLOT (#758). An arm nobody
+    /// will release (its band gone from the slot, its screen with it) left the
+    /// bar collapsing on For You; reconciling with no band up restores the
+    /// shell's behaviour, and the old holder re-arms cleanly on its next
+    /// install instead of releasing into a count it is no longer part of.
+    @Test func aBareSlotGivesTheShellItsBehaviourBack() {
+        let controller = UITabBarController()
+        controller.tabBarMinimizeBehavior = .never
+        let accessory = SelectorAccessory(strip: PagedTabBar(titles: ["A"], style: .navigationTitle))
+
+        accessory.install(into: controller, minimizesOnScroll: true)
+        #expect(controller.tabBarMinimizeBehavior == .onScrollDown)
+        // The leak: the band leaves the slot without its remove.
+        controller.setBottomAccessory(nil, animated: false)
+
+        SelectorAccessory.reconcileMinimize(in: controller)
+        #expect(controller.tabBarMinimizeBehavior == .never, "the leaked arm still collapses a bare bar")
+
+        accessory.install(into: controller, minimizesOnScroll: true)
+        #expect(controller.tabBarMinimizeBehavior == .onScrollDown, "the old holder did not re-arm")
+        accessory.remove(from: controller)
+        #expect(controller.tabBarMinimizeBehavior == .never)
+    }
+
+    /// A band up: reconciling leaves its collapse alone.
+    @Test func reconcilingLeavesAnInstalledBandsCollapse() {
+        let controller = UITabBarController()
+        controller.tabBarMinimizeBehavior = .never
+        let accessory = SelectorAccessory(strip: PagedTabBar(titles: ["A"], style: .navigationTitle))
+        accessory.install(into: controller, minimizesOnScroll: true)
+        SelectorAccessory.reconcileMinimize(in: controller)
+        #expect(controller.tabBarMinimizeBehavior == .onScrollDown)
+        accessory.remove(from: controller)
+        #expect(controller.tabBarMinimizeBehavior == .never)
+    }
+
     /// ⚠️ THE MINIMIZE IS SHELL-WIDE, SO IT IS OPT-IN. It only means anything
     /// on a host that has registered a scroll view; arming it from one that has
     /// not gives every other tab a collapsing bar and this one nothing.

@@ -547,6 +547,21 @@ private enum MinimizeBehaviourStore {
 
     private static var records: [ObjectIdentifier: Record] = [:]
 
+    /// Bumped by every reconcile: an arm from an earlier generation no
+    /// longer counts, so its holder re-arms on its next install and never
+    /// releases into a count it is not part of.
+    private(set) static var generation = 0
+
+    /// ⚠️ A BARE SLOT COLLAPSES NOTHING (#758). With no band installed the
+    /// shell's own behaviour comes back, whatever arm was leaked — one taken
+    /// by a screen already gone, which no remove will ever give back.
+    static func reconcile(_ controller: UITabBarController) {
+        guard controller.bottomAccessory == nil, let found = record(for: controller) else { return }
+        controller.tabBarMinimizeBehavior = found.saved
+        records[ObjectIdentifier(controller)] = nil
+        generation += 1
+    }
+
     /// The record for `controller`, or nil when the entry belongs to a dead
     /// object that happened to share its address.
     private static func record(for controller: UITabBarController) -> Record? {
@@ -589,6 +604,15 @@ public final class SelectorAccessory {
     /// Whether THIS accessory is one of the store's owners, so a double
     /// install or a double remove cannot move the count twice.
     private var holdsMinimize = false
+    /// The store's generation the arm was taken in (`MinimizeBehaviourStore.reconcile`).
+    private var minimizeGeneration = 0
+
+    /// Gives the shell its own collapse behaviour back when no band is up —
+    /// what a screen without one calls as it appears (#758).
+    public static func reconcileMinimize(in controller: UITabBarController?) {
+        guard let controller else { return }
+        MinimizeBehaviourStore.reconcile(controller)
+    }
 
     private let options: Options
 
@@ -673,8 +697,9 @@ public final class SelectorAccessory {
         // animation is UIKit's own from here; with a hand-over there is no
         // appearance to animate anyway, because the band never leaves.
         controller.setBottomAccessory(UITabAccessory(contentView: hostView), animated: true)
-        if minimizesOnScroll, !holdsMinimize {
+        if minimizesOnScroll, !holdsMinimize || minimizeGeneration != MinimizeBehaviourStore.generation {
             holdsMinimize = true
+            minimizeGeneration = MinimizeBehaviourStore.generation
             MinimizeBehaviourStore.arm(controller)
         }
 
@@ -705,10 +730,10 @@ public final class SelectorAccessory {
         // release under the guard is how the count runs away: every hand-over
         // adds an owner nothing ever removes, and the shell's default never
         // comes back.
-        if holdsMinimize {
-            holdsMinimize = false
+        if holdsMinimize, minimizeGeneration == MinimizeBehaviourStore.generation {
             MinimizeBehaviourStore.release(controller)
         }
+        holdsMinimize = false
         guard controller.bottomAccessory?.contentView === hostView else {
             // Somebody else's band is up. That is the hand-over working: the
             // incoming screen claimed the slot before we were asked to leave,

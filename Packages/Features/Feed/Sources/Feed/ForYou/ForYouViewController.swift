@@ -1867,6 +1867,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // BELT (#758): no band here, so nothing for the bar's collapse to make
+        // room for — whatever arm a screen left behind, the shell's own
+        // behaviour comes back.
+        SelectorAccessory.reconcileMinimize(in: tabBarController)
         // ⚠️ MEASURED WHILE THE BAR IS UP, because the one moment the reveal
         // needs the number is the one moment it cannot read it: a push takes
         // the bar down, and `applyPendingReveal` runs on the way out.
