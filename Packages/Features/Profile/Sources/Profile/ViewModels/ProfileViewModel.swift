@@ -526,6 +526,14 @@ public final class ProfileViewModel {
     /// two extra tabs when the read lands would be a jump.
     public var isOwnProfile: Bool { source == .currentUser }
 
+    /// Whether a handle or a token is still all this screen knows (#800):
+    /// resolving it, or the lookup failed or named no one. No id yet, so
+    /// nothing that acts on the profile — the mute bell — can be offered.
+    public var isAwaitingLookup: Bool {
+        if case .lookup = source { return true }
+        return false
+    }
+
     /// Everything the followers / following screen needs to open, or `nil`
     /// until the profile has loaded (the counters read "—" until then, so
     /// there is nothing to tap).

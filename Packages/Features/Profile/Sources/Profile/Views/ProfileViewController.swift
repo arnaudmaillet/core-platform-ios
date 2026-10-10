@@ -1536,6 +1536,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// profile — what a routed profile that is not the viewer's own is —
     /// wears the bell from the first frame; the relationship only confirms it.
     private var showsMuteBell: Bool {
+        // A handle or link not resolved yet — or that named no one — has no
+        // id to mute (#800).
+        guard !viewModel.isAwaitingLookup else { return false }
         let isOtherProfile = viewModel.canModerate
             || (presumesOtherProfile && !viewModel.isRelationshipSettled)
         return viewModel.canMute && isOtherProfile && MemberGates.gate(from: self)?.isMember != false

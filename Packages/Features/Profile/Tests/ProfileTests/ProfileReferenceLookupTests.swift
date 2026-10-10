@@ -25,9 +25,11 @@ struct ProfileReferenceLookupTests {
         // Asked, not answered: still the skeleton, and no profile fetched.
         #expect(phases().isEmpty)
         #expect(await provider.requestedIDs.isEmpty)
+        #expect(viewModel.isAwaitingLookup)
 
         await lookup.release()
         await settle { phases().last.map(Self.isContent) == true }
+        #expect(!viewModel.isAwaitingLookup)
 
         #expect(await provider.requestedIDs == [ProfileID("prof-7")])
         #expect(viewModel.profile?.id == ProfileID("prof-7"))
@@ -50,6 +52,24 @@ struct ProfileReferenceLookupTests {
 
         #expect(phases() == [.notFound(message: "This account doesn\u{2019}t exist", detail: nil)])
         #expect(await provider.requestedIDs.isEmpty)
+    }
+
+    /// The not-found screen offers nothing that acts on a profile: there is
+    /// no id to mute, follow or message.
+    @Test func aHandleThatNamesNoOneOffersNoProfileAction() async {
+        let lookup = ScriptedLookup([.missing])
+        let viewModel = ProfileViewModel(
+            repository: StubProvider(), source: .lookup(.handle("gone")), lookup: { await lookup($0) }
+        )
+        let phases = recorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await settle { !phases().isEmpty }
+
+        #expect(viewModel.isAwaitingLookup)
+        #expect(!viewModel.canMessage)
+        #expect(!viewModel.canModerate)
+        #expect(viewModel.shareCard == nil)
     }
 
     @Test func aShareTokenThatNamesNoOneSaysTheLinkMayHaveBeenReset() async {
