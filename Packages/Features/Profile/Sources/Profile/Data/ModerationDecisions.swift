@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Why a restriction was imposed: the decision's Statement of Reasons
@@ -56,7 +57,17 @@ public enum AppealError: Error, Equatable {
     case notAppealable
     /// The decision isn't this account's, or no longer exists.
     case notFound
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension AppealError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// An appeal the viewer filed, as the server holds it (#576, backend #744):
@@ -131,7 +142,7 @@ extension AccountStatusRepository: ModerationDecisionReviewing {
         let response = await moderationClient.getStatementOfReasons(request: request, headers: [:])
         switch response.result {
         case .success(let body): return DecisionStatement(body.statement)
-        case .failure(let error): throw AccountStatusError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw AccountStatusError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -151,7 +162,7 @@ extension AccountStatusRepository: ModerationDecisionReviewing {
             if message.contains("MOD-5003") { throw AppealError.windowClosed }
             if message.contains("MOD-5004") { throw AppealError.notAppealable }
             if error.code == .notFound { throw AppealError.notFound }
-            throw AppealError.transport(message: error.message ?? "code \(error.code)")
+            throw AppealError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }
@@ -168,7 +179,7 @@ extension AccountStatusRepository {
             case .success(let body):
                 return (body.appeals.map(FiledAppeal.init), body.nextPageToken)
             case .failure(let error):
-                throw AccountStatusError.transport(message: error.message ?? "code \(error.code)")
+                throw AccountStatusError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
     }

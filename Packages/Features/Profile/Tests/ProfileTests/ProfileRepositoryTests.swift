@@ -30,9 +30,11 @@ private struct UnauthenticatedSessionStub: AuthSessionProviding {
 struct ProfileRepositoryTests {
     private func makeRepository(
         session: any AuthSessionProviding = AuthenticatedSessionStub(),
-        dataset: MockSocialDataset = MockSocialDataset()
+        dataset: MockSocialDataset = MockSocialDataset(),
+        faults: MockNetworkFaults? = nil
     ) -> ProfileRepository {
         let bff = MockBFF()
+        bff.faults = faults
         MockSocialServices(dataset: dataset).register(on: bff)
         MockCounterService(store: MockCounterStore(dataset: dataset)).register(on: bff)
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
@@ -53,6 +55,23 @@ struct ProfileRepositoryTests {
         #expect(profile.id == ProfileID(MockSocialDataset.viewerProfileID))
         #expect(profile.handle == "you")
         #expect(profile.displayName == "Demo Viewer")
+    }
+
+    /// A ProfileError keeps WHY the call failed (#794): offline reads
+    /// offline, through the viewer lookup too. The mock's own switchboard,
+    /// never a shared one.
+    @Test func aProfileErrorKeepsWhyTheCallFailed() async throws {
+        let faults = MockNetworkFaults()
+        faults.isForcedOffline = true
+        let repository = makeRepository(faults: faults)
+
+        let byID = await #expect(throws: ProfileError.self) {
+            _ = try await repository.profile(id: ProfileID(MockSocialDataset.viewerProfileID))
+        }
+        #expect(byID?.networkFailure == .offline)
+
+        let viewer = await #expect(throws: ProfileError.self) { _ = try await repository.currentUserProfile() }
+        #expect(viewer?.networkFailure == .offline)
     }
 
     @Test func listsAccountProfilesAndSwitchesActive() async throws {

@@ -145,19 +145,44 @@ public protocol NetworkFailureCarrying: Error {
 
 /// The words a failed screen shows, picked from WHY it failed (#794).
 ///
-/// ⚠️ Only "offline" gets its own sentence in this slice. It is the one case a
-/// person can fix themselves, and the one every screen was getting wrong by
-/// saying "Couldn't load" as if the app or the server were at fault. Timeouts
-/// and server faults keep each screen's own fallback, which already names
-/// what failed ("Couldn't search for people").
+/// ⚠️ Only "offline" and a timeout get their own sentence. Offline is the one
+/// case a person can fix themselves, and the one every screen was getting
+/// wrong by saying "Couldn't load" as if the app or the server were at fault;
+/// a timeout is worth another try rather than a verdict. Server faults and
+/// refusals keep each screen's own fallback, which already names what failed
+/// ("Couldn't search for people").
 public enum FailureCopy {
     /// What to say when the device has no connection. Shared so every screen
     /// says it the same way.
-    public static let offline = "You're offline. Check your connection and try again."
+    ///
+    /// The curly apostrophe (U+2019), as everywhere else the app writes one.
+    public static let offline = "You\u{2019}re offline. Check your connection and try again."
+    /// What to say when the call ran out of time: the network may be slow
+    /// rather than gone. For a screen with a Try Again under it.
+    public static let timeout = "That took too long. Try again."
 
-    /// The offline sentence when `error` came from a lost connection, else
-    /// `fallback` (the screen's own wording).
+    /// The short forms, for a headline or a toast (`Feedback`: short, no
+    /// trailing period, no "Try again" when the screen retries by itself).
+    public static let offlineTitle = "You\u{2019}re offline"
+    public static let timeoutTitle = "That took too long"
+
+    /// The offline or timeout sentence when that is why `error` happened,
+    /// else `fallback` (the screen's own wording).
     public static func message(for error: any Error, fallback: String) -> String {
-        NetworkFailure.of(error) == .offline ? offline : fallback
+        switch NetworkFailure.of(error) {
+        case .offline: offline
+        case .timeout: timeout
+        default: fallback
+        }
+    }
+
+    /// The short form of `message(for:fallback:)`: `offlineTitle`,
+    /// `timeoutTitle`, else `fallback`. For toasts and headlines.
+    public static func title(for error: any Error, fallback: String) -> String {
+        switch NetworkFailure.of(error) {
+        case .offline: offlineTitle
+        case .timeout: timeoutTitle
+        default: fallback
+        }
     }
 }

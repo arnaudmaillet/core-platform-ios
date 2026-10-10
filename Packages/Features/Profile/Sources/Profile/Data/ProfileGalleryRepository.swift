@@ -115,7 +115,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
             let posts = await withCounters(withAuthors(hydrate(postIDs: body.posts.map(\.postID))))
             return GalleryPage(posts: posts, nextPageToken: body.nextToken.isEmpty ? nil : body.nextToken)
         case .failure(let error):
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -138,7 +138,7 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
             )
             return GalleryPage(posts: posts, nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
         case .failure(let error):
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 

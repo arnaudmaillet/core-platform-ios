@@ -112,13 +112,20 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
 
         // ⚠️ OFFLINE FAILS FAST, before latency and before the handler: a real
         // URLSession call with no network answers at once, and writes nothing.
+        // ⚠️ The URLError in `exception` is what makes it read as offline
+        // (#794): Connect attaches one to every real transport failure, and a
+        // bare `unavailable` is a server's answer (`NetworkFailure`).
         if faults?.isOffline == true {
             let offline = HTTPResponse(
                 code: .unavailable,
                 headers: [:],
                 message: nil,
                 trailers: [:],
-                error: ConnectError(code: .unavailable, message: "The Internet connection appears to be offline."),
+                error: ConnectError(
+                    code: .unavailable,
+                    message: "The Internet connection appears to be offline.",
+                    exception: URLError(.notConnectedToInternet)
+                ),
                 tracingInfo: nil
             )
             DispatchQueue.global().async { onResponse(offline) }

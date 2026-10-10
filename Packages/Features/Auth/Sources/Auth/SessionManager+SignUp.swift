@@ -2,6 +2,7 @@ import AuthInterface
 import Connect
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 // MARK: - Codes and sign-up (guest mode B4, #449)
@@ -127,7 +128,7 @@ extension SessionManager {
         let response = await authClient.startFederatedSignIn(request: Auth_V1_StartFederatedSignInRequest(), headers: [:])
         switch response.result {
         case .success(let body): return body.nonce
-        case .failure(let error): throw AuthError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw AuthError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -255,7 +256,7 @@ extension SessionManager {
             pendingSignUpNotice = true
             install(Self.makeSession(accountID: pending.accountID, tokens: body.tokens, now: now()))
         case .failure(let error):
-            throw AuthError.transport(message: error.message ?? "code \(error.code)")
+            throw AuthError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -285,7 +286,7 @@ extension SessionManager {
         case .invalidArgument, .unauthenticated, .permissionDenied:
             return .identityRejected
         default:
-            return .transport(message: error.message ?? "code \(error.code)")
+            return .transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -294,7 +295,7 @@ extension SessionManager {
         case .invalidArgument, .unauthenticated, .permissionDenied, .notFound, .deadlineExceeded:
             .invalidCode
         default:
-            .transport(message: error.message ?? "code \(error.code)")
+            .transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 

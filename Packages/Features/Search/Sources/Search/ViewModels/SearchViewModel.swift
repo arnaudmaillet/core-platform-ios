@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import CoreStorage
 import DesignSystem
 import Foundation
@@ -237,6 +238,9 @@ public final class SearchViewModel {
     public private(set) var isSearchingPosts = false
     /// What the Posts tab says when its search failed.
     nonisolated static let postsFailureMessage = "Couldn't search posts."
+    /// What the Posts tab says about ITS failure: `postsFailureMessage`, or
+    /// "You're offline" when that is why (#794). Read while `postsFailed`.
+    public private(set) var postsFailureText = SearchViewModel.postsFailureMessage
 
     /// A next page of POSTS starting (true) and landing (false) — the Posts
     /// tab's footer spinner (#612).
@@ -923,16 +927,24 @@ public final class SearchViewModel {
         postsTask = Task { [weak self] in
             guard let self else { return }
             let page: PostSearchPage?
+            let failure: (any Error)?
             do {
                 page = try await self.repository.searchPostsPage(
                     matching: trimmed, sort: self.sortOrder, limit: self.pageSize, pageToken: nil
                 )
+                failure = nil
             } catch {
                 page = nil
+                failure = error
             }
             guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
             self.isSearchingPosts = false
             guard let page else {
+                // ⚠️ Worded only past the guard above: a superseded search's
+                // failure must not rewrite the words of the current one (#794).
+                if let failure {
+                    self.postsFailureText = FailureCopy.message(for: failure, fallback: Self.postsFailureMessage)
+                }
                 // A refresh over posts on screen keeps them: the failure only
                 // reads as one where there is nothing else to show.
                 self.postsFailed = self.postResults.isEmpty
@@ -978,7 +990,8 @@ public final class SearchViewModel {
             }
         } catch {
             guard !Task.isCancelled else { return }
-            phase = .failed(message: "Couldn't search. Please try again.")
+            // "You're offline" when that is why (#794).
+            phase = .failed(message: FailureCopy.message(for: error, fallback: "Couldn't search. Please try again."))
         }
     }
 

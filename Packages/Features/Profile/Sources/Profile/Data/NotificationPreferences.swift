@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// A kind of push the profile can switch (#392, backend #725).
@@ -131,7 +132,7 @@ public actor NotificationPreferencesRepository: NotificationPreferencesManaging 
         let response = await notificationClient.getNotificationPreferences(request: request, headers: [:])
         switch response.result {
         case .success(let body): return NotificationPreferences(body)
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -159,7 +160,7 @@ public actor NotificationPreferencesRepository: NotificationPreferencesManaging 
         let response = await notificationClient.updateNotificationPreferences(request: request, headers: [:])
         switch response.result {
         case .success(let body): return NotificationPreferences(body)
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

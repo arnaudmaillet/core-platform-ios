@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Who may comment on the active profile's posts (#397, backend #714). The
@@ -105,7 +106,7 @@ extension ProfileRepository: CommentAudienceManaging {
         request.settings = settings
         let response = await profileClient.setInteractionSettings(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

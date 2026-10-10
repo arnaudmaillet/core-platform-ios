@@ -27,6 +27,13 @@ private actor PagedSearch: SearchProviding {
     private var held: Set<String> = []
     /// How many first-page asks of each kind still fail (#798).
     private var failuresLeft: [String: Int] = [:]
+    /// Why those asks fail, by kind (#794); none throws a plain error.
+    private var failures: [String: NetworkFailure] = [:]
+    /// Post first pages that fail for this query, every time (#794).
+    private var postFailuresByQuery: [String: NetworkFailure] = [:]
+    /// Queries whose post first page waits for `releasePosts`.
+    private var heldPostQueries: Set<String> = []
+    private var postQueryWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
     private var heldWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
 
     init(people: [String: [String?: ProfileSearchPage]], posts: [String: [String?: PostSearchPage]] = [:]) {
@@ -37,10 +44,23 @@ private actor PagedSearch: SearchProviding {
     func hold(_ token: String) { held.insert(token) }
     /// The next first-page ask of `kind` ("people" / "posts") fails.
     func failOnce(_ kind: String) { failuresLeft[kind] = 1 }
+    /// The next first-page ask of `kind` fails for `failure` (#794).
+    func failOnce(_ kind: String, for failure: NetworkFailure) {
+        failuresLeft[kind] = 1
+        failures[kind] = failure
+    }
+
+    func failPosts(for query: String, with failure: NetworkFailure) { postFailuresByQuery[query] = failure }
+    func holdPosts(for query: String) { heldPostQueries.insert(query) }
+    func releasePosts(for query: String) {
+        heldPostQueries.remove(query)
+        for waiter in postQueryWaiters.removeValue(forKey: query) ?? [] { waiter.resume() }
+    }
 
     private func failIfAsked(_ kind: String, token: String?) throws {
         guard token == nil, let left = failuresLeft[kind], left > 0 else { return }
         failuresLeft[kind] = left - 1
+        if let failure = failures[kind] { throw SearchError.transport(message: "x", failure: failure) }
         throw SearchFailure()
     }
     func release(_ token: String) {
@@ -72,6 +92,12 @@ private actor PagedSearch: SearchProviding {
     ) async throws -> PostSearchPage {
         asks.append(Ask(kind: "posts", query: query, token: pageToken, limit: limit))
         await waitIfHeld(pageToken)
+        if pageToken == nil, heldPostQueries.contains(query) {
+            await withCheckedContinuation { postQueryWaiters[query, default: []].append($0) }
+        }
+        if pageToken == nil, let failure = postFailuresByQuery[query] {
+            throw SearchError.transport(message: "x", failure: failure)
+        }
         try failIfAsked("posts", token: pageToken)
         return posts[query]?[pageToken] ?? PostSearchPage(hits: [], nextPageToken: nil)
     }
@@ -238,6 +264,47 @@ struct SearchResultsPagingTests {
 
         #expect(handles(viewModel) == ["user10", "user11"])
         #expect(viewModel.hasMorePeople) // bob's own cursor, b2
+    }
+
+    /// A search that failed offline says so on both tabs; a server fault
+    /// keeps each tab's own words (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't search. Please try again.", "Couldn't search posts."),
+    ])
+    func aFailedSearchIsWordedByWhyItFailed(failure: NetworkFailure, people: String, posts: String) async throws {
+        let provider = PagedSearch(people: ["ann": [:]], posts: ["ann": [:]])
+        await provider.failOnce("people", for: failure)
+        await provider.failOnce("posts", for: failure)
+        let viewModel = makeViewModel(provider)
+        viewModel.submitQuery("ann")
+        try #require(await settle {
+            if case .failed = viewModel.currentPhase { viewModel.postsFailed } else { false }
+        })
+
+        #expect(viewModel.currentPhase == .failed(message: people))
+        #expect(viewModel.postsFailureText == posts)
+    }
+
+    /// A superseded post search that fails late does not rewrite the words
+    /// of the current one (#794).
+    @Test func anOlderPostFailureDoesNotOverwriteTheNewerWords() async throws {
+        let provider = PagedSearch(people: ["ann": [:], "bob": [:]])
+        await provider.failPosts(for: "ann", with: .offline)
+        await provider.failPosts(for: "bob", with: .server(code: "internal"))
+        await provider.holdPosts(for: "ann")
+        let viewModel = makeViewModel(provider)
+
+        viewModel.submitQuery("ann")
+        try #require(await settle { await provider.asks("posts").count == 1 })
+        viewModel.submitQuery("bob")
+        try #require(await settle { viewModel.postsFailed })
+        #expect(viewModel.postsFailureText == "Couldn't search posts.")
+
+        await provider.releasePosts(for: "ann")
+        await idle()
+
+        #expect(viewModel.postsFailureText == "Couldn't search posts.")
     }
 
     /// #798: a post search that FAILED is not one that matched nothing — the

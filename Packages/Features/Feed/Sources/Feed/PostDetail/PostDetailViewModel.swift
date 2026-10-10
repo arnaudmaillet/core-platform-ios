@@ -500,7 +500,8 @@ public final class PostDetailViewModel {
                 // Superseded; leave the phase alone.
             } catch {
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load this post")
+                    // "You're offline" when that is why (#794).
+                    self.phase = .failed(message: FailureCopy.message(for: error, fallback: "Couldn't load this post"))
                 }
             }
             self.load = nil
@@ -554,7 +555,16 @@ public final class PostDetailViewModel {
         // page prefetched a minute ago can have missed a comment since.
         Task { [weak self] in
             guard let self else { return }
-            let page = try? await commentsProvider.loadCommentsPage(for: postID, after: nil)
+            // The error is kept only to word the failed row (#794).
+            let page: CommentPage?
+            let failure: (any Error)?
+            do {
+                page = try await commentsProvider.loadCommentsPage(for: postID, after: nil)
+                failure = nil
+            } catch {
+                page = nil
+                failure = error
+            }
             // A load another one has superseded neither clears the flag the
             // newer one holds nor reports a failure; its answer, if it has
             // one, still lands unless a newer answer already has (#798).
@@ -570,7 +580,9 @@ public final class PostDetailViewModel {
             guard let page else {
                 if isCurrent, !didShowPrefetch, self.comments.isEmpty, !self.showsAnswer {
                     self.firstPageFailed = true
-                    self.onCommentsChange?(.failed(message: Self.commentsFailureMessage))
+                    self.onCommentsChange?(.failed(message: failure.map {
+                        FailureCopy.message(for: $0, fallback: Self.commentsFailureMessage)
+                    } ?? Self.commentsFailureMessage))
                 }
                 return
             }

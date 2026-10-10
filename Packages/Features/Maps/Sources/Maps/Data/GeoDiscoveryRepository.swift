@@ -1,9 +1,20 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 public enum GeoDiscoveryError: Error, Equatable, Sendable {
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension GeoDiscoveryError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// The result of one Radar query: the pins in the viewport, plus the number of
@@ -80,7 +91,7 @@ public actor GeoDiscoveryRepository: GeoDiscoveryProviding {
                 tileCount: Int(body.tileCount)
             )
         case .failure(let error):
-            throw GeoDiscoveryError.transport(message: error.message ?? "code \(error.code)")
+            throw GeoDiscoveryError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 

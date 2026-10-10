@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// What a Follow tap did: followed, or asked a private profile (#396,
@@ -115,7 +116,7 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
             case .success(let body):
                 return (body.requests, body.nextPageToken)
             case .failure(let error):
-                throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
     }

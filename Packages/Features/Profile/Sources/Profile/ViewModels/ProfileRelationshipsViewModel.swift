@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 
 /// Drives the follower / following screen: one state machine per direction,
@@ -473,7 +474,9 @@ public final class ProfileRelationshipsViewModel {
             state.hasLoaded = true
             state.relations = []
         } else if reset {
-            state.failure = "Couldn't load this list. Pull to retry."
+            // The failed list has its own Try Again (#797), so no "Pull to
+            // retry"; and "You're offline" when that is why (#794).
+            state.failure = FailureCopy.message(for: error, fallback: "Couldn't load this list.")
         }
         // A failed *append* keeps the rows already on screen and simply stops
         // paging; the cursor is left in place so scrolling can retry.

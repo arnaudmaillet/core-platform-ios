@@ -229,7 +229,10 @@ final class InboxCatalog {
                 // current load's problem, and must not put the inbox into a
                 // failed state while a live fetch is still running.
                 guard self.loadGeneration == generation, self.snapshot.phase != .loaded else { return }
-                self.snapshot.phase = .failed(message: "Couldn't load your messages.")
+                // "You're offline" when that is why (#794).
+                self.snapshot.phase = .failed(message: FailureCopy.message(
+                    for: error, fallback: "Couldn't load your messages."
+                ))
                 self.emit()
             }
         }

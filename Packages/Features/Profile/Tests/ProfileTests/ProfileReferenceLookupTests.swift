@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 import MediaCore
 import ProfileInterface
@@ -128,6 +129,25 @@ struct ProfileReferenceLookupTests {
         #expect(phases() == [.failed(message: "Couldn't load this profile")])
     }
 
+    /// A profile that failed offline says so; a server fault keeps "Couldn't
+    /// load this profile" (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't load this profile"),
+    ])
+    func aFailedProfileIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async {
+        let viewModel = ProfileViewModel(
+            repository: StubProvider(failure: .transport(message: "x", failure: failure)),
+            source: .profile(ProfileID("prof-7"))
+        )
+        let phases = recorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await settle { !phases().isEmpty }
+
+        #expect(phases() == [.failed(message: expected)])
+    }
+
     // MARK: - The bell (#778, #756)
 
     /// Bar items are decided at frame 0 so none pops in mid-push: a handle
@@ -236,11 +256,17 @@ private struct SampleError: Error {}
 
 private actor StubProvider: ProfileProviding, ProfileMuting {
     private let fails: Bool
+    /// What a failing load throws instead of `SampleError` (#794).
+    private let failure: ProfileError?
     private let relationshipValue: ProfileRelationship
     private(set) var requestedIDs: [ProfileID] = []
 
-    init(fails: Bool = false, relationship: ProfileRelationship = .other(isFollowing: false, isBlocked: false)) {
+    init(
+        fails: Bool = false, failure: ProfileError? = nil,
+        relationship: ProfileRelationship = .other(isFollowing: false, isBlocked: false)
+    ) {
         self.fails = fails
+        self.failure = failure
         self.relationshipValue = relationship
     }
 
@@ -248,6 +274,7 @@ private actor StubProvider: ProfileProviding, ProfileMuting {
 
     func profile(id: ProfileID) async throws -> UserProfile {
         requestedIDs.append(id)
+        if let failure { throw failure }
         if fails { throw SampleError() }
         return UserProfile(
             id: id, handle: "ada", displayName: "Ada Lovelace", bio: "",

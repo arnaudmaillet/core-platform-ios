@@ -119,10 +119,26 @@ struct NetworkFailureTests {
     @Test func anOfflineFailureSaysYoureOffline() {
         let error = StubFeatureError.transport(message: "x", failure: .offline)
         #expect(FailureCopy.message(for: error, fallback: "Couldn't load.")
-            == "You're offline. Check your connection and try again.")
+            == "You\u{2019}re offline. Check your connection and try again.")
     }
 
-    @Test(arguments: [NetworkFailure.timeout, .server(code: "internal"), .refused(code: "not_found")])
+    @Test func aTimeoutSaysItIsTakingTooLong() {
+        let error = StubFeatureError.transport(message: "x", failure: .timeout)
+        #expect(FailureCopy.message(for: error, fallback: "Couldn't load.") == "That took too long. Try again.")
+    }
+
+    /// The short forms: no trailing period, no "Try again" (toasts and
+    /// headlines).
+    @Test func theTitlesAreShortAndUnpunctuated() {
+        let offline = StubFeatureError.transport(message: "x", failure: .offline)
+        let timeout = StubFeatureError.transport(message: "x", failure: .timeout)
+        let server = StubFeatureError.transport(message: "x", failure: .server(code: "internal"))
+        #expect(FailureCopy.title(for: offline, fallback: "Couldn't load") == "You\u{2019}re offline")
+        #expect(FailureCopy.title(for: timeout, fallback: "Couldn't load") == "That took too long")
+        #expect(FailureCopy.title(for: server, fallback: "Couldn't load") == "Couldn't load")
+    }
+
+    @Test(arguments: [NetworkFailure.server(code: "internal"), .refused(code: "not_found"), .cancelled])
     func anyOtherFailureKeepsTheScreensOwnWords(failure: NetworkFailure) {
         let error = StubFeatureError.transport(message: "x", failure: failure)
         #expect(FailureCopy.message(for: error, fallback: "Couldn't load.") == "Couldn't load.")

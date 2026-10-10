@@ -116,16 +116,21 @@ private actor RankedSuggestions: SuggestionsProviding {
     let count: Int
     private(set) var asked: [Int] = []
     var failsNext = false
+    /// Why the next ask fails (#794); nil is a server fault.
+    private var nextFailure: NetworkFailure?
 
     init(count: Int) { self.count = count }
 
-    func failNext() { failsNext = true }
+    func failNext(_ failure: NetworkFailure? = nil) {
+        failsNext = true
+        nextFailure = failure
+    }
 
     func suggestions(limit: Int) async throws -> [SuggestedAccount] {
         asked.append(limit)
         if failsNext {
             failsNext = false
-            throw SuggestionsError.transport(message: "down")
+            throw SuggestionsError.transport(message: "down", failure: nextFailure)
         }
         return (0..<min(limit, count)).map { index in
             SuggestedAccount(
@@ -204,6 +209,23 @@ struct SuggestionsPagingTests {
         try #require(await settle { self.rows(viewModel).count == 50 })
 
         #expect(await source.asked == [20, 50, 50])
+    }
+
+    /// A first page that failed offline says so; a server fault keeps
+    /// "Couldn't load suggestions." (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't load suggestions."),
+    ])
+    func aFailedFirstPageIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async throws {
+        let source = RankedSuggestions(count: 60)
+        await source.failNext(failure)
+        let viewModel = SuggestionsViewModel(repository: source, limit: 20, fullLimit: 50)
+
+        viewModel.loadIfNeeded()
+        try #require(await settle { if case .failed = viewModel.phase { true } else { false } })
+
+        #expect(viewModel.phase == .failed(message: expected))
     }
 
     /// A failed ask at the end keeps the place: the next approach asks

@@ -36,6 +36,8 @@ private actor PagedComments: CommentsProviding {
     private var failuresLeft: [String: Int] = [:]
     /// How many first-page asks (token nil) still throw (#798).
     private var firstPageFailuresLeft = 0
+    /// Why those first-page asks fail (#794); nil is a server fault.
+    private var firstPageFailure: NetworkFailure?
     /// First-page asks are numbered from 1 as they arrive; these numbers throw.
     private var failingFirstPageAsks: Set<Int> = []
     private var firstPageAsks = 0
@@ -59,7 +61,10 @@ private actor PagedComments: CommentsProviding {
 
     func setPage(_ page: CommentPage, for token: String?) { pages[token] = page }
     func failOnce(_ token: String) { failuresLeft[token] = 1 }
-    func failFirstPageOnce() { firstPageFailuresLeft = 1 }
+    func failFirstPageOnce(_ failure: NetworkFailure? = nil) {
+        firstPageFailuresLeft = 1
+        firstPageFailure = failure
+    }
     func failFirstPageAsk(_ number: Int) { failingFirstPageAsks.insert(number) }
     func gateFirstPage() { firstPageGated = true }
     var firstPageWaitingCount: Int { firstPageWaiting.count }
@@ -85,7 +90,7 @@ private actor PagedComments: CommentsProviding {
         }
         if pageToken == nil, firstPageFailuresLeft > 0 {
             firstPageFailuresLeft -= 1
-            throw CommentsError.transport(message: "offline")
+            throw CommentsError.transport(message: "offline", failure: firstPageFailure)
         }
         if let token = pageToken, let left = failuresLeft[token], left > 0 {
             failuresLeft[token] = left - 1
@@ -290,6 +295,42 @@ struct CommentsPagingTests {
         #expect(models.map(\.id) == ["a"])
         #expect(states.dropLast() == [.loading, .failed(message: "Couldn't load comments"), .loading])
         #expect(await provider.requests == [nil, nil])
+    }
+
+    /// A first page that failed offline says so (#794); a server fault keeps
+    /// "Couldn't load comments" (above).
+    @Test func anOfflineFirstPageSaysYoureOffline() async {
+        let provider = PagedComments([nil: CommentPage(entries: [entry("a")], nextPageToken: nil)])
+        await provider.failFirstPageOnce(.offline)
+        let viewModel = PostDetailViewModel(
+            postID: PostID("post-1"), repository: PagingFeedProvider(), commentsProvider: provider
+        )
+        var states: [PostDetailViewModel.CommentsState] = []
+        viewModel.onCommentsChange = { states.append($0) }
+        viewModel.viewDidLoad()
+        await settle { if case .failed = states.last { true } else { false } }
+
+        #expect(states == [.loading, .failed(message: FailureCopy.offline)])
+    }
+
+    /// The failed row's headline: "You're offline" when it is, the view
+    /// model's words otherwise (#794).
+    @Test func theFailedRowSaysYoureOfflineOnlyWhenItIs() {
+        typealias Screen = PostDetailViewController
+        #expect(Screen.commentsFailedPageCopy(FailureCopy.offline).title == "You\u{2019}re offline")
+        #expect(Screen.commentsFailedPageCopy(FailureCopy.timeout).title == "That took too long")
+        #expect(
+            Screen.commentsFailedPageCopy(PostDetailViewModel.commentsFailureMessage).title == "Couldn't load comments"
+        )
+    }
+
+    /// The full mode's note never ends "..": a period is added only to a
+    /// message without one (#794).
+    @Test func theFailedNoteNeverDoublesItsPeriod() {
+        typealias Screen = PostDetailViewController
+        #expect(Screen.commentsFailedNoteText(FailureCopy.timeout) == "That took too long. Try again.")
+        #expect(Screen.commentsFailedNoteText(FailureCopy.offline) == FailureCopy.offline)
+        #expect(Screen.commentsFailedNoteText("Couldn't load comments") == "Couldn't load comments.")
     }
 
     /// #798: comments already on screen are kept when a refresh's first page

@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// What kind of profile this is (#415, backend #734), public on every
@@ -83,7 +84,17 @@ public struct BusinessContact: Equatable, Sendable {
 public enum AccountTypeError: Error, Equatable {
     /// The server refused the contact card (category, email or phone).
     case invalidContact(message: String)
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension AccountTypeError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Edit Profile → Account Type, for the active profile.
@@ -110,7 +121,7 @@ extension ProfileRepository: AccountTypeManaging {
             if error.code == .invalidArgument {
                 throw AccountTypeError.invalidContact(message: error.message ?? "")
             }
-            throw AccountTypeError.transport(message: error.message ?? "code \(error.code)")
+            throw AccountTypeError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

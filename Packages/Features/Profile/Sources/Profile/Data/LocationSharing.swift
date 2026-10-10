@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// How the active profile's location reaches others (#398; backend #717,
@@ -50,7 +51,7 @@ extension ProfileRepository: LocationSharingManaging {
         request.settings = settings.proto
         let response = await profileClient.setLocationSettings(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

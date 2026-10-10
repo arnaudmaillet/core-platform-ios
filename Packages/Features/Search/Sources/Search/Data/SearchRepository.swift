@@ -1,9 +1,20 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 public enum SearchError: Error, Equatable, Sendable {
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension SearchError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// How the engine should order what it returns.
@@ -239,7 +250,7 @@ public actor SearchRepository: SearchProviding {
                 nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken
             )
         case .failure(let error):
-            throw SearchError.transport(message: error.message ?? "code \(error.code)")
+            throw SearchError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -291,7 +302,7 @@ public actor SearchRepository: SearchProviding {
                 .map { PostSearchHit(id: PostID($0.id)) }
             return PostSearchPage(hits: hits, nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
         case .failure(let error):
-            throw SearchError.transport(message: error.message ?? "code \(error.code)")
+            throw SearchError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -320,7 +331,7 @@ public actor SearchRepository: SearchProviding {
         case .success(let body):
             return body.suggestions.compactMap(Self.makeSuggestion)
         case .failure(let error):
-            throw SearchError.transport(message: error.message ?? "code \(error.code)")
+            throw SearchError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -340,7 +351,7 @@ public actor SearchRepository: SearchProviding {
                 .first { $0.entityType == .hashtag && $0.hashtag.tag.lowercased() == bare.lowercased() }
                 .map { Int($0.hashtag.postCount) }
         case .failure(let error):
-            throw SearchError.transport(message: error.message ?? "code \(error.code)")
+            throw SearchError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 

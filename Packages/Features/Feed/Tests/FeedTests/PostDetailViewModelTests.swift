@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 import Testing
 @testable import Feed
@@ -119,6 +120,28 @@ struct PostDetailViewModelTests {
             Issue.record("expected failed, got \(String(describing: lastPhase))")
             return
         }
+    }
+
+    /// A post that failed offline says so; a server fault keeps "Couldn't
+    /// load this post" (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't load this post"),
+    ])
+    func aFailedPostIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async {
+        let provider = DetailFeedProvider(.failure(.transport(message: "nope", failure: failure)))
+        let viewModel = PostDetailViewModel(postID: PostID("x"), repository: provider)
+        var lastPhase: PostDetailViewModel.Phase?
+        viewModel.onPhaseChange = { lastPhase = $0 }
+
+        viewModel.viewDidLoad()
+        await settle()
+
+        guard case .failed(let message) = lastPhase else {
+            Issue.record("expected failed, got \(String(describing: lastPhase))")
+            return
+        }
+        #expect(message == expected)
     }
 
     /// A like is a point (#676): shown at once, committed, never undone.

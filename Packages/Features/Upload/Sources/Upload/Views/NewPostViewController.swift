@@ -1,6 +1,7 @@
 // `AVURLAsset` — the trim is resolved against the FILE's length, not the item's
 // declared one. See the note in `post()`.
 import AVFoundation
+import CoreNetworking
 import MediaPlayback
 import CoreModels
 import StickerKit
@@ -1507,13 +1508,23 @@ final class NewPostViewController: UIViewController {
         return alert
     }
 
-    private static func message(for error: ComposeError) -> String {
-        switch error {
+    static func message(for error: ComposeError) -> String {
+        // A publish whose answer never came may have landed (#795): look
+        // first, never "try again". Decided before the offline line below,
+        // which a connection lost mid-request also reads as (#794).
+        if case .unconfirmed = error { return ComposeError.unconfirmedMessage }
+        // "You’re offline" when the request never left: the one cause the
+        // author can fix, and the draft is still here (#794).
+        // ⚠️ Offline only, not `FailureCopy.message`: its timeout line says
+        // "Try again".
+        if error.networkFailure == .offline { return FailureCopy.offline }
+        return switch error {
         case .emptyPost: "Add a photo or write something first."
         case .notAuthenticated, .noViewerProfile: "Sign in again to post."
-        case .media(let why): why
+        case .media(let why, _): why
         case .mentionRefused: error.errorDescription ?? "Someone you mentioned doesn't allow mentions."
-        case .transport(let why): why
+        case .transport(let why, _): why
+        case .unconfirmed: ComposeError.unconfirmedMessage
         }
     }
 }

@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// One interest the recommender learnt for the active profile (#413,
@@ -63,7 +64,7 @@ public struct InterestTagsRepository: InterestTagsManaging {
     private static func tags(_ response: ResponseMessage<Timeline_V1_InterestsResponse>) throws -> [InterestTag] {
         switch response.result {
         case .success(let body): return body.interests.map(InterestTag.init)
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

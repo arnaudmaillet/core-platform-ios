@@ -58,6 +58,8 @@ private final class StubForYouProvider: ForYouProviding, @unchecked Sendable {
     private let lock = NSLock()
     var pages: [String?: ForYouPage] = [:]
     var failFirstPage = false
+    /// Why a failed first page failed (#794); nil is a server fault.
+    var firstPageFailure: NetworkFailure?
     private(set) var firstPageLoads = 0
     private(set) var pagedLoads = 0
 
@@ -66,7 +68,7 @@ private final class StubForYouProvider: ForYouProviding, @unchecked Sendable {
     func firstPage() async throws -> ForYouPage {
         try lock.withLock {
             firstPageLoads += 1
-            if failFirstPage { throw FeedError.transport(message: "nope") }
+            if failFirstPage { throw FeedError.transport(message: "nope", failure: firstPageFailure) }
             return pages[nil] ?? ForYouPage(posts: [], nextPageToken: nil)
         }
     }
@@ -481,7 +483,34 @@ struct ForYouViewModelTests {
 
         #expect(provider.firstPageLoads == 2)
         #expect(refreshFailures == 0)
-        #expect(snapshots().last?.discover == .failed(message: "Couldn't load. Pull to retry."))
+        #expect(snapshots().last?.discover == .failed(message: ForYouViewModel.failureMessage))
+    }
+
+    /// A first page that failed offline says so, and promises no pull: the
+    /// failed page's way out is its Try Again (#794).
+    @Test func anOfflineFirstPageSaysYoureOffline() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: [], nextPageToken: nil))
+        provider.failFirstPage = true
+        provider.firstPageFailure = .offline
+        let (viewModel, snapshots) = makeViewModel(provider)
+        viewModel.viewDidLoad()
+        await settle()
+
+        #expect(snapshots().last?.discover == .failed(message: FailureCopy.offline))
+    }
+
+    /// A server fault keeps the page's own words, and none of them is "Pull to
+    /// retry" (#794).
+    @Test func aServerFailureKeepsTheFirstPagesOwnCopy() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: [], nextPageToken: nil))
+        provider.failFirstPage = true
+        provider.firstPageFailure = .server(code: "unavailable")
+        let (viewModel, snapshots) = makeViewModel(provider)
+        viewModel.viewDidLoad()
+        await settle()
+
+        #expect(snapshots().last?.discover == .failed(message: "Couldn't load these posts."))
+        #expect(!ForYouViewModel.failureMessage.contains("Pull"))
     }
 
     @Test func aFailedLoadReportsOnEveryPage() async {
@@ -492,7 +521,7 @@ struct ForYouViewModelTests {
         await settle()
 
         let last = try! #require(snapshots().last)
-        #expect(last.discover == .failed(message: "Couldn't load. Pull to retry."))
+        #expect(last.discover == .failed(message: ForYouViewModel.failureMessage))
         #expect(last.media == last.discover)
         #expect(last.following == last.discover)
         #expect(last.friends == last.discover)
@@ -510,10 +539,10 @@ struct ForYouViewModelTests {
         let (viewModel, snapshots) = makeViewModel(provider)
         viewModel.connectivity = monitor
         viewModel.viewDidLoad()
-        for _ in 0..<200 where snapshots().last?.discover != .failed(message: "Couldn't load. Pull to retry.") {
+        for _ in 0..<200 where snapshots().last?.discover != .failed(message: ForYouViewModel.failureMessage) {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        #expect(snapshots().last?.discover == .failed(message: "Couldn't load. Pull to retry."))
+        #expect(snapshots().last?.discover == .failed(message: ForYouViewModel.failureMessage))
 
         provider.failFirstPage = false
         monitor.report(online: false)

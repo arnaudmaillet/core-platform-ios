@@ -119,11 +119,38 @@ public enum ComposeError: Error, Equatable, Sendable {
     case notAuthenticated
     case noViewerProfile
     case emptyPost
-    case media(String)
+    /// The media could not be prepared or uploaded. `failure` keeps WHY an
+    /// upload failed (#794); nil when it never reached the network.
+    case media(String, failure: NetworkFailure? = nil)
     /// PST-1009: someone the post mentions doesn't allow mentions from the
     /// author ("Who Can Mention", #397). Nothing was created.
     case mentionRefused
-    case transport(String)
+    /// A post.v1 / profile.v1 call failed. `failure` keeps WHY (#794):
+    /// offline, a timeout, a refusal, a server fault. Defaulted, so every
+    /// `.transport("…")` still builds and every `case .transport:` matches.
+    case transport(String, failure: NetworkFailure? = nil)
+    /// CreatePost or PublishPost went out and its answer never came back: a
+    /// timeout, or a connection lost mid-request (#794).
+    ///
+    /// ⚠️ THE POST MAY EXIST. Neither call carries an idempotency key (#795),
+    /// so the author must not be told to try again; only to look first.
+    /// Apart from `transport`, whose failures never reached the server.
+    case unconfirmed(String, failure: NetworkFailure? = nil)
+}
+
+extension ComposeError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        switch self {
+        case .media(_, let failure), .transport(_, let failure), .unconfirmed(_, let failure): failure
+        case .notAuthenticated, .noViewerProfile, .emptyPost, .mentionRefused: nil
+        }
+    }
+}
+
+extension ComposeError {
+    /// What an `unconfirmed` publish says: look before posting again.
+    public static let unconfirmedMessage =
+        "Couldn\u{2019}t confirm your post. Check your profile before posting again."
 }
 
 extension ComposeError: LocalizedError {
@@ -133,6 +160,7 @@ extension ComposeError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .mentionRefused: "Someone you mentioned doesn't allow mentions from you. Remove the mention and try again."
+        case .unconfirmed: Self.unconfirmedMessage
         default: nil
         }
     }
@@ -441,7 +469,7 @@ public actor PostComposer: PostComposing {
                 idempotencyKey: idempotencyKey
             ).url
         } catch let error as MediaAssetUploader.UploadError {
-            throw ComposeError.media(error.message)
+            throw ComposeError.media(error.message, failure: error.networkFailure)
         }
     }
 
@@ -459,7 +487,10 @@ public actor PostComposer: PostComposing {
 
         let response = await postClient.createPost(request: request, headers: [:])
         if (response.error?.message ?? "").contains("PST-1009") { throw ComposeError.mentionRefused }
-        let body = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
+        let body = try unwrapWrite(
+            response.message, errorMessage: response.error?.message, exception: response.error?.exception,
+            failure: response.error.flatMap { NetworkFailure.of($0) }
+        )
         return PostID(body.postID)
     }
 
@@ -468,7 +499,10 @@ public actor PostComposer: PostComposing {
         request.postID = postID.rawValue
         request.profileID = profileID.rawValue
         let response = await postClient.publishPost(request: request, headers: [:])
-        _ = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
+        _ = try unwrapWrite(
+            response.message, errorMessage: response.error?.message, exception: response.error?.exception,
+            failure: response.error.flatMap { NetworkFailure.of($0) }
+        )
     }
 
     /// The profile a post is published as: `author` when the account holds it,
@@ -509,7 +543,10 @@ public actor PostComposer: PostComposing {
         var request = Profile_V1_ListProfilesByAccountRequest()
         request.accountID = accountID.rawValue
         let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
-        let body = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
+        let body = try unwrap(
+            response.message, errorMessage: response.error?.message,
+            failure: response.error.flatMap { NetworkFailure.of($0) }
+        )
         let profiles = body.profiles.map { profile in
             AuthorSummary(
                 id: ProfileID(profile.profileID),
@@ -533,9 +570,25 @@ public actor PostComposer: PostComposing {
         return input
     }
 
-    private func unwrap<T>(_ message: T?, errorMessage: String?, as wrap: (String) -> ComposeError) throws -> T {
+    /// `unwrap` for CreatePost / PublishPost: a request that went out and
+    /// never got its answer — timed out, or its connection dropped mid-way
+    /// (`networkConnectionLost`, which `NetworkFailure` counts as offline) —
+    /// is `unconfirmed`, not a failure to retry (#794, #795). Offline before
+    /// the request left (`notConnectedToInternet`...) stays `transport`.
+    private func unwrapWrite<T>(
+        _ message: T?, errorMessage: String?, exception: (any Error)?, failure: NetworkFailure?
+    ) throws -> T {
+        if message == nil, failure == .timeout || (exception as? URLError)?.code == .networkConnectionLost {
+            throw ComposeError.unconfirmed(errorMessage ?? "no answer", failure: failure)
+        }
+        return try unwrap(message, errorMessage: errorMessage, failure: failure)
+    }
+
+    /// The answer's body, or a `transport` failure that keeps why the call
+    /// failed (#794).
+    private func unwrap<T>(_ message: T?, errorMessage: String?, failure: NetworkFailure?) throws -> T {
         guard let message else {
-            throw wrap(errorMessage ?? "unknown error")
+            throw ComposeError.transport(errorMessage ?? "unknown error", failure: failure)
         }
         return message
     }

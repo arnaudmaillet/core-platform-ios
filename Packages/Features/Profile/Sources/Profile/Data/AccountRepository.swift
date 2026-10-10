@@ -2,6 +2,7 @@ import AuthInterface
 import Connect
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import CoreStorage
 import Foundation
 
@@ -15,7 +16,17 @@ public enum AccountError: Error, Equatable, Sendable {
     /// or has no record (NOT_FOUND). An answer, unlike `transport`, which is
     /// a call that never got one.
     case refused(Code)
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension AccountError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Settings → Account → Deactivate Account (#385): the account's profiles are
@@ -142,7 +153,7 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
                 backupCodesLeft: Int(view.mfaRecoveryCodesRemaining)
             )
         case .failure(let error):
-            throw AccountError.transport(message: error.message ?? "code \(error.code)")
+            throw AccountError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -160,7 +171,7 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
         request.accountID = try await accountID()
         let response = await accountClient.requestDataExport(request: request, headers: [:])
         if case .failure(let error) = response.result {
-            throw AccountError.transport(message: error.message ?? "code \(error.code)")
+            throw AccountError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -217,7 +228,7 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
         if error.code == .permissionDenied, (error.message ?? "").contains("step_up") {
             return .stepUpRequired
         }
-        return .transport(message: error.message ?? "code \(error.code)")
+        return .transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
     }
 
     func accountID() async throws -> String {

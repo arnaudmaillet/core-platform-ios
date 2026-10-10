@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 
 /// The "Suggestions" surface's view model: accounts worth following, with the
@@ -127,7 +128,8 @@ public final class SuggestionsViewModel {
                 self.load = nil
                 if error is CancellationError { return }
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load suggestions.")
+                    // "You're offline" when that is why (#794).
+                    self.phase = .failed(message: FailureCopy.message(for: error, fallback: "Couldn't load suggestions."))
                 }
             }
         }

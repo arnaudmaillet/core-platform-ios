@@ -1,6 +1,7 @@
 import AuthInterface
 import Connect
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// One active restriction on the account, as Account Status lists it.
@@ -46,7 +47,17 @@ public protocol AccountStatusProviding: Sendable {
 
 public enum AccountStatusError: Error, Equatable {
     case notAuthenticated
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension AccountStatusError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// `moderation.v1.GetEnforcementState` for the signed-in account. The actor
@@ -76,7 +87,7 @@ public actor AccountStatusRepository: AccountStatusProviding {
         case .success(let body):
             return Self.restrictions(from: body.activeEnforcements)
         case .failure(let error):
-            throw AccountStatusError.transport(message: error.message ?? "code \(error.code)")
+            throw AccountStatusError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 

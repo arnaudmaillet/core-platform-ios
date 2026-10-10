@@ -25,6 +25,9 @@ let package = Package(
                 "CoreContracts",
                 "CoreModels",
                 "CoreNavigation",
+                // `NetworkFailure`: the repository error keeps why a call
+                // failed, so the screen can say "You're offline" (#794).
+                "CoreNetworking",
                 "CoreStorage",
                 "DesignSystem",
                 "MediaCore"

@@ -976,7 +976,7 @@ final class SearchResultsViewController: UIViewController {
         case .explore, .suggesting:
             .loading
         case _ where viewModel.postsFailed:
-            .failed(message: SearchViewModel.postsFailureMessage)
+            .failed(message: viewModel.postsFailureText)
         case _ where viewModel.postResults.isEmpty && viewModel.isSearchingPosts:
             .loading
         case .loading where viewModel.postResults.isEmpty:

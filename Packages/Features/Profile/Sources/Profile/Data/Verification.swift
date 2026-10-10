@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// What a verified badge says about a profile (#415, backend #668).
@@ -67,7 +68,17 @@ public enum VerificationError: Error, Equatable {
     case alreadyPending
     /// The server refused the request as sent (category, or 1–5 links).
     case invalid(message: String)
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension VerificationError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// A supporting link for a verification request: an official website, news
@@ -117,7 +128,7 @@ extension ProfileRepository: VerificationRequesting {
         case .success(let body):
             return Self.status(of: body)
         case .failure(let error):
-            throw VerificationError.transport(message: error.message ?? "code \(error.code)")
+            throw VerificationError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -151,6 +162,6 @@ extension ProfileRepository: VerificationRequesting {
         if message.contains("PRF-5001") { throw VerificationError.alreadyVerified }
         if message.contains("PRF-5002") { throw VerificationError.alreadyPending }
         if error.code == .invalidArgument { throw VerificationError.invalid(message: message) }
-        throw VerificationError.transport(message: message.isEmpty ? "code \(error.code)" : message)
+        throw VerificationError.transport(message: message.isEmpty ? "code \(error.code)" : message, failure: NetworkFailure(error))
     }
 }

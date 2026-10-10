@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// How far back other people can see the active profile's posts (#411,
@@ -57,7 +58,7 @@ extension ProfileRepository: PostWindowManaging {
         request.postWindow = window.proto
         let response = await profileClient.setTabSettings(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

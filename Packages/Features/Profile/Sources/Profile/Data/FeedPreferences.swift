@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// How much sensitive content the active profile's feeds may show (#407,
@@ -81,7 +82,7 @@ extension ProfileRepository: FeedPreferencesManaging {
         request.settings = settings
         let response = await profileClient.setFeedSettings(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

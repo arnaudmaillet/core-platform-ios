@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 import Testing
 @testable import Notifications
@@ -100,6 +101,28 @@ struct NotificationsViewModelTests {
             Issue.record("expected failed, got \(String(describing: last))")
             return
         }
+    }
+
+    /// Notifications that failed offline say so; a server fault keeps
+    /// "Couldn't load your notifications." (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't load your notifications."),
+    ])
+    func aFailedLoadIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async {
+        let error = NotificationsError.transport(message: "x", failure: failure)
+        let viewModel = NotificationsViewModel(repository: StubProvider([], loadError: error))
+        var last: NotificationsViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
+
+        viewModel.viewDidLoad()
+        await settle()
+
+        guard case .failed(let message) = last else {
+            Issue.record("expected failed, got \(String(describing: last))")
+            return
+        }
+        #expect(message == expected)
     }
 
     @Test func tapOnPostNotificationRoutesToPost() async {

@@ -20,14 +20,21 @@ private actor PagedHistory: ChatProviding {
     private var pages: [String?: MessagePage]
     private var failuresLeft: [String: Int] = [:]
     private(set) var requests: [String?] = []
+    /// When set, the newest page fails as a lost call would (#794).
+    private var newestFailure: NetworkFailure?
 
     init(_ pages: [String?: MessagePage]) { self.pages = pages }
+
+    func failNewest(_ failure: NetworkFailure) { newestFailure = failure }
 
     func setPage(_ page: MessagePage, for token: String?) { pages[token] = page }
     func failOnce(_ token: String) { failuresLeft[token] = 1 }
 
     func loadMessagesPage(in conversationID: ConversationID, before pageToken: String?) async throws -> MessagePage {
         requests.append(pageToken)
+        if pageToken == nil, let newestFailure {
+            throw ChatError.transport(message: "x", failure: newestFailure)
+        }
         if let token = pageToken, let left = failuresLeft[token], left > 0 {
             failuresLeft[token] = left - 1
             throw HistoryStubError()
@@ -76,6 +83,26 @@ struct HistoryPagingTests {
         viewModel.viewDidLoad()
         await settle { !shown.ids.isEmpty }
         return (viewModel, shown)
+    }
+
+    /// A conversation that failed offline says so; a server fault keeps
+    /// "Couldn't load this conversation" (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't load this conversation"),
+    ])
+    func aFailedConversationIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async {
+        let provider = PagedHistory([:])
+        await provider.failNewest(failure)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
+        var failed: String?
+        viewModel.onPhaseChange = {
+            if case .failed(let message) = $0 { failed = message }
+        }
+        viewModel.viewDidLoad()
+        await settle { failed != nil }
+
+        #expect(failed == expected)
     }
 
     @Test func nearingTheTopPrependsTheOlderPageOnceAndStopsAtTheStart() async {

@@ -1,5 +1,6 @@
 import Connect
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// Which address of the account changes.
@@ -35,7 +36,17 @@ public enum ContactChangeError: Error, Equatable {
     case rateLimited
     /// Codes can't be sent there (AUT-5012), or the address was refused.
     case unreachable
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension ContactChangeError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Settings → Account → Email / Phone (#393, backend #651): a code to the new
@@ -112,6 +123,6 @@ extension AccountSessionsRepository: ContactChanging {
         if message.contains("AUT-5013") || error.code == .resourceExhausted { return .rateLimited }
         if message.contains("AUT-5011") || error.code == .unauthenticated { return .wrongCode }
         if message.contains("AUT-5012") || error.code == .invalidArgument || error.code == .failedPrecondition { return .unreachable }
-        return .transport(message: message.isEmpty ? "code \(error.code)" : message)
+        return .transport(message: message.isEmpty ? "code \(error.code)" : message, failure: NetworkFailure(error))
     }
 }

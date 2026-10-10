@@ -2,6 +2,7 @@ import AuthInterface
 import Connect
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Files reports through `moderation.v1.SubmitReport` and lists them back
@@ -48,7 +49,7 @@ public actor ProfileReportRepository: ContentReporting {
 
         let response = await moderationClient.submitReport(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         // Reporting the same content again is still success: the id is
         // deterministic per reporter and subject. Only a missing id means

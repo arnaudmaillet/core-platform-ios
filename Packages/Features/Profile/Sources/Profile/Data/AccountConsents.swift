@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// The consents on the account's GDPR record (Settings → Ads and Data →
@@ -72,7 +73,17 @@ public enum DeletionCancelError: Error, Equatable {
     case nothingPending
     /// ACC-7004: the grace period is over.
     case tooLate
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension DeletionCancelError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 extension AccountRepository: AccountConsentManaging, AccountDeletionCancelling {
@@ -82,7 +93,7 @@ extension AccountRepository: AccountConsentManaging, AccountDeletionCancelling {
         let response = await accountClient.getGdprRecord(request: request, headers: [:])
         switch response.result {
         case .success(let record): return AccountConsents(record)
-        case .failure(let error): throw AccountError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw AccountError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -94,7 +105,7 @@ extension AccountRepository: AccountConsentManaging, AccountDeletionCancelling {
         let response = await accountClient.updateConsents(request: request, headers: [:])
         switch response.result {
         case .success(let record): return AccountConsents(record)
-        case .failure(let error): throw AccountError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw AccountError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -106,7 +117,7 @@ extension AccountRepository: AccountConsentManaging, AccountDeletionCancelling {
             let message = error.message ?? ""
             if message.contains("ACC-7003") { throw DeletionCancelError.nothingPending }
             if message.contains("ACC-7004") { throw DeletionCancelError.tooLate }
-            throw DeletionCancelError.transport(message: error.message ?? "code \(error.code)")
+            throw DeletionCancelError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

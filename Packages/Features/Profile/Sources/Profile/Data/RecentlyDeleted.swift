@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 import PostGrid
 
@@ -47,7 +48,17 @@ public enum PostRestoreError: Error, Equatable {
     case tooLate
     /// PST-1006: it isn't deleted (restored meanwhile).
     case notDeleted
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension PostRestoreError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Delete a post of one's own, and bring it back within 30 days
@@ -66,7 +77,7 @@ extension ProfileGalleryRepository: PostTrashManaging {
         request.profileID = author.rawValue
         let response = await postClient.deletePost(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -85,7 +96,7 @@ extension ProfileGalleryRepository: PostTrashManaging {
                 views += body.posts
                 pageToken = body.nextToken
             case .failure(let error):
-                throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
             if pageToken.isEmpty { break }
         }
@@ -106,7 +117,7 @@ extension ProfileGalleryRepository: PostTrashManaging {
             let message = error.message ?? ""
             if message.contains("PST-1007") { throw PostRestoreError.tooLate }
             if message.contains("PST-1006") { throw PostRestoreError.notDeleted }
-            throw PostRestoreError.transport(message: error.message ?? "code \(error.code)")
+            throw PostRestoreError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

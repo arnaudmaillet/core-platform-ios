@@ -214,6 +214,22 @@ struct FeedViewModelTests {
         #expect(observed.last?.phase == .failed(message: "Couldn't load your timeline"))
     }
 
+    /// An empty timeline that failed offline says so (#794); the server fault
+    /// above keeps "Couldn't load your timeline".
+    @Test func anOfflineEmptyTimelineSaysYoureOffline() async {
+        let provider = FakeFeedProvider()
+        provider.pages[""] = .failure(.transport(message: "offline", failure: .offline))
+        let viewModel = FeedViewModel(repository: provider)
+
+        async let states = collectStates(viewModel) {
+            if case .failed = $0.phase { return true } else { return false }
+        }
+        viewModel.viewDidLoad()
+        let observed = await states
+
+        #expect(observed.last?.phase == .failed(message: FailureCopy.offline))
+    }
+
     /// ⚠️ THE NETWORK COMES BACK, THE TIMELINE LOADS (#793): a timeline that
     /// failed while offline reloads on recovery, without a tap.
     ///

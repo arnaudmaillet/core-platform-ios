@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 import OSLog
 
@@ -82,7 +83,11 @@ public struct RelationshipPage: Equatable, Sendable {
 }
 
 public enum RelationshipsError: Error, Equatable, Sendable {
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
     /// The viewer isn't allowed to see this list. Distinct from a transport
     /// failure: it is an *answer*, and the UI shows the private state rather
     /// than a retry affordance.
@@ -90,6 +95,12 @@ public enum RelationshipsError: Error, Equatable, Sendable {
     /// The server refused the follow: the target blocks the viewer (#726).
     /// An answer, not a failure — the row stops offering Follow.
     case cannotFollow
+}
+
+extension RelationshipsError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Whether the viewer may see a profile's relationship lists.
@@ -375,7 +386,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
     /// kept for any refusal spelled as an error.
     private static func mapped(_ error: ConnectError) -> RelationshipsError {
         if error.code == .permissionDenied { return .forbidden }
-        return .transport(message: error.message ?? "code \(error.code)")
+        return .transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
     }
 
     // MARK: - Hydration
@@ -484,7 +495,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
                 unfollowableIDs.insert(profileID.rawValue)
                 throw RelationshipsError.cannotFollow
             default:
-                throw RelationshipsError.transport(message: error.message ?? "code \(error.code)")
+                throw RelationshipsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
         if response.message?.requested == true {
@@ -565,7 +576,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
 
     private static func ensureAccepted(_ response: ResponseMessage<SocialGraph_V1_CommandResponse>) throws {
         if let error = response.error {
-            throw RelationshipsError.transport(message: error.message ?? "code \(error.code)")
+            throw RelationshipsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         guard response.message?.success == true else {
             throw RelationshipsError.transport(message: "command rejected")

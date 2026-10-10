@@ -517,7 +517,8 @@ public final class FeedViewModel {
             // Keep showing cached content on failure; only fail visibly when
             // there is nothing at all to show.
             if items.isEmpty {
-                phase = .failed(message: "Couldn't load your timeline")
+                // "You're offline" when that is why (#794).
+                phase = .failed(message: FailureCopy.message(for: error, fallback: "Couldn't load your timeline"))
             }
         }
         initialLoad = nil
