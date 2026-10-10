@@ -457,7 +457,7 @@ public final class PostDetailViewModel {
                 // Superseded; leave the phase alone.
             } catch {
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load this post. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load this post")
                 }
             }
             self.load = nil

@@ -113,7 +113,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private let pullIndicator = HeroPullToRefreshView()
     /// The band the spinner centres in, under the navigation bar.
     private static let pullIndicatorHeight: CGFloat = 44
-    private let statusLabel = UILabel()
+    /// A failed first load, with its way out (#797).
+    private let statusView = EmptyStateView()
     /// First-load guarantee: while the skeleton screen is up, the scroll
     /// content must fill the viewport, so the gallery's shimmer rows reach
     /// the screen bottom from the very first layout pass. The pager's own
@@ -2369,16 +2370,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         view.bringSubviewToFront(pullIndicator)
 
-        statusLabel.font = .appFont(forTextStyle: .body)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
+        statusView.isHidden = true
+        statusView.constrain(in: view) { parent in
+            statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
+            statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
     }
 
@@ -2980,7 +2977,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // through their own loading state until the view model's first
             // snapshot arrives. Hydration is a pure cross-fade over the very
             // frames the content will occupy — nothing can shift.
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             galleryPager.isHidden = false
             // The HEADER is held on a switch rather than redacted: its bones'
             // shimmer sweeps left to right, and over a fast load that sweep
@@ -2999,7 +2996,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
         case .content(let model):
             pullIndicator.endRefreshing()
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             galleryPager.isHidden = false
             // Content owns its height again; the release rides the same
             // layout pass as the (dissolve-masked) gallery height snap.
@@ -3029,8 +3026,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false
             headerView.setRedacted(false)
-            statusLabel.text = message
-            statusLabel.isHidden = false
+            // ⚠️ A WAY OUT (#797): the pull lives on the gallery this hides,
+            // so "Pull to retry" could not be done.
+            statusView.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.viewModel.refresh()
+                }
+            )
+            statusView.isHidden = false
         }
     }
 }

@@ -147,7 +147,7 @@ struct FeedViewModelTests {
         viewModel.viewDidLoad()
         let observed = await states
 
-        #expect(observed.last?.phase == .failed(message: "Couldn't load your timeline. Pull to retry."))
+        #expect(observed.last?.phase == .failed(message: "Couldn't load your timeline"))
     }
 
     /// ⚠️ THE NETWORK COMES BACK, THE TIMELINE LOADS (#793): a timeline that
