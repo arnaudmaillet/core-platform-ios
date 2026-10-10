@@ -13,7 +13,9 @@ public enum ChatError: Error, Equatable, Sendable {
     /// One, #397). A narrower audience makes the message a request instead.
     case messagesRefused
     /// The photo or video could not be uploaded (#681); nothing was sent.
-    case mediaUpload(message: String)
+    /// `failure` keeps WHY, from the uploader's error (#794), so the screen
+    /// can say "You’re offline"; defaulted, like `transport`'s.
+    case mediaUpload(message: String, failure: NetworkFailure? = nil)
     /// This provider sends no media.
     case mediaUnsupported
     /// The call failed on the way to or at the server. `failure` keeps WHY
@@ -25,7 +27,10 @@ public enum ChatError: Error, Equatable, Sendable {
 
 extension ChatError: NetworkFailureCarrying {
     public var networkFailure: NetworkFailure? {
-        if case .transport(_, let failure) = self { failure } else { nil }
+        switch self {
+        case .transport(_, let failure), .mediaUpload(_, let failure): failure
+        default: nil
+        }
     }
 }
 
@@ -537,9 +542,10 @@ public actor ChatRepository: ChatProviding {
                 upload, key: idempotencyKey, ownerID: account.rawValue, uploader: mediaUploader, encoder: encoder
             )
         } catch let error as MediaAssetUploader.UploadError {
-            throw ChatError.mediaUpload(message: error.message)
+            // The uploader's error carries why (#794): keep it.
+            throw ChatError.mediaUpload(message: error.message, failure: NetworkFailure.of(error))
         } catch {
-            throw ChatError.mediaUpload(message: String(describing: error))
+            throw ChatError.mediaUpload(message: String(describing: error), failure: NetworkFailure.of(error))
         }
         return try await sendMessage(
             body: caption, media: media, as: viewer, to: conversationID, replyingTo: replyToID

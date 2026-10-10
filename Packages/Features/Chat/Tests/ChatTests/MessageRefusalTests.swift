@@ -49,5 +49,14 @@ struct MessageRefusalTests {
     @Test func theNoticeSaysWhy() {
         #expect(ConversationViewModel.sendFailureNotice(ChatError.messagesRefused).message == "This account doesn't take messages.")
         #expect(ConversationViewModel.sendFailureNotice(ChatError.transport(message: "x")).title == "Couldn't send")
+        // #794: offline says so, a failed upload included.
+        #expect(ConversationViewModel.sendFailureNotice(ChatError.transport(message: "x", failure: .offline)).title
+            == "You\u{2019}re offline")
+        #expect(ConversationViewModel.sendFailureNotice(
+            ChatError.mediaUpload(message: "x", failure: .offline), isMedia: true
+        ).title == "You\u{2019}re offline")
+        #expect(ConversationViewModel.sendFailureNotice(
+            ChatError.mediaUpload(message: "x", failure: .server(code: "internal")), isMedia: true
+        ).title == "Couldn't send")
     }
 }

@@ -109,6 +109,32 @@ struct ChatMediaTests {
         #expect(try await repository.loadMessages(in: conversation).count == before)
     }
 
+    /// #794: the upload's failure used to be dropped, so a photo sent offline
+    /// could only fail like any other. It is carried now; a refusal carries
+    /// none.
+    @Test func anOfflineUploadKeepsWhyItFailed() async throws {
+        let repository = repository(transport: FailingTransport(error: URLError(.notConnectedToInternet)))
+        let conversation = try await repository.directConversation(with: ProfileID("prof-31"))
+        await #expect {
+            _ = try await repository.send(
+                media: .image(Self.solid()), caption: "", to: conversation, replyingTo: nil, idempotencyKey: "k"
+            )
+        } throws: { error in
+            guard case .mediaUpload = error as? ChatError else { return false }
+            return NetworkFailure.of(error) == .offline
+        }
+
+        let refused = self.repository(transport: FailingTransport())
+        await #expect {
+            _ = try await refused.send(
+                media: .image(Self.solid()), caption: "", to: conversation, replyingTo: nil, idempotencyKey: "k2"
+            )
+        } throws: { error in
+            guard case .mediaUpload = error as? ChatError else { return false }
+            return NetworkFailure.of(error) == nil
+        }
+    }
+
     /// The seeded thread's received photo (`conv-0`), as the thread reads it.
     @Test func theSeededThreadHasAReceivedPhoto() async throws {
         let repository = repository()
@@ -161,6 +187,46 @@ struct ChatMediaTests {
         #expect(delivered.last?.media?.url != nil)
         #expect(delivered.last?.media?.preview === picture, "the viewer's own picture was dropped")
         #expect(uploaded.count == 1, "the delivered picture did not reach the image cache")
+    }
+
+    /// #794: a photo that failed offline says so — its bubble only reads
+    /// "Not sent" — and one refused by the server stays quiet, as before.
+    @Test func aPhotoSentOfflineSaysYoureOffline() async throws {
+        let viewModel = ConversationViewModel(
+            conversationID: ConversationID("c"), repository: MediaStubProvider(failures: 1, failure: .offline)
+        )
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        var notices: [(String, String)] = []
+        viewModel.onActionNotice = { notices.append(($0, $1)) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        viewModel.send(media: [.image(Self.solid())])
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .failed } else { false }
+        })
+        #expect(notices.map(\.0) == ["You\u{2019}re offline"])
+        #expect(notices.first?.1 == "Your photo or video wasn\u{2019}t sent. Tap it to try again.")
+    }
+
+    @Test func aPhotoRefusedByTheServerStaysQuiet() async throws {
+        let viewModel = ConversationViewModel(
+            conversationID: ConversationID("c"),
+            repository: MediaStubProvider(failures: 1, failure: .server(code: "internal"))
+        )
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        var notices: [String] = []
+        viewModel.onActionNotice = { title, _ in notices.append(title) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        viewModel.send(media: [.image(Self.solid())])
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .failed } else { false }
+        })
+        #expect(notices.isEmpty)
     }
 
     /// ⚠️ A RETRIED PHOTO GOES UP UNDER THE KEY ITS BUBBLE WAS SENT WITH
@@ -224,17 +290,24 @@ struct ChatMediaTests {
 
 private struct FailingTransport: MediaUploadTransport {
     struct Refused: Error {}
-    func upload(_ data: Data, using ticket: MediaUploadTicket) async throws -> String { throw Refused() }
+    /// What the upload throws: a plain refusal unless told otherwise.
+    var error: any Error = Refused()
+    func upload(_ data: Data, using ticket: MediaUploadTicket) async throws -> String { throw error }
 }
 
 /// Fails the first `failures` media sends, then delivers; records the key
 /// every attempt was made under.
 private actor MediaStubProvider: ChatProviding {
     private var failures: Int
+    /// Why a failing send failed (#794): nil reads as a server fault.
+    private let failure: NetworkFailure?
     private var count = 0
     private(set) var keys: [String] = []
 
-    init(failures: Int) { self.failures = failures }
+    init(failures: Int, failure: NetworkFailure? = nil) {
+        self.failures = failures
+        self.failure = failure
+    }
 
     func viewerProfileID() async throws -> ProfileID { ProfileID("me") }
     func loadConversations() async throws -> [Conversation] { [] }
@@ -249,7 +322,7 @@ private actor MediaStubProvider: ChatProviding {
         keys.append(idempotencyKey)
         if failures > 0 {
             failures -= 1
-            throw ChatError.mediaUpload(message: "offline")
+            throw ChatError.mediaUpload(message: "offline", failure: failure)
         }
         count += 1
         return ChatMessage(
