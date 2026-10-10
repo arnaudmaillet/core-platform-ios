@@ -82,6 +82,8 @@ final class RevealDismissInteractionController: NSObject,
     /// The card the window carries home — see
     /// `RevealGeometry.makeDismissStandIn`.
     private var standIn: UIView?
+    /// The release's touch shield — see `release` (#786).
+    private var releaseShield: UIView?
 
     /// The row's rect in the container, read with the presenter momentarily at
     /// IDENTITY — which is the space the window's own mask lives in.
@@ -362,6 +364,16 @@ final class RevealDismissInteractionController: NSObject,
         // choreography on its own clock.
         commit ? context.finishInteractiveTransition() : context.cancelInteractiveTransition()
 
+        // ⚠️ THE SETTLE IS WATCHABLE, NOT TOUCHABLE — the zoom release's
+        // shield, which this release lacked (#786). The stage takes no touches
+        // (`RevealStage.makeHost`), so for the whole spring a touch reached the
+        // grid underneath, and a scroll there moved the very landing this
+        // release is about to read. At the release and not at the start, as
+        // the zoom grab does: during the drag the hand is the only thing
+        // touching, and the pose follows it. Removed in `finish`, on both
+        // outcomes.
+        releaseShield = RevealStage.installTouchShield(in: context.containerView)
+
         // Read once more at release, so the spring ends on the rect the drag
         // was already aiming at and there is nothing left to correct.
         let container = context.containerView
@@ -542,6 +554,9 @@ final class RevealDismissInteractionController: NSObject,
             RevealStage.unwrap(page, from: host, to: container, frame: pageFrame)
         }
         dim?.removeFromSuperview()
+        // Committed or cancelled alike: the container outlives the transition.
+        releaseShield?.removeFromSuperview()
+        releaseShield = nil
         presentingView?.transform = .identity
         ZoomFlight.clearRecededChrome(from: presentingView)
         // The page is staying or going; either way it must carry no mask into
