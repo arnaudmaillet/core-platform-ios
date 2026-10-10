@@ -210,7 +210,7 @@ final class InboxCatalog {
                 // current load's problem, and must not put the inbox into a
                 // failed state while a live fetch is still running.
                 guard self.loadGeneration == generation, self.snapshot.phase != .loaded else { return }
-                self.snapshot.phase = .failed(message: "Couldn't load your messages. Pull to retry.")
+                self.snapshot.phase = .failed(message: "Couldn't load your messages.")
                 self.emit()
             }
         }

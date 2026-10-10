@@ -171,7 +171,8 @@ final class PostDetailViewController: UIViewController {
     private let postSectionHost = UIView()
     private let refreshControl = UIRefreshControl()
     private let spinner = UIActivityIndicatorView(style: .large)
-    private let statusLabel = UILabel()
+    /// A failed first load, with its way out (#797).
+    private let statusView = EmptyStateView()
 
     private let avatarView = UIView()
     private let avatarImageView = UIImageView()
@@ -669,15 +670,12 @@ final class PostDetailViewController: UIViewController {
             spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
 
-        statusLabel.font = .appFont(forTextStyle: .body)
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
+        statusView.isHidden = true
+        statusView.constrain(in: view) { parent in
+            statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
+            statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
     }
 
@@ -1207,7 +1205,7 @@ final class PostDetailViewController: UIViewController {
     private func render(_ phase: PostDetailViewModel.Phase) {
         switch phase {
         case .loading:
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             if mode == .commentsOnly {
                 // The skeleton stream IS the loading state (the messages
                 // doctrine) — no spinner, no hidden surface.
@@ -1221,15 +1219,20 @@ final class PostDetailViewController: UIViewController {
         case .content(let model):
             spinner.stopAnimating()
             refreshControl.endRefreshing()
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             collectionView.isHidden = false
             configure(model)
         case .failed(let message):
             spinner.stopAnimating()
             refreshControl.endRefreshing()
             collectionView.isHidden = true
-            statusLabel.text = message
-            statusLabel.isHidden = false
+            // ⚠️ A WAY OUT (#797): the refresh control it promised lives on
+            // the collection this hides, so "Pull to retry" could not be done.
+            statusView.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in self?.viewModel.refresh() }
+            )
+            statusView.isHidden = false
         }
     }
 

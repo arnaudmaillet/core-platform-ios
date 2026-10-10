@@ -108,6 +108,15 @@ public final class EmptyStateView: UIView {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// ⚠️ ONLY THE ACTION TAKES A TOUCH (#797). The block is often laid over a
+    /// whole screen — a failed thread under its composer, a failed profile
+    /// under its bar — and its empty background must not swallow the touches
+    /// meant for what is around it.
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === self || hit === stack ? nil : hit
+    }
+
     /// Sets the whole state at once.
     ///
     /// One call rather than four properties, because these are facets of a

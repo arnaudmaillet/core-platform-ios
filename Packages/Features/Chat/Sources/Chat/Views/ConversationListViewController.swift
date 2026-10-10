@@ -294,13 +294,16 @@ final class ConversationListViewController: UIViewController {
             statusView.configure(
                 symbol: "bubble.left.and.bubble.right",
                 title: "No conversations yet",
-                message: "Start one from someone's profile, or tap the compose button."
+                message: "Start one from someone's profile, or from search."
             )
             statusView.isHidden = false
         case .failed(let message):
             skeletonView.isHidden = true
             tableView.isHidden = true
-            statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
+            statusView.configure(
+                symbol: "exclamationmark.triangle", title: "Something went wrong", message: message,
+                actionTitle: "Try Again", action: { [weak self] in self?.viewModel.refresh() }
+            )
             statusView.isHidden = false
         }
     }

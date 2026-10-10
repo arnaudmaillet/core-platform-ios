@@ -138,7 +138,10 @@ final class SuggestionsViewController: UIViewController {
         case .failed(let message):
             skeletonView.isHidden = true
             tableView.isHidden = true
-            statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
+            statusView.configure(
+                symbol: "exclamationmark.triangle", title: "Something went wrong", message: message,
+                actionTitle: "Try Again", action: { [weak self] in self?.viewModel.refresh() }
+            )
             statusView.isHidden = false
         }
     }

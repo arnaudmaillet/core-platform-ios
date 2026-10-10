@@ -478,7 +478,7 @@ public final class ConversationViewModel {
                 // Superseded.
             } catch {
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load this conversation. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load this conversation")
                 }
             }
             self.load = nil

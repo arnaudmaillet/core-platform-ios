@@ -1448,7 +1448,7 @@ public final class ProfileViewModel {
                 // Only surface a hard failure when there is nothing on screen;
                 // a failed refresh keeps the last good content.
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load this profile. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load this profile")
                 }
             }
             self.load = nil

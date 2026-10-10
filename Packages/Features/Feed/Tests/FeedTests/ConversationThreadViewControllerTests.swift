@@ -36,7 +36,8 @@ struct ConversationThreadViewControllerTests {
             onPinnedChange?(pinned)
             onPhaseChange?(initial)
         }
-        func refresh() {}
+        private(set) var refreshes = 0
+        func refresh() { refreshes += 1 }
         func send(_ text: String) { sent.append(text) }
         func beginReply(to messageID: String) { replies.append(messageID) }
         func cancelReply() {}
@@ -103,6 +104,22 @@ struct ConversationThreadViewControllerTests {
             if let match = firstView(type, in: subview) { return match }
         }
         return nil
+    }
+
+    /// ⚠️ A FAILED FIRST LOAD HAS A WAY OUT (#797). It said "Pull to retry"
+    /// on a screen with no pull; it now offers Try Again, which reloads.
+    @Test func aFailedFirstLoadOffersTryAgain() throws {
+        let (screen, driver, _, window) = makeScreen(phase: .failed("Couldn't load this conversation"))
+        defer { window.isHidden = true }
+        let status = try #require(Self.firstView(EmptyStateView.self, in: screen.view))
+        #expect(!status.isHidden, "the failure was not shown")
+        let button = try #require(Self.firstView(UIButton.self, in: status))
+        #expect(!button.isHidden)
+        #expect(button.configuration?.title == "Try Again")
+
+        button.sendActions(for: .primaryActionTriggered)
+
+        #expect(driver.refreshes == 1)
     }
 
     @Test func messagesAreGroupedByDayOldestFirst() throws {

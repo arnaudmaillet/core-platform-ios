@@ -146,7 +146,7 @@ struct FeedViewModelTests {
         viewModel.viewDidLoad()
         let observed = await states
 
-        #expect(observed.last?.phase == .failed(message: "Couldn't load your timeline. Pull to retry."))
+        #expect(observed.last?.phase == .failed(message: "Couldn't load your timeline"))
     }
 
     @Test func networkFailureKeepsCachedContentVisible() async {

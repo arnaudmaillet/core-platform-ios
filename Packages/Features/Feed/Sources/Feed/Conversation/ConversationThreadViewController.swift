@@ -77,7 +77,8 @@ final class ConversationThreadViewController: UIViewController {
         maskColors: SnapCommentsLayout.footerFrostMaskColors,
         maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
-    private let statusLabel = UILabel()
+    /// A failed first load, with its way out (#797).
+    private let statusView = EmptyStateView()
     /// Under the bar while older history is on its way (#600): pinned to the
     /// screen rather than to the content, so it is where the reader is
     /// looking — at the top — whatever the scroll. Turns only while a page
@@ -768,15 +769,12 @@ final class ConversationThreadViewController: UIViewController {
     #endif
 
     private func configureStatusLabel() {
-        statusLabel.font = .appFont(forTextStyle: .body)
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
+        statusView.isHidden = true
+        statusView.constrain(in: view) { parent in
+            statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
+            statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
     }
 
@@ -832,12 +830,18 @@ final class ConversationThreadViewController: UIViewController {
         self.phase = phase
         switch phase {
         case .loading:
-            statusLabel.isHidden = true
+            statusView.isHidden = true
         case .failed(let message):
-            statusLabel.text = message
-            statusLabel.isHidden = hasRenderedContent
+            // ⚠️ A WAY OUT (#797). It said "Pull to retry" on a screen with no
+            // pull — by design (the composer owns the bottom edge) — so a
+            // failed first load was a dead end until the viewer backed out.
+            statusView.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in self?.driver.refresh() }
+            )
+            statusView.isHidden = hasRenderedContent
         case .content(let messages):
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             let before = messagesByID
             messagesByID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             noteSendTransitions(from: before, to: messages)

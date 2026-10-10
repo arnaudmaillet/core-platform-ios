@@ -22,7 +22,8 @@ final class SnapFeedViewController: UIViewController {
 
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, PostID>!
-    private let statusLabel = UILabel()
+    /// The timeline's empty and failed states (#797).
+    private let statusView = EmptyStateView()
     /// The author identity, hosted as the trailing bar item's custom view —
     /// at a FIXED width read off the bar (`applyBarPillWidths`), so its glass
     /// is the same size on every page and a long name truncates inside it.
@@ -2219,19 +2220,14 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func configureStatusLabel() {
-        statusLabel.font = .appFont(forTextStyle: .body)
-        // ⚠️ NOT WHITE. It was, for a screen that was always black; a feed
-        // whose corpus resolves to nothing now shows this over the tone of the
-        // card that was tapped, and white on `.secondarySystemBackground` is
-        // invisible. `.secondaryLabel` reads on both and follows the trait.
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.xl)
+        // ⚠️ NOT WHITE: the shared empty state's ink follows the trait, so it
+        // reads over the tone of the card that was tapped as over black.
+        statusView.isHidden = true
+        statusView.constrain(in: view) { parent in
+            statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
+            statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
     }
 
@@ -2470,13 +2466,20 @@ final class SnapFeedViewController: UIViewController {
 
         switch state.phase {
         case .loading, .content:
-            statusLabel.isHidden = true
+            statusView.isHidden = true
         case .empty:
-            statusLabel.text = "Nothing here yet.\nFollow people to fill your timeline."
-            statusLabel.isHidden = false
+            statusView.configure(
+                symbolName: "person.2", title: "Nothing here yet", subtitle: "Follow people to fill your timeline."
+            )
+            statusView.isHidden = false
         case .failed(let message):
-            statusLabel.text = message
-            statusLabel.isHidden = false
+            // ⚠️ A WAY OUT (#797): this screen has no pull, so "Pull to
+            // retry" was a promise it could not keep.
+            statusView.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in self?.viewModel.refresh() }
+            )
+            statusView.isHidden = false
         }
     }
 

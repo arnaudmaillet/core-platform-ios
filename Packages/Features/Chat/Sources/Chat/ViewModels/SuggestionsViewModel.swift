@@ -127,7 +127,7 @@ public final class SuggestionsViewModel {
                 self.load = nil
                 if error is CancellationError { return }
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load suggestions. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load suggestions.")
                 }
             }
         }

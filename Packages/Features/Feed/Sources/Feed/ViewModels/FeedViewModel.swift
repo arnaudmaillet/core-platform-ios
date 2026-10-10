@@ -462,7 +462,7 @@ public final class FeedViewModel {
             // Keep showing cached content on failure; only fail visibly when
             // there is nothing at all to show.
             if items.isEmpty {
-                phase = .failed(message: "Couldn't load your timeline. Pull to retry.")
+                phase = .failed(message: "Couldn't load your timeline")
             }
         }
         initialLoad = nil
