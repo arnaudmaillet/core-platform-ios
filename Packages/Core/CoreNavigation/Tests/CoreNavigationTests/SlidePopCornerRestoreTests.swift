@@ -11,9 +11,10 @@ import UIKit
 /// `completeTransition`, so a push started in that window inherited a clipped,
 /// rounded feed.
 ///
-/// Driven through a fake transition context in a visible window (the bezel
-/// radius is read from the screen behind the view), waiting on the leg's own
-/// completion by condition, never by clock.
+/// Driven through a fake transition context in a visible window, waiting on
+/// the leg's own completion by condition, never by clock. The bezel radius is
+/// FORCED: read from the screen, it is 0 on a square-cornered device (iPhone
+/// SE), where the leg writes nothing and "rounded during the leg" fails.
 @Suite(.serialized, .timeLimit(.minutes(10)))
 @MainActor
 struct SlidePopCornerRestoreTests {
@@ -21,7 +22,7 @@ struct SlidePopCornerRestoreTests {
     @Test func aCompletedSlidePopHandsTheFeedItsOwnCornersBack() async throws {
         try await hosting { rig in
             let context = rig.context()
-            TimelineSlidePopAnimator(axis: .horizontal).animateTransition(using: context)
+            TimelineSlidePopAnimator(axis: .horizontal, bezelRadius: { _ in 44 }).animateTransition(using: context)
             // The leg really did borrow the layer — or this test proves nothing.
             #expect(LayerCornerStyle(capturing: rig.feed.view.layer) != rig.resting,
                     "the leg never rounded the feed: the restore went untested")
@@ -38,7 +39,7 @@ struct SlidePopCornerRestoreTests {
         try await hosting { rig in
             let context = rig.context()
             context.wasCancelled = true
-            TimelineSlidePopAnimator(axis: .horizontal).animateTransition(using: context)
+            TimelineSlidePopAnimator(axis: .horizontal, bezelRadius: { _ in 44 }).animateTransition(using: context)
             #expect(LayerCornerStyle(capturing: rig.feed.view.layer) != rig.resting)
 
             try await settle { context.completed != nil }

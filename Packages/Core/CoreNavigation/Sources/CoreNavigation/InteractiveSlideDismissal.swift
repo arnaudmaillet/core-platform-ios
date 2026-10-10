@@ -853,9 +853,17 @@ final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransiti
     /// native parallax depth, applied on whichever axis the exit travels.
     private let parallax: CGFloat = 0.3
     private let axis: ZoomDismissAxis
+    /// The bezel radius the feed is clipped to for the slide. A seam so a test
+    /// can run the borrow-and-restore on any device: a square-cornered screen
+    /// (iPhone SE) answers 0, and the leg then writes nothing at all.
+    private let bezelRadius: @MainActor (UIView) -> CGFloat
 
-    init(axis: ZoomDismissAxis = .horizontal) {
+    init(
+        axis: ZoomDismissAxis = .horizontal,
+        bezelRadius: @escaping @MainActor (UIView) -> CGFloat = { ScreenGeometry.cornerRadius(behind: $0) }
+    ) {
         self.axis = axis
+        self.bezelRadius = bezelRadius
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
@@ -906,7 +914,7 @@ final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransiti
         // came out of every pop with its corners gone. Captured before the
         // first write, restored verbatim by the completion.
         let restingCorners = LayerCornerStyle(capturing: fromView.layer)
-        let radius = ScreenGeometry.cornerRadius(behind: fromView)
+        let radius = bezelRadius(fromView)
         if radius > 0 {
             fromView.layer.cornerCurve = .continuous
             fromView.layer.cornerRadius = radius

@@ -1056,6 +1056,43 @@ enum RevealStage {
         return shield
     }
 
+    /// ⚠️ A SHIELD STOPS NEW TOUCHES, NOT MOTION ALREADY UNDER WAY (#786).
+    ///
+    /// A grid still coasting from a fling, or dragged by a second finger that
+    /// was down before the shield went up, keeps moving the landing row after
+    /// the release has read it. Every scroll view under `root` is stopped
+    /// where it stands: its pan is cycled, which cancels a finger already on
+    /// it, and its offset is re-set without animation, which ends a coast or
+    /// an animated scroll. Idle scroll views are untouched in effect — the
+    /// offset they are given is the one they have.
+    ///
+    /// ⚠️ NOT A VIEW PAST ITS EDGE. A rubber-banded offset frozen in place
+    /// would stay out of bounds until the next touch; that one is left to
+    /// bounce home, the lesser movement of the two.
+    static func haltScrolling(in root: UIView) {
+        var pending = [root]
+        while let view = pending.popLast() {
+            if let scroll = view as? UIScrollView {
+                if scroll.isTracking || scroll.isDragging {
+                    scroll.panGestureRecognizer.isEnabled = false
+                    scroll.panGestureRecognizer.isEnabled = true
+                }
+                let inset = scroll.adjustedContentInset
+                let offset = scroll.contentOffset
+                let minimum = CGPoint(x: -inset.left, y: -inset.top)
+                let maximum = CGPoint(
+                    x: max(minimum.x, scroll.contentSize.width + inset.right - scroll.bounds.width),
+                    y: max(minimum.y, scroll.contentSize.height + inset.bottom - scroll.bounds.height)
+                )
+                if (minimum.x...maximum.x).contains(offset.x),
+                   (minimum.y...maximum.y).contains(offset.y) {
+                    scroll.setContentOffset(offset, animated: false)
+                }
+            }
+            pending.append(contentsOf: view.subviews)
+        }
+    }
+
     /// `standIn`, when there is one, takes the WINDOW's frame rather than the
     /// page's transform — which is the whole point of it. The page moves with
     /// its own scroll and its own registration; the stand-in is the card, and
@@ -1464,7 +1501,8 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             delay: 0,
             usingSpringWithDamping: RevealStage.springDamping,
             initialSpringVelocity: RevealStage.springVelocity,
-            options: [.allowUserInteraction]
+            // No `.allowUserInteraction`: the shield decides touches now (#786).
+            options: []
         ) {
             RevealStage.apply(open, mask: mask, page: toView, standIn: standIn)
             // On the SAME spring as the mask, so the card does not become the

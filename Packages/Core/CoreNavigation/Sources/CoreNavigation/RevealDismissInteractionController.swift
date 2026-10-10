@@ -373,6 +373,12 @@ final class RevealDismissInteractionController: NSObject,
         // touching, and the pose follows it. Removed in `finish`, on both
         // outcomes.
         releaseShield = RevealStage.installTouchShield(in: context.containerView)
+        // …and what was already moving under it stops, BEFORE the landing is
+        // read below: a coasting grid or a second finger on it would otherwise
+        // carry the row away from the rect the spring is about to aim at.
+        if let landingView = context.view(forKey: .to) {
+            RevealStage.haltScrolling(in: landingView)
+        }
 
         // Read once more at release, so the spring ends on the rect the drag
         // was already aiming at and there is nothing left to correct.
@@ -482,7 +488,8 @@ final class RevealDismissInteractionController: NSObject,
             withDuration: RevealStage.springDuration, delay: 0,
             usingSpringWithDamping: RevealStage.springDamping,
             initialSpringVelocity: springVelocity,
-            options: [.beginFromCurrentState, .allowUserInteraction]
+            // No `.allowUserInteraction`: the shield decides touches now (#786).
+            options: [.beginFromCurrentState]
         ) {
             RevealStage.apply(target, mask: windowMask, page: page, standIn: self.standIn)
             // The release finishes whatever fraction the drag reached: a
