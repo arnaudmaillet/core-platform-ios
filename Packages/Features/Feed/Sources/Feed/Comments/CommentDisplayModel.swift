@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 
 /// View-ready projection of a `CommentEntry`.
@@ -42,9 +43,9 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         authorName = entry.authorName
         body = entry.body
         parentID = entry.parentID
-        monogram = Self.monogram(entry.authorName)
+        monogram = MonogramAvatarView.monogram(name: entry.authorName, handle: "")
         avatarURL = entry.authorAvatarURL
-        metaText = Self.relativeShort(from: entry.createdAt, to: now)
+        metaText = RelativeAgeFormatter.short(from: entry.createdAt, to: now)
         createdAt = entry.createdAt
         isHeld = entry.isHeld
         self.canReview = entry.isHeld && canReview
@@ -73,23 +74,6 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         self.createdAt = createdAt
         isHeld = false
         canReview = false
-        monogram = Self.monogram(authorName)
-    }
-
-    private static func monogram(_ name: String) -> String {
-        let initials = name.split(separator: " ").prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
-    }
-
-    private static func relativeShort(from date: Date, to now: Date) -> String {
-        let seconds = max(0, now.timeIntervalSince(date))
-        switch seconds {
-        case ..<60: return "now"
-        case ..<3600: return "\(Int(seconds / 60))m"
-        case ..<86_400: return "\(Int(seconds / 3600))h"
-        case ..<604_800: return "\(Int(seconds / 86_400))d"
-        default: return "\(Int(seconds / 604_800))w"
-        }
+        monogram = MonogramAvatarView.monogram(name: authorName, handle: "")
     }
 }

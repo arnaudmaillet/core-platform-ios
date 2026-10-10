@@ -37,11 +37,4 @@ final class BlockedAccountsViewModel {
             phase = .loaded(current.filter { $0.id != profile.id })
         }
     }
-
-    /// The row's initials: display name first, the handle when there is none.
-    static func monogram(for profile: BlockedProfile) -> String {
-        let source = profile.displayName.trimmingCharacters(in: .whitespaces).isEmpty ? profile.handle : profile.displayName
-        let initials: [String] = source.split(separator: " ").prefix(2).compactMap { word in word.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
-    }
 }

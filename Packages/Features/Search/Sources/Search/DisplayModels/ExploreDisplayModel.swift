@@ -104,7 +104,7 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
             )
             subject = .person
             avatarURL = stored
-            monogram = Self.monogram(for: entry.text)
+            monogram = MonogramAvatarView.monogram(name: entry.text, handle: entry.text)
         } else {
             action = .search
             subject = .symbol("clock")
@@ -140,7 +140,9 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
             // `Suggest` answers with text and an id and no picture, so this
             // starts empty and is filled in by `ProfileAvatarProviding`.
             avatarURL = nil
-            monogram = Self.monogram(for: suggestion.text)
+            // The text is a handle (see above), so it goes in as one: a
+            // leading "@" is then never read as an initial (#811).
+            monogram = MonogramAvatarView.monogram(name: "", handle: suggestion.text)
         } else if suggestion.kind == .hashtag {
             action = .openHashtag(String(shown.dropFirst()).lowercased())
             subject = .symbol("number")
@@ -152,12 +154,6 @@ public struct SearchRowDisplayModel: Equatable, Sendable, Identifiable {
             avatarURL = nil
             monogram = ""
         }
-    }
-
-    /// The same initials rule the rest of the app uses, so one person's disc
-    /// reads the same in Recent as in Suggestions.
-    private static func monogram(for name: String) -> String {
-        SearchResultDisplayModel.monogram(displayName: name, handle: name)
     }
 
     /// This row as the shared person cell renders it.

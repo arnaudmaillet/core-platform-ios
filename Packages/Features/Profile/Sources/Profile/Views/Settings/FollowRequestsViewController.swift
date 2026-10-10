@@ -77,7 +77,7 @@ final class FollowRequestsViewController: UIViewController {
             cell.configure(with: PersonRowContent(
                 displayName: request.displayName.isEmpty ? request.handle : request.displayName,
                 handle: "@\(request.handle)",
-                monogram: FollowRequestsViewModel.monogram(for: request)
+                monogram: MonogramAvatarView.monogram(name: request.displayName, handle: request.handle)
             ))
             cell.accessibilityHint = "Confirm or delete this follow request."
             cell.setAvatarImage(nil)

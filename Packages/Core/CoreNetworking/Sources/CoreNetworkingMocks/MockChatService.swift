@@ -269,7 +269,7 @@ public final class MockChatService: @unchecked Sendable {
     /// feature looks broken when it is the data that is silent. Three
     /// conversations therefore arrive a few minutes into the future, which
     /// covers the seconds between launch and first render whatever the
-    /// simulator is doing, and renders as "now" (`relativeShort` clamps a
+    /// simulator is doing, and renders as "now" (`RelativeAgeFormatter` clamps a
     /// future date rather than counting backwards).
     private static let justArrived: Int64 = -5
 

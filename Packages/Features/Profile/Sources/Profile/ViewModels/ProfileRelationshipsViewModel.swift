@@ -566,8 +566,15 @@ public final class ProfileRelationshipsViewModel {
 
     /// Initials for the identity disc: first letters of the display name's
     /// first two words, falling back to the handle.
+    ///
+    /// ⚠️ Deliberately NOT `MonogramAvatarView.monogram` (#811): a handle
+    /// here also splits on "." and "_", so "lena_klein" reads "LK" (pinned by
+    /// `monogramTakesTwoInitialsFromWhicheverNameExists`). What it does share
+    /// with the canonical rule is that a handle's "@" is never an initial.
     private static func monogram(for relation: ProfileRelation) -> String {
-        let source = relation.displayName.isEmpty ? relation.handle : relation.displayName
+        let source = relation.displayName.isEmpty
+            ? relation.handle.trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
+            : relation.displayName
         let initials = source
             .split(whereSeparator: { $0 == " " || $0 == "." || $0 == "_" })
             .prefix(2)

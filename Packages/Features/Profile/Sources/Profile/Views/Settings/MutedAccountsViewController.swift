@@ -65,7 +65,7 @@ final class MutedAccountsViewController: UIViewController {
             cell.configure(with: PersonRowContent(
                 displayName: profile.displayName.isEmpty ? profile.handle : profile.displayName,
                 handle: MutedAccountsViewModel.detail(for: profile),
-                monogram: MutedAccountsViewModel.monogram(for: profile)
+                monogram: MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
             ))
             cell.setAvatarImage(nil)
             guard let url = profile.avatarURL, let pipeline = self?.imagePipeline else { return }

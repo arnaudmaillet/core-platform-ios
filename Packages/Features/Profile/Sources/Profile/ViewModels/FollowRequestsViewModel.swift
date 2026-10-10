@@ -47,11 +47,4 @@ final class FollowRequestsViewModel {
             phase = .loaded(current.filter { $0.id != request.id })
         }
     }
-
-    /// The row's initials: display name first, the handle when there is none.
-    static func monogram(for request: FollowRequest) -> String {
-        let source = request.displayName.trimmingCharacters(in: .whitespaces).isEmpty ? request.handle : request.displayName
-        let initials: [String] = source.split(separator: " ").prefix(2).compactMap { word in word.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
-    }
 }

@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import PostGrid
 import Foundation
@@ -206,14 +207,11 @@ public struct FeedDisplayModelBuilder: Sendable {
     /// week ("28 May", see `PostMetadata.compactAge`) and this one never stops
     /// counting days — both are right for their surface, and a seed built with
     /// the wrong one visibly rewrites itself the moment the real entry lands.
+    ///
+    /// The shared ladder (#811) with the week rung switched off: the other
+    /// short ages roll 7 days up to "1w", this one keeps saying "7d", "52d".
     static func relativeTime(from date: Date, to now: Date) -> String {
-        let seconds = max(0, now.timeIntervalSince(date))
-        switch seconds {
-        case ..<60: return "now"
-        case ..<3600: return "\(Int(seconds / 60))m"
-        case ..<86_400: return "\(Int(seconds / 3600))h"
-        default: return "\(Int(seconds / 86_400))d"
-        }
+        RelativeAgeFormatter.short(from: date, to: now, rollsUpToWeeks: false)
     }
 
     /// The HUMAN-READABLE age for the engaged info card ("5 minutes",
