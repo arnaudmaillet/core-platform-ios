@@ -73,9 +73,13 @@ struct MapDonorPlayerCarriageTests {
         func playableURL(for url: URL) async throws -> URL { url }
     }
 
+    /// A coordinator the map has told it is on screen — every test here is
+    /// about what a VISIBLE map does (it is not visible at birth).
     private func makeCoordinator() -> (MapVideoPlaybackCoordinator, VideoPlaybackController) {
         let pool = VideoPlaybackController(source: SilentSource(), poolSize: 4, capacity: 4)
-        return (MapVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3), pool)
+        let coordinator = MapVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        coordinator.setSurfaceVisible(true)
+        return (coordinator, pool)
     }
 
     @Test func aReconcileDuringAFlightLeavesTheDonorPlaying() {
@@ -131,5 +135,40 @@ struct MapDonorPlayerCarriageTests {
         // Nothing chosen any more: the sweep must now be free to stop it.
         coordinator.update(candidates: [])
         #expect(donor.ended == 1, "a stale exemption kept a pin playing off-screen")
+    }
+
+    /// ⚠️ A MAP NOBODY HAS SHOWN PLAYS NOTHING.
+    ///
+    /// `update` runs on every annotation add, so a map built before it is on
+    /// screen is asked to play long before `viewWillAppear` — and with the old
+    /// `true` default it did, on players the rest of the app shares.
+    @Test func aMapNeverShownPlaysNothing() {
+        let pool = VideoPlaybackController(source: SilentSource(), poolSize: 4, capacity: 4)
+        let coordinator = MapVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        let pin = SpyHost()
+        let id = PostID(rawValue: "post-pin")
+
+        coordinator.update(candidates: [
+            MapVideoPlaybackCoordinator.Candidate(id: id, url: URL(string: "mock://video/1")!, host: pin)
+        ])
+
+        #expect(pin.began == 0, "a map that was only constructed started a preview")
+    }
+
+    /// The witness: told it is visible, the same candidate plays. A gate that
+    /// never opened would pass the test above on its own.
+    @Test func theFirstAppearanceStartsWhatTheMapAlreadyHolds() {
+        let pool = VideoPlaybackController(source: SilentSource(), poolSize: 4, capacity: 4)
+        let coordinator = MapVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        let pin = SpyHost()
+        let candidate = MapVideoPlaybackCoordinator.Candidate(
+            id: PostID(rawValue: "post-pin"), url: URL(string: "mock://video/1")!, host: pin
+        )
+        coordinator.update(candidates: [candidate])
+
+        coordinator.setSurfaceVisible(true)
+        coordinator.update(candidates: [candidate])
+
+        #expect(pin.began == 1)
     }
 }
