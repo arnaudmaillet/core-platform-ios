@@ -14,6 +14,12 @@ import Foundation
 ///
 /// Only the LAST push is remembered. A route to another id supersedes it, as
 /// a newer tap supersedes an older one.
+///
+/// A screen can answer to more than the key it was pushed under (#800): a
+/// profile pushed for `@ada` learns Ada's id once it resolves, and one pushed
+/// by id learns her handle once it loads. `screenKeys` asks the screen, so a
+/// notification for Ada over her `@ada` profile — or an `@ada` link over her
+/// profile opened by id — is a repeat too.
 public struct RepeatPushFilter<ID: Hashable> {
     private var last: (id: ID, screen: WeakScreen)?
     /// `last` waits for a running transition to end: not on the stack yet.
@@ -22,11 +28,16 @@ public struct RepeatPushFilter<ID: Hashable> {
     public init() {}
 
     /// Whether a route to `id` is the last push again: its screen is still
-    /// `topScreen`, or its push still waits for rest.
-    public func isRepeat(_ id: ID, topScreen: AnyObject?) -> Bool {
-        guard let last, last.id == id else { return false }
+    /// `topScreen`, or its push still waits for rest. `screenKeys` names the
+    /// other keys the last pushed screen answers to by now.
+    public func isRepeat(
+        _ id: ID, topScreen: AnyObject?, screenKeys: (AnyObject) -> Set<ID> = { _ in [] }
+    ) -> Bool {
+        guard let last else { return false }
+        let screen = last.screen.value
+        guard last.id == id || screen.map({ screenKeys($0).contains(id) }) == true else { return false }
         if isAwaitingRest { return true }
-        guard let screen = last.screen.value, let topScreen else { return false }
+        guard let screen, let topScreen else { return false }
         return screen === topScreen
     }
 

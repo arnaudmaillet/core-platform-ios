@@ -10,7 +10,7 @@ import PostGrid
 import ShareSheet
 import UIKit
 
-final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
+final class ProfileViewController: UIViewController, HeaderAccessoryHosting, ProfileRouteAnswering {
     private let viewModel: ProfileViewModel
     /// Non-nil only for the signed-in viewer's own profile (the Profile tab);
     /// nil for a profile pushed via routing, which shows no account actions.
@@ -113,7 +113,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private let pullIndicator = HeroPullToRefreshView()
     /// The band the spinner centres in, under the navigation bar.
     private static let pullIndicatorHeight: CGFloat = 44
-    /// A failed first load, with its way out (#797).
+    /// A failed first load, with its way out (#797), or a handle or link
+    /// that names no one (#800).
     private let statusView = EmptyStateView()
     /// First-load guarantee: while the skeleton screen is up, the scroll
     /// content must fill the viewport, so the gallery's shimmer rows reach
@@ -374,14 +375,28 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             HeroScreenCost.measure("landing.relationship") {
                 self.followButtonState = state
                 self.headerView.configureAction(state)
-                // The relationship usually resolves while the push/present is
-                // still animating; bind the bar inside the transition so the
-                // toolbar composes during the animation, not after it.
-                self.alongsideTransition { $0.applyNavigationState() }
+                // A bell that has to GO (a handle that turned out to be the
+                // viewer, #800) leaves at rest and unanimated: removing a bar
+                // item mid-push pops it on device (#756).
+                if self.isShowingMuteBell, !self.showsMuteBell {
+                    self.applyNavigationStateAtRest()
+                } else {
+                    // The relationship usually resolves while the push/present
+                    // is still animating; bind the bar inside the transition so
+                    // the toolbar composes during the animation, not after it.
+                    self.alongsideTransition { $0.applyNavigationState() }
+                }
                 self.noteLandingMilestone()
             }
         }
-        viewModel.onRelationshipSettled = { [weak self] in self?.noteLandingMilestone() }
+        viewModel.onRelationshipSettled = { [weak self] in
+            guard let self else { return }
+            // The button moves before the read counts as settled, so the
+            // bar it recomposed could still presume someone else: a bell the
+            // answer rules out (the viewer's own handle, #800) goes now.
+            if self.isShowingMuteBell, !self.showsMuteBell { self.applyNavigationStateAtRest() }
+            self.noteLandingMilestone()
+        }
         headerView.onPicturesSettled = { [weak self] in self?.noteLandingMilestone() }
         viewModel.onMapPinButtonChange = { [weak self] _ in
             HeroScreenCost.measure("landing.mapPin") {
@@ -1534,11 +1549,26 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// push land unanimated at its end on device (#756). Someone else's
     /// profile — what a routed profile that is not the viewer's own is —
     /// wears the bell from the first frame; the relationship only confirms it.
+    ///
+    /// A handle or link route (#800) wears it from frame 0 too, DISABLED until
+    /// the lookup names someone else (`isMuteBellEnabled`); a lookup that
+    /// names no one, or the viewer, takes it away once the push has settled
+    /// (`applyNavigationStateAtRest`).
     private var showsMuteBell: Bool {
+        guard !viewModel.namesNoOne else { return false }
         let isOtherProfile = viewModel.canModerate
             || (presumesOtherProfile && !viewModel.isRelationshipSettled)
         return viewModel.canMute && isOtherProfile && MemberGates.gate(from: self)?.isMember != false
     }
+
+    /// Whether the bell can be used yet: a handle or link route has no one to
+    /// mute until the relationship read says the lookup found someone else.
+    private var isMuteBellEnabled: Bool {
+        !viewModel.wasOpenedByReference || viewModel.canModerate
+    }
+
+    /// The keys the router's repeat filter asks about (#800).
+    var profileRouteKeys: Set<ProfileRouteKey> { viewModel.profileRouteKeys }
 
     /// A profile reached by id that is not the viewer's own, as far as frame 0
     /// can tell: no self stub, no Edit wiring.
@@ -2136,6 +2166,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         updateActionBarItem(followButtonState)
     }
 
+    /// Whether the bar wears the bell right now.
+    private var isShowingMuteBell: Bool {
+        navigationItem.rightBarButtonItems?.contains { $0 === muteBellItem } == true
+    }
+
+    /// Recomposes the bar once no transition runs, without animation — for an
+    /// item that has to leave (#800, #756).
+    private func applyNavigationStateAtRest() {
+        let apply: @MainActor () -> Void = { [weak self] in
+            UIView.performWithoutAnimation { self?.applyNavigationState() }
+        }
+        if let navigationController { navigationController.whenAtRest(apply) } else { apply() }
+    }
+
     /// Runs a navigation-bar mutation eagerly during an active transition:
     /// applied inside the transition coordinator's animation block it tracks
     /// the push/present frame-by-frame instead of snapping in after the
@@ -2233,6 +2277,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // The mute bell (#689), someone else's profile only: `[0]` is the
         // corner, as the gear is on your own — `[bell][coins]`.
         if showsMuteBell {
+            muteBellItem.isEnabled = isMuteBellEnabled
             items.append(muteBellItem)
             if trailingAccessoryItem != nil { items.append(muteBellSpacer) }
         }
@@ -2978,6 +3023,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // snapshot arrives. Hydration is a pure cross-fade over the very
             // frames the content will occupy — nothing can shift.
             statusView.isHidden = true
+            headerView.isHidden = false
             galleryPager.isHidden = false
             // The HEADER is held on a switch rather than redacted: its bones'
             // shimmer sweeps left to right, and over a fast load that sweep
@@ -2997,6 +3043,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         case .content(let model):
             pullIndicator.endRefreshing()
             statusView.isHidden = true
+            headerView.isHidden = false
             galleryPager.isHidden = false
             // Content owns its height again; the release rides the same
             // layout pass as the (dissolve-masked) gallery height snap.
@@ -3026,6 +3073,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false
             headerView.setRedacted(false)
+            // Nothing ever loaded (an offline handle tap, #800): an empty
+            // badge, counters and Message button would show around the block.
+            headerView.isHidden = viewModel.profile == nil
             // ⚠️ A WAY OUT (#797): the pull lives on the gallery this hides,
             // so "Pull to retry" could not be done.
             statusView.configure(
@@ -3036,6 +3086,23 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 }
             )
             statusView.isHidden = false
+
+        case .notFound(let message, let detail):
+            // The same block as a failure, without Try Again: an answer, not
+            // an error (#800). The header goes too — with no profile its
+            // verified badge, counter labels and Message button showed
+            // through around the block, a page for no one.
+            pullIndicator.endRefreshing()
+            galleryPager.isHidden = true
+            skeletonViewportFill?.isActive = false
+            headerView.setRedacted(false)
+            headerView.isHidden = true
+            statusView.configure(
+                symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail
+            )
+            statusView.isHidden = false
+            // The bell worn since frame 0 has no one to mute.
+            if isShowingMuteBell { applyNavigationStateAtRest() }
         }
     }
 }
@@ -3053,7 +3120,7 @@ extension ProfileViewController {
     var isSettled: Bool {
         switch renderedPhase {
         case .loading: return false
-        case .failed: return true
+        case .failed, .notFound: return true
         case .content:
             let relationshipKnown = followButtonState != .hidden || viewModel.isRelationshipSettled
             return relationshipKnown && viewModel.isMapPinSettled
@@ -3130,6 +3197,7 @@ extension ProfileViewController {
         case .loading: "loading"
         case .content: "content"
         case .failed: "failed"
+        case .notFound: "notFound"
         }
         let state = "phase=\(phase) relationship=\(followButtonState != .hidden || viewModel.isRelationshipSettled) "
             + "pin=\(viewModel.isMapPinSettled) "

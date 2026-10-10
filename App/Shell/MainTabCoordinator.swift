@@ -479,8 +479,8 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     }
 
     /// The profile a tapped `@handle` names, by the same road as a
-    /// `wynn.cn/@handle` link: `RouteResolver` looks the handle up, pushes the
-    /// profile like an author's, and says so when it names no one.
+    /// `wynn.cn/@handle` link: `RouteResolver` pushes the profile at once, and
+    /// the profile looks the handle up and says so when it names no one (#800).
     private func openMention(_ handle: String, from source: UIView) {
         container.router.route(to: .profileHandle(handle))
     }

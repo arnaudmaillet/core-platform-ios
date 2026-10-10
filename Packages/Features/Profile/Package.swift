@@ -59,6 +59,9 @@ let package = Package(
             name: "ProfileTests",
             dependencies: [
                 "Profile",
+                // `ProfileReference` / `ProfileLookup`, for the handle and
+                // share-token lookup suite (#800).
+                "ProfileInterface",
                 "ShareSheet",
                 "CoreNavigation",
                 "CoreStorage",
