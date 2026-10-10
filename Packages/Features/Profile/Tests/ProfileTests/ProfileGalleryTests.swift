@@ -145,10 +145,10 @@ struct GalleryFilterTests {
     /// A FILTERED page says why it is narrower than the profile — that is the
     /// thing the tab itself cannot know.
     @Test func emptyMessagesNameTheCombination() {
-        #expect(ProfileViewModel.emptyMessage(
+        #expect(ProfileGalleryStore.emptyMessage(
             for: GalleryFilter(format: .media, source: .reposts)
         ) == "No media in reposts yet.")
-        #expect(ProfileViewModel.emptyMessage(
+        #expect(ProfileGalleryStore.emptyMessage(
             for: GalleryFilter(format: .short, source: .tagged)
         ) == "No short posts in tagged posts yet.")
     }
@@ -159,7 +159,7 @@ struct GalleryFilterTests {
     /// underneath it would be the same fact twice, in worse words.
     @Test(arguments: [GalleryFilter.Format.activity, .media, .short])
     func anUnfilteredPageLeavesTheTabToSpeak(format: GalleryFilter.Format) {
-        #expect(ProfileViewModel.emptyMessage(
+        #expect(ProfileGalleryStore.emptyMessage(
             for: GalleryFilter(format: format, source: .all)
         ).isEmpty)
     }

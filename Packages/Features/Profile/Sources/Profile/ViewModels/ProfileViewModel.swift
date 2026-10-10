@@ -234,10 +234,6 @@ public final class ProfileViewModel {
     /// Read by the gallery's rows too, so a card's save control and the
     /// Saved tab share one pile.
     let bookmarks: PostBookmarkStore?
-    /// The saved pile's tiles, once hydrated. Held because the pile can change
-    /// while the screen is up (a post unsaved from the feed underneath) and the
-    /// snapshot is rebuilt from parts.
-    private var savedPage: GalleryPageState = .empty(message: "Nothing saved yet.")
     /// `var` for one transition only: a `.lookup` becomes the `.profile` it
     /// resolves to.
     private var source: Source
@@ -364,41 +360,16 @@ public final class ProfileViewModel {
 
     // MARK: Gallery state
 
-    public private(set) var galleryFilter = GalleryFilter()
-    /// The page on screen's source (`gallerySource`), on every profile (#772).
-    private var pageSource: GalleryFilter.Source = .posts
-    /// The authored fetch (Posts + Reposts split it) and the tagged fetch,
-    /// cached so selector/kind changes recompute locally without round trips.
-    /// nil = in flight (page shows loading); a failure records instead.
-    private var authoredCache: [GalleryPost]?
-    private var taggedCache: [GalleryPost]?
-    private var authoredFailed = false
-    private var taggedFailed = false
-    /// Why each first page failed, kept beside the flags (#794): the fetches
-    /// used to be `try?`, so a failed page could only say "Couldn't load",
-    /// offline or not. Nil when it did not come from the network.
-    private var authoredFailure: NetworkFailure?
-    private var taggedFailure: NetworkFailure?
+    /// The corpora, their paging and failures, and the pages built from them
+    /// (#846). This view model fetches and publishes; the store decides.
+    private let galleryStore = ProfileGalleryStore()
+    public var galleryFilter: GalleryFilter { galleryStore.filter }
     private var galleryLoad: Task<Void, Never>?
-    /// Where each corpus's next page starts; nil when it has no more, or
-    /// before its first page answered (#634).
-    private var authoredToken: String?
-    private var taggedToken: String?
-    /// Pages beyond the first are loaded: a revalidation merges its first
-    /// page over them rather than cutting the corpus back to one page.
-    private var authoredHasLaterPages = false
-    private var taggedHasLaterPages = false
     /// The next page(s) on their way — one round at a time.
     private var galleryMoreLoad: Task<Void, Never>?
     /// Pages walked through in a row that add nothing to the tab on screen
     /// (Short over a run of photos) before waiting for the next approach.
     static let maxUnchangedGalleryPages = 5
-    /// The last next-page round failed: the grid stops asking on its own
-    /// (an empty tab would otherwise retry in a tight loop) until the viewer
-    /// approaches the end again, or pulls to refresh.
-    private var galleryMorePausedByFailure = false
-    /// Why that round failed (#794), for the tab it leaves empty.
-    private var galleryMoreFailure: NetworkFailure?
 
     public init(
         repository: any ProfileProviding,
@@ -435,7 +406,7 @@ public final class ProfileViewModel {
         // post. A stored Gallery or Short would narrow the list to media or
         // text with no page to say so.
         if let stored = galleryPreferences?.filter {
-            galleryFilter = GalleryFilter(format: .activity, source: stored.source)
+            galleryStore.filter = GalleryFilter(format: .activity, source: stored.source)
         }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.followGraphDidChange(change)
@@ -1077,7 +1048,7 @@ public final class ProfileViewModel {
             do {
                 try await trash.deletePost(postID, author: profile.id)
                 guard let self else { return }
-                self.authoredCache?.removeAll { $0.id == postID }
+                self.galleryStore.removeAuthoredPost(postID)
                 self.renderGallery()
                 self.onActionResult?(.postDeleted)
             } catch {
@@ -1117,8 +1088,8 @@ public final class ProfileViewModel {
     /// (pages are always computed): the view pages to it, empty messages
     /// name it, and the choice persists globally for the next profile.
     public func setGalleryFormat(_ format: GalleryFilter.Format) {
-        galleryFilter.format = format
-        galleryPreferences?.filter = galleryFilter
+        galleryStore.filter.format = format
+        galleryPreferences?.filter = galleryStore.filter
         // A tab the loaded pages leave empty fills itself as it arrives.
         fillEmptyGalleryTab()
     }
@@ -1134,8 +1105,8 @@ public final class ProfileViewModel {
         case .tagged: .tagged
         default: .posts
         }
-        guard source != pageSource else { return }
-        pageSource = source
+        guard source != galleryStore.pageSource else { return }
+        galleryStore.pageSource = source
         // The media "View all" shows, and an empty page fills itself.
         renderGallery()
     }
@@ -1146,7 +1117,7 @@ public final class ProfileViewModel {
     /// #772): Posts (its own posts, reposts excluded), Reposts, Tagged. So it
     /// always opens on Posts. The stored filter's source — the top menu your
     /// own profile had — is read by nothing any more.
-    var gallerySource: GalleryFilter.Source { pageSource }
+    var gallerySource: GalleryFilter.Source { galleryStore.pageSource }
 
     /// Fetches both corpora concurrently once the profile is known (the pager
     /// shows neighbors mid-swipe, so tagged can't be lazy). Called from the
@@ -1154,27 +1125,14 @@ public final class ProfileViewModel {
     private func loadGallery(for profile: UserProfile, reset: Bool) {
         guard let gallery else { return }
         if reset {
-            // A reset lands on Posts — the only page shown while the sources
-            // reload (#742) — so the source goes back with it (#772).
-            pageSource = .posts
             galleryLoad?.cancel()
             galleryLoad = nil
             galleryMoreLoad?.cancel()
             galleryMoreLoad = nil
-            authoredCache = nil
-            taggedCache = nil
-            authoredFailed = false
-            taggedFailed = false
-            authoredFailure = nil
-            taggedFailure = nil
-            authoredToken = nil
-            taggedToken = nil
-            authoredHasLaterPages = false
-            taggedHasLaterPages = false
+            galleryStore.reset()
         }
         guard galleryLoad == nil else { return }
-        galleryMorePausedByFailure = false
-        galleryMoreFailure = nil
+        galleryStore.resumePaging()
         renderGallery() // all pages report loading — or, revalidating, what they hold
         galleryLoad = Task { [weak self] in
             async let authoredFetch = gallery.authoredPage(for: profile.id, after: nil)
@@ -1194,24 +1152,10 @@ public final class ProfileViewModel {
             }
             guard let self, !Task.isCancelled else { return }
 
-            // A revalidation over pages beyond the first merges into them —
-            // and, failing, leaves them as they are rather than blanking them.
-            if self.authoredHasLaterPages, let shown = self.authoredCache {
-                if let authored { self.authoredCache = Self.mergingGallery(firstPage: authored.posts, over: shown) }
-            } else {
-                self.authoredCache = authored?.posts
-                self.authoredFailed = authored == nil
-                self.authoredFailure = authoredFailure
-                self.authoredToken = authored?.nextPageToken
-            }
-            if self.taggedHasLaterPages, let shown = self.taggedCache {
-                if let tagged { self.taggedCache = Self.mergingGallery(firstPage: tagged.posts, over: shown) }
-            } else {
-                self.taggedCache = tagged?.posts
-                self.taggedFailed = tagged == nil
-                self.taggedFailure = taggedFailure
-                self.taggedToken = tagged?.nextPageToken
-            }
+            self.galleryStore.applyFirstPages(
+                authored: authored, authoredFailure: authoredFailure,
+                tagged: tagged, taggedFailure: taggedFailure
+            )
             self.galleryLoad = nil
             self.renderGallery()
         }
@@ -1236,16 +1180,16 @@ public final class ProfileViewModel {
         after id: PostID, in format: GalleryFilter.Format = .activity
     ) async -> [PostID]? {
         for _ in 0..<Self.maxUnchangedGalleryPages {
-            let tiles = galleryTiles(format)
+            let tiles = galleryStore.tiles(format)
             guard let index = tiles.firstIndex(where: { $0.id == id }) else { return nil }
             let following = tiles[(index + 1)...]
             if !following.isEmpty { return following.prefix(Self.continuationWindow).map(\.id) }
-            guard galleryTokensToFollow() != (nil, nil) else { return nil }
+            guard !galleryStore.isComplete() else { return nil }
             if galleryMoreLoad == nil { loadMoreGallery() }
             // Not started: the first load is still out.
             guard let round = galleryMoreLoad else { return [] }
             await round.value
-            if galleryMorePausedByFailure { return [] }
+            if galleryStore.isPausedByFailure { return [] }
         }
         return []
     }
@@ -1254,8 +1198,7 @@ public final class ProfileViewModel {
     static let continuationWindow = 12
 
     public func loadMoreGallery() {
-        galleryMorePausedByFailure = false
-        galleryMoreFailure = nil
+        galleryStore.resumePaging()
         startGalleryPages()
     }
 
@@ -1263,36 +1206,24 @@ public final class ProfileViewModel {
     /// on screen and ask for more: it asks here — unless the last round
     /// failed, which waits for the viewer.
     private func fillEmptyGalleryTab() {
-        guard !galleryMorePausedByFailure, galleryTiles(galleryFilter.format).isEmpty else { return }
+        guard !galleryStore.isPausedByFailure, galleryStore.tiles(galleryFilter.format).isEmpty else { return }
         startGalleryPages()
     }
 
     private func startGalleryPages() {
         guard let gallery, let profile, galleryLoad == nil, galleryMoreLoad == nil,
-              galleryTokensToFollow() != (nil, nil)
+              !galleryStore.isComplete()
         else { return }
         galleryMoreLoad = Task { [weak self] in
             await self?.appendGalleryPages(from: gallery, for: profile)
         }
     }
 
-    /// The tokens the active source reads through: authored for Posts and
-    /// Reposts, tagged for Tagged, both for All.
-    private func galleryTokensToFollow(
-        _ source: GalleryFilter.Source? = nil
-    ) -> (authored: String?, tagged: String?) {
-        let source = source ?? gallerySource
-        return (
-            source == .tagged ? nil : authoredToken,
-            source == .all || source == .tagged ? taggedToken : nil
-        )
-    }
-
     private func appendGalleryPages(from gallery: any ProfileGalleryProviding, for profile: UserProfile) async {
         for _ in 0..<Self.maxUnchangedGalleryPages {
-            let tokens = galleryTokensToFollow()
+            let tokens = galleryStore.tokensToFollow()
             guard tokens != (nil, nil) else { break }
-            let before = galleryTiles(galleryFilter.format).count
+            let before = galleryStore.tiles(galleryFilter.format).count
             async let authoredFetch = Self.page(of: tokens.authored) { token in
                 try await gallery.authoredPage(for: profile.id, after: token)
             }
@@ -1303,50 +1234,11 @@ public final class ProfileViewModel {
             // A reset since — another profile, a pull that started over —
             // owns the grid now, and the slot with it.
             guard !Task.isCancelled, self.profile?.id == profile.id else { return }
-            var failed = false
-            var failure: NetworkFailure?
-            if let token = tokens.authored {
-                switch authored {
-                case .success(let page)?:
-                    if authoredToken == token {
-                        authoredToken = page.nextPageToken
-                        if let grown = Self.appending(page.posts, to: authoredCache) {
-                            authoredCache = grown
-                            authoredHasLaterPages = true
-                        }
-                    }
-                case .failure(let error)?:
-                    failed = true
-                    failure = NetworkFailure.of(error)
-                case nil:
-                    failed = true
-                }
-            }
-            if let token = tokens.tagged {
-                switch tagged {
-                case .success(let page)?:
-                    if taggedToken == token {
-                        taggedToken = page.nextPageToken
-                        if let grown = Self.appending(page.posts, to: taggedCache) {
-                            taggedCache = grown
-                            taggedHasLaterPages = true
-                        }
-                    }
-                case .failure(let error)?:
-                    failed = true
-                    failure = Self.likelierCause(failure, NetworkFailure.of(error))
-                case nil:
-                    failed = true
-                }
-            }
+            let failed = galleryStore.applyNextPages(tokens: tokens, authored: authored, tagged: tagged)
             // The tab on screen gained tiles: they come on screen and ask
             // again. It gained none (Short over a run of photos): no tile will
             // ask, so the next page is asked now — within a bound.
-            if failed {
-                galleryMorePausedByFailure = true
-                galleryMoreFailure = failure
-            }
-            if failed || galleryTiles(galleryFilter.format).count > before { break }
+            if failed || galleryStore.tiles(galleryFilter.format).count > before { break }
         }
         // ⚠️ THE SLOT FREES BEFORE THE TILES RENDER: a page that lands wholly
         // on screen asks for the next one while it renders (#596).
@@ -1368,118 +1260,12 @@ public final class ProfileViewModel {
         }
     }
 
-    /// Of two fetches' failures, the one worth naming: offline first (the
-    /// one cause the viewer can fix), then a timeout, then either.
-    private static func likelierCause(_ first: NetworkFailure?, _ second: NetworkFailure?) -> NetworkFailure? {
-        if first == .offline || second == .offline { return .offline }
-        if first == .timeout || second == .timeout { return .timeout }
-        return first ?? second
-    }
-
-    /// A failed gallery page's words (#794): "You’re offline…" or "That took
-    /// too long…" when that is why; otherwise the pull it offers, since the
-    /// gallery is what the pull refreshes.
-    static func galleryFailureMessage(_ failure: NetworkFailure?) -> String {
-        FailureCopy.message(for: failure, fallback: "Couldn't load. Pull to retry.")
-    }
-
-    /// `shown` with the page's new posts below it, or nil when it brings
-    /// none — a post can sit on both sides of a page boundary.
-    private static func appending(_ page: [GalleryPost], to shown: [GalleryPost]?) -> [GalleryPost]? {
-        let known = Set((shown ?? []).map(\.id))
-        let fresh = page.filter { !known.contains($0.id) }
-        return fresh.isEmpty ? nil : (shown ?? []) + fresh
-    }
-
-    /// A revalidated first page over a corpus that runs past it: the page
-    /// replaces every post at least as recent as its oldest, and every older
-    /// post stays. Both corpora page newest first, so a post missing from the
-    /// fresh page either slid down (older: kept) or went away (newer:
-    /// dropped). Pure, for tests.
-    static func mergingGallery(firstPage: [GalleryPost], over shown: [GalleryPost]) -> [GalleryPost] {
-        guard let oldest = firstPage.map(\.publishedAtMS).min() else { return shown }
-        let fresh = Set(firstPage.map(\.id))
-        return firstPage + shown.filter { !fresh.contains($0.id) && $0.publishedAtMS < oldest }
-    }
-
-    /// The tiles a tab shows under the active source.
-    ///
-    /// ⚠️ ALL STOPS AT THE FRONTIER. It merges two corpora that page on their
-    /// own; a post older than what one of them has reached may still be
-    /// followed by newer ones from it, and showing it now would have the next
-    /// page land ABOVE tiles already on screen. So All shows only down to the
-    /// later of the unfinished corpora's oldest posts — where both are known
-    /// — and every page from then on only adds below.
-    private func galleryTiles(
-        _ format: GalleryFilter.Format, source: GalleryFilter.Source? = nil
-    ) -> [GalleryPost] {
-        let source = source ?? gallerySource
-        let filter = GalleryFilter(format: format, source: source)
-        let tiles = filter.tiles(authored: authoredCache ?? [], tagged: taggedCache ?? [])
-        guard source == .all, let frontier = allFrontier else { return tiles }
-        return tiles.filter { $0.publishedAtMS >= frontier }
-    }
-
-    /// The later of the unfinished corpora's oldest loaded posts; nil when
-    /// neither has more to load.
-    private var allFrontier: Int64? {
-        [(authoredToken, authoredCache), (taggedToken, taggedCache)]
-            .compactMap { token, cache in token == nil ? nil : cache?.map(\.publishedAtMS).min() }
-            .max()
-    }
-
     /// Recomputes the snapshot — Posts, Reposts, Tagged, the media of the page
     /// on screen, Saved — from the caches. Every data landing and page change
     /// funnels here.
     private func renderGallery() {
         guard gallery != nil else { return }
-
-        // Which fetches a source depends on: All needs both, Tagged its own,
-        // Posts/Reposts the authored one. A page is loading/failed only when
-        // a fetch it actually reads is.
-        func page(
-            _ format: GalleryFilter.Format, _ source: GalleryFilter.Source, emptyMessage: String? = nil
-        ) -> GalleryPageState {
-            let readsAuthored = source != .tagged
-            let readsTagged = source == .all || source == .tagged
-            if (readsAuthored && authoredFailed) || (readsTagged && taggedFailed) {
-                let failure = Self.likelierCause(
-                    readsAuthored && authoredFailed ? authoredFailure : nil,
-                    readsTagged && taggedFailed ? taggedFailure : nil
-                )
-                return .failed(message: Self.galleryFailureMessage(failure))
-            }
-            if (readsAuthored && authoredCache == nil) || (readsTagged && taggedCache == nil) {
-                return .loading
-            }
-            let filter = GalleryFilter(format: format, source: source)
-            let tiles = galleryTiles(format, source: source)
-            guard tiles.isEmpty else { return .content(tiles) }
-            // Nothing YET is not nothing: with pages still to load, a tab
-            // that none of the loaded posts fill is still loading — or, its
-            // last page having failed, says so.
-            if galleryTokensToFollow(source) == (nil, nil) {
-                return .empty(message: emptyMessage ?? Self.emptyMessage(for: filter))
-            }
-            return galleryMorePausedByFailure
-                ? .failed(message: Self.galleryFailureMessage(galleryMoreFailure))
-                : .loading
-        }
-
-        // Three pages, three sources (#696), on every profile since #772; the
-        // media "View all" pushes is the page on screen's. The empty pages let
-        // their tab speak (`ProfileTab.emptyState`), Posts saying what it
-        // holds here. Saved is your own profile's alone.
-        let snapshot = GallerySnapshot(
-            activity: page(.activity, .posts, emptyMessage: "Posts will appear here."),
-            media: page(.media, pageSource),
-            isComplete: galleryTokensToFollow(.posts) == (nil, nil),
-            saved: isOwnProfile ? savedPage : .empty(message: ""),
-            reposts: page(.activity, .reposts, emptyMessage: ""),
-            tagged: page(.activity, .tagged, emptyMessage: ""),
-            repostsComplete: galleryTokensToFollow(.reposts) == (nil, nil),
-            taggedComplete: galleryTokensToFollow(.tagged) == (nil, nil)
-        )
+        let snapshot = galleryStore.snapshot(isOwnProfile: isOwnProfile)
         fillEmptyGalleryTab()
         // The same pages again is no news: a revalidation that agrees with
         // the screen must cost the screen nothing.
@@ -1509,7 +1295,7 @@ public final class ProfileViewModel {
         guard let bookmarks, let gallery else { return }
         let ids = bookmarks.savedPostIDs
         guard !ids.isEmpty else {
-            savedPage = .empty(message: "")
+            galleryStore.saved = .empty(message: "")
             renderGallery()
             return
         }
@@ -1518,51 +1304,18 @@ public final class ProfileViewModel {
         // `.loading` over shown tiles reloaded the grid as bones mid-dismissal:
         // the card had no tile to land on and collapsed to the fallback rect.
         // A page already showing its tiles keeps them while the refresh runs.
-        if case .content = savedPage {} else {
-            savedPage = .loading
+        if case .content = galleryStore.saved {} else {
+            galleryStore.saved = .loading
             renderGallery()
         }
         Task { [weak self] in
             let tiles = (try? await gallery.posts(ids: ids)) ?? []
             guard let self else { return }
-            savedPage = tiles.isEmpty
+            galleryStore.saved = tiles.isEmpty
                 ? .empty(message: "Nothing saved yet.")
                 : .content(tiles)
             renderGallery()
         }
-    }
-
-    /// Names the empty combination so the blank page reads as an answer.
-    ///
-    /// ⚠️ Empty means "nothing to add", not "nothing to say". Unfiltered, this
-    /// page is empty because the profile has nothing of that kind — which the
-    /// TAB already says better than a generated sentence can, with a glyph and
-    /// a headline. It is the FILTER that this knows and the tab cannot: "no
-    /// media in reposts" explains why the page is narrower than the profile,
-    /// and that is worth overriding the tab's own line for.
-    nonisolated static func emptyMessage(for filter: GalleryFilter) -> String {
-        guard filter.source != .all else { return "" }
-        // Posts (#631) is every kind, so the source alone names what is
-        // missing: "No reposts yet", not "No activity in reposts yet".
-        if filter.format == .activity {
-            return switch filter.source {
-            case .all, .posts: "No posts yet."
-            case .reposts: "No reposts yet."
-            case .tagged: "No tagged posts yet."
-            }
-        }
-        let format = switch filter.format {
-        case .activity: "posts"
-        case .media: "media"
-        case .short: "short posts"
-        }
-        let source = switch filter.source {
-        case .all: ""
-        case .posts: " in posts"
-        case .reposts: " in reposts"
-        case .tagged: " in tagged posts"
-        }
-        return "No \(format)\(source) yet."
     }
 
     // MARK: - Loading

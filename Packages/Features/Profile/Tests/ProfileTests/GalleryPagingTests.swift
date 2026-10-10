@@ -300,7 +300,7 @@ struct GalleryPagingTests {
         let shown = [post("gone", at: 65), post("a", at: 60), post("b", at: 50), post("c", at: 40)]
         let fresh = [post("new", at: 70), post("a", at: 60)]
 
-        let merged = ProfileViewModel.mergingGallery(firstPage: fresh, over: shown)
+        let merged = ProfileGalleryStore.mergingGallery(firstPage: fresh, over: shown)
 
         #expect(merged.map(\.id.rawValue) == ["new", "a", "b", "c"])
     }
