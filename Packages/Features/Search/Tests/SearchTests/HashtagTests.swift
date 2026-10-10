@@ -28,6 +28,8 @@ private actor TagSearch: SearchProviding {
     }
 
     func setFailsNextPages(_ fails: Bool) { failsNextPages = fails }
+    func setFails(_ fails: Bool) { self.fails = fails }
+    func setTop(_ top: [PostSearchHit]) { self.top = top }
 
     func searchProfiles(matching query: String, sort: SearchSortOrder, limit: Int32) async throws -> [ProfileSearchResult] { [] }
     func suggestions(forPrefix prefix: String, limit: Int32) async throws -> [SearchSuggestion] { [] }
@@ -95,6 +97,45 @@ struct HashtagViewModelTests {
         let one = HashtagViewModel(tag: "travel", repository: TagSearch(recent: [hit("a")]))
         await one.load()
         #expect(one.countText == "1 post")
+    }
+
+    // MARK: Refresh (#798)
+
+    /// A failed tag's Try Again (and a pull) asks again, and lands the posts.
+    @Test func aFailedTagIsLoadedByItsTryAgain() async {
+        let search = TagSearch(top: [hit("a")], recent: [hit("a")], fails: true)
+        let viewModel = HashtagViewModel(tag: "travel", repository: search)
+        await viewModel.load()
+        #expect(viewModel.top == .failed(message: "Couldn\u{2019}t load #travel."))
+
+        await search.setFails(false)
+        await viewModel.refresh()
+
+        #expect(viewModel.top == .posts([PostID("a")]))
+        #expect(viewModel.recent == .posts([PostID("a")]))
+    }
+
+    /// A pull over posts keeps them on screen — never back to loading — and
+    /// keeps them when it fails; when it lands, the new first page replaces them.
+    @Test func aPullKeepsThePostsUntilTheNewPageReplacesThem() async {
+        let search = TagSearch(top: [hit("a"), hit("b")], recent: [hit("a")])
+        let viewModel = HashtagViewModel(tag: "travel", repository: search)
+        await viewModel.load()
+        var seen: [SearchPostSurfaceState] = []
+        viewModel.onChange = { seen.append(viewModel.top) }
+
+        await search.setFails(true)
+        await viewModel.refresh()
+        #expect(viewModel.top == .posts([PostID("a"), PostID("b")]))
+
+        await search.setFails(false)
+        await search.setTop([hit("c"), hit("a")])
+        await viewModel.refresh()
+
+        #expect(viewModel.top == .posts([PostID("c"), PostID("a")]))
+        #expect(!seen.contains(.loading))
+        #expect(!seen.contains { if case .failed = $0 { true } else { false } })
+        #expect(!viewModel.isLoadingMore(.top))
     }
 
     // MARK: Paging (#579)

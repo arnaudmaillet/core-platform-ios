@@ -392,6 +392,19 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // says nothing about what is on screen now.
             self?.warmedComments.removeAll()
         }
+        // A refresh that failed over content the viewer can still see (#798):
+        // the content stays, the toast says the refresh did not happen. On the
+        // NAVIGATION controller's view, because the pull may have come from a
+        // pushed list (Following, Friends, the gallery) covering this one. The
+        // refresh controls end on `onLoadSettled`, which follows.
+        viewModel.onRefreshFailed = { [weak self] in
+            guard let self else { return }
+            ToastView.present(
+                "Couldn't refresh",
+                symbol: "exclamationmark.triangle.fill",
+                in: navigationController?.view ?? view
+            )
+        }
         viewModel.onLoadSettled = { [weak self] in
             self?.page.endRefreshing()
             self?.discoverGallery?.endRefreshing()

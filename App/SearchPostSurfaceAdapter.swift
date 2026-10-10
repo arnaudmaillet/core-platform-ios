@@ -59,6 +59,11 @@ struct SearchPostSurfaceAdapter: SearchPostSurfaceProviding {
             set { surface.onNearEnd = newValue }
         }
 
+        var onRetry: (() -> Void)? {
+            get { surface.onRetry }
+            set { surface.onRetry = newValue }
+        }
+
         func setPaging(_ paging: Bool) { surface.setPaging(paging) }
 
         func setHasMore(_ hasMore: Bool) { surface.setHasMore(hasMore) }

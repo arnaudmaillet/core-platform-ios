@@ -120,6 +120,21 @@ public final class ForYouViewModel {
     /// refresh control on this rather than inferring it from a snapshot that
     /// may be identical to the last one.
     public var onLoadSettled: (() -> Void)?
+    /// Fires when a pull-to-refresh FAILED while content was already on
+    /// screen — the content stays, and the screen says the refresh did not
+    /// happen (#798).
+    ///
+    /// ⚠️ A refresh used to drop the corpus before asking for the new one, so
+    /// a failed refresh published an empty FAILED page: one dropped request
+    /// wiped everything the viewer was looking at. Now the corpus stays until
+    /// its replacement lands, and a failure keeps it; but kept silently, a
+    /// refresh that did nothing reads as "there is nothing new", which is a
+    /// lie of its own. So it is said — once, out of the way (a toast), since
+    /// the page itself is still good. Fires before `onLoadSettled`.
+    ///
+    /// A failure with NOTHING loaded is not this: it is the failed page, with
+    /// its own retry, exactly as before.
+    public var onRefreshFailed: (() -> Void)?
     /// Every context's count, for the menu that offers them and the tab item.
     ///
     /// The menu names five modes, and the whole point of putting a number
@@ -238,7 +253,9 @@ public final class ForYouViewModel {
         loadFirstPage(reset: false)
     }
 
-    /// Pull-to-refresh: drops the corpus and the cursor and starts over.
+    /// Pull-to-refresh: asks for the first page again and replaces the corpus
+    /// with it. What is on screen stays there until the answer lands, and a
+    /// failed answer leaves it there (`onRefreshFailed`, #798).
     public func refresh() {
         rearmMockNewActivity()
         loadFirstPage(reset: true)
@@ -575,8 +592,17 @@ public final class ForYouViewModel {
     }
 
     private func loadFirstPage(reset: Bool) {
+        // ⚠️ A REFRESH DURING A LOAD WAITS FOR THAT LOAD (#798). It used to
+        // cancel it and then stop at `guard load == nil` below — the cancelled
+        // task returns before publishing or settling, and the new one never
+        // started — so a pull during the INITIAL load left the page loading
+        // for good, with no Try Again and a refresh control that never ended.
+        // The load in flight is already the fresh answer the pull asked for,
+        // and its settle ends the controls. (Not cancelled and replaced:
+        // `load` cannot be nilled here, because the old task's `defer` would
+        // then wipe out the new one.)
+        if reset, load != nil { return }
         if reset {
-            load?.cancel()
             if pageLoad != nil {
                 pageLoad?.cancel()
                 // A cancelled task's `defer` does not run, so the footer would
@@ -591,14 +617,23 @@ public final class ForYouViewModel {
                 onPagingChange?(false)
             }
             followingPageLoad = nil
-            corpus = nil
-            discovery = nil
-            discoveryToken = nil
-            failure = nil
-            nextPageToken = nil
+            // ⚠️ The corpus and its cursors are NOT dropped here (#798): what
+            // the viewer is looking at stays on screen while the refresh is in
+            // flight, and stays there if it fails. Only a page that has
+            // nothing (never loaded, or failed) goes back to loading.
+            if corpus == nil {
+                failure = nil
+            }
         }
         guard load == nil else { return }
-        publish() // every surface reports loading
+        // Read once, before the fetch: whether this load replaces content the
+        // viewer can see, which decides both how a success lands (a re-derived
+        // corpus, not an append) and how a failure is told (a toast, not the
+        // failed page).
+        let replacesContent = corpus != nil
+        if !replacesContent {
+            publish() // every surface reports loading
+        }
         load = Task { [weak self] in
             guard let self else { return }
             defer { self.load = nil }
@@ -621,6 +656,12 @@ public final class ForYouViewModel {
                 // author it is about to move.
                 await resolveRelations(for: page.posts)
                 guard !Task.isCancelled else { return }
+                if replacesContent {
+                    // Content → content with no loading frame between: the
+                    // pages would otherwise read a refreshed corpus that
+                    // starts with the old posts as an APPEND (`onCorpusReset`).
+                    onCorpusReset?()
+                }
                 corpus = source.ordering(page.posts)
                 hasDiscovery = discover != nil
                 discovery = discover.map { Self.unique($0.posts) }
@@ -634,6 +675,14 @@ public final class ForYouViewModel {
                 #endif
             } catch {
                 guard !Task.isCancelled else { return }
+                if replacesContent {
+                    // The corpus, its cursors and the published pages are all
+                    // still what the viewer sees: nothing to publish, only to
+                    // say (#798).
+                    onRefreshFailed?()
+                    onLoadSettled?()
+                    return
+                }
                 failure = "Couldn't load. Pull to retry."
             }
             publish()

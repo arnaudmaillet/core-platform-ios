@@ -25,6 +25,8 @@ final class SearchPeoplePage: UIViewController {
     /// One of the last rows came into view: the cue to fetch the next page of
     /// people, which arrives as a longer `.results` (#612).
     var onNearEnd: (() -> Void)?
+    /// The failed state's Try Again (#798).
+    var onRetry: (() -> Void)?
     /// How close to the end a row has to come into view to ask for more —
     /// early enough that the page usually lands before the end does.
     static let nearEndRowCount = 5
@@ -251,8 +253,16 @@ final class SearchPeoplePage: UIViewController {
         case .failed(let message):
             spinner.stopAnimating()
             showSkeleton(false)
+            // ⚠️ The rows of the PREVIOUS answer go, as they do for `.empty`
+            // (#798): left under the failure, they read as this query's
+            // results, with a message over them saying there are none.
+            dataSource.apply(NSDiffableDataSourceSnapshot<Int, ProfileID>(), animatingDifferences: true)
             statusView.configure(
-                symbolName: "exclamationmark.triangle", title: "Couldn't search", subtitle: message
+                symbolName: "exclamationmark.triangle",
+                title: "Couldn't search",
+                subtitle: message,
+                actionTitle: "Try Again",
+                actionHandler: { [weak self] in self?.onRetry?() }
             )
             statusView.isHidden = false
         }
