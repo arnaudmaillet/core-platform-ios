@@ -439,6 +439,108 @@ struct RowClipRetentionTests {
         #expect(pool.isAdvancing(in: cell.watchedClipSurface!))
     }
 
+    // MARK: - A released loan still owns its clips
+
+    /// ⚠️ A STALE LOAN IS FORGOTTEN, ITS ROW'S CLIPS ARE NOT.
+    ///
+    /// Paging a carousel from one clip to the next releases the row's loan
+    /// rather than stopping it, so the clip just left stays warm on its page —
+    /// and the start that re-takes the loan is skipped while a fling suppresses
+    /// starts. Between the two the row belonged to nobody: when it then left the
+    /// viewport, or was recycled, neither the stop sweep (no loan) nor its
+    /// `onReuse` (cleared) reached its players, and both stayed bound in the
+    /// shared pool for the rest of the session. That is how a grid that budgets
+    /// six players ends up resting at eight or nine.
+    @Test func aRowReleasedMidFlingGivesBackEveryClipWhenItLeaves() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
+        let cell = row([true, true], id: "post-0")
+
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-0"),
+                  cell: cell, distanceFromCentre: 0)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        await settle { pool.activePlayerCount >= 2 }
+        // The denominator: the watched clip and its warmed neighbour.
+        #expect(pool.activePlayerCount == 2, "nothing was ever bound, so nothing below means anything")
+
+        // The viewer pages the card while the feed is flinging: the loan is
+        // released, and no start re-takes it.
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-1"),
+                  cell: cell, distanceFromCentre: 0)
+        ], allowingStarts: false)
+
+        // The row scrolls away, still mid-fling.
+        coordinator.update(candidates: [], allowingStarts: false)
+        for _ in 0..<200 { await Task.yield() }
+
+        #expect(pool.activePlayerCount == 0, "a row nobody owns kept its players")
+    }
+
+    /// The same row, recycled instead of swept: `onReuse` is the only door left.
+    @Test func aRowReleasedMidFlingGivesBackEveryClipWhenRecycled() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
+        let cell = row([true, true], id: "post-0")
+
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-0"),
+                  cell: cell, distanceFromCentre: 0)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        await settle { pool.activePlayerCount >= 2 }
+        #expect(pool.activePlayerCount == 2, "nothing was ever bound, so nothing below means anything")
+
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-1"),
+                  cell: cell, distanceFromCentre: 0)
+        ], allowingStarts: false)
+        // Held past its last use: `onReuse` holds the coordinator weakly, and a
+        // coordinator released early would make this pass for the wrong reason
+        // — or, as it did, fail for one.
+        withExtendedLifetime(coordinator) { cell.prepareForReuse() }
+        for _ in 0..<200 { await Task.yield() }
+
+        #expect(pool.activePlayerCount == 0, "a recycled row kept its players")
+    }
+
+    /// ⚠️ THE WITNESS: a row that is still chosen keeps the clip it left warm.
+    /// Stopping every released row outright would pass both tests above and
+    /// throw away the very warmth the release exists to keep.
+    @Test func aReleasedRowThatStaysChosenKeepsItsWarmClip() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
+        let cell = row([true, true], id: "post-0")
+
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-0"),
+                  cell: cell, distanceFromCentre: 0)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        await settle { pool.activePlayerCount >= 2 }
+        #expect(pool.activePlayerCount == 2, "nothing was ever bound, so nothing below means anything")
+
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        let arriving = [GridVideoPlaybackCoordinator.Candidate(
+            id: PostID("post-0"), url: url("clip-1"), cell: cell, distanceFromCentre: 0
+        )]
+        coordinator.update(candidates: arriving, allowingStarts: false)
+        coordinator.update(candidates: arriving, allowingStarts: false)
+        for _ in 0..<200 { await Task.yield() }
+
+        #expect(pool.activePlayerCount == 2, "a row still on screen lost its clips")
+    }
+
     // MARK: - Sharing the pool
 
     /// ⚠️ THE BUDGET IS IN PLAYERS, NOT ROWS.

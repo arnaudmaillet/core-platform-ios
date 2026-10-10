@@ -111,6 +111,19 @@ public final class GridVideoPlaybackCoordinator {
     /// has started and must therefore clean up. Whether anything is PLAYING is
     /// the pool's to answer — see `isPlaying`.
     private var loans: [PostID: any GridPlaybackCell] = [:]
+    /// Rows whose loan was released as stale (`releaseStaleLoan`) while they
+    /// may still hold clips — the page they left, kept warm on purpose.
+    ///
+    /// ⚠️ A FORGOTTEN LOAN IS NOT A FORGOTTEN ROW. The release undoes only the
+    /// bookkeeping, counting on the start pass to take the loan straight back —
+    /// and a fling suppresses that pass. Until this existed, the row then
+    /// belonged to nobody: the stop sweep walks `loans`, its `onReuse` had been
+    /// cleared, and when it scrolled away or was recycled its players stayed
+    /// bound in the shared pool for the rest of the session. That is how a grid
+    /// budgeting six rests at eight or nine (#830). A row here is let go the
+    /// moment it is no longer chosen, recycled, or the surface goes away — or
+    /// taken back by the next start, which is what normally happens.
+    private var strays: [PostID: any GridPlaybackCell] = [:]
     /// Playing posts → the stream each one is actually playing.
     ///
     /// ⚠️ A post is no longer one stream. A mixed carousel has a clip on one
@@ -287,6 +300,10 @@ public final class GridVideoPlaybackCoordinator {
         for (id, cell) in loans
         where !chosenIDs.contains(id) && id != handoffID && id != focusedID {
             stop(id: id, cell: cell)
+        }
+        for id in Array(strays.keys)
+        where !chosenIDs.contains(id) && id != handoffID && id != focusedID {
+            stopStray(id)
         }
         // A post that is still chosen but on a DIFFERENT stream — the viewer
         // paged a mixed carousel from one clip to another — is stopped here so
@@ -608,6 +625,7 @@ public final class GridVideoPlaybackCoordinator {
 
     /// Stops whatever is playing in `cell` — the collection view recycled it.
     public func stop(cell: any GridPlaybackCell) {
+        if let id = strays.first(where: { $0.value === cell })?.key { stopStray(id) }
         guard let id = loans.first(where: { $0.value === cell })?.key else { return }
         stop(id: id, cell: cell)
     }
@@ -624,6 +642,7 @@ public final class GridVideoPlaybackCoordinator {
         for (id, cell) in loans where id != kept {
             stop(id: id, cell: cell)
         }
+        for id in Array(strays.keys) where id != kept { stopStray(id) }
     }
 
     // MARK: - Hero handoff
@@ -879,10 +898,8 @@ public final class GridVideoPlaybackCoordinator {
         // re-minted the clip from its resume point a frame later.
         playingURLs[id] = url
         uncappedIDs.remove(id)
-        cell.onReuse = { [weak self] in
-            guard let self, let cell = loans[id] else { return }
-            stop(id: id, cell: cell)
-        }
+        settleStray(id, claimedBy: cell)
+        cell.onReuse = reuseHandler(for: id)
         #if DEBUG
         Self.logPool(loans.count, handoff: handoffID)
         #endif
@@ -925,10 +942,8 @@ public final class GridVideoPlaybackCoordinator {
         loans[id] = cell
         // The stream with the loan — see `adoptAttachedSurface`.
         playingURLs[id] = url
-        cell.onReuse = { [weak self] in
-            guard let self, let cell = loans[id] else { return }
-            stop(id: id, cell: cell)
-        }
+        settleStray(id, claimedBy: cell)
+        cell.onReuse = reuseHandler(for: id)
     }
 
 
@@ -1002,6 +1017,7 @@ public final class GridVideoPlaybackCoordinator {
 
     public func stopAll() {
         for (id, cell) in loans { stop(id: id, cell: cell) }
+        for id in Array(strays.keys) { stopStray(id) }
     }
 
     // MARK: - Internals
@@ -1022,10 +1038,8 @@ public final class GridVideoPlaybackCoordinator {
         candidate.cell.beginVideoPreview()
         let renderView = candidate.cell.makeVideoRenderViewIfNeeded()
         let id = candidate.id
-        candidate.cell.onReuse = { [weak self] in
-            guard let self, let cell = loans[id] else { return }
-            stop(id: id, cell: cell)
-        }
+        settleStray(id, claimedBy: candidate.cell)
+        candidate.cell.onReuse = reuseHandler(for: id)
         let url = candidate.url
         // A tile that is already flying full screen keeps its lifted cap.
         let cap = uncappedIDs.contains(id) ? Self.uncapped : Self.tileBitRateCap
@@ -1129,10 +1143,56 @@ public final class GridVideoPlaybackCoordinator {
         }
         #endif
         startTasks.removeValue(forKey: id)?.cancel()
-        loans[id]?.onReuse = nil
+        // The row is kept, with its `onReuse`: see `strays`.
+        if let cell = loans[id] { strays[id] = cell }
         loans[id] = nil
         playingURLs[id] = nil
         uncappedIDs.remove(id)
+    }
+
+    /// What a recycled cell asks of this coordinator: give back whatever it
+    /// holds for `id`, on a live loan or a released one.
+    private func reuseHandler(for id: PostID) -> () -> Void {
+        { [weak self] in
+            guard let self else { return }
+            if let cell = loans[id] {
+                stop(id: id, cell: cell)
+            } else {
+                stopStray(id)
+            }
+        }
+    }
+
+    /// A loan for `id` was just taken by `cell`. The same row taking its loan
+    /// back is the ordinary ending of a release, and its clips are tracked by
+    /// the loan again; a DIFFERENT row means the released one is nobody's and
+    /// is let go now.
+    private func settleStray(_ id: PostID, claimedBy cell: any GridPlaybackCell) {
+        guard let stray = strays[id] else { return }
+        guard stray !== cell else {
+            strays[id] = nil
+            return
+        }
+        stopStray(id)
+    }
+
+    /// Ends every clip a released row still holds — `stop(id:cell:)` minus the
+    /// loan, which is already gone.
+    private func stopStray(_ id: PostID) {
+        guard let cell = strays.removeValue(forKey: id) else { return }
+        #if DEBUG
+        if CarouselPlaybackAudit.isEnabled {
+            CarouselPlaybackAudit.trace("grid stopped released row \(id.rawValue)")
+        }
+        #endif
+        for surface in cell.retainedPlaybackSurfaces {
+            pool.stop(surface)
+        }
+        for surface in cell.releaseRetainedClips() {
+            pool.stop(surface)
+        }
+        cell.endVideoPreview()
+        cell.onReuse = nil
     }
 
     private func stop(id: PostID, cell: any GridPlaybackCell) {
