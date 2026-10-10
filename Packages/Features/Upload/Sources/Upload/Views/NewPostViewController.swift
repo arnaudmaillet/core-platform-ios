@@ -1509,11 +1509,14 @@ final class NewPostViewController: UIViewController {
     }
 
     static func message(for error: ComposeError) -> String {
-        // "You're offline" when that is why a call or an upload failed: the
-        // one cause the author can fix, and the draft is still here (#794).
-        // ⚠️ Offline only, not `FailureCopy.message`: a timed-out CreatePost
-        // may have landed (it carries no idempotency key, #795), so "Try
-        // again" would invite a second post.
+        // A publish whose answer never came may have landed (#795): look
+        // first, never "try again". Decided before the offline line below,
+        // which a connection lost mid-request also reads as (#794).
+        if case .unconfirmed = error { return ComposeError.unconfirmedMessage }
+        // "You’re offline" when the request never left: the one cause the
+        // author can fix, and the draft is still here (#794).
+        // ⚠️ Offline only, not `FailureCopy.message`: its timeout line says
+        // "Try again".
         if error.networkFailure == .offline { return FailureCopy.offline }
         return switch error {
         case .emptyPost: "Add a photo or write something first."
@@ -1521,6 +1524,7 @@ final class NewPostViewController: UIViewController {
         case .media(let why, _): why
         case .mentionRefused: error.errorDescription ?? "Someone you mentioned doesn't allow mentions."
         case .transport(let why, _): why
+        case .unconfirmed: ComposeError.unconfirmedMessage
         }
     }
 }

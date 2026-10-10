@@ -129,15 +129,28 @@ public enum ComposeError: Error, Equatable, Sendable {
     /// offline, a timeout, a refusal, a server fault. Defaulted, so every
     /// `.transport("…")` still builds and every `case .transport:` matches.
     case transport(String, failure: NetworkFailure? = nil)
+    /// CreatePost or PublishPost went out and its answer never came back: a
+    /// timeout, or a connection lost mid-request (#794).
+    ///
+    /// ⚠️ THE POST MAY EXIST. Neither call carries an idempotency key (#795),
+    /// so the author must not be told to try again; only to look first.
+    /// Apart from `transport`, whose failures never reached the server.
+    case unconfirmed(String, failure: NetworkFailure? = nil)
 }
 
 extension ComposeError: NetworkFailureCarrying {
     public var networkFailure: NetworkFailure? {
         switch self {
-        case .media(_, let failure), .transport(_, let failure): failure
+        case .media(_, let failure), .transport(_, let failure), .unconfirmed(_, let failure): failure
         case .notAuthenticated, .noViewerProfile, .emptyPost, .mentionRefused: nil
         }
     }
+}
+
+extension ComposeError {
+    /// What an `unconfirmed` publish says: look before posting again.
+    public static let unconfirmedMessage =
+        "Couldn\u{2019}t confirm your post. Check your profile before posting again."
 }
 
 extension ComposeError: LocalizedError {
@@ -147,6 +160,7 @@ extension ComposeError: LocalizedError {
     public var errorDescription: String? {
         switch self {
         case .mentionRefused: "Someone you mentioned doesn't allow mentions from you. Remove the mention and try again."
+        case .unconfirmed: Self.unconfirmedMessage
         default: nil
         }
     }
@@ -473,8 +487,8 @@ public actor PostComposer: PostComposing {
 
         let response = await postClient.createPost(request: request, headers: [:])
         if (response.error?.message ?? "").contains("PST-1009") { throw ComposeError.mentionRefused }
-        let body = try unwrap(
-            response.message, errorMessage: response.error?.message,
+        let body = try unwrapWrite(
+            response.message, errorMessage: response.error?.message, exception: response.error?.exception,
             failure: response.error.flatMap { NetworkFailure.of($0) }
         )
         return PostID(body.postID)
@@ -485,8 +499,8 @@ public actor PostComposer: PostComposing {
         request.postID = postID.rawValue
         request.profileID = profileID.rawValue
         let response = await postClient.publishPost(request: request, headers: [:])
-        _ = try unwrap(
-            response.message, errorMessage: response.error?.message,
+        _ = try unwrapWrite(
+            response.message, errorMessage: response.error?.message, exception: response.error?.exception,
             failure: response.error.flatMap { NetworkFailure.of($0) }
         )
     }
@@ -554,6 +568,20 @@ public actor PostComposer: PostComposing {
         input.height = UInt32(attachment.pixelHeight)
         input.thumbnailURL = attachment.thumbnailURL?.absoluteString ?? ""
         return input
+    }
+
+    /// `unwrap` for CreatePost / PublishPost: a request that went out and
+    /// never got its answer — timed out, or its connection dropped mid-way
+    /// (`networkConnectionLost`, which `NetworkFailure` counts as offline) —
+    /// is `unconfirmed`, not a failure to retry (#794, #795). Offline before
+    /// the request left (`notConnectedToInternet`...) stays `transport`.
+    private func unwrapWrite<T>(
+        _ message: T?, errorMessage: String?, exception: (any Error)?, failure: NetworkFailure?
+    ) throws -> T {
+        if message == nil, failure == .timeout || (exception as? URLError)?.code == .networkConnectionLost {
+            throw ComposeError.unconfirmed(errorMessage ?? "no answer", failure: failure)
+        }
+        return try unwrap(message, errorMessage: errorMessage, failure: failure)
     }
 
     /// The answer's body, or a `transport` failure that keeps why the call

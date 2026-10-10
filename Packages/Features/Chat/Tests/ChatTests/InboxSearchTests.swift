@@ -386,7 +386,7 @@ struct InboxSearchViewModelTests {
         viewModel.queryChanged("sofia")
         let phase = await settle(box) { if case .failed = $0 { true } else { false } }
 
-        #expect(phase == .failed(message: "You're offline. Check your connection and try again."))
+        #expect(phase == .failed(message: "You\u{2019}re offline. Check your connection and try again."))
     }
 
     /// Clearing the field lands back on the IDLE OFFER — recent threads and the

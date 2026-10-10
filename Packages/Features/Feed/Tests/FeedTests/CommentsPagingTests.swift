@@ -316,11 +316,21 @@ struct CommentsPagingTests {
     /// The failed row's headline: "You're offline" when it is, the view
     /// model's words otherwise (#794).
     @Test func theFailedRowSaysYoureOfflineOnlyWhenItIs() {
-        #expect(PostDetailViewController.commentsFailedPageCopy(FailureCopy.offline).title == "You\u{2019}re offline")
+        typealias Screen = PostDetailViewController
+        #expect(Screen.commentsFailedPageCopy(FailureCopy.offline).title == "You\u{2019}re offline")
+        #expect(Screen.commentsFailedPageCopy(FailureCopy.timeout).title == "That took too long")
         #expect(
-            PostDetailViewController.commentsFailedPageCopy(PostDetailViewModel.commentsFailureMessage).title
-                == "Couldn't load comments"
+            Screen.commentsFailedPageCopy(PostDetailViewModel.commentsFailureMessage).title == "Couldn't load comments"
         )
+    }
+
+    /// The full mode's note never ends "..": a period is added only to a
+    /// message without one (#794).
+    @Test func theFailedNoteNeverDoublesItsPeriod() {
+        typealias Screen = PostDetailViewController
+        #expect(Screen.commentsFailedNoteText(FailureCopy.timeout) == "That took too long. Try again.")
+        #expect(Screen.commentsFailedNoteText(FailureCopy.offline) == FailureCopy.offline)
+        #expect(Screen.commentsFailedNoteText("Couldn't load comments") == "Couldn't load comments.")
     }
 
     /// #798: comments already on screen are kept when a refresh's first page

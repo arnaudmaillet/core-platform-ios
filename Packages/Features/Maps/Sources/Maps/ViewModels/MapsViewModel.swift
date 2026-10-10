@@ -55,9 +55,10 @@ public final class MapsViewModel {
     /// is told. Once: a toast on every pan of a dead connection would be a
     /// nag, and it says nothing the first one did not.
     ///
-    /// Hands over the toast's words: "You're offline…" when the last query
-    /// failed for want of a connection, `repeatedFailureMessage` otherwise
-    /// (#794).
+    /// Hands over the toast's words (#794): "You’re offline" or "That took
+    /// too long" when that is why the last query failed,
+    /// `repeatedFailureMessage` otherwise. Toast copy: short, no trailing
+    /// period, and no "Try again" — the next pan retries by itself.
     public var onRepeatedQueryFailure: ((String) -> Void)?
     /// What the toast says when the map failed with the device online.
     nonisolated static let repeatedFailureMessage = "Couldn't load the map"
@@ -214,7 +215,7 @@ public final class MapsViewModel {
         consecutiveQueryFailures += 1
         guard consecutiveQueryFailures >= Self.failureReportThreshold, !reportedFailureRun else { return }
         reportedFailureRun = true
-        onRepeatedQueryFailure?(FailureCopy.message(for: error, fallback: Self.repeatedFailureMessage))
+        onRepeatedQueryFailure?(FailureCopy.title(for: error, fallback: Self.repeatedFailureMessage))
     }
 
     /// Reconciles the authoritative state with `incoming` and emits the diff.

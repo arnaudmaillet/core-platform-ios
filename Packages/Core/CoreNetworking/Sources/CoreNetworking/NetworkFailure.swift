@@ -154,10 +154,17 @@ public protocol NetworkFailureCarrying: Error {
 public enum FailureCopy {
     /// What to say when the device has no connection. Shared so every screen
     /// says it the same way.
-    public static let offline = "You're offline. Check your connection and try again."
+    ///
+    /// The curly apostrophe (U+2019), as everywhere else the app writes one.
+    public static let offline = "You\u{2019}re offline. Check your connection and try again."
     /// What to say when the call ran out of time: the network may be slow
-    /// rather than gone.
-    public static let timeout = "This is taking too long. Try again."
+    /// rather than gone. For a screen with a Try Again under it.
+    public static let timeout = "That took too long. Try again."
+
+    /// The short forms, for a headline or a toast (`Feedback`: short, no
+    /// trailing period, no "Try again" when the screen retries by itself).
+    public static let offlineTitle = "You\u{2019}re offline"
+    public static let timeoutTitle = "That took too long"
 
     /// The offline or timeout sentence when that is why `error` happened,
     /// else `fallback` (the screen's own wording).
@@ -165,6 +172,16 @@ public enum FailureCopy {
         switch NetworkFailure.of(error) {
         case .offline: offline
         case .timeout: timeout
+        default: fallback
+        }
+    }
+
+    /// The short form of `message(for:fallback:)`: `offlineTitle`,
+    /// `timeoutTitle`, else `fallback`. For toasts and headlines.
+    public static func title(for error: any Error, fallback: String) -> String {
+        switch NetworkFailure.of(error) {
+        case .offline: offlineTitle
+        case .timeout: timeoutTitle
         default: fallback
         }
     }

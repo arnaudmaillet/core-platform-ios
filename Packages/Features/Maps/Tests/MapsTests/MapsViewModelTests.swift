@@ -190,10 +190,11 @@ struct MapsViewModelTests {
         #expect(reports == 1, "not repeated within the run")
     }
 
-    /// The toast says "You're offline" when the map failed for want of a
-    /// connection, and "Couldn't load the map" otherwise (#794).
+    /// The toast says why in toast words — short, no period, no "Try again"
+    /// (the next pan retries) — and "Couldn't load the map" otherwise (#794).
     @Test(arguments: [
-        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.offline, "You\u{2019}re offline"),
+        (NetworkFailure.timeout, "That took too long"),
         (NetworkFailure.server(code: "unavailable"), "Couldn't load the map"),
     ])
     func theRepeatedFailureToastIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async {

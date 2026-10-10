@@ -2041,12 +2041,28 @@ final class PostDetailViewController: UIViewController {
     static func commentsFailedPageCopy(_ message: String) -> EmptyPageCopy {
         EmptyPageCopy(
             symbol: "exclamationmark.triangle",
-            // Offline (#794): a headline-sized "You're offline"; the subtitle
-            // already says what to do about it.
-            title: message == FailureCopy.offline ? "You\u{2019}re offline" : message,
+            title: commentsFailureTitle(message),
             subtitle: "Check your connection and try again.",
             actionTitle: "Try Again"
         )
+    }
+
+    /// The failed page's headline (#794): offline and a timeout get their
+    /// short forms, since the subtitle already says what to do and saying
+    /// "try again" twice reads as a stutter; anything else is the view
+    /// model's own words.
+    static func commentsFailureTitle(_ message: String) -> String {
+        switch message {
+        case FailureCopy.offline: FailureCopy.offlineTitle
+        case FailureCopy.timeout: FailureCopy.timeoutTitle
+        default: message
+        }
+    }
+
+    /// The full mode's one line: the message as a sentence, never with a
+    /// second period after one it already has ("…Try again..").
+    static func commentsFailedNoteText(_ message: String) -> String {
+        message.hasSuffix(".") ? message : message + "."
     }
 
     private var emptyPageCopy: EmptyPageCopy {
@@ -2062,7 +2078,7 @@ final class PostDetailViewController: UIViewController {
     /// the page.
     private func installFailedNote(in contentView: UIView) {
         let label = UILabel()
-        label.text = commentsFailureText == FailureCopy.offline ? FailureCopy.offline : "\(commentsFailureText)."
+        label.text = Self.commentsFailedNoteText(commentsFailureText)
         label.font = .appFont(forTextStyle: .subheadline)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel

@@ -927,17 +927,24 @@ public final class SearchViewModel {
         postsTask = Task { [weak self] in
             guard let self else { return }
             let page: PostSearchPage?
+            let failure: (any Error)?
             do {
                 page = try await self.repository.searchPostsPage(
                     matching: trimmed, sort: self.sortOrder, limit: self.pageSize, pageToken: nil
                 )
+                failure = nil
             } catch {
                 page = nil
-                self.postsFailureText = FailureCopy.message(for: error, fallback: Self.postsFailureMessage)
+                failure = error
             }
             guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
             self.isSearchingPosts = false
             guard let page else {
+                // ⚠️ Worded only past the guard above: a superseded search's
+                // failure must not rewrite the words of the current one (#794).
+                if let failure {
+                    self.postsFailureText = FailureCopy.message(for: failure, fallback: Self.postsFailureMessage)
+                }
                 // A refresh over posts on screen keeps them: the failure only
                 // reads as one where there is nothing else to show.
                 self.postsFailed = self.postResults.isEmpty

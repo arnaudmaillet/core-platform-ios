@@ -29,6 +29,11 @@ private actor PagedSearch: SearchProviding {
     private var failuresLeft: [String: Int] = [:]
     /// Why those asks fail, by kind (#794); none throws a plain error.
     private var failures: [String: NetworkFailure] = [:]
+    /// Post first pages that fail for this query, every time (#794).
+    private var postFailuresByQuery: [String: NetworkFailure] = [:]
+    /// Queries whose post first page waits for `releasePosts`.
+    private var heldPostQueries: Set<String> = []
+    private var postQueryWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
     private var heldWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
 
     init(people: [String: [String?: ProfileSearchPage]], posts: [String: [String?: PostSearchPage]] = [:]) {
@@ -43,6 +48,13 @@ private actor PagedSearch: SearchProviding {
     func failOnce(_ kind: String, for failure: NetworkFailure) {
         failuresLeft[kind] = 1
         failures[kind] = failure
+    }
+
+    func failPosts(for query: String, with failure: NetworkFailure) { postFailuresByQuery[query] = failure }
+    func holdPosts(for query: String) { heldPostQueries.insert(query) }
+    func releasePosts(for query: String) {
+        heldPostQueries.remove(query)
+        for waiter in postQueryWaiters.removeValue(forKey: query) ?? [] { waiter.resume() }
     }
 
     private func failIfAsked(_ kind: String, token: String?) throws {
@@ -80,6 +92,12 @@ private actor PagedSearch: SearchProviding {
     ) async throws -> PostSearchPage {
         asks.append(Ask(kind: "posts", query: query, token: pageToken, limit: limit))
         await waitIfHeld(pageToken)
+        if pageToken == nil, heldPostQueries.contains(query) {
+            await withCheckedContinuation { postQueryWaiters[query, default: []].append($0) }
+        }
+        if pageToken == nil, let failure = postFailuresByQuery[query] {
+            throw SearchError.transport(message: "x", failure: failure)
+        }
         try failIfAsked("posts", token: pageToken)
         return posts[query]?[pageToken] ?? PostSearchPage(hits: [], nextPageToken: nil)
     }
@@ -266,6 +284,27 @@ struct SearchResultsPagingTests {
 
         #expect(viewModel.currentPhase == .failed(message: people))
         #expect(viewModel.postsFailureText == posts)
+    }
+
+    /// A superseded post search that fails late does not rewrite the words
+    /// of the current one (#794).
+    @Test func anOlderPostFailureDoesNotOverwriteTheNewerWords() async throws {
+        let provider = PagedSearch(people: ["ann": [:], "bob": [:]])
+        await provider.failPosts(for: "ann", with: .offline)
+        await provider.failPosts(for: "bob", with: .server(code: "internal"))
+        await provider.holdPosts(for: "ann")
+        let viewModel = makeViewModel(provider)
+
+        viewModel.submitQuery("ann")
+        try #require(await settle { await provider.asks("posts").count == 1 })
+        viewModel.submitQuery("bob")
+        try #require(await settle { viewModel.postsFailed })
+        #expect(viewModel.postsFailureText == "Couldn't search posts.")
+
+        await provider.releasePosts(for: "ann")
+        await idle()
+
+        #expect(viewModel.postsFailureText == "Couldn't search posts.")
     }
 
     /// #798: a post search that FAILED is not one that matched nothing — the
