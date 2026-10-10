@@ -1528,6 +1528,104 @@ struct NewPostTests {
         #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
     }
 
+    /// Holds every publish until `fail()` is called, then fails it — so a test
+    /// decides WHEN the answer comes, with no clock in the race (#795).
+    private final class HeldFailingComposer: PostComposing, @unchecked Sendable {
+        private let lock = NSLock()
+        private var released = false
+        private var _started = false
+
+        var started: Bool { lock.withLock { _started } }
+        func fail() { lock.withLock { released = true } }
+
+        func publish(
+            media: [ComposeMedia], caption: String, as author: AuthorSummary?
+        ) async throws -> FeedEntry {
+            lock.withLock { _started = true }
+            while !lock.withLock({ released }) {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            throw ComposeError.transport("offline")
+        }
+    }
+
+    /// Every toast anywhere under `view`.
+    private static func toasts(under view: UIView) -> [ToastView] {
+        view.subviews.flatMap { subview -> [ToastView] in
+            (subview as? ToastView).map { [$0] } ?? toasts(under: subview)
+        }
+    }
+
+    /// ⚠️ **A PUBLISH THAT FAILS ONCE ITS SCREEN HAS LEFT THE WINDOW IS STILL
+    /// SAID (#795).** The task holds the screen, not the sheet: swiped away
+    /// mid-publish, the failure alert used to be presented on a screen in no
+    /// window, and UIKit dropped it — the author believed in a post that never
+    /// went up. The failure is now said from the sheet's presenter.
+    ///
+    /// ⚠️ **NO DISMISSAL IS PERFORMED, AND THAT IS THE TEST HOST, NOT A
+    /// SHORTCUT.** Measured: here a presented sheet never reaches the window
+    /// (`post.view.window` stays nil after `present`) and `dismiss` never
+    /// clears `presentedViewController`, animated or not. So the screen is
+    /// already in the one state that matters — out of every window, where an
+    /// alert is never seen — and what is pinned is that the failure toast is
+    /// sourced from the presenter (`Feedback.host(for:)` places it; its own
+    /// rules are DesignSystem's `FeedbackTests`).
+    @Test(.timeLimit(.minutes(10)))
+    func aPublishThatFailsOffScreenIsSaidFromTheSheetsPresenter() async throws {
+        let composer = HeldFailingComposer()
+        let post = NewPostViewController(
+            items: Self.items(1), library: StubLibrary(), composer: composer, preview: StubPreview(),
+            photoLibrary: StubPhotoLibrary(), reducesMotion: { true }
+        ) { _ in }
+        let sheet = UINavigationController(rootViewController: post)
+        let root = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = root
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        root.present(sheet, animated: false)
+        try await settle(until: { root.presentedViewController === sheet })
+        try #require(post.presentingViewController === root, "guard: the screen sits in a presented sheet")
+        try #require(post.viewIfLoaded?.window == nil, "guard: the screen is in no window")
+
+        post.debugTapPost()
+        try await settle(until: { composer.started })
+        try #require(composer.started, "guard: the publish is on its way")
+        let host = Feedback.host(for: root).view!
+        try #require(Self.toasts(under: host).isEmpty, "guard: nothing said before the answer")
+
+        composer.fail()
+        try await settle(until: { !Self.toasts(under: host).isEmpty })
+
+        #expect(Self.toasts(under: host).first?.style == .failure, "the failure was lost with the screen")
+    }
+
+    /// What `reportPublishFailure(on:)` does, pinned the way "Posted" is: a
+    /// failure toast on the tab the author is on, clear of the tab bar.
+    @Test func aPublishFailureIsSaidOverThePresentersTab() {
+        #expect(NewPostViewController.publishFailedMessage == "Couldn't publish your post")
+        let tabs = UITabBarController()
+        let feed = UINavigationController(rootViewController: UIViewController())
+        tabs.viewControllers = [feed]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = tabs
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+
+        NewPostViewController.reportPublishFailure(on: tabs)
+
+        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        #expect(toast?.style == .failure, "no failure toast over the author's tab")
+        #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
+    }
+
     /// Six switches in one card is a wall. Grouped, each card asks one question
     /// — and the engagement four are the group the author actually thinks about
     /// together.

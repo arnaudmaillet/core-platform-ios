@@ -192,6 +192,12 @@ final class NewPostViewController: UIViewController {
     private var caption = ""
     private var settings = Settings()
     private var isPublishing = false
+    /// The sheet's presenter, as it was when Post was tapped (#795): where
+    /// the outcome is said if the sheet has gone by the time it is known —
+    /// `presentingViewController` is nil by then.
+    private weak var publishPresenter: UIViewController?
+    /// The sheet Post was tapped in — what `endTheFlow` may dismiss.
+    private weak var publishSheet: UIViewController?
 
     /// Which chosen item leads the carousel — a photo or a video.
     private var coverID: String?
@@ -1160,6 +1166,8 @@ final class NewPostViewController: UIViewController {
     private func post() {
         guard !isPublishing else { return }
         isPublishing = true
+        publishPresenter = presentingViewController
+        publishSheet = presentingViewController?.presentedViewController
         postItem.isEnabled = false
         // ⚠️ **THE FORM FREEZES WHILE THE POST GOES OUT.** A clip's export and
         // upload take seconds, and a switch flipped meanwhile — Save to Photos
@@ -1284,9 +1292,20 @@ final class NewPostViewController: UIViewController {
                 isPublishing = false
                 postItem.isEnabled = true
                 if isViewLoaded { list.isUserInteractionEnabled = true }
+                // ⚠️ AN ALERT ON A SCREEN THAT HAS GONE IS NEVER SEEN (#795).
+                guard isShown else {
+                    if let presenter = publishPresenter { Self.reportPublishFailure(on: presenter) }
+                    return
+                }
                 present(Self.failureAlert(error), animated: true)
             }
         }
+    }
+
+    /// Whether this screen is still where an alert would be seen: in a
+    /// window, and not in a sheet on its way out.
+    private var isShown: Bool {
+        viewIfLoaded?.window != nil && navigationController?.isBeingDismissed != true
     }
 
     /// The item's upload key: the one an earlier attempt used, or a new one
@@ -1343,19 +1362,52 @@ final class NewPostViewController: UIViewController {
     ///
     /// Only ever called once the post is up, so the dismissal ends with the
     /// confirmation (#803): see `confirmPublished(on:)`.
+    ///
+    /// ⚠️ **AND THE SHEET MAY ALREADY BE GONE (#795).** Swiped away while the
+    /// post was on its way, this screen has no presenter left to ask — the
+    /// one captured when Post was tapped (`publishPresenter`) still confirms,
+    /// at once, since there is no dismissal to wait for.
     private func endTheFlow() {
-        let presenter = presentingViewController
-        presenter?.dismiss(animated: true) {
-            guard let presenter else { return }
-            Self.confirmPublished(on: presenter)
-        }
+        let presenter = presentingViewController ?? publishPresenter
         #if DEBUG
         debugFlowEndedBy = presenter
         #endif
+        guard let presenter else { return }
+        // ⚠️ ONLY THE SHEET THIS POST WAS TAPPED IN is dismissed: once it has
+        // gone, whatever the presenter shows now is something else the author
+        // opened since, and a post landing must not close it.
+        let sheetIsUp = presentingViewController != nil
+            || (publishSheet.map { presenter.presentedViewController === $0 } ?? false)
+        guard sheetIsUp else {
+            Self.confirmPublished(on: presenter)
+            return
+        }
+        presenter.dismiss(animated: true) {
+            Self.confirmPublished(on: presenter)
+        }
     }
 
     /// What the author is told once the sheet has gone.
     static let publishedMessage = "Posted"
+
+    /// What the author is told when the post did not go up after the sheet
+    /// had gone (#795).
+    static let publishFailedMessage = "Couldn't publish your post"
+
+    /// "Couldn't publish your post", with the error haptic, over the screen
+    /// the sheet was raised from (#795) — `confirmPublished(on:)`'s failure.
+    ///
+    /// ⚠️ **THE SHEET CAN GO WHILE THE POST IS ON ITS WAY, AND A FAILURE THEN
+    /// HAD NOWHERE TO BE SAID.** The publish task holds this screen, not the
+    /// sheet: swiped away (or stepped back from) mid-publish, the task runs on
+    /// and its failure alert was presented on a screen no longer in any
+    /// window — UIKit drops that without a word, and the author believed a
+    /// post was up that never was. There is no media draft to keep it in
+    /// (`saveDraftItem` is inert, `PostDraftStore` holds text only), so what
+    /// can be done is to SAY it, where the author now is.
+    static func reportPublishFailure(on presenter: UIViewController) {
+        Feedback.failure(publishFailedMessage, from: presenter)
+    }
 
     /// "Posted", with the success haptic, over the screen the sheet was
     /// raised from (#803).
