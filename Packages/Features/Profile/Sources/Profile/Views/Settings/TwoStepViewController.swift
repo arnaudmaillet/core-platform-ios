@@ -203,22 +203,51 @@ final class TwoStepViewController: UIViewController {
         )
     }
 
-    private func startEnrollment() {
-        guard !isWorking else { return }
-        isWorking = true
-        Task { [weak self] in
-            guard let self else { return }
-            defer { isWorking = false }
-            do {
-                let enrollment = try await manager.startTwoStepEnrollment()
-                let setup = TwoStepEnrollmentViewController(enrollment: enrollment, manager: manager) { [weak self] codes in
-                    self?.didTurnOn(with: codes)
-                }
-                navigationController?.pushViewController(setup, animated: true)
-            } catch {
-                presentFailure(error)
-            }
+    /// The setup screen on the stack, while it is there: a second tap lands
+    /// on it instead of pushing another one.
+    private weak var enrollmentScreen: TwoStepEnrollmentViewController?
+
+    /// ⚠️ PUSHES AT ONCE, THEN THE SCREEN FETCHES ITS SECRET (#800). This
+    /// used to await `startTwoStepEnrollment()` before pushing: for the whole
+    /// round trip the password alert had gone and nothing happened, which
+    /// reads as a tap that didn't take — so people tapped again. The setup
+    /// screen now arrives on its own skeleton, starts the enrolment itself,
+    /// and keeps a failure inside it (with Try Again) instead of an alert
+    /// over a screen that never moved.
+    ///
+    /// Synchronous on purpose: by the time this returns the screen is on the
+    /// stack, whatever the network is doing.
+    func startEnrollment() {
+        guard enrollmentScreen == nil, let navigationController else { return }
+        let setup = TwoStepEnrollmentViewController(
+            model: enrollmentModelForPush(),
+            manager: manager,
+            stepUp: stepUp,
+            onEnabled: { [weak self] codes in self?.didTurnOn(with: codes) }
+        )
+        enrollmentScreen = setup
+        navigationController.pushViewController(setup, animated: true)
+    }
+
+    /// The last setup's round trip, kept past its screen.
+    private var enrollmentModel: TwoStepEnrollmentModel?
+
+    /// ⚠️ ONE START IN FLIGHT PER SCREEN, EVEN ACROSS A POP (#800). Back out
+    /// of the setup screen while its start is out and set up again: a fresh
+    /// model would mint a second secret, and if the first answer reached the
+    /// server last, the QR code would show a seed the server had already
+    /// replaced — the app's first code would never match. So a pending start
+    /// is reused by the next push; once it has answered (secret or failure),
+    /// the next setup starts clean, since nothing else can race it.
+    func enrollmentModelForPush() -> TwoStepEnrollmentModel {
+        if let pending = enrollmentModel, pending.isStarting { return pending }
+        let model = TwoStepEnrollmentModel(manager: manager)
+        model.onFailure = { [weak self] error in
+            // On (or off) somewhere else: this screen catches up underneath.
+            if case .alreadyChanged? = error as? TwoStepError { self?.load() }
         }
+        enrollmentModel = model
+        return model
     }
 
     /// Turned on: the backup codes replace the setup screen, and this one
@@ -337,20 +366,135 @@ extension TwoStepViewController: UICollectionViewDelegate {
 
 // MARK: - Setup
 
+/// The setup screen's one round trip: `StartMfaEnrollment`, from loading to
+/// the secret, or to a failure that Try Again starts over (#800).
+///
+/// Its own type so the states can be driven and read without a window: the
+/// screen only draws whatever this says.
+@MainActor
+final class TwoStepEnrollmentModel {
+    enum State: Equatable {
+        case loading
+        case ready(TwoStepEnrollment)
+        /// `message`: what went wrong, in the screen's words; `recovery`:
+        /// the way out the failed state offers.
+        case failed(message: String, recovery: Recovery)
+    }
+
+    /// ⚠️ NOT EVERY FAILURE IS RETRIED THE SAME WAY. Starting again only
+    /// fixes what the next round trip can fix: a stale step-up fails every
+    /// start until the password is asked again, and two-step changed
+    /// elsewhere fails every start for good — Try Again there would be a
+    /// button that never works.
+    enum Recovery: Equatable {
+        /// Start again (the network, the server having a moment).
+        case retry
+        /// Ask for the password again, then start (`stepUpRequired`).
+        case stepUp
+        /// Nothing to set up any more: back to the Two-Step screen, which
+        /// has reloaded underneath (`alreadyChanged`).
+        case back
+    }
+
+    static func recovery(for error: Error) -> Recovery {
+        switch error as? TwoStepError {
+        case .stepUpRequired: .stepUp
+        case .alreadyChanged: .back
+        default: .retry
+        }
+    }
+
+    private(set) var state: State = .loading {
+        didSet { if state != oldValue { onChange?(state) } }
+    }
+
+    /// Every change of `state`, on the main actor.
+    var onChange: ((State) -> Void)?
+    /// The error behind a `.failed`, for whoever has to react to it beyond
+    /// this screen (an `alreadyChanged` makes the screen under it reload).
+    var onFailure: ((Error) -> Void)?
+
+    private let manager: any TwoStepManaging
+    private var inFlight: Task<Void, Never>?
+
+    init(manager: any TwoStepManaging) {
+        self.manager = manager
+    }
+
+    /// A start is out and hasn't answered.
+    var isStarting: Bool { inFlight != nil }
+
+    /// Starts the enrolment — first time, or again after a failure.
+    ///
+    /// One round trip at a time, and none once the secret is here: each
+    /// start mints a NEW secret server-side, so a second one racing the first
+    /// would leave the QR code on screen pointing at a seed the server has
+    /// already replaced, and the app's first code would never match.
+    func start() {
+        guard inFlight == nil else { return }
+        if case .ready = state { return }
+        state = .loading
+        inFlight = Task { [weak self, manager] in
+            let result: Result<TwoStepEnrollment, Error>
+            do {
+                result = .success(try await manager.startTwoStepEnrollment())
+            } catch {
+                result = .failure(error)
+            }
+            guard let self else { return }
+            inFlight = nil
+            switch result {
+            case .success(let enrollment):
+                state = .ready(enrollment)
+            case .failure(let error):
+                state = .failed(message: TwoStepViewController.failureMessage(error), recovery: Self.recovery(for: error))
+                onFailure?(error)
+            }
+        }
+    }
+}
+
 /// Turning two-step on: the account goes into the authenticator app (QR code,
 /// Add to Passwords, or the setup key typed by hand), and the app's first
 /// code turns it on.
+///
+/// ⚠️ PUSHED BEFORE ITS SECRET EXISTS (#800). The screen fetches the
+/// enrolment itself: until it answers, the QR code, the button and the setup
+/// key are skeleton bones in their own shapes (the steps' words are already
+/// there — they don't depend on the answer); a failure replaces the whole
+/// screen with what went wrong and its way out (`Recovery`), never a blank
+/// screen or a spinner that never ends.
+///
+/// The model comes from the Two-Step screen, which keeps a pending start
+/// across a pop so a re-push never mints a second secret.
 final class TwoStepEnrollmentViewController: UIViewController {
-    private let enrollment: TwoStepEnrollment
+    let model: TwoStepEnrollmentModel
     private let manager: any TwoStepManaging
+    private let stepUp: any CredentialStepUp
+    /// Asks for the password, then runs its closure once the step-up has
+    /// gone through. Nil: the password alert. A test hands in its own (an
+    /// alert never finishes presenting in the test host).
+    var presentStepUp: ((@escaping () -> Void) -> Void)?
     private let onEnabled: (BackupCodes) -> Void
     private let codeField = UITextField()
-    private let scroll = UIScrollView()
+    let scroll = UIScrollView()
+    /// The failed state: what went wrong, and Try Again.
+    let failureView = EmptyStateView()
+    /// Where the QR code, Add to Passwords and the setup key go — bones
+    /// until the enrolment answers.
+    private let secretSlot = UIStackView()
+    private var enrollment: TwoStepEnrollment?
     private var isConfirming = false
 
-    init(enrollment: TwoStepEnrollment, manager: any TwoStepManaging, onEnabled: @escaping (BackupCodes) -> Void) {
-        self.enrollment = enrollment
+    init(
+        model: TwoStepEnrollmentModel,
+        manager: any TwoStepManaging,
+        stepUp: any CredentialStepUp,
+        onEnabled: @escaping (BackupCodes) -> Void
+    ) {
+        self.model = model
         self.manager = manager
+        self.stepUp = stepUp
         self.onEnabled = onEnabled
         super.init(nibName: nil, bundle: nil)
         title = "Set Up"
@@ -387,56 +531,12 @@ final class TwoStepEnrollmentViewController: UIViewController {
             "Scan the code with another device's camera, or tap Add to Passwords on this iPhone.",
             style: .subheadline, color: .secondaryLabel
         ))
-        // A white plate with a margin around the code: scanners need the
-        // quiet zone, and a dark-mode background would otherwise touch it.
-        let plate = UIView()
-        plate.backgroundColor = .white
-        plate.layer.cornerRadius = 16
-        plate.isAccessibilityElement = true
-        plate.accessibilityLabel = "QR code for your authenticator app"
-        let qr = UIImageView(image: Self.qrCode(for: enrollment.otpauthURI))
-        qr.contentMode = .scaleAspectFit
-        qr.layer.magnificationFilter = .nearest
-        let qrHolder = UIView()
-        qrHolder.addSubview(plate)
-        plate.addSubview(qr)
-        plate.translatesAutoresizingMaskIntoConstraints = false
-        qr.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            plate.centerXAnchor.constraint(equalTo: qrHolder.centerXAnchor),
-            plate.topAnchor.constraint(equalTo: qrHolder.topAnchor),
-            plate.bottomAnchor.constraint(equalTo: qrHolder.bottomAnchor),
-            qr.topAnchor.constraint(equalTo: plate.topAnchor, constant: 16),
-            qr.bottomAnchor.constraint(equalTo: plate.bottomAnchor, constant: -16),
-            qr.leadingAnchor.constraint(equalTo: plate.leadingAnchor, constant: 16),
-            qr.trailingAnchor.constraint(equalTo: plate.trailingAnchor, constant: -16),
-            qr.widthAnchor.constraint(equalToConstant: 184),
-            qr.heightAnchor.constraint(equalToConstant: 184),
-        ])
-        stack.addArrangedSubview(qrHolder)
+        secretSlot.axis = .vertical
+        secretSlot.spacing = Spacing.md
+        secretSlot.alignment = .fill
+        stack.addArrangedSubview(secretSlot)
 
-        var addConfig = UIButton.Configuration.bordered()
-        addConfig.title = "Add to Passwords"
-        addConfig.image = UIImage(systemName: "key.viewfinder")
-        addConfig.imagePadding = 8
-        let addButton = UIButton(configuration: addConfig, primaryAction: UIAction { [weak self] _ in self?.openAuthenticator() })
-        stack.addArrangedSubview(addButton)
-
-        stack.addArrangedSubview(Self.label("Or type this setup key:", style: .subheadline, color: .secondaryLabel))
-        var keyConfig = UIButton.Configuration.gray()
-        keyConfig.title = enrollment.groupedSecret
-        keyConfig.attributedTitle = AttributedString(
-            enrollment.groupedSecret,
-            attributes: AttributeContainer([.font: UIFont.monospacedSystemFont(ofSize: 17, weight: .medium)])
-        )
-        keyConfig.image = UIImage(systemName: "doc.on.doc")
-        keyConfig.imagePlacement = .trailing
-        keyConfig.imagePadding = 8
-        let keyButton = UIButton(configuration: keyConfig, primaryAction: UIAction { [weak self] _ in self?.copyKey() })
-        keyButton.accessibilityLabel = "Setup key, \(enrollment.secret). Copy"
-        stack.addArrangedSubview(keyButton)
-
-        stack.setCustomSpacing(Spacing.xl, after: keyButton)
+        stack.setCustomSpacing(Spacing.xl, after: secretSlot)
         stack.addArrangedSubview(Self.label("2. Enter the 6-digit code it shows", style: .headline))
         codeField.placeholder = "6-digit code"
         codeField.keyboardType = .numberPad
@@ -451,6 +551,10 @@ final class TwoStepEnrollmentViewController: UIViewController {
         codeField.heightAnchor.constraint(greaterThanOrEqualToConstant: 48).isActive = true
         stack.addArrangedSubview(codeField)
 
+        failureView.translatesAutoresizingMaskIntoConstraints = false
+        failureView.isHidden = true
+        view.addSubview(failureView)
+
         let margins = view.layoutMarginsGuide
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: view.topAnchor),
@@ -461,7 +565,204 @@ final class TwoStepEnrollmentViewController: UIViewController {
             stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -Spacing.lg),
             stack.leadingAnchor.constraint(equalTo: margins.leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: margins.trailingAnchor),
+            failureView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            failureView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            failureView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
         ])
+
+        model.onChange = { [weak self] state in self?.render(state) }
+        render(model.state)
+        model.start()
+    }
+
+    /// The failed state's action: start again, ask for the password first,
+    /// or go back — whichever can actually get past this failure.
+    func recover() {
+        guard case .failed(_, let recovery) = model.state else { return }
+        switch recovery {
+        case .retry:
+            model.start()
+        case .stepUp:
+            let start: () -> Void = { [weak self] in self?.model.start() }
+            if let presentStepUp {
+                presentStepUp(start)
+            } else {
+                StepUpPrompt.present(
+                    on: self,
+                    message: "To turn on two-step sign-in, enter your password.",
+                    actionTitle: "Continue",
+                    stepUp: stepUp,
+                    onVerified: start,
+                    onFailure: { [weak self] error in self?.presentMessage(TwoStepViewController.failureMessage(error)) }
+                )
+            }
+        case .back:
+            navigationController?.popViewController(animated: true)
+        }
+    }
+
+    // MARK: States
+
+    private func render(_ state: TwoStepEnrollmentModel.State) {
+        secretSlot.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        switch state {
+        case .loading:
+            enrollment = nil
+            scroll.isHidden = false
+            failureView.isHidden = true
+            let bones = UIStackView(arrangedSubviews: loadingSecret())
+            bones.axis = .vertical
+            bones.spacing = secretSlot.spacing
+            bones.isUserInteractionEnabled = false
+            bones.isAccessibilityElement = true
+            bones.accessibilityLabel = "Loading setup code"
+            secretSlot.addArrangedSubview(bones)
+        case .ready(let enrollment):
+            self.enrollment = enrollment
+            scroll.isHidden = false
+            failureView.isHidden = true
+            secret(for: enrollment).forEach(secretSlot.addArrangedSubview)
+        case .failed(let message, let recovery):
+            enrollment = nil
+            scroll.isHidden = true
+            failureView.configure(
+                symbolName: "exclamationmark.triangle",
+                title: "Couldn't Start Setup",
+                subtitle: message,
+                actionTitle: Self.actionTitle(for: recovery),
+                actionHandler: { [weak self] in self?.recover() }
+            )
+            failureView.isHidden = false
+            codeField.resignFirstResponder()
+        }
+        // Nothing to type a code for until there is a secret to put in the app.
+        codeField.isEnabled = enrollment != nil
+        codeChanged()
+    }
+
+    static func actionTitle(for recovery: TwoStepEnrollmentModel.Recovery) -> String {
+        recovery == .back ? "Back" : "Try Again"
+    }
+
+    /// What a setup key looks like before there is one: as long as the
+    /// mock's (and the server's) 16-character base32 seed, so the key's bone
+    /// wraps as the key will.
+    private static let placeholderSecret = String(repeating: "X", count: 16)
+
+    /// ⚠️ THE BONES ARE THE REAL VIEWS, INVISIBLE (#800). Fixed-size bones
+    /// guessed the button heights and the caption's line, so the screen
+    /// jumped when the secret landed — and further at larger text sizes.
+    /// Here each bone is laid over the very view that will replace it (built
+    /// by the same factory, drawn at alpha 0), so it has that view's height
+    /// at every Dynamic Type size, and the caption's bone is one line of its
+    /// own font tall. The QR plate keeps its fixed size.
+    private func loadingSecret() -> [UIView] {
+        let plate = SkeletonBoneView(rounding: .fixed(16))
+        let caption = Self.setupKeyCaption()
+        return [
+            Self.qrHolder(around: plate),
+            Self.underBone(addToPasswordsButton()),
+            Self.underBone(caption, rounding: .capsule, widthFraction: 0.5),
+            Self.underBone(setupKeyButton(grouped: Self.placeholderSecret, secret: "")),
+        ]
+    }
+
+    private func secret(for enrollment: TwoStepEnrollment) -> [UIView] {
+        // A white plate with a margin around the code: scanners need the
+        // quiet zone, and a dark-mode background would otherwise touch it.
+        let plate = UIView()
+        plate.backgroundColor = .white
+        plate.layer.cornerRadius = 16
+        plate.isAccessibilityElement = true
+        plate.accessibilityLabel = "QR code for your authenticator app"
+        let qr = UIImageView(image: Self.qrCode(for: enrollment.otpauthURI))
+        qr.contentMode = .scaleAspectFit
+        qr.layer.magnificationFilter = .nearest
+        plate.addSubview(qr)
+        qr.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            qr.topAnchor.constraint(equalTo: plate.topAnchor, constant: 16),
+            qr.bottomAnchor.constraint(equalTo: plate.bottomAnchor, constant: -16),
+            qr.leadingAnchor.constraint(equalTo: plate.leadingAnchor, constant: 16),
+            qr.trailingAnchor.constraint(equalTo: plate.trailingAnchor, constant: -16),
+        ])
+        return [
+            Self.qrHolder(around: plate),
+            addToPasswordsButton(),
+            Self.setupKeyCaption(),
+            setupKeyButton(grouped: enrollment.groupedSecret, secret: enrollment.secret),
+        ]
+    }
+
+    /// The plate centred on its row: 184 pt of code in a 16 pt quiet zone.
+    private static func qrHolder(around plate: UIView) -> UIView {
+        let holder = UIView()
+        holder.addSubview(plate)
+        plate.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            plate.centerXAnchor.constraint(equalTo: holder.centerXAnchor),
+            plate.topAnchor.constraint(equalTo: holder.topAnchor),
+            plate.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+            plate.widthAnchor.constraint(equalToConstant: 216),
+            plate.heightAnchor.constraint(equalToConstant: 216),
+        ])
+        return holder
+    }
+
+    private func addToPasswordsButton() -> UIButton {
+        var config = UIButton.Configuration.bordered()
+        config.title = "Add to Passwords"
+        config.image = UIImage(systemName: "key.viewfinder")
+        config.imagePadding = 8
+        return UIButton(configuration: config, primaryAction: UIAction { [weak self] _ in self?.openAuthenticator() })
+    }
+
+    private static func setupKeyCaption() -> UILabel {
+        label("Or type this setup key:", style: .subheadline, color: .secondaryLabel)
+    }
+
+    private func setupKeyButton(grouped: String, secret: String) -> UIButton {
+        var config = UIButton.Configuration.gray()
+        config.title = grouped
+        config.attributedTitle = AttributedString(
+            grouped,
+            attributes: AttributeContainer([.font: UIFont.monospacedSystemFont(ofSize: 17, weight: .medium)])
+        )
+        config.image = UIImage(systemName: "doc.on.doc")
+        config.imagePlacement = .trailing
+        config.imagePadding = 8
+        let button = UIButton(configuration: config, primaryAction: UIAction { [weak self] _ in self?.copyKey() })
+        button.accessibilityLabel = "Setup key, \(secret). Copy"
+        return button
+    }
+
+    /// `content`, invisible, with a bone over it: the bone takes the view's
+    /// height (and `widthFraction` of its width, from the leading edge).
+    private static func underBone(
+        _ content: UIView,
+        rounding: SkeletonBoneView.Rounding = .fixed(12),
+        widthFraction: CGFloat = 1
+    ) -> UIView {
+        let holder = UIView()
+        let bone = SkeletonBoneView(rounding: rounding)
+        content.alpha = 0
+        content.isAccessibilityElement = false
+        content.accessibilityElementsHidden = true
+        holder.addSubview(content)
+        holder.addSubview(bone)
+        content.translatesAutoresizingMaskIntoConstraints = false
+        bone.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            content.topAnchor.constraint(equalTo: holder.topAnchor),
+            content.bottomAnchor.constraint(equalTo: holder.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: holder.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: holder.trailingAnchor),
+            bone.topAnchor.constraint(equalTo: content.topAnchor),
+            bone.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+            bone.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            bone.widthAnchor.constraint(equalTo: content.widthAnchor, multiplier: widthFraction),
+        ])
+        return holder
     }
 
     static func cleaned(_ text: String) -> String {
@@ -505,11 +806,11 @@ final class TwoStepEnrollmentViewController: UIViewController {
     private func codeChanged() {
         let code = Self.cleaned(codeField.text ?? "")
         codeField.text = code
-        navigationItem.rightBarButtonItem?.isEnabled = code.count == 6 && !isConfirming
+        navigationItem.rightBarButtonItem?.isEnabled = code.count == 6 && !isConfirming && enrollment != nil
     }
 
     private func openAuthenticator() {
-        guard let url = URL(string: enrollment.otpauthURI) else { return }
+        guard let uri = enrollment?.otpauthURI, let url = URL(string: uri) else { return }
         UIApplication.shared.open(url) { [weak self] opened in
             guard !opened else { return }
             self?.presentMessage("No app on this iPhone takes setup codes. Scan the QR code with another device, or type the setup key.")
@@ -519,13 +820,14 @@ final class TwoStepEnrollmentViewController: UIViewController {
     /// A copy has no evidence on screen, so it says so (#803): a vibration
     /// alone left the author unsure the key was taken.
     private func copyKey() {
-        UIPasteboard.general.string = enrollment.secret
+        guard let secret = enrollment?.secret else { return }
+        UIPasteboard.general.string = secret
         Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self)
     }
 
     @objc private func confirm() {
         let code = Self.cleaned(codeField.text ?? "")
-        guard code.count == 6, !isConfirming else { return }
+        guard code.count == 6, !isConfirming, enrollment != nil else { return }
         isConfirming = true
         navigationItem.rightBarButtonItem?.isEnabled = false
         navigationItem.hidesBackButton = true
