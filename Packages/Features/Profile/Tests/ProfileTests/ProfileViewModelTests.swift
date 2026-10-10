@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 import PostGrid
 import Testing
@@ -17,7 +18,7 @@ private actor StubProfileProvider: ProfileProviding {
         case failure(Error)
     }
 
-    private let outcome: Outcome
+    private var outcome: Outcome
     private let stubRelationship: ProfileRelationship
     private var setFollowingError: Error?
     private var setBlockedError: Error?
@@ -44,6 +45,9 @@ private actor StubProfileProvider: ProfileProviding {
         self.setBlockedError = setBlockedError
         self.accountBlockResult = accountBlockResult
     }
+
+    /// What the next reads answer: the network coming back.
+    func setOutcome(_ outcome: Outcome) { self.outcome = outcome }
 
     func currentUserProfile() async throws -> UserProfile {
         try await resolve()
@@ -133,8 +137,8 @@ struct ProfileViewModelTests {
     /// and a single fixed sleep is a wall-clock bet a loaded machine loses —
     /// this suite reddened wholesale the moment the package gained more
     /// suites doing real work. Same fix `ProfileGalleryTests` already carries.
-    private func settle(until condition: @escaping () -> Bool = { false }) async {
-        for _ in 0..<60 {
+    private func settle(attempts: Int = 60, until condition: @escaping () -> Bool = { false }) async {
+        for _ in 0..<attempts {
             await Task.yield()
             if condition() { return }
             try? await Task.sleep(for: .milliseconds(5))
@@ -191,6 +195,40 @@ struct ProfileViewModelTests {
             Issue.record("expected failed phase, got \(String(describing: phases().last))")
             return
         }
+    }
+
+    /// ⚠️ THE NETWORK COMES BACK, THE PROFILE LOADS (#793): a profile whose
+    /// first load failed while offline reloads on recovery, without a pull.
+    ///
+    /// ⚠️ ITS OWN MONITOR: the shared one is process-wide, and flipping it
+    /// reloaded every store alive in the parallel suites.
+    @Test func aFailedProfileReloadsWhenTheNetworkReturns() async {
+        let provider = StubProfileProvider(.failure(SampleError()))
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
+        let viewModel = ProfileViewModel(repository: provider)
+        viewModel.connectivity = monitor
+        let phases = phaseRecorder(viewModel)
+        viewModel.viewDidLoad()
+        await settle(attempts: 400) {
+            if case .failed = phases().last { return true } else { return false }
+        }
+        guard case .failed = phases().last else {
+            Issue.record("expected failed phase, got \(String(describing: phases().last))")
+            return
+        }
+
+        await provider.setOutcome(.success(sampleProfile()))
+        monitor.report(online: false)
+        monitor.report(online: true)
+        await settle(attempts: 400) {
+            if case .content = phases().last { return true } else { return false }
+        }
+
+        guard case .content(let model) = phases().last else {
+            Issue.record("the profile did not reload on recovery: \(String(describing: phases().last))")
+            return
+        }
+        #expect(model.handle == "@ada")
     }
 
     // MARK: - Follow button

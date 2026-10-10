@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 import PostGrid
 import Testing
@@ -495,6 +496,35 @@ struct ForYouViewModelTests {
         #expect(last.media == last.discover)
         #expect(last.following == last.discover)
         #expect(last.friends == last.discover)
+    }
+
+    /// ⚠️ THE NETWORK COMES BACK, FOR YOU LOADS (#793): a corpus that failed
+    /// while offline reloads on recovery, without a pull.
+    ///
+    /// ⚠️ ITS OWN MONITOR: the shared one is process-wide, and flipping it
+    /// reloaded every store alive in the parallel suites.
+    @Test func aFailedForYouReloadsWhenTheNetworkReturns() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
+        provider.failFirstPage = true
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
+        let (viewModel, snapshots) = makeViewModel(provider)
+        viewModel.connectivity = monitor
+        viewModel.viewDidLoad()
+        for _ in 0..<200 where snapshots().last?.discover != .failed(message: "Couldn't load. Pull to retry.") {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(snapshots().last?.discover == .failed(message: "Couldn't load. Pull to retry."))
+
+        provider.failFirstPage = false
+        monitor.report(online: false)
+        monitor.report(online: true)
+        let landed = ForYouViewModel.PageState.content(DiscoverySource.trending.ordering(mixed))
+        for _ in 0..<200 where snapshots().last?.discover != landed {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(provider.firstPageLoads == 2)
+        #expect(snapshots().last?.discover == landed)
     }
 
     /// An empty list has to name itself — and an unfiltered one offers no
