@@ -165,8 +165,6 @@ struct MapsViewModelTests {
                 "the tile response reaches the diff wearing the injected tags")
     }
 
-    /// Bounded yield-polling: the fake answers synchronously, so the query
-    /// task only needs scheduler turns, never wall-clock time.
     // MARK: - Repeated failures (#798)
 
     /// Two failed queries in a row are reported once; more failures in the
@@ -219,6 +217,8 @@ struct MapsViewModelTests {
         #expect(reports == 2, "a new run is reported afresh")
     }
 
+    /// Bounded yield-polling: the fake answers synchronously, so the query
+    /// task only needs scheduler turns, never wall-clock time.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<1000 where !condition() { await Task.yield() }
     }

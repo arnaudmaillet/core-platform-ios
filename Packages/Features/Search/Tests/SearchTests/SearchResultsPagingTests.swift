@@ -289,8 +289,9 @@ struct SearchResultsPagingTests {
         #expect(await provider.asks("people") == [nil, nil])
     }
 
-    /// Nothing failed: Try Again (or a pull on the posts) asks for nothing.
-    @Test func tryAgainWithNothingFailedAsksForNothing() async throws {
+    /// #798: a pull over good posts re-asks for the posts alone, and keeps
+    /// them on the tab while it is out — and when it fails.
+    @Test func aPullOverGoodPostsReasksForThemAndKeepsThemShown() async throws {
         let provider = PagedSearch(
             people: ["ann": [nil: people(1...1, next: nil)]],
             posts: ["ann": [nil: posts([0], next: nil)]]
@@ -299,9 +300,16 @@ struct SearchResultsPagingTests {
         viewModel.submitQuery("ann")
         try #require(await settle { viewModel.postResults.count == 1 && handles(viewModel) == ["user1"] })
 
+        await provider.failOnce("posts")
         viewModel.retryFailedSearch()
+        #expect(viewModel.isSearchingPosts)
+        #expect(ids(viewModel.postResults) == ["post-0"], "still shown while the pull is out")
+        try #require(await settle { !viewModel.isSearchingPosts })
 
-        #expect(!viewModel.isSearchingPosts)
+        #expect(!viewModel.postsFailed, "a failed pull over posts keeps them")
+        #expect(ids(viewModel.postResults) == ["post-0"])
+        #expect(await provider.asks("posts") == [nil, nil])
+        #expect(await provider.asks("people") == [nil], "the people answer is not asked again")
         #expect(handles(viewModel) == ["user1"])
     }
 

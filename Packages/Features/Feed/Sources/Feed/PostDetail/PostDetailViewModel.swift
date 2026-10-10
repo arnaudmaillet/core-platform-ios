@@ -105,7 +105,20 @@ public final class PostDetailViewModel {
     private var pagingGeneration = 0
     /// The first page's load is out: a near-end reached meanwhile is honoured
     /// as soon as it says whether there is more.
-    private var isLoadingFirstPage = false
+    /// Internal-readable for the test that overlaps two first-page loads.
+    private(set) var isLoadingFirstPage = false
+    /// Bumped by every first-page load (#798). First-page loads OVERLAP — a
+    /// pull while the first is out, the check after a review — and without a
+    /// token whichever ended first cleared `isLoadingFirstPage` for the one
+    /// still out, and a late failure could cover an answer that had landed.
+    /// Only the latest load clears the flag or reports a failure.
+    private var firstPageGeneration = 0
+    /// The newest first-page load whose answer has landed: an OLDER answer
+    /// arriving after it is stale and dropped.
+    private var appliedFirstPageGeneration = 0
+    /// The view is showing an answer — a loaded stream, empty or not — rather
+    /// than its skeleton or the failed row. What a failure must never cover.
+    private var showsAnswer = false
     /// The last first-page load failed with nothing on screen (`.failed`):
     /// what `retryComments()` answers to.
     private var firstPageFailed = false
@@ -212,6 +225,7 @@ public final class PostDetailViewModel {
         // page is empty because it is new, not because it is waiting. Only the
         // viewer is asked for, because the viewer is the author.
         guard !isDraft else {
+            showsAnswer = true
             onCommentsChange?(.loaded([]))
             loadViewerIdentity()
             return
@@ -472,27 +486,36 @@ public final class PostDetailViewModel {
         let didShowPrefetch = prefetched != nil
         isLoadingFirstPage = true
         firstPageFailed = false
+        firstPageGeneration += 1
+        let generation = firstPageGeneration
         // Refreshed regardless: the cache is a head start, not the truth. A
         // page prefetched a minute ago can have missed a comment since.
         Task { [weak self] in
             guard let self else { return }
             let page = try? await commentsProvider.loadCommentsPage(for: postID, after: nil)
-            self.isLoadingFirstPage = false
+            // A load another one has superseded neither clears the flag the
+            // newer one holds nor reports a failure; its answer, if it has
+            // one, still lands unless a newer answer already has (#798).
+            let isCurrent = generation == self.firstPageGeneration
+            if isCurrent { self.isLoadingFirstPage = false }
             // ⚠️ A FAILURE IS NOT AN EMPTY PAGE (#798). With nothing on screen
             // — the view sitting in `.loading` — it is said as `.failed`, with
             // a retry; with anything on screen (a prefetched page, the stream
-            // a refresh is checking, a published draft's), it changes nothing.
-            // Decided before the later-pages branch below on purpose: that
-            // branch only runs with comments shown, and keeps them too.
+            // a refresh is checking, a published draft's, an answer an
+            // overlapping load landed), it changes nothing. Decided before the
+            // later-pages branch below on purpose: that branch only runs with
+            // comments shown, and keeps them too.
             guard let page else {
-                if !didShowPrefetch, self.comments.isEmpty {
+                if isCurrent, !didShowPrefetch, self.comments.isEmpty, !self.showsAnswer {
                     self.firstPageFailed = true
                     self.onCommentsChange?(.failed(message: Self.commentsFailureMessage))
                 }
                 return
             }
+            guard generation > self.appliedFirstPageGeneration else { return }
+            self.appliedFirstPageGeneration = generation
             defer {
-                if self.wantsNextPage {
+                if isCurrent, self.wantsNextPage {
                     self.wantsNextPage = false
                     self.loadMoreComments()
                 }
@@ -646,6 +669,7 @@ public final class PostDetailViewModel {
         let now = now()
         let ordered = Self.sortedForDisplay(comments, order: commentSort, liked: likedComments, pageStarts: pageStarts)
         let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
+        showsAnswer = true
         onCommentsChange?(.loaded(ordered.map {
             CommentDisplayModel(entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id))
         }))

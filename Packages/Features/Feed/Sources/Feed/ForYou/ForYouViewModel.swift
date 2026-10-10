@@ -592,8 +592,17 @@ public final class ForYouViewModel {
     }
 
     private func loadFirstPage(reset: Bool) {
+        // ⚠️ A REFRESH DURING A LOAD WAITS FOR THAT LOAD (#798). It used to
+        // cancel it and then stop at `guard load == nil` below — the cancelled
+        // task returns before publishing or settling, and the new one never
+        // started — so a pull during the INITIAL load left the page loading
+        // for good, with no Try Again and a refresh control that never ended.
+        // The load in flight is already the fresh answer the pull asked for,
+        // and its settle ends the controls. (Not cancelled and replaced:
+        // `load` cannot be nilled here, because the old task's `defer` would
+        // then wipe out the new one.)
+        if reset, load != nil { return }
         if reset {
-            load?.cancel()
             if pageLoad != nil {
                 pageLoad?.cancel()
                 // A cancelled task's `defer` does not run, so the footer would

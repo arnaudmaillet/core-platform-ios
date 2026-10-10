@@ -874,16 +874,18 @@ public final class SearchViewModel {
         }
     }
 
-    /// The failed state's Try Again, from either tab (#798).
+    /// The failed state's Try Again, from either tab, and a pull on the Posts
+    /// tab (#798).
     ///
     /// The PEOPLE search failing fails the whole answer (`.failed`), so the
-    /// whole search runs again. The POST search failing alone re-asks only
-    /// for the posts: the people answer on the other tab is fine, and running
-    /// it again would flash its rows back to a spinner for nothing. A no-op
-    /// when nothing failed — a pull on a good answer.
+    /// whole search runs again. Otherwise only the POSTS are asked for again —
+    /// the people answer on the other tab is fine, and running it again would
+    /// flash its rows back to a spinner for nothing. Posts on screen stay
+    /// there until the new first page replaces them, and stay if it fails: a
+    /// pull over a good answer is a refresh, not a reset.
     public func retryFailedSearch() {
         let trimmed = submittedQuery
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty, isShowingSearchResults else { return }
         if case .failed = phase {
             searchTask?.cancel()
             searchTask = Task { [weak self] in
@@ -891,7 +893,13 @@ public final class SearchViewModel {
             }
             return
         }
-        guard postsFailed, !isSearchingPosts else { return }
+        guard !isSearchingPosts else { return }
+        // A next page of the answer being replaced would land on the new one.
+        if postsPageLoad != nil {
+            postsPageLoad?.cancel()
+            postsPageLoad = nil
+            onPostsPagingChange?(false)
+        }
         loadPosts(trimmed)
     }
 
@@ -908,8 +916,9 @@ public final class SearchViewModel {
         postsTask?.cancel()
         postsFailed = false
         isSearchingPosts = true
-        // Announced: the tab goes back to loading (a Try Again, or a new
-        // question) before anything has come back.
+        // Announced: a tab with nothing on it goes back to loading (a Try
+        // Again, or a new question) before anything has come back; one with
+        // posts keeps them (`postState`).
         onPostResultsChange?(postResults)
         postsTask = Task { [weak self] in
             guard let self else { return }
@@ -924,7 +933,9 @@ public final class SearchViewModel {
             guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
             self.isSearchingPosts = false
             guard let page else {
-                self.postsFailed = true
+                // A refresh over posts on screen keeps them: the failure only
+                // reads as one where there is nothing else to show.
+                self.postsFailed = self.postResults.isEmpty
                 self.onPostResultsChange?(self.postResults)
                 return
             }

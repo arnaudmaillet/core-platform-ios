@@ -447,6 +447,23 @@ struct ForYouViewModelTests {
         #expect(refreshFailures == 0)
     }
 
+    /// #798: a pull while the INITIAL load is out leaves that load to answer —
+    /// it used to cancel it and start nothing, and the page stayed loading
+    /// for good with its refresh control turning.
+    @Test func aPullDuringTheInitialLoadStillSettles() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
+        let (viewModel, snapshots) = makeViewModel(provider)
+        var settled = 0
+        viewModel.onLoadSettled = { settled += 1 }
+        viewModel.viewDidLoad()
+        viewModel.refresh() // before the initial load has answered
+        await settle()
+
+        #expect(settled == 1, "the refresh control ends")
+        #expect(provider.firstPageLoads == 1)
+        #expect(snapshots().last?.discover == .content(DiscoverySource.trending.ordering(mixed)))
+    }
+
     /// #798: with nothing loaded, a failed refresh is still the failed page
     /// (with its retry), not a toast over nothing.
     @Test func aFailedRefreshWithNothingLoadedStillShowsTheFailedPage() async {

@@ -36,6 +36,12 @@ private actor PagedComments: CommentsProviding {
     private var failuresLeft: [String: Int] = [:]
     /// How many first-page asks (token nil) still throw (#798).
     private var firstPageFailuresLeft = 0
+    /// First-page asks are numbered from 1 as they arrive; these numbers throw.
+    private var failingFirstPageAsks: Set<Int> = []
+    private var firstPageAsks = 0
+    /// First-page asks wait for `releaseOldestFirstPage` while set.
+    private var firstPageGated = false
+    private var firstPageWaiting: [CheckedContinuation<Void, Never>] = []
     private(set) var requests: [String?] = []
     /// Tokens whose pages wait for `release`, in the order they were asked.
     private var gated: Set<String> = []
@@ -54,6 +60,13 @@ private actor PagedComments: CommentsProviding {
     func setPage(_ page: CommentPage, for token: String?) { pages[token] = page }
     func failOnce(_ token: String) { failuresLeft[token] = 1 }
     func failFirstPageOnce() { firstPageFailuresLeft = 1 }
+    func failFirstPageAsk(_ number: Int) { failingFirstPageAsks.insert(number) }
+    func gateFirstPage() { firstPageGated = true }
+    var firstPageWaitingCount: Int { firstPageWaiting.count }
+    func releaseOldestFirstPage() {
+        guard !firstPageWaiting.isEmpty else { return }
+        firstPageWaiting.removeFirst().resume()
+    }
 
     func loadComments(for postID: PostID) async throws -> [CommentEntry] {
         try await loadCommentsPage(for: postID, after: nil).entries
@@ -61,6 +74,12 @@ private actor PagedComments: CommentsProviding {
 
     func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
         requests.append(pageToken)
+        if pageToken == nil {
+            firstPageAsks += 1
+            let number = firstPageAsks
+            if firstPageGated { await withCheckedContinuation { firstPageWaiting.append($0) } }
+            if failingFirstPageAsks.contains(number) { throw CommentsError.transport(message: "offline") }
+        }
         if let token = pageToken, gated.contains(token) {
             await withCheckedContinuation { waiting.append((token, $0)) }
         }
@@ -304,6 +323,38 @@ struct CommentsPagingTests {
         #expect(!states.contains { if case .failed = $0 { true } else { false } })
         #expect(!states.contains(.loaded([])))
         #expect(shownIDs == ["b", "a"])
+    }
+
+    /// #798: two first-page loads out at once (a pull while the first is
+    /// out). The first answers — an empty, valid stream — and the pull's
+    /// failure lands after it: the failure must not cover that answer, and the
+    /// first load ending must not clear the flag the pull's load still holds.
+    @Test func anOverlappingPullsFailureNeverCoversAnAnswerThatLanded() async {
+        let provider = PagedComments([nil: CommentPage(entries: [], nextPageToken: nil)])
+        await provider.gateFirstPage()
+        await provider.failFirstPageAsk(2)
+        let viewModel = PostDetailViewModel(
+            postID: PostID("post-1"), repository: PagingFeedProvider(), commentsProvider: provider
+        )
+        var states: [PostDetailViewModel.CommentsState] = []
+        viewModel.onCommentsChange = { states.append($0) }
+        var postLoads = 0
+        viewModel.onPhaseChange = { if case .content = $0 { postLoads += 1 } }
+        viewModel.viewDidLoad()
+        await settle(untilAsync: { await provider.firstPageWaitingCount == 1 })
+        await settle { postLoads == 1 } // `refresh()` waits for the post's load
+
+        viewModel.refresh()
+        await settle(untilAsync: { await provider.firstPageWaitingCount == 2 })
+        await provider.releaseOldestFirstPage() // the first load: empty, valid
+        await settle { states.contains(.loaded([])) }
+        #expect(viewModel.isLoadingFirstPage, "the pull's load is still out")
+
+        await provider.releaseOldestFirstPage() // the pull's: fails
+        await settle { !viewModel.isLoadingFirstPage }
+
+        #expect(!states.contains { if case .failed = $0 { true } else { false } })
+        #expect(states.last == .loaded([]))
     }
 
     /// A comment on both sides of a page boundary is shown once.
