@@ -304,14 +304,15 @@ public final class WalletBadgeButton: UIButton {
     var isBreathing: Bool { coinView.layer.animation(forKey: Self.pulseKey) != nil }
     var isGlowing: Bool { coinView.layer.shadowOpacity > 0 }
 
-    /// Reduce Motion, Power Saving or the app's rest changed: the breath
-    /// follows, the glow stays.
+    /// Re-arms what backgrounding stripped (#783).
     @objc private func rearmAfterForeground() {
         guard window != nil else { return }
         if wantsPulse { addPulseIfMissing() }
         applyRing()
     }
 
+    /// Reduce Motion, Power Saving or the app's rest changed: the breath
+    /// follows, the glow stays.
     @objc private func motionPreferenceChanged() {
         guard wantsPulse else { return }
         coinView.layer.removeAnimation(forKey: Self.pulseKey)
