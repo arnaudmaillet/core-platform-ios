@@ -2414,7 +2414,10 @@ final class PostDetailViewController: UIViewController {
     private(set) var dayUnderHeader: Date?
 
     private func syncDayUnderHeader() {
-        let day = groupsByDay ? lastDayGoneUnderTheTop() : nil
+        var day = groupsByDay ? lastDayGoneUnderTheTop() : nil
+        #if DEBUG
+        if let debugDayUnderTheTop { day = debugDayUnderTheTop() }
+        #endif
         guard day != dayUnderHeader else { return }
         dayUnderHeader = day
         onDayUnderHeaderChange?(day)
@@ -2437,8 +2440,18 @@ final class PostDetailViewController: UIViewController {
         return passed
     }
 
-    /// Scrolls to `day`'s chip, landing it just below the stream's top edge.
-    func scrollToDay(_ day: Date) {
+    /// Scrolls to `day`'s chip, landing it just under the stream's top edge.
+    ///
+    /// ⚠️ UNDER THE EDGE, NOT BELOW IT. The bar's day is the last chip gone
+    /// under the top, so a chip landed just below it handed the bar the day
+    /// BEFORE: a tap on "Yesterday" retitled the pill "Today", and on the
+    /// first day took it away. Under the edge, the chip is what the bar
+    /// already says, and that day's first comment opens the stream.
+    /// `animated` is false for tests, where nothing drives the animation.
+    func scrollToDay(_ day: Date, animated: Bool = true) {
+        #if DEBUG
+        debugOnScrollToDay?(day)
+        #endif
         guard let streamDataSource,
               let section = streamDataSource.snapshot().sectionIdentifiers.firstIndex(of: .day(day)),
               let chip = collectionView.layoutAttributesForSupplementaryElement(
@@ -2447,12 +2460,29 @@ final class PostDetailViewController: UIViewController {
         else { return }
         let insets = collectionView.adjustedContentInset
         let maxOffset = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
-        let offset = min(max(chip.minY - insets.top - Spacing.sm, -insets.top), maxOffset)
-        collectionView.setContentOffset(CGPoint(x: 0, y: offset), animated: true)
+        let offset = min(max(chip.maxY - insets.top, -insets.top), maxOffset)
+        collectionView.setContentOffset(CGPoint(x: 0, y: offset), animated: animated)
     }
 
     /// Re-reads the day under the top. Tests, and the host after a layout.
     func debugSyncDayUnderHeader() { syncDayUnderHeader() }
+
+    /// The stream's days, in order, with the section each heads. Tests.
+    var debugStreamDays: [(day: Date, section: Int)] {
+        guard let streamDataSource else { return [] }
+        return streamDataSource.snapshot().sectionIdentifiers.enumerated().compactMap { index, section in
+            guard case .day(let day) = section else { return nil }
+            return (day, index)
+        }
+    }
+
+    #if DEBUG
+    /// Stands in for the stream's geometry, for tests about the HOST's bar
+    /// rather than the scroll: the day this panel reports at its next sync.
+    var debugDayUnderTheTop: (() -> Date?)?
+    /// Hears every `scrollToDay`, for tests of what a tap reaches.
+    var debugOnScrollToDay: ((Date) -> Void)?
+    #endif
 
     /// The engaged toolbar's sort selector lands here — the view model
     /// re-ranks the data and the diffable apply animates the moves.

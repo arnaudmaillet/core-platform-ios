@@ -1635,12 +1635,25 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// Hears the day off the panel that holds the engagement.
+    ///
+    /// ⚠️ ONLY THE CURRENT PAGE'S PANEL DRIVES THE BAR, at the mount too. A
+    /// preview mounts while the page being left still owns the engagement,
+    /// and reading ITS day there cleared the pill mid-swipe; a cancelled
+    /// swipe never brought it back. A preview is heard at its promotion
+    /// instead (`syncCommentsDay`).
     private func observeCommentsDay(of detail: PostDetailViewController?) {
         detail?.onDayUnderHeaderChange = { [weak self, weak detail] day in
             guard let self, let detail, self.commentsContentVC === detail else { return }
             self.setCommentsDay(day)
         }
-        setCommentsDay(detail?.dayUnderHeader)
+        guard let detail, commentsContentVC === detail else { return }
+        setCommentsDay(detail.dayUnderHeader)
+    }
+
+    /// Reads the day off the panel that holds the engagement, whichever
+    /// route made it the one: a promotion, a settle, a cancelled swipe.
+    private func syncCommentsDay() {
+        setCommentsDay((commentsContentVC as? PostDetailViewController)?.dayUnderHeader)
     }
 
     private func scheduleTrailingPlacement() {
@@ -3353,6 +3366,8 @@ final class SnapFeedViewController: UIViewController {
         commentsContentVC = content
         commentsEngagementIsResting = true
         restingLockApplied = false
+        // Its day was not heard while it was a preview.
+        syncCommentsDay()
         return true
     }
 
@@ -3740,6 +3755,9 @@ final class SnapFeedViewController: UIViewController {
         (commentsContentVC as? PostDetailViewController)?
             .setComposerTracksKeyboard(commentsEngagedID == activeID)
         (previewRestingVC as? PostDetailViewController)?.setComposerTracksKeyboard(false)
+        // And so does the bar's day (#757): a swipe that settled, or one
+        // that went back home, shows the day of the panel now engaged.
+        syncCommentsDay()
         // ⚠️ AND SO DOES THE GROUND BEHIND THE PAGES.
         //
         // The pager's own background is what shows through any strip a page has

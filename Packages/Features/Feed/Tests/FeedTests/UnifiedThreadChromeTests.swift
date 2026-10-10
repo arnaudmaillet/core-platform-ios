@@ -100,8 +100,7 @@ struct UnifiedThreadChromeTests {
     }
 
     /// ⚠️ THE DAY CHIPS ARE NOT STICKY (#757), and the panel tells its host
-    /// the day of the last chip gone under its top — none before one has; a
-    /// tap on the host's day scrolls that day's chip back to the top.
+    /// the day of the last chip gone under its top — none before one has.
     @Test func theChipsScrollAwayAndTheDayUnderTheTopIsTold() async throws {
         let (controller, stream, window) = try await makeStream(Self.longAcrossDays)
         defer { window.isHidden = true }
@@ -127,13 +126,44 @@ struct UnifiedThreadChromeTests {
         }.first)
         #expect(firstChip.frame.maxY < stream.contentOffset.y + stream.adjustedContentInset.top,
                 "the chip stayed pinned to the top: \(firstChip.frame)")
+    }
 
-        controller.scrollToDay(day)
-        stream.setContentOffset(stream.contentOffset, animated: false)
+    /// ⚠️ A TAP ON THE BAR'S DAY LANDS THAT DAY'S CHIP UNDER THE TOP (#757):
+    /// the bar then still says the day it was tapped on, rather than the day
+    /// before it, or nothing. Unanimated: a test window has no scene to drive
+    /// the scroll's animation (the tap's wiring is `SnapCommentsDayBarTests`).
+    @Test func scrollingToADayLandsItsChipUnderTheTop() async throws {
+        let (controller, stream, window) = try await makeStream(Self.longAcrossDays)
+        defer { window.isHidden = true }
+        let days = controller.debugStreamDays
+        try #require(days.count >= 3, "the premise: three days in the thread")
+
+        // From the end of the thread, where the oldest day is under the top.
+        let bottom = stream.contentSize.height + stream.adjustedContentInset.bottom - stream.bounds.height
+        stream.setContentOffset(CGPoint(x: 0, y: bottom), animated: false)
         stream.layoutIfNeeded()
         controller.debugSyncDayUnderHeader()
-        #expect(controller.dayUnderHeader == day || controller.dayUnderHeader == nil,
-                "the scroll landed past the day it was asked for")
+        #expect(controller.dayUnderHeader == days[days.count - 1].day, "the premise: the oldest day at the end")
+
+        // The middle day: its chip is above the top here, the next one too.
+        let target = days[1]
+        let start = stream.contentOffset.y
+        controller.scrollToDay(target.day, animated: false)
+        stream.layoutIfNeeded()
+
+        #expect(stream.contentOffset.y != start, "the tap scrolled nothing")
+        let line = stream.contentOffset.y + stream.adjustedContentInset.top
+        let chip = try #require(stream.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: target.section)
+        ))
+        #expect(chip.frame.midY <= line, "the chip landed below the top: \(chip.frame) against \(line)")
+        let next = try #require(stream.layoutAttributesForSupplementaryElement(
+            ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: days[2].section)
+        ))
+        #expect(next.frame.midY > line, "the scroll ran past the day: \(next.frame) against \(line)")
+        // Told by the scroll itself, not by a re-read.
+        #expect(controller.dayUnderHeader == target.day,
+                "the bar's day after the tap: \(String(describing: controller.dayUnderHeader))")
     }
 
     @Test func recentGroupsTheThreadsUnderOnePillPerDay() async throws {
