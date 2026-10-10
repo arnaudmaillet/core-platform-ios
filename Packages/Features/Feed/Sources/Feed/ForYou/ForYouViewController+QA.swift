@@ -12,7 +12,9 @@ import UIKit
 //
 // The launch-argument automation (`installDebugHooks`, run from
 // `viewDidLoad`), the scripted grab cycles and the `debug*` accessors.
-// `auditPostMenu` and `logRowSource` stay in `ForYouViewController.swift`:
+// Private methods stay private: this file reaches them through thin `debug*`
+// wrappers in the main file (`debugOpenFeed`, `debugApplyContext`,
+// `debugFloatingBarCover`). `auditPostMenu` and `logRowSource` stay in `ForYouViewController.swift`:
 // they read private menu and flight state that only they use. Stored DEBUG
 // properties stay with the type.
 
@@ -34,7 +36,7 @@ extension ForYouViewController {
                 ? Int(ProcessInfo.processInfo.arguments[$0 + 1]) : nil } ?? 0
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             guard let self else { return }
-            openFeed(at: index)
+            debugOpenFeed(at: index)
         }
     }
 
@@ -92,7 +94,7 @@ extension ForYouViewController {
            position + 1 < arguments.count,
            let context = ContentContext(rawValue: arguments[position + 1]) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.applyContext(context)
+                self?.debugApplyContext(context)
             }
         }
         // `-foryou-scroll-demo <steps>` walks the active page down the corpus,
@@ -222,7 +224,7 @@ extension ForYouViewController {
                 page.revealPost(
                     posts[index].id,
                     clearing: UIEdgeInsets(top: view.safeAreaInsets.top, left: 0,
-                                           bottom: floatingBarCover, right: 0)
+                                           bottom: debugFloatingBarCover, right: 0)
                 )
             }
             let ready = page.heroAppearance(for: posts[index].id)?.cover != nil
@@ -242,7 +244,7 @@ extension ForYouViewController {
                     print("[foryou-comments] row \(index) has no comment chip to press")
                 }
             } else if !page.debugSelectItem(at: index) {
-                openFeed(at: index)
+                debugOpenFeed(at: index)
             }
             // `-foryou-demo-close`: the chevron's close, as the rows' hooks
             // schedule it — with `-snap-fling N`, the close from wherever the
@@ -285,7 +287,7 @@ extension ForYouViewController {
                                     guard let self, let nav = self.navigationController else { return false }
                                     return nav.topViewController === self && nav.transitionCoordinator == nil
                                 }) { [weak self] in
-                                    self?.openFeed(at: reopen)
+                                    self?.debugOpenFeed(at: reopen)
                                     runRound(round + 1)
                                 }
                             }
@@ -371,7 +373,7 @@ extension ForYouViewController {
                     let id = page.posts[index].id
                     if !page.isPostVisible(id) {
                         page.revealPost(id, clearing: UIEdgeInsets(
-                            top: view.safeAreaInsets.top, left: 0, bottom: floatingBarCover, right: 0
+                            top: view.safeAreaInsets.top, left: 0, bottom: debugFloatingBarCover, right: 0
                         ))
                         return false
                     }
@@ -381,7 +383,7 @@ extension ForYouViewController {
                     print("[qa] -foryou-open-paired \(ordinal): flat index \(index)"
                         + " id=\(page.posts[index].id.rawValue) aspect=\(page.posts[index].aspectRatio)")
                     scheduleDemoCloseIfRequested()
-                    if !page.debugSelectItem(at: index) { openFeed(at: index) }
+                    if !page.debugSelectItem(at: index) { debugOpenFeed(at: index) }
                 }
             }
         }

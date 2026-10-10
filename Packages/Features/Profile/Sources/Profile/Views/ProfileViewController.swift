@@ -1337,9 +1337,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// hosts them — the same split `moreMenuElements` uses, and for the same
     /// reason: a `UIMenu` opens on a tap, the simulator has none, and this is
     /// what `-profile-map-pin-audit` prints instead of guessing.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    func mapFavoriteMenuActions() -> [UIAction] {
+    private func mapFavoriteMenuActions() -> [UIAction] {
         let current = viewModel.mapPinButton.categories
         var rows: [(MapFavoriteCategory, String, String)] = [
             (.dock, "Map Dock", "pin"),
@@ -1457,6 +1455,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     }
     func debugMuteMenuElements() -> [UIMenuElement] { muteMenuElements() }
     func debugMoreMenuElements() -> [UIMenuElement] { moreMenuElements() }
+    /// The map star's rows, for `-profile-map-pin-audit` (+QA).
+    func debugMapFavoriteMenuActions() -> [UIAction] { mapFavoriteMenuActions() }
+    /// A gallery card's "..." rows, for `-post-menu-audit` (+QA).
+    func debugGalleryMenuActions(
+        for context: ProfileGalleryGridView.AuthorMenuContext
+    ) -> [PostCardMenuAction] {
+        galleryMenuActions(for: context)
+    }
     #endif
 
     // MARK: - Overflow menu
@@ -1639,9 +1645,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// — sitting on a row, worded differently, reachable while the header says
     /// the opposite — is how two truths about one relationship end up on screen
     /// at once.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    func galleryMenuActions(
+    private func galleryMenuActions(
         for context: ProfileGalleryGridView.AuthorMenuContext
     ) -> [PostCardMenuAction] {
         // The viewer's OWN post offers what a post of one's own is for. Edit

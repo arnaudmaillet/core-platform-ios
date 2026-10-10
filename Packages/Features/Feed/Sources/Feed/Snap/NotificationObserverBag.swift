@@ -1,11 +1,10 @@
 import Foundation
 
-/// Holds notification tokens and unregisters them on its own deallocation,
-/// which happens when the owning view controller is released. `@unchecked
-/// Sendable` so its `deinit` may run off the main actor; `removeObserver` is
-/// itself thread-safe, and the tokens are only mutated on the main actor.
-/// Holds block-based notification tokens for a screen's lifetime and drops
-/// them together when it goes.
+/// Holds block-based notification tokens for a screen's lifetime and
+/// unregisters them together on its own deallocation, which happens when the
+/// owning view controller is released. `@unchecked Sendable` so its `deinit`
+/// may run off the main actor; `removeObserver` is itself thread-safe, and the
+/// tokens are only mutated on the main actor.
 ///
 /// ⚠️ It exists because a `deinit` cannot do this itself under Swift 6: a
 /// main-actor screen's `deinit` is nonisolated, so it may not even READ a

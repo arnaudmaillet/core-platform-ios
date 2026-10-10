@@ -12,11 +12,14 @@ import UIKit
 // MARK: - QA hooks
 //
 // Test seams, launch-argument drivers and probes that read nothing private
-// beyond the few members widened for them. The launch-argument hooks that
-// drive the screen (`runDebugAppearanceHooks`) stay in
-// `SnapFeedViewController.swift`, and so do the comments, loading-page and
-// dismissal accessors and the `ArrivalInvariantReporting` facts: each reads
-// private state that a file of its own could only reach by widening it.
+// beyond the few stored members widened for them. Private methods stay
+// private: this file reaches them through the thin `debug*` wrappers in the
+// main file (`debugDrivePageSwipe`, `debugReachableCeiling`,
+// `debugMoreMenuActions`). The launch-argument hooks that drive the screen
+// (`runDebugAppearanceHooks`) stay in `SnapFeedViewController.swift`, and so
+// do the comments, loading-page and dismissal accessors and the
+// `ArrivalInvariantReporting` facts: each reads private state that a file of
+// its own could only reach by widening it.
 
 // MARK: - Bar
 
@@ -78,23 +81,6 @@ extension SnapFeedViewController {
 // MARK: - Pager drives
 
 extension SnapFeedViewController {
-    /// Walks the page swipe a finger drives on a text page, animated settle
-    /// included.
-    ///
-    /// The only gesture that moves a text page belongs to the composer bar, and
-    /// a synthetic drag cannot produce it — so the window that matters most
-    /// here, the half-second while the settle animates and the model has
-    /// already arrived at the destination, had no scripted route at all. Every
-    /// defect reported inside it had to be found by watching a recording.
-    func debugDrivePageSwipe(steps: Int = 12, distance: CGFloat = 520) {
-        drivePageSwipe(.began, translation: 0, velocity: 0)
-        for step in 1...max(1, steps) {
-            let dy = -distance * CGFloat(step) / CGFloat(max(1, steps))
-            drivePageSwipe(.changed, translation: dy, velocity: -900)
-        }
-        drivePageSwipe(.ended, translation: -distance, velocity: -900)
-    }
-
     /// One page of scroll, in sixtieths of a second — a flick, not a jump.
     ///
     /// Each step is an ordinary offset change followed by the delegate callback
@@ -114,7 +100,7 @@ extension SnapFeedViewController {
             guard let self else { return false }
             let page = self.collectionView.bounds.height
             guard page > 0 else { return false }
-            return CGFloat(self.reachableCeiling()) * page > self.collectionView.contentOffset.y + 0.5
+            return CGFloat(self.debugReachableCeiling()) * page > self.collectionView.contentOffset.y + 0.5
         }) { [weak self] in
             self?.debugFlingOnePage(remaining)
         }
@@ -123,7 +109,7 @@ extension SnapFeedViewController {
     private func debugFlingOnePage(_ remaining: Int) {
         let page = collectionView.bounds.height
         let start = collectionView.contentOffset.y
-        let target = min(start + page, CGFloat(reachableCeiling()) * page)
+        let target = min(start + page, CGFloat(debugReachableCeiling()) * page)
         // `-snap-fling-steps N`: frames per page, one every 1/60 s. 24 is a
         // gentle 0.4 s page; 3 is a fling (about 17,000 pt/s on a 874 pt
         // page), the speed #627 is about.
@@ -210,9 +196,6 @@ extension SnapFeedViewController {
     /// engagement used to be able to hold down for the rest of a session.
     var debugPagerIsLocked: Bool { !collectionView.isScrollEnabled }
 
-    /// The ceiling the pager actually clamps to — prepares, then answers.
-    func debugReachableCeiling() -> Int { reachableCeiling() }
-
     /// The moment a page's last pixel leaves — which a unit test's scroll does
     /// not produce, and which is now when a resting page is torn down.
     func debugLeaveCell(at item: Int) {
@@ -244,11 +227,6 @@ extension SnapFeedViewController {
         openComments(for: id, revealingFrom: CGRect(x: 28, y: 601, width: 312, height: 195))
         setZoomContentHidden(true)
     }
-
-    /// The ⋯ menu's rows, as built for `id`. The menu itself is a deferred
-    /// element UIKit resolves when it opens, so there is nothing to read off
-    /// the button — the composition has to be asked for.
-    func debugMoreMenuActions(for id: PostID) -> [UIMenuElement] { moreMenuActions(for: id) }
 
     func debugMoreMenuTitles(for id: PostID) -> [String] {
         debugMoreMenuActions(for: id).compactMap { ($0 as? UIAction)?.title }

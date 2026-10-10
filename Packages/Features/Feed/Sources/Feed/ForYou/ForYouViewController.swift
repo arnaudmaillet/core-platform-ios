@@ -543,9 +543,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// Set HERE rather than in the menu action so that every path that changes
     /// the context — a menu tap, a debug hook, a restore — moves all of them
     /// together.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    func applyContext(_ context: ContentContext) {
+    private func applyContext(_ context: ContentContext) {
         viewModel.setContext(context)
         contextItem.image = UIImage(systemName: context.symbol)
         contextItem.accessibilityValue = context.title
@@ -1169,8 +1167,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router)
     }
 
-    /// Internal (not private) only for the +QA hooks.
-    func openFeed(at index: Int, showingComments: Bool = false) {
+    private func openFeed(at index: Int, showingComments: Bool = false) {
         // One flight at a time: a second tap while a card is in the air would
         // stage a transition over a live one. Same guard as the map's.
         guard activeTransition == nil else { return }
@@ -2079,9 +2076,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// that measurement in prose for a long time ("bar at y 791 height 83,
     /// while the grid reserves 34"); this is the same fact, asked of the bar
     /// rather than restated as a number that can go stale on the next device.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    var floatingBarCover: CGFloat {
+    private var floatingBarCover: CGFloat {
         guard let bar = tabBarController?.tabBar, !bar.isHidden, let host = bar.superview
         else { return view.safeAreaInsets.bottom }
         let inPage = view.convert(bar.frame, from: host)
@@ -2373,6 +2368,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     ///
     /// Internal (not private) only for the +QA hooks.
     static var remainingGrabCycles = 0
+
+    /// `openFeed(at:)`, for the launch-argument hooks (+QA).
+    func debugOpenFeed(at index: Int) { openFeed(at: index) }
+    /// `applyContext(_:)`, for `-foryou-context` (+QA).
+    func debugApplyContext(_ context: ContentContext) { applyContext(context) }
+    /// How much of the page the floating bar covers, for the hooks' insets (+QA).
+    var debugFloatingBarCover: CGFloat { floatingBarCover }
     #endif
 }
 

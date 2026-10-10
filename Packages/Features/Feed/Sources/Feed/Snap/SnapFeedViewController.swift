@@ -3005,6 +3005,31 @@ final class SnapFeedViewController: UIViewController {
     /// the rule is about what the veto ANSWERS while one is up.
     func debugSetKeyboardOnScreen(_ onScreen: Bool) { isKeyboardOnScreen = onScreen }
 
+    /// Walks the page swipe a finger drives on a text page, animated settle
+    /// included.
+    ///
+    /// The only gesture that moves a text page belongs to the composer bar, and
+    /// a synthetic drag cannot produce it — so the window that matters most
+    /// here, the half-second while the settle animates and the model has
+    /// already arrived at the destination, had no scripted route at all. Every
+    /// defect reported inside it had to be found by watching a recording.
+    func debugDrivePageSwipe(steps: Int = 12, distance: CGFloat = 520) {
+        drivePageSwipe(.began, translation: 0, velocity: 0)
+        for step in 1...max(1, steps) {
+            let dy = -distance * CGFloat(step) / CGFloat(max(1, steps))
+            drivePageSwipe(.changed, translation: dy, velocity: -900)
+        }
+        drivePageSwipe(.ended, translation: -distance, velocity: -900)
+    }
+
+    /// The ceiling the pager actually clamps to — prepares, then answers.
+    func debugReachableCeiling() -> Int { reachableCeiling() }
+
+    /// The ⋯ menu's rows, as built for `id`. The menu itself is a deferred
+    /// element UIKit resolves when it opens, so there is nothing to read off
+    /// the button — the composition has to be asked for.
+    func debugMoreMenuActions(for id: PostID) -> [UIMenuElement] { moreMenuActions(for: id) }
+
     /// Which text page has had its interface built ahead. Kept separately from
     /// the live field so a test can see a warm that was CONSUMED — which is the
     /// half that proves the mount paid nothing.
@@ -3761,9 +3786,7 @@ final class SnapFeedViewController: UIViewController {
     /// cannot chain), because programmatic `contentOffset` ignores
     /// `isScrollEnabled`. On release the drive settles to the target page;
     /// the page change tears the old engagement down via the resign leg.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    func drivePageSwipe(
+    private func drivePageSwipe(
         _ phase: CommentsInputBar.PageSwipePhase, translation dy: CGFloat, velocity vy: CGFloat
     ) {
         #if DEBUG
@@ -4044,9 +4067,7 @@ final class SnapFeedViewController: UIViewController {
     /// What remains gated is the only thing a viewer can understand: a page
     /// whose data has not arrived. That is the end of the list, and the loader
     /// says so.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    func reachableCeiling() -> Int {
+    private func reachableCeiling() -> Int {
         let last = max(0, orderedIDs.count - 1)
         let settled = min(settledPageIndex, last)
         guard settled < last, modelsByID[orderedIDs[settled + 1]] != nil else { return settled }
@@ -4956,9 +4977,7 @@ final class SnapFeedViewController: UIViewController {
     /// Share is not here: it has its own button in the toolbar's capsule
     /// (`configureToolbarItems`), and a second door to it in a menu would be
     /// the kind of duplicate this menu exists to avoid.
-    ///
-    /// Internal (not private) only for the +QA hooks.
-    func moreMenuActions(for id: PostID) -> [UIMenuElement] {
+    private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
         var actions: [UIMenuElement] = []
         // Share left the toolbar's capsule for here (#671), with the same sheet.
         actions.append(UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
