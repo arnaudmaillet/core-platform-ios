@@ -691,8 +691,8 @@ final class WalletEmptyStakesCell: UICollectionViewCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-/// Some stakes' posts could not be loaded (#834): says so at the head of the
-/// list, with Try Again — which asks for those posts only, never the whole
+/// Some stakes' posts could not be loaded (#834): says so at the head of a
+/// section whose rows failed (`WalletStakeList`), with Try Again — which asks for those posts only, never the whole
 /// sheet. The empty card's shape and type, so the list keeps one voice.
 final class WalletStakesFailedCell: UICollectionViewCell {
     private let titleLabel = UILabel()
@@ -715,8 +715,14 @@ final class WalletStakesFailedCell: UICollectionViewCell {
         bodyLabel.textColor = .secondaryLabel
         bodyLabel.numberOfLines = 0
 
-        var button = UIButton.Configuration.plain()
-        button.contentInsets = .zero
+        // A tinted capsule in the Claim button's blue: plain tinted text drew
+        // in the sheet's vibrant ink — black on the glass — and read as one
+        // more line of the message, not as a button (filmed, 10 October 2026).
+        var button = UIButton.Configuration.tinted()
+        button.cornerStyle = .capsule
+        button.baseForegroundColor = .systemBlue
+        button.baseBackgroundColor = .systemBlue
+        button.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14)
         button.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
             attributes.font = UIFont.appFont(forTextStyle: .subheadline)

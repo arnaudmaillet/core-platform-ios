@@ -10,7 +10,7 @@ import Foundation
 ///   • **loading** — asked for, not answered: the row's post part is bones;
 ///   • **loaded** — the post is in hand: the row is the post;
 ///   • **failed** — the lookup came back without it: the row says it could
-///     not load, and a failed row with Try Again heads the list.
+///     not load, and a failed row with Try Again heads its section.
 ///
 /// ⚠️ **ASKED FOR ONCE, ASKED AGAIN ONLY BY TRY AGAIN.** Every wallet change
 /// refreshes the sheet; a refresh must not re-ask for a post already on its
@@ -111,9 +111,14 @@ public enum WalletStakeRow: Hashable, Sendable {
 
 /// The stake list as the sheet lays it out: the ACTIVE section, always there
 /// (its stakes, or the card saying there are none), and the SETTLED one, nil
-/// when nothing has settled. The failed row heads the active section — the
-/// head of the list, whichever section the failed posts sit in — so the small
-/// detent shows it.
+/// when nothing has settled.
+///
+/// ⚠️ **THE FAILED ROW HEADS A SECTION THAT HAS A FAILED ROW** — the active
+/// one when an active stake's post failed, else the settled one — and there
+/// is ONE (a Try Again retries every failed post, whichever section). It
+/// first headed the active section whatever failed, so a sheet whose only
+/// failures were settled stakes said "Couldn't load some posts" right over
+/// "No active stakes" (filmed, 10 October 2026).
 ///
 /// ⚠️ **THE FAILED ROW STAYS WHILE ITS TRY AGAIN IS OUT** ("Trying again…"),
 /// and leaves only once the retry has loaded everything. Dropping it the
@@ -131,11 +136,16 @@ public struct WalletStakeList: Equatable, Sendable {
         let settledStakes = stakes.filter(\.isSettled)
         // Only a failure about a stake still listed: a stake gone from the
         // ledger takes its failure with it.
-        let ids = stakes.map(\.targetID)
-        let failed = ids.contains { loads.state(of: $0) == .failed || loads.isRetrying($0) }
-        var active: [WalletStakeRow] = failed ? [.postsFailed] : []
-        active += activeStakes.isEmpty ? [.noActiveStakes] : activeStakes.map { .stake($0.targetID) }
-        self.active = active
-        self.settled = settledStakes.isEmpty ? nil : settledStakes.map { .stake($0.targetID) }
+        let failing: (WalletStake) -> Bool = {
+            loads.state(of: $0.targetID) == .failed || loads.isRetrying($0.targetID)
+        }
+        let activeFailed = activeStakes.contains(where: failing)
+        let settledFailed = !activeFailed && settledStakes.contains(where: failing)
+        self.active = activeStakes.isEmpty
+            ? [.noActiveStakes]
+            : (activeFailed ? [.postsFailed] : []) + activeStakes.map { .stake($0.targetID) }
+        self.settled = settledStakes.isEmpty
+            ? nil
+            : (settledFailed ? [.postsFailed] : []) + settledStakes.map { .stake($0.targetID) }
     }
 }

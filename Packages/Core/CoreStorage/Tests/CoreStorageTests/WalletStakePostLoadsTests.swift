@@ -157,13 +157,41 @@ struct WalletStakePostLoadsTests {
         #expect(list.settled == [.stake("b")])
     }
 
-    @Test func aFailureHeadsTheListWhicheverSectionItSitsIn() {
+    @Test func onlySettledFailuresPutTheFailedRowUnderSettledNeverBesideNoActiveStakes() {
         var loads = WalletStakePostLoads()
         _ = loads.begin(["b"])
         loads.finish(requested: ["b"], found: [])
         let list = WalletStakeList(stakes: [Self.stake("b", settled: true)], loads: loads)
-        #expect(list.active == [.postsFailed, .noActiveStakes])
+        #expect(list.active == [.noActiveStakes])
+        #expect(list.settled == [.postsFailed, .stake("b")])
+    }
+
+    @Test func settledFailuresBesideHealthyActiveStakesStayUnderSettled() {
+        var loads = WalletStakePostLoads()
+        _ = loads.begin(["a", "b"])
+        loads.finish(requested: ["a", "b"], found: ["a"])
+        let list = WalletStakeList(stakes: [Self.stake("a"), Self.stake("b", settled: true)], loads: loads)
+        #expect(list.active == [.stake("a")])
+        #expect(list.settled == [.postsFailed, .stake("b")])
+    }
+
+    @Test func failuresInBothSectionsShowOneFailedRowUnderActive() {
+        var loads = WalletStakePostLoads()
+        _ = loads.begin(["a", "b"])
+        loads.finish(requested: ["a", "b"], found: [])
+        let list = WalletStakeList(stakes: [Self.stake("a"), Self.stake("b", settled: true)], loads: loads)
+        #expect(list.active == [.postsFailed, .stake("a")])
         #expect(list.settled == [.stake("b")])
+    }
+
+    @Test func aSettledRetryKeepsItsFailedRowUnderSettled() {
+        var loads = WalletStakePostLoads()
+        _ = loads.begin(["b"])
+        loads.finish(requested: ["b"], found: [])
+        _ = loads.retry()
+        let list = WalletStakeList(stakes: [Self.stake("b", settled: true)], loads: loads)
+        #expect(list.active == [.noActiveStakes])
+        #expect(list.settled == [.postsFailed, .stake("b")])
     }
 
     @Test func aFailureAboutAStakeNoLongerListedShowsNothing() {
