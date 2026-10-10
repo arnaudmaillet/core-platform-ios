@@ -65,7 +65,9 @@ extension SimulatedConditions {
     /// - `-mock-latency 300` or `-mock-latency 100-800` — per-request delay
     ///   in milliseconds (single value or uniform range);
     /// - `-mock-fail TimelineService` — fail RPCs whose path contains the
-    ///   substring (`all` fails every route);
+    ///   substring (`all` fails every route). Repeatable, and a rule may carry
+    ///   its own rate: `-mock-fail ChatService:0.3 -mock-fail CommentsService`
+    ///   (#790);
     /// - `-mock-fail-code unavailable` — Connect code for injected failures
     ///   (default `unavailable`);
     /// - `-mock-fail-rate 0.3` — fraction of matching calls that fail
@@ -84,16 +86,29 @@ extension SimulatedConditions {
             }
         }
 
-        if let path = value(after: "-mock-fail", in: arguments) {
-            conditions.failures = [FailureRule(
+        let failCode = value(after: "-mock-fail-code", in: arguments).flatMap(code(named:)) ?? .unavailable
+        let failRate = value(after: "-mock-fail-rate", in: arguments).flatMap(Double.init) ?? 1
+        conditions.failures = values(after: "-mock-fail", in: arguments).map { raw in
+            let parts = raw.split(separator: ":", maxSplits: 1).map(String.init)
+            let path = parts[0]
+            return FailureRule(
                 pathContains: path == "all" ? "" : path,
-                code: value(after: "-mock-fail-code", in: arguments).flatMap(code(named:)) ?? .unavailable,
+                code: failCode,
                 message: "simulated by -mock-fail",
-                rate: value(after: "-mock-fail-rate", in: arguments).flatMap(Double.init) ?? 1
-            )]
+                rate: parts.count == 2 ? Double(parts[1]) ?? failRate : failRate
+            )
         }
 
         return conditions
+    }
+
+    /// Every value given to a repeatable flag, in order.
+    private static func values(after flag: String, in arguments: [String]) -> [String] {
+        arguments.indices.compactMap { index in
+            guard arguments[index] == flag, arguments.indices.contains(index + 1),
+                  !arguments[index + 1].hasPrefix("-") else { return nil }
+            return arguments[index + 1]
+        }
     }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {

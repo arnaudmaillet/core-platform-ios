@@ -20,6 +20,7 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
     private var recorded: [RecordedRequest] = []
     private var conditions: SimulatedConditions = .none
     private var guardsEdge = false
+    private var networkFaults: MockNetworkFaults?
 
     public init() {}
 
@@ -29,6 +30,13 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
     public var simulatedConditions: SimulatedConditions {
         get { lock.withLock { conditions } }
         set { lock.withLock { conditions = newValue } }
+    }
+
+    /// Offline, outages and lost acks (#790), shared with the upload transport
+    /// and the realtime server so the whole mock network fails together.
+    public var faults: MockNetworkFaults? {
+        get { lock.withLock { networkFaults } }
+        set { lock.withLock { networkFaults = newValue } }
     }
 
     /// Whether calls go through `MockEdgePolicy` first — a guest's call to a
@@ -97,12 +105,27 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
         onResponse: @escaping @Sendable (HTTPResponse) -> Void
     ) -> Cancelable {
         let path = request.url.path
-        let (handler, conditions, guardsEdge) = lock.withLock {
+        let (handler, conditions, guardsEdge, faults) = lock.withLock {
             recorded.append(RecordedRequest(path: path, headers: request.headers))
-            return (routes[path], self.conditions, self.guardsEdge)
+            return (routes[path], self.conditions, self.guardsEdge, self.networkFaults)
         }
 
-        let response: HTTPResponse
+        // ⚠️ OFFLINE FAILS FAST, before latency and before the handler: a real
+        // URLSession call with no network answers at once, and writes nothing.
+        if faults?.isOffline == true {
+            let offline = HTTPResponse(
+                code: .unavailable,
+                headers: [:],
+                message: nil,
+                trailers: [:],
+                error: ConnectError(code: .unavailable, message: "The Internet connection appears to be offline."),
+                tracingInfo: nil
+            )
+            DispatchQueue.global().async { onResponse(offline) }
+            return Cancelable(cancel: {})
+        }
+
+        var response: HTTPResponse
         if guardsEdge, let refusal = MockEdgePolicy.refusal(path: path, headers: request.headers) {
             response = HTTPResponse(
                 code: refusal.code,
@@ -149,6 +172,19 @@ public final class MockBFF: HTTPClientInterface, @unchecked Sendable {
                 message: nil,
                 trailers: [:],
                 error: ConnectError(code: .unimplemented, message: "MockBFF: no route for \(path)"),
+                tracingInfo: nil
+            )
+        }
+
+        // ACK LOSS: the handler ran — the write is applied — and the answer
+        // never arrives. What a retried send duplicates on.
+        if response.code == .ok, faults?.losesAck(for: path) == true {
+            response = HTTPResponse(
+                code: .deadlineExceeded,
+                headers: [:],
+                message: nil,
+                trailers: [:],
+                error: ConnectError(code: .deadlineExceeded, message: "simulated lost response"),
                 tracingInfo: nil
             )
         }

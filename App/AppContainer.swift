@@ -53,15 +53,27 @@ final class AppContainer {
     /// The whole in-process backend (dataset + stores + fully registered
     /// MockBFF), with network realism read from launch arguments
     /// (`-mock-latency`, `-mock-fail`, `-mock-fail-code`, `-mock-fail-rate`).
-    private lazy var mockBackend = MockBackend(
-        conditions: .fromLaunchArguments(),
-        mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic,
-        seedsMapHierarchy: Self.seedsMapPlaces,
-        // A guest's write is refused here as at the fleet's edge, so a missing
-        // gate shows up in mock mode (`[edge] REFUSED` in the console).
-        // `-mock-open-edge` turns it off for QA that predates guest mode.
-        enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge")
-    )
+    private(set) lazy var mockBackend: MockBackend = {
+        let backend = MockBackend(
+            conditions: .fromLaunchArguments(),
+            mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic,
+            seedsMapHierarchy: Self.seedsMapPlaces,
+            // A guest's write is refused here as at the fleet's edge, so a missing
+            // gate shows up in mock mode (`[edge] REFUSED` in the console).
+            // `-mock-open-edge` turns it off for QA that predates guest mode.
+            enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge")
+        )
+        backend.bff.faults = mockNetworkFaults
+        return backend
+    }()
+
+    /// Offline, timed outages, lost acks and upload faults for the WHOLE mock
+    /// network — BFF, upload transport and realtime together (#790):
+    /// `-mock-offline`, `-mock-outage 20+30`, `-mock-ack-loss <path|all>`,
+    /// `-mock-upload-fail 0.5`, and at runtime the shake sheet
+    /// (`NetworkConditionsMenu`).
+    private(set) lazy var mockNetworkFaults = MockNetworkFaults.fromLaunchArguments()
+    private var mockFaultsObserver: NSObjectProtocol?
 
     /// Semantic map clusters (city/country places on the mock pins, and the
     /// European seed behind them) are the DEFAULT mock experience — no
@@ -84,7 +96,18 @@ final class AppContainer {
     /// requires network.
     static let usesRichMedia = ProcessInfo.processInfo.arguments.contains("-rich-media")
 
-    private(set) lazy var mockRealtimeServer = MockRealtimeServer()
+    private(set) lazy var mockRealtimeServer: MockRealtimeServer = {
+        let server = MockRealtimeServer()
+        // Offline refuses the socket too, and the outage's end lets it back.
+        let faults = mockNetworkFaults
+        server.refusesConnections = faults.isOffline
+        mockFaultsObserver = NotificationCenter.default.addObserver(
+            forName: MockNetworkFaults.didChange, object: faults, queue: .main
+        ) { _ in
+            if server.refusesConnections != faults.isOffline { server.refusesConnections = faults.isOffline }
+        }
+        return server
+    }()
 
     /// Bridge from the compose feature to the feed's optimistic insert.
     private let composedPostChannel = ComposedPostChannel()
@@ -1320,7 +1343,7 @@ final class AppContainer {
     private var mediaUploadTransport: any MediaUploadTransport {
         switch environment {
         case .mock:
-            MockMediaUploadTransport(store: mockBackend.blobStore)
+            MockMediaUploadTransport(store: mockBackend.blobStore, faults: mockNetworkFaults)
         case .localFleet:
             // The media service presigns object-store URLs against the
             // Docker-internal host (minio:9000), unreachable from the

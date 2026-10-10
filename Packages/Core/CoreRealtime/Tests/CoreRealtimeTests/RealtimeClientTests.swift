@@ -152,3 +152,16 @@ struct RealtimeClientTests {
         await client.stop()
     }
 }
+
+/// The mock network is down (#790): the server refuses the socket, as a real
+/// one finds no route, and lets it back when the network returns.
+@Test func aRefusingServerRejectsConnectionsUntilItAcceptsAgain() async throws {
+    let server = MockRealtimeServer()
+    server.refusesConnections = true
+    await #expect(throws: URLError.self) {
+        _ = try await server.connect(edgeToken: "edge-token")
+    }
+    server.refusesConnections = false
+    _ = try await server.connect(edgeToken: "edge-token")
+    #expect(server.connectCount == 1)
+}
