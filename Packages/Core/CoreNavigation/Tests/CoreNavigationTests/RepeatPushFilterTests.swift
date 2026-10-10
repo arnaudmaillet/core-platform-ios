@@ -1,3 +1,4 @@
+import CoreModels
 import Testing
 @testable import CoreNavigation
 
@@ -103,5 +104,52 @@ struct RepeatPushFilterTests {
         filter.stoppedWaiting(ben)
         #expect(!filter.isRepeat("ana", topScreen: origin))
         #expect(filter.isRepeat("ben", topScreen: ben))
+    }
+
+    // MARK: - Handles and share tokens (#800)
+
+    /// A handle route is pushed at once and resolved by the screen, so a
+    /// second tap on the same `@handle` arrives while it is still asking.
+    @Test func theSameHandleWhileItsProfileStillResolvesIsARepeat() throws {
+        var filter = RepeatPushFilter<ProfileRouteKey>()
+        let profile = Screen()
+        let first = try #require(AppRoute.profileHandle("ada").profileRouteKey)
+        filter.willPush(first, screen: profile, isTransitioning: false)
+        filter.stoppedWaiting(profile)
+        let second = try #require(AppRoute.profileHandle("ada").profileRouteKey)
+        #expect(filter.isRepeat(second, topScreen: profile))
+    }
+
+    @Test func handlesThatDifferOnlyInCaseAreTheSameRequest() {
+        #expect(AppRoute.profileHandle("Ada").profileRouteKey == AppRoute.profileHandle("ada").profileRouteKey)
+    }
+
+    @Test func aDifferentHandlePushes() throws {
+        var filter = RepeatPushFilter<ProfileRouteKey>()
+        let profile = Screen()
+        filter.willPush(try #require(AppRoute.profileHandle("ada").profileRouteKey), screen: profile, isTransitioning: false)
+        filter.stoppedWaiting(profile)
+        #expect(!filter.isRepeat(try #require(AppRoute.profileHandle("ben").profileRouteKey), topScreen: profile))
+    }
+
+    @Test func theSameShareTokenWhileItsProfileStillResolvesIsARepeat() throws {
+        var filter = RepeatPushFilter<ProfileRouteKey>()
+        let profile = Screen()
+        let key = try #require(AppRoute.profileShareToken("tok").profileRouteKey)
+        filter.willPush(key, screen: profile, isTransitioning: true)
+        // Mid-transition the push waits for rest: still the same request.
+        #expect(filter.isRepeat(key, topScreen: Screen()))
+        #expect(!filter.isRepeat(.handle("tok"), topScreen: Screen()))
+    }
+
+    @Test func aHandleAndAnIDAreKeptApart() {
+        #expect(AppRoute.profile(ProfileID("ada"), stub: nil).profileRouteKey == .id(ProfileID("ada")))
+        #expect(AppRoute.profileHandle("ada").profileRouteKey == .handle("ada"))
+        #expect(AppRoute.profileShareToken("ada").profileRouteKey == .shareToken("ada"))
+    }
+
+    @Test func aRouteThatIsNotAProfileHasNoKey() {
+        #expect(AppRoute.search.profileRouteKey == nil)
+        #expect(AppRoute.hashtag("ada").profileRouteKey == nil)
     }
 }

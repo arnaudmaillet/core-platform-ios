@@ -411,6 +411,23 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     }
 
     public func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController {
+        makeRoutedProfileViewController(source: .profile(profileID), lookup: nil, identityStub: identityStub)
+    }
+
+    public func makeProfileViewController(
+        resolving reference: ProfileReference,
+        lookup: @escaping ProfileLookingUp
+    ) -> UIViewController {
+        // The same screen as an author's profile, on the same skeleton: only
+        // the id it loads arrives a round trip later (#800).
+        makeRoutedProfileViewController(source: .lookup(reference), lookup: lookup, identityStub: nil)
+    }
+
+    private func makeRoutedProfileViewController(
+        source: ProfileViewModel.Source,
+        lookup: ProfileLookingUp?,
+        identityStub: ProfileIdentityStub?
+    ) -> UIViewController {
         // Idempotent: the cache hears the follow channel from the first
         // routed profile on (the channel is set after this builder is made).
         cache.observe(followEvents)
@@ -421,10 +438,11 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 reporting: reporting,
                 gallery: gallery,
                 galleryPreferences: galleryPreferences,
-                source: .profile(profileID),
+                source: source,
                 router: router,
                 cache: cache,
-                followEvents: followEvents
+                followEvents: followEvents,
+                lookup: lookup
             ),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,

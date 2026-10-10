@@ -5,6 +5,7 @@ import CoreStorage
 import Foundation
 import MapsInterface
 import PostGrid
+import ProfileInterface
 import ShareSheet
 
 @MainActor
@@ -13,12 +14,18 @@ public final class ProfileViewModel {
         case loading
         case content(ProfileDisplayModel)
         case failed(message: String)
+        /// The handle or link named no one (#800). An answer, not a failure:
+        /// there is nothing to try again.
+        case notFound(message: String, detail: String?)
     }
 
     /// Whose profile this view model loads.
     public nonisolated enum Source: Equatable, Sendable {
         case currentUser
         case profile(ProfileID)
+        /// A handle or a share token, resolved once the screen is up (#800):
+        /// it becomes `.profile` with the id the lookup answers.
+        case lookup(ProfileReference)
     }
 
     /// The header's action button. `hidden` until the relationship is known, so
@@ -231,7 +238,11 @@ public final class ProfileViewModel {
     /// while the screen is up (a post unsaved from the feed underneath) and the
     /// snapshot is rebuilt from parts.
     private var savedPage: GalleryPageState = .empty(message: "Nothing saved yet.")
-    private let source: Source
+    /// `var` for one transition only: a `.lookup` becomes the `.profile` it
+    /// resolves to.
+    private var source: Source
+    /// Answers a `.lookup` source. Nil for every other one.
+    private let lookup: ProfileLookingUp?
     private let router: (any Router)?
     /// Last-known profiles, shared app-wide. Nil in compositions without one
     /// (tests), which simply never seed.
@@ -390,9 +401,11 @@ public final class ProfileViewModel {
         router: (any Router)? = nil,
         cache: ProfileCache? = nil,
         followEvents: FollowGraphEvents? = nil,
-        shareLinks: (any ShareLinkManaging)? = nil
+        shareLinks: (any ShareLinkManaging)? = nil,
+        lookup: ProfileLookingUp? = nil
     ) {
         self.repository = repository
+        self.lookup = lookup
         self.shareLinks = shareLinks
         self.mapPinning = mapPinning
         self.reporting = reporting
@@ -545,6 +558,12 @@ public final class ProfileViewModel {
 
     public func viewDidLoad() {
         armRecovery()
+        seedFromCache()
+        reload()
+    }
+
+    /// Puts what the cache knows about a routed profile on screen at once.
+    private func seedFromCache() {
         // ⚠️ A REVISIT RENDERS THE CACHED PROFILE AT FRAME 0 (charter P7). The
         // cache used to be read on an account switch alone; a second visit to
         // a profile opened on a skeleton and re-revealed a page the viewer had
@@ -563,7 +582,6 @@ public final class ProfileViewModel {
         if case .profile(let id) = source, let relationship = cache?.relationship(for: id) {
             apply(relationship)
         }
-        reload()
     }
 
     /// True between a cache seed and the fetch that confirms it, so that
@@ -1454,6 +1472,10 @@ public final class ProfileViewModel {
     private func reload(galleryRevalidates: Bool = false) {
         load?.cancel()
         relationshipLoad?.cancel()
+        if case .lookup(let reference) = source {
+            resolve(reference)
+            return
+        }
         // Deliberately NOT resetting `followButton` here: the controller may
         // have pre-seeded a provisional state from the route's identity stub,
         // and a refresh keeps showing the last known state. The relationship
@@ -1513,6 +1535,58 @@ public final class ProfileViewModel {
         switch source {
         case .currentUser: try await repository.currentUserProfile()
         case .profile(let id): try await repository.profile(id: id)
+        // `reload` resolves a lookup before it fetches anything.
+        case .lookup: throw CancellationError()
+        }
+    }
+
+    /// Asks whose profile a handle or a token names, then loads it like any
+    /// routed profile (#800). The screen is already up on its skeleton: the
+    /// round trip used to run on the screen the viewer tapped from, with
+    /// nothing on screen until it ended.
+    ///
+    /// The viewer's own handle loads as a routed profile, as it did when the
+    /// router resolved it: `isOwnProfile` stays false, so no tabs grow later.
+    private func resolve(_ reference: ProfileReference) {
+        load = Task { [weak self] in
+            guard let self else { return }
+            let answer = await self.lookup?(reference) ?? .unavailable
+            // Superseded by a newer load: that one answers.
+            guard !Task.isCancelled else { return }
+            self.load = nil
+            switch answer {
+            case .found(let id):
+                self.source = .profile(id)
+                self.seedFromCache()
+                self.reload()
+            case .missing:
+                self.phase = Self.notFound(reference)
+                self.onLoadSettled?()
+            case .unavailable:
+                self.phase = .failed(message: Self.unreachableMessage(reference))
+                self.onLoadSettled?()
+            }
+        }
+    }
+
+    /// What a reference that names no one says.
+    static func notFound(_ reference: ProfileReference) -> Phase {
+        switch reference {
+        case .handle:
+            .notFound(message: "This account doesn\u{2019}t exist", detail: nil)
+        case .shareToken:
+            .notFound(
+                message: "This account doesn\u{2019}t exist",
+                detail: "This link may have been reset or turned off."
+            )
+        }
+    }
+
+    /// What a lookup that did not get through says, above Try Again.
+    static func unreachableMessage(_ reference: ProfileReference) -> String {
+        switch reference {
+        case .handle(let handle): "Couldn\u{2019}t open @\(handle)"
+        case .shareToken: "Couldn\u{2019}t open this link"
         }
     }
 

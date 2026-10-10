@@ -68,6 +68,15 @@ public protocol ProfileFeatureBuilding {
     /// the origin only has the id.
     func makeProfileViewController(for profileID: ProfileID, identityStub: ProfileIdentityStub?) -> UIViewController
 
+    /// A profile named by a handle or a share token (#800). Pushed at once on
+    /// its loading state, like any routed profile: the screen asks `lookup`
+    /// whose it is, then loads that profile. A reference that names no one,
+    /// or a lookup that did not get through, says so inside the screen.
+    func makeProfileViewController(
+        resolving reference: ProfileReference,
+        lookup: @escaping ProfileLookingUp
+    ) -> UIViewController
+
     /// The signed-in viewer's avatar, decoded and cached — for shell chrome
     /// (the Profile tab's icon). Best-effort: `nil` when the viewer has no
     /// avatar or it can't be fetched; callers render a placeholder glyph.

@@ -113,7 +113,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private let pullIndicator = HeroPullToRefreshView()
     /// The band the spinner centres in, under the navigation bar.
     private static let pullIndicatorHeight: CGFloat = 44
-    /// A failed first load, with its way out (#797).
+    /// A failed first load, with its way out (#797), or a handle or link
+    /// that names no one (#800).
     private let statusView = EmptyStateView()
     /// First-load guarantee: while the skeleton screen is up, the scroll
     /// content must fill the viewport, so the gallery's shimmer rows reach
@@ -2978,6 +2979,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // snapshot arrives. Hydration is a pure cross-fade over the very
             // frames the content will occupy — nothing can shift.
             statusView.isHidden = true
+            headerView.isHidden = false
             galleryPager.isHidden = false
             // The HEADER is held on a switch rather than redacted: its bones'
             // shimmer sweeps left to right, and over a fast load that sweep
@@ -2997,6 +2999,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         case .content(let model):
             pullIndicator.endRefreshing()
             statusView.isHidden = true
+            headerView.isHidden = false
             galleryPager.isHidden = false
             // Content owns its height again; the release rides the same
             // layout pass as the (dissolve-masked) gallery height snap.
@@ -3036,6 +3039,21 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 }
             )
             statusView.isHidden = false
+
+        case .notFound(let message, let detail):
+            // The same block as a failure, without Try Again: an answer, not
+            // an error (#800). The header goes too — with no profile its
+            // verified badge, counter labels and Message button showed
+            // through around the block, a page for no one.
+            pullIndicator.endRefreshing()
+            galleryPager.isHidden = true
+            skeletonViewportFill?.isActive = false
+            headerView.setRedacted(false)
+            headerView.isHidden = true
+            statusView.configure(
+                symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail
+            )
+            statusView.isHidden = false
         }
     }
 }
@@ -3053,7 +3071,7 @@ extension ProfileViewController {
     var isSettled: Bool {
         switch renderedPhase {
         case .loading: return false
-        case .failed: return true
+        case .failed, .notFound: return true
         case .content:
             let relationshipKnown = followButtonState != .hidden || viewModel.isRelationshipSettled
             return relationshipKnown && viewModel.isMapPinSettled
@@ -3130,6 +3148,7 @@ extension ProfileViewController {
         case .loading: "loading"
         case .content: "content"
         case .failed: "failed"
+        case .notFound: "notFound"
         }
         let state = "phase=\(phase) relationship=\(followButtonState != .hidden || viewModel.isRelationshipSettled) "
             + "pin=\(viewModel.isMapPinSettled) "

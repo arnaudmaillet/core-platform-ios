@@ -242,14 +242,17 @@ final class AppContainer {
         }
     }
 
-    enum HandleLookup: Equatable {
-        case found(ProfileID)
-        case missing
-        case unavailable
+    /// The profile a handle or a share token names — what a profile pushed
+    /// from a `@handle` or a link asks once it is on screen (#800).
+    func profileID(for reference: ProfileReference) async -> ProfileLookup {
+        switch reference {
+        case .handle(let handle): await profileID(forHandle: handle)
+        case .shareToken(let token): await profileID(forShareToken: token)
+        }
     }
 
     /// The profile a `@handle` names (`profile.v1.GetProfileByHandle`, #524).
-    func profileID(forHandle handle: String) async -> HandleLookup {
+    private func profileID(forHandle handle: String) async -> ProfileLookup {
         var request = Profile_V1_GetProfileByHandleRequest()
         request.handle = handle
         let response = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
@@ -262,7 +265,7 @@ final class AppContainer {
     /// (`profile.v1.ResolveShareToken`, #412). `.missing` covers a reset
     /// token and an owner who switched links off: the server tells them apart
     /// from no one.
-    func profileID(forShareToken token: String) async -> HandleLookup {
+    private func profileID(forShareToken token: String) async -> ProfileLookup {
         var request = Profile_V1_ResolveShareTokenRequest()
         request.token = token
         let response = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
@@ -1328,10 +1331,9 @@ final class AppContainer {
                 makeSheet: { [unowned self] in self.makeWalletSheet() }
             )
         },
-        // A tapped `@handle` and a `wynn.cn/@handle` link (#524).
-        lookupHandle: { [unowned self] handle in await self.profileID(forHandle: handle) },
-        // A scanned QR code and a `wynn.cn/s/<token>` link (#412).
-        lookupShareToken: { [unowned self] token in await self.profileID(forShareToken: token) }
+        // A tapped `@handle`, a `wynn.cn/@handle` link (#524), a scanned QR
+        // code and a `wynn.cn/s/<token>` link (#412).
+        lookupProfile: { [unowned self] reference in await self.profileID(for: reference) }
     )
 
     var router: any Router { routeResolver }
