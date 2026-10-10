@@ -46,12 +46,37 @@ public final class AuthInterceptor: UnaryInterceptor, Sendable {
                 // token used to read as `unauthenticated` — the same answer an
                 // expired session gives — so a call made with no network
                 // looked like an auth failure to every screen above.
-                proceed(.failure(ConnectError(
-                    code: Self.code(forTokenFailure: error),
-                    message: "token refresh failed: \(error)"
-                )))
+                proceed(.failure(Self.connectError(forTokenFailure: error)))
             }
         }
+    }
+
+    /// The failure a call fails with when no token could be had.
+    ///
+    /// ⚠️ AN OFFLINE FAILURE CARRIES ITS `URLError` (#791). `NetworkFailure`
+    /// reads offline ONLY from the `URLError` in `exception` (#794): a bare
+    /// `unavailable` is what a server answers, so a refresh that failed for
+    /// want of a network read as a server fault. The `URLError` behind the
+    /// failure rides along; a failure only DESCRIBED as offline (the auth
+    /// feature's own error) gets `notConnectedToInternet` in its place.
+    static func connectError(forTokenFailure error: Error) -> ConnectError {
+        ConnectError(
+            code: code(forTokenFailure: error),
+            message: "token refresh failed: \(error)",
+            exception: exception(forTokenFailure: error)
+        )
+    }
+
+    /// The transport error behind a token failure, if the network caused it.
+    static func exception(forTokenFailure error: Error) -> Error? {
+        if let urlError = error as? URLError { return urlError }
+        if let connect = error as? ConnectError, let urlError = connect.exception as? URLError {
+            return urlError
+        }
+        if let described = error as? NetworkUnavailabilityDescribing, described.isNetworkUnavailable {
+            return URLError(.notConnectedToInternet)
+        }
+        return nil
     }
 
     /// `unavailable` when the network failed, `unauthenticated` otherwise.
