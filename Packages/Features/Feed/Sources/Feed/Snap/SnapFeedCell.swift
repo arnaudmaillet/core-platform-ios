@@ -3326,8 +3326,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // what either restores was captured from a page that no longer exists.
         endEngagedDismissal()
         endMaskedRevealForFlight()
-        // The reveal's spring may still be carrying the stage to identity.
+        // The reveal's spring may still be carrying the stage to identity, and
+        // a released dismissal's spring may still be fading the layers it
+        // drives: neither may play out on the next post.
         pageStage.layer.removeAllAnimations()
+        dismissalTravellers.forEach { $0.layer.removeAllAnimations() }
         mediaCard.isHidden = false
         mediaCard.alpha = 1
         // Instant (unanimated) disengage: a recycled cell must come back

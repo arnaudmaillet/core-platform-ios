@@ -50,6 +50,33 @@ struct CoverLoadCancellationTests {
         #expect(carousel.cover(onPage: 0) === pipeline.cachedImage(for: url))
     }
 
+    /// A page whose fetch FAILED is not counted as loaded either: the next
+    /// window that shows it asks again, instead of leaving an empty fill.
+    @Test func aCarouselPageWhoseFetchFailedIsAskedForAgain() async throws {
+        let fetcher = FailOnceFetcher()
+        let pipeline = ImagePipeline(fetcher: fetcher)
+        let url = try #require(URL(string: "mock://page-failing"))
+        let pages = [GalleryPost.MediaPage(thumbnailURL: url, aspectRatio: 1)]
+        let carousel = MediaCarouselView(style: .page, frame: CGRect(x: 0, y: 0, width: 300, height: 300))
+
+        carousel.configure(with: pages, imagePipeline: pipeline)
+        #expect(carousel.loadedPages == [0])
+        // Join the carousel's own fetch (held, so it is still in flight), let
+        // it fail, and give the carousel's completion its main-actor turn.
+        let failure = Task { await fetcher.fail() }
+        #expect(await (try? pipeline.image(for: url)) == nil)
+        await failure.value
+        for _ in 0..<100 where carousel.loadedPages.contains(0) { await Task.yield() }
+        #expect(carousel.loadedPages.isEmpty)
+        #expect(carousel.cover(onPage: 0) == nil)
+
+        // The second fetch succeeds, and the next configure asks again.
+        _ = try await pipeline.image(for: url)
+        carousel.configure(with: pages, imagePipeline: pipeline)
+        #expect(carousel.cover(onPage: 0) === pipeline.cachedImage(for: url))
+        #expect(await fetcher.fetchCount == 2)
+    }
+
     // MARK: - #781
 
     /// A second configure cancels the first cover load, and only the latest
@@ -141,7 +168,27 @@ private actor GatedCoverFetcher: ImageFetching {
     }
 
     /// The smallest thing `CGImageSourceCreateThumbnailAtIndex` will decode.
-    private static let onePixelPNG = Data(base64Encoded: """
+    static let onePixelPNG = Data(base64Encoded: """
         iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
         """)!
+}
+
+/// Holds its first fetch until `fail()`, fails it, then serves a picture.
+private actor FailOnceFetcher: ImageFetching {
+    private(set) var fetchCount = 0
+    private var failed = false
+    private var waiter: CheckedContinuation<Void, Never>?
+
+    func fail() {
+        failed = true
+        waiter?.resume()
+        waiter = nil
+    }
+
+    func fetchImageData(for url: URL) async throws -> Data {
+        fetchCount += 1
+        guard fetchCount == 1 else { return GatedCoverFetcher.onePixelPNG }
+        if !failed { await withCheckedContinuation { waiter = $0 } }
+        throw URLError(.notConnectedToInternet)
+    }
 }

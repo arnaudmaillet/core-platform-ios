@@ -519,7 +519,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// Which pages have been asked for. A SET rather than a count, because the
     /// window moves in both directions and a page must never be fetched twice.
     ///
-    /// ⚠️ A page whose load is CANCELLED leaves this set (`cancelPendingWork`).
+    /// ⚠️ A page whose load is CANCELLED leaves this set (`cancelPendingWork`),
+    /// and so does one whose fetch FAILED.
     /// It used to stay: the page counted as fetched, the window skipped it, and
     /// a row recycled mid-load and dequeued again for the same post kept an
     /// empty fill for good (#779). Readable inside the package for that test.
@@ -683,7 +684,14 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
                 // a newer load of the same page by now.
                 guard !Task.isCancelled, let self else { return }
                 self.loadTasks[index] = nil
-                guard let image, self.pageViews.indices.contains(index) else { return }
+                // ⚠️ A FAILED fetch is not a loaded page either: kept in the
+                // set, it was never asked for again and stayed an empty fill.
+                // Out of it, the next window that shows it retries.
+                guard let image else {
+                    self.loadedPages.remove(index)
+                    return
+                }
+                guard self.pageViews.indices.contains(index) else { return }
                 let page = self.pageViews[index]
                 // The whole page dissolves, not only its cover: a fitted page
                 // gains its backdrop in the same beat as its picture, and a
