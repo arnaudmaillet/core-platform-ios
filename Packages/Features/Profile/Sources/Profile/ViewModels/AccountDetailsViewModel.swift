@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import Foundation
 
@@ -18,6 +19,9 @@ final class AccountDetailsViewModel {
         didSet { if phase != oldValue { onChange?() } }
     }
     var onChange: (() -> Void)?
+    /// Why the last read failed, nil after one that worked: the retry's
+    /// toast says what the failed row says (#794).
+    private(set) var failure: NetworkFailure?
 
     private let account: any AccountProviding
 
@@ -38,6 +42,7 @@ final class AccountDetailsViewModel {
         if phase.isFailed { phase = .loading }
         let account = account
         let result = await settingsRead { try await account.currentAccount() }
+        failure = result.networkFailure
         phase = phase.refreshed(by: result, failure: Self.failureMessage)
         if case .success = result { return true }
         return false
@@ -54,6 +59,7 @@ final class AccountDetailsViewModel {
     func reloadAfterEdit() async -> Bool {
         let account = account
         let result = await settingsRead { try await account.currentAccount() }
+        failure = result.networkFailure
         phase = Phase.loading.refreshed(by: result, failure: Self.failureMessage)
         if case .success = result { return true }
         return false

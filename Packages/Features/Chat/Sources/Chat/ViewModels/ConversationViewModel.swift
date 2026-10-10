@@ -389,9 +389,11 @@ public final class ConversationViewModel {
         } catch {
             markFailed(pendingID)
             // A refusal is said; a failed text says so too, as it always did
-            // — the failed row offers the retry.
-            if (error as? ChatError) == .messagesRefused || pending.isText {
-                let notice = Self.sendFailureNotice(error)
+            // — the failed row offers the retry. A failed photo or video
+            // says so only when the connection is why (#794): its bubble
+            // reads "Not sent", which cannot tell the viewer they're offline.
+            if (error as? ChatError) == .messagesRefused || pending.isText || Self.isConnectionFailure(error) {
+                let notice = Self.sendFailureNotice(error, isMedia: !pending.isText)
                 onActionNotice?(notice.title, notice.message)
             }
         }
@@ -404,11 +406,25 @@ public final class ConversationViewModel {
     }
 
     /// What a message that didn't go says: the recipient takes none (#397),
-    /// or it simply failed.
-    static func sendFailureNotice(_ error: Error) -> (title: String, message: String) {
-        (error as? ChatError) == .messagesRefused
-            ? ("Can't Send Message", "This account doesn't take messages.")
-            : ("Couldn't send", "Your message wasn't sent. Check your connection and try again.")
+    /// or it simply failed — titled "You’re offline" or "That took too long"
+    /// when that is why (#794), the media upload's failure included.
+    static func sendFailureNotice(_ error: Error, isMedia: Bool = false) -> (title: String, message: String) {
+        if (error as? ChatError) == .messagesRefused {
+            return ("Can't Send Message", "This account doesn't take messages.")
+        }
+        let title = FailureCopy.title(for: error, fallback: "Couldn't send")
+        return isMedia
+            ? (title, "Your photo or video wasn\u{2019}t sent. Tap it to try again.")
+            : (title, "Your message wasn\u{2019}t sent. Check your connection and try again.")
+    }
+
+    /// Whether a send failed for want of a connection: offline or out of
+    /// time — the causes worth a word beyond the failed bubble (#794).
+    static func isConnectionFailure(_ error: Error) -> Bool {
+        switch NetworkFailure.of(error) {
+        case .offline, .timeout: true
+        default: false
+        }
     }
 
     /// The context menu's action funnel. Reply and Delete are wired; Forward

@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -47,7 +48,11 @@ final class DataExportViewController: UIViewController {
     }()
 
     /// The status line, pure so tests pin the wording.
-    static func statusText(for phase: DataExportViewModel.Phase, email: String?) -> String {
+    /// `failure` words the failed row: "You’re offline…" when that is why
+    /// the read failed (#794).
+    static func statusText(
+        for phase: DataExportViewModel.Phase, email: String?, failure: NetworkFailure? = nil
+    ) -> String {
         let destination = email.map { "to \($0)" } ?? "to your email address"
         switch phase {
         case .loading:
@@ -59,7 +64,7 @@ final class DataExportViewController: UIViewController {
         case .ready(let completedOn):
             return "Your file was prepared on \(dateFormatter.string(from: completedOn)) and sent \(destination)."
         case .failed:
-            return "Couldn't check your data download. Tap to try again."
+            return FailureCopy.row(for: failure, fallback: "Couldn't check your data download. Tap to try again.")
         }
     }
 
@@ -82,7 +87,7 @@ final class DataExportViewController: UIViewController {
             var content = UIListContentConfiguration.cell()
             switch item {
             case .status:
-                content.text = Self.statusText(for: viewModel.phase, email: email)
+                content.text = Self.statusText(for: viewModel.phase, email: email, failure: viewModel.failure)
                 // Failed, the status row is tapped to retry: VoiceOver says so (#799).
                 if viewModel.phase == .failed {
                     cell.accessibilityTraits.insert(.button)
@@ -150,7 +155,10 @@ final class DataExportViewController: UIViewController {
     private func retryLoad() {
         Task { [weak self] in
             guard let self, await viewModel.load() == false else { return }
-            Feedback.failure("Couldn't check your data download", from: self)
+            // The failed row’s words: "You’re offline" when that is why (#794).
+            Feedback.failure(
+                FailureCopy.title(for: viewModel.failure, fallback: "Couldn't check your data download"), from: self
+            )
         }
     }
 }

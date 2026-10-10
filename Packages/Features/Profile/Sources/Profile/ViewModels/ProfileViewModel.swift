@@ -374,6 +374,11 @@ public final class ProfileViewModel {
     private var taggedCache: [GalleryPost]?
     private var authoredFailed = false
     private var taggedFailed = false
+    /// Why each first page failed, kept beside the flags (#794): the fetches
+    /// used to be `try?`, so a failed page could only say "Couldn't load",
+    /// offline or not. Nil when it did not come from the network.
+    private var authoredFailure: NetworkFailure?
+    private var taggedFailure: NetworkFailure?
     private var galleryLoad: Task<Void, Never>?
     /// Where each corpus's next page starts; nil when it has no more, or
     /// before its first page answered (#634).
@@ -392,6 +397,8 @@ public final class ProfileViewModel {
     /// (an empty tab would otherwise retry in a tight loop) until the viewer
     /// approaches the end again, or pulls to refresh.
     private var galleryMorePausedByFailure = false
+    /// Why that round failed (#794), for the tab it leaves empty.
+    private var galleryMoreFailure: NetworkFailure?
 
     public init(
         repository: any ProfileProviding,
@@ -1158,6 +1165,8 @@ public final class ProfileViewModel {
             taggedCache = nil
             authoredFailed = false
             taggedFailed = false
+            authoredFailure = nil
+            taggedFailure = nil
             authoredToken = nil
             taggedToken = nil
             authoredHasLaterPages = false
@@ -1165,15 +1174,24 @@ public final class ProfileViewModel {
         }
         guard galleryLoad == nil else { return }
         galleryMorePausedByFailure = false
+        galleryMoreFailure = nil
         renderGallery() // all pages report loading — or, revalidating, what they hold
         galleryLoad = Task { [weak self] in
             async let authoredFetch = gallery.authoredPage(for: profile.id, after: nil)
             async let taggedFetch = gallery.taggedPage(for: profile.id, handle: profile.handle, after: nil)
 
             // The two fetches fail independently: one page family degrading
-            // must not blank the other.
-            let authored = try? await authoredFetch
-            let tagged = try? await taggedFetch
+            // must not blank the other. Each keeps WHY it failed (#794).
+            let authored: GalleryPage?, tagged: GalleryPage?
+            var authoredFailure: NetworkFailure?, taggedFailure: NetworkFailure?
+            do { authored = try await authoredFetch } catch {
+                authored = nil
+                authoredFailure = NetworkFailure.of(error)
+            }
+            do { tagged = try await taggedFetch } catch {
+                tagged = nil
+                taggedFailure = NetworkFailure.of(error)
+            }
             guard let self, !Task.isCancelled else { return }
 
             // A revalidation over pages beyond the first merges into them —
@@ -1183,6 +1201,7 @@ public final class ProfileViewModel {
             } else {
                 self.authoredCache = authored?.posts
                 self.authoredFailed = authored == nil
+                self.authoredFailure = authoredFailure
                 self.authoredToken = authored?.nextPageToken
             }
             if self.taggedHasLaterPages, let shown = self.taggedCache {
@@ -1190,6 +1209,7 @@ public final class ProfileViewModel {
             } else {
                 self.taggedCache = tagged?.posts
                 self.taggedFailed = tagged == nil
+                self.taggedFailure = taggedFailure
                 self.taggedToken = tagged?.nextPageToken
             }
             self.galleryLoad = nil
@@ -1235,6 +1255,7 @@ public final class ProfileViewModel {
 
     public func loadMoreGallery() {
         galleryMorePausedByFailure = false
+        galleryMoreFailure = nil
         startGalleryPages()
     }
 
@@ -1283,8 +1304,10 @@ public final class ProfileViewModel {
             // owns the grid now, and the slot with it.
             guard !Task.isCancelled, self.profile?.id == profile.id else { return }
             var failed = false
+            var failure: NetworkFailure?
             if let token = tokens.authored {
-                if let page = authored {
+                switch authored {
+                case .success(let page)?:
                     if authoredToken == token {
                         authoredToken = page.nextPageToken
                         if let grown = Self.appending(page.posts, to: authoredCache) {
@@ -1292,10 +1315,16 @@ public final class ProfileViewModel {
                             authoredHasLaterPages = true
                         }
                     }
-                } else { failed = true }
+                case .failure(let error)?:
+                    failed = true
+                    failure = NetworkFailure.of(error)
+                case nil:
+                    failed = true
+                }
             }
             if let token = tokens.tagged {
-                if let page = tagged {
+                switch tagged {
+                case .success(let page)?:
                     if taggedToken == token {
                         taggedToken = page.nextPageToken
                         if let grown = Self.appending(page.posts, to: taggedCache) {
@@ -1303,12 +1332,20 @@ public final class ProfileViewModel {
                             taggedHasLaterPages = true
                         }
                     }
-                } else { failed = true }
+                case .failure(let error)?:
+                    failed = true
+                    failure = Self.likelierCause(failure, NetworkFailure.of(error))
+                case nil:
+                    failed = true
+                }
             }
             // The tab on screen gained tiles: they come on screen and ask
             // again. It gained none (Short over a run of photos): no tile will
             // ask, so the next page is asked now — within a bound.
-            if failed { galleryMorePausedByFailure = true }
+            if failed {
+                galleryMorePausedByFailure = true
+                galleryMoreFailure = failure
+            }
             if failed || galleryTiles(galleryFilter.format).count > before { break }
         }
         // ⚠️ THE SLOT FREES BEFORE THE TILES RENDER: a page that lands wholly
@@ -1317,11 +1354,33 @@ public final class ProfileViewModel {
         renderGallery()
     }
 
+    /// The page after `token`, or why it failed (#794: it used to be `try?`,
+    /// and the failed tab could not tell offline from a refusal). Nil when
+    /// there is no token to follow.
     private static func page(
         of token: String?, _ fetch: @Sendable (String) async throws -> GalleryPage
-    ) async -> GalleryPage? {
+    ) async -> Result<GalleryPage, any Error>? {
         guard let token else { return nil }
-        return try? await fetch(token)
+        do {
+            return .success(try await fetch(token))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    /// Of two fetches' failures, the one worth naming: offline first (the
+    /// one cause the viewer can fix), then a timeout, then either.
+    private static func likelierCause(_ first: NetworkFailure?, _ second: NetworkFailure?) -> NetworkFailure? {
+        if first == .offline || second == .offline { return .offline }
+        if first == .timeout || second == .timeout { return .timeout }
+        return first ?? second
+    }
+
+    /// A failed gallery page's words (#794): "You’re offline…" or "That took
+    /// too long…" when that is why; otherwise the pull it offers, since the
+    /// gallery is what the pull refreshes.
+    static func galleryFailureMessage(_ failure: NetworkFailure?) -> String {
+        FailureCopy.message(for: failure, fallback: "Couldn't load. Pull to retry.")
     }
 
     /// `shown` with the page's new posts below it, or nil when it brings
@@ -1384,7 +1443,11 @@ public final class ProfileViewModel {
             let readsAuthored = source != .tagged
             let readsTagged = source == .all || source == .tagged
             if (readsAuthored && authoredFailed) || (readsTagged && taggedFailed) {
-                return .failed(message: "Couldn't load. Pull to retry.")
+                let failure = Self.likelierCause(
+                    readsAuthored && authoredFailed ? authoredFailure : nil,
+                    readsTagged && taggedFailed ? taggedFailure : nil
+                )
+                return .failed(message: Self.galleryFailureMessage(failure))
             }
             if (readsAuthored && authoredCache == nil) || (readsTagged && taggedCache == nil) {
                 return .loading
@@ -1398,7 +1461,9 @@ public final class ProfileViewModel {
             if galleryTokensToFollow(source) == (nil, nil) {
                 return .empty(message: emptyMessage ?? Self.emptyMessage(for: filter))
             }
-            return galleryMorePausedByFailure ? .failed(message: "Couldn't load. Pull to retry.") : .loading
+            return galleryMorePausedByFailure
+                ? .failed(message: Self.galleryFailureMessage(galleryMoreFailure))
+                : .loading
         }
 
         // Three pages, three sources (#696), on every profile since #772; the

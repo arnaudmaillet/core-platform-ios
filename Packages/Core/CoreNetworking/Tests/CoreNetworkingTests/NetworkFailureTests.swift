@@ -144,6 +144,26 @@ struct NetworkFailureTests {
         #expect(FailureCopy.message(for: error, fallback: "Couldn't load.") == "Couldn't load.")
     }
 
+    /// A failed row that retries when tapped says so in its own form (#794).
+    @Test func aFailedRowSaysOfflineOrTooLongAndTapToTryAgain() {
+        let offline = ConnectError(code: .unavailable, message: "x", exception: URLError(.notConnectedToInternet))
+        let fallback = "Couldn\u{2019}t load this. Tap to try again."
+        #expect(FailureCopy.row(for: offline, fallback: fallback) == "You\u{2019}re offline. Tap to try again.")
+        #expect(FailureCopy.row(
+            for: NetworkFailure.timeout, fallback: fallback) == "That took too long. Tap to try again."
+        )
+        #expect(FailureCopy.row(for: NetworkFailure.server(code: "internal"), fallback: fallback) == fallback)
+        #expect(FailureCopy.row(for: nil, fallback: fallback) == fallback)
+    }
+
+    @Test func aKeptFailureWordsTheMessageLikeTheError() {
+        #expect(FailureCopy.message(for: NetworkFailure.offline, fallback: "x") == FailureCopy.offline)
+        #expect(FailureCopy.message(for: NetworkFailure.refused(code: "not_found"), fallback: "x") == "x")
+        #expect(FailureCopy.title(for: NetworkFailure.offline, fallback: "x") == FailureCopy.offlineTitle)
+        #expect(FailureCopy.title(for: NetworkFailure.timeout, fallback: "x") == FailureCopy.timeoutTitle)
+        #expect(FailureCopy.title(for: nil, fallback: "x") == "x")
+    }
+
     @Test func aNonNetworkErrorKeepsTheScreensOwnWords() {
         #expect(FailureCopy.message(for: StubFeatureError.notAuthenticated, fallback: "Couldn't load.")
             == "Couldn't load.")

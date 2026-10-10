@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -57,6 +58,12 @@ final class AccountTypeViewController: UIViewController {
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
+    /// The same, for the verification row's own read.
+    private var verificationFailure: NetworkFailure?
     private var verification: VerificationPhase = .loading {
         didSet { applySnapshot() }
     }
@@ -103,18 +110,25 @@ final class AccountTypeViewController: UIViewController {
                 let status = try await verifier.verificationStatus()
                 self?.verification = .loaded(status)
             } catch {
+                self?.verificationFailure = NetworkFailure.of(error)
                 self?.verification = .failed
             }
         }
     }
 
-    /// The badge row's words for each state.
-    static func verificationRow(_ phase: VerificationPhase) -> (title: String, detail: String?) {
+    /// The badge row's words for each state; `failure` words the failed one
+    /// ("You’re offline…" when that is why, #794).
+    static func verificationRow(
+        _ phase: VerificationPhase, failure: NetworkFailure? = nil
+    ) -> (title: String, detail: String?) {
         switch phase {
         case .loading:
             ("Verification", "Loading…")
         case .failed:
-            ("Verification", "Couldn't load your verification status. Tap to try again.")
+            (
+                "Verification",
+                FailureCopy.row(for: failure, fallback: "Couldn't load your verification status. Tap to try again.")
+            )
         case .loaded(.notRequested):
             ("Request Verification", "Ask for a verified badge next to your name.")
         case .loaded(.pending(let category, let submittedAt)):
@@ -138,6 +152,7 @@ final class AccountTypeViewController: UIViewController {
                 let current = try await manager.accountType()
                 phase = .loaded(current.type, current.contact)
             } catch {
+                loadFailure = NetworkFailure.of(error)
                 phase = .failed
             }
         }
@@ -183,7 +198,7 @@ final class AccountTypeViewController: UIViewController {
                 }
                 cell.accessories = [.disclosureIndicator()]
             case .verification:
-                let row = Self.verificationRow(verification)
+                let row = Self.verificationRow(verification, failure: verificationFailure)
                 content.text = row.title
                 content.secondaryText = row.detail
                 switch verification {
@@ -201,7 +216,10 @@ final class AccountTypeViewController: UIViewController {
                 content.textProperties.color = .secondaryLabel
             case .failed:
                 content = .cell()
-                content.text = "Couldn't load your account type. Tap to try again."
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: loadFailure, fallback: "Couldn't load your account type. Tap to try again."
+                )
                 content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content

@@ -1,3 +1,4 @@
+import CoreNetworking
 import Foundation
 
 /// State for Settings → Security and Login: the account's sessions and the
@@ -13,6 +14,10 @@ final class SecuritySettingsViewModel {
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
     }
+    /// Why the first load failed, kept beside `.failed` so the row can say
+    /// "You’re offline" when that is the cause (#794). Set before the phase,
+    /// so the redraw `.failed` triggers already reads it.
+    private(set) var failure: NetworkFailure?
     var onChange: (() -> Void)?
     /// A refresh over a loaded list failed. The list stays as it was (the
     /// screen says so in passing); only a failed FIRST load is `.failed`.
@@ -35,6 +40,7 @@ final class SecuritySettingsViewModel {
             if case .loaded = phase {
                 onRefreshFailed?()
             } else {
+                failure = NetworkFailure.of(error)
                 phase = .failed
             }
         }

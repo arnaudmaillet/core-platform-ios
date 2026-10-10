@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 import UserNotifications
@@ -51,6 +52,10 @@ final class NotificationSettingsViewController: UIViewController {
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
     private var isSaving = false
     /// iOS's notification permission for this app, read on every appearance —
     /// it changes in iOS Settings, behind this screen's back.
@@ -129,6 +134,7 @@ final class NotificationSettingsViewController: UIViewController {
             do {
                 phase = .loaded(try await manager.notificationPreferences())
             } catch {
+                loadFailure = NetworkFailure.of(error)
                 phase = .failed
             }
         }
@@ -249,7 +255,10 @@ final class NotificationSettingsViewController: UIViewController {
                 // Drawn by `SettingsSkeletonRowCell`.
                 break
             case .failed:
-                content.text = "Couldn't load your notification settings. Tap to try again."
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: loadFailure, fallback: "Couldn't load your notification settings. Tap to try again."
+                )
                 content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content

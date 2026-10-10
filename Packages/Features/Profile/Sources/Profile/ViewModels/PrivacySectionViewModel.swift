@@ -1,3 +1,4 @@
+import CoreNetworking
 import Foundation
 
 /// State for Settings → Privacy's Private Account switch (#388).
@@ -63,6 +64,13 @@ final class PrivacySectionViewModel {
     private(set) var failedSides: Set<SideSetting> = [] {
         didSet { if failedSides != oldValue { onChange?() } }
     }
+    /// Why each failed side's last read failed, and why Private Account's
+    /// did (#794): kept beside the flags so a failed row can say "You’re
+    /// offline" when that is the cause. Set before the flag, so the redraw
+    /// it triggers already reads it; a side failing again for another
+    /// reason redraws once on its own (`reload(_:)`).
+    private(set) var sideFailures: [SideSetting: NetworkFailure] = [:]
+    private(set) var visibilityFailure: NetworkFailure?
     var onChange: (() -> Void)?
     /// Side settings with a read in flight — see `reload(_:)`.
     private(set) var reading: Set<SideSetting> = []
@@ -149,8 +157,11 @@ final class PrivacySectionViewModel {
 
     private func loadVisibility() async {
         do {
-            phase = .loaded(isPrivate: try await visibility.activeProfileIsPrivate())
+            let isPrivate = try await visibility.activeProfileIsPrivate()
+            visibilityFailure = nil
+            phase = .loaded(isPrivate: isPrivate)
         } catch {
+            visibilityFailure = NetworkFailure.of(error)
             phase = .failed
         }
     }
@@ -190,9 +201,18 @@ final class PrivacySectionViewModel {
                 postSharing = try await sharing.postSharing()
             }
             failedSides.remove(side)
+            sideFailures[side] = nil
             return true
         } catch {
-            if !hasValue(side) { failedSides.insert(side) }
+            if !hasValue(side) {
+                // One redraw per change: the flag's own when the row is new,
+                // else this one when only the reason moved (#794).
+                let failure = NetworkFailure.of(error)
+                let reworded = failedSides.contains(side) && sideFailures[side] != failure
+                sideFailures[side] = failure
+                failedSides.insert(side)
+                if reworded { onChange?() }
+            }
             return false
         }
     }

@@ -56,7 +56,8 @@ struct SecurityCheckupTests {
     /// names it — it used to vanish and leave "1 of 1 done".
     @Test func aFailedReadIsAFailedLineAndTheSummaryNeverReadsAllClear() {
         let items = SecurityCheckup.items(
-            account: .failed(message: "x"), sessionCount: .failed(message: "x"), appLockOn: true, lockMethod: "Face ID"
+            account: .failed(message: SecurityCheckup.failedAccountTitle), sessionCount: .failed(message: "x"),
+            appLockOn: true, lockMethod: "Face ID"
         )
         #expect(items.map(\.id) == ["account", "sessions", "appLock", "password", "twoFactor"])
         #expect(state("account", in: items) == .failed)

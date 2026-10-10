@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -58,6 +59,11 @@ final class WhatYouSeeViewController: UIViewController {
     private var interestsPhase: InterestsPhase = .loading {
         didSet { applySnapshot() }
     }
+    /// Why each section's last read failed, kept beside `.failed` so its
+    /// failed row can say "You’re offline" when that is the cause (#794).
+    /// Set before the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
+    private var interestsFailure: NetworkFailure?
     private var isSaving = false
     private var isSavingPersonalized = false
     /// Tags whose removal (or the reset) is in flight.
@@ -116,11 +122,15 @@ final class WhatYouSeeViewController: UIViewController {
         phase = .loading
         Task { [weak self] in
             guard let self else { return }
-            let (next, teen) = await Self.loadSensitive(preferences: preferences, isTeen: isTeen)
+            let (next, teen, failure) = await Self.loadSensitive(preferences: preferences, isTeen: isTeen)
             self.teen = teen ?? self.teen
+            loadFailure = failure
             phase = next
             if wasFailed, next == .failed {
-                Feedback.failure("Couldn't load these settings", from: self)
+                // The failed row’s words: "You’re offline" when that is why (#794).
+                Feedback.failure(
+                    FailureCopy.title(for: loadFailure, fallback: "Couldn't load these settings"), from: self
+                )
             }
         }
         loadInterests()
@@ -129,18 +139,18 @@ final class WhatYouSeeViewController: UIViewController {
     /// The sensitive-content section's read: the level, the For You switch
     /// and the age that decides whether Standard is offered. Any of the
     /// three failing fails the section — the age included (#799). Pure, so
-    /// the rule is pinned by tests.
+    /// the rule is pinned by tests. `failure` is why it failed (#794).
     static func loadSensitive(
         preferences: any FeedPreferencesManaging,
         isTeen: () async throws -> Bool
-    ) async -> (phase: Phase, teen: Bool?) {
+    ) async -> (phase: Phase, teen: Bool?, failure: NetworkFailure?) {
         do {
             async let level = preferences.sensitiveContent()
             async let personalized = preferences.personalizedFeed()
             let teen = try await isTeen()
-            return (.loaded(try await level, personalized: try await personalized), teen)
+            return (.loaded(try await level, personalized: try await personalized), teen, nil)
         } catch {
-            return (.failed, nil)
+            return (.failed, nil, NetworkFailure.of(error))
         }
     }
 
@@ -152,6 +162,7 @@ final class WhatYouSeeViewController: UIViewController {
                 let tags = try await interestTags.interests()
                 self?.interestsPhase = .loaded(tags)
             } catch {
+                self?.interestsFailure = NetworkFailure.of(error)
                 self?.interestsPhase = .failed
             }
         }
@@ -181,6 +192,15 @@ final class WhatYouSeeViewController: UIViewController {
         case .ordering:
             "Following never uses your interests."
         }
+    }
+
+    /// The two failed rows: "You’re offline…" when that is why (#794).
+    static func failedText(_ failure: NetworkFailure?) -> String {
+        FailureCopy.row(for: failure, fallback: "Couldn't load these settings. Tap to try again.")
+    }
+
+    static func interestsFailedText(_ failure: NetworkFailure?) -> String {
+        FailureCopy.row(for: failure, fallback: "Couldn't load your interests. Tap to try again.")
     }
 
     static let personalizedTitle = "Personalised For You"
@@ -243,12 +263,12 @@ final class WhatYouSeeViewController: UIViewController {
                 content.textProperties.color = .secondaryLabel
             case .failed:
                 content = .cell()
-                content.text = "Couldn't load these settings. Tap to try again."
+                content.text = Self.failedText(loadFailure)
                 content.textProperties.color = .secondaryLabel
                 cell.accessibilityTraits.insert(.button)
             case .interestsFailed:
                 content = .cell()
-                content.text = "Couldn't load your interests. Tap to try again."
+                content.text = Self.interestsFailedText(interestsFailure)
                 content.textProperties.color = .secondaryLabel
                 cell.accessibilityTraits.insert(.button)
             case .personalized:

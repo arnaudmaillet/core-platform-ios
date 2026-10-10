@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import MediaCore
 import UIKit
@@ -40,15 +41,15 @@ final class PrivacySectionViewController: UIViewController {
     }
 
     /// The failed row of a side setting, in the wording every Settings
-    /// screen uses.
-    static func failedText(_ side: PrivacySectionViewModel.SideSetting) -> String {
+    /// screen uses — or "You’re offline…" when that is why it failed (#794).
+    static func failedText(_ side: PrivacySectionViewModel.SideSetting, failure: NetworkFailure? = nil) -> String {
         let what = switch side {
         case .postWindow: "who sees your older posts"
         case .commentAudience: "who can comment"
         case .interactionAudiences: "who can mention and message you"
         case .postSharing: "your like count and download settings"
         }
-        return "Couldn't load \(what). Tap to try again."
+        return FailureCopy.row(for: failure, fallback: "Couldn't load \(what). Tap to try again.")
     }
 
     /// "3", or nothing while unread or when none are pending.
@@ -188,11 +189,13 @@ final class PrivacySectionViewController: UIViewController {
             spinner.startAnimating()
             cell.accessories = [.customView(configuration: .init(customView: spinner, placement: .trailing()))]
         case .failed:
-            content.text = "Couldn't load your privacy setting. Tap to try again."
+            content.text = FailureCopy.row(
+                for: viewModel.visibilityFailure, fallback: "Couldn't load your privacy setting. Tap to try again."
+            )
             content.textProperties.color = .secondaryLabel
             cell.accessibilityTraits.insert(.button)
         case .sideFailed(let side):
-            content.text = Self.failedText(side)
+            content.text = Self.failedText(side, failure: viewModel.sideFailures[side])
             content.textProperties.color = .secondaryLabel
             cell.accessibilityTraits.insert(.button)
         case .followRequests:
@@ -332,6 +335,13 @@ final class PrivacySectionViewController: UIViewController {
         // The switch reads the phase and the saving flag at configuration.
         if case .loaded = viewModel.phase { snapshot.reconfigureItems([.privateAccount]) }
         if viewModel.requests != nil { snapshot.reconfigureItems([.followRequests]) }
+        // A failed row reads why at configuration (#794): a retry that fails
+        // for another reason rewords it in place.
+        let failedRows = snapshot.itemIdentifiers.filter {
+            if case .sideFailed = $0 { return true }
+            return $0 == .failed
+        }
+        snapshot.reconfigureItems(failedRows)
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
@@ -398,7 +408,10 @@ final class PrivacySectionViewController: UIViewController {
     private func retry(_ side: PrivacySectionViewModel.SideSetting) {
         Task { [weak self] in
             guard let self, await viewModel.reload(side) == false else { return }
-            Feedback.failure("Couldn't load this setting", from: self)
+            // The failed row’s words: "You’re offline" when that is why (#794).
+            Feedback.failure(
+                FailureCopy.title(for: viewModel.sideFailures[side], fallback: "Couldn't load this setting"), from: self
+            )
         }
     }
 

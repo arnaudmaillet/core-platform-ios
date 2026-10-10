@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import MediaCore
 import UIKit
@@ -76,12 +77,16 @@ final class MutedAccountsViewController: UIViewController {
                 cell?.setAvatarImage(image)
             }
         }
-        let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
+        let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()
             content.textProperties.color = .secondaryLabel
             switch item {
             case .loading: content.text = "Loading…"
-            case .failed: content.text = "Couldn't load muted accounts. Tap to try again."
+            case .failed:
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: self?.viewModel.failure, fallback: "Couldn't load muted accounts. Tap to try again."
+                )
             case .empty: content.text = "You haven't muted anyone."
             case .profile: break
             }

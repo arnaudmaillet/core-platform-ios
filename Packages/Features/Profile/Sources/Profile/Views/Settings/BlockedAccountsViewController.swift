@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import MediaCore
 import UIKit
@@ -77,12 +78,16 @@ final class BlockedAccountsViewController: UIViewController {
                 cell?.setAvatarImage(image)
             }
         }
-        let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
+        let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()
             content.textProperties.color = .secondaryLabel
             switch item {
             case .loading: content.text = "Loading…"
-            case .failed: content.text = "Couldn't load blocked accounts. Tap to try again."
+            case .failed:
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: self?.viewModel.failure, fallback: "Couldn't load blocked accounts. Tap to try again."
+                )
             case .empty: content.text = "You haven't blocked anyone."
             case .profile: break
             }

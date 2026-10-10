@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -28,6 +29,10 @@ final class HiddenWordsViewController: UIViewController {
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
     private var isSaving = false
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -76,6 +81,7 @@ final class HiddenWordsViewController: UIViewController {
             do {
                 phase = .loaded(try await manager.commentFilters())
             } catch {
+                loadFailure = NetworkFailure.of(error)
                 phase = .failed
             }
         }
@@ -135,7 +141,10 @@ final class HiddenWordsViewController: UIViewController {
                 content.text = "Loading…"
                 content.textProperties.color = .secondaryLabel
             case .failed:
-                content.text = "Couldn't load your filters. Tap to try again."
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: loadFailure, fallback: "Couldn't load your filters. Tap to try again."
+                )
                 content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content

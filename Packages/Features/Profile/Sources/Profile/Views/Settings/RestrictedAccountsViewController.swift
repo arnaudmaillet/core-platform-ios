@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import MediaCore
 import UIKit
@@ -14,6 +15,10 @@ final class RestrictedAccountsViewModel {
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private(set) var failure: NetworkFailure?
     var onChange: (() -> Void)?
 
     private let restricting: any ProfileRestricting
@@ -27,6 +32,7 @@ final class RestrictedAccountsViewModel {
         do {
             phase = .loaded(try await restricting.restrictedProfiles())
         } catch {
+            failure = NetworkFailure.of(error)
             phase = .failed
         }
     }
@@ -113,12 +119,16 @@ final class RestrictedAccountsViewController: UIViewController {
                 cell?.setAvatarImage(image)
             }
         }
-        let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
+        let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()
             content.textProperties.color = .secondaryLabel
             switch item {
             case .loading: content.text = "Loading…"
-            case .failed: content.text = "Couldn't load restricted accounts. Tap to try again."
+            case .failed:
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: self?.viewModel.failure, fallback: "Couldn't load restricted accounts. Tap to try again."
+                )
             case .empty: content.text = "You haven't restricted anyone."
             case .profile: break
             }

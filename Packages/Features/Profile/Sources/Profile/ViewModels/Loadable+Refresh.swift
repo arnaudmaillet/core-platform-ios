@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 
 extension Loadable {
@@ -13,10 +14,15 @@ extension Loadable {
     /// A value already on screen outlives a later failed refresh: the screen
     /// keeps showing what it last knew rather than trading a true value for
     /// an error row. The caller reports that failure with a toast.
+    ///
+    /// `message` is the row's own wording; offline or a timeout says so
+    /// instead ("You’re offline. Tap to try again.", #794), so the row is
+    /// drawn from the phase's message, never from the constant.
     func refreshed(by result: Result<Content, any Error>, failure message: String) -> Loadable {
         switch result {
         case .success(let value): .content(value)
-        case .failure: content.map(Loadable.content) ?? .failed(message: message)
+        case .failure(let error):
+            content.map(Loadable.content) ?? .failed(message: FailureCopy.row(for: error, fallback: message))
         }
     }
 
@@ -24,6 +30,15 @@ extension Loadable {
     var isFailed: Bool {
         if case .failed = self { return true }
         return false
+    }
+}
+
+extension Result where Failure == any Error {
+    /// Why a settings read failed, nil when it worked or the error did not
+    /// come from the network — kept for the retry's toast (#794).
+    var networkFailure: NetworkFailure? {
+        if case .failure(let error) = self { return NetworkFailure.of(error) }
+        return nil
     }
 }
 

@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import DesignSystem
 import MediaCore
 import UIKit
@@ -96,7 +97,10 @@ final class RecentlyDeletedViewController: UIViewController {
                 content.textProperties.color = .secondaryLabel
             case .failed:
                 content = .cell()
-                content.text = "Couldn't load deleted posts. Tap to try again."
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: viewModel.failure, fallback: "Couldn't load deleted posts. Tap to try again."
+                )
                 content.textProperties.color = .secondaryLabel
             case .empty:
                 content = .cell()
