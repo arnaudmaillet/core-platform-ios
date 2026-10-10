@@ -847,15 +847,23 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
 /// parallax offset under a fading dim. Linear inside, so scrubbed progress
 /// tracks the finger; the percent driver's completion curve eases the
 /// remainder on release.
-private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
+final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// How far (fraction of the travel span) the underlying screen sits
     /// shifted against the exit direction before the pop reveals it — the
     /// native parallax depth, applied on whichever axis the exit travels.
     private let parallax: CGFloat = 0.3
     private let axis: ZoomDismissAxis
+    /// The bezel radius the feed is clipped to for the slide. A seam so a test
+    /// can run the borrow-and-restore on any device: a square-cornered screen
+    /// (iPhone SE) answers 0, and the leg then writes nothing at all.
+    private let bezelRadius: @MainActor (UIView) -> CGFloat
 
-    init(axis: ZoomDismissAxis = .horizontal) {
+    init(
+        axis: ZoomDismissAxis = .horizontal,
+        bezelRadius: @escaping @MainActor (UIView) -> CGFloat = { ScreenGeometry.cornerRadius(behind: $0) }
+    ) {
         self.axis = axis
+        self.bezelRadius = bezelRadius
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
@@ -899,10 +907,20 @@ private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimated
         // the transition's whole life. A plain cornerRadius clip with no
         // shadow composites on the GPU without an offscreen pass, so the
         // 1:1 tracking stays cheap.
-        let radius = ScreenGeometry.cornerRadius(behind: fromView)
+        //
+        // ⚠️ AND HANDED BACK AS IT WAS FOUND (#787). The layer is the reused
+        // feed's own root layer, and this leg used to "reset" it to 0 / false —
+        // literals, not what was there — so a feed that rounds or clips itself
+        // came out of every pop with its corners gone. Captured before the
+        // first write, restored verbatim by the completion.
+        let restingCorners = LayerCornerStyle(capturing: fromView.layer)
+        let radius = bezelRadius(fromView)
         if radius > 0 {
             fromView.layer.cornerCurve = .continuous
             fromView.layer.cornerRadius = radius
+            // The BEZEL's rounding has four corners, whatever subset the feed
+            // rounds at rest; the subset comes back with the rest of it.
+            fromView.layer.maskedCorners = LayerCornerStyle.allCorners
             fromView.layer.masksToBounds = true
         }
 
@@ -923,23 +941,49 @@ private final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimated
             dim.removeFromSuperview()
             fromView.transform = .identity
             toView.transform = .identity
-            if context.transitionWasCancelled {
-                // The feed is back at full screen, where the rounding hides
-                // behind the bezel again — animate it off anyway so the
-                // retained view carries no mask outside dismissals.
-                UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState]) {
-                    fromView.layer.cornerRadius = 0
-                } completion: { _ in
-                    fromView.layer.masksToBounds = false
-                }
-            } else {
-                // Committed: the view held the bezel radius to its last
-                // on-screen frame; it is unparented now, so reset silently
-                // for the retained feed's next push.
-                fromView.layer.cornerRadius = 0
-                fromView.layer.masksToBounds = false
-            }
+            // ⚠️ INSTANTLY, ON BOTH OUTCOMES, AND BEFORE `completeTransition`
+            // (#787). A cancel used to animate the radius off over 0.2 s, and
+            // that animation outlived the transition: a push started inside
+            // that window inherited a clipped, rounded feed. Nothing needs the
+            // fade — a cancelled feed is back at full screen, where the bezel
+            // rounding sits exactly behind the device's own corners, and a
+            // committed one is already off screen.
+            restingCorners.restore(on: fromView.layer)
             context.completeTransition(!context.transitionWasCancelled)
         }
+    }
+}
+
+/// The corner state of a layer, captured so a transition that borrows the
+/// layer's rounding can hand back exactly what it found (#787).
+struct LayerCornerStyle: Equatable {
+    static let allCorners: CACornerMask = [
+        .layerMinXMinYCorner, .layerMaxXMinYCorner,
+        .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
+    ]
+
+    let cornerRadius: CGFloat
+    let maskedCorners: CACornerMask
+    let masksToBounds: Bool
+    let cornerCurve: CALayerCornerCurve
+
+    init(capturing layer: CALayer) {
+        cornerRadius = layer.cornerRadius
+        maskedCorners = layer.maskedCorners
+        masksToBounds = layer.masksToBounds
+        cornerCurve = layer.cornerCurve
+    }
+
+    /// Writes the captured state back with actions off, so it lands in the
+    /// current transaction rather than as an implicit animation that could
+    /// outlive the caller.
+    func restore(on layer: CALayer) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.cornerRadius = cornerRadius
+        layer.maskedCorners = maskedCorners
+        layer.masksToBounds = masksToBounds
+        layer.cornerCurve = cornerCurve
+        CATransaction.commit()
     }
 }

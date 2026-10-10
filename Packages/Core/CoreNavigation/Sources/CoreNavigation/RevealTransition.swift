@@ -1009,6 +1009,12 @@ enum RevealStage {
         //
         // Non-interactive rather than hidden: the page must still be drawn, and
         // `unwrap` hands it back to the container where it becomes live again.
+        //
+        // ⚠️ AND NON-INTERACTIVE IS NOT A SHIELD (#786). A view that takes no
+        // touches lets them fall THROUGH to whatever is under it — the grid —
+        // so this closed the page's hole and opened the grid's: a scroll
+        // during a close moved the very row the window was landing on. Every
+        // leg now adds `installTouchShield` on top of the stage as well.
         host.isUserInteractionEnabled = false
         container.addSubview(host)
         host.addSubview(page)
@@ -1027,6 +1033,64 @@ enum RevealStage {
         mask.layer.cornerCurve = cornerCurve
         host.mask = mask
         return (host, mask)
+    }
+
+    /// ⚠️ THE REVEAL IS WATCHABLE, NOT TOUCHABLE — the hero's shield, which
+    /// every reveal leg lacked (#786).
+    ///
+    /// The host is non-interactive (see `makeHost`) and the dim is too, so for
+    /// the whole of an opening or a closing a touch went straight through the
+    /// stage to the screen underneath. On a close that is the worst screen to
+    /// hand it to: the window has already measured its landing, and a scroll
+    /// of the grid moved the row out from under it — the window landed on the
+    /// old rect and the row was uncovered somewhere else.
+    ///
+    /// Topmost in the container, so hit-testing stops here; the container
+    /// outlives the transition, so every leg removes it on EVERY outcome —
+    /// landed, reversed and cancelled alike. A plain view would do; the type
+    /// is only so a test can name what it found.
+    static func installTouchShield(in container: UIView) -> UIView {
+        let shield = RevealTouchShield(frame: container.bounds)
+        shield.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        container.addSubview(shield)
+        return shield
+    }
+
+    /// ⚠️ A SHIELD STOPS NEW TOUCHES, NOT MOTION ALREADY UNDER WAY (#786).
+    ///
+    /// A grid still coasting from a fling, or dragged by a second finger that
+    /// was down before the shield went up, keeps moving the landing row after
+    /// the release has read it. Every scroll view under `root` is stopped
+    /// where it stands: its pan is cycled, which cancels a finger already on
+    /// it, and its offset is re-set without animation, which ends a coast or
+    /// an animated scroll. Idle scroll views are untouched in effect — the
+    /// offset they are given is the one they have.
+    ///
+    /// ⚠️ NOT A VIEW PAST ITS EDGE. A rubber-banded offset frozen in place
+    /// would stay out of bounds until the next touch; that one is left to
+    /// bounce home, the lesser movement of the two.
+    static func haltScrolling(in root: UIView) {
+        var pending = [root]
+        while let view = pending.popLast() {
+            if let scroll = view as? UIScrollView {
+                if scroll.isTracking || scroll.isDragging {
+                    scroll.panGestureRecognizer.isEnabled = false
+                    scroll.panGestureRecognizer.isEnabled = true
+                }
+                let inset = scroll.adjustedContentInset
+                let offset = scroll.contentOffset
+                let minimum = CGPoint(x: -inset.left, y: -inset.top)
+                let maximum = CGPoint(
+                    x: max(minimum.x, scroll.contentSize.width + inset.right - scroll.bounds.width),
+                    y: max(minimum.y, scroll.contentSize.height + inset.bottom - scroll.bounds.height)
+                )
+                if (minimum.x...maximum.x).contains(offset.x),
+                   (minimum.y...maximum.y).contains(offset.y) {
+                    scroll.setContentOffset(offset, animated: false)
+                }
+            }
+            pending.append(contentsOf: view.subviews)
+        }
     }
 
     /// `standIn`, when there is one, takes the WINDOW's frame rather than the
@@ -1205,6 +1269,10 @@ final class RevealGrabAnimator: NSObject, UIViewControllerAnimatedTransitioning 
     func animateTransition(using context: any UIViewControllerContextTransitioning) {}
 }
 
+/// The full-container view a reveal leg swallows touches with — see
+/// `RevealStage.installTouchShield`.
+final class RevealTouchShield: UIView {}
+
 // MARK: - Present
 
 /// The window opens. Non-interactive, and on the hero's own spring, so a text
@@ -1344,6 +1412,8 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             toView.alpha = 0
         }
         RevealStage.apply(closed, mask: mask, page: toView, standIn: standIn)
+        // Over everything staged above — see `installTouchShield` (#786).
+        let shield = RevealStage.installTouchShield(in: container)
         // The page wears the CARD before it wears itself. Set outside the
         // animation block so frame 0 is already the card's tone; the block
         // below hands the ground back, which cross-fades it.
@@ -1431,7 +1501,8 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             delay: 0,
             usingSpringWithDamping: RevealStage.springDamping,
             initialSpringVelocity: RevealStage.springVelocity,
-            options: [.allowUserInteraction]
+            // No `.allowUserInteraction`: the shield decides touches now (#786).
+            options: []
         ) {
             RevealStage.apply(open, mask: mask, page: toView, standIn: standIn)
             // On the SAME spring as the mask, so the card does not become the
@@ -1462,6 +1533,8 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             // out to.
             toView.alpha = 1
             dim.removeFromSuperview()
+            // Landed or reversed alike: the container outlives the transition.
+            shield.removeFromSuperview()
             // Cleared under the opaque page, where the reset cannot be seen.
             presenting?.transform = .identity
             ZoomFlight.clearRecededChrome(from: presenting)
@@ -1661,6 +1734,11 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             cornerCurve: geometry.sourceCornerCurve
         )
         let open = RevealStage.open(container: container)
+        // ⚠️ THE CLOSE NEEDS IT MOST (#786): the landing was measured above,
+        // and a scroll of the grid from here on moves the row out from under
+        // the window. Added after the host, so it is topmost; an overhanging
+        // stand-in is inserted directly above the HOST, so it stays below.
+        let shield = RevealStage.installTouchShield(in: container)
         // The stand-in: the card, drawn fresh, above the page inside the same
         // window. It fades in over the flight while the page fades out under
         // it, so a page that was scrolled stops mattering the moment the
@@ -1807,6 +1885,8 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             standIn?.removeFromSuperview()
             RevealStage.unwrap(fromView, from: host, to: container, frame: pageFrame)
             dim.removeFromSuperview()
+            // Committed or cancelled alike: the container outlives the pop.
+            shield.removeFromSuperview()
             presenting.transform = .identity
             ZoomFlight.clearRecededChrome(from: presenting)
             // The page is staying or going; either way it must carry no mask
