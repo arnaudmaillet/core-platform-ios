@@ -329,7 +329,7 @@ struct InboxCatalogTests {
         await settle(until: { @MainActor in
             if case .failed = latest?.phase { return true } else { return false }
         })
-        #expect(latest?.phase == .failed(message: "Couldn't load your messages. Pull to retry."))
+        #expect(latest?.phase == .failed(message: "Couldn't load your messages."))
 
         await provider.setFailsInbox(false)
         monitor.report(online: false)

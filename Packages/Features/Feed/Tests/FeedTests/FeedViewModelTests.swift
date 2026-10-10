@@ -41,7 +41,7 @@ private final class FakeFeedProvider: FeedProviding, @unchecked Sendable {
 }
 
 /// Holds every first-page call until the test answers it, by call number.
-private final class GatedFirstPageProvider: FeedProviding, @unchecked Sendable {
+private final class GatedFirstPageProvider: RepointableFeedProviding, @unchecked Sendable {
     private let lock = NSLock()
     private var waiting: [Int: CheckedContinuation<Result<FeedPage, FeedError>, Never>] = [:]
     private var calls = 0
@@ -59,6 +59,9 @@ private final class GatedFirstPageProvider: FeedProviding, @unchecked Sendable {
     }
 
     func cachedFirstPage() async -> [FeedEntry]? { nil }
+
+    /// A window change: the next first-page call is the new window's.
+    func repoint(to ids: [PostID]) async {}
 
     func loadFirstPage() async throws -> FeedPage {
         let result = await withCheckedContinuation { continuation in
@@ -237,8 +240,11 @@ struct FeedViewModelTests {
         #expect(observed.last?.items.count == 3)
     }
 
-    /// A feed whose first load (call 0) was superseded by a pull (call 1),
-    /// both still waiting, with every state it emits recorded.
+    /// A feed whose first load (call 0) was superseded by a window change
+    /// (call 1), both still waiting, with every state it emits recorded.
+    ///
+    /// A `repoint`, not a pull: since #797 a pull while the first load is on
+    /// its way is ignored rather than cancelling it.
     private func supersededFirstPage() async -> (FeedViewModel, GatedFirstPageProvider, () -> [FeedViewModel.RenderState]) {
         let provider = GatedFirstPageProvider()
         let viewModel = FeedViewModel(repository: provider)
@@ -247,16 +253,16 @@ struct FeedViewModelTests {
         viewModel.onStateChange = { states.append($0) }
         viewModel.viewDidLoad()
         #expect(await eventually { provider.callCount == 1 }, "the first load never asked")
-        viewModel.refresh()
-        #expect(await eventually { provider.callCount == 2 }, "the pull never asked")
+        viewModel.repoint(to: [PostID("post-new-window")])
+        #expect(await eventually { provider.callCount == 2 }, "the new window never asked")
         return (viewModel, provider, { states })
     }
 
     /// ⚠️ A SUPERSEDED FIRST PAGE LEAVES ITS SUCCESSOR'S SLOT ALONE (#836):
-    /// the first load, cancelled by a pull, ended by clearing the slot of the
-    /// load that replaced it, and the feed read "nothing on its way" — the
+    /// the first load, cancelled by a window change, ended by clearing the
+    /// slot of the load that replaced it, and the feed read "nothing on its way" — the
     /// end of the list — with the new first page still in flight.
-    @Test func aFirstPageCancelledByRefreshLeavesTheNewLoadsSlotSet() async {
+    @Test func aFirstPageSupersededByARepointLeavesTheNewLoadsSlotSet() async {
         let (viewModel, provider, _) = await supersededFirstPage()
 
         provider.answer(call: 0, with: .success(FeedPage(entries: makeEntries(0..<5), nextPageToken: nil, isCold: false)))
