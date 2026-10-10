@@ -69,6 +69,14 @@ public final class EmoteKeyboard: NSObject {
     /// the strip covered the feed's composer outright. Floating in the window
     /// above the field touches no one's layout.
     public weak var suggestionAnchor: UIView?
+    /// Rides inside the text view and reports when it leaves its window.
+    /// `nonisolated(unsafe)` for the same `deinit` as the strips.
+    ///
+    /// ⚠️ IN THE TEXT VIEW, NEVER IN THE ANCHOR. The comments composer's
+    /// anchor is a `UIVisualEffectView`, which forbids subviews of its own.
+    /// In every host the text view sits inside the anchor, so the text view
+    /// leaving the window means the anchor has left too.
+    nonisolated(unsafe) private let windowWatch: WindowExitWatch
 
     /// Whether `@` and `#` complete. On by default.
     public var completesTextEntities = true
@@ -110,12 +118,15 @@ public final class EmoteKeyboard: NSObject {
         self.recents = recents
         self.strip = EmoteSuggestionStrip(engine: engine)
         self.completionStrip = TextCompletionStrip()
+        self.windowWatch = WindowExitWatch()
         self.suggestsInline = suggestsInline
         super.init()
 
         strip.onSelect = { [weak self] emote in self?.acceptSuggestion(emote) }
         completionStrip.onSelect = { [weak self] completion in self?.acceptCompletion(completion) }
         heights.track(self)
+        windowWatch.onLeaveWindow = { [weak self] in self?.fieldLeftWindow() }
+        textView.addSubview(windowWatch)
 
         toggleButton.accessibilityIdentifier = "emote-toggle"
         toggleButton.addAction(UIAction { [weak self] _ in self?.toggle() }, for: .primaryActionTriggered)
@@ -166,10 +177,27 @@ public final class EmoteKeyboard: NSObject {
     /// composer) left a strip floating over whatever came next.
     deinit {
         guard Thread.isMainThread else { return }
-        MainActor.assumeIsolated { [strip, completionStrip] in
+        MainActor.assumeIsolated { [strip, completionStrip, windowWatch] in
             strip.removeFromSuperview()
             completionStrip.removeFromSuperview()
+            windowWatch.onLeaveWindow = nil
+            windowWatch.removeFromSuperview()
         }
+    }
+
+    /// ⚠️ AND WHEN THE FIELD LEAVES THE WINDOW (#785). A composer can be
+    /// taken off screen while its field is still editing, its keyboard kept
+    /// alive by an owner that stays: a cell moved out of the window, a bar
+    /// removed from its screen. The strips stayed behind in the window,
+    /// over whatever came next. They go at once: there is no field left for
+    /// them to shrink back into.
+    private func fieldLeftWindow() {
+        stripGeneration += 1
+        strip.layer.removeAllAnimations()
+        strip.transform = .identity
+        strip.removeFromSuperview()
+        strip.show([])
+        hideCompletions()
     }
 
     @objc private func textDidEndEditing(_ note: Notification) {
@@ -465,8 +493,32 @@ public final class EmoteKeyboard: NSObject {
     func search() { startSearch() }
     var completionTokens: [String] { completionStrip.completions.map(\.token) }
     var isShowingCompletions: Bool { completionStrip.superview != nil && !completionStrip.isHidden }
+    /// The `@`/`#` strip itself, so a test can hold it past its keyboard (#785).
+    var textCompletionStrip: TextCompletionStrip { completionStrip }
     func selectCompletion(at index: Int) {
         guard index < completionStrip.completions.count else { return }
         acceptCompletion(completionStrip.completions[index])
+    }
+}
+
+/// An invisible, empty view that says when the view it sits in leaves its
+/// window. UIKit tells a view, not its observers, so the watch sits inside.
+private final class WindowExitWatch: UIView {
+    var onLeaveWindow: (() -> Void)?
+
+    init() {
+        super.init(frame: .zero)
+        isHidden = true
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window == nil else { return }
+        onLeaveWindow?()
     }
 }

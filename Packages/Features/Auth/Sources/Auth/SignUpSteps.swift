@@ -66,8 +66,12 @@ final class VerificationCodeViewController: SignUpStepViewController {
     private static let length = 6
     private let codeCell = TextFieldCell()
     private lazy var resendCell = makeLinkCell(title: "Resend Code")
-    private var resendAvailableAt = Date()
-    private var resendTimer: Timer?
+    /// When a new code may be asked for. Readable inside the module so a test
+    /// can check that a step coming back keeps its deadline (#784).
+    private(set) var resendAvailableAt = Date()
+    /// Readable inside the module so a test can watch the countdown end with
+    /// its screen (#784); only this screen starts or stops it.
+    private(set) var resendTimer: Timer?
 
     init(destination: String, resendAfter: TimeInterval) {
         super.init(
@@ -92,9 +96,31 @@ final class VerificationCodeViewController: SignUpStepViewController {
         startResendCountdown()
     }
 
+    /// Back on screen, a later step popped: the countdown picks up from the
+    /// time still left, which the stop below never touched.
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        guard resendTimer?.isValid != true else { return }
+        if resendAvailableAt > Date() {
+            startResendCountdown()
+        } else {
+            updateResendRow()
+        }
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         codeCell.textField.becomeFirstResponder()
+    }
+
+    /// ⚠️ THE COUNTDOWN STOPS WHEN THE STEP LEAVES THE SCREEN (#784), popped
+    /// or covered by the next step. The release check in the timer only
+    /// catches a step that is freed; a step kept on the stack under the next
+    /// one ticked away unseen.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        resendTimer?.invalidate()
+        resendTimer = nil
     }
 
     private var code: String {
