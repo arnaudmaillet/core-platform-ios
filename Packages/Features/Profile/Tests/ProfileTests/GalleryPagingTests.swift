@@ -104,8 +104,8 @@ struct GalleryPagingTests {
         return posts.map(\.id.rawValue)
     }
 
-    /// Your own profile by default: these tests drive the source filter,
-    /// which only your own has since #696.
+    /// Your own profile by default; its pages are its sources since #772, as
+    /// anyone else's since #696.
     private func open(
         _ gallery: PagedGallery, source: ProfileViewModel.Source = .currentUser
     ) async throws -> (ProfileViewModel, Shown) {
@@ -126,7 +126,6 @@ struct GalleryPagingTests {
             "a2": GalleryPage(posts: [post("c", at: 40)], nextPageToken: nil),
         ])
         let (viewModel, shown) = try await open(gallery)
-        viewModel.setGallerySource(.posts)
         #expect(ids(shown.snapshot?.activity) == ["a", "b"])
 
         viewModel.loadMoreGallery()
@@ -159,27 +158,6 @@ struct GalleryPagingTests {
         #expect(shown.snapshot?.repostsComplete == true)
         // Posts kept every plain post the run brought, reposts excluded.
         #expect(ids(shown.snapshot?.activity) == ["a", "b", "c", "d", "e"])
-    }
-
-    /// All merges two corpora that page on their own: it shows only down to
-    /// where both are known, so the next page only ever adds below.
-    @Test func allStopsAtTheFrontierAndOnlyEverAppends() async throws {
-        let gallery = PagedGallery(
-            authored: [
-                nil: GalleryPage(posts: [post("a", at: 100), post("b", at: 90)], nextPageToken: "a2"),
-                "a2": GalleryPage(posts: [post("c", at: 50)], nextPageToken: nil),
-            ],
-            tagged: [nil: GalleryPage(posts: [post("t1", at: 95), post("t2", at: 10)], nextPageToken: nil)]
-        )
-        let (viewModel, shown) = try await open(gallery)
-        // t2 (10) is older than what the authored corpus has reached (90):
-        // an authored post could still land between them, so it waits.
-        #expect(ids(shown.snapshot?.activity) == ["a", "t1", "b"])
-
-        viewModel.loadMoreGallery()
-        try #require(await settle { ids(shown.snapshot?.activity).count == 5 })
-
-        #expect(ids(shown.snapshot?.activity) == ["a", "t1", "b", "c", "t2"])
     }
 
     /// The media gallery "View all" pushes (#631) shows only media: a page
@@ -232,7 +210,6 @@ struct GalleryPagingTests {
             "a2": GalleryPage(posts: [post("c", at: 40), post("d", at: 30)], nextPageToken: nil),
         ])
         let (viewModel, shown) = try await open(gallery)
-        viewModel.setGallerySource(.posts)
         viewModel.loadMoreGallery()
         try #require(await settle { ids(shown.snapshot?.activity).count == 4 })
 
@@ -255,7 +232,6 @@ struct GalleryPagingTests {
             "a2": GalleryPage(posts: [post("c", at: 40)], nextPageToken: nil),
         ])
         let (viewModel, shown) = try await open(gallery)
-        viewModel.setGallerySource(.posts)
 
         #expect(await viewModel.galleryPostIDs(after: PostID("a")) == [PostID("b")])
         #expect(await viewModel.galleryPostIDs(after: PostID("b")) == [PostID("c")])
@@ -273,7 +249,6 @@ struct GalleryPagingTests {
         ])
         await gallery.fail("a2")
         let (viewModel, _) = try await open(gallery)
-        viewModel.setGallerySource(.posts)
 
         #expect(await viewModel.galleryPostIDs(after: PostID("a")) == [])
 

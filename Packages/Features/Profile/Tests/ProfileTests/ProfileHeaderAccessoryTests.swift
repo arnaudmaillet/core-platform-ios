@@ -152,8 +152,9 @@ struct ProfileHeaderAccessoryTests {
 
     // MARK: - The leading item (the shell's bell)
 
-    /// ⚠️ THE BELL LEADS, AHEAD OF THE SOURCE FILTER: `[bell][filter]`.
-    @Test func theInjectedBellLeadsAheadOfTheSourceFilter() throws {
+    /// ⚠️ THE BELL LEADS, ALONE: `[bell]`. The source filter that stood
+    /// beside it is gone; its sources are tabs at the foot (#772).
+    @Test func theInjectedBellLeadsAlone() throws {
         let screen = ownProfile()
         screen.loadViewIfNeeded()
         let bell = accessory()
@@ -161,9 +162,8 @@ struct ProfileHeaderAccessoryTests {
         screen.setLeadingAccessoryItem(bell)
 
         let items = try #require(screen.navigationItem.leftBarButtonItems)
-        #expect(items.count == 2)
-        #expect(items.first === bell, "the filter took the corner from the bell")
-        #expect(items.last?.accessibilityLabel == "Content source")
+        #expect(items.count == 1)
+        #expect(items.first === bell)
     }
 
     /// And, like the balance, it survives a rebuild of the bar.
@@ -179,15 +179,16 @@ struct ProfileHeaderAccessoryTests {
         #expect(items.first === bell, "a rebuild dropped the bell")
     }
 
-    /// Clearing it leaves the filter alone in the leading group.
-    @Test func clearingTheBellLeavesTheFilter() {
+    /// Clearing it leaves the leading group empty: no filter stands there any
+    /// more (#772).
+    @Test func clearingTheBellEmptiesTheLeadingGroup() {
         let screen = ownProfile()
         screen.loadViewIfNeeded()
 
         screen.setLeadingAccessoryItem(accessory())
         screen.setLeadingAccessoryItem(nil)
 
-        #expect(screen.navigationItem.leftBarButtonItems?.count == 1)
+        #expect(screen.navigationItem.leftBarButtonItems?.isEmpty != false)
     }
 }
 

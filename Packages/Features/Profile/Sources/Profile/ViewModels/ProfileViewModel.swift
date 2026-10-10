@@ -104,7 +104,7 @@ public final class ProfileViewModel {
         /// lets the Posts list settle its tail chunk (`MosaicChunkPlanner`).
         public var isComplete: Bool = true
         /// The viewer's saved pile. Absent on anyone else's profile — a saved
-        /// list is private by construction.
+        /// list is private by construction. Own profile only.
         public var saved: GalleryPageState = .empty(message: "")
         /// ⚠️ Always the same answer, and honestly so. `engagement.v1` can
         /// record a reaction and count reactions on a post; nothing anywhere
@@ -113,8 +113,8 @@ public final class ProfileViewModel {
         /// the shape is right when a seam arrives; what it shows until then is
         /// the truth about what can be known.
         public var reactions: GalleryPageState = .empty(message: "")
-        /// Someone else's reposts and the posts that tag them, each its own
-        /// page (#696). Absent on your own profile.
+        /// The profile's reposts and the posts that tag it, each its own page
+        /// (#696; your own profile too since #772).
         public var reposts: GalleryPageState = .empty(message: "")
         public var tagged: GalleryPageState = .empty(message: "")
         /// Whether no further page is coming for Reposts and for Tagged: each
@@ -324,8 +324,8 @@ public final class ProfileViewModel {
     // MARK: Gallery state
 
     public private(set) var galleryFilter = GalleryFilter()
-    /// Someone else's profile: the page on screen's source (`gallerySource`).
-    private var pushedPageSource: GalleryFilter.Source = .posts
+    /// The page on screen's source (`gallerySource`), on every profile (#772).
+    private var pageSource: GalleryFilter.Source = .posts
     /// The authored fetch (Posts + Reposts split it) and the tagged fetch,
     /// cached so selector/kind changes recompute locally without round trips.
     /// nil = in flight (page shows loading); a failure records instead.
@@ -1012,42 +1012,30 @@ public final class ProfileViewModel {
         fillEmptyGalleryTab()
     }
 
-    /// The page on screen. Format pages set the format (above); on someone
-    /// else's profile the page also picks the corpus the paging, "View all"
-    /// and a feed's continuation read (#696).
+    /// The page on screen. Format pages set the format (above); the page
+    /// also picks the corpus the paging, "View all" and a feed's continuation
+    /// read (#696) — on your own profile too since #772. Saved and Liked read
+    /// no corpus of the profile's and leave it on Posts.
     public func setActiveTab(_ tab: ProfileTab) {
         if let format = tab.format { setGalleryFormat(format) }
-        guard !isOwnProfile else { return }
         let source: GalleryFilter.Source = switch tab {
         case .reposts: .reposts
         case .tagged: .tagged
         default: .posts
         }
-        guard source != pushedPageSource else { return }
-        pushedPageSource = source
+        guard source != pageSource else { return }
+        pageSource = source
         // The media "View all" shows, and an empty page fills itself.
         renderGallery()
     }
 
     /// The source the page on screen reads.
     ///
-    /// ⚠️ SOMEONE ELSE'S PROFILE IGNORES THE GLOBAL SOURCE (#696): its pages
-    /// ARE the sources — Posts (own posts, reposts excluded), Reposts,
-    /// Tagged — so it always opens on Posts, whatever the viewer last chose
-    /// on their own profile. Your own profile keeps the top filter and its
-    /// global preference.
-    var gallerySource: GalleryFilter.Source {
-        isOwnProfile ? galleryFilter.source : pushedPageSource
-    }
-
-    /// The global source modifier: recomputes every page locally, without
-    /// touching the active format tab; persists globally like the format.
-    public func setGallerySource(_ source: GalleryFilter.Source) {
-        guard galleryFilter.source != source else { return }
-        galleryFilter.source = source
-        galleryPreferences?.filter = galleryFilter
-        renderGallery()
-    }
+    /// ⚠️ EVERY PROFILE'S PAGES ARE ITS SOURCES (#696, and your own since
+    /// #772): Posts (its own posts, reposts excluded), Reposts, Tagged. So it
+    /// always opens on Posts. The stored filter's source — the top menu your
+    /// own profile had — is read by nothing any more.
+    var gallerySource: GalleryFilter.Source { pageSource }
 
     /// Fetches both corpora concurrently once the profile is known (the pager
     /// shows neighbors mid-swipe, so tagged can't be lazy). Called from the
@@ -1055,6 +1043,9 @@ public final class ProfileViewModel {
     private func loadGallery(for profile: UserProfile, reset: Bool) {
         guard let gallery else { return }
         if reset {
+            // A reset lands on Posts — the only page shown while the sources
+            // reload (#742) — so the source goes back with it (#772).
+            pageSource = .posts
             galleryLoad?.cancel()
             galleryLoad = nil
             galleryMoreLoad?.cancel()
@@ -1274,8 +1265,9 @@ public final class ProfileViewModel {
             .max()
     }
 
-    /// Recomputes the full three-page snapshot from the caches and the global
-    /// source modifier. Every data landing and source change funnels here.
+    /// Recomputes the snapshot — Posts, Reposts, Tagged, the media of the page
+    /// on screen, Saved — from the caches. Every data landing and page change
+    /// funnels here.
     private func renderGallery() {
         guard gallery != nil else { return }
 
@@ -1305,29 +1297,20 @@ public final class ProfileViewModel {
             return galleryMorePausedByFailure ? .failed(message: "Couldn't load. Pull to retry.") : .loading
         }
 
-        let snapshot: GallerySnapshot
-        if isOwnProfile {
-            let source = galleryFilter.source
-            snapshot = GallerySnapshot(
-                activity: page(.activity, source),
-                media: page(.media, source),
-                isComplete: galleryTokensToFollow(source) == (nil, nil),
-                saved: savedPage
-            )
-        } else {
-            // Three pages, three sources (#696); the media "View all" pushes
-            // is the page on screen's. The empty pages let their tab speak
-            // (`ProfileTab.emptyState`), Posts saying what it holds here.
-            snapshot = GallerySnapshot(
-                activity: page(.activity, .posts, emptyMessage: "Posts will appear here."),
-                media: page(.media, pushedPageSource),
-                isComplete: galleryTokensToFollow(.posts) == (nil, nil),
-                reposts: page(.activity, .reposts, emptyMessage: ""),
-                tagged: page(.activity, .tagged, emptyMessage: ""),
-                repostsComplete: galleryTokensToFollow(.reposts) == (nil, nil),
-                taggedComplete: galleryTokensToFollow(.tagged) == (nil, nil)
-            )
-        }
+        // Three pages, three sources (#696), on every profile since #772; the
+        // media "View all" pushes is the page on screen's. The empty pages let
+        // their tab speak (`ProfileTab.emptyState`), Posts saying what it
+        // holds here. Saved is your own profile's alone.
+        let snapshot = GallerySnapshot(
+            activity: page(.activity, .posts, emptyMessage: "Posts will appear here."),
+            media: page(.media, pageSource),
+            isComplete: galleryTokensToFollow(.posts) == (nil, nil),
+            saved: isOwnProfile ? savedPage : .empty(message: ""),
+            reposts: page(.activity, .reposts, emptyMessage: ""),
+            tagged: page(.activity, .tagged, emptyMessage: ""),
+            repostsComplete: galleryTokensToFollow(.reposts) == (nil, nil),
+            taggedComplete: galleryTokensToFollow(.tagged) == (nil, nil)
+        )
         fillEmptyGalleryTab()
         // The same pages again is no news: a revalidation that agrees with
         // the screen must cost the screen nothing.
