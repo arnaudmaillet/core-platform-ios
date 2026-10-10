@@ -99,6 +99,8 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
         scrollView.addSubview(imageView)
         // Over the picture, under ✕: the bone and the failed state stand
         // where the photo will, and the way out stays on top of both.
+        placeholder.isAccessibilityElement = true
+        placeholder.accessibilityLabel = "Loading photo"
         view.addSubview(placeholder)
         failedState.pin(to: view)
 
@@ -174,6 +176,9 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
                 phase = .failed
                 showFailed()
                 placeholder.crossfadeSkeleton(to: failedState)
+                // VoiceOver was on "Loading photo"; the bone is gone, so it is
+                // taken to what replaced it.
+                UIAccessibility.post(notification: .layoutChanged, argument: failedState)
             }
         }
     }
@@ -206,7 +211,11 @@ final class ThreadPhotoViewerController: UIViewController, UIScrollViewDelegate 
     var debugFailedState: EmptyStateView? { failedState.isHidden ? nil : failedState }
     #endif
 
-    func viewForZooming(in scrollView: UIScrollView) -> UIView? { imageView }
+    /// Only a picture zooms: a pinch over the bone or the failed state does
+    /// nothing.
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        phase == .content ? imageView : nil
+    }
 
     @objc private func tapped() {
         guard scrollView.zoomScale <= 1 else {

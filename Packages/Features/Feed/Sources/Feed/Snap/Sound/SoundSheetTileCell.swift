@@ -386,35 +386,40 @@ final class SoundSheetTileCell: UICollectionViewCell {
     /// Whether the placeholder's shimmer shows — what a test reads.
     var showsPlaceholderBone: Bool { bone.map { !$0.isHidden && $0.alpha > 0 } ?? false }
 
-    /// The bone on a placeholder; off a loaded tile — cross-faded away when
-    /// the same post is filled in (charter P10), dropped at once when the
-    /// cell now stands for another.
-    private func setPlaceholder(_ placeholder: Bool, fillingIn: Bool) {
-        if placeholder {
-            if bone == nil {
-                let bone = SkeletonBoneView(rounding: .fixed(0))
-                // The tile's own fill is the ground; the bone adds only the
-                // sweep, so a placeholder keeps the tile's colour.
-                bone.backgroundColor = .clear
-                bone.frame = contentView.bounds
-                bone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                contentView.insertSubview(bone, aboveSubview: imageView)
-                self.bone = bone
-            }
-            bone?.showSkeleton()
-        } else if let bone {
-            self.bone = nil
-            if fillingIn {
-                bone.fadeOutSkeleton(removing: true)
-            } else {
-                bone.removeFromSuperview()
-            }
+    /// The bone on a placeholder.
+    private func showBone() {
+        if bone == nil {
+            let bone = SkeletonBoneView(rounding: .fixed(0))
+            // The tile's own fill is the ground; the bone adds only the
+            // sweep, so a placeholder keeps the tile's colour.
+            bone.backgroundColor = .clear
+            bone.frame = contentView.bounds
+            bone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            contentView.insertSubview(bone, aboveSubview: imageView)
+            self.bone = bone
+        }
+        bone?.showSkeleton()
+    }
+
+    /// The bone leaves: cross-faded once what it stood for is drawn (charter
+    /// P10), or at once when the cell now stands for another post.
+    private func dropBone(animated: Bool) {
+        guard let bone else { return }
+        self.bone = nil
+        if animated {
+            bone.fadeOutSkeleton(removing: true)
+        } else {
+            bone.removeFromSuperview()
         }
     }
 
     func configure(_ tile: SoundSheetViewController.Tile, pipeline: ImagePipeline) {
         let fillingIn = postID == tile.postID
-        setPlaceholder(!tile.isLoaded, fillingIn: fillingIn)
+        if !tile.isLoaded {
+            showBone()
+        } else if !fillingIn {
+            dropBone(animated: false)
+        }
         postID = tile.postID
         originalBadge.isHidden = !tile.isOriginal
         currentBadge.isHidden = !tile.isCurrent
@@ -428,12 +433,27 @@ final class SoundSheetTileCell: UICollectionViewCell {
         accessibilityTraits = .button
         loading?.cancel()
         captionLabel.text = tile.thumbnailURL == nil ? tile.caption : nil
-        guard let url = tile.thumbnailURL else { return }
+        // ⚠️ A FILLED-IN PLACEHOLDER KEEPS ITS BONE UNTIL ITS PICTURE IS DRAWN.
+        // Faded on the fill alone, the tile went bone → bare fill → the poster
+        // snapping in. Words are drawn at once, and so is a cached poster; any
+        // other poster takes the bone away when it lands — or when it cannot,
+        // so a failed thumbnail does not shimmer for ever.
+        let loaded = tile.isLoaded
+        guard let url = tile.thumbnailURL else {
+            if loaded { dropBone(animated: true) }
+            return
+        }
+        if let cached = pipeline.cachedImage(for: url) {
+            imageView.image = cached
+            if loaded { dropBone(animated: true) }
+            return
+        }
         let id = tile.postID
         loading = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            let image = try? await pipeline.image(for: url)
             guard let self, self.postID == id else { return }
-            self.imageView.image = image
+            if let image { self.imageView.image = image }
+            if loaded { self.dropBone(animated: true) }
         }
     }
 }

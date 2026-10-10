@@ -119,6 +119,23 @@ struct ThreadPhotoViewerStatesTests {
         #expect(fetcher.fetches == 2)
     }
 
+    @Test func onlyThePictureZooms() async {
+        let pipeline = ImagePipeline(fetcher: FlakyFetcher(failures: 0))
+        let viewer = laidOut(ThreadPhotoViewerController(image: nil, url: Self.photoURL, pipeline: pipeline))
+        #expect(viewer.viewForZooming(in: UIScrollView()) == nil, "a pinch over the bone does nothing")
+
+        await settle { viewer.phase == .content }
+        #expect(viewer.viewForZooming(in: UIScrollView()) != nil)
+    }
+
+    @Test func theBoneTellsVoiceOverThePhotoIsLoading() {
+        let pipeline = ImagePipeline(fetcher: FlakyFetcher(failures: 0))
+        let viewer = laidOut(ThreadPhotoViewerController(image: nil, url: Self.photoURL, pipeline: pipeline))
+
+        let labels = viewer.view.subviews.filter(\.isAccessibilityElement).compactMap(\.accessibilityLabel)
+        #expect(labels.contains("Loading photo"))
+    }
+
     @Test func aPhotoWithNoAddressFailsWithoutOfferingToTryAgain() {
         let viewer = laidOut(ThreadPhotoViewerController(image: nil, url: nil, pipeline: nil))
 

@@ -514,6 +514,7 @@ final class MediaPickerViewController: UIViewController {
             // frame with a fractional page, so the neighbour is revealed as soon
             // as it is genuinely coming.
             revealPage(at: Int(progress.rounded()))
+            wakePlaceholders(near: Int(progress.rounded()))
         }
         pager.onSettled = { [weak self] index in
             guard let self, albums.indices.contains(index) else { return }
@@ -525,6 +526,16 @@ final class MediaPickerViewController: UIViewController {
             }
         }
         updateTrayReserve()
+        wakePlaceholders(near: pager.activeIndex)
+    }
+
+    /// Bones shimmer on the page in front and the two either side of it —
+    /// the ones a swipe can bring on screen — and sleep everywhere else
+    /// (`MediaAlbumPageView.setPlaceholdersAwake`).
+    private func wakePlaceholders(near index: Int) {
+        for (offset, page) in pages.enumerated() {
+            page.setPlaceholdersAwake(abs(offset - index) <= 1)
+        }
     }
 
     private func makePage() -> MediaAlbumPageView {
@@ -874,6 +885,11 @@ extension MediaPickerViewController {
     /// Internal for tests: whether the album at `index` still wears its bones.
     func debugPageShowsPlaceholders(at index: Int) -> Bool {
         pages.indices.contains(index) && pages[index].debugShowsPlaceholders
+    }
+    /// Internal for tests: whether the album at `index` still holds bones,
+    /// shimmering or asleep.
+    func debugPageHoldsPlaceholders(at index: Int) -> Bool {
+        pages.indices.contains(index) && pages[index].debugHoldsPlaceholders
     }
     /// Internal for tests: the bones the album at `index` lays out.
     func debugPagePlaceholderCount(at index: Int) -> Int {

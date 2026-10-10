@@ -17,7 +17,27 @@ struct SoundSheetTilePlaceholderTests {
         func fetchImageData(for url: URL) async throws -> Data { throw URLError(.cancelled) }
     }
 
+    /// Serves a small PNG for any poster.
+    private struct PosterFetcher: ImageFetching {
+        static let png: Data = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).pngData { context in
+            UIColor.gray.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+
+        func fetchImageData(for url: URL) async throws -> Data { Self.png }
+    }
+
     private let pipeline = ImagePipeline(fetcher: SilentFetcher())
+
+    /// Looks, not wall-clock time: a budget of looks spends nothing while the
+    /// process is not scheduled.
+    private func settle(until condition: () -> Bool) async {
+        for _ in 0..<2_000 {
+            await Task.yield()
+            if condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
 
     private func tile(_ id: String, loaded: Bool) -> SoundSheetViewController.Tile {
         SoundSheetViewController.Tile(
@@ -50,11 +70,42 @@ struct SoundSheetTilePlaceholderTests {
         #expect(cell.showsPlaceholderBone == false)
     }
 
-    @Test func aPlaceholderFilledInGivesItsBoneUp() {
+    @Test func aPlaceholderFilledInWithACachedPosterTradesItsBoneForItAtOnce() {
+        let cell = cell()
+        cell.configure(tile("p1", loaded: false), pipeline: pipeline)
+        let poster = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { _ in }
+        pipeline.store(poster, for: URL(string: "https://cdn.example/p1.jpg")!)
+
+        cell.configure(tile("p1", loaded: true), pipeline: pipeline)
+
+        #expect(cell.cover === poster)
+        #expect(cell.showsPlaceholderBone == false)
+    }
+
+    @Test func aPlaceholderFilledInKeepsItsBoneUntilItsPosterLands() async {
+        let pipeline = ImagePipeline(fetcher: PosterFetcher())
         let cell = cell()
         cell.configure(tile("p1", loaded: false), pipeline: pipeline)
 
         cell.configure(tile("p1", loaded: true), pipeline: pipeline)
+        #expect(cell.showsPlaceholderBone, "no bare fill before the poster")
+        #expect(cell.cover == nil)
+
+        await settle { cell.cover != nil }
+        #expect(cell.cover != nil)
+        #expect(cell.showsPlaceholderBone == false, "the bone leaves as the poster lands")
+    }
+
+    @Test func aFilledInTextPostGivesItsBoneUpAtOnce() {
+        let cell = cell()
+        cell.configure(tile("p1", loaded: false), pipeline: pipeline)
+
+        cell.configure(
+            SoundSheetViewController.Tile(
+                postID: PostID("p1"), thumbnailURL: nil, caption: "words", isCurrent: false
+            ),
+            pipeline: pipeline
+        )
 
         #expect(cell.showsPlaceholderBone == false)
     }

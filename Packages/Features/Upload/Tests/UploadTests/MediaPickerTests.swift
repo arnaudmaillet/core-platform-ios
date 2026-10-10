@@ -368,6 +368,34 @@ struct MediaPickerTests {
         #expect(screen.picker.debugPageShowsPlaceholders(at: 1) == false, "the bones leave as the tiles land")
     }
 
+    /// ⚠️ **AN ALBUM OUT OF REACH DOES NOT SHIMMER.** Every page sits in the
+    /// window, so bones on albums never visited would sweep for as long as the
+    /// sheet is open (#580's idle cost). Only the page in front and its
+    /// neighbours wear them awake.
+    @Test func aFarAlbumsBonesSleepUntilItComesIntoReach() async throws {
+        let albums = (0..<4).map { MediaLibraryAlbum(id: "album-\($0)", title: "Album \($0)", count: 2) }
+        var contents: [String: [MediaLibraryItem]] = [:]
+        for album in albums {
+            contents[album.id] = (0..<2).map { MediaLibraryItem(id: "\(album.id)-\($0)", kind: .photo) }
+        }
+        let screen = try await open(StubLibrary(albums: albums, contents: contents))
+        defer {
+            screen.window.isHidden = true
+            screen.window.rootViewController = nil
+        }
+        screen.window.layoutIfNeeded()
+        let pager = try #require(screen.picker.debugPager)
+
+        #expect(screen.picker.debugPageShowsPlaceholders(at: 1), "the neighbour is in reach")
+        #expect(screen.picker.debugPageHoldsPlaceholders(at: 3), "the far album still has bones")
+        #expect(screen.picker.debugPageShowsPlaceholders(at: 3) == false, "asleep, not sweeping")
+
+        pager.setActivePage(3, animated: false)
+
+        #expect(screen.picker.debugPageShowsPlaceholders(at: 3), "woken as it comes into reach")
+        #expect(screen.picker.debugPageShowsPlaceholders(at: 1) == false, "and the one left behind sleeps")
+    }
+
     /// A page on its own: bones from its first frame, gone once it is filled —
     /// even with nothing in it, where the empty state takes over.
     @Test func aPageWearsBonesUntilItIsFilled() {

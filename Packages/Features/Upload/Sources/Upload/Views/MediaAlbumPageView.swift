@@ -123,7 +123,11 @@ final class MediaAlbumPageView: UIView {
     var debugNoticeReserve: CGFloat { grid.contentInset.top }
 
     /// Whether the page's bones stand in for its album — what a test reads.
-    var debugShowsPlaceholders: Bool { skeleton.superview != nil && skeleton.alpha == 1 }
+    var debugShowsPlaceholders: Bool {
+        skeleton.superview != nil && !skeleton.isHidden && skeleton.alpha == 1
+    }
+    /// Whether the page still holds bones, awake or asleep — what a test reads.
+    var debugHoldsPlaceholders: Bool { skeleton.superview != nil }
     /// How many bones stand in, once laid out — what a test reads.
     var debugPlaceholderCount: Int { skeleton.superview == nil ? 0 : skeleton.debugBoneCount }
     #endif
@@ -266,8 +270,13 @@ final class MediaAlbumPageView: UIView {
         dataSource.apply(snapshot, animatingDifferences: false)
         // Bones out, album in — removed rather than hidden: nothing brings them
         // back, and shimmering layers over the album would keep animating for
-        // nothing.
-        skeleton.fadeOutSkeleton(removing: true)
+        // nothing. Bones put to sleep (`setPlaceholdersAwake`) have nothing to
+        // fade and simply go.
+        if skeleton.isHidden {
+            skeleton.removeFromSuperview()
+        } else {
+            skeleton.fadeOutSkeleton(removing: true)
+        }
         // ⚠️ THE OFFSET IS READ AFTER A LAYOUT PASS, NOT BEFORE ONE.
         // `adjustedContentInset` is only final once the grid has been laid out
         // inside the bars above and below it. Read on the way in it is short by
@@ -413,6 +422,22 @@ final class MediaAlbumPageView: UIView {
     /// same reason the tray's is: the banner is laid OVER the grid, so without
     /// this the first row would sit under it permanently and the notice would
     /// hide the very photos it is talking about.
+    /// ⚠️ **ONLY A PAGE IN REACH SHIMMERS.** Every page sits in the pager's
+    /// window from the start, so an album never visited would sweep its bones
+    /// for as long as the sheet is open — on a library of many albums, many
+    /// endless animations recompositing for nothing (#580's idle cost). The
+    /// picker wakes the active page and its neighbours and puts the rest to
+    /// sleep; a hidden bone is not drawn. A loaded page has no bones left and
+    /// ignores this.
+    func setPlaceholdersAwake(_ awake: Bool) {
+        guard !hasLoaded, skeleton.superview != nil else { return }
+        if awake {
+            skeleton.showSkeleton()
+        } else {
+            skeleton.isHidden = true
+        }
+    }
+
     func setNoticeReserve(_ reserved: CGFloat) {
         grid.contentInset.top = reserved
         grid.verticalScrollIndicatorInsets.top = reserved
