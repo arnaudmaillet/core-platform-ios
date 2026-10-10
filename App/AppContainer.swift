@@ -1333,7 +1333,7 @@ final class AppContainer {
         },
         // A tapped `@handle`, a `wynn.cn/@handle` link (#524), a scanned QR
         // code and a `wynn.cn/s/<token>` link (#412).
-        lookupProfile: { [unowned self] reference in await self.profileID(for: reference) }
+        lookupProfile: { [weak self] reference in await self?.profileID(for: reference) ?? .unavailable }
     )
 
     var router: any Router { routeResolver }

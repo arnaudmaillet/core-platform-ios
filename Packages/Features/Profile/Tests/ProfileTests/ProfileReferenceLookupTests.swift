@@ -1,7 +1,10 @@
 import CoreModels
+import CoreNavigation
 import Foundation
+import MediaCore
 import ProfileInterface
 import Testing
+import UIKit
 @testable import Profile
 
 /// A `@handle` or a share link pushes the profile at once, and the profile
@@ -25,11 +28,14 @@ struct ProfileReferenceLookupTests {
         // Asked, not answered: still the skeleton, and no profile fetched.
         #expect(phases().isEmpty)
         #expect(await provider.requestedIDs.isEmpty)
-        #expect(viewModel.isAwaitingLookup)
+        #expect(viewModel.profileRouteKeys == [.handle("ada")])
 
         await lookup.release()
         await settle { phases().last.map(Self.isContent) == true }
-        #expect(!viewModel.isAwaitingLookup)
+        // Ada's profile now answers to her id and her handle as well (the
+        // router's repeat filter asks).
+        #expect(viewModel.profileRouteKeys == [.handle("ada"), .id(ProfileID("prof-7"))])
+        #expect(viewModel.wasOpenedByReference)
 
         #expect(await provider.requestedIDs == [ProfileID("prof-7")])
         #expect(viewModel.profile?.id == ProfileID("prof-7"))
@@ -66,7 +72,7 @@ struct ProfileReferenceLookupTests {
         viewModel.viewDidLoad()
         await settle { !phases().isEmpty }
 
-        #expect(viewModel.isAwaitingLookup)
+        #expect(viewModel.namesNoOne)
         #expect(!viewModel.canMessage)
         #expect(!viewModel.canModerate)
         #expect(viewModel.shareCard == nil)
@@ -120,6 +126,55 @@ struct ProfileReferenceLookupTests {
         await settle { !phases().isEmpty }
 
         #expect(phases() == [.failed(message: "Couldn't load this profile")])
+    }
+
+    // MARK: - The bell (#778, #756)
+
+    /// Bar items are decided at frame 0 so none pops in mid-push: a handle
+    /// route wears the bell from the start, unusable until the lookup has
+    /// named someone else.
+    @Test func aHandleRouteWearsADisabledBellFromTheFirstFrameUntilItNamesSomeoneElse() async {
+        let lookup = ScriptedLookup([.found(ProfileID("prof-7"))], held: true)
+        let screen = Self.screen(lookup: lookup, relationship: .other(isFollowing: false, isBlocked: false))
+
+        screen.loadViewIfNeeded()
+        #expect(screen.debugMuteBellItem != nil)
+        #expect(screen.debugMuteBellItem?.isEnabled == false)
+
+        await lookup.release()
+        await settle { screen.debugMuteBellItem?.isEnabled == true }
+    }
+
+    @Test func aHandleThatNamesNoOneTakesTheBellAway() async {
+        let screen = Self.screen(lookup: ScriptedLookup([.missing]), relationship: .other(isFollowing: false, isBlocked: false))
+
+        screen.loadViewIfNeeded()
+        #expect(screen.debugMuteBellItem != nil)
+        await settle { screen.debugMuteBellItem == nil }
+    }
+
+    @Test func aHandleThatNamesTheViewerTakesTheBellAway() async {
+        let screen = Self.screen(lookup: ScriptedLookup([.found(ProfileID("prof-7"))]), relationship: .me)
+
+        screen.loadViewIfNeeded()
+        #expect(screen.debugMuteBellItem != nil)
+        await settle { screen.debugMuteBellItem == nil }
+    }
+
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    /// A pushed profile for `@ada`, off any window.
+    private static func screen(lookup: ScriptedLookup, relationship: ProfileRelationship) -> ProfileViewController {
+        ProfileViewController(
+            viewModel: ProfileViewModel(
+                repository: StubProvider(relationship: relationship),
+                source: .lookup(.handle("ada")), lookup: { await lookup($0) }
+            ),
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            onLogout: nil
+        )
     }
 
     // MARK: - Support
@@ -179,11 +234,15 @@ private actor ScriptedLookup {
 
 private struct SampleError: Error {}
 
-private actor StubProvider: ProfileProviding {
+private actor StubProvider: ProfileProviding, ProfileMuting {
     private let fails: Bool
+    private let relationshipValue: ProfileRelationship
     private(set) var requestedIDs: [ProfileID] = []
 
-    init(fails: Bool = false) { self.fails = fails }
+    init(fails: Bool = false, relationship: ProfileRelationship = .other(isFollowing: false, isBlocked: false)) {
+        self.fails = fails
+        self.relationshipValue = relationship
+    }
 
     func currentUserProfile() async throws -> UserProfile { throw SampleError() }
 
@@ -198,8 +257,12 @@ private actor StubProvider: ProfileProviding {
     }
 
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship {
-        .other(isFollowing: false, isBlocked: false)
+        relationshipValue
     }
+
+    func muteScopes(for profileID: ProfileID) async throws -> MuteScopes { .none }
+    func setMuteScopes(_ scopes: MuteScopes, for profileID: ProfileID) async throws {}
+    func mutedProfiles() async throws -> [MutedProfile] { [] }
 
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
     func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {}

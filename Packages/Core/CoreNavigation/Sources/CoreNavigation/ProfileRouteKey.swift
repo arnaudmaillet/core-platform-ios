@@ -12,6 +12,20 @@ public enum ProfileRouteKey: Hashable, Sendable {
     /// person.
     case handle(String)
     case shareToken(String)
+
+    /// A handle's key, however it was typed.
+    public static func handle(normalizing handle: String) -> ProfileRouteKey {
+        .handle(handle.lowercased())
+    }
+}
+
+/// A pushed screen showing one profile, and every key a route to it could
+/// carry by now (#800): the reference it was opened with, its id once known,
+/// its handle once loaded. What lets `RepeatPushFilter` see that `@ada` and
+/// Ada's id are one person.
+@MainActor
+public protocol ProfileRouteAnswering: AnyObject {
+    var profileRouteKeys: Set<ProfileRouteKey> { get }
 }
 
 public extension AppRoute {
@@ -20,7 +34,7 @@ public extension AppRoute {
     var profileRouteKey: ProfileRouteKey? {
         switch self {
         case .profile(let id, _): .id(id)
-        case .profileHandle(let handle): .handle(handle.lowercased())
+        case .profileHandle(let handle): .handle(normalizing: handle)
         case .profileShareToken(let token): .shareToken(token)
         default: nil
         }

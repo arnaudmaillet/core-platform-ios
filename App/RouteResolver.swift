@@ -137,8 +137,13 @@ final class RouteResolver: Router {
         // request, not a second push: during the slide the new profile is
         // already the top screen. A second tap on the same `@handle` too,
         // while the profile it pushed is still resolving it.
+        // Either way round: the top profile answers to the id a handle
+        // resolved to, and to the handle a profile opened by id loaded.
         if let key = route.profileRouteKey,
-           repeatProfiles.isRepeat(key, topScreen: navigator.activeNavigationController?.topViewController) {
+           repeatProfiles.isRepeat(
+               key, topScreen: navigator.activeNavigationController?.topViewController,
+               screenKeys: { ($0 as? ProfileRouteAnswering)?.profileRouteKeys ?? [] }
+           ) {
             // Still the viewer's tap: a drawer it came from slides shut.
             navigator.closeOverlays()
             return

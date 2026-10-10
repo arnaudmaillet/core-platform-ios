@@ -243,6 +243,9 @@ public final class ProfileViewModel {
     private var source: Source
     /// Answers a `.lookup` source. Nil for every other one.
     private let lookup: ProfileLookingUp?
+    /// The handle or token a `.lookup` source opened with, kept once it
+    /// resolves.
+    private let reference: ProfileReference?
     private let router: (any Router)?
     /// Last-known profiles, shared app-wide. Nil in compositions without one
     /// (tests), which simply never seed.
@@ -406,6 +409,7 @@ public final class ProfileViewModel {
     ) {
         self.repository = repository
         self.lookup = lookup
+        if case .lookup(let reference) = source { self.reference = reference } else { self.reference = nil }
         self.shareLinks = shareLinks
         self.mapPinning = mapPinning
         self.reporting = reporting
@@ -526,12 +530,33 @@ public final class ProfileViewModel {
     /// two extra tabs when the read lands would be a jump.
     public var isOwnProfile: Bool { source == .currentUser }
 
-    /// Whether a handle or a token is still all this screen knows (#800):
-    /// resolving it, or the lookup failed or named no one. No id yet, so
-    /// nothing that acts on the profile — the mute bell — can be offered.
-    public var isAwaitingLookup: Bool {
-        if case .lookup = source { return true }
+    /// Whether the screen was opened by a handle or a token (#800) — it stays
+    /// true once the lookup resolves: the bar's bell was decided at frame 0
+    /// without knowing whose profile this is.
+    public var wasOpenedByReference: Bool { reference != nil }
+
+    /// Whether the lookup named no one: the screen has nobody to act on.
+    public var namesNoOne: Bool {
+        if case .notFound = phase { return true }
         return false
+    }
+
+    /// Every key a route to this screen could carry by now (#800): the
+    /// reference it was opened with, its id once known, its handle once
+    /// loaded — what the router's repeat filter compares a new route with.
+    public var profileRouteKeys: Set<ProfileRouteKey> {
+        var keys = Set<ProfileRouteKey>()
+        switch reference {
+        case .handle(let handle): keys.insert(.handle(normalizing: handle))
+        case .shareToken(let token): keys.insert(.shareToken(token))
+        case nil: break
+        }
+        if case .profile(let id) = source { keys.insert(.id(id)) }
+        if let profile {
+            keys.insert(.id(profile.id))
+            keys.insert(.handle(normalizing: profile.handle))
+        }
+        return keys
     }
 
     /// Everything the followers / following screen needs to open, or `nil`
