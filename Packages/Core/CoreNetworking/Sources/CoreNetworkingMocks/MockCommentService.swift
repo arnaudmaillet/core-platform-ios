@@ -458,8 +458,15 @@ public final class MockCommentService: @unchecked Sendable {
             lock.withLock { (created[postID] ?? []).filter { $0.parentID == commentID } + seed }
         }
 
+        /// ⚠️ **A `comment_id` IT ALREADY HOLDS IS A REPLAY, NOT A NEW
+        /// COMMENT (#795).** The id is client-supplied precisely so a retry
+        /// after a lost answer can be recognised: the original is answered
+        /// again and nothing is inserted — where this used to file a twin.
         func append(_ request: Comment_V1_CreateCommentRequest) -> (commentID: String, postID: String) {
             lock.withLock {
+                if (created[request.postID] ?? []).contains(where: { $0.commentID == request.commentID }) {
+                    return (request.commentID, request.postID)
+                }
                 var view = Comment_V1_CommentView()
                 view.commentID = request.commentID
                 view.postID = request.postID

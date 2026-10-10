@@ -12,7 +12,25 @@ import UIKit
 /// actor; picked images are immutable.
 public struct PickedImage: @unchecked Sendable {
     public let image: UIImage
-    public init(_ image: UIImage) { self.image = image }
+    /// media.v1's idempotency key for this picture's upload (#795).
+    ///
+    /// ⚠️ **ONE PER PICTURE THE AUTHOR CHOSE, NOT ONE PER PUBLISH.** A screen
+    /// that offers a retry hands the SAME key back on the retry
+    /// (`NewPostViewController.uploadKey(for:)`), so an upload whose answer
+    /// was lost is not reserved and sent a second time.
+    public let uploadKey: String
+
+    /// A one-shot picture, with no retry to keep a key for: a key of its own.
+    /// (Its own initialiser, not a defaulted parameter, so `PickedImage.init`
+    /// still reads as `(UIImage) -> PickedImage` where it is passed along.)
+    public init(_ image: UIImage) {
+        self.init(image, uploadKey: UUID().uuidString)
+    }
+
+    public init(_ image: UIImage, uploadKey: String) {
+        self.image = image
+        self.uploadKey = uploadKey
+    }
 }
 
 /// A picked video (a local file URL from the photo library) ready to compose.
@@ -48,10 +66,21 @@ public struct PickedVideo: Sendable, Equatable {
     /// The baked frames of the stickers the finish lays over the clip.
     public let artwork: (any OverlayArtwork)?
 
+    /// media.v1's idempotency key for this clip's upload (#795). Kept across
+    /// a retry for the reason `PickedImage.uploadKey` gives, and NOT compared
+    /// by `==`: equality is about what is published, not which attempt it is.
+    public let uploadKey: String
+
+    /// The poster still's key: its own asset, so its own key — but derived,
+    /// so a retried clip retries its poster under the same one too.
+    var posterUploadKey: String { uploadKey + ".poster" }
+
     public init(
         sourceURL: URL, keptPieces: [VideoExportSegment] = [], finish: FrameFinish = .none,
-        soundtrack: VideoSoundtrack? = nil, artwork: (any OverlayArtwork)? = nil
+        soundtrack: VideoSoundtrack? = nil, artwork: (any OverlayArtwork)? = nil,
+        uploadKey: String = UUID().uuidString
     ) {
+        self.uploadKey = uploadKey
         self.sourceURL = sourceURL
         self.keptPieces = keptPieces
         self.finish = finish
@@ -292,6 +321,7 @@ public actor PostComposer: PostComposing {
             mimeType: encoded.mimeType,
             sizeBytes: encoded.byteSize,
             sha256: encoded.sha256Hex,
+            idempotencyKey: picked.uploadKey,
             payload: .data(encoded.data)
         )
         return MediaAttachment(
@@ -320,10 +350,11 @@ public actor PostComposer: PostComposing {
             mimeType: exported.mimeType,
             sizeBytes: exported.byteSize,
             sha256: exported.sha256Hex,
+            idempotencyKey: picked.uploadKey,
             payload: .file(exported.fileURL)
         )
 
-        let poster = await uploadPoster(for: exported, ownerID: ownerID)
+        let poster = await uploadPoster(for: exported, key: picked.posterUploadKey, ownerID: ownerID)
 
         let server = MediaAttachment(
             url: cdnURL,
@@ -371,7 +402,7 @@ public actor PostComposer: PostComposing {
     /// `PHASE3_VIDEO_BACKEND.md` §3 has the server generating a real poster
     /// rendition anyway, once that worker exists.
     private func uploadPoster(
-        for exported: ExportedVideo, ownerID: AccountID
+        for exported: ExportedVideo, key: String, ownerID: AccountID
     ) async -> (image: UIImage, url: URL)? {
         guard let frame = await posterFrame(exported) else {
             logger.warning("no poster frame for the picked video; thumbnail falls back to the clip")
@@ -384,6 +415,7 @@ public actor PostComposer: PostComposing {
                 mimeType: encoded.mimeType,
                 sizeBytes: encoded.byteSize,
                 sha256: encoded.sha256Hex,
+                idempotencyKey: key,
                 payload: .data(encoded.data)
             )
             return (frame, url)
@@ -400,17 +432,24 @@ public actor PostComposer: PostComposing {
         mimeType: String,
         sizeBytes: UInt64,
         sha256: String,
+        idempotencyKey: String,
         payload: MediaAssetUploader.Payload
     ) async throws -> URL {
         do {
             return try await uploader.upload(
-                payload, ownerID: ownerID.rawValue, mimeType: mimeType, sizeBytes: sizeBytes, sha256: sha256
+                payload, ownerID: ownerID.rawValue, mimeType: mimeType, sizeBytes: sizeBytes, sha256: sha256,
+                idempotencyKey: idempotencyKey
             ).url
         } catch let error as MediaAssetUploader.UploadError {
             throw ComposeError.media(error.message)
         }
     }
 
+    /// ⚠️ **NOT IDEMPOTENT, AND THE CLIENT CANNOT MAKE IT SO (#795).**
+    /// `CreatePostRequest` carries no idempotency key and the server mints the
+    /// post id, so a retry after a lost CreatePost/PublishPost answer creates
+    /// a second post. The uploads above are keyed and replay; this step waits
+    /// on a contract field.
     private func createDraft(profileID: ProfileID, caption: String, attachments: [Post_V1_MediaAttachmentInput], hasMedia: Bool) async throws -> PostID {
         var request = Post_V1_CreatePostRequest()
         request.profileID = profileID.rawValue

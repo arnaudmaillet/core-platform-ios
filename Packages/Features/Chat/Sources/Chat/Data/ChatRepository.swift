@@ -227,8 +227,14 @@ public protocol ChatProviding: ViewerIdentityProviding {
     /// Uploads `media` (media.v1), then sends it as a MEDIA message with
     /// `caption` as its body (#681). Returns the created, viewer-owned
     /// message. `ChatError.mediaUpload` when the upload failed.
+    ///
+    /// `idempotencyKey` is the BUBBLE's (#795): minted once when the message
+    /// is sent and passed again by every retry of it, so the upload of a
+    /// message whose answer was lost replays instead of storing the picture
+    /// twice.
     func send(
-        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?,
+        idempotencyKey: String
     ) async throws -> ChatMessage
     func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws
     /// Mutes the conversation's pushes for the viewer, or unmutes them
@@ -277,7 +283,8 @@ extension ChatProviding {
 
     /// Providers that send no media (previews, fakes).
     public func send(
-        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?,
+        idempotencyKey: String
     ) async throws -> ChatMessage {
         throw ChatError.mediaUnsupported
     }
@@ -516,7 +523,8 @@ public actor ChatRepository: ChatProviding {
     }
 
     public func send(
-        media upload: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+        media upload: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?,
+        idempotencyKey: String
     ) async throws -> ChatMessage {
         guard let mediaUploader else { throw ChatError.mediaUnsupported }
         let viewer = try await resolveViewerProfileID(forWrite: "send")
@@ -525,7 +533,9 @@ public actor ChatRepository: ChatProviding {
         }
         let media: ChatMedia
         do {
-            media = try await Self.upload(upload, ownerID: account.rawValue, uploader: mediaUploader, encoder: encoder)
+            media = try await Self.upload(
+                upload, key: idempotencyKey, ownerID: account.rawValue, uploader: mediaUploader, encoder: encoder
+            )
         } catch let error as MediaAssetUploader.UploadError {
             throw ChatError.mediaUpload(message: error.message)
         } catch {
@@ -537,16 +547,17 @@ public actor ChatRepository: ChatProviding {
     }
 
     /// The photo, or the clip and its still (best effort: a clip sends
-    /// without one), through media.v1.
+    /// without one), through media.v1 — under the bubble's `key`, the still
+    /// under one derived from it (its own asset, retried with the clip).
     private static func upload(
-        _ upload: ChatMediaUpload, ownerID: String, uploader: MediaAssetUploader, encoder: MediaEncoder
+        _ upload: ChatMediaUpload, key: String, ownerID: String, uploader: MediaAssetUploader, encoder: MediaEncoder
     ) async throws -> ChatMedia {
         switch upload {
         case .image(let image):
             let encoded = try encoder.encode(image)
             let asset = try await uploader.upload(
                 .data(encoded.data), ownerID: ownerID, mimeType: encoded.mimeType,
-                sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex
+                sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex, idempotencyKey: key
             )
             return ChatMedia(
                 kind: .image, url: asset.url, pixelWidth: encoded.pixelWidth, pixelHeight: encoded.pixelHeight
@@ -555,13 +566,13 @@ public actor ChatRepository: ChatProviding {
             let fingerprint = try video.fingerprint()
             let asset = try await uploader.upload(
                 .file(video.fileURL), ownerID: ownerID, mimeType: video.mimeType,
-                sizeBytes: fingerprint.size, sha256: fingerprint.sha256
+                sizeBytes: fingerprint.size, sha256: fingerprint.sha256, idempotencyKey: key
             )
             var posterURL: URL?
             if let poster = video.poster, let encoded = try? encoder.encode(poster) {
                 posterURL = try? await uploader.upload(
                     .data(encoded.data), ownerID: ownerID, mimeType: encoded.mimeType,
-                    sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex
+                    sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex, idempotencyKey: key + ".poster"
                 ).url
             }
             return ChatMedia(
@@ -573,6 +584,12 @@ public actor ChatRepository: ChatProviding {
 
     /// chat.v1 `SendMessage`: TEXT with `body`, or MEDIA with the reference
     /// (`ChatMediaRef`) and `body` as its caption.
+    ///
+    /// ⚠️ **THIS STEP IS NOT IDEMPOTENT, AND THE CLIENT CANNOT MAKE IT SO
+    /// (#795).** `SendMessageRequest` has no client message id or idempotency
+    /// key and the server mints `message_id`, so a retry after a lost answer
+    /// sends the message twice. A media message's UPLOAD replays under the
+    /// bubble's key; the send itself waits on a contract field.
     private func sendMessage(
         body: String, media: ChatMedia?, as viewer: ProfileID,
         to conversationID: ConversationID, replyingTo replyToID: String?

@@ -95,7 +95,30 @@ public final class PostDetailViewModel {
     private let router: (any Router)?
     private let now: @Sendable () -> Date
 
-    private var comments: [CommentEntry] = []
+    private var comments: [CommentEntry] = [] {
+        didSet { forgetUnsentIfItLanded() }
+    }
+    /// The comment that failed last — its text, its parent and the id it was
+    /// sent under — kept so that sending it again is a RETRY (#795).
+    ///
+    /// ⚠️ **THE ID IS comment.v1's IDEMPOTENCY KEY.** A failure is not proof
+    /// the server didn't take it: the write can land and only the answer be
+    /// lost. The failed text goes back into the composer
+    /// (`onCommentFailed`), and when the viewer sends that same text under
+    /// the same parent it goes under the same id, so the server answers with
+    /// the comment it already has instead of posting a twin. Edited text, or
+    /// another parent, is a new comment and takes a new id.
+    private var unsent: (body: String, parentID: String?, commentID: String)?
+
+    /// ⚠️ **A FAILED COMMENT THAT TURNS UP IN THE STREAM DID LAND.** Its id is
+    /// spent: kept, the viewer's next comment with the same words would go
+    /// out under it and be answered with the one already there — a comment
+    /// they meant to post again, swallowed. Asked on every change to the
+    /// stream, so a refresh, a page or a merge all count.
+    private func forgetUnsentIfItLanded() {
+        guard let id = unsent?.commentID, comments.contains(where: { $0.id == id }) else { return }
+        unsent = nil
+    }
     /// Where the next page of comments starts; nil when there is none, or
     /// before the first page has answered (#589).
     private var nextPageToken: String?
@@ -330,15 +353,27 @@ public final class PostDetailViewModel {
         guard !body.isEmpty, !isComposing else { return }
         if let draft { return publish(body, through: draft) }
         guard let commentsProvider, let postID else { return }
+        let commentID: String
+        if let unsent, unsent.body == body, unsent.parentID == parentID {
+            commentID = unsent.commentID
+        } else {
+            commentID = UUID().uuidString
+        }
         setComposing(true)
         Task { [weak self] in
             guard let self else { return }
             do {
-                let entry = try await commentsProvider.addComment(body, to: postID, parentID: parentID)
+                let entry = try await commentsProvider.addComment(
+                    body, to: postID, parentID: parentID, commentID: commentID
+                )
+                self.unsent = nil
                 self.insertSubmitted(entry)
                 self.emitComments()
                 self.setComposing(false)
             } catch {
+                self.unsent = (body, parentID, commentID)
+                // A reload during the send may already have shown it landed.
+                self.forgetUnsentIfItLanded()
                 self.setComposing(false)
                 self.onCommentFailed?(body, (error as? CommentsError) == .notAllowed)
             }
@@ -407,6 +442,14 @@ public final class PostDetailViewModel {
     }
 
     private func insertSubmitted(_ entry: CommentEntry) {
+        // ⚠️ A REPLAY CAN ANSWER WITH A COMMENT ALREADY ON SCREEN (#795): the
+        // write landed, a reload brought it in, and the resend's answer is
+        // that same comment. Inserted again, the stream holds one id twice —
+        // and a diffable snapshot traps on a duplicate identifier.
+        if let index = comments.firstIndex(where: { $0.id == entry.id }) {
+            comments[index] = entry
+            return
+        }
         guard let parentID = entry.parentID,
               let parentIndex = comments.firstIndex(where: { $0.id == parentID }) else {
             comments.insert(entry, at: 0)

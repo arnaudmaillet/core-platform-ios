@@ -31,7 +31,9 @@ struct UnifiedThreadChromeTests {
         init(_ entries: [CommentEntry]) { self.entries = entries }
         nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? { entries }
         func loadComments(for postID: PostID) async throws -> [CommentEntry] { entries }
-        func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+        func addComment(
+            _ body: String, to postID: PostID, parentID: String?, commentID: String
+        ) async throws -> CommentEntry {
             throw CommentsError.transport(message: "not used")
         }
     }

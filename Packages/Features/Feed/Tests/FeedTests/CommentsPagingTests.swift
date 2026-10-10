@@ -94,7 +94,9 @@ private actor PagedComments: CommentsProviding {
         return pages[pageToken] ?? CommentPage(entries: [], nextPageToken: nil)
     }
 
-    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
         throw CommentsError.transport(message: "not used")
     }
 }

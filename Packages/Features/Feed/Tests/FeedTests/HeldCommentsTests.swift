@@ -42,7 +42,9 @@ private actor HeldCommentsFake: CommentsProviding, HeldCommentReviewing {
     }
 
     func loadComments(for postID: PostID) async throws -> [CommentEntry] { entries }
-    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
         throw ReviewError()
     }
     func viewerIdentity() async -> ViewerIdentity? {
