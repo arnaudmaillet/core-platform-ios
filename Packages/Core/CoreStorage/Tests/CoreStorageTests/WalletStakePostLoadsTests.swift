@@ -66,7 +66,33 @@ struct WalletStakePostLoadsTests {
         #expect(loads.retry() == ["a", "c"])
         #expect(loads.state(of: "a") == .loading)
         #expect(loads.state(of: "b") == .loaded)
-        #expect(!loads.hasFailures, "the failed row leaves while the retry is out")
+        #expect(loads.isRetrying("a"))
+        #expect(!loads.isRetrying("b"))
+    }
+
+    @Test func theFailedRowStaysWhileTheRetryIsOut() {
+        var loads = WalletStakePostLoads()
+        let stakes = [Self.stake("a"), Self.stake("b")]
+        _ = loads.begin(["a", "b"])
+        loads.finish(requested: ["a", "b"], found: ["b"])
+        _ = loads.retry()
+        #expect(loads.isRetrying)
+        // Removed under the finger, every row below it slid up.
+        #expect(WalletStakeList(stakes: stakes, loads: loads).active == [.postsFailed, .stake("a"), .stake("b")])
+    }
+
+    @Test func theFailedRowLeavesOnlyOnceTheRetrySucceeds() {
+        var loads = WalletStakePostLoads()
+        let stakes = [Self.stake("a")]
+        _ = loads.begin(["a"])
+        loads.finish(requested: ["a"], found: [])
+        var again = loads.retry()
+        loads.finish(requested: again, found: [])
+        #expect(!loads.isRetrying)
+        #expect(WalletStakeList(stakes: stakes, loads: loads).active == [.postsFailed, .stake("a")])
+        again = loads.retry()
+        loads.finish(requested: again, found: ["a"])
+        #expect(WalletStakeList(stakes: stakes, loads: loads).active == [.stake("a")])
     }
 
     @Test func aRetryThatSucceedsClearsTheFailure() {

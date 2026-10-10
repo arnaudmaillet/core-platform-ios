@@ -364,7 +364,8 @@ final class WalletSummaryCell: UICollectionViewCell {
 /// it is out, the post part — thumbnail, author, caption — is bones laid over
 /// the very views they stand for (charter P8/P9), and the amount and
 /// countdown stay real; when it lands the bones cross-fade to the post (P10).
-/// A lookup that failed says so in the caption line.
+/// A lookup that failed says so in the caption line, and a tap on the row
+/// tries again.
 final class WalletStakeCell: UICollectionViewCell {
     private let thumbnail = UIImageView()
     private let titleLabel = UILabel()
@@ -378,6 +379,7 @@ final class WalletStakeCell: UICollectionViewCell {
     private var shownURL: URL?
     /// The post state drawn now; nil on a fresh or recycled row.
     private var shownPhase: WalletStakePostLoads.State?
+    private var pressRecognizers: [UIGestureRecognizer] = []
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -395,6 +397,9 @@ final class WalletStakeCell: UICollectionViewCell {
         Surface.applyCardEdge(to: contentView)
         // The app's one press: the card gives a little under the finger.
         PressFeedback.attach(toView: contentView, sound: nil)
+        // Its watcher, switched off while a tap would do nothing (a row on
+        // its bones): a card that gives and then opens nothing lies.
+        pressRecognizers = contentView.gestureRecognizers ?? []
 
         thumbnail.contentMode = .scaleAspectFill
         thumbnail.clipsToBounds = true
@@ -508,11 +513,14 @@ final class WalletStakeCell: UICollectionViewCell {
 
     /// `phase` is where the post's lookup stands; `animated` cross-fades the
     /// bones out when it has just landed — false from inside a data source
-    /// apply, which swallows the animation anyway.
+    /// apply, which swallows the animation anyway. `pressable` is whether a
+    /// tap does anything (opens the post, or retries a failed one): the card
+    /// gives under the finger only then.
     func configure(
         stake: WalletStake, post: GalleryPost?, phase: WalletStakePostLoads.State,
-        now: Date, imagePipeline: ImagePipeline?, animated: Bool
+        pressable: Bool, now: Date, imagePipeline: ImagePipeline?, animated: Bool
     ) {
+        for recognizer in pressRecognizers { recognizer.isEnabled = pressable }
         // The post: who wrote it, and its opening words (a photograph with no
         // caption says what it is instead).
         if let post {
@@ -527,7 +535,7 @@ final class WalletStakeCell: UICollectionViewCell {
             // height, so the post landing moves nothing.
             subtitleLabel.text = phase == .failed ? "Couldn't load this post" : " "
         }
-        applyThumbnail(post: post, imagePipeline: imagePipeline)
+        applyThumbnail(post: post, failed: phase == .failed, imagePipeline: imagePipeline)
         applyStatus(stake: stake, now: now)
         applyPhase(phase, animated: animated)
         accessibilityLabel = phase == .loading
@@ -581,15 +589,18 @@ final class WalletStakeCell: UICollectionViewCell {
         accessibilityValue = [resultLabel.text, detailLabel.text].compactMap { $0 }.joined(separator: ", ")
     }
 
-    private func applyThumbnail(post: GalleryPost?, imagePipeline: ImagePipeline?) {
+    private func applyThumbnail(post: GalleryPost?, failed: Bool, imagePipeline: ImagePipeline?) {
         let url = post.flatMap { $0.kind == .text ? nil : $0.thumbnailURL }
         guard let url, let imagePipeline else {
-            // A text post (or one not loaded yet) wears a quote on a tile.
+            // A text post wears a quote on a tile; a post that could not be
+            // loaded, a warning — never the dotted "on its way" circle, which
+            // read as still loading.
             imageTask?.cancel()
             shownURL = nil
             thumbnail.contentMode = .center
+            let symbol = post != nil ? "text.quote" : failed ? "exclamationmark.triangle" : "circle.dotted"
             thumbnail.image = UIImage(
-                systemName: post == nil ? "circle.dotted" : "text.quote",
+                systemName: symbol,
                 withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
             )
             return
@@ -729,7 +740,7 @@ final class WalletStakesFailedCell: UICollectionViewCell {
             column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.md),
             column.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.md),
         ])
-        configure(failedAfterRetry: false)
+        configure(retrying: false, failedAfterRetry: false)
     }
 
     @available(*, unavailable)
@@ -740,12 +751,15 @@ final class WalletStakesFailedCell: UICollectionViewCell {
         onRetry = nil
     }
 
-    /// A retry that failed too says so, rather than repeating the first
-    /// message as if nothing had been tried.
-    func configure(failedAfterRetry: Bool) {
+    /// While a Try Again is out the row STAYS, saying so with its button off
+    /// (`WalletStakeList`); a retry that failed too says so, rather than
+    /// repeating the first message as if nothing had been tried.
+    func configure(retrying: Bool, failedAfterRetry: Bool) {
         bodyLabel.text = failedAfterRetry
             ? "Still couldn't load them. Check your connection and try again in a moment."
             : "Your stakes are safe. Check your connection and try again."
+        retryButton.configuration?.title = retrying ? "Trying Again…" : "Try Again"
+        retryButton.isEnabled = !retrying
     }
 }
 

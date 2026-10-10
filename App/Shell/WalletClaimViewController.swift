@@ -374,7 +374,7 @@ final class WalletClaimViewController: UIViewController {
         let emptyRegistration = UICollectionView.CellRegistration<WalletEmptyStakesCell, Item> { _, _, _ in }
         let failedRegistration = UICollectionView.CellRegistration<WalletStakesFailedCell, Item> { [weak self] cell, _, _ in
             guard let self else { return }
-            cell.configure(failedAfterRetry: postLoads.failedAfterRetry)
+            cell.configure(retrying: postLoads.isRetrying, failedAfterRetry: postLoads.failedAfterRetry)
             cell.onRetry = { [weak self] in self?.retryFailedPosts() }
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
@@ -680,8 +680,16 @@ final class WalletClaimViewController: UIViewController {
         guard let stake = stakesByID[id] else { return }
         cell.configure(
             stake: stake, post: entries[PostID(id)], phase: postPhase(for: id),
-            now: Date(), imagePipeline: imagePipeline, animated: animated
+            pressable: isPressable(stakeID: id), now: Date(), imagePipeline: imagePipeline, animated: animated
         )
+    }
+
+    /// Whether a tap on `id`'s row does anything: open its post, or try
+    /// again when its post could not be loaded. A row on its bones does
+    /// nothing, so it neither gives under the finger nor selects.
+    private func isPressable(stakeID id: String) -> Bool {
+        if postPhase(for: id) == .failed { return true }
+        return entries[PostID(id)] != nil && openFeedHero != nil
     }
 
     /// Asks for the posts behind `ids` — already marked loading — and draws
@@ -704,7 +712,7 @@ final class WalletClaimViewController: UIViewController {
         let retryFailed = postLoads.finish(requested: requested, found: Set(found.keys.map(\.rawValue)))
         // A Try Again that failed too: the sheet's own warning, and the failed
         // row's message says it (`WalletStakesFailedCell`). No toast.
-        if retryFailed {
+        if retryFailed, viewIfLoaded?.window != nil {
             HapticNotification().notificationOccurred(.warning)
         }
         // Visible rows are drawn HERE, outside the apply, so their bones can
@@ -720,9 +728,11 @@ final class WalletClaimViewController: UIViewController {
         applyList(reconfiguring: offscreen)
     }
 
-    /// The failed row's Try Again: the failed posts only — their rows go back
-    /// to bones and the failed row leaves until the answer. The summary and
-    /// the rest of the list are not touched.
+    /// Try Again — the failed row's button, or a tap on a failed stake row:
+    /// the failed posts only. Their rows go back to bones; the failed row
+    /// STAYS, "Trying Again…" with its button off, so nothing below it moves
+    /// (`WalletStakeList`). The summary and the rest of the list are not
+    /// touched.
     private func retryFailedPosts() {
         let ids = postLoads.retry()
         guard !ids.isEmpty else { return }
@@ -957,17 +967,22 @@ final class WalletClaimViewController: UIViewController {
 }
 
 extension WalletClaimViewController: UICollectionViewDelegate {
-    /// A stake row opens its post; nothing else on the list is pressable.
+    /// A stake row opens its post, or tries again when its post could not be
+    /// loaded; nothing else on the list is pressable (the failed row has its
+    /// own button).
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .stake(let id): entries[PostID(id)] != nil && openFeedHero != nil
+        case .stake(let id): isPressable(stakeID: id)
         default: false
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: false)
-        if case .stake(let id) = dataSource.itemIdentifier(for: indexPath) {
+        guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
+        if postPhase(for: id) == .failed {
+            retryFailedPosts()
+        } else {
             openFeed(fromStake: id)
         }
     }

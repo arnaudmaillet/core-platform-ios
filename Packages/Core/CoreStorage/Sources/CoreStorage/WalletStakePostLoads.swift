@@ -85,6 +85,17 @@ public struct WalletStakePostLoads: Equatable, Sendable {
     public var hasFailures: Bool {
         states.values.contains(.failed)
     }
+
+    /// True while a Try Again is out for `targetID`'s post.
+    public func isRetrying(_ targetID: String) -> Bool {
+        retrying.contains(targetID)
+    }
+
+    /// True while a Try Again is out: the failed row stays, saying so, until
+    /// the answer.
+    public var isRetrying: Bool {
+        !retrying.isEmpty
+    }
 }
 
 /// One row of the wallet sheet's stake list, under its summary.
@@ -93,7 +104,8 @@ public enum WalletStakeRow: Hashable, Sendable {
     case stake(String)
     /// No active stake: what staking is, where the list would be.
     case noActiveStakes
-    /// Some posts could not be loaded: says so, with Try Again.
+    /// Some posts could not be loaded: says so, with Try Again — or "Trying
+    /// again…" while one is out.
     case postsFailed
 }
 
@@ -102,6 +114,14 @@ public enum WalletStakeRow: Hashable, Sendable {
 /// when nothing has settled. The failed row heads the active section — the
 /// head of the list, whichever section the failed posts sit in — so the small
 /// detent shows it.
+///
+/// ⚠️ **THE FAILED ROW STAYS WHILE ITS TRY AGAIN IS OUT** ("Trying again…"),
+/// and leaves only once the retry has loaded everything. Dropping it the
+/// moment Try Again was pressed slid every row up under the finger, and a
+/// second failure slid them all back down.
+///
+/// This is the wallet sheet's own layout rule, kept beside `WalletStore` only
+/// because the App target has no unit-test target to keep it in.
 public struct WalletStakeList: Equatable, Sendable {
     public let active: [WalletStakeRow]
     public let settled: [WalletStakeRow]?
@@ -112,7 +132,7 @@ public struct WalletStakeList: Equatable, Sendable {
         // Only a failure about a stake still listed: a stake gone from the
         // ledger takes its failure with it.
         let ids = stakes.map(\.targetID)
-        let failed = ids.contains { loads.state(of: $0) == .failed }
+        let failed = ids.contains { loads.state(of: $0) == .failed || loads.isRetrying($0) }
         var active: [WalletStakeRow] = failed ? [.postsFailed] : []
         active += activeStakes.isEmpty ? [.noActiveStakes] : activeStakes.map { .stake($0.targetID) }
         self.active = active
