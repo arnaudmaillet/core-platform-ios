@@ -44,13 +44,10 @@ final class RouteResolver: Router {
     /// `.profileShareToken`.
     private let lookupShareToken: (String) async -> AppContainer.HandleLookup
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
-    /// The profile the router pushed last, while it is still the top screen —
-    /// what turns a second tap on the same author into nothing (#778).
-    private var lastPushedProfile: (id: ProfileID, screen: Weak<UIViewController>)?
-    /// A profile whose push waits for a running transition (`push` defers it
-    /// to `whenAtRest`): not on the stack yet, so `lastPushedProfile` cannot
-    /// see it — a second tap meanwhile is still the same request.
-    private var deferredProfileID: ProfileID?
+    /// The profile the router pushed last — what turns a second tap on the
+    /// same author into nothing while that profile is the top screen, or
+    /// while its push waits for a running transition (#778).
+    private var repeatProfiles = RepeatPushFilter<ProfileID>()
 
     init(
         searchFeature: @escaping () -> any SearchFeatureBuilding,
@@ -100,16 +97,19 @@ final class RouteResolver: Router {
         using navigator: AppNavigating,
         animated: Bool = true
     ) {
-        guard let navigation = navigator.activeNavigationController else { return }
+        guard let navigation = navigator.activeNavigationController else {
+            repeatProfiles.stoppedWaiting(destination)
+            return
+        }
         // A route arriving while a transition runs (a deep link during a hero
         // flight) waits for it: UIKit would drop the push silently.
         guard navigation.transitionCoordinator == nil else {
             navigation.whenAtRest { [weak self] in
-                self?.deferredProfileID = nil
                 self?.push(destination, using: navigator, animated: animated)
             }
             return
         }
+        repeatProfiles.stoppedWaiting(destination)
         // The overwhelmingly common case takes the plain path, untouched. This
         // app drives pushes through custom navigation delegates — zoom
         // transitions, the pop-gesture enabler — and `setViewControllers` is a
@@ -130,13 +130,6 @@ final class RouteResolver: Router {
         navigation.setViewControllers(stack, animated: animated)
     }
 
-    /// Whether `id`'s profile, pushed by this router, is the active stack's top
-    /// screen right now — a second tap on the author, not a second profile.
-    private func isTopScreen(profile id: ProfileID, in navigator: AppNavigating) -> Bool {
-        guard let last = lastPushedProfile, last.id == id, let screen = last.screen.value else { return false }
-        return navigator.activeNavigationController?.topViewController === screen
-    }
-
     func route(to route: AppRoute) {
         guard let navigator else {
             logger.debug("No navigator; dropping route: \(String(describing: route))")
@@ -146,7 +139,7 @@ final class RouteResolver: Router {
         // request, not a second push: during the slide the new profile is
         // already the top screen.
         if case .profile(let id, _) = route,
-           isTopScreen(profile: id, in: navigator) || deferredProfileID == id {
+           repeatProfiles.isRepeat(id, topScreen: navigator.activeNavigationController?.topViewController) {
             // Still the viewer's tap: a drawer it came from slides shut.
             navigator.closeOverlays()
             return
@@ -217,11 +210,11 @@ final class RouteResolver: Router {
             // place and the gallery shows its bones; the data cross-fades in
             // over the very frames it will occupy. It used to be held up to
             // 250 ms for its data (`PresentationHold`, charter P12a).
-            if navigator.activeNavigationController?.transitionCoordinator != nil {
-                deferredProfileID = profileID
-            }
+            repeatProfiles.willPush(
+                profileID, screen: profile,
+                isTransitioning: navigator.activeNavigationController?.transitionCoordinator != nil
+            )
             push(profile, using: navigator)
-            lastPushedProfile = (profileID, Weak(profile))
 
         case .search:
             // ⚠️ NOT ANIMATED, and that is the whole point of this route being
@@ -376,10 +369,4 @@ private extension AppRoute {
             nil
         }
     }
-}
-
-/// A weak reference as a value.
-private struct Weak<Value: AnyObject> {
-    weak var value: Value?
-    init(_ value: Value) { self.value = value }
 }
