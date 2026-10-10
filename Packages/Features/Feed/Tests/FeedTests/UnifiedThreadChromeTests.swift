@@ -49,7 +49,7 @@ struct UnifiedThreadChromeTests {
     ]
 
     private func makeStream(
-        _ entries: [CommentEntry]
+        _ entries: [CommentEntry], threadChrome: Bool = true, groupsByDay: Bool = false
     ) async throws -> (PostDetailViewController, UICollectionView, UIWindow) {
         let controller = PostDetailViewController(
             viewModel: PostDetailViewModel(
@@ -57,7 +57,8 @@ struct UnifiedThreadChromeTests {
             ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             mode: .commentsOnly,
-            threadChrome: true
+            threadChrome: threadChrome,
+            groupsByDay: groupsByDay
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = controller
@@ -83,6 +84,56 @@ struct UnifiedThreadChromeTests {
             if let match = firstView(type, in: subview) { return match }
         }
         return nil
+    }
+
+    /// Many comments over three days: enough to scroll past the chips.
+    private static let longAcrossDays: [CommentEntry] = (0..<36).map { index in
+        entry("l\(index)", ageInDays: Double(index / 12) * 1.1 + Double(index % 12) * 0.01)
+    }
+
+    /// ⚠️ A MEDIA POST'S COMMENTS GROUP BY DAY TOO (#757): every snap page's
+    /// panel, not only a text page's.
+    @Test func aMediaPanelGroupsItsThreadsByDayToo() async throws {
+        let (_, stream, window) = try await makeStream(Self.spreadAcrossDays, threadChrome: false, groupsByDay: true)
+        defer { window.isHidden = true }
+        #expect(stream.numberOfSections >= 3, "one section per day: \(stream.numberOfSections)")
+    }
+
+    /// ⚠️ THE DAY CHIPS ARE NOT STICKY (#757), and the panel tells its host
+    /// the day of the last chip gone under its top — none before one has; a
+    /// tap on the host's day scrolls that day's chip back to the top.
+    @Test func theChipsScrollAwayAndTheDayUnderTheTopIsTold() async throws {
+        let (controller, stream, window) = try await makeStream(Self.longAcrossDays)
+        defer { window.isHidden = true }
+        var told: [Date?] = []
+        controller.onDayUnderHeaderChange = { told.append($0) }
+        stream.setContentOffset(CGPoint(x: 0, y: -stream.adjustedContentInset.top), animated: false)
+        stream.layoutIfNeeded()
+        controller.debugSyncDayUnderHeader()
+        #expect(controller.dayUnderHeader == nil, "a day before any chip went under the top")
+
+        let bottom = stream.contentSize.height + stream.adjustedContentInset.bottom - stream.bounds.height
+        stream.setContentOffset(CGPoint(x: 0, y: bottom), animated: false)
+        stream.layoutIfNeeded()
+        controller.debugSyncDayUnderHeader()
+        let day = try #require(controller.dayUnderHeader, "no day under the top at the end of the thread")
+        #expect(told.last == day)
+
+        // Not sticky: the first day's chip has scrolled away above the top.
+        let firstChip = try #require((1..<stream.numberOfSections).lazy.compactMap {
+            stream.layoutAttributesForSupplementaryElement(
+                ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: $0)
+            )
+        }.first)
+        #expect(firstChip.frame.maxY < stream.contentOffset.y + stream.adjustedContentInset.top,
+                "the chip stayed pinned to the top: \(firstChip.frame)")
+
+        controller.scrollToDay(day)
+        stream.setContentOffset(stream.contentOffset, animated: false)
+        stream.layoutIfNeeded()
+        controller.debugSyncDayUnderHeader()
+        #expect(controller.dayUnderHeader == day || controller.dayUnderHeader == nil,
+                "the scroll landed past the day it was asked for")
     }
 
     @Test func recentGroupsTheThreadsUnderOnePillPerDay() async throws {
