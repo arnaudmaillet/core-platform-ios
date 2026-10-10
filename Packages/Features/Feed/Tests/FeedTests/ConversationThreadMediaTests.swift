@@ -176,4 +176,20 @@ struct ConversationThreadMediaTests {
         view.onTap?()
         #expect(driver.retried == ["pending-1"])
     }
+
+    /// #794: the picker is still closing when a photo sent offline fails,
+    /// and its "You’re offline" alert used to be dropped. A notice waits
+    /// for a screen on its way out, and never covers one still in use.
+    ///
+    /// The wait itself (the dismissal's coordinator completion) is not
+    /// driven here: modal transitions never complete in the test host, so
+    /// this pins the decision the alert's timing rests on.
+    @Test func aNoticeWaitsForAClosingPickerAndNeverCoversAnOpenOne() {
+        final class Closing: UIViewController {
+            override var isBeingDismissed: Bool { true }
+        }
+        #expect(ConversationThreadViewController.noticeTiming(over: nil) == .now)
+        #expect(ConversationThreadViewController.noticeTiming(over: Closing()) == .afterDismissal)
+        #expect(ConversationThreadViewController.noticeTiming(over: UIViewController()) == .never)
+    }
 }

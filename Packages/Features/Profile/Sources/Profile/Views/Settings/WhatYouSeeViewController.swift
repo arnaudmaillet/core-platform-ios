@@ -127,7 +127,10 @@ final class WhatYouSeeViewController: UIViewController {
             loadFailure = failure
             phase = next
             if wasFailed, next == .failed {
-                Feedback.failure("Couldn't load these settings", from: self)
+                // The failed row’s words: "You’re offline" when that is why (#794).
+                Feedback.failure(
+                    FailureCopy.title(for: loadFailure, fallback: "Couldn't load these settings"), from: self
+                )
             }
         }
         loadInterests()

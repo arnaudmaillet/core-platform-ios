@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import Foundation
 
@@ -29,6 +30,9 @@ final class SecurityCheckupViewModel {
     var onChange: (() -> Void)?
     /// Parts with a read in flight — see `reload(_:)`.
     private(set) var reading: Set<Part> = []
+    /// Why each part's last read failed: the retry's toast says what the
+    /// failed line says (#794).
+    private(set) var failures: [Part: NetworkFailure] = [:]
 
     private let accountSource: (any AccountProviding)?
     private let sessionsSource: (any AccountSessionsManaging)?
@@ -67,11 +71,13 @@ final class SecurityCheckupViewModel {
         case .account:
             guard let accountSource else { return true }
             let result = await settingsRead { try await accountSource.currentAccount() }
+            failures[part] = result.networkFailure
             account = account?.refreshed(by: result, failure: SecurityCheckup.failedAccountTitle)
             if case .success = result { return true }
         case .sessions:
             guard let sessionsSource else { return true }
             let result = await settingsRead { try await sessionsSource.activeSessions().count }
+            failures[part] = result.networkFailure
             sessionCount = sessionCount?.refreshed(by: result, failure: SecurityCheckup.failedSessionsTitle)
             if case .success = result { return true }
         }

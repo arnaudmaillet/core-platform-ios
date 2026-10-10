@@ -68,10 +68,8 @@ final class PrivacySectionViewModel {
     /// did (#794): kept beside the flags so a failed row can say "You’re
     /// offline" when that is the cause. Set before the flag, so the redraw
     /// it triggers already reads it; a side failing again for another
-    /// reason redraws on its own.
-    private(set) var sideFailures: [SideSetting: NetworkFailure] = [:] {
-        didSet { if sideFailures != oldValue { onChange?() } }
-    }
+    /// reason redraws once on its own (`reload(_:)`).
+    private(set) var sideFailures: [SideSetting: NetworkFailure] = [:]
     private(set) var visibilityFailure: NetworkFailure?
     var onChange: (() -> Void)?
     /// Side settings with a read in flight — see `reload(_:)`.
@@ -207,8 +205,13 @@ final class PrivacySectionViewModel {
             return true
         } catch {
             if !hasValue(side) {
-                sideFailures[side] = NetworkFailure.of(error)
+                // One redraw per change: the flag's own when the row is new,
+                // else this one when only the reason moved (#794).
+                let failure = NetworkFailure.of(error)
+                let reworded = failedSides.contains(side) && sideFailures[side] != failure
+                sideFailures[side] = failure
                 failedSides.insert(side)
+                if reworded { onChange?() }
             }
             return false
         }

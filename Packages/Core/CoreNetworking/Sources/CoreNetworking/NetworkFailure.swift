@@ -205,7 +205,13 @@ public enum FailureCopy {
     /// The short form of `message(for:fallback:)`: `offlineTitle`,
     /// `timeoutTitle`, else `fallback`. For toasts and headlines.
     public static func title(for error: any Error, fallback: String) -> String {
-        switch NetworkFailure.of(error) {
+        title(for: NetworkFailure.of(error), fallback: fallback)
+    }
+
+    /// `title(for:fallback:)` from a failure the view model kept — a retry's
+    /// toast, so it agrees with the failed row it retried (#794).
+    public static func title(for failure: NetworkFailure?, fallback: String) -> String {
+        switch failure {
         case .offline: offlineTitle
         case .timeout: timeoutTitle
         default: fallback

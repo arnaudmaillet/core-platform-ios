@@ -1174,6 +1174,7 @@ public final class ProfileViewModel {
         }
         guard galleryLoad == nil else { return }
         galleryMorePausedByFailure = false
+        galleryMoreFailure = nil
         renderGallery() // all pages report loading — or, revalidating, what they hold
         galleryLoad = Task { [weak self] in
             async let authoredFetch = gallery.authoredPage(for: profile.id, after: nil)
@@ -1254,6 +1255,7 @@ public final class ProfileViewModel {
 
     public func loadMoreGallery() {
         galleryMorePausedByFailure = false
+        galleryMoreFailure = nil
         startGalleryPages()
     }
 

@@ -1375,8 +1375,41 @@ final class ConversationThreadViewController: UIViewController {
         )
     }
 
+    /// When a notice can show over what this screen presents.
+    enum NoticeTiming: Equatable {
+        /// Nothing covers the screen.
+        case now
+        /// A screen on its way out — the media picker, closing as its photos
+        /// start sending: once it has gone.
+        case afterDismissal
+        /// Something the viewer is still using: not over it.
+        case never
+    }
+
+    static func noticeTiming(over presented: UIViewController?) -> NoticeTiming {
+        guard let presented else { return .now }
+        return presented.isBeingDismissed ? .afterDismissal : .never
+    }
+
+    /// ⚠️ **THE PICKER IS STILL CLOSING WHEN A SEND CAN FAIL (#794).** The
+    /// driver dismisses it and sends at once, so an upload that fails fast
+    /// (offline) reported while the picker was still presented, and the
+    /// "You’re offline" alert was dropped. A notice over a screen on its way
+    /// out waits for that dismissal to complete; a cancelled one drops it.
     private func presentNotice(_ title: String, _ message: String) {
-        guard presentedViewController == nil else { return }
+        switch Self.noticeTiming(over: presentedViewController) {
+        case .now:
+            break
+        case .afterDismissal:
+            guard let coordinator = presentedViewController?.transitionCoordinator else { return }
+            coordinator.animate(alongsideTransition: nil) { [weak self] context in
+                guard !context.isCancelled else { return }
+                self?.presentNotice(title, message)
+            }
+            return
+        case .never:
+            return
+        }
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)

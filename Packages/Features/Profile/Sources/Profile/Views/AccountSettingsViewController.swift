@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -193,7 +194,10 @@ final class AccountSettingsViewController: UIViewController {
         Task { [weak self] in
             guard let self else { return }
             guard await viewModel.load() == false else { return }
-            Feedback.failure("Couldn't load your account details", from: self)
+            // The failed row’s words: "You’re offline" when that is why (#794).
+            Feedback.failure(
+                FailureCopy.title(for: viewModel.failure, fallback: "Couldn't load your account details"), from: self
+            )
         }
     }
 

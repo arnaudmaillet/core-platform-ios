@@ -415,7 +415,7 @@ public final class ConversationViewModel {
         let title = FailureCopy.title(for: error, fallback: "Couldn't send")
         return isMedia
             ? (title, "Your photo or video wasn\u{2019}t sent. Tap it to try again.")
-            : (title, "Your message wasn't sent. Check your connection and try again.")
+            : (title, "Your message wasn\u{2019}t sent. Check your connection and try again.")
     }
 
     /// Whether a send failed for want of a connection: offline or out of

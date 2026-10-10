@@ -99,7 +99,10 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
             let succeeded = await ageCheck.read()
             applySnapshot()
             if isRetry, !succeeded {
-                Feedback.failure("Couldn't load your account's age", from: self)
+                // The failed row’s words: "You’re offline" when that is why (#794).
+                Feedback.failure(
+                    FailureCopy.title(for: ageCheck.failure, fallback: "Couldn't load your account's age"), from: self
+                )
             }
         }
     }

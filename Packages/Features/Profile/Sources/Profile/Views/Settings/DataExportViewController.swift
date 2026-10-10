@@ -155,7 +155,10 @@ final class DataExportViewController: UIViewController {
     private func retryLoad() {
         Task { [weak self] in
             guard let self, await viewModel.load() == false else { return }
-            Feedback.failure("Couldn't check your data download", from: self)
+            // The failed row’s words: "You’re offline" when that is why (#794).
+            Feedback.failure(
+                FailureCopy.title(for: viewModel.failure, fallback: "Couldn't check your data download"), from: self
+            )
         }
     }
 }

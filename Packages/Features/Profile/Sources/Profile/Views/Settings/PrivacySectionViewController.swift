@@ -408,7 +408,10 @@ final class PrivacySectionViewController: UIViewController {
     private func retry(_ side: PrivacySectionViewModel.SideSetting) {
         Task { [weak self] in
             guard let self, await viewModel.reload(side) == false else { return }
-            Feedback.failure("Couldn't load this setting", from: self)
+            // The failed row’s words: "You’re offline" when that is why (#794).
+            Feedback.failure(
+                FailureCopy.title(for: viewModel.sideFailures[side], fallback: "Couldn't load this setting"), from: self
+            )
         }
     }
 

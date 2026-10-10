@@ -33,6 +33,15 @@ extension Loadable {
     }
 }
 
+extension Result where Failure == any Error {
+    /// Why a settings read failed, nil when it worked or the error did not
+    /// come from the network — kept for the retry's toast (#794).
+    var networkFailure: NetworkFailure? {
+        if case .failure(let error) = self { return NetworkFailure.of(error) }
+        return nil
+    }
+}
+
 /// Runs `read` and wraps its outcome, so a view model can hand it to
 /// `Loadable.refreshed(by:failure:)` without a `do`/`catch` per field.
 @MainActor

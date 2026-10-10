@@ -159,6 +159,9 @@ struct NetworkFailureTests {
     @Test func aKeptFailureWordsTheMessageLikeTheError() {
         #expect(FailureCopy.message(for: NetworkFailure.offline, fallback: "x") == FailureCopy.offline)
         #expect(FailureCopy.message(for: NetworkFailure.refused(code: "not_found"), fallback: "x") == "x")
+        #expect(FailureCopy.title(for: NetworkFailure.offline, fallback: "x") == FailureCopy.offlineTitle)
+        #expect(FailureCopy.title(for: NetworkFailure.timeout, fallback: "x") == FailureCopy.timeoutTitle)
+        #expect(FailureCopy.title(for: nil, fallback: "x") == "x")
     }
 
     @Test func aNonNetworkErrorKeepsTheScreensOwnWords() {

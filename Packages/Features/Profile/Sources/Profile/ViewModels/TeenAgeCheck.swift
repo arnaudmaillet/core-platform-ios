@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 
 /// Whether the account is 13 to 17, for Settings → Family and Teens (#799).
@@ -13,6 +14,9 @@ import DesignSystem
 final class TeenAgeCheck {
     private(set) var age: Loadable<Bool> = .loading
     private(set) var isReading = false
+    /// Why the last read failed: the retry's toast says what the failed row
+    /// says (#794).
+    private(set) var failure: NetworkFailure?
 
     private let isTeen: () async throws -> Bool
 
@@ -26,7 +30,17 @@ final class TeenAgeCheck {
         guard !isReading else { return true }
         isReading = true
         defer { isReading = false }
-        age = await FamilyAndTeensViewController.readAge(isTeen)
+        let isTeen = isTeen
+        var caught: NetworkFailure?
+        age = await FamilyAndTeensViewController.readAge {
+            do {
+                return try await isTeen()
+            } catch {
+                caught = NetworkFailure.of(error)
+                throw error
+            }
+        }
+        failure = caught
         return !age.isFailed
     }
 }

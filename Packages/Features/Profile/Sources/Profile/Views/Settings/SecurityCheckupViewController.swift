@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -223,7 +224,10 @@ final class SecurityCheckupViewController: UIViewController {
     private func retry(_ part: SecurityCheckupViewModel.Part) {
         Task { [weak self] in
             guard let self, await viewModel.reload(part) == false else { return }
-            Feedback.failure("Couldn't load this check", from: self)
+            // The failed row’s words: "You’re offline" when that is why (#794).
+            Feedback.failure(
+                FailureCopy.title(for: viewModel.failures[part], fallback: "Couldn't load this check"), from: self
+            )
         }
     }
 

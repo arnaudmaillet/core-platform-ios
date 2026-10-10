@@ -51,6 +51,23 @@ struct SettingsOfflineCopyTests {
         #expect(refused == .failed(message: FamilyAndTeensViewController.failedText))
     }
 
+    /// The retry's toast reads the kept failure, so it says what the row
+    /// says rather than "Couldn't load …" under "You’re offline".
+    @Test func aFailedRetryKeepsWhyForItsToast() async {
+        let account = AccountDetailsViewModel(account: SwitchableAccount(fails: true, failure: .offline))
+        await account.load()
+        #expect(account.failure == .offline)
+        #expect(FailureCopy.title(for: account.failure, fallback: "x") == "You\u{2019}re offline")
+
+        let checkup = SecurityCheckupViewModel(account: SwitchableAccount(fails: true, failure: .offline), sessions: nil)
+        #expect(await checkup.reload(.account) == false)
+        #expect(checkup.failures[.account] == .offline)
+
+        let age = TeenAgeCheck { throw droppedConnection() }
+        #expect(await age.read() == false)
+        #expect(age.failure == .offline)
+    }
+
     // MARK: - Flag rows that now keep the failure
 
     @Test func anOfflineDataExportCheckSaysOffline() async {
