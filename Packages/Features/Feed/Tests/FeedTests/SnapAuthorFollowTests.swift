@@ -14,10 +14,23 @@ import UIKit
 /// "+" becomes the followed mark, or the FRIENDS mark when the author follows
 /// back. Every change of glyph is drawn IN PLACE, through the pill's own blur:
 /// the item and its identifier never change.
+///
+/// The graph is GATED (`SnapAuthorFollowStoreTests`' shape): every lookup and
+/// follow waits until the test answers it, and every wait is a bounded run of
+/// yields on the main actor — never the clock.
 @MainActor
 struct SnapAuthorFollowTests {
+    /// Lets the store's tasks, the graph's gates and the main-queue delivery
+    /// of graph events move — bounded, and never on the clock. Everything
+    /// involved runs on the main actor, so a yield always lets it through.
+    private static func settle(until condition: () -> Bool) async {
+        for _ in 0..<10_000 where !condition() {
+            await Task.yield()
+        }
+    }
+
     private static func feed(
-        graph: FollowGraphStub? = FollowGraphStub(), readable: Bool = true,
+        graph: GatedFollowGraph? = GatedFollowGraph(), readable: Bool = true,
         events: FollowGraphEvents? = nil
     ) -> SnapFeedViewController {
         let feed = SnapFeedViewController(
@@ -82,16 +95,18 @@ struct SnapAuthorFollowTests {
     /// The answer arriving for the author ON the pill re-draws its badge — in
     /// the same item, so the glass does not morph.
     @Test func theGraphsAnswerDrawsTheFollowInPlace() async throws {
-        let graph = FollowGraphStub(relations: [ProfileID("prof-2"): .notFollowing])
+        let graph = GatedFollowGraph()
         let feed = Self.feed(graph: graph)
         feed.showAuthor(Self.model(authorID: "prof-2"))
         let before = try Self.authorItem(feed)
         #expect(try Self.pill(feed).offersFollow == false, "precondition: not known yet")
 
         feed.followStore.resolve(for: ProfileID("prof-2"))
-        for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == false {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        await Self.settle { graph.pendingLookups == 1 }
+        #expect(graph.lookups == [ProfileID("prof-2")])
+        #expect(try Self.pill(feed).offersFollow == false, "nothing is drawn before the graph answers")
+        graph.answerLookup(.notFollowing)
+        await Self.settle { (try? Self.pill(feed).offersFollow) == true }
 
         let after = try Self.authorItem(feed)
         #expect(after === before, "a new item for a badge: iOS 26 morphs the glass between them")
@@ -116,7 +131,7 @@ struct SnapAuthorFollowTests {
     /// The tap follows OPTIMISTICALLY (the profile's rule): the "+" goes at
     /// once, in the same item, and the graph hears the follow.
     @Test func tappingFollowFollowsAndTheFollowGoes() async throws {
-        let graph = FollowGraphStub()
+        let graph = GatedFollowGraph()
         let feed = Self.feed(graph: graph)
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
@@ -131,10 +146,11 @@ struct SnapAuthorFollowTests {
         #expect(followed.identifier == SnapFeedViewController.authorItemIdentifier)
         #expect(try Self.pill(feed).offersFollow == false)
         #expect(try Self.pill(feed).followBadge == .following, "a follow is drawn, not forgotten")
-        for _ in 0..<200 where graph.follows.isEmpty {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        await Self.settle { graph.pendingFollows == 1 }
         #expect(graph.follows == [ProfileID("prof-2")])
+        graph.answerFollow(accepting: true)
+        await Self.settle { feed.followStore.followsInFlight.isEmpty }
+        #expect(feed.followStore.followsInFlight.isEmpty)
         #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .following)
     }
 
@@ -170,7 +186,7 @@ struct SnapAuthorFollowTests {
     /// Following someone who already follows the viewer makes a FRIEND, and
     /// the optimistic draw says so at once.
     @Test func followingBackDrawsTheFriendsMark() async throws {
-        let graph = FollowGraphStub()
+        let graph = GatedFollowGraph()
         let feed = Self.feed(graph: graph)
         feed.followStore.setRelation(.followedBy, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
@@ -180,10 +196,11 @@ struct SnapAuthorFollowTests {
 
         #expect(try Self.pill(feed).followBadge == .friends)
         #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .mutual)
-        for _ in 0..<200 where graph.follows.isEmpty {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        await Self.settle { graph.pendingFollows == 1 }
         #expect(graph.follows == [ProfileID("prof-2")])
+        graph.answerFollow(accepting: true)
+        await Self.settle { feed.followStore.followsInFlight.isEmpty }
+        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .mutual)
     }
 
     /// A state mark is not an action: it takes no touch, so a tap on it is a
@@ -215,17 +232,18 @@ struct SnapAuthorFollowTests {
     /// A refused follow puts the "+" back — and says so (#802), in a failure
     /// toast naming the author.
     @Test func aRefusedFollowBringsTheFollowBackAndSaysSo() async throws {
-        let graph = FollowGraphStub(failsFollow: true)
+        let graph = GatedFollowGraph()
         let feed = Self.feed(graph: graph)
         feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
 
         feed.followAuthor(ProfileID("prof-2"))
         #expect(try Self.pill(feed).offersFollow == false)
+        await Self.settle { graph.pendingFollows == 1 }
+        #expect(try Self.pill(feed).offersFollow == false, "the \"+\" came back before the graph answered")
         #expect(Self.toast(in: feed.view) == nil, "the failure was said before the graph answered")
-        for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == false {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        graph.answerFollow(accepting: false)
+        await Self.settle { (try? Self.pill(feed).offersFollow) == true }
         #expect(try Self.pill(feed).offersFollow)
         let toast = try #require(Self.toast(in: feed.view), "the refused follow was silent")
         #expect(toast.style == .failure)
@@ -259,15 +277,11 @@ struct SnapAuthorFollowTests {
         #expect(try Self.pill(feed).offersFollow)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
-        for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == true {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        await Self.settle { (try? Self.pill(feed).offersFollow) == false }
         #expect(try Self.pill(feed).offersFollow == false)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: false))
-        for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == false {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        await Self.settle { (try? Self.pill(feed).offersFollow) == true }
         #expect(try Self.pill(feed).offersFollow)
     }
 
@@ -281,22 +295,18 @@ struct SnapAuthorFollowTests {
         #expect(try Self.pill(feed).followBadge == .friends)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: false))
-        for _ in 0..<200 where (try? Self.pill(feed).followBadge) == .friends {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        await Self.settle { (try? Self.pill(feed).followBadge) == .follow }
         #expect(try Self.pill(feed).followBadge == .follow)
         #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .followedBy)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
-        for _ in 0..<200 where (try? Self.pill(feed).followBadge) == .follow {
-            try await Task.sleep(for: .milliseconds(5))
-        }
+        await Self.settle { (try? Self.pill(feed).followBadge) == .friends }
         #expect(try Self.pill(feed).followBadge == .friends)
     }
 
     /// An unfollow does not make the viewer themself, or someone they block,
     /// followable.
-    @Test func anUnfollowElsewhereLeavesTheViewerAndTheBlockedAlone() async throws {
+    @Test func anUnfollowElsewhereLeavesTheViewerAndTheBlockedAlone() async {
         let events = FollowGraphEvents()
         let feed = Self.feed(events: events)
         feed.followStore.setRelation(.viewer, for: ProfileID("me"))
@@ -304,8 +314,11 @@ struct SnapAuthorFollowTests {
 
         events.publish(FollowChange(profileID: ProfileID("me"), isFollowing: false))
         events.publish(FollowChange(profileID: ProfileID("prof-3"), isFollowing: false))
-        // One main-queue turn delivers both (publication order).
-        try await Task.sleep(for: .milliseconds(50))
+        // Delivery keeps publication order: once a later change has landed,
+        // both of these have been heard — no clock to outwait.
+        events.publish(FollowChange(profileID: ProfileID("prof-4"), isFollowing: true))
+        await Self.settle { feed.followStore.relationsByAuthor[ProfileID("prof-4")] != nil }
+        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-4")] == .following, "the events were never heard")
 
         #expect(feed.followStore.relationsByAuthor[ProfileID("me")] == .viewer)
         #expect(feed.followStore.relationsByAuthor[ProfileID("prof-3")] == .blocked)
@@ -372,27 +385,45 @@ struct SnapAttributionItemTests {
     }
 }
 
-/// A follow graph that answers from a table and records the follows it hears.
-private final class FollowGraphStub: SocialGraphReading, SocialGraphWriting, @unchecked Sendable {
-    private let lock = NSLock()
-    private let relations: [ProfileID: FollowRelation]
-    private let failsFollow: Bool
-    private var heard: [ProfileID] = []
+/// A follow graph whose every lookup and follow waits for the test's answer,
+/// recording what it is asked.
+///
+/// On the main actor, like the screen, its store and the tests: a gate is
+/// reached and answered on one serial executor, so a few yields always let it
+/// move — nothing waits on the shared cooperative pool.
+@MainActor
+private final class GatedFollowGraph: SocialGraphReading, SocialGraphWriting {
+    private var lookupGates: [CheckedContinuation<FollowRelation, any Error>] = []
+    private var followGates: [CheckedContinuation<Void, any Error>] = []
+    private(set) var lookups: [ProfileID] = []
+    private(set) var follows: [ProfileID] = []
 
-    init(relations: [ProfileID: FollowRelation] = [:], failsFollow: Bool = false) {
-        self.relations = relations
-        self.failsFollow = failsFollow
-    }
-
-    var follows: [ProfileID] { lock.withLock { heard } }
+    var pendingLookups: Int { lookupGates.count }
+    var pendingFollows: Int { followGates.count }
 
     func followRelation(to profileID: ProfileID) async throws -> FollowRelation {
-        relations[profileID] ?? .following
+        lookups.append(profileID)
+        return try await withCheckedThrowingContinuation { lookupGates.append($0) }
     }
 
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
-        if failsFollow { throw URLError(.badServerResponse) }
-        lock.withLock { heard.append(profileID) }
+        follows.append(profileID)
+        try await withCheckedThrowingContinuation { (gate: CheckedContinuation<Void, any Error>) in
+            followGates.append(gate)
+        }
+    }
+
+    func answerLookup(_ relation: FollowRelation) {
+        lookupGates.removeFirst().resume(returning: relation)
+    }
+
+    func answerFollow(accepting: Bool) {
+        let gate = followGates.removeFirst()
+        if accepting {
+            gate.resume()
+        } else {
+            gate.resume(throwing: URLError(.badServerResponse))
+        }
     }
 }
 
