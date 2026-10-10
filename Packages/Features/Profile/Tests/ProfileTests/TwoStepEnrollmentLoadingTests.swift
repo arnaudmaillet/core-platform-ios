@@ -6,7 +6,7 @@ import UIKit
 /// Two-step setup pushes at once and loads its secret itself (#800): the
 /// setup screen arrives on its loading state while `StartMfaEnrollment` is
 /// still out, shows the secret when it answers, and keeps a failure inside
-/// it with Try Again.
+/// it with the way out that can actually get past it.
 ///
 /// Every answer is handed over by the test (`GatedTwoStep`), so "still
 /// loading" is a state the test holds open, not a race it hopes to win.
@@ -35,8 +35,13 @@ struct TwoStepEnrollmentLoadingTests {
         func regenerateBackupCodes() async throws -> BackupCodes { BackupCodes(codes: [], sessionsSignedOut: 0) }
     }
 
-    private struct NoAccount: AccountProviding {
-        func currentAccount() async throws -> AccountDetails { throw TwoStepError.transport(message: "offline") }
+    /// Counts the Two-Step screen's loads (each one fails: offline).
+    private actor CountingAccount: AccountProviding {
+        private(set) var loads = 0
+        func currentAccount() async throws -> AccountDetails {
+            loads += 1
+            throw TwoStepError.transport(message: "offline")
+        }
     }
 
     private struct NoStepUp: CredentialStepUp {
@@ -47,6 +52,12 @@ struct TwoStepEnrollmentLoadingTests {
     private static let enrollment = TwoStepEnrollment(
         secret: "JBSWY3DPEHPK3PXP", otpauthURI: "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP", expiresIn: 600
     )
+
+    private func setupScreen(_ gate: GatedTwoStep, model: TwoStepEnrollmentModel? = nil) -> TwoStepEnrollmentViewController {
+        TwoStepEnrollmentViewController(
+            model: model ?? TwoStepEnrollmentModel(manager: gate), manager: gate, stepUp: NoStepUp(), onEnabled: { _ in }
+        )
+    }
 
     /// Yields and looks again (main actor).
     ///
@@ -70,10 +81,12 @@ struct TwoStepEnrollmentLoadingTests {
         model.start()
         try #require(await settle { await gate.waiting == 1 })
         #expect(model.state == .loading)
+        #expect(model.isStarting)
 
         await gate.answer(.success(Self.enrollment))
         try #require(await settle { model.state != .loading })
         #expect(model.state == .ready(Self.enrollment))
+        #expect(!model.isStarting)
     }
 
     @Test func aStartThatThrowsShowsTheFailureAndTryAgainStartsOver() async throws {
@@ -84,9 +97,10 @@ struct TwoStepEnrollmentLoadingTests {
 
         model.start()
         try #require(await settle { await gate.waiting == 1 })
-        await gate.answer(.failure(TwoStepError.transport(message: "offline")))
+        let offline = TwoStepError.transport(message: "offline")
+        await gate.answer(.failure(offline))
         try #require(await settle { model.state != .loading })
-        #expect(model.state == .failed(message: TwoStepViewController.failureMessage(TwoStepError.transport(message: "offline"))))
+        #expect(model.state == .failed(message: TwoStepViewController.failureMessage(offline), recovery: .retry))
         #expect(failures.count == 1)
 
         model.start()
@@ -119,11 +133,10 @@ struct TwoStepEnrollmentLoadingTests {
 
     /// The screen draws the model: bones while loading, the failed state
     /// (with Try Again) instead of the content when the start throws, and
-    /// loading again on retry.
-    @Test func theScreenShowsLoadingThenTheFailureThenLoadingOnRetry() async throws {
+    /// loading again on Try Again.
+    @Test func theScreenShowsLoadingThenTheFailureThenLoadingOnTryAgain() async throws {
         let gate = GatedTwoStep()
-        var startFailures: [Error] = []
-        let setup = TwoStepEnrollmentViewController(manager: gate, onEnabled: { _ in }, onStartFailed: { startFailures.append($0) })
+        let setup = setupScreen(gate)
 
         setup.loadViewIfNeeded()
         try #require(await settle { await gate.waiting == 1 })
@@ -131,12 +144,12 @@ struct TwoStepEnrollmentLoadingTests {
         #expect(!setup.scroll.isHidden)
         #expect(setup.failureView.isHidden)
 
-        await gate.answer(.failure(TwoStepError.alreadyChanged))
+        await gate.answer(.failure(TwoStepError.transport(message: "offline")))
         try #require(await settle { !setup.failureView.isHidden })
         #expect(setup.scroll.isHidden)
-        #expect(startFailures.map { $0 as? TwoStepError } == [.alreadyChanged])
+        #expect(TwoStepEnrollmentViewController.actionTitle(for: .retry) == "Try Again")
 
-        setup.retry()
+        setup.recover()
         #expect(setup.failureView.isHidden)
         #expect(!setup.scroll.isHidden)
         try #require(await settle { await gate.waiting == 1 })
@@ -147,11 +160,73 @@ struct TwoStepEnrollmentLoadingTests {
         #expect(setup.failureView.isHidden)
     }
 
+    /// A stale step-up fails every start: Try Again asks for the password
+    /// first, and only then starts.
+    @Test func aStaleStepUpAsksForThePasswordBeforeStartingAgain() async throws {
+        let gate = GatedTwoStep()
+        let setup = setupScreen(gate)
+        var prompts = 0
+        setup.presentStepUp = { verified in
+            prompts += 1
+            verified()
+        }
+
+        setup.loadViewIfNeeded()
+        try #require(await settle { await gate.waiting == 1 })
+        await gate.answer(.failure(TwoStepError.stepUpRequired))
+        try #require(await settle { setup.model.state != .loading })
+        #expect(setup.model.state == .failed(
+            message: TwoStepViewController.failureMessage(TwoStepError.stepUpRequired), recovery: .stepUp
+        ))
+        #expect(TwoStepEnrollmentViewController.actionTitle(for: .stepUp) == "Try Again")
+        #expect(await gate.startCalls == 1)
+
+        setup.recover()
+        #expect(prompts == 1)
+        try #require(await settle { await gate.waiting == 1 })
+        #expect(await gate.startCalls == 2)
+
+        await gate.answer(.success(Self.enrollment))
+        try #require(await settle { setup.model.state == .ready(Self.enrollment) })
+    }
+
+    /// Two-step changed elsewhere: no start can work, so the way out is
+    /// Back — to the Two-Step screen, which has reloaded underneath.
+    @Test func twoStepChangedElsewhereGoesBackToAReloadedScreen() async throws {
+        let gate = GatedTwoStep()
+        let account = CountingAccount()
+        let screen = TwoStepViewController(account: account, manager: gate, stepUp: NoStepUp())
+        let navigation = UINavigationController(rootViewController: screen)
+
+        screen.startEnrollment()
+        let setup = try #require(navigation.viewControllers.last as? TwoStepEnrollmentViewController)
+        setup.loadViewIfNeeded()
+        try #require(await settle { await gate.waiting == 1 })
+        // Never on screen: its own first load hasn't run, so any load is the
+        // failure's.
+        #expect(!screen.isViewLoaded)
+        let loadsBefore = await account.loads
+        #expect(loadsBefore == 0)
+
+        await gate.answer(.failure(TwoStepError.alreadyChanged))
+        try #require(await settle { setup.model.state != .loading })
+        #expect(setup.model.state == .failed(
+            message: TwoStepViewController.failureMessage(TwoStepError.alreadyChanged), recovery: .back
+        ))
+        #expect(TwoStepEnrollmentViewController.actionTitle(for: .back) == "Back")
+        try #require(await settle { await account.loads > loadsBefore })
+
+        setup.recover()
+        #expect(navigation.viewControllers.count == 1)
+        #expect(navigation.viewControllers.last === screen)
+        #expect(await gate.startCalls == 1)
+    }
+
     /// ⚠️ The push is the point (#800): it happens while the start is still
     /// out — held open by the gate — and a second tap doesn't push again.
     @Test func settingUpPushesBeforeTheSecretArrivesAndOnlyOnce() async throws {
         let gate = GatedTwoStep()
-        let screen = TwoStepViewController(account: NoAccount(), manager: gate, stepUp: NoStepUp())
+        let screen = TwoStepViewController(account: CountingAccount(), manager: gate, stepUp: NoStepUp())
         let navigation = UINavigationController(rootViewController: screen)
 
         screen.startEnrollment()
@@ -168,5 +243,29 @@ struct TwoStepEnrollmentLoadingTests {
 
         await gate.answer(.success(Self.enrollment))
         try #require(await settle { setup.model.state == .ready(Self.enrollment) })
+    }
+
+    /// Back out while the start is out, then set up again: the new setup
+    /// screen picks up the SAME pending start — no second secret — and shows
+    /// its answer. Once that start has answered, the next setup starts clean.
+    @Test func aRePushDuringAPendingStartReusesItInsteadOfMintingASecondSecret() async throws {
+        let gate = GatedTwoStep()
+        let screen = TwoStepViewController(account: CountingAccount(), manager: gate, stepUp: NoStepUp())
+
+        let first = screen.enrollmentModelForPush()
+        setupScreen(gate, model: first).loadViewIfNeeded()
+        try #require(await settle { await gate.waiting == 1 })
+
+        let second = screen.enrollmentModelForPush()
+        #expect(second === first)
+        let again = setupScreen(gate, model: second)
+        again.loadViewIfNeeded()
+        await Task.yield()
+        #expect(await gate.startCalls == 1)
+        #expect(again.model.state == .loading)
+
+        await gate.answer(.success(Self.enrollment))
+        try #require(await settle { again.model.state == .ready(Self.enrollment) })
+        #expect(screen.enrollmentModelForPush() !== first)
     }
 }
