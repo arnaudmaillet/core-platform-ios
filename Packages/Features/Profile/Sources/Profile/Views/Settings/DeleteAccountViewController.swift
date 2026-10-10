@@ -14,17 +14,20 @@ import UIKit
 /// the screen says to contact support rather than offering an undo it cannot
 /// perform.
 final class DeleteAccountViewController: UIViewController {
-    private enum Section: Hashable {
+    enum Section: Hashable {
         case consequences, beforeYouGo, action
     }
 
-    private enum Item: Hashable {
+    enum Item: Hashable {
         case consequence(String)
         case downloadData
-        case loading
+        /// A row-shaped bone while the account is checked (charter P8).
+        case skeleton(Int)
         case delete
         case requested
         case cancelRequest
+        /// The account couldn't be checked: read it again.
+        case retry
     }
 
     /// What gets deleted, as concrete as the account allows (#402): the
@@ -69,6 +72,8 @@ final class DeleteAccountViewController: UIViewController {
     private let canceller: (any AccountDeletionCancelling)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    /// Whether the list last drew bones: leaving them cross-fades (P10).
+    private var isShowingSkeleton = false
 
     init(
         viewModel: DeleteAccountViewModel,
@@ -119,6 +124,8 @@ final class DeleteAccountViewController: UIViewController {
             "You asked to delete this account on \(dateFormatter.string(from: on)). "
                 + "It becomes permanent on \(dateFormatter.string(from: permanentOn)). "
                 + "Until then you can cancel it here, or by logging back in."
+        case .failed:
+            "Couldn't check whether a deletion is already pending. Check your connection and try again."
         }
     }
 
@@ -152,9 +159,9 @@ final class DeleteAccountViewController: UIViewController {
                 content.image = UIImage(systemName: "arrow.down.doc")
                 content.imageProperties.tintColor = .label
                 cell.accessories = [.disclosureIndicator()]
-            case .loading:
-                content.text = "Checking your account…"
-                content.textProperties.color = .secondaryLabel
+            case .skeleton:
+                // Drawn by `SettingsSkeletonRowCell`.
+                break
             case .delete:
                 content.text = "Delete Account"
                 content.textProperties.color = .systemRed
@@ -164,11 +171,20 @@ final class DeleteAccountViewController: UIViewController {
             case .cancelRequest:
                 content.text = "Cancel Deletion Request"
                 content.textProperties.color = .tintColor
+            case .retry:
+                content.text = "Try Again"
+                content.textProperties.color = .tintColor
             }
             cell.contentConfiguration = content
         }
+        let skeletonRegistration = UICollectionView.CellRegistration<SettingsSkeletonRowCell, Int> { cell, _, index in
+            cell.configure(redacting: Self.placeholder(index))
+        }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
-            collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
+            if case .skeleton(let index) = item {
+                return collectionView.dequeueConfiguredReusableCell(using: skeletonRegistration, for: indexPath, item: index)
+            }
+            return collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader
@@ -198,22 +214,75 @@ final class DeleteAccountViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.consequences])
-        snapshot.appendItems(Self.consequences(for: viewModel.checklist).map(Item.consequence), toSection: .consequences)
-        if case .ready = viewModel.phase, hasDataExport {
-            snapshot.appendSections([.beforeYouGo])
-            snapshot.appendItems([.downloadData], toSection: .beforeYouGo)
-        }
-        snapshot.appendSections([.action])
-        switch viewModel.phase {
-        case .loading: snapshot.appendItems([.loading], toSection: .action)
-        case .ready: snapshot.appendItems([.delete], toSection: .action)
-        case .requested:
-            snapshot.appendItems(canceller == nil ? [.requested] : [.requested, .cancelRequest], toSection: .action)
+        let layout = Self.layout(
+            phase: viewModel.phase, checklist: viewModel.checklist,
+            offersDataExport: hasDataExport, canCancel: canceller != nil
+        )
+        for (section, items) in layout {
+            snapshot.appendSections([section])
+            snapshot.appendItems(items, toSection: section)
         }
         // The footer carries the dates; reload it with the row.
         snapshot.reloadSections([.action])
-        dataSource.apply(snapshot, animatingDifferences: false)
+
+        let wasShowingSkeleton = isShowingSkeleton
+        isShowingSkeleton = viewModel.phase == .loading
+        if wasShowingSkeleton, !isShowingSkeleton {
+            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
+                dataSource?.apply(snapshot, animatingDifferences: false)
+            }
+        } else {
+            dataSource.apply(snapshot, animatingDifferences: false)
+        }
+    }
+
+    /// The screen's sections and rows. The sections are the same before and
+    /// after the account is read — bones stand in for the consequences and
+    /// the button while it is — so nothing is inserted above the button when
+    /// the read lands. Download Your Data is offered whatever the phase: it
+    /// doesn't depend on the read, and a pending deletion is exactly when
+    /// someone still wants their copy.
+    static func layout(
+        phase: DeleteAccountViewModel.Phase,
+        checklist: DeletionChecklist?,
+        offersDataExport: Bool,
+        canCancel: Bool
+    ) -> [(Section, [Item])] {
+        var layout: [(Section, [Item])] = []
+        if phase == .loading {
+            layout.append((.consequences, consequences(for: nil).indices.map(Item.skeleton)))
+        } else {
+            layout.append((.consequences, consequences(for: checklist).map(Item.consequence)))
+        }
+        if offersDataExport {
+            layout.append((.beforeYouGo, [.downloadData]))
+        }
+        switch phase {
+        case .loading:
+            layout.append((.action, [.skeleton(consequences(for: nil).count)]))
+        case .ready:
+            layout.append((.action, [.delete]))
+        case .requested:
+            layout.append((.action, canCancel ? [.requested, .cancelRequest] : [.requested]))
+        case .failed:
+            layout.append((.action, [.retry]))
+        }
+        return layout
+    }
+
+    /// The row a bone stands for, with sample words: a consequence line, or
+    /// (past the last of them) the action row. Only the bones' widths come
+    /// from them.
+    private static func placeholder(_ index: Int) -> UIListContentConfiguration {
+        let lines = consequences(for: nil)
+        var content = UIListContentConfiguration.cell()
+        if lines.indices.contains(index) {
+            content.text = lines[index]
+            content.image = UIImage(systemName: "minus.circle")
+        } else {
+            content.text = "Delete Account"
+        }
+        return content
     }
 
     private lazy var hasDataExport = makeDataExport() != nil
@@ -319,7 +388,7 @@ extension DeleteAccountViewController {
 extension DeleteAccountViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         let item = dataSource.itemIdentifier(for: indexPath)
-        return item == .delete || item == .downloadData || item == .cancelRequest
+        return item == .delete || item == .downloadData || item == .cancelRequest || item == .retry
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -329,6 +398,8 @@ extension DeleteAccountViewController: UICollectionViewDelegate {
             confirmDeletion()
         case .cancelRequest:
             cancelRequest()
+        case .retry:
+            Task { await viewModel.load() }
         case .downloadData:
             if let export = makeDataExport() {
                 navigationController?.pushViewController(export, animated: true)

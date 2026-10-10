@@ -10,6 +10,11 @@ public enum AccountError: Error, Equatable, Sendable {
     /// A step-up-gated RPC refused a token that wasn't re-proved recently
     /// (PERMISSION_DENIED "step_up_required"): ask for the password again.
     case stepUpRequired
+    /// The server answered and declined: this deployment doesn't serve the
+    /// call (UNIMPLEMENTED), won't show it to this account (PERMISSION_DENIED)
+    /// or has no record (NOT_FOUND). An answer, unlike `transport`, which is
+    /// a call that never got one.
+    case refused(Code)
     case transport(message: String)
 }
 
@@ -177,7 +182,23 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
                     ? date(record.dataExportCompletedAt.seconds, record.dataExportCompletedAt.nanos) : nil
             )
         case .failure(let error):
-            throw AccountError.transport(message: error.message ?? "code \(error.code)")
+            throw Self.gdprError(error)
+        }
+    }
+
+    /// How a failed GDPR read is told apart: a refusal keeps its code, so
+    /// Delete Account can still offer the button where the record is simply
+    /// not served (App Review 5.1.1(v)); a call that got no answer is a
+    /// transport failure the screen retries.
+    static func gdprError(_ error: ConnectError) -> AccountError {
+        switch error.code {
+        case .unimplemented, .notFound:
+            return .refused(error.code)
+        case .permissionDenied:
+            let refusal = accountError(error)
+            return refusal == .stepUpRequired ? refusal : .refused(error.code)
+        default:
+            return accountError(error)
         }
     }
 
