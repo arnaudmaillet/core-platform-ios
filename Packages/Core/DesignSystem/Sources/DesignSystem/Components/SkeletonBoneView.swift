@@ -71,6 +71,15 @@ public final class SkeletonBoneView: UIView {
             self, selector: #selector(reinstallIfVisible),
             name: UIApplication.willEnterForegroundNotification, object: nil
         )
+        // ⚠️ STILL WHEN DECORATION RESTS (#789): an endless window-sized sweep
+        // on a load that never answers (offline, a hung request) recomposited
+        // the whole frame forever — the #580 cost. Reduce Motion, Power Saving
+        // and an app at rest all still it; the bones stay, which is the state.
+        for name in [UIAccessibility.reduceMotionStatusDidChangeNotification, .decorativeMotionDidChange] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(reinstallIfVisible), name: name, object: nil
+            )
+        }
     }
 
     @available(*, unavailable)
@@ -122,6 +131,7 @@ public final class SkeletonBoneView: UIView {
 
     private func installSweep() {
         gradient.removeAnimation(forKey: Self.sweepKey)
+        guard !MotionPreference.stillsDecoration else { return }
         let sweep = CABasicAnimation(keyPath: "locations")
         sweep.fromValue = [-0.4, -0.2, 0]
         sweep.toValue = [1, 1.2, 1.4]
@@ -135,4 +145,7 @@ public final class SkeletonBoneView: UIView {
     @objc private func reinstallIfVisible() {
         if window != nil { installSweep() }
     }
+
+    /// Whether the sweep is running. Tests.
+    var isSweeping: Bool { gradient.animation(forKey: Self.sweepKey) != nil }
 }

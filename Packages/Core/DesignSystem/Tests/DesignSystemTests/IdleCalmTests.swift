@@ -113,4 +113,26 @@ struct IdleCalmTests {
         #expect(badge.isBreathing, "waking left the badge still")
         _ = window
     }
+
+    /// ⚠️ THE BONES REST WITH THE APP (#789): an endless window-sized sweep on
+    /// a load that never answers recomposited the whole frame forever.
+    ///
+    /// Process-wide state, flipped and restored in ONE turn with no await.
+    @Test func aSkeletonsSweepRestsAndWakesWithTheApp() {
+        let bone = SkeletonBoneView()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+        window.addSubview(bone)
+        bone.frame = CGRect(x: 0, y: 0, width: 120, height: 12)
+        let wasCalm = IdleCalm.isCalm
+        IdleCalm.set(false)
+        #expect(bone.isSweeping, "guard: a bone on screen sweeps")
+
+        IdleCalm.set(true)
+        #expect(!bone.isSweeping, "the bone swept on at rest")
+
+        IdleCalm.set(false)
+        #expect(bone.isSweeping, "waking left the bone still")
+        IdleCalm.set(wasCalm)
+        _ = window
+    }
 }
