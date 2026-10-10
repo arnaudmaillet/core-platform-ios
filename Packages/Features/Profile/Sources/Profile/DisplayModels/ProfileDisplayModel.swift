@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import PostGrid
 
@@ -45,7 +46,7 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         bio = profile.bio
         hasBio = !profile.bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         avatarURL = profile.avatarURL
-        avatarMonogram = Self.monogram(displayName: profile.displayName, handle: profile.handle)
+        avatarMonogram = MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
         isVerified = profile.isVerified
         followerText = Self.format(profile.followerCount)
         followingText = Self.format(profile.followingCount)
@@ -72,15 +73,6 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         while path.hasSuffix("/") { path.removeLast() }
         let display = host + path
         return display.isEmpty ? nil : display
-    }
-
-    private static func monogram(displayName: String, handle: String) -> String {
-        let source = displayName.trimmingCharacters(in: .whitespaces).isEmpty ? handle : displayName
-        let initials = source
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map(Character.uppercased) }
-        return initials.isEmpty ? "?" : initials.joined()
     }
 
     /// Renders a count estimate: exact → "1.2K", bounded fallback → "1.2K+",

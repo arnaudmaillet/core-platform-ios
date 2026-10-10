@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
+import DesignSystem
 import Foundation
 import Testing
 @testable import Profile
@@ -77,9 +78,9 @@ struct SettingsRepositoryTests {
 
     @Test func theMonogramPrefersTheNameThenTheHandle() {
         let named = BlockedProfile(id: ProfileID("a"), handle: "maya", displayName: "Maya Lopez", avatarURL: nil, blockedAt: nil)
-        #expect(BlockedAccountsViewModel.monogram(for: named) == "ML")
+        #expect(MonogramAvatarView.monogram(name: named.displayName, handle: named.handle) == "ML")
         let bare = BlockedProfile(id: ProfileID("b"), handle: "zed", displayName: " ", avatarURL: nil, blockedAt: nil)
-        #expect(BlockedAccountsViewModel.monogram(for: bare) == "Z")
+        #expect(MonogramAvatarView.monogram(name: bare.displayName, handle: bare.handle) == "Z")
     }
 
     @Test func unblockingFromTheListDropsTheRow() async throws {

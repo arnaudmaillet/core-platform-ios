@@ -67,7 +67,7 @@ final class BlockedAccountsViewController: UIViewController {
             cell.configure(with: PersonRowContent(
                 displayName: profile.displayName.isEmpty ? profile.handle : profile.displayName,
                 handle: "@\(profile.handle)",
-                monogram: BlockedAccountsViewModel.monogram(for: profile)
+                monogram: MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
             ))
             cell.setAvatarImage(nil)
             // One load per CELL, cancelled when the cell is configured again:

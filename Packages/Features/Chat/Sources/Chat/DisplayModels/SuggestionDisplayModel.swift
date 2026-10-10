@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 
 /// View-ready row for the Suggestions surface.
@@ -18,7 +19,7 @@ public struct SuggestionDisplayModel: Equatable, Sendable, Identifiable {
         displayName = account.displayName
         handleText = account.handle.isEmpty ? "" : "@\(account.handle)"
         reasonText = Self.reasonText(account.reason)
-        monogram = ConversationDisplayModel.monogram(account.displayName)
+        monogram = MonogramAvatarView.monogram(name: account.displayName, handle: account.handle)
         avatarURL = account.avatarURL
         self.isFollowing = isFollowing
     }

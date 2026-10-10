@@ -38,12 +38,6 @@ final class RestrictedAccountsViewModel {
             phase = .loaded(current.filter { $0.id != profile.id })
         }
     }
-
-    static func monogram(for profile: RestrictedProfile) -> String {
-        let source = profile.displayName.trimmingCharacters(in: .whitespaces).isEmpty ? profile.handle : profile.displayName
-        let initials: [String] = source.split(separator: " ").prefix(2).compactMap { word in word.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
-    }
 }
 
 /// Settings → Safety and Interactions → Restricted Accounts (#416): who the
@@ -109,7 +103,7 @@ final class RestrictedAccountsViewController: UIViewController {
             cell.configure(with: PersonRowContent(
                 displayName: profile.displayName.isEmpty ? profile.handle : profile.displayName,
                 handle: "@\(profile.handle)",
-                monogram: RestrictedAccountsViewModel.monogram(for: profile)
+                monogram: MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
             ))
             cell.setAvatarImage(nil)
             // One load per CELL, cancelled when the cell is configured again:

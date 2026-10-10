@@ -1594,4 +1594,15 @@ struct SuggestionDisplayModelTests {
         )
         #expect(SuggestionDisplayModel(account: anonymous, isFollowing: true).handleText.isEmpty)
     }
+
+    /// A nameless account reads its handle's initial, exactly as the compose
+    /// picker draws the same account (#811) — it used to be "?" here.
+    @Test func aNamelessAccountTakesItsHandlesInitialLikeTheComposePicker() {
+        let nameless = SuggestedAccount(
+            id: ProfileID("p3"), handle: "grace", displayName: "", avatarURL: nil, reason: .suggestedForYou
+        )
+        let suggestion = SuggestionDisplayModel(account: nameless, isFollowing: false)
+        #expect(suggestion.monogram == "G")
+        #expect(suggestion.monogram == PersonDisplayModel(account: nameless).monogram)
+    }
 }

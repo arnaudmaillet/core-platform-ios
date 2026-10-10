@@ -43,10 +43,4 @@ final class MutedAccountsViewModel {
         let scopes = profile.scopes.summary
         return scopes.isEmpty ? "@\(profile.handle)" : "@\(profile.handle) · \(scopes)"
     }
-
-    static func monogram(for profile: MutedProfile) -> String {
-        let source = profile.displayName.trimmingCharacters(in: .whitespaces).isEmpty ? profile.handle : profile.displayName
-        let initials: [String] = source.split(separator: " ").prefix(2).compactMap { word in word.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
-    }
 }

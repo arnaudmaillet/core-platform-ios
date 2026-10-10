@@ -107,7 +107,7 @@ public final class PostAuthorBandView: UIView {
             self.name = name.isEmpty ? handle : name
             self.handle = handle
             avatarURL = post.authorAvatarURL
-            monogram = Self.monogram(name: name, handle: handle)
+            monogram = MonogramAvatarView.monogram(name: name, handle: handle)
         }
 
         /// The same band with a different date — what a stand-in does to show
@@ -122,17 +122,6 @@ public final class PostAuthorBandView: UIView {
             self.avatarURL = avatarURL
             self.monogram = monogram
             self.age = age
-        }
-
-        /// Initials, on the app's rule: the display name when there is one, the
-        /// handle when there is not.
-        private static func monogram(name: String, handle: String) -> String {
-            let source = name.isEmpty ? handle : name
-            let initials = source
-                .split(separator: " ")
-                .prefix(2)
-                .compactMap { $0.first.map { String($0).uppercased() } }
-            return initials.isEmpty ? "?" : initials.joined()
         }
     }
 

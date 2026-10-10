@@ -69,7 +69,7 @@ extension PersonDisplayModel {
             id: person.id,
             displayName: name,
             handle: person.handle,
-            monogram: ConversationDisplayModel.monogram(name),
+            monogram: MonogramAvatarView.monogram(name: person.displayName, handle: person.handle),
             isVerified: person.isVerified,
             existingConversationID: existingConversationID
         )
@@ -86,7 +86,7 @@ extension PersonDisplayModel {
             id: account.id,
             displayName: name,
             handle: account.handle,
-            monogram: ConversationDisplayModel.monogram(name),
+            monogram: MonogramAvatarView.monogram(name: account.displayName, handle: account.handle),
             existingConversationID: existingConversationID
         )
     }
@@ -101,7 +101,7 @@ extension PersonDisplayModel {
             id: peer,
             displayName: conversation.title,
             handle: conversation.directPeerHandle ?? "",
-            monogram: ConversationDisplayModel.monogram(conversation.title),
+            monogram: MonogramAvatarView.monogram(name: conversation.title, handle: ""),
             existingConversationID: conversation.id
         )
     }

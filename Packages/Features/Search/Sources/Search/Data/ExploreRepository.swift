@@ -133,9 +133,7 @@ enum ExploreRanking {
                 id: post.authorID,
                 displayName: displayName,
                 handle: post.authorHandle,
-                monogram: SearchResultDisplayModel.monogram(
-                    displayName: displayName, handle: post.authorHandle
-                ),
+                monogram: MonogramAvatarView.monogram(name: displayName, handle: post.authorHandle),
                 avatarURL: post.authorAvatarURL
             ))
         }

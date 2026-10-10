@@ -28,16 +28,7 @@ public struct SearchResultDisplayModel: Equatable, Sendable, Identifiable {
         displayName = result.displayName
         handle = "@" + result.handle
         isVerified = result.isVerified
-        monogram = Self.monogram(displayName: result.displayName, handle: result.handle)
-    }
-
-    static func monogram(displayName: String, handle: String) -> String {
-        let source = displayName.trimmingCharacters(in: .whitespaces).isEmpty ? handle : displayName
-        let initials = source
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
+        monogram = MonogramAvatarView.monogram(name: result.displayName, handle: result.handle)
     }
 }
 

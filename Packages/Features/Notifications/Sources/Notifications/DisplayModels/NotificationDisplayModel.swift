@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 
 /// View-ready projection of a `NotificationItem`: who (the bold part of the
@@ -38,11 +39,11 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
         actorsText = Self.actors(for: item)
         phrase = Self.phrase(for: item)
         text = "\(actorsText) \(phrase)"
-        timeText = Self.relativeShort(from: item.createdAt, to: now)
-        monogram = Self.monogram(item.senderName)
+        timeText = RelativeAgeFormatter.short(from: item.createdAt, to: now)
+        monogram = MonogramAvatarView.monogram(name: item.senderName, handle: "")
         var faces = [Face(monogram: monogram, avatarURL: item.senderAvatarURL)]
         if item.otherSenderCount > 0, let second = item.sampleSenders.first {
-            faces.append(Face(monogram: Self.monogram(second.name), avatarURL: second.avatarURL))
+            faces.append(Face(monogram: MonogramAvatarView.monogram(name: second.name, handle: ""), avatarURL: second.avatarURL))
         }
         self.faces = faces
         thumbnailURL = item.subjectPreview?.thumbnailURL
@@ -70,25 +71,6 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
         case .reply: return "replied to you"
         case .mention: return "mentioned you"
         case .other: return "interacted with you"
-        }
-    }
-
-    static func monogram(_ name: String) -> String {
-        let initials = name
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
-    }
-
-    private static func relativeShort(from date: Date, to now: Date) -> String {
-        let seconds = max(0, now.timeIntervalSince(date))
-        switch seconds {
-        case ..<60: return "now"
-        case ..<3600: return "\(Int(seconds / 60))m"
-        case ..<86_400: return "\(Int(seconds / 3600))h"
-        case ..<604_800: return "\(Int(seconds / 86_400))d"
-        default: return "\(Int(seconds / 604_800))w"
         }
     }
 }

@@ -196,7 +196,9 @@ public final class ShareQRCardView: UIView {
     public func configure(with card: ShareCard) {
         nameLabel.text = card.displayName
         handleLabel.text = card.handle
-        monogramLabel.text = Self.monogram(for: card.displayName)
+        // The name alone: the line under it is a place's country as often as
+        // a handle, and a country's initial is nobody's (#811).
+        monogramLabel.text = MonogramAvatarView.monogram(name: card.displayName, handle: "")
         renderedURL = card.url
         // Force a re-render: the payload changed even if the side did not.
         renderedSide = 0
@@ -283,13 +285,5 @@ public final class ShareQRCardView: UIView {
             guard let self, !Task.isCancelled else { return }
             self.avatarView.image = image
         }
-    }
-
-    private static func monogram(for displayName: String) -> String {
-        let initials = displayName
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map(String.init) }
-        return initials.joined().uppercased()
     }
 }

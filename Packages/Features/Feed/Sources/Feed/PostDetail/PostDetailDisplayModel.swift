@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import PostGrid
 
@@ -26,7 +27,7 @@ public struct PostDetailDisplayModel: Sendable, Equatable {
         handle = "@" + entry.author.handle
         timestampText = Self.timestamp(entry.post.publishedAt, now: now)
         avatarURL = entry.author.avatarURL
-        avatarMonogram = Self.monogram(displayName: entry.author.displayName, handle: entry.author.handle)
+        avatarMonogram = MonogramAvatarView.monogram(name: entry.author.displayName, handle: entry.author.handle)
 
         let trimmed = entry.post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
         caption = trimmed
@@ -36,15 +37,6 @@ public struct PostDetailDisplayModel: Sendable, Equatable {
         mediaURL = attachment?.url
         mediaAspectRatio = attachment?.aspectRatio ?? 1
         hasMedia = attachment?.url != nil
-    }
-
-    private static func monogram(displayName: String, handle: String) -> String {
-        let source = displayName.trimmingCharacters(in: .whitespaces).isEmpty ? handle : displayName
-        let initials = source
-            .split(separator: " ")
-            .prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
     }
 
     /// THE CARD'S register, not one of this screen's own.

@@ -35,6 +35,22 @@ struct SearchRowRepresentationTests {
         #expect(row.rowContent.handle == "ada")
     }
 
+    /// One person, one disc (#811): Recent stores `displayName ?? handle` as
+    /// its text, so a nameless "@grace" arrives there as a NAME, while the
+    /// Suggestion row gets it as a handle. Both read "G", never "@".
+    @Test func aHandleOnlyPersonReadsTheSameInRecentAndSuggestions() throws {
+        let entry = try #require(RecentSearch.profile(
+            id: "prof-9", displayName: "", handle: "@grace", searchedAtMS: 1
+        ))
+        let recent = historyRow(entry)
+        let suggestion = SearchRowDisplayModel(
+            suggestion: SearchSuggestion(text: "@grace", kind: .profile, id: "prof-9")
+        )
+
+        #expect(recent.monogram == "G")
+        #expect(suggestion.monogram == recent.monogram)
+    }
+
     /// A person with no stored picture is still a PERSON — the disc falls back
     /// to initials rather than to a glyph.
     @Test func aRememberedPersonWithoutAPictureKeepsTheirInitials() throws {

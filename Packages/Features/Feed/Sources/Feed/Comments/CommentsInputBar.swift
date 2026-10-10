@@ -1087,13 +1087,11 @@ final class CommentsInputBar: UIView {
         avatarButton.isEnabled = menu != nil
     }
 
-    /// The composer's initials, by the comment stream's rule (first letters
-    /// of the first two words). The placeholder for an unknown viewer is
-    /// the same "?" a nameless comment author gets.
+    /// The composer's initials, by the app's one rule (#811): first letters
+    /// of the first two words. The placeholder for an unknown viewer is the
+    /// same "?" a nameless comment author gets.
     static func monogram(_ name: String?) -> String {
-        let initials = (name ?? "").split(separator: " ").prefix(2)
-            .compactMap { $0.first.map { String($0).uppercased() } }
-        return initials.isEmpty ? "?" : initials.joined()
+        MonogramAvatarView.monogram(name: name ?? "", handle: "")
     }
 
     /// The reply state's face: a non-nil name switches the placeholder to

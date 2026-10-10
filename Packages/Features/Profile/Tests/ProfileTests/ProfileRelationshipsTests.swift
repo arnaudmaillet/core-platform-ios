@@ -876,15 +876,18 @@ struct ProfileRelationshipsViewModelTests {
         let provider = StubRelationshipsProvider(followers: [
             person("ava", name: "Ava Moreau"),
             person("lena_klein", name: ""),
-            person("cher", name: "Cher")
+            person("cher", name: "Cher"),
+            // A handle that arrives with its sigil: the "@" is never an
+            // initial (#811).
+            person("@zed", name: "")
         ])
         let viewModel = ProfileRelationshipsViewModel(subject: subject(), repository: provider)
         let phases = phaseRecorder(viewModel)
 
         viewModel.viewDidLoad()
-        await settle(until: { rows(phases).count == 3 })
+        await settle(until: { rows(phases).count == 4 })
 
-        #expect(rows(phases).map(\.monogram) == ["AM", "LK", "C"])
+        #expect(rows(phases).map(\.monogram) == ["AM", "LK", "C", "Z"])
     }
 }
 

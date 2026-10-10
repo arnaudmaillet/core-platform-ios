@@ -14,8 +14,8 @@ struct SearchDisplayModelTests {
     }
 
     @Test func monogramFallsBackToHandleWhenNameBlank() {
-        #expect(SearchResultDisplayModel.monogram(displayName: "", handle: "grace") == "G")
-        #expect(SearchResultDisplayModel.monogram(displayName: "Cher", handle: "cher") == "C")
+        #expect(SearchResultDisplayModel(result: result(handle: "grace", name: "")).monogram == "G")
+        #expect(SearchResultDisplayModel(result: result(handle: "cher", name: "Cher")).monogram == "C")
     }
 
     @Test func carriesVerifiedFlag() {
