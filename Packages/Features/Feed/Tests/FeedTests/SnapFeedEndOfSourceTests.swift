@@ -164,6 +164,31 @@ struct SnapFeedEndOfSourceTests {
                 == feed.zoomVerticalDismissalPermitted(at: point, in: feed.view))
     }
 
+    /// ⚠️ AT THE END, THE PAGE DRIVE'S DRAGS CLOSE (#770): on an engaged text
+    /// page the composer bar and the header band are the only drags that page,
+    /// and at the last post they have nowhere to go. The rail keeps its own;
+    /// the stream below the band decides by its bottom.
+    @MainActor
+    @Test func thePageDrivesTerritoryClosesAtTheEnd() {
+        let bar = CommentsInputBar()
+        let field = UIView()
+        bar.addSubview(field)
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: field, inPageDriveBand: false) == .closes,
+                "the composer bar's drag pages a text post: at the end it closes")
+
+        let container = SnapCommentsContainerView()
+        let row = UIView()
+        container.addSubview(row)
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: row, inPageDriveBand: true) == .closes,
+                "the header band's drag pages a text post: at the end it closes")
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: row, inPageDriveBand: false) == .streamDecides,
+                "below the band the stream yields only at its bottom")
+
+        let rail = SnapShortcutRailView()
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: rail, inPageDriveBand: true) == .refuses)
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: UIView(), inPageDriveBand: false) == .closes)
+    }
+
     /// While the next page is on its way, the last post loaded is not the end.
     @Test func aPageOnItsWayIsNotTheEnd() async throws {
         let feed = try await feed(FixedPostsFeedProvider(base: Photos(), ids: ids("a", "b", "c")) { _ in
