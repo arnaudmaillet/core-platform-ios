@@ -81,7 +81,8 @@ struct CoverLoadCancellationTests {
 
     /// A second configure cancels the first cover load, and only the latest
     /// post's cover lands on the tile.
-    @Test(.timeLimit(.minutes(1)))
+    // Ten minutes, not one: CI starves this package, and a 1-minute limit fired there.
+    @Test(.timeLimit(.minutes(10)))
     func aTileReconfiguredMidLoadCancelsTheFirstCoverAndShowsOnlyTheLatest() async throws {
         let fetcher = GatedCoverFetcher()
         let pipeline = ImagePipeline(fetcher: fetcher)

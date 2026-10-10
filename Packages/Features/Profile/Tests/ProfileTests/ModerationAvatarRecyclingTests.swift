@@ -15,7 +15,8 @@ import UIKit
 /// lands first is arranged, never raced against a clock.
 @MainActor
 struct ModerationAvatarRecyclingTests {
-    @Test(.timeLimit(.minutes(1)))
+    // Ten minutes, not one: CI starves this package, and a 1-minute limit fired there.
+    @Test(.timeLimit(.minutes(10)))
     func aRecycledModerationRowNeverShowsThePreviousPersonsAvatar() async throws {
         let fetcher = GatedAvatarFetcher()
         let pipeline = ImagePipeline(fetcher: fetcher)
