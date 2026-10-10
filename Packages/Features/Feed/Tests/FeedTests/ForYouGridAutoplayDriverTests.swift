@@ -189,4 +189,57 @@ struct ForYouGridAutoplayDriverTests {
         _ = driver.scrollTick(offset: 1000, at: 10)
         #expect(driver.scrollTick(offset: 600, at: 10.1) == false)
     }
+
+    // MARK: - Warm window
+
+    @Test func theWarmTakesAtMostFourVisiblePostsInOnScreenOrder() {
+        #expect(ForYouGridAutoplayDriver.warmIndices(
+            visibleFlatIndices: [3, 4, 5, 6, 7, 8, 9], postCount: 20
+        ) == [3, 4, 5, 6])
+    }
+
+    @Test func theWarmSkipsIndicesThatNoLongerNameAPost() {
+        #expect(ForYouGridAutoplayDriver.warmIndices(
+            visibleFlatIndices: [8, 9, 10, 11], postCount: 10
+        ) == [8, 9])
+    }
+
+    // MARK: - Cover lookahead
+
+    @Test func coversAreFetchedSixEitherSideOfTheVisibleRange() {
+        var driver = ForYouGridAutoplayDriver()
+        #expect(driver.coverRangeToPreload(aroundFlatIndices: [12, 10, 11], postCount: 40) == 4...18)
+    }
+
+    @Test func theLookaheadIsClampedToThePosts() {
+        var driver = ForYouGridAutoplayDriver()
+        #expect(driver.coverRangeToPreload(aroundFlatIndices: [1, 2], postCount: 5) == 0...4)
+    }
+
+    @Test func theSameRangeIsNotFetchedTwice() {
+        var driver = ForYouGridAutoplayDriver()
+        #expect(driver.coverRangeToPreload(aroundFlatIndices: [10], postCount: 40) == 4...16)
+        #expect(driver.coverRangeToPreload(aroundFlatIndices: [10], postCount: 40) == nil)
+        #expect(driver.coverRangeToPreload(aroundFlatIndices: [11], postCount: 40) == 5...17)
+    }
+
+    @Test func nothingVisibleFetchesNothingAndForgetsNothing() {
+        var driver = ForYouGridAutoplayDriver()
+        _ = driver.coverRangeToPreload(aroundFlatIndices: [10], postCount: 40)
+        #expect(driver.coverRangeToPreload(aroundFlatIndices: [], postCount: 40) == nil)
+        #expect(driver.preloadedCoverRange == 4...16)
+    }
+
+    /// Visible indices past a corpus that shrank leave no range to fetch.
+    @Test func visibleIndicesPastTheEndOfTheCorpusFetchNothing() {
+        var driver = ForYouGridAutoplayDriver()
+        #expect(driver.coverRangeToPreload(aroundFlatIndices: [30], postCount: 10) == nil)
+        #expect(driver.preloadedCoverRange == nil)
+    }
+
+    @Test func theLeadingGuessReachesTwelveAhead() {
+        #expect(ForYouGridAutoplayDriver.leadingCoverRange(postCount: 40) == 0...12)
+        #expect(ForYouGridAutoplayDriver.leadingCoverRange(postCount: 3) == 0...2)
+        #expect(ForYouGridAutoplayDriver.leadingCoverRange(postCount: 0) == nil)
+    }
 }

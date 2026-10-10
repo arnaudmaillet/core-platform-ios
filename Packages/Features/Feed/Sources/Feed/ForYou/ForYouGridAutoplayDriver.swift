@@ -133,4 +133,57 @@ struct ForYouGridAutoplayDriver {
 
         return velocity <= Self.maximumStartVelocity
     }
+
+    // MARK: - Warm window
+
+    /// ⚠️ A CEILING ON THE BURST, because "visible" is not always three cards.
+    ///
+    /// These rows SELF-SIZE, and until a cell has been measured the layout
+    /// holds it at its estimate — so the first reconcile after a render reports
+    /// a dozen items inside the viewport, and the trace showed exactly that:
+    /// twelve posts asked for at once, each in its own task. Four is what fits
+    /// on screen once the heights are real, plus room for the one arriving.
+    static let warmWindow = 4
+
+    /// The flat indices to warm, out of the visible ones in on-screen order:
+    /// those that still name a post, at most `warmWindow` of them.
+    static func warmIndices(visibleFlatIndices: [Int], postCount: Int) -> [Int] {
+        Array(visibleFlatIndices.filter((0..<postCount).contains).prefix(warmWindow))
+    }
+
+    // MARK: - Cover lookahead
+
+    /// How far beyond the visible range to pull covers for autoplaying posts.
+    static let autoplayCoverLookahead = 6
+
+    /// The visible range covers were last requested for, so a scroll does not
+    /// rebuild the same URL list 30 times a second.
+    private(set) var preloadedCoverRange: ClosedRange<Int>?
+
+    /// The flat range whose autoplay covers to fetch around the visible flat
+    /// indices — `autoplayCoverLookahead` either side, clamped to the posts —
+    /// or nil when nothing is visible or the range is the one last fetched.
+    /// Remembers what it returns.
+    mutating func coverRangeToPreload(aroundFlatIndices flat: [Int], postCount: Int) -> ClosedRange<Int>? {
+        guard let first = flat.min(),
+              let last = flat.max()
+        else { return nil }
+        let lower = max(0, first - Self.autoplayCoverLookahead)
+        let upper = min(postCount - 1, last + Self.autoplayCoverLookahead)
+        guard lower <= upper else { return nil }
+        let range = lower...upper
+        guard range != preloadedCoverRange else { return nil }
+        preloadedCoverRange = range
+        return range
+    }
+
+    /// The first-load range, where there are no cells yet to be "around".
+    ///
+    /// Leaves `preloadedCoverRange` unset on purpose: the first real
+    /// reconcile should still run against the actual visible set rather than
+    /// believe this guess already covered it.
+    static func leadingCoverRange(postCount: Int) -> ClosedRange<Int>? {
+        guard postCount > 0 else { return nil }
+        return 0...min(postCount - 1, autoplayCoverLookahead * 2)
+    }
 }

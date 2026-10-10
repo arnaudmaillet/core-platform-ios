@@ -662,7 +662,8 @@ final class ForYouGridPage: UIView {
     /// one place that applies them, so neither can clear the other.
     private var revealConcealedPostID: PostID?
     /// The autoplay decisions this page measures for — the during-scroll
-    /// throttle's state among them. See `ForYouGridAutoplayDriver`.
+    /// throttle's state and the last cover range fetched among them. See
+    /// `ForYouGridAutoplayDriver`.
     private var autoplayDriver = ForYouGridAutoplayDriver()
     #if DEBUG
     /// Internal (not private) only for the +QA hooks.
@@ -1411,13 +1412,6 @@ final class ForYouGridPage: UIView {
         return true
     }
 
-    /// How far beyond the visible range to pull covers for autoplaying posts.
-    private static let autoplayCoverLookahead = 6
-
-    /// The visible range covers were last requested for, so a scroll does not
-    /// rebuild the same URL list 30 times a second.
-    private var preloadedCoverRange: ClosedRange<Int>?
-
     /// Fetches cover images for autoplay-capable posts before their tiles need
     /// them.
     ///
@@ -1437,15 +1431,8 @@ final class ForYouGridPage: UIView {
         // the list's "New"/"Recent") an item number restarts every section.
         let flat = visible.map(flatIndex(for:))
         guard !showsSkeleton, !posts.isEmpty,
-              let first = flat.min(),
-              let last = flat.max()
+              let range = autoplayDriver.coverRangeToPreload(aroundFlatIndices: flat, postCount: posts.count)
         else { return }
-        let lower = max(0, first - Self.autoplayCoverLookahead)
-        let upper = min(posts.count - 1, last + Self.autoplayCoverLookahead)
-        guard lower <= upper else { return }
-        let range = lower...upper
-        guard range != preloadedCoverRange else { return }
-        preloadedCoverRange = range
 
         let urls = posts[range].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
         guard !urls.isEmpty else { return }
@@ -1454,13 +1441,14 @@ final class ForYouGridPage: UIView {
 
     /// The first-load case, where there are no cells yet to be "around".
     private func preloadLeadingAutoplayCovers() {
-        guard !showsSkeleton, !posts.isEmpty else { return }
-        let upper = min(posts.count - 1, Self.autoplayCoverLookahead * 2)
-        let urls = posts[0...upper].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
+        guard !showsSkeleton, !posts.isEmpty,
+              let range = ForYouGridAutoplayDriver.leadingCoverRange(postCount: posts.count)
+        else { return }
+        let urls = posts[range].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
         guard !urls.isEmpty else { return }
-        // Leaves `preloadedCoverRange` unset on purpose: the first real
-        // reconcile should still run against the actual visible set rather than
-        // believe this guess already covered it.
+        // Leaves the driver's `preloadedCoverRange` unset on purpose: the first
+        // real reconcile should still run against the actual visible set rather
+        // than believe this guess already covered it.
         imagePipeline.prefetch(urls)
     }
 
@@ -3374,24 +3362,14 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     /// then but the shape of what is coming.
     private func requestWarm(_ allowing: Bool) {
         guard allowing, !showsSkeleton, onWarmRequested != nil else { return }
-        let visible = collectionView.indexPathsForVisibleItems
-            .sorted()
-            .map(flatIndex(for:))
-            .filter(posts.indices.contains)
-            .prefix(Self.warmWindow)
-            .map { posts[$0] }
+        // At most the driver's `warmWindow` — see the ⚠️ there.
+        let visible = ForYouGridAutoplayDriver.warmIndices(
+            visibleFlatIndices: collectionView.indexPathsForVisibleItems.sorted().map(flatIndex(for:)),
+            postCount: posts.count
+        ).map { posts[$0] }
         guard !visible.isEmpty else { return }
         onWarmRequested?(visible)
     }
-
-    /// ⚠️ A CEILING ON THE BURST, because "visible" is not always three cards.
-    ///
-    /// These rows SELF-SIZE, and until a cell has been measured the layout
-    /// holds it at its estimate — so the first reconcile after a render reports
-    /// a dozen items inside the viewport, and the trace showed exactly that:
-    /// twelve posts asked for at once, each in its own task. Four is what fits
-    /// on screen once the heights are real, plus room for the one arriving.
-    private static let warmWindow = 4
 
     /// The cadence and the fling gate are the driver's
     /// (`scrollReconcileInterval`, `maximumStartVelocity`).
