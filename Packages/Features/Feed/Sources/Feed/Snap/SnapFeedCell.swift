@@ -1991,32 +1991,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     // MARK: - The wait
 
-    /// How long a page may be missing its media before it says so.
-    ///
-    /// ⚠️ NOT ZERO, and the number is the whole design. A cached picture lands
-    /// within a frame or two of `configure`, so a spinner shown the instant a
-    /// page has nothing would flash on almost every page change — motion that
-    /// means "waiting" appearing where there was no wait is worse than the
-    /// silence it replaces. A quarter of a second is long enough that anything
-    /// still missing is a real fetch, and short enough that a real fetch is
-    /// announced before the viewer wonders.
-    private static let mediaLoaderGrace: TimeInterval = {
+    /// Whether the page is announcing a wait — see `SnapMediaWait`, which
+    /// asks `hasItsOwnMedia` and drives the card's loader.
+    private lazy var mediaWait: SnapMediaWait = {
+        let wait = SnapMediaWait(
+            hasItsOwnMedia: { [weak self] in self?.hasItsOwnMedia ?? true },
+            isShowingLoader: { [weak self] in self?.mediaCard.isShowingLoader ?? false },
+            setLoading: { [weak self] loading in self?.mediaCard.setLoading(loading) }
+        )
         #if DEBUG
-        // `-media-wait-grace <ms>`: shortens (or removes) the delay, so the
-        // state can be filmed. It is otherwise close to unreachable in the
-        // simulator — the transition hands a page the picture it flew in with,
-        // and the warm window has the neighbours ready — which is the system
-        // working, and also why "I could not see it" is not evidence that it
-        // does not work.
-        let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-media-wait-grace"),
-           position + 1 < arguments.count, let milliseconds = Double(arguments[position + 1]) {
-            return milliseconds / 1000
-        }
+        wait.debugSubject = { [weak self] in self?.mediaURL?.lastPathComponent ?? "nil" }
         #endif
-        return 0.25
+        return wait
     }()
-    private var mediaLoaderTimer: Timer?
 
     /// Whether the media area has the post's OWN picture on it.
     ///
@@ -2037,48 +2024,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
-    /// Re-decides whether the page is announcing a wait.
-    ///
-    /// Called from every place the answer can change — the bind, the image
-    /// landing, the first decoded frame, a carousel page turn — rather than
-    /// polled: this is a fact the media surfaces already know, and asking them
-    /// on a timer would be inventing a signal that exists.
+    /// Re-decides whether the page is announcing a wait — called from every
+    /// place the answer can change (`SnapMediaWait.refresh`).
     private func refreshMediaLoader() {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
-            print(String(format: "[media-wait] %.3f decide own=%@ armed=%@ showing=%@ url=%@",
-                         CACurrentMediaTime(), hasItsOwnMedia ? "Y" : "n",
-                         mediaLoaderTimer == nil ? "n" : "Y",
-                         mediaCard.isShowingLoader ? "Y" : "n",
-                         mediaURL?.lastPathComponent ?? "nil"))
-        }
-        #endif
-        guard !hasItsOwnMedia else {
-            mediaLoaderTimer?.invalidate()
-            mediaLoaderTimer = nil
-            mediaCard.setLoading(false)
-            return
-        }
-        guard mediaLoaderTimer == nil, !mediaCard.isShowingLoader else { return }
-        let timer = Timer.scheduledTimer(
-            withTimeInterval: Self.mediaLoaderGrace, repeats: false
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.mediaLoaderTimer = nil
-                // Asked AGAIN at the end of the grace, never assumed: the whole
-                // point of waiting is that the answer may have changed.
-                self.mediaCard.setLoading(!self.hasItsOwnMedia)
-            }
-        }
-        mediaLoaderTimer = timer
+        mediaWait.refresh()
     }
 
     /// Drops the wait entirely — the recycle path.
     private func cancelMediaLoader() {
-        mediaLoaderTimer?.invalidate()
-        mediaLoaderTimer = nil
-        mediaCard.setLoading(false)
+        mediaWait.cancel()
     }
 
     #if DEBUG
@@ -2100,9 +2054,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Runs the grace out now, so a spec does not have to sleep for it.
     func debugElapseMediaLoaderGrace() {
-        mediaLoaderTimer?.invalidate()
-        mediaLoaderTimer = nil
-        mediaCard.setLoading(!hasItsOwnMedia)
+        mediaWait.debugElapseGrace()
     }
 
     /// Delivers a picture the way the pipeline would, so a spec can watch the
