@@ -1,3 +1,4 @@
+import Connect
 import CoreContracts
 import CoreModels
 import CoreNetworking
@@ -23,7 +24,9 @@ private struct GalleryStubError: Error {}
 private actor PagedGallery: ProfileGalleryProviding {
     private var authored: [String?: GalleryPage]
     private var tagged: [String?: GalleryPage]
-    private var failing: Set<String> = []
+    private var failing: [String: any Error] = [:]
+    /// What the authored FIRST page throws, if anything (#794).
+    private var firstPageError: (any Error)?
     private(set) var authoredAsks: [String?] = []
     private(set) var taggedAsks: [String?] = []
 
@@ -33,12 +36,14 @@ private actor PagedGallery: ProfileGalleryProviding {
     }
 
     func setAuthored(_ page: GalleryPage, for token: String?) { authored[token] = page }
-    func fail(_ token: String) { failing.insert(token) }
-    func heal(_ token: String) { failing.remove(token) }
+    func fail(_ token: String, with error: any Error = GalleryStubError()) { failing[token] = error }
+    func heal(_ token: String) { failing[token] = nil }
+    func failFirstPage(with error: any Error) { firstPageError = error }
 
     func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
         authoredAsks.append(pageToken)
-        if let pageToken, failing.contains(pageToken) { throw GalleryStubError() }
+        if pageToken == nil, let firstPageError { throw firstPageError }
+        if let pageToken, let error = failing[pageToken] { throw error }
         return authored[pageToken] ?? GalleryPage(posts: [], nextPageToken: nil)
     }
 
@@ -200,6 +205,41 @@ struct GalleryPagingTests {
         viewModel.loadMoreGallery()
         try #require(await settle { ids(shown.snapshot?.media) == ["x"] })
         #expect(ids(shown.snapshot?.media) == ["x"])
+    }
+
+    // MARK: - Why a page failed (#794)
+
+    /// The fetches used to be `try?`: offline read "Couldn't load" like any
+    /// other failure.
+    @Test func anOfflineFirstPageSaysOffline() async throws {
+        let gallery = PagedGallery(authored: [:])
+        await gallery.failFirstPage(with: ProfileError.transport(message: "x", failure: .offline))
+        let (_, shown) = try await open(gallery)
+        #expect(shown.snapshot?.activity == .failed(message: FailureCopy.offline))
+    }
+
+    @Test func aServerFaultOnTheFirstPageKeepsThePullToRetry() async throws {
+        let gallery = PagedGallery(authored: [:])
+        await gallery.failFirstPage(with: ProfileError.transport(message: "x", failure: .server(code: "internal")))
+        let (_, shown) = try await open(gallery)
+        #expect(shown.snapshot?.activity == .failed(message: "Couldn't load. Pull to retry."))
+    }
+
+    @Test func anOfflineNextPageUnderAnEmptyTabSaysOffline() async throws {
+        let gallery = PagedGallery(authored: [
+            nil: GalleryPage(posts: [post("t1", .text, at: 60)], nextPageToken: "a2"),
+        ])
+        await gallery.fail("a2", with: ConnectError(
+            code: .unavailable, message: "x", exception: URLError(.notConnectedToInternet)
+        ))
+        let (viewModel, shown) = try await open(gallery)
+
+        viewModel.setGalleryFormat(.media)
+        try #require(await settle {
+            if case .failed = shown.snapshot?.media { return true }
+            return false
+        })
+        #expect(shown.snapshot?.media == .failed(message: FailureCopy.offline))
     }
 
     /// A revisit or a pull revalidates: the fresh first page goes over the
