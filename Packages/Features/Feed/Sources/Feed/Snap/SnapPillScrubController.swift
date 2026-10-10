@@ -85,17 +85,19 @@ struct SnapPillScrubController {
         guard pageHeight > 0, canScrub else { return nil }
         let position = offset / pageHeight
         let frame = BarPillScrub.frame(position: position, itemCount: itemCount)
-        let differs = frame.map { differs(upper: $0.upper, ask: pillDiffers) } ?? false
-        let blur = differs ? (frame?.blur ?? 0) : 0
+        // ⚠️ Not `let differs = … differs(upper:…)`: Xcode 26 resolves the
+        // call to the local Bool being declared (CI fails; 27 accepts it).
+        let pillChanges = frame.map { differs(upper: $0.upper, ask: pillDiffers) } ?? false
+        let blur = pillChanges ? (frame?.blur ?? 0) : 0
         let swapTo = scrub.update(position: position, itemCount: itemCount)
         return Step(position: position, blur: blur, swapTo: swapTo)
     }
 
     private mutating func differs(upper: Int, ask: (Int) -> Bool?) -> Bool {
         if let pair, pair.upper == upper { return pair.differs }
-        guard let differs = ask(upper) else { return false }
-        pair = (upper, differs)
-        return differs
+        guard let answer = ask(upper) else { return false }
+        pair = (upper, answer)
+        return answer
     }
 
     /// Whether the author pill draws `first` and `second` differently: what
