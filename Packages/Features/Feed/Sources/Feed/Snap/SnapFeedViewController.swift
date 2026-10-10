@@ -122,6 +122,9 @@ final class SnapFeedViewController: UIViewController {
     /// the SAME shell-owned sheet the map's badge opens, injected so the
     /// two entries can never diverge. Nil keeps the badge display-only.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    /// The boost flow on the current post — the wallet's verdicts, the
+    /// session undo and the anchors' context (`SnapBoostController`).
+    private let boost: SnapBoostController
 
     /// id → display model; lookups only, never measurement.
     /// The colour this screen wears while it has NO PAGES.
@@ -438,8 +441,11 @@ final class SnapFeedViewController: UIViewController {
     /// card's Unfollow — for the screen's life (`FollowGraphEvents`). Nil
     /// without a channel, and then a return re-asks instead.
     private var followSubscription: FollowGraphSubscription?
-    /// See `FeedFeatureBuilder.soundProvider` / `useSound`.
-    private let soundProvider: (any PostSoundProviding)?
+    /// The page's sound: which sound a post is set to, what it draws, what is
+    /// heard, and the sound sheet's inputs (`SnapSoundState`), over
+    /// `FeedFeatureBuilder.soundProvider`.
+    private let soundState: SnapSoundState
+    /// See `FeedFeatureBuilder.useSound`.
     private let useSound: (@MainActor (PostSound) -> Void)?
     /// Opens a new feed with the hero — the sound sheet's grid uses it.
     private let openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
@@ -467,7 +473,7 @@ final class SnapFeedViewController: UIViewController {
         prewarmPosts: (@Sendable ([PostID]) async -> Void)? = nil
     ) {
         self.prewarmPosts = prewarmPosts
-        self.soundProvider = soundProvider
+        self.soundState = SnapSoundState(provider: soundProvider)
         self.useSound = useSound
         self.openFeedHero = openFeedHero
         self.galleryPost = galleryPost
@@ -477,6 +483,7 @@ final class SnapFeedViewController: UIViewController {
         self.makeCommentsPanelContent = makeCommentsPanelContent
         self.makeRestingCommentsPanelContent = makeRestingCommentsPanelContent
         self.wallet = wallet
+        self.boost = SnapBoostController(wallet: wallet)
         self.makeWalletSheet = makeWalletSheet
         self.reporting = reporting
         self.followStore = SnapAuthorFollowStore(writer: socialGraph, reader: followRelations)
@@ -1233,13 +1240,8 @@ final class SnapFeedViewController: UIViewController {
             (cell as? SnapCellLifecycle)?.releaseRetainedNeighbourClips()
         }
         // Leaving the screen finalizes the session's boosts, same as paging
-        // away — "undo until you move on", and you just moved on. (The
-        // retained timeline can come back to the same post; the spend is
-        // still final: the window is the visit, not the post.)
-        // The taps are committed now, not 10 s after the last one (#676).
-        if let id = sessionBoostID { wallet?.commitStakes(on: id.rawValue) }
-        sessionBoostID = nil
-        sessionBoostAmount = 0
+        // away (`SnapBoostController.finalize`).
+        boost.finalize()
     }
 
     // MARK: - Setup
@@ -1426,12 +1428,11 @@ final class SnapFeedViewController: UIViewController {
                 // the balance can still afford, and whether any of it is
                 // still session-undoable — a recycled cell for a boosted
                 // post gets its receipt back.
-                if let wallet = self.wallet {
-                    cell.setBoostTotal(wallet.boostTotal(forTarget: id.rawValue))
+                if let total = self.boost.boostTotal(on: id),
+                   let context = self.boost.anchorContext(for: id) {
+                    cell.setBoostTotal(total)
                     cell.setBoostContext(
-                        balance: wallet.stakeableBalance,
-                        undoable: self.sessionBoostID == id ? self.sessionBoostAmount : 0,
-                        stakeShots: wallet.stakeShots
+                        balance: context.balance, undoable: context.undoable, stakeShots: context.stakeShots
                     )
                 }
                 cell.onRequestCommentsPageDrive = { [weak self] phase, translation, velocity in
@@ -2369,7 +2370,7 @@ final class SnapFeedViewController: UIViewController {
     /// through playing off screen — only when the viewer turned it on, the
     /// feed's sound is on, and this screen (not one under it) owns the sound.
     private func continueInBackground() -> Bool {
-        guard MediaPlaybackPolicy.playsInBackground, FeedSound.isOn, isOnScreen, !isAudioYielded,
+        guard MediaPlaybackPolicy.playsInBackground, soundState.isOn, isOnScreen, !isAudioYielded,
               let videoPlayback, let surface = ownAudibleSurface,
               surface === videoPlayback.currentAudibleSurface
         else { return false }
@@ -2520,20 +2521,10 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Boost
 
-    /// The active post's UNDOABLE spend: what this screen has boosted onto
-    /// it while it stayed the active page. Paging away FINALIZES it — the
-    /// lifecycle's resign hook clears the tally — which is the product
-    /// rule stated as ownership: the undo window IS the post's time on
-    /// screen. One post at a time, because only one post is on screen.
-    private var sessionBoostID: PostID?
-    private var sessionBoostAmount = 0
-
-    /// One boost spend, wallet-first: the debit lands synchronously (or is
-    /// refused) before any pixel moves, so the feedback can never promise a
-    /// state the balance doesn't have. Haptics here with the verdict —
-    /// constructed inline, the codebase's idiom — visuals on the cell that
-    /// asked. A nil wallet (unwired host) drops the tap silently; the mock
-    /// store is always wired in the app itself.
+    /// One boost spend, wallet-first (`SnapBoostController.stake`). Haptics
+    /// here with the verdict — constructed inline, the codebase's idiom —
+    /// visuals on the cell that asked. A nil wallet (unwired host) drops the
+    /// tap silently; the mock store is always wired in the app itself.
     private func performBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
         MemberGates.perform(.like, from: self) { [weak self, weak feedbackCell] in
             self?.commitBoost(on: id, spend: spend, feedbackCell: feedbackCell)
@@ -2541,19 +2532,9 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func commitBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
-        guard let wallet else { return }
-        let outcome = wallet.stake(spend, on: id.rawValue)
-        switch outcome {
-        case .boosted(_, let targetTotal, let spent):
-            // `spent`, never the request: a near-cap boost is CLAMPED to
-            // the remainder, and the tally/float must say what actually
-            // left the wallet.
-            if sessionBoostID == id {
-                sessionBoostAmount += spent
-            } else {
-                sessionBoostID = id
-                sessionBoostAmount = spent
-            }
+        guard let verdict = boost.stake(spend, on: id) else { return }
+        switch verdict {
+        case .boosted(let targetTotal, let spent):
             HapticImpact(style: .medium).impactOccurred()
             // Receipt before theatre: the anchor flips to (or grows) its
             // number face, then the "+N" float rises off it.
@@ -2561,58 +2542,39 @@ final class SnapFeedViewController: UIViewController {
             feedbackCell?.playBoostConfirmation(amount: spent)
             refreshVisibleBoostControls()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
+            if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
                 print("[wallet] boosted post=\(id.rawValue) requested=\(spend) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance) shots=\(wallet.stakeShots)")
             }
             #endif
-        case .insufficientBalance(let balance):
+        case .refused(let refusal):
             HapticNotification().notificationOccurred(.error)
             feedbackCell?.playBoostDenied()
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-                print("[wallet] boost DENIED post=\(id.rawValue) spend=\(spend) balance=\(balance) shots=\(wallet.stakeShots)")
-            }
-            #endif
-        case .targetCapReached(let targetTotal):
-            HapticNotification().notificationOccurred(.error)
-            feedbackCell?.playBoostDenied()
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-                print("[wallet] boost CAP post=\(id.rawValue) targetTotal=\(targetTotal)")
-            }
-            #endif
-        case .noShotsLeft, .shotDoesNotFit:
-            // The menu offers a shot only with a pack loaded and room on the
-            // post for all of it; a stale menu (the pack emptied, the post
-            // filled on another surface) or `-wallet-demo-shot` lands here.
-            HapticNotification().notificationOccurred(.error)
-            feedbackCell?.playBoostDenied()
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-                print("[wallet] shot REFUSED post=\(id.rawValue) outcome=\(outcome) shots=\(wallet.stakeShots)")
+            if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
+                switch refusal {
+                case .insufficientBalance(let balance):
+                    print("[wallet] boost DENIED post=\(id.rawValue) spend=\(spend) balance=\(balance) shots=\(wallet.stakeShots)")
+                case .targetCapReached(let targetTotal):
+                    print("[wallet] boost CAP post=\(id.rawValue) targetTotal=\(targetTotal)")
+                case .noShotsLeft, .shotDoesNotFit:
+                    print("[wallet] shot REFUSED post=\(id.rawValue) outcome=\(refusal) shots=\(wallet.stakeShots)")
+                }
             }
             #endif
         }
     }
 
-    /// Takes back the whole session spend on `id` — the menu's Undo entry.
-    /// Session-scoped by construction: the guard requires the tally to
-    /// still name this post, and the tally dies the moment the post resigns
-    /// the active page.
+    /// Takes back the whole session spend on `id` — the menu's Undo entry
+    /// (`SnapBoostController.undo`).
     private func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
-        guard let wallet, sessionBoostID == id, sessionBoostAmount > 0,
-              let result = wallet.undoBoost(targetID: id.rawValue, amount: sessionBoostAmount)
-        else { return }
-        let refunded = sessionBoostAmount
-        sessionBoostID = nil
-        sessionBoostAmount = 0
+        guard let refund = boost.undo(on: id) else { return }
         HapticImpact(style: .light).impactOccurred()
-        feedbackCell?.setBoostTotal(result.targetTotal, animated: true)
-        feedbackCell?.playBoostRefund(amount: refunded)
+        feedbackCell?.setBoostTotal(refund.targetTotal, animated: true)
+        feedbackCell?.playBoostRefund(amount: refund.refunded)
         refreshVisibleBoostControls()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
-            print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refunded) targetTotal=\(result.targetTotal) balance=\(result.newBalance)")
+            print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refund.refunded) targetTotal=\(refund.targetTotal) balance=\(refund.newBalance)")
         }
         #endif
     }
@@ -2647,16 +2609,9 @@ final class SnapFeedViewController: UIViewController {
     /// a spend (or a claim on another screen) enables/disables the control
     /// and updates the menu it will build on its next long-press.
     /// What the sound bubble and the composer's rail slot draw for `model`
-    /// (#671): the sound's cover and the mute state — and for a post with no
-    /// sound, media or text, a greyed `music.note.slash` that keeps the slot
-    /// (#683).
+    /// (#671) — see `SnapSoundState.face`.
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
-        let postSound = sound(for: model)
-        return SnapSoundFace(
-            coverURL: SnapMediaAttributionView.coverURL(for: model, cover: attributionContent(for: model).cover),
-            isAvailable: postSound != nil,
-            isMuted: !FeedSound.isOn
-        )
+        soundState.face(for: model, playingClip: playingClip(of: model))
     }
 
     /// Every visible sound bubble, and the open panel's rail slot, after the
@@ -2700,17 +2655,13 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func refreshVisibleBoostControls() {
-        guard let wallet else { return }
-        let balance = wallet.stakeableBalance
-        let shots = wallet.stakeShots
+        guard boost.wallet != nil else { return }
         for indexPath in collectionView.indexPathsForVisibleItems {
             guard orderedIDs.indices.contains(indexPath.item),
-                  let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell else { continue }
-            let id = orderedIDs[indexPath.item]
+                  let cell = collectionView.cellForItem(at: indexPath) as? SnapFeedCell,
+                  let context = boost.anchorContext(for: orderedIDs[indexPath.item]) else { continue }
             cell.setBoostContext(
-                balance: balance,
-                undoable: sessionBoostID == id ? sessionBoostAmount : 0,
-                stakeShots: shots
+                balance: context.balance, undoable: context.undoable, stakeShots: context.stakeShots
             )
         }
     }
@@ -4155,12 +4106,10 @@ final class SnapFeedViewController: UIViewController {
             // it keeps its player and simply stops advancing.
             lifecycleCell(at: resign)?.didResignActive(releasingPlayback: false)
             // Paging away FINALIZES the session's boosts: the undo window
-            // is the post's time on screen, and it just ended.
-            if orderedIDs.indices.contains(resign), sessionBoostID == orderedIDs[resign] {
-                // …and commits its taps (#676).
-                wallet?.commitStakes(on: orderedIDs[resign].rawValue)
-                sessionBoostID = nil
-                sessionBoostAmount = 0
+            // is the post's time on screen, and it just ended — and commits
+            // its taps (#676).
+            if orderedIDs.indices.contains(resign) {
+                boost.pageResigned(orderedIDs[resign])
             }
             // An engagement is PAGE-SCOPED: the engaged page resigning
             // retires it instantly (a belt for interrupted teardowns —
@@ -4326,18 +4275,11 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// What the attribution draws for `model`: the sound's line, and a cover
-    /// that is the SOUND's — its artwork, a note for a song that has none, and
-    /// the post's own picture only for a sound with neither.
+    /// that is the SOUND's (`SnapSoundState.attribution`).
     private func attributionContent(
         for model: FeedItemDisplayModel
     ) -> (sound: SnapMediaAttributionView.SoundCredit, cover: SnapMediaAttributionView.Cover) {
-        let postSound = sound(for: model)
-        let cover: SnapMediaAttributionView.Cover = switch (postSound?.artworkURL, postSound?.isOriginal) {
-        case (let artwork?, _): .artwork(artwork)
-        case (nil, false): .note
-        default: .post
-        }
-        return (soundLine(for: model).map { .sound($0) } ?? .none, cover)
+        soundState.attribution(for: model, playingClip: playingClip(of: model))
     }
 
     // MARK: - Bar pills under the scroll
@@ -4433,7 +4375,7 @@ final class SnapFeedViewController: UIViewController {
         refreshPictureInPicture(ownerCell: ownerCell)
         guard let videoPlayback else { return }
         var surface: VideoRenderView?
-        if FeedSound.isOn, isOnScreen, isForeground, !isAudioYielded, let owner = playbackOwner,
+        if soundState.isOn, isOnScreen, isForeground, !isAudioYielded, let owner = playbackOwner,
            let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
             surface = cell.audibleSurface
         }
@@ -4478,27 +4420,16 @@ final class SnapFeedViewController: UIViewController {
 
     /// The sound of a page with no clip — a photograph, a collection of
     /// them, a text post — played while that page owns the screen, under the
-    /// same rules as a clip's (see `FeedSongPlayer`).
-    ///
-    /// ⚠️ **NOTHING UNDER POWER SAVING (#580).** A clip under Power Saving
-    /// does not start on its own; a photograph's song is the same thing
-    /// without a picture, so it is silent too — the viewer's decision.
+    /// same rules as a clip's (see `FeedSongPlayer`), and nothing under Power
+    /// Saving (#580; `SnapSoundState.song`).
     private func refreshSong() {
         var song: URL?
-        if Self.pageSongPlays(soundOn: FeedSound.isOn, powerSaving: PowerSavingPreference.isOn),
-           isOnScreen, isForeground, !isAudioYielded,
+        if isOnScreen, isForeground, !isAudioYielded,
            let owner = playbackOwner, orderedIDs.indices.contains(owner),
-           let model = modelsByID[orderedIDs[owner]],
-           !(model.mediaKind == .video || model.extraMedia.contains { $0.videoURL != nil }) {
-            song = sound(for: model)?.previewURL
+           let model = modelsByID[orderedIDs[owner]] {
+            song = soundState.song(for: model, playingClip: playingClip(of: model))
         }
         songPlayer.play(song)
-    }
-
-    /// Whether a page's song may be heard at all: the feed's sound on, and
-    /// Power Saving off (#580).
-    static func pageSongPlays(soundOn: Bool, powerSaving: Bool) -> Bool {
-        soundOn && !powerSaving
     }
 
     /// Turns the attribution's cover while the page's media plays — a clip
@@ -4513,7 +4444,7 @@ final class SnapFeedViewController: UIViewController {
         // The sound bubble's record turns while the post plays AUDIBLY: the
         // player's play and pause, and the mute (#683) — and so does the
         // panel's slot, where a TEXT page's sound lives (#692).
-        let audible = playing && FeedSound.isOn
+        let audible = soundState.isAudible(playing: playing)
         activeSnapCell?.setSoundSpinning(audible)
         (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(audible)
         (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(audible)
@@ -4531,7 +4462,7 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func toggleSound() {
-        FeedSound.toggle()
+        soundState.toggle()
         refreshAudibleSurface()
         // The page's sound bubble and the panel's slot wear the new state.
         refreshVisibleSoundFaces()
@@ -4547,77 +4478,33 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Sound sheet
 
-    /// The clip a post's sound belongs to: the one on screen when this is the
-    /// active page (a collection's pages are different clips, with different
-    /// sounds), else its head, or its first clip page.
-    private func soundVideoURL(of model: FeedItemDisplayModel) -> URL? {
-        if model.id == activeModel?.id, let playing = activeSnapCell?.currentClipURL { return playing }
-        if model.mediaKind == .video, let url = model.mediaURL { return url }
-        return model.extraMedia.first { $0.videoURL != nil }?.videoURL
-    }
-
-    /// The sound `model` is set to: the provider's answer, or — with nobody to
-    /// ask — the clip's own "original sound", played from the clip itself
-    /// when a player can open it.
-    private func sound(for model: FeedItemDisplayModel) -> PostSound? {
-        let clip = soundVideoURL(of: model)
-        if let known = soundProvider?.sound(forPost: model.id, clip: clip) { return known }
-        guard let url = clip else { return nil }
-        let playable = url.isFileURL || ["http", "https"].contains(url.scheme?.lowercased() ?? "")
-        return PostSound(
-            id: "original-\(model.id.rawValue)", title: nil, artist: nil,
-            previewURL: playable ? url : nil, artworkURL: model.thumbnailURL, duration: nil
-        )
-    }
-
-    /// The attribution's second line: the track, or the author's original
-    /// sound. Nil for a post with nothing to hear.
-    private func soundLine(for model: FeedItemDisplayModel) -> String? {
-        guard let sound = sound(for: model) else { return nil }
-        guard let title = sound.title else {
-            return "Original sound · \(sound.artist ?? "@\(Self.handle(of: model))")"
-        }
-        return [title, sound.artist].compactMap { $0 }.joined(separator: " · ")
-    }
-
-    /// "@handle" off the meta line ("@handle · 3m"), the author's name
-    /// otherwise.
-    private static func handle(of model: FeedItemDisplayModel) -> String {
-        let first = model.metaText.components(separatedBy: " · ").first ?? ""
-        return first.hasPrefix("@") ? String(first.dropFirst()) : model.authorName
+    /// The clip the active page's cell is showing, for `model` when it is the
+    /// active page; nil for every other page (`SnapSoundState.clip`).
+    private func playingClip(of model: FeedItemDisplayModel) -> URL? {
+        model.id == activeModel?.id ? activeSnapCell?.currentClipURL : nil
     }
 
     /// The attribution's tap: the sound the page is set to, in a sheet.
     private func presentSoundSheet() {
         guard presentedViewController == nil, let model = activeModel,
-              let sound = sound(for: model) else { return }
+              let inputs = soundState.sheetInputs(for: model, playingClip: playingClip(of: model))
+        else { return }
         // The sheet lists EVERY post set to this sound, not only this feed's
-        // (`SoundSheetSections`): popular — only when the provider gives the
-        // sound one; the sound's original post first when it is a media
-        // post, then the page it was opened from — then recent: every post
-        // the popular row does not show, newest first.
-        let rankings = soundProvider?.rankings(using: sound) ?? .empty
-        // With nobody to ask, a clip's own sound (`sound(for:)`) is this
-        // page's: it is its own original.
-        let original = soundProvider?.originalPostID(of: sound)
-            ?? (sound.id == "original-\(model.id.rawValue)" ? model.id : nil)
+        // (`SnapSoundState.sheetInputs`).
+        let rankings = inputs.rankings
+        let original = inputs.original
         let current = model.id
         let content = soundSheetContent(current: current, original: original, rankings: rankings)
         let sheet = SoundSheetViewController(
-            sound: sound,
-            authorHandle: Self.handle(of: model),
-            // An original sound stands for the post it came from; a named song
-            // with no artwork keeps the sheet's neutral note rather than
-            // borrowing somebody's photo.
-            fallbackArtworkURL: sound.isOriginal ? (model.thumbnailURL ?? model.avatarURL) : nil,
+            sound: inputs.sound,
+            authorHandle: inputs.authorHandle,
+            fallbackArtworkURL: inputs.fallbackArtworkURL,
             sections: content.sections,
             tiles: content.tiles,
             imagePipeline: imagePipeline
         )
-        // Only a sound the device HOLDS can go under a new clip: the editor
-        // lays it from a file. A clip's own sound streamed from the fleet is
-        // not one yet, and the button is not offered for it.
-        if sound.previewURL?.isFileURL == true, let useSound {
+        // Only a sound the device HOLDS can go under a new clip.
+        if inputs.offersUseSound, let useSound {
             sheet.onUseSound = { sound in useSound(sound) }
         }
         // The cell that is covered now is the one to uncover, whatever the
@@ -6421,7 +6308,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         chrome.setSoundFace(soundFace(for: model))
         // The replica's boost anchor wears the same face as the live one —
         // a boosted post must not flash back to the glyph mid-flight.
-        chrome.setBoostTotal(wallet?.boostTotal(forTarget: model.id.rawValue) ?? 0)
+        chrome.setBoostTotal(boost.boostTotal(on: model.id) ?? 0)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
             print("[flight-chrome] \(model.id.rawValue) hasMedia=\(model.mediaURL != nil)"

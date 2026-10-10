@@ -6,9 +6,9 @@ import Testing
 @MainActor
 struct FeedSongPowerSavingTests {
     @Test func aPagesSongPlaysOnlyWithTheSoundOnAndPowerSavingOff() {
-        #expect(SnapFeedViewController.pageSongPlays(soundOn: true, powerSaving: false))
-        #expect(!SnapFeedViewController.pageSongPlays(soundOn: true, powerSaving: true), "a song under Power Saving")
-        #expect(!SnapFeedViewController.pageSongPlays(soundOn: false, powerSaving: false))
-        #expect(!SnapFeedViewController.pageSongPlays(soundOn: false, powerSaving: true))
+        #expect(SnapSoundState.pageSongPlays(soundOn: true, powerSaving: false))
+        #expect(!SnapSoundState.pageSongPlays(soundOn: true, powerSaving: true), "a song under Power Saving")
+        #expect(!SnapSoundState.pageSongPlays(soundOn: false, powerSaving: false))
+        #expect(!SnapSoundState.pageSongPlays(soundOn: false, powerSaving: true))
     }
 }
