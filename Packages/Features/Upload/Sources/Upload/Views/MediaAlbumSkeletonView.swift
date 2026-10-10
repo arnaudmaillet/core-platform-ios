@@ -16,8 +16,21 @@ import UIKit
 /// nothing to select, and the bones are cheap. Enough rows are made to cover
 /// the view's height and no more; a one-row sheet at rest shows one row, the
 /// expanded sheet shows them all.
+///
+/// Two hosts: the picker, while the library has not yet said which albums it
+/// has, and then each album's page until its own fetch lands
+/// (`MediaAlbumPageView`, #831) — so swiping to an album never shows a blank
+/// page first.
 final class MediaAlbumSkeletonView: UIView {
     private var bones: [SkeletonBoneView] = []
+
+    /// Room claimed above the first row on top of the safe area: the access
+    /// notice's, which a page gives its grid as inset
+    /// (`MediaAlbumPageView.setNoticeReserve`) — so the bones start where that
+    /// grid's first row will.
+    var topReserve: CGFloat = 0 {
+        didSet { if topReserve != oldValue { setNeedsLayout() } }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -34,9 +47,9 @@ final class MediaAlbumSkeletonView: UIView {
         let columns = Int(MediaAlbumPageView.columns)
         let side = MediaAlbumPageView.tileSide(forWidth: bounds.width)
         guard side > 0, bounds.height > 0 else { return }
-        // The top inset is the picker's notice reserve at most; the bones
-        // start where the grid's first row starts, under the bar.
-        let top = safeAreaInsets.top + gutter
+        // The bones start where the grid's first row starts: under the bar,
+        // and under the notice when there is one.
+        let top = safeAreaInsets.top + topReserve + gutter
         let rows = Int(((bounds.height - top) / (side + gutter)).rounded(.up))
         let needed = max(0, rows * columns)
         while bones.count < needed {
@@ -57,4 +70,9 @@ final class MediaAlbumSkeletonView: UIView {
             )
         }
     }
+
+    #if DEBUG
+    /// How many bones stand in now — what a test reads.
+    var debugBoneCount: Int { bones.count }
+    #endif
 }
