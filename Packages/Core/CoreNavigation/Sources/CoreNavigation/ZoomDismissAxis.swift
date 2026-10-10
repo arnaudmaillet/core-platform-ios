@@ -21,10 +21,10 @@ public enum ZoomDismissAxis: Hashable, CaseIterable, Sendable {
     /// says so (`zoomUpwardDismissalPermitted`, "no" by default) — so every
     /// screen that never asks keeps its pager's upward drag.
     ///
-    /// It lands where a DOWNWARD close does (`landsBeneath`, #685): on the
-    /// screen beneath the feed when there is one — a map place feed's place
-    /// page — and on the source otherwise. The owner's call (2026-10-08, on
-    /// #674): on a map feed, swipe up and swipe down do the same thing.
+    /// It lands where a RIGHTWARD close does — on the source, the map's
+    /// marker — never on a screen beneath (#761, the owner's call 2026-10-10,
+    /// reversing #685's of 2026-10-08): a place feed's end closes straight to
+    /// the map, as the swipe right does.
     case upward
 
     /// The begin gate, shared by every armed axis: the hand's velocity must
@@ -50,10 +50,9 @@ public enum ZoomDismissAxis: Hashable, CaseIterable, Sendable {
     }
 
     /// Whether a close along this axis lands on the screen BENEATH the feed
-    /// (a place page) when one is there: the vertical axis, and — since #685
-    /// — upward, which does what a swipe down does. A horizontal close always
-    /// lands on the source.
-    public var landsBeneath: Bool { self != .horizontal }
+    /// (a place page) when one is there: the vertical axis alone. A
+    /// horizontal or an upward close lands on the source (#761).
+    public var landsBeneath: Bool { self == .vertical }
 
     /// What a driver armed with `axes` may begin along: `upward` rides with
     /// `vertical` (#628). The destination's gate is what keeps it closed
