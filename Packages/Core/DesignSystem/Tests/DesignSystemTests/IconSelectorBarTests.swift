@@ -315,6 +315,45 @@ struct IconSelectorBarTests {
         #expect(bar.debugStripAcceptsScrolling, "and handed back after it")
     }
 
+    /// ⚠️ **A DRAG DOES NOT SURVIVE THE WINDOW IT WAS IN** — `PagedTabBar`'s
+    /// rule. A bar taken off screen mid-drag (a pop, a sheet swapped out) gets
+    /// no `.cancelled` from a recognizer that is no longer in any hierarchy, so
+    /// the strip stayed locked, the pill stayed lifted between two icons, and
+    /// the end-of-strip `CADisplayLink` — which RETAINS its target — kept the
+    /// bar alive and ticking for the rest of the session.
+    ///
+    /// The window is never made visible: `didMoveToWindow` needs a window, not
+    /// a screen, and no visible window outlives this test.
+    @Test func aDragEndsWhenTheBarLeavesItsWindow() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 200))
+        let bar = bar()
+        window.addSubview(bar)
+        var told: [Int] = []
+        bar.onSelect = { told.append($0) }
+
+        let start = lensCentre(bar)
+        bar.debugBeginDrag(atX: start)
+        for step in 1...4 {
+            bar.debugDrag(toX: start + CGFloat(step) * 12, after: 0.05)
+        }
+        // The denominator: a drag really is in progress.
+        #expect(bar.debugStripAcceptsScrolling == false, "no drag was ever under way")
+        #expect(bar.debugEdgeScrollIsArmed, "no drag was ever under way")
+
+        bar.removeFromSuperview()
+
+        #expect(bar.debugStripAcceptsScrolling, "the strip stayed locked after the bar left")
+        #expect(bar.debugEdgeScrollIsArmed == false, "the display link kept the bar alive")
+        // And it LANDED, on an icon, saying so once — not a pill left between two.
+        #expect(told == [bar.selectedIndex])
+        if let alignment = bar.debugLensAlignment {
+            #expect(abs(alignment.lens.midX - alignment.segment.midX) < 0.5,
+                    "the pill was left at \(alignment.lens.midX), its icon is at \(alignment.segment.midX)")
+        } else {
+            Issue.record("no icon is chosen after the drag")
+        }
+    }
+
     @Test func theWidthGrowsWithTheIconsSoOverflowIsReal() {
         let two = Array(Self.four.prefix(2))
         let narrow = bar(two).intrinsicContentSize.width

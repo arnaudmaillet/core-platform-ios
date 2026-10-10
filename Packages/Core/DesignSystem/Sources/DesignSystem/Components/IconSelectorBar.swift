@@ -585,6 +585,13 @@ public final class IconSelectorBar: UIView {
         // when it comes back — the next host may be a different ring.
         if window == nil { remeasure.reset() }
         if window == nil { pillMotion.cancel() } else { pillMotion.snapOnNextMove() }
+        // ⚠️ **A DRAG DOES NOT SURVIVE THE WINDOW IT WAS IN** — `PagedTabBar`'s
+        // rule, for the same reason. A bar taken away mid-drag gets no
+        // `.cancelled` from its recognizer, and the end-of-strip `CADisplayLink`
+        // RETAINS its target: the bar would stay alive and ticking, its strip
+        // locked and its pill lifted between two icons. Ended as a release, so
+        // it lands where the finger left it.
+        if window == nil, drag != nil { endDrag() }
         guard window != nil, capsule.effect == nil, hosting.drawsBackdrop else { return }
         materialiseCapsule()
     }
