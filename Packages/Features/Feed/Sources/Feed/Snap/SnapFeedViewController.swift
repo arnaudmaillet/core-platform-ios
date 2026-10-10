@@ -758,7 +758,7 @@ final class SnapFeedViewController: UIViewController {
         if hasAppeared { retireTabBarOnReturn() }
         // A return may follow a follow made elsewhere — on the author's own
         // profile, pushed from this pill. With the channel wired that change
-        // has already been HEARD (`followGraphDidChange`); without one, ask
+        // has already been HEARD (`SnapAuthorFollowStore.graphDidChange`); without one, ask
         // again for the author on the pill. Either answer lands through the
         // landing install.
         if hasAppeared, followSubscription == nil, let author = authorIdentityView.shownAuthor?.authorID {
@@ -4357,9 +4357,12 @@ final class SnapFeedViewController: UIViewController {
             pageHeight: collectionView.bounds.height,
             itemCount: orderedIDs.count,
             canScrub: canAnimateBarItems,
+            // ⚠️ Runs while `pillScrub` is being mutated: it must never touch
+            // `pillScrub` (a `forgetPair()` from here would trap with a
+            // simultaneous-access error). It reads only the models and the
+            // follow badges.
             pillDiffers: { self.authorPillDiffers(upper: $0) }
         ) else { return endBarPillScrub() }
-        let position = step.position
         let authorBlur = step.blur
         // Blur first — a scrub that starts on this frame pictures the content
         // being left — then the swap, which lands under that blur on the
@@ -4370,7 +4373,7 @@ final class SnapFeedViewController: UIViewController {
            (authorBlur * 10).rounded() != (debugLastScrubBlur * 10).rounded() {
             debugLastScrubBlur = authorBlur
             print(String(format: "[pill-probe] scrub pos=%.3f blur=%.2f alpha=%.2f",
-                         position, authorBlur, authorIdentityView.subviews.first?.alpha ?? -1))
+                         step.position, authorBlur, authorIdentityView.subviews.first?.alpha ?? -1))
         }
         #endif
         guard let index = step.swapTo,
@@ -4385,7 +4388,7 @@ final class SnapFeedViewController: UIViewController {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
             print(String(format: "[pill-probe] scrub swap -> %d at %.3f blur=%.2f shown=%.2f",
-                         index, position, authorBlur, authorIdentityView.shownScrubBlur))
+                         index, step.position, authorBlur, authorIdentityView.shownScrubBlur))
         }
         #endif
     }

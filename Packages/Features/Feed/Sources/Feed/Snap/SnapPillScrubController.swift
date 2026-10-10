@@ -27,8 +27,9 @@ import CoreModels
 /// (the screen's `canAnimateBarItems`): the flight's landing settles the
 /// pills, as before.
 ///
-/// Kept free of UIKit so the steps are unit-tested without a scroll view
-/// (`SnapPillScrubControllerTests`).
+/// Kept free of scroll views and gestures, so the steps are unit-tested with
+/// plain numbers (`SnapPillScrubControllerTests`); it only reads the pill's
+/// follow badge type.
 struct SnapPillScrubController {
     /// What the pill does on one scroll frame.
     struct Step: Equatable {
