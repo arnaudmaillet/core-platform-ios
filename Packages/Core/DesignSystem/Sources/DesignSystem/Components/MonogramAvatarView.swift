@@ -138,15 +138,23 @@ public final class MonogramAvatarView: UIView {
     /// Initials on the app's rule: the display name when there is one, the
     /// handle when there is not — the first letter of the first two words,
     /// "?" when there is nothing to read.
+    ///
+    /// A sigil is never an initial, on either side (#811): Search's Recent
+    /// stores `displayName ?? handle` as its name, so "@grace" can arrive as a
+    /// NAME and must read "G" like the same person's Suggestion row. A name
+    /// that is nothing but sigils falls back to the handle.
     nonisolated public static func monogram(name: String, handle: String) -> String {
-        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = trimmed.isEmpty ? handle.trimmingCharacters(in: CharacterSet(charactersIn: "@ ")) : trimmed
+        let trimmed = name.trimmingCharacters(in: sigilAndSpace)
+        let source = trimmed.isEmpty ? handle.trimmingCharacters(in: sigilAndSpace) : trimmed
         let initials = source
             .split(separator: " ")
             .prefix(2)
             .compactMap { $0.first.map { String($0).uppercased() } }
         return initials.isEmpty ? "?" : initials.joined()
     }
+
+    /// Built once: the rule runs in cell configuration.
+    nonisolated private static let sigilAndSpace = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "@"))
 
     public func setMonogram(_ monogram: String) {
         label.text = monogram

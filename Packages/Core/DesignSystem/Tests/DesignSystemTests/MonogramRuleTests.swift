@@ -27,6 +27,14 @@ struct MonogramRuleTests {
         #expect(MonogramAvatarView.monogram(name: "", handle: "@") == "?")
     }
 
+    /// Search's Recent stores `displayName ?? handle` as the name, so a
+    /// handle can arrive on the NAME side and must read the same.
+    @Test func aSigilInTheNameIsNeverAnInitialEither() {
+        #expect(MonogramAvatarView.monogram(name: "@grace", handle: "") == "G")
+        #expect(MonogramAvatarView.monogram(name: "@", handle: "zed") == "Z")
+        #expect(MonogramAvatarView.monogram(name: " @ ", handle: "") == "?")
+    }
+
     @Test func nothingToReadIsAQuestionMark() {
         #expect(MonogramAvatarView.monogram(name: "", handle: "") == "?")
     }

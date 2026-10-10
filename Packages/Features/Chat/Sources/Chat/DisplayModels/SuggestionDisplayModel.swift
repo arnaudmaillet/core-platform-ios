@@ -19,7 +19,7 @@ public struct SuggestionDisplayModel: Equatable, Sendable, Identifiable {
         displayName = account.displayName
         handleText = account.handle.isEmpty ? "" : "@\(account.handle)"
         reasonText = Self.reasonText(account.reason)
-        monogram = MonogramAvatarView.monogram(name: account.displayName, handle: "")
+        monogram = MonogramAvatarView.monogram(name: account.displayName, handle: account.handle)
         avatarURL = account.avatarURL
         self.isFollowing = isFollowing
     }
