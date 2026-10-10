@@ -846,7 +846,6 @@ final class MediaEditorViewController: UIViewController {
     /// band on every return from the finalisation screen.
     private var hasSelectedDebugCategory = false
 
-    #if DEBUG
     private var hasSeededDebugCuts = false
 
     /// `-upload-seed-cuts N` cuts the first clip the track opens on into N equal
@@ -883,21 +882,6 @@ final class MediaEditorViewController: UIViewController {
         if let raw = Self.debugValue(after: "-open-transitions"), let seam = Int(raw) {
             openTransitions(atSeam: seam)
         }
-    }
-
-    #endif
-
-    /// The value after a flag, `-upload-category 3` style.
-    ///
-    /// ⚠️ **THE PICKER'S `debugArgument` IS PRIVATE TO IT**, so this is stated
-    /// here rather than reached for. Two small readers beat widening a seam for
-    /// a DEBUG convenience.
-    static func debugValue(after flag: String) -> String? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: flag), arguments.count > index + 1 else {
-            return nil
-        }
-        return arguments[index + 1]
     }
     #endif
 
@@ -1781,7 +1765,6 @@ final class MediaEditorViewController: UIViewController {
     /// Internal for tests: the geometry the bar was last measured at, and what
     /// the strip's own width constraint says — to tell a stale measurement from
     /// a stale write.
-    var debugBarGeometry: ToolbarGeometry { barGeometry }
     var debugCategoryWidthConstant: CGFloat { categoryBarWidth.constant }
     /// Internal for tests: the ceiling the pill is carrying.
     var debugSoundPillCap: CGFloat { soundPillCap.constant }
@@ -4026,32 +4009,6 @@ extension MediaEditorViewController {
 
 #if DEBUG
 extension MediaEditorViewController {
-    /// Where the canvas actually IS, behind `-upload-log-sheet`.
-    ///
-    /// ⚠️ **TWO CAUSES LOOK IDENTICAL IN A SCREENSHOT AND NEED OPPOSITE FIXES:**
-    /// a canvas laid out BETWEEN the bars, or a canvas running the full sheet
-    /// under bars that paint over it. Both show a picture that stops at the
-    /// chrome. Two rounds were spent guessing between them — transparent bar
-    /// appearances, then `extendedLayoutIncludesOpaqueBars` — and neither moved
-    /// a pixel. These are the numbers that tell them apart: if the CELL spans
-    /// the sheet, the bars are painting; if it stops short, the layout is.
-    func logCanvas(_ moment: String) {
-        guard ProcessInfo.processInfo.arguments.contains("-upload-log-sheet") else { return }
-        let bar = navigationController?.navigationBar
-        let foot = navigationController?.toolbar
-        let cell = canvas.cellForItem(at: IndexPath(item: 0, section: 0))
-        print("""
-        [editor \(moment)] \
-        window=\(view.window?.bounds.size.debugDescription ?? "nil") \
-        view=\(view.frame) safeArea=\(view.safeAreaInsets) \
-        canvas=\(canvas.frame) inset=\(canvas.contentInset) adjusted=\(canvas.adjustedContentInset) \
-        cell=\(cell?.frame.debugDescription ?? "nil") \
-        navBar=\(bar?.frame.debugDescription ?? "nil") barTranslucent=\(bar?.isTranslucent.description ?? "nil") \
-        toolbar=\(foot?.frame.debugDescription ?? "nil") footTranslucent=\(foot?.isTranslucent.description ?? "nil") \
-        extendedOpaque=\(extendedLayoutIncludesOpaqueBars) edges=\(edgesForExtendedLayout.rawValue)
-        """)
-    }
-
     /// Internal for tests: the canvas's own bounds, to compare a page against.
     var debugCanvasBounds: CGRect { canvas.bounds }
 
@@ -4105,9 +4062,6 @@ extension MediaEditorViewController {
     }
     /// Internal for tests: the momentary bar the timeline mode puts opposite it.
     var debugActionBar: IconActionBar { actionBar }
-    /// Internal for tests: the pill that holds the leading slot the rest of the
-    /// time.
-    var debugSoundPill: UIView { soundPill }
     /// Internal for tests: the width each strip is being held to, or nil where
     /// the rule is not being applied.
     var debugStripWidths: (leading: CGFloat, trailing: CGFloat)? {
@@ -4244,8 +4198,6 @@ extension MediaEditorViewController {
     /// control to tap. It is the crop tools' now — the header walks the
     /// author's history instead.
     func debugTapResetCrop() { resetCrop() }
-    /// Internal for tests: whether a display link is still scheduled.
-    var debugFollowerIsScheduled: Bool { followerProxy.link != nil }
     /// Internal for tests: whether the bar is offering the two arrows, and on
     /// which side.
     var debugBarOffersTheArrows: Bool {
