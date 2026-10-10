@@ -1861,12 +1861,26 @@ final class SnapFeedViewController: UIViewController {
               let before = followRelationsByAuthor[author] else { return }
         followsInFlight.insert(author)
         setFollowRelation(before.settingFollow(true), for: author)
+        // Named now, while the pill shows them: by the time the graph answers
+        // the viewer may have swiped to someone else.
+        let name = authorIdentityView.shownAuthor.flatMap { $0.authorID == author ? Self.followName(of: $0) : nil }
         Task { [weak self] in
             let accepted = (try? await socialGraph.setFollowing(true, for: author)) != nil
             guard let self else { return }
             self.followsInFlight.remove(author)
-            if !accepted { self.setFollowRelation(before, for: author) }
+            guard !accepted else { return }
+            // The "+" comes back — and says why (#802): a mark that undoes
+            // itself without a word reads as a glitch, or is missed entirely.
+            self.setFollowRelation(before, for: author)
+            Feedback.failure(name.map { "Couldn't follow \($0)" } ?? "Couldn't follow", from: self)
         }
+    }
+
+    /// How a follow failure names the author: their `@handle` when the meta
+    /// line carries one, otherwise their display name.
+    private static func followName(of model: FeedItemDisplayModel) -> String {
+        let first = model.metaText.components(separatedBy: " · ").first ?? ""
+        return first.hasPrefix("@") ? first : model.authorName
     }
 
 

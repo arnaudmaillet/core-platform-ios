@@ -139,6 +139,41 @@ struct ChatSendAndMuteTests {
         #expect(await settle { !catalog.isMuted(ConversationID("c1")) }, "a refused mute stayed on")
     }
 
+    /// ⚠️ A MUTE IS CONFIRMED ONCE THE SERVER HAS ANSWERED (#802): the row
+    /// flips at once, the confirmation waits for the write.
+    @Test func aMuteConfirmsOnlyAfterTheServerAnswers() async {
+        let provider = TextStubProvider(failures: 0)
+        let catalog = InboxCatalog(repository: provider)
+        let answers = Answers()
+        catalog.setMute(ConversationID("c1"), muted: true, until: nil) { answers.items.append($0) }
+        #expect(catalog.isMuted(ConversationID("c1")), "the row waited for the server")
+        #expect(answers.items.isEmpty, "confirmed before the server answered")
+        #expect(await settle { !answers.items.isEmpty })
+        #expect(answers.items == [true])
+        #expect(await provider.mutes == [MuteCall(id: "c1", muted: true)])
+    }
+
+    /// A refused mute answers false, after it has been put back.
+    @Test func aRefusedMuteAnswersFalseOnceRolledBack() async {
+        let provider = TextStubProvider(failures: 0, refusesMute: true)
+        let catalog = InboxCatalog(repository: provider)
+        let mutedWhenAnswered = Answers()
+        let answers = Answers()
+        catalog.toggleMute(ConversationID("c1")) { confirmed in
+            answers.items.append(confirmed)
+            mutedWhenAnswered.items.append(catalog.isMuted(ConversationID("c1")))
+        }
+        #expect(await settle { !answers.items.isEmpty })
+        #expect(answers.items == [false])
+        #expect(mutedWhenAnswered.items == [false], "the refusal was answered before the rollback")
+    }
+
+    /// What a completion answered, read after an await.
+    @MainActor
+    private final class Answers {
+        var items: [Bool] = []
+    }
+
     /// The server's mute reaches the inbox on load (`InboxEntryView.muted`).
     @Test func theServersMuteIsAdopted() async {
         let provider = TextStubProvider(failures: 0, mutedOnServer: ["c1"])

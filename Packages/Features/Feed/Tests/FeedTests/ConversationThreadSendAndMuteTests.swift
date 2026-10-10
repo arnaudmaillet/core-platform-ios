@@ -54,10 +54,26 @@ struct ConversationThreadSendAndMuteTests {
             onMutedChange?(self.muted)
         }
         private(set) var mutes: [(muted: Bool, until: Date?)] = []
-        func setMuted(_ muted: Bool, until: Date?) {
+        /// The server's answers not given yet, oldest first: a test answers
+        /// them with `answerMute(_:)`.
+        private var pendingMutes: [@MainActor (Bool) -> Void] = []
+        func setMuted(_ muted: Bool, until: Date?, completion: @escaping @MainActor (Bool) -> Void) {
             mutes.append((muted, until))
+            let before = self.muted
             self.muted = muted
             onMutedChange?(muted)
+            pendingMutes.append { [weak self] confirmed in
+                if !confirmed, let self {
+                    self.muted = before
+                    self.onMutedChange?(before)
+                }
+                completion(confirmed)
+            }
+        }
+        /// The server answers the oldest pending mute.
+        func answerMute(_ confirmed: Bool) {
+            guard !pendingMutes.isEmpty else { return }
+            pendingMutes.removeFirst()(confirmed)
         }
     }
 
@@ -187,20 +203,36 @@ struct ConversationThreadSendAndMuteTests {
         }
     }
 
-    /// Muting says so at the foot of the screen, as signing in does.
-    @Test func muteShowsAToast() throws {
+    /// Muting says so at the foot of the screen, as signing in does — once
+    /// the server has written it (#802), never on the tap.
+    @Test func muteShowsAToastOnceTheServerAnswers() throws {
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
         defer { window.isHidden = true }
         #expect(bell(screen)?.primaryAction != nil)
         screen.debugTapBell()
         #expect(driver.mutes.last?.muted == true)
         #expect(driver.mutes.last?.until == nil, "a tap mutes until turned back on")
-        #expect(Self.firstToast(in: screen.view) != nil, "no toast confirmed the mute")
+        #expect(Self.firstToast(in: screen.view) == nil, "the mute was confirmed before the server answered")
+        driver.answerMute(true)
+        let toast = try #require(Self.firstToast(in: screen.view), "no toast confirmed the mute")
+        #expect(toast.style == .confirmation)
 
         // A duration mutes until that time.
         screen.debugPickMuteDuration(0)
         let until = try #require(driver.mutes.last?.until, "a duration muted for ever")
         #expect(abs(until.timeIntervalSinceNow - 3_600) < 5)
+    }
+
+    /// A refused mute puts the bell back and says it failed (#802).
+    @Test func aRefusedMuteRollsBackWithAFailureToast() throws {
+        let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        screen.debugTapBell()
+        #expect(bell(screen)?.image == UIImage(systemName: "bell.slash"))
+        driver.answerMute(false)
+        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "the refused mute stayed on")
+        let toast = try #require(Self.firstToast(in: screen.view), "the refusal was silent")
+        #expect(toast.style == .failure)
     }
 
     private static func firstToast(in view: UIView) -> ToastView? {
@@ -443,8 +475,8 @@ struct ConversationThreadSendAndMuteTests {
         #expect(screen.debugPeerFollowBadge == .following, "the read from before the follow put the + back")
     }
 
-    /// A refused follow puts the "+" back.
-    @Test func aRefusedFollowPutsThePlusBack() async {
+    /// A refused follow puts the "+" back — and says so (#802).
+    @Test func aRefusedFollowPutsThePlusBackAndSaysSo() async {
         let graph = Graph(.notFollowing)
         graph.refuses = true
         let (screen, driver, window) = makeScreen(graph: graph)
@@ -454,6 +486,7 @@ struct ConversationThreadSendAndMuteTests {
         screen.followPeer(ProfileID("them"))
         #expect(screen.debugPeerFollowBadge == .following, "no optimistic follow")
         #expect(await settle { screen.debugPeerFollowBadge == .follow }, "the refusal stuck")
+        #expect(Self.firstToast(in: screen.view)?.style == .failure, "the refused follow was silent")
     }
 
     /// The pill draws the relation as a vertical post's author pill does —

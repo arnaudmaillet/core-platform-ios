@@ -326,6 +326,58 @@ struct ProfileViewModelTests {
         #expect(lastFollowerText(phases) == "10")
     }
 
+    /// ⚠️ A refused follow is SAID, not only rolled back (#802): a button that
+    /// flips back on its own reads as a glitch. A toast, not the alert
+    /// `failed` raises — the button already shows the truth.
+    @Test func aFailedFollowEmitsAFailureResult() async {
+        let provider = StubProfileProvider(
+            .success(sampleProfile(followers: .exact(10))),
+            relationship: .other(isFollowing: false, isBlocked: false),
+            setFollowingError: SampleError()
+        )
+        let viewModel = ProfileViewModel(repository: provider, source: .profile(ProfileID("prof-1")))
+        let follow = followRecorder(viewModel)
+        let results = actionRecorder(viewModel)
+        viewModel.viewDidLoad()
+        await settle(until: { follow().last == .follow })
+
+        viewModel.toggleFollow()
+        #expect(results().isEmpty, "the failure was said before the server answered")
+        await settle(until: { !results().isEmpty })
+
+        #expect(results() == [.followFailed(message: "Couldn't follow @ada")])
+        #expect(follow().last == .follow)
+    }
+
+    /// An unfollow the server refused says so in its own words.
+    @Test func aFailedUnfollowEmitsAnUnfollowFailure() async {
+        let provider = StubProfileProvider(
+            .success(sampleProfile(followers: .exact(10))),
+            relationship: .other(isFollowing: true, isBlocked: false),
+            setFollowingError: SampleError()
+        )
+        let viewModel = ProfileViewModel(repository: provider, source: .profile(ProfileID("prof-1")))
+        let follow = followRecorder(viewModel)
+        let results = actionRecorder(viewModel)
+        viewModel.viewDidLoad()
+        await settle(until: { follow().last == .following })
+
+        viewModel.toggleFollow()
+        await settle(until: { !results().isEmpty })
+
+        #expect(results() == [.followFailed(message: "Couldn't unfollow @ada")])
+        #expect(follow().last == .following)
+    }
+
+    /// Every refused follow change names what failed — short, no period.
+    @Test func followFailureMessagesFollowTheToastsRule() {
+        #expect(ProfileViewModel.followFailureMessage(handle: "@ada", change: .follow) == "Couldn't follow @ada")
+        #expect(ProfileViewModel.followFailureMessage(handle: "@ada", change: .unfollow) == "Couldn't unfollow @ada")
+        #expect(ProfileViewModel.followFailureMessage(handle: "@ada", change: .request) == "Couldn't ask to follow @ada")
+        #expect(ProfileViewModel.followFailureMessage(handle: nil, change: .withdraw) == "Couldn't withdraw your request")
+        #expect(ProfileViewModel.followFailureMessage(handle: nil, change: .follow) == "Couldn't follow this profile")
+    }
+
     @Test func messageTappedRoutesToDirectMessageForOthers() async {
         let router = SpyRouter()
         let viewModel = ProfileViewModel(

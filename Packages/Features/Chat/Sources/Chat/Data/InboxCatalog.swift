@@ -386,25 +386,37 @@ final class InboxCatalog {
 
     /// Mutes or unmutes the conversation (#719): at once on screen, written
     /// through `MuteConversation`, and put back if the server refuses.
-    func toggleMute(_ id: ConversationID) {
-        setMute(id, muted: !muted.contains(id), until: nil)
+    func toggleMute(_ id: ConversationID, completion: (@MainActor (_ confirmed: Bool) -> Void)? = nil) {
+        setMute(id, muted: !muted.contains(id), until: nil, completion: completion)
     }
 
     /// Mutes until `until` — nil: until turned back on — or unmutes (#729).
-    func setMute(_ id: ConversationID, muted mute: Bool, until: Date?) {
+    ///
+    /// The row (and the thread's bell) flips at once; `completion` answers
+    /// only once the server has (#802): true when written, false when refused
+    /// and put back. A confirmation belongs THERE — shown on the tap, it
+    /// claimed a mute the server could still refuse, and the rollback that
+    /// followed said nothing.
+    func setMute(
+        _ id: ConversationID, muted mute: Bool, until: Date?,
+        completion: (@MainActor (_ confirmed: Bool) -> Void)? = nil
+    ) {
         let wasMuted = muted.contains(id)
         if mute { muted.insert(id) } else { muted.remove(id) }
         mutesInFlight.insert(id)
         emit()
         Task { [weak self] in
             guard let self else { return }
+            var confirmed = true
             do {
                 try await self.repository.setMuted(mute, until: until, for: id)
             } catch {
+                confirmed = false
                 if wasMuted { self.muted.insert(id) } else { self.muted.remove(id) }
                 self.emit()
             }
             self.mutesInFlight.remove(id)
+            completion?(confirmed)
         }
     }
 

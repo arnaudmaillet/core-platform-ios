@@ -1876,6 +1876,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             Feedback.success("Post deleted", symbol: "trash.fill", from: self)
         case .reported:
             Feedback.success("Report sent", symbol: "flag.fill", from: self)
+        case .followFailed(let message):
+            // A toast, not the alert below: the button has already flipped
+            // back, so there is nothing to decide — only why it moved (#802).
+            Feedback.failure(message, from: self)
         case .failed(let message):
             let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default))
