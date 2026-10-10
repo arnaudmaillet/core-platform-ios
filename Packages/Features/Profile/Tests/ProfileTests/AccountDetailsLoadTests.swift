@@ -54,6 +54,33 @@ struct AccountDetailsLoadTests {
         #expect(model.details == SwitchableAccount.sample)
     }
 
+    /// Review of #799: kept over a failed re-read, the pre-edit "Add" would
+    /// push the one-time date-of-birth editor again.
+    @Test func aFailedReReadAfterAnEditShowsTheFailedRowNotThePreEditValues() async {
+        let before = AccountDetails(email: "a@b.c", emailVerified: true, phone: "", phoneVerified: false, country: "FR")
+        let account = SwitchableAccount(details: before)
+        let model = AccountDetailsViewModel(account: account)
+        await model.load()
+        #expect(model.details?.dateOfBirth == nil)
+        await account.setDetails(SwitchableAccount.sample)
+        await account.setFails(true)
+        #expect(await model.reloadAfterEdit() == false)
+        #expect(model.phase == .failed(message: AccountDetailsViewModel.failureMessage))
+        #expect(model.details == nil)
+        await account.setFails(false)
+        #expect(await model.load())
+        #expect(model.details?.dateOfBirth == SwitchableAccount.sample.dateOfBirth)
+    }
+
+    @Test func aReReadAfterAnEditShowsTheEditedValues() async {
+        let account = SwitchableAccount(details: AccountDetails(email: "a@b.c", emailVerified: true, phone: "", phoneVerified: false, country: "FR"))
+        let model = AccountDetailsViewModel(account: account)
+        await model.load()
+        await account.setDetails(SwitchableAccount.sample)
+        #expect(await model.reloadAfterEdit())
+        #expect(model.details == SwitchableAccount.sample)
+    }
+
     @Test func aRefreshShowsTheNewValues() async {
         let account = SwitchableAccount()
         let model = AccountDetailsViewModel(account: account)

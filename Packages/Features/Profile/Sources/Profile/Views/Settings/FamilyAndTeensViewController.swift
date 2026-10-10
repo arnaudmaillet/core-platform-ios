@@ -49,18 +49,18 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
     static let failedText = "Couldn't load your account's age. Tap to try again."
 
     var openSection: ((SettingsSection) -> Void)?
-    /// Throws when the account can't be read — never answers "adult" for it.
-    private let isTeen: () async throws -> Bool
+    /// The account's age bracket, read on arrival and from the failed row;
+    /// its closure throws when the account can't be read.
+    private let ageCheck: TeenAgeCheck
     private let screenTime: ScreenTimeStore
-    /// The account's age bracket, read on arrival and from the failed row.
-    private var age: Loadable<Bool> = .loading
+    private var age: Loadable<Bool> { ageCheck.age }
     /// True or false once known; nil while loading or after a failed read.
     private var teen: Bool? { age.content }
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
     init(isTeen: @escaping () async throws -> Bool, screenTime: ScreenTimeStore = .standard) {
-        self.isTeen = isTeen
+        ageCheck = TeenAgeCheck(isTeen: isTeen)
         self.screenTime = screenTime
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.familyAndTeens.title
@@ -90,14 +90,14 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
     }
 
     /// Reads the age; a retry that fails again keeps the failed row and says
-    /// so.
+    /// so. A tap while a read runs sends nothing (`TeenAgeCheck`).
     private func readAge() {
         let isRetry = age.isFailed
         Task { [weak self] in
             guard let self else { return }
-            age = await Self.readAge(isTeen)
+            let succeeded = await ageCheck.read()
             applySnapshot()
-            if isRetry, age.isFailed {
+            if isRetry, !succeeded {
                 ToastView.present("Couldn't load your account's age", symbol: "exclamationmark.triangle", in: view)
             }
         }
@@ -165,6 +165,8 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             guard let self else { return }
             cell.accessories = []
+            // Only a failed row is tapped to retry: VoiceOver says so (#799).
+            cell.accessibilityTraits.remove(.button)
             var content = UIListContentConfiguration.subtitleCell()
             content.secondaryTextProperties.color = .secondaryLabel
             switch item {
@@ -186,6 +188,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                 content = .cell()
                 content.text = Self.failedText
                 content.textProperties.color = .secondaryLabel
+                cell.accessibilityTraits.insert(.button)
             }
             cell.contentConfiguration = content
         }

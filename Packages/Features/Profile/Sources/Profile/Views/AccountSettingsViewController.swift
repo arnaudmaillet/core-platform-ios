@@ -131,6 +131,8 @@ final class AccountSettingsViewController: UIViewController {
             content.textProperties.color = .secondaryLabel
             cell.contentConfiguration = content
             cell.accessories = []
+            // Tapped to retry: VoiceOver says so.
+            cell.accessibilityTraits.insert(.button)
         }
 
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
@@ -179,15 +181,22 @@ final class AccountSettingsViewController: UIViewController {
         return snapshot
     }
 
-    /// After the date of birth, the email or the phone changed — or from the
-    /// failed row: re-read the account. A read that fails again keeps what
-    /// is on screen (values, or the failed row) and says so with a toast.
-    private func reloadAccount() {
+    /// The failed row's retry: the skeleton comes back while it runs (so a
+    /// second tap finds no row to hit), and a read that fails again keeps
+    /// the failed row and says so with a toast.
+    private func retryAccount() {
         Task { [weak self] in
             guard let self else { return }
             guard await viewModel.load() == false else { return }
             ToastView.present("Couldn't load your account details", symbol: "exclamationmark.triangle", in: view)
         }
+    }
+
+    /// After the date of birth, the email or the phone changed: re-read the
+    /// account. A failed re-read shows the failed row rather than the
+    /// pre-edit values — see `AccountDetailsViewModel.reloadAfterEdit`.
+    private func reloadAfterEdit() {
+        Task { await viewModel.reloadAfterEdit() }
     }
 
     private func render() {
@@ -277,7 +286,7 @@ final class AccountSettingsViewController: UIViewController {
             if details?.dateOfBirth != nil {
                 presentInfo("Only you can see your date of birth. To correct it, contact support.")
             } else if let setter = account as? any AccountBirthDateSetting {
-                push(BirthDateViewController(setter: setter, onSaved: { [weak self] in self?.reloadAccount() }))
+                push(BirthDateViewController(setter: setter, onSaved: { [weak self] in self?.reloadAfterEdit() }))
             } else {
                 presentInfo("Adding your date of birth isn't available yet.")
             }
@@ -317,7 +326,7 @@ final class AccountSettingsViewController: UIViewController {
         ) { [weak self] stored in
             guard let self else { return }
             reportReadOnly(Self.contactChangedNotice(kind, to: stored))
-            reloadAccount()
+            reloadAfterEdit()
             navigationController?.popToViewController(self, animated: true)
         })
     }
@@ -494,7 +503,7 @@ extension AccountSettingsViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
         case .row(let row): handle(row)
-        case .failed: reloadAccount()
+        case .failed: retryAccount()
         case .skeleton, nil: break
         }
     }

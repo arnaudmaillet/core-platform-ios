@@ -160,8 +160,11 @@ final class SecurityCheckupViewController: UIViewController {
                 content.textProperties.color = .secondaryLabel
                 cell.contentConfiguration = content
                 cell.accessories = []
+                // Tapped to retry: VoiceOver says so.
+                cell.accessibilityTraits.insert(.button)
                 return
             }
+            cell.accessibilityTraits.remove(.button)
             var content = UIListContentConfiguration.subtitleCell()
             content.text = item.title
             content.secondaryText = item.detail

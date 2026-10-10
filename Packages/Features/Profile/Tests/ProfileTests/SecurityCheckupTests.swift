@@ -96,6 +96,22 @@ struct SecurityCheckupTests {
         #expect(model.sessionCount == nil)
     }
 
+    /// A double tap on a failed line (or an appearance mid-retry): one read,
+    /// so offline one toast.
+    @Test(.timeLimit(.minutes(10))) func aSecondRetryWhileOneIsInFlightSendsNoSecondRead() async {
+        let gate = ReadGate()
+        let account = SwitchableAccount(fails: true, gate: gate)
+        let model = SecurityCheckupViewModel(account: account, sessions: nil)
+        let first = Task { await model.reload(.account) }
+        await gate.waitUntilEntered()
+        #expect(model.reading == [.account])
+        #expect(await model.reload(.account), "the duplicate has nothing to report")
+        await gate.release()
+        #expect(await first.value == false)
+        #expect(await account.reads == 1)
+        #expect(model.reading.isEmpty)
+    }
+
     /// The checkup reloads on every appearance; a line it already knows
     /// keeps its value when a later read fails.
     @Test func aFailedRefreshKeepsTheLinesAlreadyShown() async {

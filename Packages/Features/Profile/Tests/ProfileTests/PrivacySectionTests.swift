@@ -114,6 +114,22 @@ struct PrivacySectionTests {
         #expect(model.postSharing == PostSharing(showsLikeCounts: false, allowsDownloads: true))
     }
 
+    /// A double tap on a failed row: one read, so offline one toast.
+    @Test(.timeLimit(.minutes(10))) func aSecondRetryWhileOneIsInFlightSendsNoSecondRead() async {
+        let gate = ReadGate()
+        let sharing = GatedSharing(gate: gate)
+        let model = PrivacySectionViewModel(visibility: StubVisibility(isPrivate: false), sharing: sharing)
+        let first = Task { await model.reload(.postSharing) }
+        await gate.waitUntilEntered()
+        #expect(model.reading == [.postSharing])
+        #expect(await model.reload(.postSharing), "the duplicate has nothing to report")
+        await gate.release()
+        #expect(await first.value == false)
+        #expect(await sharing.reads == 1)
+        #expect(model.reading.isEmpty)
+        #expect(model.failedSides == [.postSharing])
+    }
+
     /// A side the screen can't set is neither shown nor failed.
     @Test func aSideWithoutASourceIsNeverFailed() async {
         let model = PrivacySectionViewModel(visibility: StubVisibility(isPrivate: true))
@@ -123,7 +139,23 @@ struct PrivacySectionTests {
     }
 }
 
-private actor StubSides: PostWindowManaging, CommentAudienceManaging, PostSharingManaging, InteractionAudienceManaging {
+/// Offline, and parked at the gate until the test releases it.
+private actor GatedSharing: PostSharingManaging {
+    private let gate: ReadGate
+    private(set) var reads = 0
+
+    init(gate: ReadGate) { self.gate = gate }
+
+    func postSharing() async throws -> PostSharing {
+        reads += 1
+        await gate.pass()
+        throw ProfileError.notAuthenticated
+    }
+
+    func setPostSharing(_ sharing: PostSharing) async throws {}
+}
+
+private actor StubSides:PostWindowManaging, CommentAudienceManaging, PostSharingManaging, InteractionAudienceManaging {
     private var fails: Bool
     private(set) var commentReads = 0
     private(set) var windowReads = 0

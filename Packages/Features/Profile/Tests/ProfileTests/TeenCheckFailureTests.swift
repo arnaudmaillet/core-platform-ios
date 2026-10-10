@@ -30,6 +30,31 @@ struct TeenCheckFailureTests {
         #expect(await FamilyAndTeensViewController.readAge { false } == .content(false))
     }
 
+    @Test func theAgeCheckFailsThenLoadsOnRetry() async {
+        let account = SwitchableAccount(fails: true)
+        let check = TeenAgeCheck { try await account.currentAccount().ageBracket.isTeen }
+        #expect(await check.read() == false)
+        #expect(check.age.isFailed)
+        await account.setFails(false)
+        #expect(await check.read())
+        #expect(check.age == .content(false))
+    }
+
+    /// A double tap on the failed row: one read, so offline one toast.
+    @Test(.timeLimit(.minutes(10))) func aSecondAgeReadWhileOneIsInFlightSendsNoSecondRead() async {
+        let gate = ReadGate()
+        let account = SwitchableAccount(fails: true, gate: gate)
+        let check = TeenAgeCheck { try await account.currentAccount().ageBracket.isTeen }
+        let first = Task { await check.read() }
+        await gate.waitUntilEntered()
+        #expect(check.isReading)
+        #expect(await check.read(), "the duplicate has nothing to report")
+        await gate.release()
+        #expect(await first.value == false)
+        #expect(await account.reads == 1)
+        #expect(!check.isReading)
+    }
+
     /// What You See: Standard is only offered once the age says adult.
     @Test func aFailedAgeReadFailsTheSensitiveContentSection() async {
         let loaded = await WhatYouSeeViewController.loadSensitive(preferences: StubPreferences()) { throw Offline() }

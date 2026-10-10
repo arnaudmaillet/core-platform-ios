@@ -83,6 +83,12 @@ final class DataExportViewController: UIViewController {
             switch item {
             case .status:
                 content.text = Self.statusText(for: viewModel.phase, email: email)
+                // Failed, the status row is tapped to retry: VoiceOver says so (#799).
+                if viewModel.phase == .failed {
+                    cell.accessibilityTraits.insert(.button)
+                } else {
+                    cell.accessibilityTraits.remove(.button)
+                }
                 content.textProperties.color = .secondaryLabel
                 content.image = UIImage(systemName: "doc.zipper")
                 content.imageProperties.tintColor = .label

@@ -64,6 +64,8 @@ final class PrivacySectionViewModel {
         didSet { if failedSides != oldValue { onChange?() } }
     }
     var onChange: (() -> Void)?
+    /// Side settings with a read in flight — see `reload(_:)`.
+    private(set) var reading: Set<SideSetting> = []
 
     private let visibility: any ProfileVisibilityManaging
     let requests: (any FollowRequestsManaging)?
@@ -157,8 +159,16 @@ final class PrivacySectionViewModel {
     /// screen outlives a failed refresh; with none, the side is marked
     /// failed. Returns false when the read failed (the screen toasts a
     /// retry that fails again). A side the screen can't set reads as done.
+    ///
+    /// ⚠️ **ONE READ PER SIDE AT A TIME.** A double tap on a failed row used
+    /// to send two reads and, offline, stack two toasts. A call made while
+    /// that side is already being read sends nothing and returns true — the
+    /// read in flight reports for both.
     @discardableResult
     func reload(_ side: SideSetting) async -> Bool {
+        guard !reading.contains(side) else { return true }
+        reading.insert(side)
+        defer { reading.remove(side) }
         do {
             switch side {
             case .postWindow:

@@ -42,4 +42,20 @@ final class AccountDetailsViewModel {
         if case .success = result { return true }
         return false
     }
+
+    /// Re-reads after an edit (date of birth, email, phone).
+    ///
+    /// ⚠️ **THE VALUES ON SCREEN ARE STALE THE MOMENT THE EDIT LANDS.** Kept
+    /// over a failed re-read, Date of Birth would still say "Add" and push
+    /// its one-time editor again for a date the server now holds. So a
+    /// failed re-read here drops them for the failed row, whose retry reads
+    /// the account afresh; unlike `load()`, nothing is kept.
+    @discardableResult
+    func reloadAfterEdit() async -> Bool {
+        let account = account
+        let result = await settingsRead { try await account.currentAccount() }
+        phase = Phase.loading.refreshed(by: result, failure: Self.failureMessage)
+        if case .success = result { return true }
+        return false
+    }
 }

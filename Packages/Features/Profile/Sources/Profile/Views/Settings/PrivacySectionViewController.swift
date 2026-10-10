@@ -166,6 +166,8 @@ final class PrivacySectionViewController: UIViewController {
     private func configure(_ cell: UICollectionViewListCell, for item: Item) {
         var content = UIListContentConfiguration.cell()
         cell.accessories = []
+        // Only a failed row is tapped to retry: VoiceOver says so (#799).
+        cell.accessibilityTraits.remove(.button)
         switch item {
         case .privateAccount:
             content.text = "Private Account"
@@ -188,9 +190,11 @@ final class PrivacySectionViewController: UIViewController {
         case .failed:
             content.text = "Couldn't load your privacy setting. Tap to try again."
             content.textProperties.color = .secondaryLabel
+            cell.accessibilityTraits.insert(.button)
         case .sideFailed(let side):
             content.text = Self.failedText(side)
             content.textProperties.color = .secondaryLabel
+            cell.accessibilityTraits.insert(.button)
         case .followRequests:
             content = .valueCell()
             content.text = "Follow Requests"

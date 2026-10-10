@@ -220,6 +220,8 @@ final class WhatYouSeeViewController: UIViewController {
         let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             guard let self else { return }
             cell.accessories = []
+            // Only a failed row is tapped to retry: VoiceOver says so (#799).
+            cell.accessibilityTraits.remove(.button)
             var content = UIListContentConfiguration.subtitleCell()
             content.secondaryTextProperties.color = .secondaryLabel
             switch item {
@@ -243,10 +245,12 @@ final class WhatYouSeeViewController: UIViewController {
                 content = .cell()
                 content.text = "Couldn't load these settings. Tap to try again."
                 content.textProperties.color = .secondaryLabel
+                cell.accessibilityTraits.insert(.button)
             case .interestsFailed:
                 content = .cell()
                 content.text = "Couldn't load your interests. Tap to try again."
                 content.textProperties.color = .secondaryLabel
+                cell.accessibilityTraits.insert(.button)
             case .personalized:
                 content = .cell()
                 content.text = Self.personalizedTitle

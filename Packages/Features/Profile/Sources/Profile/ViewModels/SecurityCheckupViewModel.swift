@@ -27,6 +27,8 @@ final class SecurityCheckupViewModel {
         didSet { if sessionCount != oldValue { onChange?() } }
     }
     var onChange: (() -> Void)?
+    /// Parts with a read in flight — see `reload(_:)`.
+    private(set) var reading: Set<Part> = []
 
     private let accountSource: (any AccountProviding)?
     private let sessionsSource: (any AccountSessionsManaging)?
@@ -51,8 +53,16 @@ final class SecurityCheckupViewModel {
 
     /// Reads one part — the failed line's retry. Returns false when the read
     /// failed, so the screen can say a retry failed again.
+    ///
+    /// ⚠️ **ONE READ PER PART AT A TIME.** A double tap on a failed line, or
+    /// an appearance while a retry runs, used to send a second read and,
+    /// offline, a second toast. A call made while that part is already being
+    /// read sends nothing and returns true — the read in flight reports.
     @discardableResult
     func reload(_ part: Part) async -> Bool {
+        guard !reading.contains(part) else { return true }
+        reading.insert(part)
+        defer { reading.remove(part) }
         switch part {
         case .account:
             guard let accountSource else { return true }
