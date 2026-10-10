@@ -42,11 +42,27 @@ public final class AuthInterceptor: UnaryInterceptor, Sendable {
                     idempotencyLevel: request.idempotencyLevel
                 )))
             } catch {
+                // ⚠️ OFFLINE IS NOT SIGNED OUT (#791). Every failure to get a
+                // token used to read as `unauthenticated` — the same answer an
+                // expired session gives — so a call made with no network
+                // looked like an auth failure to every screen above.
                 proceed(.failure(ConnectError(
-                    code: .unauthenticated,
+                    code: Self.code(forTokenFailure: error),
                     message: "token refresh failed: \(error)"
                 )))
             }
         }
+    }
+
+    /// `unavailable` when the network failed, `unauthenticated` otherwise.
+    static func code(forTokenFailure error: Error) -> Code {
+        if let described = error as? NetworkUnavailabilityDescribing, described.isNetworkUnavailable {
+            return .unavailable
+        }
+        if let connect = error as? ConnectError, connect.code == .unavailable || connect.code == .deadlineExceeded {
+            return connect.code
+        }
+        if error is URLError { return .unavailable }
+        return .unauthenticated
     }
 }

@@ -1,4 +1,5 @@
 import Connect
+import CoreNetworking
 import Foundation
 
 /// Auth failures surfaced to callers and the UI, normalized from transport
@@ -64,4 +65,12 @@ public enum LoginOutcome: Equatable, Sendable {
     case signedIn
     /// Two-step sign-in is on: the holder's code finishes it.
     case needsSecondStep(SecondStepChallenge)
+}
+
+extension AuthError: NetworkUnavailabilityDescribing {
+    /// A transport failure is the network's, not the session's (#791).
+    public var isNetworkUnavailable: Bool {
+        if case .transport = self { return true }
+        return false
+    }
 }

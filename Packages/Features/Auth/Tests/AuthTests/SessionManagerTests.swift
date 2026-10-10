@@ -484,6 +484,25 @@ struct SessionManagerTests {
         #expect(client.guestRequests.isEmpty)
     }
 
+    /// ⚠️ OFFLINE KEEPS THE GUEST'S SESSION (#791): a renewal that finds no
+    /// network is not a refusal — the stored session stays for when it returns.
+    @Test func anOfflineRenewalKeepsTheGuestSession() async throws {
+        let client = FakeAuthClient()
+        client.refreshResult = .failure(ConnectError(code: .unavailable, message: "offline"))
+        client.guestResult = .failure(ConnectError(code: .unavailable, message: "offline"))
+        let stale = AuthSession(
+            accountID: AccountID("guest-1"), sessionID: SessionID("guest-sess-1"),
+            accessToken: "gt-stale", accessTokenExpiry: Date(timeIntervalSince1970: 100), refreshToken: "grt-1"
+        )
+        let guestStore = InMemorySessionStore(session: stale)
+        let manager = guestManager(client, guestStore: guestStore)
+
+        _ = try? await manager.validAccessToken()
+
+        #expect(try guestStore.load() == stale, "a dead network wiped the guest's session")
+        #expect(client.guestRequests.isEmpty, "a new session was attempted while the network was down")
+    }
+
     @Test func aGuestSessionTheServerForgotIsReplaced() async throws {
         let client = FakeAuthClient()
         client.refreshResult = .failure(ConnectError(code: .unauthenticated, message: "revoked"))

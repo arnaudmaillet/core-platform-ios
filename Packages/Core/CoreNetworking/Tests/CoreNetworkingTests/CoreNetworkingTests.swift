@@ -119,9 +119,23 @@ struct CoreNetworkingTests {
 
         let response = await client.login(request: makeLoginRequest(), headers: [:])
 
-        #expect(response.error?.code == .unauthenticated)
+        // Offline, so `unavailable` — not the `unauthenticated` an expired
+        // session gives (#791).
+        #expect(response.error?.code == .unavailable)
         // The request must never reach the wire with a missing/stale token.
         #expect(bff.recordedRequests.isEmpty)
+    }
+
+    /// ⚠️ OFFLINE IS NOT SIGNED OUT (#791): a token the network could not
+    /// fetch fails the call as `unavailable`; anything else stays
+    /// `unauthenticated`.
+    @Test func aTokenFailureIsWordedByItsCause() {
+        struct Offline: NetworkUnavailabilityDescribing { var isNetworkUnavailable: Bool { true } }
+        struct Revoked: Error {}
+        #expect(AuthInterceptor.code(forTokenFailure: Offline()) == .unavailable)
+        #expect(AuthInterceptor.code(forTokenFailure: URLError(.notConnectedToInternet)) == .unavailable)
+        #expect(AuthInterceptor.code(forTokenFailure: ConnectError(code: .deadlineExceeded, message: nil)) == .deadlineExceeded)
+        #expect(AuthInterceptor.code(forTokenFailure: Revoked()) == .unauthenticated)
     }
 
     // MARK: - Simulated conditions

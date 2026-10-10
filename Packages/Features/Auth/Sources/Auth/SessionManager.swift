@@ -1,4 +1,5 @@
 import AuthInterface
+import Connect
 import CoreContracts
 import CoreModels
 import CoreNetworking
@@ -50,7 +51,7 @@ public actor SessionManager {
     var guestSession: AuthSession?
     /// Single-flight, like the member refresh: a start or a refresh of the
     /// guest session in flight that every reader awaits.
-    private var guestTask: Task<AuthSession?, Never>?
+    private var guestTask: Task<GuestAttempt, Never>?
     private var didBootstrap = false
     private var refreshTask: Task<AuthSession, Error>?
     private var observers: [UUID: AsyncStream<AuthState>.Continuation] = [:]
@@ -281,39 +282,73 @@ public actor SessionManager {
            current.accessTokenExpiry.timeIntervalSince(now()) > configuration.expiryLeeway {
             return current.accessToken
         }
-        if let guestTask { return await guestTask.value?.accessToken }
+        if let guestTask { return await guestTask.value.session?.accessToken }
 
         let current = guestSession
         let client = authClient
         let device = deviceContext()
         let issuedAt = now()
-        let task = Task<AuthSession?, Never> {
-            if let current, let refreshed = await Self.refreshGuest(current, client: client, device: device, now: issuedAt) {
-                return refreshed
+        let task = Task<GuestAttempt, Never> {
+            if let current {
+                let refreshed = await Self.refreshGuest(current, client: client, device: device, now: issuedAt)
+                // Unreachable: a new session would be too — and the one we have
+                // must not be thrown away for it.
+                if case .refused = refreshed {} else { return refreshed }
             }
             return await Self.startGuest(guest, client: client, device: device, now: issuedAt)
         }
         guestTask = task
         defer { guestTask = nil }
         let renewed = await task.value
-        guestSession = renewed
-        if let renewed { try? guest.store.save(renewed) } else { try? guest.store.clear() }
-        return renewed?.accessToken
+        switch renewed {
+        case .session(let session):
+            guestSession = session
+            try? guest.store.save(session)
+        case .refused:
+            guestSession = nil
+            try? guest.store.clear()
+        case .unreachable:
+            // ⚠️ OFFLINE KEEPS THE GUEST'S SESSION (#791). It used to be wiped
+            // whenever a renewal failed, offline included: the guest lost
+            // their session for a dead network.
+            break
+        }
+        return renewed.session?.accessToken
     }
 
-    /// Nil when the server no longer honours the session's refresh token — a
-    /// new session is started instead.
+    /// A guest renewal's outcome: a session, a refusal (start another), or a
+    /// network that did not answer (keep what we have).
+    enum GuestAttempt {
+        case session(AuthSession)
+        case refused
+        case unreachable
+
+        var session: AuthSession? {
+            if case .session(let session) = self { return session }
+            return nil
+        }
+
+        /// The codes a dead or timing-out network answers with.
+        static func failure(_ error: ConnectError) -> GuestAttempt {
+            error.code == .unavailable || error.code == .deadlineExceeded ? .unreachable : .refused
+        }
+    }
+
+    /// Refused when the server no longer honours the session's refresh token
+    /// — a new session is started instead.
     private static func refreshGuest(
         _ current: AuthSession, client: any Auth_V1_AuthServiceClientInterface,
         device: Auth_V1_DeviceContext, now: Date
-    ) async -> AuthSession? {
+    ) async -> GuestAttempt {
         var request = Auth_V1_RefreshRequest()
         request.refreshToken = current.refreshToken
         request.device = device
-        guard case .success(let body) = await client.refresh(request: request, headers: [:]).result else {
-            return nil
+        switch await client.refresh(request: request, headers: [:]).result {
+        case .success(let body):
+            return .session(makeSession(accountID: current.accountID, tokens: body.tokens, now: now))
+        case .failure(let error):
+            return .failure(error)
         }
-        return makeSession(accountID: current.accountID, tokens: body.tokens, now: now)
     }
 
     /// `StartGuestSession`, with an App Attest proof when the device can give
@@ -322,7 +357,7 @@ public actor SessionManager {
     private static func startGuest(
         _ guest: GuestSessionContext, client: any Auth_V1_AuthServiceClientInterface,
         device: Auth_V1_DeviceContext, now: Date
-    ) async -> AuthSession? {
+    ) async -> GuestAttempt {
         var request = Auth_V1_StartGuestSessionRequest()
         request.device = device
         request.locale = guest.locale()
@@ -337,10 +372,12 @@ public actor SessionManager {
             request.attestation = proof.attestation
             request.attestChallenge = challenge.challenge
         }
-        guard case .success(let body) = await client.startGuestSession(request: request, headers: [:]).result else {
-            return nil
+        switch await client.startGuestSession(request: request, headers: [:]).result {
+        case .success(let body):
+            return .session(makeSession(accountID: AccountID(body.guestID), tokens: body.tokens, now: now))
+        case .failure(let error):
+            return .failure(error)
         }
-        return makeSession(accountID: AccountID(body.guestID), tokens: body.tokens, now: now)
     }
 
     // MARK: - State observation
