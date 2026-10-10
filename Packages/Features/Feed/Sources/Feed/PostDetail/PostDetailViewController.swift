@@ -1865,16 +1865,17 @@ final class PostDetailViewController: UIViewController {
         let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
             [weak self] _ in self?.presentCommentShare(model)
         }
-        // The moderation seams, exactly as the row's own menu has them: the
-        // affordance is honest, the mutations wait on a moderation backend.
-        let block = UIAction(title: "Block User", image: UIImage(systemName: "hand.raised"), attributes: .destructive) { _ in }
-        let report = UIAction(title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive) { _ in }
-        let moderation = UIMenu(options: .displayInline, children: [block, report])
-        guard model.canReview else { return UIMenu(children: [copy, select, share, moderation]) }
+        // ⚠️ NO MODERATION ROWS UNTIL THEY DO SOMETHING (#801). Block and
+        // Report used to sit here as `{ _ in }` no-ops: for a safety action
+        // the user believes something was filed. There is no comment report
+        // flow (`ReportSubject` has no comment case), so the same builder
+        // as the row's own menu draws nothing for the unset seams.
+        let moderation = CommentRowView.moderationMenu(onBlock: nil, onReport: nil).map { [$0] } ?? []
+        guard model.canReview else { return UIMenu(children: [copy, select, share] + moderation) }
         let review = CommentRowView.reviewActions { [weak self] approve in
             self?.viewModel.reviewHeldComment(id, approve: approve)
         }
-        return UIMenu(children: [review, copy, select, share, moderation])
+        return UIMenu(children: [review, copy, select, share] + moderation)
     }
 
     private func streamItems() -> [StreamItem] {

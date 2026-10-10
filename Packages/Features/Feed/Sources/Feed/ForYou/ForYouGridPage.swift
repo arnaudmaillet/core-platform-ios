@@ -30,10 +30,17 @@ final class ForYouGridPage: UIView {
     /// tab through `UserDefaults` — see `PostBookmarkStore`.
     private let bookmarks = PostBookmarkStore()
 
-    /// The viewer asked to repost. UNSET today — see the note at the wiring
-    /// site: the control is drawn because the card's design calls for it, and
-    /// there is no client path that publishes a repost yet.
+    /// The viewer asked to repost. UNSET today — there is no client path that
+    /// publishes a repost yet — so no card draws the control (#801): see the
+    /// note at the wiring site.
     var onRepostRequested: ((GalleryPost) -> Void)?
+
+    /// What a card's repost control does for `post`: nil — which hides the
+    /// control — while nothing handles a repost (#801).
+    func repostHandler(for post: GalleryPost) -> (() -> Void)? {
+        guard onRepostRequested != nil else { return nil }
+        return { [weak self] in self?.onRepostRequested?(post) }
+    }
 
     /// The page's fixed shape, chosen by its format at init.
     enum Style {
@@ -2116,12 +2123,12 @@ final class ForYouGridPage: UIView {
             // is showing the whole thing.
             captionExpanded: captionExpansion.isExpanded(postID),
             showsAuthorMenu: showsAuthorMenu(for: post),
-            // ⚠️ Both controls, because every row on THIS surface wires both —
-            // see `configure`, where the repost and bookmark handlers are set
-            // unconditionally. The saved state is read from the same store the
-            // row reads, so a post saved a moment ago flies home filled in.
+            // ⚠️ What the row wires — see `configure`: the bookmark always,
+            // the repost only once something handles it (#801). The saved
+            // state is read from the same store the row reads, so a post saved
+            // a moment ago flies home filled in.
             actions: .init(
-                repost: true, bookmark: true, saved: bookmarks.isSaved(postID.rawValue),
+                repost: onRepostRequested != nil, bookmark: true, saved: bookmarks.isSaved(postID.rawValue),
                 // The like stakes on every row `staking` binds, and its heart
                 // is red once the viewer has — the stand-in reads the same
                 // wallet, or the heart changes colour in the landing frame.
@@ -3336,20 +3343,19 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // The control never toggles itself: `isBookmarked` is set from the
             // store's answer, before and after, so a store that refused would
             // leave the glyph telling the truth.
-            // ⚠️ REPOST HAS NO ACTION YET, and this closure is what makes the
-            // control visible anyway.
+            // ⚠️ REPOST HAS NO ACTION YET, so it is NOT DRAWN (#801).
             //
             // The band hides a button whose handler is nil — visibility tracks
-            // the answer — so a repost with nothing behind it would simply not
-            // appear. The card's design calls for it, so it is drawn and the
-            // request fans out to `onRepostRequested`, which nothing sets.
-            // Pressing it does nothing today.
+            // the answer. This used to set a closure anyway, forwarding to
+            // `onRepostRequested`, which nothing sets: the chip drew, pressed
+            // with its wash, and did nothing, so it looked as if it worked.
+            // `repostHandler(for:)` is nil until a handler exists.
             //
             // What it needs is a real mutation, not a handler: `CreatePost`
             // carries `parent_id` on the wire and `GalleryPost.isRepost` already
             // reads it (the profile's Posts/Reposts split), but `PostComposer`
             // takes no parent, so there is no client path that publishes one.
-            cell.onRepostTapped = { [weak self] in self?.onRepostRequested?(post) }
+            cell.onRepostTapped = repostHandler(for: post)
             // The like chip stakes — see `PostCardStaking`.
             staking?.bind(cell, to: post.id)
             cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
