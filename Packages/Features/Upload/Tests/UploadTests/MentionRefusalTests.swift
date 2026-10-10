@@ -21,8 +21,9 @@ struct MentionRefusalTests {
         func logout() async {}
     }
 
-    private func makeComposer(postStore: MockPostStore) -> PostComposer {
+    private func makeComposer(postStore: MockPostStore, faults: MockNetworkFaults? = nil) -> PostComposer {
         let bff = MockBFF()
+        bff.faults = faults
         let blobStore = MockBlobStore()
         MockAuthService().register(on: bff)
         MockSocialServices(postStore: postStore).register(on: bff)
@@ -35,9 +36,28 @@ struct MentionRefusalTests {
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             authSession: Session(),
             viewer: nil,
-            uploadTransport: MockMediaUploadTransport(store: blobStore),
+            uploadTransport: MockMediaUploadTransport(store: blobStore, faults: faults),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             composedChannel: ComposedPostChannel()
+        )
+    }
+
+    /// A publish made offline fails remembering it was offline, and the
+    /// author is told "You're offline"; a server fault keeps the screen's
+    /// words (#794). The mock's own switchboard, never a shared one.
+    @Test func anOfflinePublishSaysYoureOffline() async throws {
+        let faults = MockNetworkFaults()
+        faults.isForcedOffline = true
+        let composer = makeComposer(postStore: MockPostStore(), faults: faults)
+
+        let error = await #expect(throws: ComposeError.self) {
+            try await composer.publish(media: .image(PickedImage(image())), caption: "hi")
+        }
+
+        #expect(error?.networkFailure == .offline)
+        #expect(error.map(NewPostViewController.message(for:)) == FailureCopy.offline)
+        #expect(
+            NewPostViewController.message(for: .transport("boom", failure: .server(code: "internal"))) == "boom"
         )
     }
 

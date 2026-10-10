@@ -55,6 +55,8 @@ private actor StubInboxProvider: ChatProviding {
     var requests: [Conversation]
     private var failsRequests = false
     private var failsInbox = false
+    /// Why the INBOX fails (#794); nil throws a plain error.
+    private var inboxFailure: NetworkFailure?
 
     init(conversations: [Conversation], requests: [Conversation] = []) {
         self.conversations = conversations
@@ -65,7 +67,10 @@ private actor StubInboxProvider: ChatProviding {
     func setFailsRequests(_ fails: Bool) { failsRequests = fails }
 
     /// The INBOX folder can't be read: the network is gone.
-    func setFailsInbox(_ fails: Bool) { failsInbox = fails }
+    func setFailsInbox(_ fails: Bool, failure: NetworkFailure? = nil) {
+        failsInbox = fails
+        inboxFailure = failure
+    }
 
     /// The write is accepted but never reflected by later loads — replication
     /// lag, the exact condition the read bridge exists for.
@@ -101,6 +106,7 @@ private actor StubInboxProvider: ChatProviding {
     func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage {
         switch folder {
         case .inbox:
+            if failsInbox, let inboxFailure { throw ChatError.transport(message: "x", failure: inboxFailure) }
             if failsInbox { throw StubError() }
             return InboxPage(conversations: try await loadConversations(), nextPageToken: nil)
         case .requests:
@@ -309,6 +315,27 @@ struct InboxCatalogTests {
         #expect(latest?.phase == .loaded)
         #expect(latest?.active.map(\.id) == [ConversationID("active")])
         #expect(latest?.requests.isEmpty == true)
+        _ = token
+    }
+
+    /// An inbox that failed offline says so; a server fault keeps "Couldn't
+    /// load your messages." (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't load your messages."),
+    ])
+    func aFailedInboxIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async {
+        let provider = StubInboxProvider(conversations: [conversation("active", peer: "friend")])
+        await provider.setFailsInbox(true, failure: failure)
+        let catalog = InboxCatalog(repository: provider)
+        var latest: InboxCatalog.Snapshot?
+        let token = catalog.observe { latest = $0 }
+        catalog.reload()
+        await settle(until: { @MainActor in
+            if case .failed = latest?.phase { return true } else { return false }
+        })
+
+        #expect(latest?.phase == .failed(message: expected))
         _ = token
     }
 

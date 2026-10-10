@@ -506,7 +506,10 @@ public final class ConversationViewModel {
                 // Superseded.
             } catch {
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load this conversation")
+                    // "You're offline" when that is why (#794).
+                    self.phase = .failed(message: FailureCopy.message(
+                        for: error, fallback: "Couldn't load this conversation"
+                    ))
                 }
             }
             self.load = nil

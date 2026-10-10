@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Owns the map's pin state and turns each settled viewport into the minimal
@@ -53,7 +54,13 @@ public final class MapsViewModel {
     /// request, a dropped packet); two in a row is the network, and the viewer
     /// is told. Once: a toast on every pan of a dead connection would be a
     /// nag, and it says nothing the first one did not.
-    public var onRepeatedQueryFailure: (() -> Void)?
+    ///
+    /// Hands over the toast's words: "You're offline…" when the last query
+    /// failed for want of a connection, `repeatedFailureMessage` otherwise
+    /// (#794).
+    public var onRepeatedQueryFailure: ((String) -> Void)?
+    /// What the toast says when the map failed with the device online.
+    nonisolated static let repeatedFailureMessage = "Couldn't load the map"
     /// How many failed queries in a row make `onRepeatedQueryFailure` fire.
     nonisolated static let failureReportThreshold = 2
     /// Failed queries since the last success. A CANCELLED query is neither:
@@ -150,7 +157,7 @@ public final class MapsViewModel {
                 // Fail-open (TIER-1): keep the pins we have, drop this attempt.
                 // Counted unless it was superseded rather than failed (#798).
                 guard !Task.isCancelled, !(error is CancellationError) else { return }
-                self.recordQueryFailure()
+                self.recordQueryFailure(error)
                 return
             }
             guard !Task.isCancelled else { return }
@@ -203,11 +210,11 @@ public final class MapsViewModel {
 
     /// One more failed query in a row; reported when the run reaches the
     /// threshold, and only the first time it does.
-    private func recordQueryFailure() {
+    private func recordQueryFailure(_ error: any Error) {
         consecutiveQueryFailures += 1
         guard consecutiveQueryFailures >= Self.failureReportThreshold, !reportedFailureRun else { return }
         reportedFailureRun = true
-        onRepeatedQueryFailure?()
+        onRepeatedQueryFailure?(FailureCopy.message(for: error, fallback: Self.repeatedFailureMessage))
     }
 
     /// Reconciles the authoritative state with `incoming` and emits the diff.

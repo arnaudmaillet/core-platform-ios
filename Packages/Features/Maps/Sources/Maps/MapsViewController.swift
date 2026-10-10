@@ -2112,9 +2112,9 @@ final class MapsViewController: UIViewController {
         // map is not up to date. The view model says it once per run.
         // `Feedback` puts it on the topmost presented screen: a sheet over the
         // map (a marker preview, the sub-filter sheet) would otherwise cover it.
-        viewModel.onRepeatedQueryFailure = { [weak self] in
+        viewModel.onRepeatedQueryFailure = { [weak self] message in
             guard let self else { return }
-            Feedback.failure("Couldn't load the map", from: self)
+            Feedback.failure(message, from: self)
         }
         // `onTileCount` is a "zoom in for more" hint hook; wired to UI later.
     }

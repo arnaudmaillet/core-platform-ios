@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import DesignSystem
 import Foundation
 
@@ -144,7 +145,7 @@ final class HashtagViewModel {
         } catch {
             paging[tab]?.isLoading = false
             paging[tab]?.isRefreshing = false
-            if !hadPosts { set(tab, .failed(message: "Couldn\u{2019}t load \(title).")) }
+            if !hadPosts { set(tab, .failed(message: failureMessage(for: error))) }
             onChange?()
             return
         }
@@ -164,6 +165,12 @@ final class HashtagViewModel {
         await loadPage(tab, first: false)
     }
 
+    /// A failed tab's words: "You're offline" when that is why (#794), else
+    /// the tag it could not load.
+    private func failureMessage(for error: any Error) -> String {
+        FailureCopy.message(for: error, fallback: "Couldn\u{2019}t load \(title).")
+    }
+
     private func loadPage(_ tab: Tab, first: Bool) async {
         var state = paging[tab] ?? Paging()
         guard !state.isLoading, first ? state.ids.isEmpty : state.nextPageToken != nil else { return }
@@ -179,7 +186,7 @@ final class HashtagViewModel {
         } catch {
             paging[tab]?.isLoading = false
             if paging[tab]?.ids.isEmpty ?? true {
-                set(tab, .failed(message: "Couldn\u{2019}t load \(title)."))
+                set(tab, .failed(message: failureMessage(for: error)))
             }
             onChange?()
             return

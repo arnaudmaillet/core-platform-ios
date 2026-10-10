@@ -182,6 +182,10 @@ public final class ForYouViewModel {
     /// opens onto. The row is a way INTO the list; the list is one tap away.
     nonisolated static let railLimit = 20
 
+    /// What a failed first page says when the device is online (#794). The
+    /// page's Try Again sits under it, so it promises no pull.
+    nonisolated static let failureMessage = "Couldn't load these posts."
+
     public private(set) var source: DiscoverySource = .trending
     /// The active lens. Restored from the store at init, so the surface opens
     /// where the viewer left it.
@@ -704,7 +708,10 @@ public final class ForYouViewModel {
                     onLoadSettled?()
                     return
                 }
-                failure = "Couldn't load. Pull to retry."
+                // ⚠️ Not "Pull to retry": a failed page has no rows to pull,
+                // its way out is the Try Again under this line. And "You're
+                // offline" when that is why (#794).
+                failure = FailureCopy.message(for: error, fallback: Self.failureMessage)
             }
             publish()
             onLoadSettled?()

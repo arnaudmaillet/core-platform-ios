@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 import Testing
 import UIKit
@@ -279,6 +280,32 @@ struct ProfileRelationshipsViewModelTests {
             Issue.record("expected failed phase, got \(String(describing: phases().last))")
             return
         }
+    }
+
+    /// A list that failed offline says so; a server fault keeps the list's
+    /// own words, and neither promises a pull (#794, #797).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't load this list."),
+    ])
+    func aFailedListIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async {
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(),
+            repository: StubRelationshipsProvider(failure: RelationshipsError.transport(message: "x", failure: failure))
+        )
+        let phases = phaseRecorder(viewModel)
+
+        viewModel.viewDidLoad()
+        await settle(until: {
+            if case .failed = phases().last { return true }
+            return false
+        })
+
+        guard case .failed(let message) = phases().last else {
+            Issue.record("expected failed phase, got \(String(describing: phases().last))")
+            return
+        }
+        #expect(message == expected)
     }
 
     @Test func emptyListNamesTheDirectionAndTheSubject() async {

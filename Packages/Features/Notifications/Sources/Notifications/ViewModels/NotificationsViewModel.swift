@@ -211,7 +211,11 @@ public final class NotificationsViewModel {
                 // Superseded; leave the phase alone.
             } catch {
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load your notifications.")
+                    // "You're offline" when that is why: the one cause the
+                    // viewer can fix themselves (#794).
+                    self.phase = .failed(message: FailureCopy.message(
+                        for: error, fallback: "Couldn't load your notifications."
+                    ))
                 }
             }
             self.load = nil

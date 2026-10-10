@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import CoreStorage
 import DesignSystem
 import Foundation
@@ -237,6 +238,9 @@ public final class SearchViewModel {
     public private(set) var isSearchingPosts = false
     /// What the Posts tab says when its search failed.
     nonisolated static let postsFailureMessage = "Couldn't search posts."
+    /// What the Posts tab says about ITS failure: `postsFailureMessage`, or
+    /// "You're offline" when that is why (#794). Read while `postsFailed`.
+    public private(set) var postsFailureText = SearchViewModel.postsFailureMessage
 
     /// A next page of POSTS starting (true) and landing (false) — the Posts
     /// tab's footer spinner (#612).
@@ -929,6 +933,7 @@ public final class SearchViewModel {
                 )
             } catch {
                 page = nil
+                self.postsFailureText = FailureCopy.message(for: error, fallback: Self.postsFailureMessage)
             }
             guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
             self.isSearchingPosts = false
@@ -978,7 +983,8 @@ public final class SearchViewModel {
             }
         } catch {
             guard !Task.isCancelled else { return }
-            phase = .failed(message: "Couldn't search. Please try again.")
+            // "You're offline" when that is why (#794).
+            phase = .failed(message: FailureCopy.message(for: error, fallback: "Couldn't search. Please try again."))
         }
     }
 

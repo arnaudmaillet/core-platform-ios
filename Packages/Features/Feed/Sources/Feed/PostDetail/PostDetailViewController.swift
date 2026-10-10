@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import CoreStorage
 import MediaCore
 import DesignSystem
@@ -171,6 +172,9 @@ final class PostDetailViewController: UIViewController {
     /// The first page of comments failed with nothing to show (#798): the
     /// empty row says so, with a Try Again, instead of "No comments yet".
     private var commentsFailed = false
+    /// What the failed row says: the view model's words, "You're offline"
+    /// when that is why (#794).
+    private var commentsFailureText = PostDetailViewModel.commentsFailureMessage
     private var streamModels: [String: CommentDisplayModel] = [:]
     /// The full-mode post section (header/media/engagement), built once
     /// and hosted by the stream's leading cell.
@@ -1465,10 +1469,11 @@ final class PostDetailViewController: UIViewController {
         switch state {
         case .loaded(let loaded):
             models = loaded
-        case .failed:
+        case .failed(let message):
             // The empty row, in its failed words (`emptyPageCopy`): the stream
             // has nothing, and the reason is a failure, not an empty post.
             commentsFailed = true
+            commentsFailureText = message
             latestComments = []
             streamModels = [:]
             commentsLoaded = true
@@ -2033,15 +2038,19 @@ final class PostDetailViewController: UIViewController {
     /// SAME row as the empty page — same fit, same place — in other words,
     /// because what the reader needs is the reason the stream is empty, and
     /// the way out of it.
-    static let commentsFailedPageCopy = EmptyPageCopy(
-        symbol: "exclamationmark.triangle",
-        title: PostDetailViewModel.commentsFailureMessage,
-        subtitle: "Check your connection and try again.",
-        actionTitle: "Try Again"
-    )
+    static func commentsFailedPageCopy(_ message: String) -> EmptyPageCopy {
+        EmptyPageCopy(
+            symbol: "exclamationmark.triangle",
+            // Offline (#794): a headline-sized "You're offline"; the subtitle
+            // already says what to do about it.
+            title: message == FailureCopy.offline ? "You\u{2019}re offline" : message,
+            subtitle: "Check your connection and try again.",
+            actionTitle: "Try Again"
+        )
+    }
 
     private var emptyPageCopy: EmptyPageCopy {
-        if commentsFailed { return Self.commentsFailedPageCopy }
+        if commentsFailed { return Self.commentsFailedPageCopy(commentsFailureText) }
         return viewModel.isDraft ? Self.draftEmptyPageCopy : Self.commentsEmptyPageCopy
     }
 
@@ -2053,7 +2062,7 @@ final class PostDetailViewController: UIViewController {
     /// the page.
     private func installFailedNote(in contentView: UIView) {
         let label = UILabel()
-        label.text = "\(PostDetailViewModel.commentsFailureMessage)."
+        label.text = commentsFailureText == FailureCopy.offline ? FailureCopy.offline : "\(commentsFailureText)."
         label.font = .appFont(forTextStyle: .subheadline)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel

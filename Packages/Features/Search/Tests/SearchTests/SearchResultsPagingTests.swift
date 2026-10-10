@@ -27,6 +27,8 @@ private actor PagedSearch: SearchProviding {
     private var held: Set<String> = []
     /// How many first-page asks of each kind still fail (#798).
     private var failuresLeft: [String: Int] = [:]
+    /// Why those asks fail, by kind (#794); none throws a plain error.
+    private var failures: [String: NetworkFailure] = [:]
     private var heldWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
 
     init(people: [String: [String?: ProfileSearchPage]], posts: [String: [String?: PostSearchPage]] = [:]) {
@@ -37,10 +39,16 @@ private actor PagedSearch: SearchProviding {
     func hold(_ token: String) { held.insert(token) }
     /// The next first-page ask of `kind` ("people" / "posts") fails.
     func failOnce(_ kind: String) { failuresLeft[kind] = 1 }
+    /// The next first-page ask of `kind` fails for `failure` (#794).
+    func failOnce(_ kind: String, for failure: NetworkFailure) {
+        failuresLeft[kind] = 1
+        failures[kind] = failure
+    }
 
     private func failIfAsked(_ kind: String, token: String?) throws {
         guard token == nil, let left = failuresLeft[kind], left > 0 else { return }
         failuresLeft[kind] = left - 1
+        if let failure = failures[kind] { throw SearchError.transport(message: "x", failure: failure) }
         throw SearchFailure()
     }
     func release(_ token: String) {
@@ -238,6 +246,26 @@ struct SearchResultsPagingTests {
 
         #expect(handles(viewModel) == ["user10", "user11"])
         #expect(viewModel.hasMorePeople) // bob's own cursor, b2
+    }
+
+    /// A search that failed offline says so on both tabs; a server fault
+    /// keeps each tab's own words (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't search. Please try again.", "Couldn't search posts."),
+    ])
+    func aFailedSearchIsWordedByWhyItFailed(failure: NetworkFailure, people: String, posts: String) async throws {
+        let provider = PagedSearch(people: ["ann": [:]], posts: ["ann": [:]])
+        await provider.failOnce("people", for: failure)
+        await provider.failOnce("posts", for: failure)
+        let viewModel = makeViewModel(provider)
+        viewModel.submitQuery("ann")
+        try #require(await settle {
+            if case .failed = viewModel.currentPhase { viewModel.postsFailed } else { false }
+        })
+
+        #expect(viewModel.currentPhase == .failed(message: people))
+        #expect(viewModel.postsFailureText == posts)
     }
 
     /// #798: a post search that FAILED is not one that matched nothing — the

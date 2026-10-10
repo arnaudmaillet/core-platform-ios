@@ -122,7 +122,12 @@ struct NetworkFailureTests {
             == "You're offline. Check your connection and try again.")
     }
 
-    @Test(arguments: [NetworkFailure.timeout, .server(code: "internal"), .refused(code: "not_found")])
+    @Test func aTimeoutSaysItIsTakingTooLong() {
+        let error = StubFeatureError.transport(message: "x", failure: .timeout)
+        #expect(FailureCopy.message(for: error, fallback: "Couldn't load.") == "This is taking too long. Try again.")
+    }
+
+    @Test(arguments: [NetworkFailure.server(code: "internal"), .refused(code: "not_found"), .cancelled])
     func anyOtherFailureKeepsTheScreensOwnWords(failure: NetworkFailure) {
         let error = StubFeatureError.transport(message: "x", failure: failure)
         #expect(FailureCopy.message(for: error, fallback: "Couldn't load.") == "Couldn't load.")

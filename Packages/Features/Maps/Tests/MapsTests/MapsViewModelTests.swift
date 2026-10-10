@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 import Testing
 @testable import Maps
@@ -174,7 +175,7 @@ struct MapsViewModelTests {
         provider.failing = true
         let viewModel = MapsViewModel(repository: provider)
         var reports = 0
-        viewModel.onRepeatedQueryFailure = { reports += 1 }
+        viewModel.onRepeatedQueryFailure = { _ in reports += 1 }
 
         viewModel.viewportChanged(Self.paris)
         await waitUntil { viewModel.consecutiveQueryFailures == 1 }
@@ -189,6 +190,28 @@ struct MapsViewModelTests {
         #expect(reports == 1, "not repeated within the run")
     }
 
+    /// The toast says "You're offline" when the map failed for want of a
+    /// connection, and "Couldn't load the map" otherwise (#794).
+    @Test(arguments: [
+        (NetworkFailure.offline, FailureCopy.offline),
+        (NetworkFailure.server(code: "unavailable"), "Couldn't load the map"),
+    ])
+    func theRepeatedFailureToastIsWordedByWhyItFailed(failure: NetworkFailure, expected: String) async {
+        let provider = FakeGeoProvider()
+        provider.failing = true
+        provider.failure = failure
+        let viewModel = MapsViewModel(repository: provider)
+        var said: [String] = []
+        viewModel.onRepeatedQueryFailure = { said.append($0) }
+
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 1 }
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 2 }
+
+        #expect(said == [expected])
+    }
+
     /// A query that comes back ends the run: the next two failures are
     /// reported again, and a failure either side of a success is not a run.
     @Test func aSuccessfulQueryResetsTheRun() async {
@@ -196,7 +219,7 @@ struct MapsViewModelTests {
         provider.failing = true
         let viewModel = MapsViewModel(repository: provider)
         var reports = 0
-        viewModel.onRepeatedQueryFailure = { reports += 1 }
+        viewModel.onRepeatedQueryFailure = { _ in reports += 1 }
         viewModel.viewportChanged(Self.paris)
         await waitUntil { viewModel.consecutiveQueryFailures == 1 }
         viewModel.viewportChanged(Self.paris)
@@ -244,12 +267,19 @@ private final class FakeGeoProvider: GeoDiscoveryProviding, @unchecked Sendable 
     }
 
     struct Offline: Error {}
+    private var _failure: NetworkFailure?
+    /// Why a failing query fails (#794); nil throws `Offline`, a plain error.
+    var failure: NetworkFailure? {
+        get { lock.withLock { _failure } }
+        set { lock.withLock { _failure = newValue } }
+    }
 
     func queryTile(_ viewport: MapViewport, filter: MapFilter?) async throws -> TileResult {
-        let fails = lock.withLock {
+        let (fails, failure) = lock.withLock {
             _calls.append(Call(viewport: viewport, filter: filter))
-            return _failing
+            return (_failing, _failure)
         }
+        if fails, let failure { throw GeoDiscoveryError.transport(message: "x", failure: failure) }
         if fails { throw Offline() }
         return TileResult(pins: lock.withLock { stubbedPins }, tileCount: 1)
     }
