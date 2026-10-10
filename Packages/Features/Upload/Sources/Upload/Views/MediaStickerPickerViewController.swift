@@ -49,11 +49,27 @@ final class MediaStickerPickerViewController: UIViewController {
         static let header: CGFloat = 28
     }
 
+    /// Where the emoji come from: the shared catalogue, or a test's own.
+    private let emojiLoader: EmojiCatalogLoader
+    /// The emoji, once the catalogue is built — nil until then.
+    ///
+    /// ⚠️ **NEVER `EmojiCatalog.all` FROM HERE.** Read on the main actor it
+    /// builds the whole catalogue there, a fifth of a second of a frozen sheet
+    /// the first time the Emoji shelf opened (#827). The build starts when the
+    /// sheet loads, off the main actor, and has usually landed by the time
+    /// the shelf is picked; until it has, the shelf is empty.
+    private var emoji: [Emoji]?
     /// Each emoji's spoken name, looked up in one step — a cell asking the
     /// catalogue's list would walk a thousand entries per cell.
-    private static let names: [String: String] = Dictionary(
-        EmojiCatalog.all.map { ($0.glyph, $0.name) }, uniquingKeysWith: { first, _ in first }
-    )
+    private var names: [String: String] = [:]
+
+    init(emojiLoader: EmojiCatalogLoader = EmojiCatalog.loader) {
+        self.emojiLoader = emojiLoader
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -90,7 +106,7 @@ final class MediaStickerPickerViewController: UIViewController {
                 return cell
             case .emoji:
                 let cell = grid.dequeueReusableCell(withReuseIdentifier: EmojiCell.identifier, for: path) as? EmojiCell
-                cell?.show(id, name: Self.names[id] ?? id)
+                cell?.show(id, name: names[id] ?? id)
                 return cell
             }
         }
@@ -114,7 +130,23 @@ final class MediaStickerPickerViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+        if let built = emojiLoader.ready {
+            emojiLoaded(built)
+        } else {
+            Task { [weak self, emojiLoader] in
+                let built = await emojiLoader.load()
+                self?.emojiLoaded(built)
+            }
+        }
         reload()
+    }
+
+    /// The catalogue has landed: the Emoji shelf fills if it is showing.
+    private func emojiLoaded(_ built: [Emoji]) {
+        guard emoji == nil else { return }
+        emoji = built
+        names = Dictionary(built.map { ($0.glyph, $0.name) }, uniquingKeysWith: { first, _ in first })
+        if shelf == .emoji { reload() }
     }
 
     private func shelfChanged() {
@@ -134,17 +166,19 @@ final class MediaStickerPickerViewController: UIViewController {
             snapshot.appendSections(["stickers"])
             snapshot.appendItems(StickerCatalog.stickers.map(\.id))
         case .emoji:
+            // Empty until the catalogue lands — see `emoji`.
+            guard let emoji else { break }
             let trimmed = query.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty {
                 for section in EmojiCatalog.Section.allCases {
-                    let glyphs = EmojiCatalog.emoji(in: section).map(\.glyph)
+                    let glyphs = emoji.filter { $0.section == section }.map(\.glyph)
                     guard !glyphs.isEmpty else { continue }
                     snapshot.appendSections([section.rawValue])
                     snapshot.appendItems(glyphs, toSection: section.rawValue)
                 }
             } else {
                 snapshot.appendSections(["results"])
-                snapshot.appendItems(Array(Set(EmojiCatalog.search(trimmed).map(\.glyph))).sorted())
+                snapshot.appendItems(Array(Set(EmojiCatalog.search(trimmed, in: emoji).map(\.glyph))).sorted())
             }
         }
         let headed = shelf == .emoji && query.trimmingCharacters(in: .whitespaces).isEmpty
