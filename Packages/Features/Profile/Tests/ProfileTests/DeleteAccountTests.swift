@@ -56,6 +56,37 @@ struct DeleteAccountTests {
                 "Followers, following and saved posts", "Points and gems in your wallet"])
     }
 
+    /// The sections are the same before and after the account is read, so
+    /// nothing is inserted above the button when the read lands; bones stand
+    /// in for the consequence lines one for one.
+    @Test func theLayoutDoesNotMoveWhenTheReadLands() {
+        let permanent = AccountDeletionPolicy.permanentDate(requestedAt: Self.today)
+        let loading = DeleteAccountViewController.layout(phase: .loading, checklist: nil, offersDataExport: true, canCancel: true)
+        let ready = DeleteAccountViewController.layout(
+            phase: .ready(permanentOn: permanent), checklist: DeletionChecklist(profileHandles: ["you"]),
+            offersDataExport: true, canCancel: true
+        )
+        #expect(loading.map(\.0) == [.consequences, .beforeYouGo, .action])
+        #expect(ready.map(\.0) == loading.map(\.0))
+        #expect(loading[0].1.count == ready[0].1.count)
+        #expect(loading[0].1.allSatisfy { if case .skeleton = $0 { true } else { false } })
+        #expect(ready[2].1 == [.delete])
+    }
+
+    /// The checklist and the phase arrive in one change: the screen redraws
+    /// once, with the named consequences, not once with the general wording
+    /// and again with the names.
+    @Test func theChecklistAndThePhaseArriveTogether() async {
+        let checklist = DeletionChecklist(profileHandles: ["you"], points: 10, gems: nil)
+        let model = DeleteAccountViewModel(lifecycle: StubLifecycle(), checklist: { checklist }, now: { Self.today })
+        var changes: [(DeleteAccountViewModel.Phase, DeletionChecklist?)] = []
+        model.onChange = { changes.append((model.phase, model.checklist)) }
+        await model.load()
+        #expect(changes.count == 1)
+        #expect(changes.first?.1 == checklist)
+        #expect(changes.first?.0 == .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: Self.today)))
+    }
+
     @Test func theChecklistWordsEachCase() {
         #expect(DeleteAccountViewController.profilesLine(["you"]) == "Your profile @you")
         #expect(DeleteAccountViewController.profilesLine([]) == "Every profile on this account")

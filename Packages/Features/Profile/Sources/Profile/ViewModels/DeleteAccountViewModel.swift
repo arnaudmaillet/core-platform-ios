@@ -24,10 +24,9 @@ final class DeleteAccountViewModel {
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
     }
-    /// Nil until read (or when nothing could be read).
-    private(set) var checklist: DeletionChecklist? {
-        didSet { onChange?() }
-    }
+    /// Nil until read (or when nothing could be read). Published with the
+    /// phase, never on its own: see `load`.
+    private(set) var checklist: DeletionChecklist?
     var onChange: (() -> Void)?
 
     private let lifecycle: any AccountLifecycleManaging
@@ -49,12 +48,17 @@ final class DeleteAccountViewModel {
         // A record we cannot read (the endpoint is restricted on some
         // deployments) is treated as "no request yet": the screen then offers
         // the button, and a duplicate request is harmless server-side.
-        if let requestedAt = try? await lifecycle.gdprStatus().deletionRequestedAt {
+        let requestedAt = try? await lifecycle.gdprStatus().deletionRequestedAt
+        // Both reads land in ONE change: the checklist first (it publishes
+        // nothing by itself), then the phase. Publishing the phase and then
+        // the checklist redrew the screen twice, the consequence lines
+        // rewrapping under the viewer's eyes a moment after it settled.
+        self.checklist = await checklist
+        if let requestedAt {
             phase = .requested(on: requestedAt, permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: requestedAt))
         } else {
             phase = .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: now()))
         }
-        self.checklist = await checklist
     }
 
     /// Requests deletion; returns the date it becomes permanent.

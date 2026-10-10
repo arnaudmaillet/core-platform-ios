@@ -138,6 +138,23 @@ struct SecuritySettingsTests {
         #expect(cell.contentView.subviews.compactMap { $0 as? SkeletonBoneView }.filter { !$0.isHidden }.count == 1)
     }
 
+    /// Coming back re-reads the sessions; when that read fails the list on
+    /// screen stays (the screen says so with a toast) instead of being
+    /// replaced by the retry row.
+    @Test func aFailedRefreshKeepsTheListAndReportsIt() async {
+        let stub = StubSessions()
+        let model = SecuritySettingsViewModel(sessions: stub)
+        await model.load()
+        guard case .loaded(let before) = model.phase else { Issue.record("not loaded"); return }
+        var refreshFailures = 0
+        model.onRefreshFailed = { refreshFailures += 1 }
+
+        await stub.setFailsList(true)
+        await model.load()
+        #expect(model.phase == .loaded(before))
+        #expect(refreshFailures == 1)
+    }
+
     @Test func logOutEverywhereCallsTheGlobalRevoke() async throws {
         let stub = StubSessions()
         try await SecuritySettingsViewModel(sessions: stub).revokeAll()

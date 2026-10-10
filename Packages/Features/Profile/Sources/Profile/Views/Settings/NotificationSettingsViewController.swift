@@ -18,17 +18,23 @@ final class NotificationSettingsViewController: UIViewController {
         case pause, push, quiet, comingSoon
     }
 
-    private enum Item: Hashable {
+    enum Item: Hashable {
+        /// iOS hasn't said yet: a bone holds the permission row's slot, so
+        /// the list doesn't shift when the answer lands.
+        case permissionPending
         /// Permission not asked yet: asks it.
         case allow
         /// Permission refused: iOS Settings is the only way back.
         case turnOnInSettings
+        /// Permission given: the slot says so, rather than vanishing.
+        case allowed
         case pause
         case category(NotificationCategory)
         case quietSwitch
         case quietStart, quietEnd
         case planned(String)
-        case loading
+        /// A row-shaped bone while the preferences load (charter P8).
+        case skeleton(Int)
         case failed
     }
 
@@ -51,6 +57,9 @@ final class NotificationSettingsViewController: UIViewController {
     }
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    /// How many bones the list last drew: when that drops, the redraw
+    /// cross-fades out of them (P10).
+    private var skeletonCount = 0
 
     init(manager: any NotificationPreferencesManaging, now: @escaping () -> Date = Date.init) {
         self.manager = manager
@@ -187,6 +196,12 @@ final class NotificationSettingsViewController: UIViewController {
                 content.text = "Turn On in Settings"
                 content.image = UIImage(systemName: "gear")
                 content.textProperties.color = .tintColor
+            case .allowed:
+                content = .valueCell()
+                content.text = "Notifications"
+                content.secondaryText = "Allowed"
+                content.image = UIImage(systemName: "bell.badge")
+                content.imageProperties.tintColor = .label
             case .pause:
                 content = .valueCell()
                 content.text = "Pause All"
@@ -219,17 +234,25 @@ final class NotificationSettingsViewController: UIViewController {
             case .planned(let title):
                 content.text = title
                 content.textProperties.color = .secondaryLabel
-            case .loading:
-                content.text = "Loading…"
-                content.textProperties.color = .secondaryLabel
+            case .permissionPending, .skeleton:
+                // Drawn by `SettingsSkeletonRowCell`.
+                break
             case .failed:
                 content.text = "Couldn't load your notification settings. Tap to try again."
                 content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content
         }
+        let skeletonRegistration = UICollectionView.CellRegistration<SettingsSkeletonRowCell, Item> { cell, _, item in
+            cell.configure(redacting: Self.placeholder(for: item))
+        }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
-            collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
+            switch item {
+            case .permissionPending, .skeleton:
+                collectionView.dequeueConfiguredReusableCell(using: skeletonRegistration, for: indexPath, item: item)
+            default:
+                collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
+            }
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader
@@ -289,33 +312,83 @@ final class NotificationSettingsViewController: UIViewController {
     private func applySnapshot() {
         guard dataSource != nil else { return }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        // The permission row first, while there is something to do about it.
-        switch systemPermission {
-        case .notDetermined:
-            snapshot.appendSections([.system])
-            snapshot.appendItems([.allow], toSection: .system)
-        case .denied:
-            snapshot.appendSections([.system])
-            snapshot.appendItems([.turnOnInSettings], toSection: .system)
-        default:
-            break
+        let layout = Self.layout(permission: systemPermission, phase: phase)
+        for (section, items) in layout {
+            snapshot.appendSections([section])
+            snapshot.appendItems(items, toSection: section)
         }
-        snapshot.appendSections([.pause])
-        switch phase {
-        case .loading:
-            snapshot.appendItems([.loading], toSection: .pause)
-        case .failed:
-            snapshot.appendItems([.failed], toSection: .pause)
-        case .loaded(let preferences):
-            snapshot.appendItems([.pause], toSection: .pause)
-            snapshot.appendSections([.push, .quiet, .comingSoon])
-            snapshot.appendItems(NotificationCategory.allCases.map(Item.category), toSection: .push)
-            snapshot.appendItems([.quietSwitch] + (preferences.quietHours == nil ? [] : [.quietStart, .quietEnd]), toSection: .quiet)
-            snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
+        if case .loaded = phase {
             snapshot.reconfigureItems(snapshot.itemIdentifiers)
         }
         snapshot.reloadSections(snapshot.sectionIdentifiers.filter { $0 != .push })
-        dataSource.apply(snapshot, animatingDifferences: false)
+
+        let previousSkeletonCount = skeletonCount
+        skeletonCount = layout.flatMap { $0.1 }.filter(Self.isSkeleton).count
+        if skeletonCount < previousSkeletonCount {
+            collectionView.crossfadeFromSkeleton { [dataSource, snapshot] in
+                dataSource?.apply(snapshot, animatingDifferences: false)
+            }
+        } else {
+            dataSource.apply(snapshot, animatingDifferences: false)
+        }
+    }
+
+    /// The screen's sections and rows. The permission row's slot is there
+    /// from the first frame — a bone until iOS answers (nil), then the row for
+    /// that answer — so the read never inserts a row above the list and
+    /// pushes it down. While the preferences load, Pause All and the push
+    /// categories are bones in their own places.
+    static func layout(permission: UNAuthorizationStatus?, phase: Phase) -> [(Section, [Item])] {
+        let permissionRow: Item = switch permission {
+        case nil: .permissionPending
+        case .notDetermined?: .allow
+        case .denied?: .turnOnInSettings
+        default: .allowed
+        }
+        var layout: [(Section, [Item])] = [(.system, [permissionRow])]
+        switch phase {
+        case .loading:
+            layout.append((.pause, [.skeleton(0)]))
+            layout.append((.push, NotificationCategory.allCases.indices.map { .skeleton($0 + 1) }))
+        case .failed:
+            layout.append((.pause, [.failed]))
+        case .loaded(let preferences):
+            layout.append((.pause, [.pause]))
+            layout.append((.push, NotificationCategory.allCases.map(Item.category)))
+            layout.append((.quiet, [.quietSwitch] + (preferences.quietHours == nil ? [] : [.quietStart, .quietEnd])))
+            layout.append((.comingSoon, Self.planned.map(Item.planned)))
+        }
+        return layout
+    }
+
+    private static func isSkeleton(_ item: Item) -> Bool {
+        switch item {
+        case .permissionPending, .skeleton: true
+        default: false
+        }
+    }
+
+    /// The row a bone stands for, with sample words; only the bones' widths
+    /// come from them.
+    private static func placeholder(for item: Item) -> UIListContentConfiguration {
+        switch item {
+        case .permissionPending:
+            var content = UIListContentConfiguration.cell()
+            content.text = "Allow Notifications"
+            content.image = UIImage(systemName: "bell.badge")
+            return content
+        case .skeleton(0):
+            var content = UIListContentConfiguration.valueCell()
+            content.text = "Pause All"
+            content.image = UIImage(systemName: "bell.slash")
+            return content
+        case .skeleton(let index):
+            var content = UIListContentConfiguration.cell()
+            content.text = index.isMultiple(of: 2) ? "New followers" : "Comments and replies"
+            return content
+        default:
+            return .cell()
+        }
     }
 
     // MARK: - Changes

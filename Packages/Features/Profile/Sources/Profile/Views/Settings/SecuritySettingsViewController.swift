@@ -69,6 +69,12 @@ final class SecuritySettingsViewController: UIViewController {
         configureCollectionView()
         configureDataSource()
         viewModel.onChange = { [weak self] in self?.applySnapshot() }
+        // A refresh that fails keeps the list; the failure is a toast, not a
+        // list replaced by an error row.
+        viewModel.onRefreshFailed = { [weak self] in
+            guard let self else { return }
+            ToastView.present("Couldn't refresh your sessions", symbol: "exclamationmark.triangle", in: view)
+        }
         applySnapshot()
         Task { await viewModel.load() }
     }
