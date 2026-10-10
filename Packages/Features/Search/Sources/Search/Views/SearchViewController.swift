@@ -72,7 +72,6 @@ final class SearchViewController: UIViewController {
     private let searchField = UISearchTextField()
 
     private var collectionView: UICollectionView!
-    private let spinner = UIActivityIndicatorView(style: .medium)
     private let statusView = EmptyStateView()
 
     private var dataSource: UICollectionViewDiffableDataSource<SearchSection, SearchItem>!
@@ -158,6 +157,12 @@ final class SearchViewController: UIViewController {
         viewModel.onPhaseChange = { [weak self] phase in
             self?.render(phase)
         }
+        // ⚠️ A REFINE SCREEN DRAWS THE PHASE IT WAS BORN INTO. Its field was
+        // filled, and the typeahead for it asked for, in
+        // `configureSearchAffordance` — before the line above, so that phase
+        // went to the results screen's handler and this list stayed blank
+        // until the debounced `Suggest` answered, a round trip later (#827).
+        if case .refine = mode { render(viewModel.currentPhase) }
         viewModel.onQueryTextChange = { [weak self] text in
             // Recorded as already reported BEFORE the assignment: setting the
             // field re-enters `updateSearchResults`, and without this the
@@ -773,7 +778,7 @@ final class SearchViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(
                     using: suggestedRegistration, for: indexPath, item: id
                 )
-            case .suggestedSkeleton(let index):
+            case .suggestedSkeleton(let index), .resultSkeleton(let index):
                 collectionView.dequeueConfiguredReusableCell(
                     using: suggestedSkeletonRegistration, for: indexPath, item: index
                 )
@@ -812,12 +817,6 @@ final class SearchViewController: UIViewController {
     }
 
     private func configureStatusViews() {
-        spinner.hidesWhenStopped = true
-        spinner.constrain(in: view) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
-
         statusView.isHidden = true
         // The same keyboard bound the list has: `EmptyStateView` centres its
         // column in whatever space it is given, and the space actually left
@@ -835,7 +834,6 @@ final class SearchViewController: UIViewController {
     private func render(_ phase: SearchViewModel.Phase) {
         switch phase {
         case .explore(let model):
-            spinner.stopAnimating()
             recentsByID = Dictionary(uniqueKeysWithValues: model.recents.map { ($0.id, $0) })
             creatorsByID = Dictionary(
                 model.trending.creators.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }
@@ -852,7 +850,6 @@ final class SearchViewController: UIViewController {
             }
 
         case .suggesting(let query, let rows):
-            spinner.stopAnimating()
             recentsByID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
             apply(suggestionsSnapshot(rows))
             if rows.isEmpty {
@@ -874,11 +871,14 @@ final class SearchViewController: UIViewController {
             }
 
         case .loading:
-            spinner.startAnimating()
+            // Rows shaped like the answer, in the answer's section: the
+            // results replace them by the same diff every phase change here
+            // animates through (P8, P10). It was a centred spinner over an
+            // empty list.
+            apply(resultSkeletonSnapshot())
             hideStatus()
 
         case .results(let models):
-            spinner.stopAnimating()
             resultsByID = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
             apply(resultsSnapshot(models))
             // ⚠️ AN EMPTY SCOPE IS NOT AN EMPTY SEARCH, and the two must not
@@ -899,7 +899,6 @@ final class SearchViewController: UIViewController {
             }
 
         case .empty(let query):
-            spinner.stopAnimating()
             apply(NSDiffableDataSourceSnapshot<SearchSection, SearchItem>())
             // ⚠️ NOT "no people", and not a `person.slash` either. This screen
             // is the app's ONE search: profiles are what `search.v1` answers
@@ -921,7 +920,6 @@ final class SearchViewController: UIViewController {
             )
 
         case .failed(let message):
-            spinner.stopAnimating()
             apply(NSDiffableDataSourceSnapshot<SearchSection, SearchItem>())
             showStatus(symbolName: "exclamationmark.triangle", title: "Couldn't search", subtitle: message)
         }
@@ -970,6 +968,17 @@ final class SearchViewController: UIViewController {
         guard !rows.isEmpty else { return snapshot }
         snapshot.appendSections([.completions])
         snapshot.appendItems(rows.map { .row($0.id) }, toSection: .completions)
+        return snapshot
+    }
+
+    /// Enough skeleton rows to fill the list, so the answer arrives into a
+    /// screen already its shape.
+    private func resultSkeletonSnapshot() -> NSDiffableDataSourceSnapshot<SearchSection, SearchItem> {
+        let height = collectionView.bounds.height
+        let count = height > 0 ? PersonSkeletonCell.rowsToFill(height) : Self.suggestedSkeletonCount
+        var snapshot = NSDiffableDataSourceSnapshot<SearchSection, SearchItem>()
+        snapshot.appendSections([.results])
+        snapshot.appendItems((0..<count).map { .resultSkeleton($0) }, toSection: .results)
         return snapshot
     }
 
@@ -1089,7 +1098,7 @@ extension SearchViewController: UICollectionViewDelegate {
             viewModel.didSelectResult(id)
         case .suggested(let id):
             viewModel.didSelectCreator(id)
-        case .suggestedSkeleton:
+        case .suggestedSkeleton, .resultSkeleton:
             break
         }
     }
@@ -1113,4 +1122,11 @@ extension SearchViewController: UITextFieldDelegate {
         submitCurrentQuery()
         return true
     }
+}
+
+extension SearchViewController {
+    /// Internal for tests: what the list holds, section by section.
+    var debugSections: [SearchSection] { dataSource?.snapshot().sectionIdentifiers ?? [] }
+    var debugItems: [SearchItem] { dataSource?.snapshot().itemIdentifiers ?? [] }
+    var debugStatusIsShowing: Bool { !statusView.isHidden }
 }
