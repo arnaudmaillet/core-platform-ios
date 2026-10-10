@@ -135,7 +135,11 @@ final class VerificationCodeViewController: SignUpStepViewController {
     private func startResendCountdown() {
         resendTimer?.invalidate()
         updateResendRow()
-        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+        // ⚠️ THE TIMER ENDS WITH ITS SCREEN (#784): its only `invalidate()` was
+        // in `updateResendRow`, which never runs once the screen is gone, so
+        // backing out mid-countdown left a 1 Hz timer for the session.
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] timer in
+            guard self != nil else { return timer.invalidate() }
             MainActor.assumeIsolated { self?.updateResendRow() }
         }
         RunLoop.main.add(timer, forMode: .common)

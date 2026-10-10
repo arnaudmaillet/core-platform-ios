@@ -54,7 +54,8 @@ public final class EmoteKeyboard: NSObject {
         picker.onSearch = { [weak self] in self?.startSearch() }
         return picker
     }()
-    private let strip: EmoteSuggestionStrip
+    // `nonisolated(unsafe)`: read once more, on the main thread, by `deinit`.
+    nonisolated(unsafe) private let strip: EmoteSuggestionStrip
     private let suggestsInline: Bool
     /// Where the panel's height comes from: the system keyboard it replaces.
     private let heights: EmoteKeyboardHeight
@@ -75,7 +76,7 @@ public final class EmoteKeyboard: NSObject {
     /// `TextCompletionSource` up the field's responder chain, asked each time
     /// — a composer needs no wiring, and one off-screen completes nothing.
     public var textCompleter: (any TextCompletionProviding)?
-    private let completionStrip = TextCompletionStrip()
+    nonisolated(unsafe) private let completionStrip: TextCompletionStrip
     private var completionTask: Task<Void, Never>?
     /// A beat after the last keystroke, not one round trip per letter.
     var completionDebounce: Duration = .milliseconds(150)
@@ -108,6 +109,7 @@ public final class EmoteKeyboard: NSObject {
         self.engine = engine
         self.recents = recents
         self.strip = EmoteSuggestionStrip(engine: engine)
+        self.completionStrip = TextCompletionStrip()
         self.suggestsInline = suggestsInline
         super.init()
 
@@ -156,6 +158,18 @@ public final class EmoteKeyboard: NSObject {
             withConfiguration: UIImage.SymbolConfiguration(weight: .medium)
         ), for: .normal)
         toggleButton.accessibilityLabel = panel ? "Keyboard" : "Emotes"
+    }
+
+    /// ⚠️ THE STRIPS GO WITH THE KEYBOARD (#785). They float in the WINDOW,
+    /// above everything, and left only when the field stopped editing — an
+    /// owner released without its field resigning (a recycled cell, a closed
+    /// composer) left a strip floating over whatever came next.
+    deinit {
+        guard Thread.isMainThread else { return }
+        MainActor.assumeIsolated { [strip, completionStrip] in
+            strip.removeFromSuperview()
+            completionStrip.removeFromSuperview()
+        }
     }
 
     @objc private func textDidEndEditing(_ note: Notification) {
