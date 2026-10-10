@@ -20,6 +20,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// Handed the profile this screen holds, so the editor opens on it
     /// instead of fetching it again (charter P7).
     private let makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)?
+    /// The origin said this profile is the viewer's own (`presumesOtherProfile`).
+    private let identityStubIsSelf: Bool
     /// Builds the account settings screen (own profile only, the gear's
     /// destination). Nil for other users.
     private let makeSettingsViewController: (() -> UIViewController)?
@@ -202,13 +204,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     private var followButtonState: ProfileViewModel.FollowButton = .hidden
 
-    /// The pusher's callback while it holds the push for this screen — see
-    /// `prepareForPresentation`. Nil once called, and for a screen that was
-    /// never held.
-    private var presentationReady: (@MainActor () -> Void)?
-    /// The phase last rendered, for `isSettledForPresentation`.
+    /// The phase last rendered.
     private var renderedPhase: ProfileViewModel.Phase = .loading
-    /// The gallery as last rendered, for `isSettledForPresentation`.
+    /// The gallery as last rendered.
     private var lastGallerySnapshot: ProfileViewModel.GallerySnapshot?
     #if DEBUG
     private var hasLoggedFirstFrame = false
@@ -280,6 +278,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         trayPlacement: ProfileTrayPlacement = .navigationToolbar
     ) {
         self.trayPlacement = trayPlacement
+        self.identityStubIsSelf = identityStub?.isSelf == true
         self.viewModel = viewModel
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
@@ -330,9 +329,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // capsule, NOT "Follow". The prior used to be "Follow" ("most viewed
         // profiles aren't followed"), and every followed author's profile
         // then arrived wearing a blue call to action that turned grey a
-        // moment later. The push waits for the real answer (see
-        // `prepareForPresentation`); the placeholder is only what a read
-        // slower than the hold shows.
+        // moment later. The push never waits for the answer (#778); the
+        // placeholder holds the slot until the read lands.
         if identityStub?.isSelf == true || makeEditViewController != nil {
             // Own profile: Edit from frame 1. Checked BEFORE any follow hint,
             // because "do I follow myself" is not a question — a stub that
@@ -379,17 +377,17 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
                 // still animating; bind the bar inside the transition so the
                 // toolbar composes during the animation, not after it.
                 self.alongsideTransition { $0.applyNavigationState() }
-                self.settlePresentationIfReady()
+                self.noteLandingMilestone()
             }
         }
-        viewModel.onRelationshipSettled = { [weak self] in self?.settlePresentationIfReady() }
-        headerView.onPicturesSettled = { [weak self] in self?.settlePresentationIfReady() }
+        viewModel.onRelationshipSettled = { [weak self] in self?.noteLandingMilestone() }
+        headerView.onPicturesSettled = { [weak self] in self?.noteLandingMilestone() }
         viewModel.onMapPinButtonChange = { [weak self] _ in
             HeroScreenCost.measure("landing.mapPin") {
                 // The rails' rows keep the menu open (`.keepsMenuPresented`):
                 // their checkmarks follow in place.
                 self?.refreshVisibleMapRows()
-                self?.settlePresentationIfReady()
+                self?.noteLandingMilestone()
             }
         }
         viewModel.onMuteScopesChange = { [weak self] _ in self?.refreshMuteBell() }
@@ -445,7 +443,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // The media gallery "View all" pushed, if it is up, grows with
             // the pages as they land (#631).
             self?.mediaGallery?.render(snapshot.media)
-            self?.settlePresentationIfReady()
+            self?.noteLandingMilestone()
             #if DEBUG
             self?.auditPostMenu(snapshot)
             #endif
@@ -553,16 +551,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // the state a push held for it (charter P12a) should have settled.
         if !hasLoggedFirstFrame, ProcessInfo.processInfo.arguments.contains("-profile-first-frame-log") {
             hasLoggedFirstFrame = true
-            print("[profile-first-frame] settled=\(isSettledForPresentation) "
+            print("[profile-first-frame] settled=\(isSettled) "
                   + "redacted=\(debugIsHeaderRedacted) follow=\(debugFollowTitle ?? "placeholder") "
                   + "avatar=\(debugHasAvatarPicture ? "picture" : "initials") "
                   + "banner=\(headerView.bannerFormat) gallerySettled=\(isGallerySettled)")
         }
         #endif
-        // On screen, the hold is over however it ended — a ceiling release
-        // never hears back from here, so its callback is dropped now rather
-        // than kept alive until the page happens to settle.
-        presentationReady = nil
         // ⚠️ On every appearance, not once. The saved pile is mutable from
         // outside this screen — the feed's bookmark button writes to the same
         // store — so a Saved tab bound at load would be stale the first time
@@ -1532,8 +1526,23 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// Whether the bell stands in the bar: someone else's profile, in a
     /// composition that can mute, for a member. The same rule the see-more
     /// menu's Mute submenu had (#689): a guest has no account to mute from.
+    ///
+    /// ⚠️ DECIDED AT FRAME 0 FOR A ROUTED PROFILE (#778). The relationship
+    /// read used to land before the (held) push; pushed at once, the bar went
+    /// `[coins]` → `[bell][coins]` mid-slide, and bar items changed during a
+    /// push land unanimated at its end on device (#756). Someone else's
+    /// profile — what a routed profile that is not the viewer's own is —
+    /// wears the bell from the first frame; the relationship only confirms it.
     private var showsMuteBell: Bool {
-        viewModel.canMute && viewModel.canModerate && MemberGates.gate(from: self)?.isMember != false
+        let isOtherProfile = viewModel.canModerate
+            || (presumesOtherProfile && !viewModel.isRelationshipSettled)
+        return viewModel.canMute && isOtherProfile && MemberGates.gate(from: self)?.isMember != false
+    }
+
+    /// A profile reached by id that is not the viewer's own, as far as frame 0
+    /// can tell: no self stub, no Edit wiring.
+    private var presumesOtherProfile: Bool {
+        !viewModel.isOwnProfile && !identityStubIsSelf && makeEditViewController == nil
     }
 
     /// Resolved when it opens, so the checkmarks are the current scopes.
@@ -2958,7 +2967,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private func render(_ phase: ProfileViewModel.Phase) {
         let previous = renderedPhase
         renderedPhase = phase
-        defer { settlePresentationIfReady() }
+        defer { noteLandingMilestone() }
         switch phase {
         case .loading:
             // First load renders the REAL screen in skeleton state: the
@@ -3022,31 +3031,17 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     }
 }
 
-// MARK: - Presentation readiness (charter P12a)
+// MARK: - Landing milestones
 
-extension ProfileViewController: PresentationReadying {
-    /// Starts the loads now — they begin in `viewDidLoad`, which loading the
-    /// view runs — so the pusher can hold the slide until they land.
-    ///
-    /// Loading the view early is the same work the push would do a few
-    /// milliseconds later, moved before it; no layout runs here (the first
-    /// pass is still the push's own, P15). Everything that lands while the
-    /// screen is off-window applies without its on-screen cross-fades, which
-    /// is the point: the first frame of the slide is the finished page.
-    func prepareForPresentation(ready: @escaping @MainActor () -> Void) {
-        presentationReady = ready
-        loadViewIfNeeded()
-        settlePresentationIfReady()
-    }
-
-    /// Whether the page, pushed now, would be the page that stays: the header
+extension ProfileViewController {
+    /// Whether the page on screen is the page that stays: the header
     /// has its profile, the follow capsule has its answer (and, for someone
     /// followed, the map star its rails — it widens the tray), both pictures are
     /// drawn (or known absent), and the gallery's open page has left its
     /// bones. A failed load is settled too — nothing more is coming.
     ///
     /// The cards' own media are NOT waited for: those are per item, P13.
-    var isSettledForPresentation: Bool {
+    var isSettled: Bool {
         switch renderedPhase {
         case .loading: return false
         case .failed: return true
@@ -3065,13 +3060,13 @@ extension ProfileViewController: PresentationReadying {
         return snapshot.state(for: tabs[galleryPager.activePageIndex]) != .loading
     }
 
-    func settlePresentationIfReady() {
+    /// One piece of the first frame landed. Nothing waits on these any more —
+    /// the screen is pushed at once on its loading state (#778) — so this only
+    /// traces them (`-profile-first-frame-log`).
+    func noteLandingMilestone() {
         #if DEBUG
         traceReadiness()
         #endif
-        guard let ready = presentationReady, isSettledForPresentation else { return }
-        presentationReady = nil
-        ready()
     }
 }
 
@@ -3133,7 +3128,7 @@ extension ProfileViewController {
         guard state != lastTracedReadiness else { return }
         lastTracedReadiness = state
         let ms = (CACurrentMediaTime() - debugBornAt) * 1000
-        print(String(format: "[profile-ready] +%.0fms ", ms) + state + (presentationReady == nil ? "" : " (held)"))
+        print(String(format: "[profile-ready] +%.0fms ", ms) + state)
     }
 }
 
