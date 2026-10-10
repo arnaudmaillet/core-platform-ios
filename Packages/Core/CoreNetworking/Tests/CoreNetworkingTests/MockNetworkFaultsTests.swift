@@ -71,6 +71,23 @@ struct MockNetworkFaultsTests {
         #expect(!faults.isOffline, "still offline after the outage ended")
     }
 
+    /// The sheet's Online ends an outage in progress and clears every fault.
+    @Test func resetEndsAnOutageAndClearsEveryFault() {
+        let clock = Clock()
+        let faults = MockNetworkFaults(now: { clock.now })
+        faults.scheduleOutage(after: 0, lasting: 60)
+        faults.ackLoss = [.init()]
+        faults.uploadFailureRate = 1
+        clock.advance(1)
+        #expect(faults.isOffline)
+
+        faults.reset()
+
+        #expect(!faults.isOffline)
+        #expect(faults.ackLoss.isEmpty)
+        #expect(faults.uploadFailureRate == 0)
+    }
+
     /// ACK LOSS: the write is applied, then the answer is lost. A client that
     /// retries without an idempotency key writes twice.
     @Test func aLostAckStillAppliesTheWrite() async {

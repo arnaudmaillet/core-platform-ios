@@ -16,7 +16,8 @@ import Foundation
 /// - **upload faults** — the object-store PUT fails at a rate.
 ///
 /// Changes post `didChange` (on the main queue), including the outage's own
-/// start and end, so the realtime server and the connectivity monitor follow.
+/// start and end, so the realtime server follows. An outage is timed from the
+/// first use of the switchboard (it is built lazily), not from launch.
 public final class MockNetworkFaults: @unchecked Sendable {
     public static let didChange = Notification.Name("MockNetworkFaults.didChange")
 
@@ -66,6 +67,24 @@ public final class MockNetworkFaults: @unchecked Sendable {
         }
     }
 
+    /// Ends a scheduled outage now (the shake sheet's Online).
+    public func cancelOutage() {
+        lock.withLock { outageWindow = nil }
+        announce()
+    }
+
+    /// Back to a healthy network: no offline, no outage, no lost acks, no
+    /// failed uploads.
+    public func reset() {
+        lock.withLock {
+            offline = false
+            outageWindow = nil
+            ackLossRules = []
+            uploadFailRate = 0
+        }
+        announce()
+    }
+
     public var ackLoss: [AckLossRule] {
         get { lock.withLock { ackLossRules } }
         set { lock.withLock { ackLossRules = newValue } }
@@ -92,7 +111,7 @@ public final class MockNetworkFaults: @unchecked Sendable {
     }
 
     private func announce() {
-        let post = { NotificationCenter.default.post(name: Self.didChange, object: self) }
+        let post: @Sendable () -> Void = { NotificationCenter.default.post(name: Self.didChange, object: self) }
         if Thread.isMainThread { post() } else { DispatchQueue.main.async(execute: post) }
     }
 }

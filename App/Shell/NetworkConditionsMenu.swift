@@ -15,21 +15,27 @@ enum NetworkConditionsMenu {
         func add(_ title: String, _ apply: @escaping () -> Void) {
             sheet.addAction(UIAlertAction(title: title, style: .default) { _ in apply() })
         }
+        // Every choice starts from a healthy network, so one never inherits
+        // another's outage, lost acks or failed uploads.
         add("Online") {
-            faults.isForcedOffline = false
+            faults.reset()
             bff.simulatedConditions = .none
         }
-        add("Offline") { faults.isForcedOffline = true }
+        add("Offline") {
+            faults.reset()
+            faults.isForcedOffline = true
+        }
         add("Lossy (30% of calls fail)") {
-            faults.isForcedOffline = false
+            faults.reset()
             bff.simulatedConditions = SimulatedConditions(failures: [.init(rate: 0.3)])
         }
         add("Slow (1.5–3 s per call)") {
-            faults.isForcedOffline = false
+            faults.reset()
             bff.simulatedConditions = SimulatedConditions(latency: 1.5...3)
         }
         add("Outage in 3 s, for 20 s") {
-            faults.isForcedOffline = false
+            faults.reset()
+            bff.simulatedConditions = .none
             faults.scheduleOutage(after: 3, lasting: 20)
         }
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))

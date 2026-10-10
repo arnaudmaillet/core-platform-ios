@@ -33,6 +33,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             shakeWindow.onShake = { [weak shakeWindow] in
                 guard var top = shakeWindow?.rootViewController else { return }
                 while let presented = top.presentedViewController { top = presented }
+                // A second shake while the sheet is up does nothing.
+                guard !(top is UIAlertController) else { return }
                 NetworkConditionsMenu.present(
                     from: top, faults: container.mockNetworkFaults, bff: container.mockBackend.bff
                 )
