@@ -1,6 +1,6 @@
+#if DEBUG
 import UIKit
 
-#if DEBUG
 // MARK: - QA hooks
 //
 // The launch-argument hooks that drive the screen (`-upload-post`,

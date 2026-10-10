@@ -425,6 +425,7 @@ final class PlaceProfileViewController: UIViewController {
     }
 
     #if DEBUG
+    /// Internal (not private) only for the +QA hooks.
     var didScheduleDebugPop = false
     private var didScheduleDebugDrives = false
 

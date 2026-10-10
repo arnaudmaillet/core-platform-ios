@@ -1,3 +1,4 @@
+#if DEBUG
 import CoreModels
 import CoreNavigation
 import CoreStorage
@@ -9,7 +10,6 @@ import PostGrid
 import ShareSheet
 import UIKit
 
-#if DEBUG
 // MARK: - QA hooks
 //
 // The launch-argument drivers stay in `PlaceProfileViewController.swift`

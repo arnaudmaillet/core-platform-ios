@@ -41,6 +41,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
     var childCoordinators: [Coordinator] = []
     let tabBarController = ShellTabBarController()
 
+    /// Internal (not private) only for the +QA hooks.
     let container: AppContainer
     private let onLogout: () -> Void
     /// Presents the sign-in flow over the shell — what a guest's "Log in or
@@ -64,6 +65,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
     }
     /// Notifications, as a drawer BEHIND the shell: the whole tab bar
     /// controller slides right to reveal it. See `NotificationsDrawer`.
+    ///
+    /// Internal (not private) only for the +QA hooks.
     private(set) lazy var notificationsDrawer: NotificationsDrawer = NotificationsDrawer(
         tabBarController: tabBarController,
         list: container.notificationsFeature.makeNotificationsViewController(),
@@ -76,6 +79,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// What the window shows: the drawer container, holding the tab bar
     /// controller as its main screen.
     var rootViewController: UIViewController { notificationsDrawer.container }
+    /// Internal (not private) only for the +QA hooks.
     private(set) var feedFlow: FeedFlowCoordinator?
     /// The Profile root. Held so the viewer's avatar can be pushed onto its tab
     /// image as it loads, and again whenever the active profile changes.
@@ -144,12 +148,16 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     /// The bar's detached "+": a menu of ways to make a post, never a tab
     /// anyone stands on. See `CreateTabItem`.
+    ///
+    /// Internal (not private) only for the +QA hooks.
     private(set) lazy var createItem = CreateTabItem { [weak self] destination in
         self?.openCreate(destination)
     }
 
     /// Hold the "+" to go straight to the camera — the menu's Camera row
     /// without the menu. See `CreateHoldShortcut`.
+    ///
+    /// Internal (not private) only for the +QA hooks.
     private(set) lazy var createHold = CreateHoldShortcut(
         tab: createItem.tab, tabBarController: tabBarController
     ) { [weak self] in
@@ -615,6 +623,7 @@ extension MainTabCoordinator {
         )
     }
 
+    /// Internal (not private) only for the +QA hooks.
     func openCreate(_ destination: CreateTabItem.Destination) {
         // Posting needs an account: a guest signs up first, then lands on the
         // screen they chose. Every "+" entry (menu, long press, debug hook)

@@ -1,3 +1,4 @@
+#if DEBUG
 import ChatInterface
 import CoreModels
 import CoreNavigation
@@ -9,7 +10,6 @@ import UIKit
 import DesignSystem
 import Upload
 
-#if DEBUG
 // MARK: - QA hooks: launch arguments
 
 extension MainTabCoordinator {
