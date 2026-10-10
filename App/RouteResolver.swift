@@ -366,10 +366,12 @@ final class RouteResolver: Router {
 }
 
 extension RouteResolver {
-    /// A toast over the screen the viewer is on.
+    /// A failure toast over the screen the viewer is on — or over the sheet
+    /// covering it, which `Feedback` finds (#804): a link opened from a sheet
+    /// used to say so behind it.
     static func toast(_ message: String, symbol: String, on navigator: (any AppNavigating)?) {
         guard let screen = navigator?.activeNavigationController?.topViewController else { return }
-        ToastView.present(message, symbol: symbol, in: screen.view)
+        Feedback.failure(message, symbol: symbol, from: screen)
     }
 }
 

@@ -719,10 +719,10 @@ final class ConversationThreadViewController: UIViewController {
     /// bottom toast as "You're signed in".
     private func setMuted(_ mute: Bool, until: Date?, toast: String? = nil) {
         driver.setMuted(mute, until: until)
-        ToastView.present(
+        Feedback.success(
             toast ?? (mute ? "Notifications muted" : "Notifications on"),
             symbol: mute ? "bell.slash.fill" : "bell.fill",
-            in: view,
+            from: self,
             // Over the composer, which rests where the toast would.
             above: composeBar.inputRowTopAnchor
         )

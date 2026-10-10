@@ -5046,7 +5046,7 @@ final class SnapFeedViewController: UIViewController {
         // acknowledge a menu tap is a worse answer than the one they asked for.
         // The next render drops it — see `render(_:)` — so it goes when they
         // move on, which is when "not interested" means anything.
-        ToastView.present("Hidden from this feed", symbol: "hand.thumbsdown", in: view)
+        Feedback.info("Hidden from this feed", symbol: "hand.thumbsdown", from: self)
     }
 
     private func presentReportReasons(for id: PostID) {
@@ -5066,10 +5066,10 @@ final class SnapFeedViewController: UIViewController {
                 // reports.
                 try await reporting.report(.post(id), reason: reason, surface: "ios.feed")
                 guard let self else { return }
-                ToastView.present("Report sent", symbol: "flag.fill", in: view)
+                Feedback.success("Report sent", symbol: "flag.fill", from: self)
             } catch {
                 guard let self else { return }
-                ToastView.present("Couldn't send this report", symbol: "exclamationmark.triangle", in: view)
+                Feedback.failure("Couldn't send this report", from: self)
             }
         }
     }

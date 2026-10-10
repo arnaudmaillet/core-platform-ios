@@ -912,7 +912,7 @@ public final class ShareSheetViewController: UIViewController {
         UIPasteboard.general.string = card.url.absoluteString
         // Stays put: copying is done, and the sheet is still useful (the QR is
         // right there). Only the actions that LEAVE dismiss first.
-        ToastView.present("Link copied", symbol: "link", in: view)
+        Feedback.success("Link copied", symbol: "link", from: self)
     }
 
     #if DEBUG

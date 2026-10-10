@@ -1064,9 +1064,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // the people the viewer follows (`removeAuthor`).
                 viewModel.removeAuthor(id)
                 let name = handle.isEmpty ? "this author" : "@\(handle)"
-                ToastView.present("Unfollowed \(name)", symbol: "person.badge.minus", in: view)
+                Feedback.success("Unfollowed \(name)", symbol: "person.badge.minus", from: self)
             } catch {
-                self?.presentFailure("Couldn't unfollow. Try again.")
+                self?.presentFailure(handle.isEmpty ? "Couldn't unfollow" : "Couldn't unfollow @\(handle)")
             }
         }
     }
@@ -1090,9 +1090,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // and from a profile are different reports.
                 try await reporting.report(.post(postID), reason: reason, surface: "ios.foryou")
                 guard let self else { return }
-                ToastView.present("Report sent", symbol: "flag.fill", in: view)
+                Feedback.success("Report sent", symbol: "flag.fill", from: self)
             } catch {
-                self?.presentFailure("Couldn't send this report. Try again.")
+                self?.presentFailure("Couldn't send this report")
             }
         }
     }
@@ -1119,12 +1119,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     }
     #endif
 
-    /// Failures are alerts, not toasts: a report or an unfollow that did not
-    /// happen is something the viewer has to know in order to retry.
+    /// A report or an unfollow that did not happen is something the viewer has
+    /// to know in order to retry: a failure toast with its error haptic, the
+    /// same answer the Snap feed gives the same report (#804) — it used to be
+    /// an alert here and a toast there.
     private func presentFailure(_ message: String) {
-        let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        present(alert, animated: true)
+        Feedback.failure(message, from: self)
     }
 
     // MARK: - Discover's whole mosaic

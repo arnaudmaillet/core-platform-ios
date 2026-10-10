@@ -389,13 +389,14 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 return
             }
             let message = PendingDeletionNotice.consume()
-                ? "Welcome back. Your account deletion was cancelled."
-                : "Welcome back. Your account is active again."
+                ? "Welcome back, your account deletion was cancelled"
+                : "Welcome back, your account is active again"
             // After the shell has swapped in and the sign-in sheet (if any)
-            // has gone, over the screen on top of the active tab.
+            // has gone, over the screen on top of the active tab (or over a
+            // sheet covering it — `Feedback` finds it, #804).
             try? await Task.sleep(for: .milliseconds(600))
-            guard let host = mainTabCoordinator?.activeNavigationController?.topViewController?.view else { return }
-            ToastView.present(message, in: host)
+            guard let screen = mainTabCoordinator?.activeNavigationController?.topViewController else { return }
+            Feedback.success(message, from: screen)
         }
     }
 
@@ -429,9 +430,9 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
             sheet.dismiss(animated: true) { [weak self] in
                 // The screen on top of the active tab: its safe area clears the
                 // tab bar, which the shell's own view does not.
-                guard let host = self?.mainTabCoordinator?.activeNavigationController?.topViewController?.view
+                guard let screen = self?.mainTabCoordinator?.activeNavigationController?.topViewController
                 else { return }
-                ToastView.present("You're signed in", in: host)
+                Feedback.success("You're signed in", from: screen)
             }
         }
         finishSignUp(signedIn: true)
