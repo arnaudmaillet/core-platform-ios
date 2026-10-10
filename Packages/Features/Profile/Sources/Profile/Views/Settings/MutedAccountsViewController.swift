@@ -18,6 +18,7 @@ final class MutedAccountsViewController: UIViewController {
     private let imagePipeline: ImagePipeline?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
+    private let avatarLoads = RowAvatarLoads()
 
     init(viewModel: MutedAccountsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
@@ -68,9 +69,10 @@ final class MutedAccountsViewController: UIViewController {
                 monogram: MutedAccountsViewModel.monogram(for: profile)
             ))
             cell.setAvatarImage(nil)
-            guard let url = profile.avatarURL, let pipeline = self?.imagePipeline else { return }
-            Task { [weak cell] in
-                let image = try? await pipeline.image(for: url)
+            // One load per CELL, cancelled when the cell is configured again:
+            // an unkept task painted the previous person's face on a
+            // recycled row (#780).
+            self?.avatarLoads.load(profile.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image in
                 cell?.setAvatarImage(image)
             }
         }

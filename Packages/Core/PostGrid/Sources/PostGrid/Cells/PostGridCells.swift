@@ -1825,7 +1825,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The carousel, for a test that needs to ask where a page put something.
     var debugCarousel: MediaCarouselView? { carousel }
 
-    private var loadTask: Task<Void, Never>?
+    /// The cover load in flight. Readable inside the package so a test can
+    /// ask whether a reconfigure cancelled it (#781).
+    private(set) var loadTask: Task<Void, Never>?
     /// The metadata line always hangs off the caption; what changes per
     /// configure is whether it CLOSES the card. A media row's line is hidden
     /// under the preview, laid out but drawing nothing, which is what keeps it
@@ -2376,6 +2378,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         with post: GalleryPost, imagePipeline: ImagePipeline, captionExpanded: Bool = false,
         showsAuthorIdentity: Bool = true, captionLines: Int? = nil
     ) {
+        // ⚠️ The previous cover load goes FIRST, before anything can return.
+        // A reconfigure without a reuse (the profile gallery's
+        // `reconfigureItems`, a seeded post then its hydrated one) used to
+        // leave it running beside the new one, and whichever landed last won:
+        // the old URL's cover over the right one (#781).
+        loadTask?.cancel()
+        loadTask = nil
         fixedCaptionLines = captionLines
         isCaptionExpanded = captionExpanded && captionLines == nil
         captionLabel.numberOfLines = isCaptionExpanded ? 0 : (captionLines ?? Self.captionLineLimit)
@@ -2612,7 +2621,9 @@ public final class PostGridTileCell: UICollectionViewCell {
     private let likes = PostMetricLabel(
         symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
     )
-    private var loadTask: Task<Void, Never>?
+    /// The cover load in flight. Readable inside the package so a test can
+    /// ask whether a reconfigure cancelled it (#781).
+    private(set) var loadTask: Task<Void, Never>?
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
@@ -2898,6 +2909,11 @@ public final class PostGridTileCell: UICollectionViewCell {
         with post: GalleryPost, imagePipeline: ImagePipeline,
         showsInfo: Bool = false, infoReferenceSize: CGSize? = nil
     ) {
+        // ⚠️ The previous cover load goes first: a reconfigure without a reuse
+        // otherwise left it racing the new one, and an old cover could land
+        // over the right one (#781). See the list row's `configure`.
+        loadTask?.cancel()
+        loadTask = nil
         // Video tiles keep a dark floor: their poster may be unrenderable
         // (or plain black in the simulator), and the glyph needs a stage.
         contentView.backgroundColor = Self.fillColor(for: post)
