@@ -6645,17 +6645,23 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         return true
     }
 
-    /// Whether the viewer is on the source's very last post (#628): the settled
-    /// page is the last one, and the source has said nothing follows it — not
-    /// a window cut short, not a page still to come, not a page that failed
-    /// (`FeedViewModel.isSourceExhausted`).
+    /// Whether the viewer is on the list's last post (#628, #761): the settled
+    /// page is the last one loaded, and no page is on its way.
+    ///
+    /// ⚠️ ON EVERY FULL-SCREEN FEED, NOT ONLY A FINISHED SOURCE (#761, the
+    /// owner's call 2026-10-10). It used to need the source to have SAID
+    /// nothing follows (`FeedViewModel.isSourceExhausted`) — which only the
+    /// map's routes ever did: For You's window and a profile's paged gallery
+    /// never reached "the end", so their last post never let the grab close.
     var isAtEndOfSource: Bool {
-        viewModel.isSourceExhausted && !orderedIDs.isEmpty && settledPageIndex == orderedIDs.count - 1
+        !viewModel.isLoadingNextPage && !orderedIDs.isEmpty && settledPageIndex == orderedIDs.count - 1
     }
 
     #if DEBUG
     /// How many pages the feed holds, for a test waiting on its first load.
     var debugPageCount: Int { orderedIDs.count }
+    /// Whether a next page is on its way. Tests.
+    var debugIsLoadingNextPage: Bool { viewModel.isLoadingNextPage }
     #endif
 
     /// The UPWARD grab's gate (#628): a swipe up past the very end closes the
@@ -6675,7 +6681,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         #if DEBUG
         // `-grab-log`: why an upward swipe at the end did or did not close.
         if ProcessInfo.processInfo.arguments.contains("-grab-log") {
-            print("[grab-up] exhausted=\(viewModel.isSourceExhausted) page=\(settledPageIndex)/\(orderedIDs.count)"
+            print("[grab-up] loading=\(viewModel.isLoadingNextPage) page=\(settledPageIndex)/\(orderedIDs.count)"
                 + " keyboard=\(isKeyboardOnScreen) engaged=\(commentsEngagedID?.rawValue ?? "nil")"
                 + " resting=\(commentsEngagementIsResting)"
                 + " streamAtBottom=\((commentsContentVC as? PostDetailViewController)?.streamIsAtBottom.description ?? "-")")

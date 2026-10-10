@@ -3814,7 +3814,8 @@ extension MapsViewController: MKMapViewDelegate {
     enum MapCardCloseTarget: Equatable { case marker, placeCard }
 
     static func closeTarget(axis: ZoomDismissAxis, hasLanding: Bool) -> MapCardCloseTarget {
-        // Up or down, a place feed closes onto its page (#685).
+        // Down onto the place page; right and up (the end of the list,
+        // #761) onto the marker.
         axis.landsBeneath && hasLanding ? .placeCard : .marker
     }
 
@@ -3958,8 +3959,10 @@ extension MapsViewController: MKMapViewDelegate {
             gallery = built
             if let gallerySource = built as? any ZoomTransitionSource {
                 transition.setDismissSource(gallerySource, for: built)
+                // ⚠️ NOT UPWARD (#761): the end of the list closes to the map,
+                // through the marker driver below.
                 transition.attachInteractiveDismissal(
-                    to: feedVC.view, axes: [.vertical], towards: gallerySource
+                    to: feedVC.view, axes: [.vertical], armsUpward: false, towards: gallerySource
                 ) { [built, weak nav, weak feedVC] in
                     // ⚠️ THE PAGE JOINS THE STACK HERE, at the last moment
                     // before the pop that lands on it — the mirror of the
@@ -4110,7 +4113,8 @@ extension MapsViewController: MKMapViewDelegate {
             // card home. Axes stay disjoint with the gallery driver above:
             // exactly one of the two ever claims a drag.
             _ = clusterGallery
-            transition.attachInteractiveDismissal(to: feedVC.view, axes: [.horizontal]) {
+            // Right, and up past the end of the list (#761): both to the map.
+            transition.attachInteractiveDismissal(to: feedVC.view, axes: [.horizontal, .upward]) {
                 [weak nav] in
                 // The bottom chrome comes back from `viewWillAppear`, which
                 // this pop runs — see the pin grab below.

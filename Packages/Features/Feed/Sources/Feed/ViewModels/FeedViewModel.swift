@@ -106,10 +106,20 @@ public final class FeedViewModel {
     /// one moment a swipe up past the end may close the feed.
     ///
     /// True only when a page said so (`FeedPage.isEndOfSource`) AND left no
-    /// cursor: a window cut from a longer grid, a page still to come, or a
-    /// page that FAILED (its cursor is kept) all read false — an error is not
-    /// "the end" (the owner's call, 2026-10-07).
+    /// cursor. ⚠️ No longer the end-of-list gate (#761): the snap feed's
+    /// upward grab closes past the last post LOADED, on every feed — a failed
+    /// page included, which the 2026-10-07 rule kept from counting; the
+    /// owner's "systematic" call of 2026-10-10 supersedes it.
     public private(set) var isSourceExhausted = false
+
+    /// Whether posts are on their way — the first page, or a next one (#761):
+    /// until they land, the last post loaded is not the end of the list.
+    public var isLoadingNextPage: Bool { pagingLoad != nil || initialLoad != nil }
+
+    /// The last index a cell displayed at — so the near-end check can run
+    /// again once a cursor arrives (a seeded feed opened on its last tile
+    /// displayed it before the first page said more would follow).
+    private var lastDisplayedIndex: Int?
     private var builder: FeedDisplayModelBuilder?
     private var initialLoad: Task<Void, Never>?
     private var pagingLoad: Task<Void, Never>?
@@ -356,6 +366,11 @@ public final class FeedViewModel {
         if items.indices.contains(index) {
             ensureCommentStreams(for: items[index].id)
         }
+        lastDisplayedIndex = index
+        startPagingIfNearEnd(index)
+    }
+
+    private func startPagingIfNearEnd(_ index: Int) {
         guard nextPageToken != nil, pagingLoad == nil, index >= items.count - 5 else { return }
         pagingLoad = Task { await loadNextPage() }
     }
@@ -391,6 +406,10 @@ public final class FeedViewModel {
         guard let repointable = repository as? any RepointableFeedProviding else { return }
         initialLoad?.cancel()
         pagingLoad?.cancel()
+        // Gone with its window: a cancelled page left set read as "still
+        // loading" for good, and nothing would ever page again (#761).
+        pagingLoad = nil
+        lastDisplayedIndex = nil
         for task in streamLoads.values { task.cancel() }
         streamLoads = [:]
         streamsByPost = [:]
@@ -427,7 +446,11 @@ public final class FeedViewModel {
     private func loadFirstPageFromNetwork(renderCacheFirst: Bool) async {
         do {
             let page = try await repository.loadFirstPage()
-            guard let models = await build(page.entries) else { return }
+            guard let models = await build(page.entries) else {
+                // Not for a cancelled load: its successor owns the slot now.
+                if !Task.isCancelled { initialLoad = nil }
+                return
+            }
             items = models
             seedEngagement(from: page.entries)
             subscribeToCounters(for: models.map(\.id))
@@ -444,10 +467,16 @@ public final class FeedViewModel {
         }
         initialLoad = nil
         emit()
+        // A cursor that arrived after the viewer's cell displayed: the
+        // near-end check runs again for it (#761).
+        if let lastDisplayedIndex { startPagingIfNearEnd(lastDisplayedIndex) }
     }
 
     private func loadNextPage() async {
-        guard let token = nextPageToken else { return }
+        guard let token = nextPageToken else {
+            if !Task.isCancelled { pagingLoad = nil }
+            return
+        }
         do {
             let page = try await repository.loadPage(afterToken: token)
             if let models = await build(page.entries) {
@@ -463,7 +492,8 @@ public final class FeedViewModel {
         } catch {
             // Silent: the trigger fires again on further scrolling.
         }
-        pagingLoad = nil
+        // A cancelled page (a `repoint`) leaves the slot to its successor.
+        if !Task.isCancelled { pagingLoad = nil }
         emit()
     }
 

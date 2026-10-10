@@ -161,14 +161,21 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
     /// and the horizontal axis escapes the whole stack. Keep the axis sets
     /// of the drivers disjoint: each pan self-gates on its own axes, so
     /// disjoint sets mean exactly one driver ever claims a drag.
+    ///
+    /// - Parameter armsUpward: whether `upward` rides with this driver's
+    ///   `vertical` (#628). Pass false when a sibling takes `upward`
+    ///   explicitly — a place page beneath takes the downward close, the
+    ///   marker the end of the list (#761).
     public func attachInteractiveDismissal(
         to view: UIView,
         axes: Set<ZoomDismissAxis>,
+        armsUpward: Bool = true,
         towards flightSource: any ZoomTransitionSource,
         onDismiss: @escaping () -> Void
     ) {
         guard let destination else { return }
         let driver = ZoomDismissInteractionController()
+        driver.armsUpward = armsUpward
         driver.onCancelled = onDismissalCancelled
         driver.attach(
             to: view, source: flightSource, destination: destination, axes: axes,
@@ -217,7 +224,7 @@ public final class ZoomTransitionController: NSObject, UINavigationControllerDel
         // vertical grab that simply went somewhere else. The gallery leg had no
         // scripted route at all, which is why it was only ever verified by hand.
         let driver = ([interaction] + extraInteractions)
-            .first { ZoomDismissAxis.withUpward($0.debugArmedAxes).contains(axis) } ?? interaction
+            .first { $0.debugEffectiveAxes.contains(axis) } ?? interaction
         Task { @MainActor in
             await driver.debugPerformGrab(
                 peakProgress: 0.22, verticalDrift: 180, axis: axis

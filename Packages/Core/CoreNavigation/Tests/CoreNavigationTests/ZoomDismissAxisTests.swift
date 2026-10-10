@@ -103,11 +103,21 @@ struct ZoomDismissAxisTests {
                 "the window follows the finger up")
     }
 
-    /// A swipe up lands where a swipe down does (#685): beneath the feed when
-    /// a place page is there; a horizontal close lands on the source.
-    @Test func upwardLandsWhereDownwardDoes() {
+    /// ⚠️ A SWIPE UP LANDS WHERE A SWIPE RIGHT DOES (#761, reversing #685):
+    /// on the source — a place feed's end closes to the map; only a swipe
+    /// down lands beneath, on the place page.
+    @Test func upwardLandsWhereRightwardDoes() {
         #expect(ZoomDismissAxis.vertical.landsBeneath)
-        #expect(ZoomDismissAxis.upward.landsBeneath)
+        #expect(!ZoomDismissAxis.upward.landsBeneath)
         #expect(!ZoomDismissAxis.horizontal.landsBeneath)
+    }
+
+    /// A driver armed with `upward` explicitly (the map marker's, #761)
+    /// begins along it without `vertical`; `withUpward` adds nothing to it.
+    @Test func upwardMayBeArmedWithoutVertical() {
+        #expect(ZoomDismissAxis.withUpward([.horizontal, .upward]) == [.horizontal, .upward])
+        #expect(ZoomDismissAxis.match(velocity: CGPoint(x: 10, y: -400), axes: [.horizontal, .upward]) == .upward)
+        #expect(ZoomDismissAxis.match(velocity: CGPoint(x: 10, y: -400), axes: [.vertical]) == nil,
+                "a driver left without upward claims no upward drag")
     }
 }

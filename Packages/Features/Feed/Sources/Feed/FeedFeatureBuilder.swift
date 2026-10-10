@@ -900,7 +900,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // and one per opened post.
             dismissal.prepareForDismissal = { [weak landing, weak dismissal] axis in
                 guard let dismissal else { return }
-                // Up or down, a place feed closes onto its page (#685).
+                // Down onto the place page; right and up (#761) onto the marker.
                 guard axis.landsBeneath else {
                     dismissal.revealGeometry = markerGeometry
                     return

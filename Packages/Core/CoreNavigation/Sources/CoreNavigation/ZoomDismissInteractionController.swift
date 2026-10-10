@@ -126,6 +126,14 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
     var debugArmedAxes: Set<ZoomDismissAxis> { axes }
     #endif
 
+    /// Whether `upward` rides with `vertical` on this driver (`withUpward`).
+    /// Off for a driver whose vertical lands BENEATH (a place page) while a
+    /// sibling driver, armed with `upward` explicitly, takes the end of the
+    /// list to the source (#761). ⚠️ Outside `#if DEBUG`: Release begins on it.
+    var armsUpward = true
+    /// The axes this driver begins along.
+    var debugEffectiveAxes: Set<ZoomDismissAxis> { armsUpward ? ZoomDismissAxis.withUpward(axes) : axes }
+
     override init() {
         super.init()
         #if DEBUG
@@ -1059,10 +1067,11 @@ extension ZoomDismissInteractionController: UIGestureRecognizerDelegate {
         // would start a second pop mid-transition. Refuse; the next grab retries.
         guard (destination as? UIViewController)?.transitionCoordinator == nil
         else { return grabLog("transition settling", false) }
-        // `withUpward`: the swipe up past a finished source (#628) rides with
-        // the vertical axis; the destination's gate below keeps it closed.
+        // `withUpward`: the swipe up past the list's last post (#628, #761)
+        // rides with the vertical axis unless a sibling takes it
+        // (`armsUpward`); the destination's gate below keeps it closed.
         guard let axis = ZoomDismissAxis.match(
-            velocity: pan.velocity(in: view), axes: ZoomDismissAxis.withUpward(axes)
+            velocity: pan.velocity(in: view), axes: debugEffectiveAxes
         ) else { return grabLog("no axis v=\(pan.velocity(in: view))", false) }
         // And the destination's TENANTS: subsurfaces that own drags along this
         // axis — a scrolling rail or an open comments panel vertically, a
