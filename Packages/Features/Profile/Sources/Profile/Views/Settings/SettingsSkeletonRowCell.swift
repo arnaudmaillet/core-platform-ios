@@ -9,8 +9,8 @@ import UIKit
 ///
 /// Built this way, the skeleton's row heights, insets and Dynamic Type sizing
 /// are the real row's by construction, not by copied constants: when the
-/// content cross-fades in, nothing moves. The sample strings only decide how
-/// wide each bone is.
+/// content cross-fades in (`crossfadeSkeleton(swapping:)`), nothing moves.
+/// The sample strings only decide how wide each bone is.
 final class SettingsSkeletonRowCell: UICollectionViewListCell {
     private let listView = UIListContentView(configuration: .cell())
     private let imageBone = SkeletonBoneView(rounding: .fixed(6))
@@ -72,19 +72,5 @@ final class SettingsSkeletonRowCell: UICollectionViewListCell {
             bone.centerYAnchor.constraint(equalTo: guide.centerYAnchor),
             bone.heightAnchor.constraint(equalTo: guide.heightAnchor, multiplier: filling ? 1 : 0.6)
         ]
-    }
-}
-
-extension UICollectionView {
-    /// Leaves a skeleton for its content (charter P10): `apply` swaps the
-    /// rows inside one cross-dissolve of the list, at the settled skeleton
-    /// fade duration, so the bones melt into the values instead of popping.
-    /// Off screen there is nothing to see, and the swap is immediate.
-    func crossfadeFromSkeleton(_ apply: @escaping () -> Void) {
-        guard window != nil else {
-            apply()
-            return
-        }
-        UIView.transition(with: self, duration: UIView.skeletonFadeDuration, options: .transitionCrossDissolve, animations: apply)
     }
 }

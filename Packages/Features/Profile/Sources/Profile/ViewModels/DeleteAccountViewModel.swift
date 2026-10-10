@@ -19,9 +19,9 @@ final class DeleteAccountViewModel {
         case ready(permanentOn: Date)
         /// Already requested: when, and when it becomes permanent.
         case requested(on: Date, permanentOn: Date)
-        /// Whether a deletion is already pending couldn't be read. The screen
-        /// offers a retry, never the button: deleting on a state the app
-        /// doesn't know is not a choice it hands the viewer.
+        /// The deletion record couldn't be reached (no answer: offline, a
+        /// timeout, the service down). The screen offers a retry, not the
+        /// button: a moment later the read will likely say.
         case failed
     }
 
@@ -51,11 +51,19 @@ final class DeleteAccountViewModel {
         // A retry shows the bones again while it reads.
         if case .failed = phase { phase = .loading }
         async let checklist = readChecklist()
-        // A record that can't be read is a failure, not "no request yet": the
-        // button would otherwise be offered on a guess.
+        // Two kinds of unreadable record:
+        // - REFUSED (the deployment doesn't serve it, or not to this account):
+        //   that's as known as it gets, so "no request yet" and the button.
+        //   Blocking would leave the account undeletable there for good (App
+        //   Review 5.1.1(v)), and a duplicate request only restarts the
+        //   30-day clock.
+        // - NO ANSWER: a failure with a retry, not a button offered on a
+        //   guess.
         let status: AccountGdprStatus?
         do {
             status = try await lifecycle.gdprStatus()
+        } catch AccountError.refused {
+            status = AccountGdprStatus(deletionRequestedAt: nil)
         } catch {
             status = nil
         }

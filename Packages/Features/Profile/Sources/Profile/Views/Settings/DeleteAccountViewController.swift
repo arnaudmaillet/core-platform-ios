@@ -228,7 +228,7 @@ final class DeleteAccountViewController: UIViewController {
         let wasShowingSkeleton = isShowingSkeleton
         isShowingSkeleton = viewModel.phase == .loading
         if wasShowingSkeleton, !isShowingSkeleton {
-            collectionView.crossfadeFromSkeleton { [dataSource, snapshot] in
+            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
                 dataSource?.apply(snapshot, animatingDifferences: false)
             }
         } else {

@@ -22,11 +22,13 @@ final class NotificationSettingsViewController: UIViewController {
         /// iOS hasn't said yet: a bone holds the permission row's slot, so
         /// the list doesn't shift when the answer lands.
         case permissionPending
-        /// Permission not asked yet: asks it.
+        /// Permission not asked yet, or only provisional (quiet delivery to
+        /// Notification Center): asks for the full one.
         case allow
         /// Permission refused: iOS Settings is the only way back.
         case turnOnInSettings
-        /// Permission given: the slot says so, rather than vanishing.
+        /// Permission given: the slot says so, rather than vanishing, and
+        /// leads to iOS Settings, where it can be changed.
         case allowed
         case pause
         case category(NotificationCategory)
@@ -153,9 +155,7 @@ final class NotificationSettingsViewController: UIViewController {
     func footer(_ section: Section) -> String? {
         switch section {
         case .system:
-            return systemPermission == .denied
-                ? "Notifications are turned off for this app in iOS Settings."
-                : "Get a notification when someone likes, comments, mentions or follows you."
+            return Self.systemFooter(permission: systemPermission)
         case .pause:
             if case .loaded(let preferences) = phase, let until = preferences.pausedUntil {
                 return "Paused until \(Self.timeFormatter.string(from: until))."
@@ -167,6 +167,16 @@ final class NotificationSettingsViewController: UIViewController {
             return "No pushes between these times, in this iPhone's time zone."
         case .comingSoon:
             return "This needs a server update and isn't available yet."
+        }
+    }
+
+    /// The permission section's footer: the pitch only while there is
+    /// something to ask for; once allowed, where it is changed.
+    static func systemFooter(permission: UNAuthorizationStatus?) -> String {
+        switch Self.permissionRow(permission) {
+        case .turnOnInSettings: "Notifications are turned off for this app in iOS Settings."
+        case .allowed: "Notifications are on for this app. Choose which ones you get below."
+        default: "Get a notification when someone likes, comments, mentions or follows you."
         }
     }
 
@@ -202,6 +212,7 @@ final class NotificationSettingsViewController: UIViewController {
                 content.secondaryText = "Allowed"
                 content.image = UIImage(systemName: "bell.badge")
                 content.imageProperties.tintColor = .label
+                cell.accessories = [.disclosureIndicator()]
             case .pause:
                 content = .valueCell()
                 content.text = "Pause All"
@@ -325,7 +336,7 @@ final class NotificationSettingsViewController: UIViewController {
         let previousSkeletonCount = skeletonCount
         skeletonCount = layout.flatMap { $0.1 }.filter(Self.isSkeleton).count
         if skeletonCount < previousSkeletonCount {
-            collectionView.crossfadeFromSkeleton { [dataSource, snapshot] in
+            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
                 dataSource?.apply(snapshot, animatingDifferences: false)
             }
         } else {
@@ -339,13 +350,7 @@ final class NotificationSettingsViewController: UIViewController {
     /// pushes it down. While the preferences load, Pause All and the push
     /// categories are bones in their own places.
     static func layout(permission: UNAuthorizationStatus?, phase: Phase) -> [(Section, [Item])] {
-        let permissionRow: Item = switch permission {
-        case nil: .permissionPending
-        case .notDetermined?: .allow
-        case .denied?: .turnOnInSettings
-        default: .allowed
-        }
-        var layout: [(Section, [Item])] = [(.system, [permissionRow])]
+        var layout: [(Section, [Item])] = [(.system, [permissionRow(permission)])]
         switch phase {
         case .loading:
             layout.append((.pause, [.skeleton(0)]))
@@ -359,6 +364,16 @@ final class NotificationSettingsViewController: UIViewController {
             layout.append((.comingSoon, Self.planned.map(Item.planned)))
         }
         return layout
+    }
+
+    /// The one row in the permission slot for iOS's answer (nil: not yet).
+    static func permissionRow(_ permission: UNAuthorizationStatus?) -> Item {
+        switch permission {
+        case nil: .permissionPending
+        case .notDetermined?, .provisional?: .allow
+        case .denied?: .turnOnInSettings
+        default: .allowed
+        }
     }
 
     private static func isSkeleton(_ item: Item) -> Bool {
@@ -424,7 +439,7 @@ final class NotificationSettingsViewController: UIViewController {
 extension NotificationSettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .failed, .allow, .turnOnInSettings: true
+        case .failed, .allow, .turnOnInSettings, .allowed: true
         default: false
         }
     }
@@ -434,7 +449,7 @@ extension NotificationSettingsViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed: load()
         case .allow: requestPermission()
-        case .turnOnInSettings: openSystemSettings()
+        case .turnOnInSettings, .allowed: openSystemSettings()
         default: break
         }
     }

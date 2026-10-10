@@ -1,3 +1,4 @@
+import Connect
 import Foundation
 import Testing
 @testable import Profile
@@ -31,11 +32,11 @@ struct DeleteAccountTests {
         #expect(model.phase == .requested(on: earlier, permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: earlier)))
     }
 
-    /// An unreadable GDPR record is a failure with a retry, never the
+    /// A GDPR read that got no answer is a failure with a retry, never the
     /// button: the app doesn't know whether a deletion is already pending,
     /// so the viewer is not offered one on a guess.
-    @Test func anUnreadableRecordIsAFailureNotTheButton() async {
-        let stub = StubLifecycle(failsRead: true)
+    @Test func anUnansweredReadIsAFailureNotTheButton() async {
+        let stub = StubLifecycle(readError: .transport(message: "offline"))
         let model = DeleteAccountViewModel(lifecycle: stub, now: { Self.today })
         await model.load()
         #expect(model.phase == .failed)
@@ -44,7 +45,7 @@ struct DeleteAccountTests {
         #expect(layout.allSatisfy { !$0.1.contains(.delete) })
         #expect(DeleteAccountViewController.footer(for: .failed)?.contains("try again") == true)
 
-        await stub.setFailsRead(false)
+        await stub.setReadError(nil)
         var phases: [DeleteAccountViewModel.Phase] = []
         model.onChange = { phases.append(model.phase) }
         await model.load()
@@ -53,6 +54,40 @@ struct DeleteAccountTests {
 
     /// What gets deleted names the account's profiles and what is left in the
     /// wallet (#402), and falls back to the general wording when unread.
+    /// A deployment that refuses the GDPR read (doesn't serve it, won't show
+    /// it, has none) still offers the button: blocking would leave the
+    /// account undeletable there for good (App Review 5.1.1(v)), and a
+    /// duplicate request only restarts the 30-day clock.
+    @Test(arguments: [Code.unimplemented, .permissionDenied, .notFound])
+    func aRefusedReadStillOffersTheButton(code: Code) async {
+        let model = DeleteAccountViewModel(lifecycle: StubLifecycle(readError: .refused(code)), now: { Self.today })
+        await model.load()
+        #expect(model.phase == .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: Self.today)))
+    }
+
+    /// The repository keeps a refusal's code and folds a call that got no
+    /// answer into a transport failure; a step-up refusal stays a step-up.
+    @Test func theRepositoryTellsARefusalFromNoAnswer() {
+        for code in [Code.unimplemented, .permissionDenied, .notFound] {
+            #expect(AccountRepository.gdprError(ConnectError(code: code, message: "no")) == .refused(code))
+        }
+        for code in [Code.unavailable, .deadlineExceeded, .canceled, .unknown] {
+            guard case .transport = AccountRepository.gdprError(ConnectError(code: code, message: "down")) else {
+                Issue.record("\(code) should be a transport failure")
+                continue
+            }
+        }
+        #expect(AccountRepository.gdprError(ConnectError(code: .permissionDenied, message: "step_up_required")) == .stepUpRequired)
+    }
+
+    /// A step-up refusal on the read is not a refusal of the record: the
+    /// state is unknown, so it fails with a retry.
+    @Test func aStepUpOnTheReadIsAFailure() async {
+        let model = DeleteAccountViewModel(lifecycle: StubLifecycle(readError: .stepUpRequired), now: { Self.today })
+        await model.load()
+        #expect(model.phase == .failed)
+    }
+
     @Test func theChecklistNamesWhatWillBeLost() async {
         let checklist = DeletionChecklist(profileHandles: ["you", "you.work"], points: 1_250, gems: 3)
         let model = DeleteAccountViewModel(lifecycle: StubLifecycle(), checklist: { checklist }, now: { Self.today })
@@ -132,22 +167,22 @@ struct DeleteAccountTests {
 
 private actor StubLifecycle: AccountLifecycleManaging {
     private let requestedAt: Date?
-    private var failsRead: Bool
+    private var readError: AccountError?
     private(set) var requests = 0
 
-    init(requestedAt: Date? = nil, failsRead: Bool = false) {
+    init(requestedAt: Date? = nil, readError: AccountError? = nil) {
         self.requestedAt = requestedAt
-        self.failsRead = failsRead
+        self.readError = readError
     }
 
-    func setFailsRead(_ value: Bool) { failsRead = value }
+    func setReadError(_ error: AccountError?) { readError = error }
 
     func requestDeletion() async throws { requests += 1 }
 
     func requestDataExport() async throws {}
 
     func gdprStatus() async throws -> AccountGdprStatus {
-        if failsRead { throw AccountError.transport(message: "restricted") }
+        if let readError { throw readError }
         return AccountGdprStatus(deletionRequestedAt: requestedAt)
     }
 }

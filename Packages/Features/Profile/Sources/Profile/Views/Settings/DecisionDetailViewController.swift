@@ -245,7 +245,7 @@ final class DecisionDetailViewController: UIViewController {
         let wasShowingSkeleton = isShowingSkeleton
         isShowingSkeleton = phase == .loading
         if wasShowingSkeleton, !isShowingSkeleton {
-            collectionView.crossfadeFromSkeleton { [dataSource, snapshot] in
+            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
                 dataSource?.apply(snapshot, animatingDifferences: false)
             }
         } else {

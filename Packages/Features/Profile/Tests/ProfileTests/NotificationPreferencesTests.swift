@@ -35,13 +35,23 @@ struct NotificationPreferencesTests {
         #expect(first.first?.1 == [.permissionPending])
 
         let answers: [(UNAuthorizationStatus, NotificationSettingsViewController.Item)] = [
-            (.notDetermined, .allow), (.denied, .turnOnInSettings), (.authorized, .allowed), (.provisional, .allowed)
+            (.notDetermined, .allow), (.provisional, .allow), (.denied, .turnOnInSettings), (.authorized, .allowed), (.ephemeral, .allowed)
         ]
         for (status, row) in answers {
             let layout = NotificationSettingsViewController.layout(permission: status, phase: .loading)
             #expect(layout.map(\.0) == first.map(\.0), "\(status.rawValue)")
             #expect(layout.first?.1 == [row], "\(status.rawValue)")
         }
+    }
+
+    /// The section's footer pitches notifications only while there is
+    /// something to ask for.
+    @Test func theFooterPitchesOnlyWhileThereIsSomethingToAsk() {
+        let pitch = NotificationSettingsViewController.systemFooter(permission: .notDetermined)
+        #expect(pitch.hasPrefix("Get a notification"))
+        #expect(NotificationSettingsViewController.systemFooter(permission: .provisional) == pitch)
+        #expect(NotificationSettingsViewController.systemFooter(permission: .authorized) != pitch)
+        #expect(NotificationSettingsViewController.systemFooter(permission: .denied).contains("turned off"))
     }
 
     /// While the preferences load, Pause All and every push category are

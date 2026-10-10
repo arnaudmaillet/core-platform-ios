@@ -56,7 +56,10 @@ final class ConsentsViewController: UIViewController {
         collectionView.delegate = self
         view.addSubview(collectionView)
         configureDataSource()
-        viewModel.onChange = { [weak self] in self?.applySnapshot() }
+        viewModel.onChange = { [weak self] in
+            self?.applySnapshot()
+            self?.syncSwitches()
+        }
         applySnapshot()
         load()
     }
@@ -108,7 +111,7 @@ final class ConsentsViewController: UIViewController {
                 HapticSelection().selectionChanged()
             case .ignored:
                 // A switch flipped in the instant before it was disabled.
-                applySnapshot()
+                syncSwitches()
             case .failed:
                 let alert = UIAlertController(title: nil, message: "Couldn't save that change. Try again.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -219,14 +222,25 @@ final class ConsentsViewController: UIViewController {
         return toggle
     }
 
-    /// `toggle` brought up to date with the model — the change in flight, or
-    /// the record (which is how a failed save flips it back) — and disabled
-    /// while any change is saving.
+    /// The cell only says whether `toggle` can be touched; its value is
+    /// `syncSwitches`'s.
     private func accessory(_ toggle: UISwitch, for consent: ConsentsViewModel.Consent) -> UICellAccessory {
-        let isOn = viewModel.isGiven(consent)
-        if toggle.isOn != isOn { toggle.setOn(isOn, animated: toggle.window != nil) }
         toggle.isEnabled = !viewModel.isSaving
         return .customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
+    }
+
+    /// Brings both switches up to date with the model — the change in flight,
+    /// or the record, which is how a failed save flips one back.
+    ///
+    /// ⚠️ Called AFTER the snapshot is applied, never from the cell
+    /// registration: a `setOn(_:animated:)` made inside a diffable apply
+    /// lands without its animation, so the flip-back snapped.
+    private func syncSwitches() {
+        for (toggle, consent) in [(marketingSwitch, ConsentsViewModel.Consent.marketing), (analyticsSwitch, .analytics)] {
+            let isOn = viewModel.isGiven(consent)
+            if toggle.isOn != isOn { toggle.setOn(isOn, animated: toggle.window != nil) }
+            toggle.isEnabled = !viewModel.isSaving
+        }
     }
 }
 
