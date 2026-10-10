@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// Whether a view can actually be SEEN — the test a label passes before it
@@ -143,6 +144,18 @@ enum EmoteVisibility {
 /// the COMMON modes (so a scroll that carries a page out frees its slots
 /// without waiting for the finger to lift), and stops when no label is
 /// registered.
+///
+/// ⚠️ **A TICK WALKS NOTHING WHILE THE APP RESTS.** The walk is cheap per
+/// label and not per second: profiled at ~2.4% of the main thread's busy time
+/// (#830), most ticks re-asking a question whose answer had not changed. Two
+/// states make the answer moot:
+/// - **Idle calm** (`IdleCalm`): nobody has touched the app, so nobody
+///   scrolled anything, and every emote is a still that holds no playback
+///   slot — there is nothing to give back. Resting and waking both reset every
+///   label's players and lay it out again, which re-asks then.
+/// - **The background**: the song keeps the process running behind the home
+///   screen (`UIBackgroundModes: audio`), and the timer with it — four walks a
+///   second per label for a screen nobody can see.
 @MainActor
 final class EmoteVisibilityMonitor {
     static let shared = EmoteVisibilityMonitor()
@@ -154,9 +167,35 @@ final class EmoteVisibilityMonitor {
 
     private let labels = NSHashTable<EmoteLabel>.weakObjects()
     private var timer: Timer?
+    private var lifecycleObservers: [any NSObjectProtocol] = []
+    /// Between `didEnterBackground` and `willEnterForeground`.
+    private var isInBackground = false
+
+    /// Whether a tick should skip its walk. Swappable for tests, which must not
+    /// flip the app-wide `IdleCalm` under suites running beside them.
+    var isResting: () -> Bool = { IdleCalm.isCalm }
 
     var isRunning: Bool { timer != nil }
     var registeredCount: Int { labels.allObjects.count }
+    /// Labels re-checked so far, across every tick — what a test counts to
+    /// tell a tick that walked from one that did not.
+    private(set) var walkedLabelCount = 0
+
+    init() {
+        let center = NotificationCenter.default
+        lifecycleObservers = [
+            center.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.appDidEnterBackground() }
+            },
+            center.addObserver(
+                forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.appWillEnterForeground() }
+            }
+        ]
+    }
 
     func register(_ label: EmoteLabel) {
         labels.add(label)
@@ -174,15 +213,22 @@ final class EmoteVisibilityMonitor {
         if labels.allObjects.isEmpty { stop() }
     }
 
-    /// One pass over every registered label.
+    /// One pass over every registered label — none while the app rests.
     func tick() {
         let live = labels.allObjects
         guard !live.isEmpty else {
             stop()
             return
         }
+        guard !isInBackground, !isResting() else { return }
+        walkedLabelCount += live.count
         live.forEach { $0.reevaluateVisibility() }
     }
+
+    func appDidEnterBackground() { isInBackground = true }
+
+    /// Back in front: the next tick walks again, and asks afresh.
+    func appWillEnterForeground() { isInBackground = false }
 
     private func stop() {
         timer?.invalidate()
