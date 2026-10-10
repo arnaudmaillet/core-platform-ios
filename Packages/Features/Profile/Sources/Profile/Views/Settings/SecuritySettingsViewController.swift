@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -111,7 +112,7 @@ final class SecuritySettingsViewController: UIViewController {
 
     private func configureDataSource() {
         let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
-            Self.configure(cell, for: item)
+            Self.configure(cell, for: item, failure: self?.viewModel.failure)
             self?.configureOwnRow(cell, for: item)
         }
         let skeletonRegistration = UICollectionView.CellRegistration<SettingsSkeletonRowCell, Int> { cell, _, index in
@@ -248,7 +249,13 @@ final class SecuritySettingsViewController: UIViewController {
         }
     }
 
-    private static func configure(_ cell: UICollectionViewListCell, for item: Item) {
+    /// The sessions' failed row: "You’re offline…" when that is why the
+    /// read failed (#794), else the row's own words.
+    static func failedSessionsText(_ failure: NetworkFailure?) -> String {
+        FailureCopy.row(for: failure, fallback: "Couldn't load your sessions. Tap to try again.")
+    }
+
+    private static func configure(_ cell: UICollectionViewListCell, for item: Item, failure: NetworkFailure?) {
         cell.accessories = []
         cell.contentView.subviews.filter { $0.tag == lockControlTag }.forEach { $0.removeFromSuperview() }
         switch item {
@@ -281,7 +288,7 @@ final class SecuritySettingsViewController: UIViewController {
             break
         case .failed:
             var content = UIListContentConfiguration.cell()
-            content.text = "Couldn't load your sessions. Tap to try again."
+            content.text = failedSessionsText(failure)
             content.textProperties.color = .secondaryLabel
             cell.contentConfiguration = content
         case .logOutEverywhere:

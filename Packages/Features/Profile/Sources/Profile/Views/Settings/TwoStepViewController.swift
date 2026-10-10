@@ -1,4 +1,5 @@
 import CoreImage.CIFilterBuiltins
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -36,6 +37,10 @@ final class TwoStepViewController: UIViewController {
     private(set) var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
     private var isWorking = false
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -79,6 +84,7 @@ final class TwoStepViewController: UIViewController {
                 let details = try await account.currentAccount()
                 phase = .loaded(isOn: details.twoStepOn, codesLeft: details.backupCodesLeft)
             } catch {
+                loadFailure = NetworkFailure.of(error)
                 phase = .failed
             }
         }
@@ -103,7 +109,7 @@ final class TwoStepViewController: UIViewController {
     // MARK: - List
 
     private func configureDataSource() {
-        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, item in
+        let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.valueCell()
             cell.accessories = []
             switch item {
@@ -113,7 +119,10 @@ final class TwoStepViewController: UIViewController {
                 content.textProperties.color = .secondaryLabel
             case .failed:
                 content = .cell()
-                content.text = "Couldn't load two-step sign-in. Tap to try again."
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: self?.loadFailure, fallback: "Couldn't load two-step sign-in. Tap to try again."
+                )
                 content.textProperties.color = .secondaryLabel
             case .status(let isOn):
                 content.text = "Two-Step Sign-In"

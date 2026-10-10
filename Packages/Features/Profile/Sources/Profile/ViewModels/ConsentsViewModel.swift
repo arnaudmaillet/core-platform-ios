@@ -1,3 +1,4 @@
+import CoreNetworking
 import Foundation
 
 /// State for Settings → Ads and Data (#395): the account's consents, and the
@@ -43,6 +44,10 @@ final class ConsentsViewModel {
     private var pending: Change? {
         didSet { onChange?() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private(set) var failure: NetworkFailure?
     var onChange: (() -> Void)?
 
     private let manager: any AccountConsentManaging
@@ -64,6 +69,7 @@ final class ConsentsViewModel {
         do {
             phase = .loaded(try await manager.consents())
         } catch {
+            failure = NetworkFailure.of(error)
             phase = .failed
         }
     }

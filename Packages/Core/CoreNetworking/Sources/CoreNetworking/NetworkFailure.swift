@@ -166,12 +166,38 @@ public enum FailureCopy {
     public static let offlineTitle = "You\u{2019}re offline"
     public static let timeoutTitle = "That took too long"
 
+    /// The forms for a failed row that retries when tapped — Settings'
+    /// "Couldn't load … Tap to try again." (#794).
+    public static let offlineRow = "You\u{2019}re offline. Tap to try again."
+    public static let timeoutRow = "That took too long. Tap to try again."
+
     /// The offline or timeout sentence when that is why `error` happened,
     /// else `fallback` (the screen's own wording).
     public static func message(for error: any Error, fallback: String) -> String {
-        switch NetworkFailure.of(error) {
+        message(for: NetworkFailure.of(error), fallback: fallback)
+    }
+
+    /// `message(for:fallback:)` for a screen that kept the failure rather
+    /// than the error (a view model that remembers WHY its last read failed).
+    public static func message(for failure: NetworkFailure?, fallback: String) -> String {
+        switch failure {
         case .offline: offline
         case .timeout: timeout
+        default: fallback
+        }
+    }
+
+    /// The failed-row form: `offlineRow`, `timeoutRow`, else `fallback`
+    /// (the row's own "Couldn't load … Tap to try again.").
+    public static func row(for error: any Error, fallback: String) -> String {
+        row(for: NetworkFailure.of(error), fallback: fallback)
+    }
+
+    /// `row(for:fallback:)` from a failure the view model kept.
+    public static func row(for failure: NetworkFailure?, fallback: String) -> String {
+        switch failure {
+        case .offline: offlineRow
+        case .timeout: timeoutRow
         default: fallback
         }
     }

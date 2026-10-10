@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import EmoteKit
 import Foundation
 import PostGrid
@@ -15,6 +16,10 @@ final class RecentlyDeletedViewModel {
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private(set) var failure: NetworkFailure?
     var onChange: (() -> Void)?
 
     private let trash: any PostTrashManaging
@@ -28,12 +33,14 @@ final class RecentlyDeletedViewModel {
     func load() async {
         if case .failed = phase { phase = .loading }
         guard let author = await viewer.viewerProfileID() else {
+            failure = nil
             phase = .failed
             return
         }
         do {
             phase = .loaded(try await trash.recentlyDeleted(for: author))
         } catch {
+            failure = NetworkFailure.of(error)
             phase = .failed
         }
     }

@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -191,7 +192,10 @@ final class ConsentsViewController: UIViewController {
             cell.contentConfiguration = content
         case .failed:
             var content = UIListContentConfiguration.cell()
-            content.text = "Couldn't load your consents. Tap to try again."
+            // "You’re offline…" when that is why (#794).
+            content.text = FailureCopy.row(
+                for: viewModel.failure, fallback: "Couldn't load your consents. Tap to try again."
+            )
             content.textProperties.color = .secondaryLabel
             cell.contentConfiguration = content
         case .planned(let title):

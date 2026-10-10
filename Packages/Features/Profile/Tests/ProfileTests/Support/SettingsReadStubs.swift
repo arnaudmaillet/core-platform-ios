@@ -1,3 +1,4 @@
+import CoreNetworking
 import Foundation
 @testable import Profile
 
@@ -9,11 +10,17 @@ actor SwitchableAccount: AccountProviding {
     private(set) var reads = 0
     /// Holds each read until released, for in-flight tests.
     private let gate: ReadGate?
+    /// Why a failing read failed (#794): nil reads as a server fault.
+    private let failure: NetworkFailure?
 
-    init(details: AccountDetails = SwitchableAccount.sample, fails: Bool = false, gate: ReadGate? = nil) {
+    init(
+        details: AccountDetails = SwitchableAccount.sample, fails: Bool = false, gate: ReadGate? = nil,
+        failure: NetworkFailure? = nil
+    ) {
         self.details = details
         self.fails = fails
         self.gate = gate
+        self.failure = failure
     }
 
     static let sample = AccountDetails(
@@ -27,7 +34,7 @@ actor SwitchableAccount: AccountProviding {
     func currentAccount() async throws -> AccountDetails {
         reads += 1
         await gate?.pass()
-        if fails { throw AccountError.transport(message: "offline") }
+        if fails { throw AccountError.transport(message: "offline", failure: failure) }
         return details
     }
 }
@@ -66,16 +73,19 @@ actor ReadGate {
 actor SwitchableSessions: AccountSessionsManaging {
     private(set) var fails: Bool
     private let count: Int
+    /// Why a failing read failed (#794): nil reads as a server fault.
+    private let failure: NetworkFailure?
 
-    init(count: Int, fails: Bool = false) {
+    init(count: Int, fails: Bool = false, failure: NetworkFailure? = nil) {
         self.count = count
         self.fails = fails
+        self.failure = failure
     }
 
     func setFails(_ fails: Bool) { self.fails = fails }
 
     func activeSessions() async throws -> [AccountSession] {
-        if fails { throw AccountSessionsError.transport(message: "offline") }
+        if fails { throw AccountSessionsError.transport(message: "offline", failure: failure) }
         return (0..<count).map {
             AccountSession(id: "s\($0)", device: SessionDevice(userAgent: ""), isCurrent: $0 == 0, signedInAt: nil)
         }

@@ -1,3 +1,4 @@
+import CoreNetworking
 import CoreStorage
 import DesignSystem
 import UIKit
@@ -109,7 +110,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         do {
             return .content(try await isTeen())
         } catch {
-            return .failed(message: failedText)
+            return .failed(message: FailureCopy.row(for: error, fallback: failedText))
         }
     }
 
@@ -186,7 +187,12 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                 content.textProperties.color = .secondaryLabel
             case .failed:
                 content = .cell()
-                content.text = Self.failedText
+                // The read's words: "You’re offline…" when that is why (#794).
+                if case .failed(let message) = age {
+                    content.text = message
+                } else {
+                    content.text = Self.failedText
+                }
                 content.textProperties.color = .secondaryLabel
                 cell.accessibilityTraits.insert(.button)
             }

@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -33,6 +34,10 @@ final class DecisionDetailViewController: UIViewController {
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
+    /// Why the statement couldn't be read, kept beside `.failed` so the
+    /// footer can say "You’re offline" when that is the cause (#794). Set
+    /// before the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
     /// This decision's appeal, as the server holds it; nil before one is filed.
     private var appeal: FiledAppeal?
     private var collectionView: UICollectionView!
@@ -82,6 +87,7 @@ final class DecisionDetailViewController: UIViewController {
                 appeal = await Self.appeal(for: decisionID, in: appeals ?? [])
                 phase = .loaded(statement)
             } catch {
+                loadFailure = NetworkFailure.of(error)
                 phase = .failed
             }
         }
@@ -143,10 +149,16 @@ final class DecisionDetailViewController: UIViewController {
         }
     }
 
+    /// The failed statement's footer, over its retry row: "You’re offline…"
+    /// when that is why (#794).
+    static func failedFooter(_ failure: NetworkFailure?) -> String {
+        FailureCopy.message(for: failure, fallback: "Couldn't load why this decision was made.")
+    }
+
     private func footerText(_ section: Section) -> String? {
         switch (section, phase) {
         case (.decision, .failed):
-            "Couldn't load why this decision was made."
+            Self.failedFooter(loadFailure)
         case (.rule, .loaded(let statement)) where !statement.policyVersion.isEmpty:
             "Policy version: \(statement.policyVersion)"
         case (.appeal, .loaded):

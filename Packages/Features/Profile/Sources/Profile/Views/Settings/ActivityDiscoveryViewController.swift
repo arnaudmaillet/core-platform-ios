@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -33,6 +34,10 @@ final class ActivityDiscoveryViewController: UIViewController {
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
     private var saving: Set<ActivityDiscoverySettings.Switch> = []
     private var resetting = false
     private var collectionView: UICollectionView!
@@ -75,6 +80,7 @@ final class ActivityDiscoveryViewController: UIViewController {
             do {
                 phase = .loaded(try await manager.activityDiscoverySettings())
             } catch {
+                loadFailure = NetworkFailure.of(error)
                 phase = .failed
             }
         }
@@ -160,7 +166,10 @@ final class ActivityDiscoveryViewController: UIViewController {
                 content.text = "Loading…"
                 content.textProperties.color = .secondaryLabel
             case .failed:
-                content.text = "Couldn't load these settings. Tap to try again."
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: loadFailure, fallback: "Couldn't load these settings. Tap to try again."
+                )
                 content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content

@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -35,6 +36,10 @@ final class LimitInteractionsViewController: UIViewController {
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private var loadFailure: NetworkFailure?
     private var isSaving = false
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -78,6 +83,7 @@ final class LimitInteractionsViewController: UIViewController {
                 async let sounds = manager.allowsSoundReuse()
                 phase = .loaded(State(limit: try await limit, allowsSoundReuse: try await sounds))
             } catch {
+                loadFailure = NetworkFailure.of(error)
                 phase = .failed
             }
         }
@@ -162,7 +168,10 @@ final class LimitInteractionsViewController: UIViewController {
                 content.text = "Loading…"
                 content.textProperties.color = .secondaryLabel
             case .failed:
-                content.text = "Couldn't load your limits. Tap to try again."
+                // "You’re offline…" when that is why (#794).
+                content.text = FailureCopy.row(
+                    for: loadFailure, fallback: "Couldn't load your limits. Tap to try again."
+                )
                 content.textProperties.color = .secondaryLabel
             }
             cell.contentConfiguration = content

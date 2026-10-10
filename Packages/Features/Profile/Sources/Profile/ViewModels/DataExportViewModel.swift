@@ -1,3 +1,4 @@
+import CoreNetworking
 import Foundation
 
 /// State for Settings → Account → Download Your Data (#387, GDPR Art. 15/20).
@@ -23,6 +24,10 @@ final class DataExportViewModel {
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
     }
+    /// Why the last read failed, kept beside `.failed` so the row can say
+    /// "You’re offline" when that is the cause (#794). Set before the phase,
+    /// so the redraw `.failed` triggers already reads it.
+    private(set) var failure: NetworkFailure?
     var onChange: (() -> Void)?
 
     private let lifecycle: any AccountLifecycleManaging
@@ -41,10 +46,15 @@ final class DataExportViewModel {
     func load() async -> Bool {
         if phase == .failed { phase = .loading }
         do {
-            phase = Self.phase(for: try await lifecycle.gdprStatus())
+            let status = try await lifecycle.gdprStatus()
+            failure = nil
+            phase = Self.phase(for: status)
             return true
         } catch {
-            if phase == .loading { phase = .failed }
+            if phase == .loading {
+                failure = NetworkFailure.of(error)
+                phase = .failed
+            }
             return false
         }
     }

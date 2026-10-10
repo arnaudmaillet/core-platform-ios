@@ -1,3 +1,4 @@
+import CoreNetworking
 import DesignSystem
 import UIKit
 
@@ -112,7 +113,9 @@ final class DeleteAccountViewController: UIViewController {
         return formatter
     }()
 
-    static func footer(for phase: DeleteAccountViewModel.Phase) -> String? {
+    /// `failure` words the failed footer: "You’re offline…" when that is why
+    /// the record couldn't be reached (#794).
+    static func footer(for phase: DeleteAccountViewModel.Phase, failure: NetworkFailure? = nil) -> String? {
         switch phase {
         case .loading:
             nil
@@ -125,7 +128,10 @@ final class DeleteAccountViewController: UIViewController {
                 + "It becomes permanent on \(dateFormatter.string(from: permanentOn)). "
                 + "Until then you can cancel it here, or by logging back in."
         case .failed:
-            "Couldn't check whether a deletion is already pending. Check your connection and try again."
+            FailureCopy.message(
+                for: failure,
+                fallback: "Couldn't check whether a deletion is already pending. Check your connection and try again."
+            )
         }
     }
 
@@ -202,7 +208,7 @@ final class DeleteAccountViewController: UIViewController {
         ) { [weak self] view, _, indexPath in
             guard let self else { return }
             var content = UIListContentConfiguration.footer()
-            content.text = dataSource.sectionIdentifier(for: indexPath.section) == .action ? Self.footer(for: viewModel.phase) : nil
+            content.text = dataSource.sectionIdentifier(for: indexPath.section) == .action ? Self.footer(for: viewModel.phase, failure: viewModel.failure) : nil
             view.contentConfiguration = content
         }
         dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in

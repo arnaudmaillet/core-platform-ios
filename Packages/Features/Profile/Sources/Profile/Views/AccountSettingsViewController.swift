@@ -125,9 +125,14 @@ final class AccountSettingsViewController: UIViewController {
             cell.configure(index: index)
         }
         // The failed-row style every Settings screen uses.
-        let failedRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+        let failedRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, _ in
             var content = UIListContentConfiguration.cell()
-            content.text = AccountDetailsViewModel.failureMessage
+            // The phase's words: "You’re offline…" when that is why (#794).
+            if case .failed(let message) = self?.viewModel.phase {
+                content.text = message
+            } else {
+                content.text = AccountDetailsViewModel.failureMessage
+            }
             content.textProperties.color = .secondaryLabel
             cell.contentConfiguration = content
             cell.accessories = []

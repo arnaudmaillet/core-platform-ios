@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// State for Settings → Privacy → Follow Requests (#396).
@@ -13,6 +14,10 @@ final class FollowRequestsViewModel {
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
     }
+    /// Why the last load failed, kept beside `.failed` so the failed row
+    /// can say "You’re offline" when that is the cause (#794). Set before
+    /// the phase, so the redraw `.failed` triggers already reads it.
+    private(set) var failure: NetworkFailure?
     var onChange: (() -> Void)?
 
     private let requests: any FollowRequestsManaging
@@ -26,6 +31,7 @@ final class FollowRequestsViewModel {
         do {
             phase = .loaded(try await requests.followRequests())
         } catch {
+            failure = NetworkFailure.of(error)
             phase = .failed
         }
     }

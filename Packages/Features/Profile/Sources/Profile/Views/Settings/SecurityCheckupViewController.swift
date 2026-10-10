@@ -39,9 +39,10 @@ enum SecurityCheckup {
         account: Loadable<AccountDetails>?, sessionCount: Loadable<Int>?, appLockOn: Bool, lockMethod: String?
     ) -> [SecurityCheckupItem] {
         var items: [SecurityCheckupItem] = []
-        if case .failed = account {
+        // The read's words: "You’re offline…" when that is why (#794).
+        if case .failed(let message) = account {
             items.append(SecurityCheckupItem(
-                id: "account", title: failedAccountTitle, detail: "", symbolName: "envelope", state: .failed
+                id: "account", title: message, detail: "", symbolName: "envelope", state: .failed
             ))
         }
         if let account = account?.content {
@@ -65,9 +66,9 @@ enum SecurityCheckup {
                 state: hasPhone && account.phoneVerified ? .done : (hasPhone ? .recommended : .unavailable)
             ))
         }
-        if case .failed = sessionCount {
+        if case .failed(let message) = sessionCount {
             items.append(SecurityCheckupItem(
-                id: "sessions", title: failedSessionsTitle, detail: "", symbolName: "laptopcomputer.and.iphone", state: .failed
+                id: "sessions", title: message, detail: "", symbolName: "laptopcomputer.and.iphone", state: .failed
             ))
         }
         if let sessionCount = sessionCount?.content {

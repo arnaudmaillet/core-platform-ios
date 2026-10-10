@@ -1,3 +1,4 @@
+import CoreNetworking
 import Foundation
 
 /// What this account would lose, named before the irreversible step (#402):
@@ -31,6 +32,10 @@ final class DeleteAccountViewModel {
     /// Nil until read (or when nothing could be read). Published with the
     /// phase, never on its own: see `load`.
     private(set) var checklist: DeletionChecklist?
+    /// Why the record couldn't be reached, kept beside `.failed` so the
+    /// footer can say "You’re offline" when that is the cause (#794).
+    /// Published with the phase, like the checklist.
+    private(set) var failure: NetworkFailure?
     var onChange: (() -> Void)?
 
     private let lifecycle: any AccountLifecycleManaging
@@ -60,13 +65,16 @@ final class DeleteAccountViewModel {
         // - NO ANSWER: a failure with a retry, not a button offered on a
         //   guess.
         let status: AccountGdprStatus?
+        var failure: NetworkFailure?
         do {
             status = try await lifecycle.gdprStatus()
         } catch AccountError.refused {
             status = AccountGdprStatus(deletionRequestedAt: nil)
         } catch {
             status = nil
+            failure = NetworkFailure.of(error)
         }
+        self.failure = failure
         // Both reads land in ONE change: the checklist first (it publishes
         // nothing by itself), then the phase. Publishing the phase and then
         // the checklist redrew the screen twice, the consequence lines
