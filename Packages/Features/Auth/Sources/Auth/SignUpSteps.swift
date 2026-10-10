@@ -94,9 +94,31 @@ final class VerificationCodeViewController: SignUpStepViewController {
         startResendCountdown()
     }
 
+    /// Back on screen, a later step popped: the countdown picks up from the
+    /// time still left, which the stop below never touched.
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        guard resendTimer?.isValid != true else { return }
+        if resendAvailableAt > Date() {
+            startResendCountdown()
+        } else {
+            updateResendRow()
+        }
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         codeCell.textField.becomeFirstResponder()
+    }
+
+    /// ⚠️ THE COUNTDOWN STOPS WHEN THE STEP LEAVES THE SCREEN (#784), popped
+    /// or covered by the next step. The release check in the timer only
+    /// catches a step that is freed; a step kept on the stack under the next
+    /// one ticked away unseen.
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        resendTimer?.invalidate()
+        resendTimer = nil
     }
 
     private var code: String {
