@@ -64,7 +64,7 @@ struct SnapAuthorFollowTests {
     @Test(arguments: [FollowRelation.following, .mutual, .viewer, .blocked])
     func anAuthorTheViewerCannotFollowOffersNoFollow(_ relation: FollowRelation) throws {
         let feed = Self.feed()
-        feed.setFollowRelation(relation, for: ProfileID("prof-1"))
+        feed.followStore.setRelation(relation, for: ProfileID("prof-1"))
         feed.showAuthor(Self.model(authorID: "prof-1"))
 
         #expect(try Self.pill(feed).offersFollow == false)
@@ -72,7 +72,7 @@ struct SnapAuthorFollowTests {
 
     @Test func anAuthorTheViewerDoesNotFollowOffersFollowInTheSameItem() throws {
         let feed = Self.feed()
-        feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).offersFollow)
@@ -88,7 +88,7 @@ struct SnapAuthorFollowTests {
         let before = try Self.authorItem(feed)
         #expect(try Self.pill(feed).offersFollow == false, "precondition: not known yet")
 
-        feed.resolveFollowRelation(for: ProfileID("prof-2"))
+        feed.followStore.resolve(for: ProfileID("prof-2"))
         for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == false {
             try await Task.sleep(for: .milliseconds(5))
         }
@@ -102,8 +102,8 @@ struct SnapAuthorFollowTests {
     /// Paging re-evaluates: the "+" belongs to the author, not to the pill.
     @Test func pagingToAnotherAuthorReEvaluatesTheFollow() throws {
         let feed = Self.feed()
-        feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
-        feed.setFollowRelation(.following, for: ProfileID("prof-1"))
+        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.following, for: ProfileID("prof-1"))
 
         feed.showAuthor(Self.model(id: "p1", authorID: "prof-2"))
         #expect(try Self.pill(feed).offersFollow)
@@ -118,7 +118,7 @@ struct SnapAuthorFollowTests {
     @Test func tappingFollowFollowsAndTheFollowGoes() async throws {
         let graph = FollowGraphStub()
         let feed = Self.feed(graph: graph)
-        feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
         let offered = try Self.authorItem(feed)
         let pill = try Self.pill(feed)
@@ -135,7 +135,7 @@ struct SnapAuthorFollowTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(graph.follows == [ProfileID("prof-2")])
-        #expect(feed.followRelationsByAuthor[ProfileID("prof-2")] == .following)
+        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .following)
     }
 
     /// Each relation draws its own badge — so a friend reads apart from a
@@ -152,7 +152,7 @@ struct SnapAuthorFollowTests {
         _ relation: FollowRelation, _ badge: SnapAuthorIdentityView.FollowBadge
     ) throws {
         let feed = Self.feed()
-        feed.setFollowRelation(relation, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(relation, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).followBadge == badge)
@@ -172,14 +172,14 @@ struct SnapAuthorFollowTests {
     @Test func followingBackDrawsTheFriendsMark() async throws {
         let graph = FollowGraphStub()
         let feed = Self.feed(graph: graph)
-        feed.setFollowRelation(.followedBy, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.followedBy, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
         #expect(try Self.pill(feed).offersFollow, "following back is a follow")
 
         feed.followAuthor(ProfileID("prof-2"))
 
         #expect(try Self.pill(feed).followBadge == .friends)
-        #expect(feed.followRelationsByAuthor[ProfileID("prof-2")] == .mutual)
+        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .mutual)
         for _ in 0..<200 where graph.follows.isEmpty {
             try await Task.sleep(for: .milliseconds(5))
         }
@@ -217,7 +217,7 @@ struct SnapAuthorFollowTests {
     @Test func aRefusedFollowBringsTheFollowBackAndSaysSo() async throws {
         let graph = FollowGraphStub(failsFollow: true)
         let feed = Self.feed(graph: graph)
-        feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
 
         feed.followAuthor(ProfileID("prof-2"))
@@ -254,7 +254,7 @@ struct SnapAuthorFollowTests {
     @Test func aFollowOrUnfollowMadeElsewhereReachesThePill() async throws {
         let events = FollowGraphEvents()
         let feed = Self.feed(events: events)
-        feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
         #expect(try Self.pill(feed).offersFollow)
 
@@ -276,7 +276,7 @@ struct SnapAuthorFollowTests {
     @Test func aFriendUnfollowedElsewhereStillFollowsTheViewer() async throws {
         let events = FollowGraphEvents()
         let feed = Self.feed(events: events)
-        feed.setFollowRelation(.mutual, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.mutual, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
         #expect(try Self.pill(feed).followBadge == .friends)
 
@@ -285,7 +285,7 @@ struct SnapAuthorFollowTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(try Self.pill(feed).followBadge == .follow)
-        #expect(feed.followRelationsByAuthor[ProfileID("prof-2")] == .followedBy)
+        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .followedBy)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
         for _ in 0..<200 where (try? Self.pill(feed).followBadge) == .follow {
@@ -299,23 +299,23 @@ struct SnapAuthorFollowTests {
     @Test func anUnfollowElsewhereLeavesTheViewerAndTheBlockedAlone() async throws {
         let events = FollowGraphEvents()
         let feed = Self.feed(events: events)
-        feed.setFollowRelation(.viewer, for: ProfileID("me"))
-        feed.setFollowRelation(.blocked, for: ProfileID("prof-3"))
+        feed.followStore.setRelation(.viewer, for: ProfileID("me"))
+        feed.followStore.setRelation(.blocked, for: ProfileID("prof-3"))
 
         events.publish(FollowChange(profileID: ProfileID("me"), isFollowing: false))
         events.publish(FollowChange(profileID: ProfileID("prof-3"), isFollowing: false))
         // One main-queue turn delivers both (publication order).
         try await Task.sleep(for: .milliseconds(50))
 
-        #expect(feed.followRelationsByAuthor[ProfileID("me")] == .viewer)
-        #expect(feed.followRelationsByAuthor[ProfileID("prof-3")] == .blocked)
+        #expect(feed.followStore.relationsByAuthor[ProfileID("me")] == .viewer)
+        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-3")] == .blocked)
     }
 
     /// Nothing to follow THROUGH, nothing offered — an action that cannot act
     /// is not drawn.
     @Test func withoutAFollowSeamThereIsNoFollow() throws {
         let feed = Self.feed(graph: nil)
-        feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
+        feed.followStore.setRelation(.notFollowing, for: ProfileID("prof-2"))
         feed.showAuthor(Self.model(authorID: "prof-2"))
 
         #expect(try Self.pill(feed).offersFollow == false)

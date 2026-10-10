@@ -430,19 +430,10 @@ final class SnapFeedViewController: UIViewController {
     /// Files a post's Report. Nil withholds the row entirely: an action that
     /// cannot act is not offered — the grid's card menu follows the same rule.
     private let reporting: (any ContentReporting)?
-    /// Follows an author from the pill's "+", and says what the pill's badge
-    /// draws. The pill draws one only when BOTH are wired and the reader has
-    /// answered for the author — see `followBadge(for:)`.
-    private let socialGraph: (any SocialGraphWriting)?
-    private let followRelations: (any SocialGraphReading)?
-    /// What the reader answered, per author, overlaid by this screen's own
-    /// follows. Absent: not known yet, which draws no badge.
-    private(set) var followRelationsByAuthor: [ProfileID: FollowRelation] = [:]
-    /// Lookups in flight, so paging back and forth asks once per author.
-    private var followLookups: Set<ProfileID> = []
-    /// Follows in flight, so a double tap sends one.
-    private var followsInFlight: Set<ProfileID> = []
-    /// Keeps `followRelationsByAuthor` agreeing with a follow or unfollow
+    /// Where the viewer stands with each author, and the pill's "+" follow —
+    /// see `SnapAuthorFollowStore`. Internal for tests.
+    let followStore: SnapAuthorFollowStore
+    /// Keeps `followStore` agreeing with a follow or unfollow
     /// accepted ANYWHERE — the author's own profile pushed from this pill, a
     /// card's Unfollow — for the screen's life (`FollowGraphEvents`). Nil
     /// without a channel, and then a return re-asks instead.
@@ -488,11 +479,18 @@ final class SnapFeedViewController: UIViewController {
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
         self.reporting = reporting
-        self.socialGraph = socialGraph
-        self.followRelations = followRelations
+        self.followStore = SnapAuthorFollowStore(writer: socialGraph, reader: followRelations)
         super.init(nibName: nil, bundle: nil)
+        followStore.onRelationChange = { [weak self] author in
+            guard let self else { return }
+            // The pill's badge is part of what a pair of pages draws: a cached
+            // "the same" from before this answer would leave the scroll's swap
+            // unblurred (#627).
+            self.pillScrub.forgetPair()
+            self.followRelationDidChange(for: author)
+        }
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
-            self?.followGraphDidChange(change)
+            self?.followStore.graphDidChange(change)
         }
     }
 
@@ -760,11 +758,11 @@ final class SnapFeedViewController: UIViewController {
         if hasAppeared { retireTabBarOnReturn() }
         // A return may follow a follow made elsewhere — on the author's own
         // profile, pushed from this pill. With the channel wired that change
-        // has already been HEARD (`followGraphDidChange`); without one, ask
+        // has already been HEARD (`SnapAuthorFollowStore.graphDidChange`); without one, ask
         // again for the author on the pill. Either answer lands through the
         // landing install.
         if hasAppeared, followSubscription == nil, let author = authorIdentityView.shownAuthor?.authorID {
-            resolveFollowRelation(for: author, refresh: true)
+            followStore.resolve(for: author, refresh: true)
         }
         // The back item exists only when there is somewhere to go back to — a
         // map-opened feed, not the Timeline tab root — and the stack/
@@ -1779,7 +1777,7 @@ final class SnapFeedViewController: UIViewController {
     /// populated feed.
     func showAuthor(_ model: FeedItemDisplayModel) {
         let animated = canAnimateBarItems
-        authorIdentityView.setFollowBadge(followBadge(for: model.authorID), animated: animated)
+        authorIdentityView.setFollowBadge(followStore.badge(for: model.authorID), animated: animated)
         authorIdentityView.setAuthor(model, pipeline: imagePipeline, animated: animated)
     }
 
@@ -1841,77 +1839,12 @@ final class SnapFeedViewController: UIViewController {
             // this moment (`followRelationDidChange`): it blurs in now.
             let author = self.authorIdentityView.shownAuthor?.authorID
             self.authorIdentityView.setFollowBadge(
-                self.followBadge(for: author), animated: self.canAnimateBarItems
+                self.followStore.badge(for: author), animated: self.canAnimateBarItems
             )
         }
     }
 
     // MARK: - Follow
-
-    /// What the pill's badge draws for `author`: "+" for someone the viewer
-    /// does not follow, the followed mark for a one-way follow, the friends
-    /// mark for a mutual one — and nothing for the viewer's own posts, someone
-    /// blocked, or without a follow seam to act through.
-    ///
-    /// Unknown is NOTHING — a "+" drawn for someone the viewer follows and
-    /// then withdrawn is worse than a badge that arrives late (the neighbours'
-    /// answers are asked for at every settle, so a paged-to author is usually
-    /// known already).
-    func followBadge(for author: ProfileID?) -> SnapAuthorIdentityView.FollowBadge {
-        guard socialGraph != nil, let author,
-              let relation = followRelationsByAuthor[author] else { return .none }
-        return SnapAuthorIdentityView.FollowBadge(relation)
-    }
-
-    /// Whether the pill offers "+" for `author`.
-    func offersFollow(to author: ProfileID?) -> Bool {
-        followBadge(for: author) == .follow
-    }
-
-    /// Asks the graph where the viewer stands with `author`, once per author
-    /// — or again with `refresh`, for an answer that may have moved while the
-    /// screen was covered (a follow on the author's own profile). The cached
-    /// answer keeps drawing until the new one lands.
-    ///
-    /// Internal for tests.
-    func resolveFollowRelation(for author: ProfileID, refresh: Bool = false) {
-        guard socialGraph != nil, let followRelations,
-              refresh || followRelationsByAuthor[author] == nil,
-              !followLookups.contains(author), !followsInFlight.contains(author) else { return }
-        followLookups.insert(author)
-        Task { [weak self] in
-            let relation = try? await followRelations.followRelation(to: author)
-            guard let self else { return }
-            self.followLookups.remove(author)
-            // A tap that followed while the question was out outranks it.
-            guard let relation, !self.followsInFlight.contains(author) else { return }
-            self.setFollowRelation(relation, for: author)
-        }
-    }
-
-    /// A follow or unfollow the graph accepted, from any surface. This
-    /// screen's own tap comes back through here too, and changes nothing: the
-    /// answer is already the one it drew. The viewer themself, and someone
-    /// they block, keep their answer — an unfollow does not make either
-    /// followable (`settingFollow`). Whether the author follows the viewer
-    /// BACK is kept too: following a follower makes a friend.
-    private func followGraphDidChange(_ change: FollowChange) {
-        let author = change.profileID
-        guard !followsInFlight.contains(author) else { return }
-        let known = followRelationsByAuthor[author] ?? .notFollowing
-        setFollowRelation(known.settingFollow(change.isFollowing), for: author)
-    }
-
-    /// Internal for tests.
-    func setFollowRelation(_ relation: FollowRelation, for author: ProfileID) {
-        guard followRelationsByAuthor[author] != relation else { return }
-        followRelationsByAuthor[author] = relation
-        // The pill's badge is part of what a pair of pages draws: a cached
-        // "the same" from before this answer would leave the scroll's swap
-        // unblurred (#627).
-        barPillScrubPair = nil
-        followRelationDidChange(for: author)
-    }
 
     /// Re-draws the pill's badge when its author's relation changed, through
     /// the pill's own blur. During a presentation the landing install is armed
@@ -1919,16 +1852,16 @@ final class SnapFeedViewController: UIViewController {
     /// landed, where it can be seen to change.
     private func followRelationDidChange(for author: ProfileID) {
         guard authorIdentityView.shownAuthor?.authorID == author,
-              authorIdentityView.followBadge != followBadge(for: author) else { return }
+              authorIdentityView.followBadge != followStore.badge(for: author) else { return }
         if authorPillAwaitsLandingInstall, isAwaitingAnyFlight || transitionCoordinator != nil { return }
-        authorIdentityView.setFollowBadge(followBadge(for: author), animated: canAnimateBarItems)
+        authorIdentityView.setFollowBadge(followStore.badge(for: author), animated: canAnimateBarItems)
     }
 
     /// The pill's "+": follows the author, OPTIMISTICALLY — the profile's
     /// Follow button's rule (`ProfileViewModel.toggleFollow`). The "+" turns
     /// at once into the followed mark — the FRIENDS mark for someone who
     /// already follows the viewer — through the pill's own blur, and comes
-    /// back if the graph refuses.
+    /// back if the graph refuses (`SnapAuthorFollowStore.follow`).
     ///
     /// Internal for tests.
     func followAuthor(_ author: ProfileID) {
@@ -1938,21 +1871,13 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func commitFollow(_ author: ProfileID) {
-        guard let socialGraph, offersFollow(to: author), !followsInFlight.contains(author),
-              let before = followRelationsByAuthor[author] else { return }
-        followsInFlight.insert(author)
-        setFollowRelation(before.settingFollow(true), for: author)
         // Named now, while the pill shows them: by the time the graph answers
         // the viewer may have swiped to someone else.
         let name = authorIdentityView.shownAuthor.flatMap { $0.authorID == author ? Self.followName(of: $0) : nil }
-        Task { [weak self] in
-            let accepted = (try? await socialGraph.setFollowing(true, for: author)) != nil
+        followStore.follow(author) { [weak self] in
             guard let self else { return }
-            self.followsInFlight.remove(author)
-            guard !accepted else { return }
             // The "+" comes back — and says why (#802): a mark that undoes
             // itself without a word reads as a glitch, or is missed entirely.
-            self.setFollowRelation(before, for: author)
             Feedback.failure(name.map { "Couldn't follow \($0)" } ?? "Couldn't follow", from: self)
         }
     }
@@ -2483,7 +2408,7 @@ final class SnapFeedViewController: UIViewController {
         modelsByID = Dictionary(uniqueKeysWithValues: state.items.map { ($0.id, $0) })
         // A neighbour's model may have arrived or changed: what the pills draw
         // for a pair of pages is asked again (#627).
-        barPillScrubPair = nil
+        pillScrub.forgetPair()
         // ⚠️ BEFORE `dataSource.apply`. `willDisplay` fires inside the apply's
         // own layout pass and asks for a resting panel, so the parked one has
         // to already be in the slot by then.
@@ -4354,8 +4279,7 @@ final class SnapFeedViewController: UIViewController {
         // already swapped them to it, under its blur (`updateBarPillScrub`).
         // A page reached without passing through the middle of the screen (a
         // jump, a landing) blurs across here, on the clock.
-        barPillScrub.settle(at: index)
-        barPillScrubPair = nil
+        pillScrub.settle(at: index)
         showAuthor(model)
         // The neighbours' faces, so the pill paged to next arrives wearing one.
         for neighbour in [index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
@@ -4381,7 +4305,7 @@ final class SnapFeedViewController: UIViewController {
         // the pill's follow badge is decided before the page is.
         for neighbour in [index, index - 1, index + 1] where orderedIDs.indices.contains(neighbour) {
             if let author = modelsByID[orderedIDs[neighbour]]?.authorID {
-                resolveFollowRelation(for: author)
+                followStore.resolve(for: author)
             }
         }
         // The bars float over the PAGE, so their text has to know what kind
@@ -4418,43 +4342,28 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Bar pills under the scroll
 
-    /// Which page the pills draw, as the SCROLL has it — see `BarPillScrub`.
-    private var barPillScrub = BarPillScrub()
-    /// The pair of pages the pills' blur was last decided for, and whether
-    /// each pill draws the two differently — asked once per pair, not per
-    /// frame.
-    private var barPillScrubPair: (upper: Int, author: Bool)?
+    /// The pill's page and blur under the scroll — see `SnapPillScrubController`.
+    private var pillScrub = SnapPillScrubController()
     #if DEBUG
     private var debugLastScrubBlur: CGFloat = 0
     #endif
 
-    /// The pills follow the FINGER from one post to the next (asked
-    /// 2026-09-30): they start blurring once the page being left is 30% off
-    /// screen, change to the incoming post's author and sound when it covers
-    /// more than half, and sharpen again as it reaches 70% — every step read
-    /// off the scroll offset, so a held finger holds the blur and a drag back
-    /// plays it backwards. It used to be a timed blur at the SETTLE, after the
-    /// page had already arrived.
-    ///
-    /// Runs on every scroll callback, so the frame's work is an offset, a
-    /// cached comparison and two alphas per pill; the blurred stills are
-    /// rendered only when a scrub begins and at the swap
-    /// (`BarItemContentTransition.setScrubBlur`). Programmatic paging (an
-    /// animated `setContentOffset`, `-snap-fling`) comes through the same
-    /// callback, so it scrubs the same way.
-    ///
-    /// A pill whose two pages draw the SAME content (one person's posts, one
-    /// song) is left sharp. Nothing scrubs while a presentation owns the bars
-    /// (`canAnimateBarItems`): the flight's landing settles the pills, as
-    /// before.
+    /// Applies one scroll frame of `SnapPillScrubController` to the author
+    /// pill: its blur, and the incoming post's author once that page covers
+    /// more than half the screen.
     private func updateBarPillScrub() {
-        let page = collectionView.bounds.height
-        guard page > 0, canAnimateBarItems else { return endBarPillScrub() }
-        let position = collectionView.contentOffset.y / page
-        let count = orderedIDs.count
-        let frame = BarPillScrub.frame(position: position, itemCount: count)
-        let differs = frame.map { barPillDiffers(upper: $0.upper) } ?? false
-        let authorBlur = differs ? (frame?.blur ?? 0) : 0
+        guard let step = pillScrub.update(
+            offset: collectionView.contentOffset.y,
+            pageHeight: collectionView.bounds.height,
+            itemCount: orderedIDs.count,
+            canScrub: canAnimateBarItems,
+            // ⚠️ Runs while `pillScrub` is being mutated: it must never touch
+            // `pillScrub` (a `forgetPair()` from here would trap with a
+            // simultaneous-access error). It reads only the models and the
+            // follow badges.
+            pillDiffers: { self.authorPillDiffers(upper: $0) }
+        ) else { return endBarPillScrub() }
+        let authorBlur = step.blur
         // Blur first — a scrub that starts on this frame pictures the content
         // being left — then the swap, which lands under that blur on the
         // second call.
@@ -4464,10 +4373,10 @@ final class SnapFeedViewController: UIViewController {
            (authorBlur * 10).rounded() != (debugLastScrubBlur * 10).rounded() {
             debugLastScrubBlur = authorBlur
             print(String(format: "[pill-probe] scrub pos=%.3f blur=%.2f alpha=%.2f",
-                         position, authorBlur, authorIdentityView.subviews.first?.alpha ?? -1))
+                         step.position, authorBlur, authorIdentityView.subviews.first?.alpha ?? -1))
         }
         #endif
-        guard let index = barPillScrub.update(position: position, itemCount: count),
+        guard let index = step.swapTo,
               orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]] else { return }
         showAuthor(model)
         // Lands the swap under the blur, at FULL blur, and starts its
@@ -4479,34 +4388,24 @@ final class SnapFeedViewController: UIViewController {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-pill-probe") {
             print(String(format: "[pill-probe] scrub swap -> %d at %.3f blur=%.2f shown=%.2f",
-                         index, position, authorBlur, authorIdentityView.shownScrubBlur))
+                         index, step.position, authorBlur, authorIdentityView.shownScrubBlur))
         }
         #endif
     }
 
     /// Whether the author pill draws pages `upper` and `upper + 1`
-    /// differently. Unknown (a page without its model yet) is "no": the pill
-    /// stays sharp, and the settle blurs it across on the clock once the page
-    /// has arrived.
-    private func barPillDiffers(upper: Int) -> Bool {
-        if let pair = barPillScrubPair, pair.upper == upper { return pair.author }
+    /// differently — nil while either page has no model yet (see
+    /// `SnapPillScrubController.update`).
+    private func authorPillDiffers(upper: Int) -> Bool? {
         guard orderedIDs.indices.contains(upper), orderedIDs.indices.contains(upper + 1),
               let first = modelsByID[orderedIDs[upper]],
-              let second = modelsByID[orderedIDs[upper + 1]] else { return false }
-        // What the author pill DRAWS: the face, the name, the meta line
-        // (the post's age) and the follow badge.
-        let author = first.authorID != second.authorID
-            || first.authorName != second.authorName
-            || first.avatarURL != second.avatarURL
-            || first.metaText != second.metaText
-            || followBadge(for: first.authorID) != followBadge(for: second.authorID)
-        barPillScrubPair = (upper, author)
-        return author
+              let second = modelsByID[orderedIDs[upper + 1]] else { return nil }
+        return SnapPillScrubController.authorPillDiffers(first, second) { followStore.badge(for: $0) }
     }
 
     /// Renders the stills a drag may need before the page moves.
     private func prepareBarPillScrub() {
-        barPillScrubPair = nil
+        pillScrub.forgetPair()
         guard canAnimateBarItems else { return }
         authorIdentityView.prepareScrub()
     }
@@ -4514,7 +4413,7 @@ final class SnapFeedViewController: UIViewController {
     /// Both pills sharp and alone: the scroll has stopped, or stopped owning
     /// them.
     private func endBarPillScrub() {
-        barPillScrubPair = nil
+        pillScrub.forgetPair()
         authorIdentityView.setScrubBlur(0)
     }
 
