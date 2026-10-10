@@ -1510,12 +1510,7 @@ final class SnapFeedViewController: UIViewController {
         // the one that hands the change to the bar's own item animator. The
         // fixed space keeps two pills apart — iOS 26 groups ADJACENT bar
         // items into one shared glass platter.
-        let closes = engaged && hasMedia
-        var navItems: [UIBarButtonItem] = closes ? [closeCommentsItem] : []
-        if let walletBadgeItem {
-            navItems += navItems.isEmpty ? [walletBadgeItem] : [.fixedSpace(Spacing.sm), walletBadgeItem]
-        }
-        applyTrailingNavItems(navItems, animated: animated)
+        applyTrailingNavItems(engagedTrailingItems(), animated: animated)
 
         applyLeadingNavItem(engaged: engaged, hasMedia: hasMedia, animated: animated)
         // The toolbar is state-invariant: the ⋯ keeps its bubble in every
@@ -1571,12 +1566,123 @@ final class SnapFeedViewController: UIViewController {
         )
         barPillWidths = widths
         commentSortButton.setTitleHidden(sortOnBar && !widths.sortShowsTitle)
+        // ⚠️ THE DAY GIVES WAY FIRST (#757): it takes what the run leaves —
+        // bar margins, the back arrow and the sort on the left, the ✕ and the
+        // points on the right — and truncates in it.
+        if let pill = commentsDayItem?.customView as? SnapBarDayPill {
+            let padding: CGFloat = 18
+            let gap = Spacing.sm
+            var used: CGFloat = 16 * 2 + padding
+            if backItem != nil { used += 44 + padding }
+            if sortOnBar {
+                used += gap + padding
+                    + (widths.sortShowsTitle ? commentSortButton.titledWidth : commentSortButton.glyphWidth)
+            }
+            if engagedChromeOnBar, engagedChromeHasMedia { used += 44 + padding + gap }
+            if walletBadgeItem != nil {
+                used += walletBadge.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + padding + gap
+            }
+            pill.setMaxWidth(bar - used - gap)
+        }
         // The toolbar's leading slot (#671): the room the audio capsule had.
         authorIdentityView.setFixedWidth(widths.toolbarAuthor)
     }
 
     /// The widths `applyBarPillWidths` last gave the pills.
     private var barPillWidths: SnapBarPillWidths?
+
+    /// The trailing run as the bars stand, right to left: the ✕ while a media
+    /// post's thread is open, the points, and — engaged under Recent, once a
+    /// day chip has gone under the header — the day (#757).
+    private func engagedTrailingItems() -> [UIBarButtonItem] {
+        guard engagedChromeOnBar else { return restingTrailingItems() }
+        var items: [UIBarButtonItem] = engagedChromeHasMedia ? [closeCommentsItem] : []
+        // The fixed spaces keep the pills apart: iOS 26 groups ADJACENT bar
+        // items into one shared glass platter.
+        for item in [walletBadgeItem, commentsDayItem].compactMap({ $0 }) {
+            items += items.isEmpty ? [item] : [.fixedSpace(Spacing.sm), item]
+        }
+        return items
+    }
+
+    // MARK: - The day under the header (#757)
+
+    /// The engaged thread's day: the last chip gone under the header, none
+    /// before one has. ⚠️ ONE ITEM PER DAY, EACH UNDER ITS OWN IDENTIFIER, as
+    /// a conversation's (#755): a new identifier gets the native Liquid Glass
+    /// morph. Placed once per turn and never mid-transition (#756).
+    private(set) var commentsDay: Date?
+    private var commentsDayItem: UIBarButtonItem?
+    private var trailingPlacementScheduled = false
+
+    /// The engaged panel's day, as it changes. Internal for tests.
+    func setCommentsDay(_ day: Date?) {
+        guard day != commentsDay else { return }
+        commentsDay = day
+        commentsDayItem = day.map(makeCommentsDayItem)
+        applyBarPillWidths()
+        scheduleTrailingPlacement()
+    }
+
+    private func makeCommentsDayItem(_ day: Date) -> UIBarButtonItem {
+        let pill = SnapBarDayPill(title: DayTitleFormatter.title(for: day))
+        pill.addAction(UIAction { [weak self] _ in
+            (self?.commentsContentVC as? PostDetailViewController)?.scrollToDay(day)
+        }, for: .primaryActionTriggered)
+        let item = UIBarButtonItem(customView: pill)
+        item.identifier = "snap.comments.day.\(Int(day.timeIntervalSince1970))"
+        return item
+    }
+
+    /// Hears the day off the panel that holds the engagement.
+    ///
+    /// ⚠️ ONLY THE CURRENT PAGE'S PANEL DRIVES THE BAR, at the mount too. A
+    /// preview mounts while the page being left still owns the engagement,
+    /// and reading ITS day there cleared the pill mid-swipe; a cancelled
+    /// swipe never brought it back. A preview is heard at its promotion
+    /// instead (`syncCommentsDay`).
+    private func observeCommentsDay(of detail: PostDetailViewController?) {
+        detail?.onDayUnderHeaderChange = { [weak self, weak detail] day in
+            guard let self, let detail, self.commentsContentVC === detail else { return }
+            self.setCommentsDay(day)
+        }
+        guard let detail, commentsContentVC === detail else { return }
+        setCommentsDay(detail.dayUnderHeader)
+    }
+
+    /// Reads the day off the panel that holds the engagement, whichever
+    /// route made it the one: a promotion, a settle, a cancelled swipe.
+    private func syncCommentsDay() {
+        setCommentsDay((commentsContentVC as? PostDetailViewController)?.dayUnderHeader)
+    }
+
+    private func scheduleTrailingPlacement() {
+        guard view.window != nil else {
+            return applyTrailingNavItems(engagedTrailingItems(), animated: false)
+        }
+        guard !trailingPlacementScheduled else { return }
+        trailingPlacementScheduled = true
+        // The next turn: scrolls and layouts reach here inside diffable
+        // applies' `performWithoutAnimation` (#756).
+        DispatchQueue.main.async { [weak self] in self?.placeTrailingAfterTransition() }
+    }
+
+    /// Not during a push: items set then land unanimated at its end (#756).
+    private func placeTrailingAfterTransition() {
+        if let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               DispatchQueue.main.async { self?.placeTrailingAfterTransition() }
+           }) {
+            return
+        }
+        trailingPlacementScheduled = false
+        applyTrailingNavItems(engagedTrailingItems(), animated: true)
+    }
+
+    /// The day pill on the bar, if any. Tests.
+    var debugCommentsDayPill: SnapBarDayPill? { commentsDayItem?.customView as? SnapBarDayPill }
+    /// The trailing run as it stands. Tests.
+    var debugTrailingItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
 
     /// The resting run's items: the author pill alone (no wallet), or the
     /// pill with the badge to its left, spacer-separated so iOS 26 never
@@ -3260,6 +3366,8 @@ final class SnapFeedViewController: UIViewController {
         commentsContentVC = content
         commentsEngagementIsResting = true
         restingLockApplied = false
+        // Its day was not heard while it was a preview.
+        syncCommentsDay()
         return true
     }
 
@@ -3337,6 +3445,7 @@ final class SnapFeedViewController: UIViewController {
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
         }
         observeCommentCount(of: detail)
+        observeCommentsDay(of: detail)
         // INSTANT: composer already onstage, cell engaged synchronously —
         // no spring, no offstage→onstage slide. The interface simply IS,
         // frame one, so scrolling it into view reveals it already formed.
@@ -3454,6 +3563,7 @@ final class SnapFeedViewController: UIViewController {
             self?.drivePageSwipe(phase, translation: translation, velocity: velocity)
         }
         observeCommentCount(of: detail)
+        observeCommentsDay(of: detail)
         detail?.setComposerEntranceState(offstage: true)
         detail?.setStreamTransitionProgress(1)
         cell.setCommentsEngagementProgress(1)
@@ -3645,6 +3755,9 @@ final class SnapFeedViewController: UIViewController {
         (commentsContentVC as? PostDetailViewController)?
             .setComposerTracksKeyboard(commentsEngagedID == activeID)
         (previewRestingVC as? PostDetailViewController)?.setComposerTracksKeyboard(false)
+        // And so does the bar's day (#757): a swipe that settled, or one
+        // that went back home, shows the day of the panel now engaged.
+        syncCommentsDay()
         // ⚠️ AND SO DOES THE GROUND BEHIND THE PAGES.
         //
         // The pager's own background is what shows through any strip a page has

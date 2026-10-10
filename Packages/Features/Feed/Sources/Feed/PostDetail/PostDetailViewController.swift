@@ -66,6 +66,9 @@ final class PostDetailViewController: UIViewController {
     /// `.comments` screen — where nothing below runs and each row keeps its
     /// own menu.
     private let threadChrome: Bool
+    /// The threads grouped under a day chip each, in Recent order (#757):
+    /// every snap page's comments — media and text — not only a text page's.
+    private let groupsByDay: Bool
     private let streamPolicy = StreamSectionPolicy()
     private lazy var rowContextMenu = ThreadRowContextMenu()
     /// The order the engaged toolbar last chose; day grouping follows Recent
@@ -136,7 +139,10 @@ final class PostDetailViewController: UIViewController {
                         elementKind: DayPillHeaderView.elementKind,
                         alignment: .top
                     )
-                    pill.pinToVisibleBounds = true
+                    // ⚠️ NOT STICKY (#757, the owner's call 2026-10-10): the
+                    // chip scrolls with its day; the host's bar says which
+                    // day is under the header (`onDayUnderHeaderChange`).
+                    pill.pinToVisibleBounds = false
                     pill.zIndex = 2
                     section.boundarySupplementaryItems = [pill]
                 }
@@ -279,12 +285,14 @@ final class PostDetailViewController: UIViewController {
         mode: PostDetailMode = .full,
         profileSwitcher: (any ProfileSwitcherPresenting)? = nil,
         wallet: WalletStore? = nil,
-        threadChrome: Bool = false
+        threadChrome: Bool = false,
+        groupsByDay: Bool = false
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.mode = mode
         self.threadChrome = threadChrome
+        self.groupsByDay = threadChrome || groupsByDay
         self.profileSwitcher = profileSwitcher
         self.wallet = wallet
         super.init(nibName: nil, bundle: nil)
@@ -312,6 +320,7 @@ final class PostDetailViewController: UIViewController {
         super.viewDidLayoutSubviews()
         remeasureStreamOnWidthChange()
         refitEmptyPageOnHeightChange()
+        syncDayUnderHeader()
     }
 
     /// This view's height as last laid out — see `refitEmptyPageOnHeightChange`.
@@ -1796,7 +1805,7 @@ final class PostDetailViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: seamCell, for: indexPath, item: item)
             }
         }
-        guard threadChrome else { return }
+        guard groupsByDay else { return }
         let dayPill = UICollectionView.SupplementaryRegistration<DayPillHeaderView>(
             elementKind: DayPillHeaderView.elementKind
         ) { [weak self] pill, _, indexPath in
@@ -1821,7 +1830,7 @@ final class PostDetailViewController: UIViewController {
     /// rank, a skeleton and the empty page have no chronology to pin days over.
     private func streamSections() -> [(section: StreamSection, items: [StreamItem])] {
         let items = streamItems()
-        guard threadChrome, commentsLoaded, commentSortOrder == .recent, !latestComments.isEmpty else {
+        guard groupsByDay, commentsLoaded, commentSortOrder == .recent, !latestComments.isEmpty else {
             return [(.main, items)]
         }
         let calendar = Calendar.current
@@ -2396,6 +2405,85 @@ final class PostDetailViewController: UIViewController {
     /// rather than rebuilt so a re-fit costs a layout pass, not a view tree.
     private lazy var captionSizingCell = CaptionBubbleCell()
 
+    // MARK: - The day under the header (#757)
+
+    /// The day of the last chip gone under the stream's top edge — what the
+    /// host's bar shows left of the points — or nil before one has, or with
+    /// no days at all (Trending, a skeleton, an empty page).
+    var onDayUnderHeaderChange: ((Date?) -> Void)?
+    private(set) var dayUnderHeader: Date?
+
+    private func syncDayUnderHeader() {
+        var day = groupsByDay ? lastDayGoneUnderTheTop() : nil
+        #if DEBUG
+        if let debugDayUnderTheTop { day = debugDayUnderTheTop() }
+        #endif
+        guard day != dayUnderHeader else { return }
+        dayUnderHeader = day
+        onDayUnderHeaderChange?(day)
+    }
+
+    private func lastDayGoneUnderTheTop() -> Date? {
+        guard let streamDataSource, collectionView.window != nil || collectionView.bounds.height > 0 else { return nil }
+        let line = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        var passed: Date?
+        for (index, section) in streamDataSource.snapshot().sectionIdentifiers.enumerated() {
+            guard case .day(let day) = section,
+                  let chip = collectionView.layoutAttributesForSupplementaryElement(
+                      ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: index)
+                  )?.frame
+            else { continue }
+            // Under the top once its middle is past the stream's edge.
+            guard chip.midY <= line else { break }
+            passed = day
+        }
+        return passed
+    }
+
+    /// Scrolls to `day`'s chip, landing it just under the stream's top edge.
+    ///
+    /// ⚠️ UNDER THE EDGE, NOT BELOW IT. The bar's day is the last chip gone
+    /// under the top, so a chip landed just below it handed the bar the day
+    /// BEFORE: a tap on "Yesterday" retitled the pill "Today", and on the
+    /// first day took it away. Under the edge, the chip is what the bar
+    /// already says, and that day's first comment opens the stream.
+    /// `animated` is false for tests, where nothing drives the animation.
+    func scrollToDay(_ day: Date, animated: Bool = true) {
+        #if DEBUG
+        debugOnScrollToDay?(day)
+        #endif
+        guard let streamDataSource,
+              let section = streamDataSource.snapshot().sectionIdentifiers.firstIndex(of: .day(day)),
+              let chip = collectionView.layoutAttributesForSupplementaryElement(
+                  ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: section)
+              )?.frame
+        else { return }
+        let insets = collectionView.adjustedContentInset
+        let maxOffset = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+        let offset = min(max(chip.maxY - insets.top, -insets.top), maxOffset)
+        collectionView.setContentOffset(CGPoint(x: 0, y: offset), animated: animated)
+    }
+
+    /// Re-reads the day under the top. Tests, and the host after a layout.
+    func debugSyncDayUnderHeader() { syncDayUnderHeader() }
+
+    /// The stream's days, in order, with the section each heads. Tests.
+    var debugStreamDays: [(day: Date, section: Int)] {
+        guard let streamDataSource else { return [] }
+        return streamDataSource.snapshot().sectionIdentifiers.enumerated().compactMap { index, section in
+            guard case .day(let day) = section else { return nil }
+            return (day, index)
+        }
+    }
+
+    #if DEBUG
+    /// Stands in for the stream's geometry, for tests about the HOST's bar
+    /// rather than the scroll: the day this panel reports at its next sync.
+    var debugDayUnderTheTop: (() -> Date?)?
+    /// Hears every `scrollToDay`, for tests of what a tap reaches.
+    var debugOnScrollToDay: ((Date) -> Void)?
+    #endif
+
     /// The engaged toolbar's sort selector lands here — the view model
     /// re-ranks the data and the diffable apply animates the moves.
     func setCommentSortOrder(_ order: SnapCommentSortButton.Order) {
@@ -2591,6 +2679,7 @@ extension PostDetailViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        syncDayUnderHeader()
         guard let onPullDismissDrive, isPullDismissArmed, !isCommittingPullDismiss else { return }
         onPullDismissDrive(.changed, overshoot(of: scrollView), 0)
     }

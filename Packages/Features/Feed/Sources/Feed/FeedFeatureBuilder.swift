@@ -1389,7 +1389,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             mode: .commentsOnly,
             profileSwitcher: makeProfileSwitcher?(),
             wallet: wallet,
-            threadChrome: threadChrome
+            threadChrome: threadChrome,
+            // Every snap page's comments group by day under Recent (#757).
+            groupsByDay: true
         )
     }
 
