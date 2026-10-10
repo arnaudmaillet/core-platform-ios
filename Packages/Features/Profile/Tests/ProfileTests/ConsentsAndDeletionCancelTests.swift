@@ -81,6 +81,50 @@ struct ConsentsAndDeletionCancelTests {
         #expect(ConsentsViewController.statusText(.init(isGiven: false, changedAt: Date())).hasPrefix("Withdrawn on "))
     }
 
+    // MARK: - One save at a time
+
+    /// A flip while a save is in flight — the same switch or the other one —
+    /// sends nothing: one `updateConsents` at a time. The flipped switch
+    /// shows its new value while the change travels.
+    @Test(.timeLimit(.minutes(10))) func aSecondFlipWhileSavingSendsNothing() async {
+        let stub = GatedConsents()
+        let model = ConsentsViewModel(manager: stub)
+        await model.load()
+        #expect(!model.isGiven(.marketing))
+
+        let first = Task { await model.set(.marketing, to: true) }
+        await stub.waitForUpdate()
+        #expect(model.isSaving)
+        #expect(model.isGiven(.marketing))
+        #expect(await model.set(.analytics, to: false) == .ignored)
+        #expect(await model.set(.marketing, to: false) == .ignored)
+
+        await stub.release()
+        #expect(await first.value == .saved)
+        #expect(await stub.updates == 1)
+        #expect(!model.isSaving)
+        #expect(model.consents?.marketing.isGiven == true)
+        #expect(model.consents?.analytics.isGiven == true)
+    }
+
+    /// A failed save leaves the record as it was, and the switch's value
+    /// goes back with it.
+    @Test(.timeLimit(.minutes(10))) func aFailedSaveRollsTheSwitchBack() async {
+        let stub = GatedConsents(failsUpdate: true)
+        let model = ConsentsViewModel(manager: stub)
+        await model.load()
+        let before = model.phase
+
+        let flip = Task { await model.set(.analytics, to: false) }
+        await stub.waitForUpdate()
+        #expect(!model.isGiven(.analytics))
+        await stub.release()
+        #expect(await flip.value == .failed)
+        #expect(model.phase == before)
+        #expect(model.isGiven(.analytics))
+        #expect(!model.isSaving)
+    }
+
     // MARK: - Erasure grace period
 
     /// Requesting deletion schedules it; cancelling withdraws it; a second
@@ -117,5 +161,55 @@ struct ConsentsAndDeletionCancelTests {
         PendingDeletionNotice.recordRequest()
         #expect(PendingDeletionNotice.consume())
         #expect(!PendingDeletionNotice.consume())
+    }
+}
+
+/// Consents whose saves wait for the test to let them through, so a second
+/// flip can be tried while the first is in flight.
+private actor GatedConsents: AccountConsentManaging {
+    private let failsUpdate: Bool
+    private(set) var updates = 0
+    private var record = AccountConsents(
+        dataProcessing: .init(isGiven: true), marketing: .init(isGiven: false), analytics: .init(isGiven: true)
+    )
+    private var held: CheckedContinuation<Void, Never>?
+    private var arrival: CheckedContinuation<Void, Never>?
+    private var releasedEarly = false
+
+    init(failsUpdate: Bool = false) {
+        self.failsUpdate = failsUpdate
+    }
+
+    func consents() async throws -> AccountConsents { record }
+
+    func updateConsents(marketing: Bool?, analytics: Bool?) async throws -> AccountConsents {
+        updates += 1
+        arrival?.resume()
+        arrival = nil
+        if releasedEarly {
+            releasedEarly = false
+        } else {
+            await withCheckedContinuation { held = $0 }
+        }
+        if failsUpdate { throw AccountError.transport(message: "down") }
+        if let marketing { record.marketing = .init(isGiven: marketing, changedAt: Date(timeIntervalSince1970: 1)) }
+        if let analytics { record.analytics = .init(isGiven: analytics, changedAt: Date(timeIntervalSince1970: 1)) }
+        return record
+    }
+
+    /// Returns once an update has reached the stub.
+    func waitForUpdate() async {
+        guard updates == 0 else { return }
+        await withCheckedContinuation { arrival = $0 }
+    }
+
+    /// Lets the update in flight answer.
+    func release() {
+        if let held {
+            held.resume()
+            self.held = nil
+        } else {
+            releasedEarly = true
+        }
     }
 }

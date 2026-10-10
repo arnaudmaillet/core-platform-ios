@@ -5,7 +5,8 @@ import UIKit
 /// each with when it last changed, and what is still to come.
 ///
 /// Marketing and analytics are switches, applied at once, withdrawn as easily
-/// as given (GDPR Art. 7(3)). Processing the account's data is what the
+/// as given (GDPR Art. 7(3)), one change at a time (`ConsentsViewModel`).
+/// Processing the account's data is what the
 /// service runs on, so it isn't a switch: the way to withdraw it is to delete
 /// the account, and the row says so.
 final class ConsentsViewController: UIViewController {
@@ -22,15 +23,18 @@ final class ConsentsViewController: UIViewController {
 
     static let planned = ["Personalised ads", "Why you see an ad"]
 
-    private let manager: any AccountConsentManaging
+    private let viewModel: ConsentsViewModel
     private let makeDeleteAccount: (() -> UIViewController?)?
-    private var consents: AccountConsents?
-    private var didFail = false
+    /// One switch per consent, kept across redraws: a save in flight
+    /// disables it and a failed one flips it back, on the switch the viewer
+    /// touched rather than on a fresh one swapped in mid-animation.
+    private lazy var marketingSwitch = makeSwitch(for: .marketing)
+    private lazy var analyticsSwitch = makeSwitch(for: .analytics)
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
     init(manager: any AccountConsentManaging, makeDeleteAccount: (() -> UIViewController?)? = nil) {
-        self.manager = manager
+        self.viewModel = ConsentsViewModel(manager: manager)
         self.makeDeleteAccount = makeDeleteAccount
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.adsAndData.title
@@ -52,6 +56,7 @@ final class ConsentsViewController: UIViewController {
         collectionView.delegate = self
         view.addSubview(collectionView)
         configureDataSource()
+        viewModel.onChange = { [weak self] in self?.applySnapshot() }
         applySnapshot()
         load()
     }
@@ -90,27 +95,21 @@ final class ConsentsViewController: UIViewController {
     // MARK: - Data
 
     private func load() {
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                consents = try await manager.consents()
-                didFail = false
-            } catch {
-                didFail = true
-            }
-            applySnapshot()
-        }
+        Task { [weak self] in await self?.viewModel.load() }
     }
 
-    private func set(marketing: Bool? = nil, analytics: Bool? = nil, revert: @escaping () -> Void) {
+    /// The model rolls the consent back on failure; the redraw it triggers
+    /// flips the switch back.
+    private func set(_ consent: ConsentsViewModel.Consent, to isGiven: Bool) {
         Task { [weak self] in
             guard let self else { return }
-            do {
-                consents = try await manager.updateConsents(marketing: marketing, analytics: analytics)
+            switch await viewModel.set(consent, to: isGiven) {
+            case .saved:
                 HapticSelection().selectionChanged()
-                reconfigure([.marketing, .analytics])
-            } catch {
-                revert()
+            case .ignored:
+                // A switch flipped in the instant before it was disabled.
+                applySnapshot()
+            case .failed:
                 let alert = UIAlertController(title: nil, message: "Couldn't save that change. Try again.", preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
@@ -151,12 +150,15 @@ final class ConsentsViewController: UIViewController {
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.consents])
-        if consents != nil {
+        switch viewModel.phase {
+        case .loaded:
             snapshot.appendItems([.marketing, .analytics], toSection: .consents)
             snapshot.appendSections([.required])
             snapshot.appendItems([.dataProcessing], toSection: .required)
-        } else {
-            snapshot.appendItems([didFail ? .failed : .loading], toSection: .consents)
+        case .loading:
+            snapshot.appendItems([.loading], toSection: .consents)
+        case .failed:
+            snapshot.appendItems([.failed], toSection: .consents)
         }
         snapshot.appendSections([.comingSoon])
         snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
@@ -164,25 +166,19 @@ final class ConsentsViewController: UIViewController {
         dataSource.apply(snapshot, animatingDifferences: false)
     }
 
-    private func reconfigure(_ items: [Item]) {
-        var snapshot = dataSource.snapshot()
-        snapshot.reconfigureItems(items.filter { snapshot.indexOfItem($0) != nil })
-        dataSource.apply(snapshot, animatingDifferences: false)
-    }
-
     private func configure(_ cell: UICollectionViewListCell, for item: Item) {
         cell.accessories = []
         switch item {
         case .marketing:
-            let consent = consents?.marketing ?? .init(isGiven: false)
+            let consent = viewModel.consents?.marketing ?? .init(isGiven: false)
             cell.contentConfiguration = Self.content("Marketing", detail: "Emails and offers about the app · \(Self.statusText(consent))", symbol: "envelope")
-            cell.accessories = [toggle(isOn: consent.isGiven) { [weak self] isOn, revert in self?.set(marketing: isOn, revert: revert) }]
+            cell.accessories = [accessory(marketingSwitch, for: .marketing)]
         case .analytics:
-            let consent = consents?.analytics ?? .init(isGiven: false)
+            let consent = viewModel.consents?.analytics ?? .init(isGiven: false)
             cell.contentConfiguration = Self.content("Analytics", detail: "Usage statistics that help improve the app · \(Self.statusText(consent))", symbol: "chart.bar")
-            cell.accessories = [toggle(isOn: consent.isGiven) { [weak self] isOn, revert in self?.set(analytics: isOn, revert: revert) }]
+            cell.accessories = [accessory(analyticsSwitch, for: .analytics)]
         case .dataProcessing:
-            let consent = consents?.dataProcessing ?? .init(isGiven: true)
+            let consent = viewModel.consents?.dataProcessing ?? .init(isGiven: true)
             cell.contentConfiguration = Self.content("Data Processing", detail: "To provide the service · \(Self.statusText(consent))", symbol: "server.rack")
             if makeDeleteAccount != nil { cell.accessories = [.disclosureIndicator()] }
         case .loading:
@@ -213,16 +209,23 @@ final class ConsentsViewController: UIViewController {
         return content
     }
 
-    /// A switch that applies at once; `onChange` gets a way to flip it back
-    /// if the save fails.
-    private func toggle(isOn: Bool, onChange: @escaping (Bool, @escaping () -> Void) -> Void) -> UICellAccessory {
+    /// A switch that applies at once.
+    private func makeSwitch(for consent: ConsentsViewModel.Consent) -> UISwitch {
         let toggle = UISwitch()
-        toggle.isOn = isOn
-        toggle.addAction(UIAction { [weak toggle] _ in
+        toggle.addAction(UIAction { [weak self, weak toggle] _ in
             guard let toggle else { return }
-            let value = toggle.isOn
-            onChange(value) { [weak toggle] in toggle?.setOn(!value, animated: true) }
+            self?.set(consent, to: toggle.isOn)
         }, for: .valueChanged)
+        return toggle
+    }
+
+    /// `toggle` brought up to date with the model — the change in flight, or
+    /// the record (which is how a failed save flips it back) — and disabled
+    /// while any change is saving.
+    private func accessory(_ toggle: UISwitch, for consent: ConsentsViewModel.Consent) -> UICellAccessory {
+        let isOn = viewModel.isGiven(consent)
+        if toggle.isOn != isOn { toggle.setOn(isOn, animated: toggle.window != nil) }
+        toggle.isEnabled = !viewModel.isSaving
         return .customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))
     }
 }
@@ -240,8 +243,6 @@ extension ConsentsViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed:
-            didFail = false
-            applySnapshot()
             load()
         case .dataProcessing:
             if let screen = makeDeleteAccount?() {
