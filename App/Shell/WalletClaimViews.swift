@@ -359,14 +359,25 @@ final class WalletSummaryCell: UICollectionViewCell {
 /// A card, and a pressable one: it opens the post in the feed, flying from
 /// its thumbnail (media) or revealing from the card (text) — see
 /// `WalletClaimViewController.openFeed`.
+///
+/// The stake is local and always known; the POST is a lookup (#834). While
+/// it is out, the post part — thumbnail, author, caption — is bones laid over
+/// the very views they stand for (charter P8/P9), and the amount and
+/// countdown stay real; when it lands the bones cross-fade to the post (P10).
+/// A lookup that failed says so in the caption line.
 final class WalletStakeCell: UICollectionViewCell {
     private let thumbnail = UIImageView()
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let resultLabel = UILabel()
     private let detailLabel = UILabel()
+    /// The thumbnail and the two lines: what the bones stand in for.
+    private let postContent = UIStackView()
+    private let bones = UIView()
     private var imageTask: Task<Void, Never>?
     private var shownURL: URL?
+    /// The post state drawn now; nil on a fresh or recycled row.
+    private var shownPhase: WalletStakePostLoads.State?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -413,11 +424,15 @@ final class WalletStakeCell: UICollectionViewCell {
         let text = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
         text.axis = .vertical
         text.spacing = 2
+        postContent.addArrangedSubview(thumbnail)
+        postContent.addArrangedSubview(text)
+        postContent.spacing = Spacing.sm
+        postContent.alignment = .center
         let trailing = UIStackView(arrangedSubviews: [resultLabel, detailLabel])
         trailing.axis = .vertical
         trailing.alignment = .trailing
         trailing.spacing = 2
-        let row = UIStackView(arrangedSubviews: [thumbnail, text, trailing])
+        let row = UIStackView(arrangedSubviews: [postContent, trailing])
         row.spacing = Spacing.sm
         row.alignment = .center
         row.translatesAutoresizingMaskIntoConstraints = false
@@ -430,7 +445,47 @@ final class WalletStakeCell: UICollectionViewCell {
             row.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.md),
             row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.sm),
         ])
+        buildBones()
         isAccessibilityElement = true
+    }
+
+    /// The post part's skeleton: a tile bone ON the thumbnail and a line bone
+    /// on each label, so the swap to the post moves nothing (P8). The labels
+    /// keep a line of text under them while loading, which holds the row's
+    /// height.
+    private func buildBones() {
+        bones.isUserInteractionEnabled = false
+        bones.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(bones)
+        let tile = SkeletonBoneView(rounding: .fixed(PostGridListRowCell.mediaCornerRadius))
+        let title = SkeletonBoneView()
+        let subtitle = SkeletonBoneView()
+        for bone in [tile, title, subtitle] {
+            bone.translatesAutoresizingMaskIntoConstraints = false
+            bones.addSubview(bone)
+        }
+        NSLayoutConstraint.activate([
+            bones.topAnchor.constraint(equalTo: postContent.topAnchor),
+            bones.leadingAnchor.constraint(equalTo: postContent.leadingAnchor),
+            bones.trailingAnchor.constraint(equalTo: postContent.trailingAnchor),
+            bones.bottomAnchor.constraint(equalTo: postContent.bottomAnchor),
+            tile.topAnchor.constraint(equalTo: thumbnail.topAnchor),
+            tile.leadingAnchor.constraint(equalTo: thumbnail.leadingAnchor),
+            tile.trailingAnchor.constraint(equalTo: thumbnail.trailingAnchor),
+            tile.bottomAnchor.constraint(equalTo: thumbnail.bottomAnchor),
+            // A line bone is the cap height's band of its label, not the
+            // label's whole line box: a bone as tall as the line reads as a
+            // block, not as text.
+            title.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            title.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            title.heightAnchor.constraint(equalTo: titleLabel.heightAnchor, multiplier: 0.6),
+            title.widthAnchor.constraint(equalTo: postContent.widthAnchor, multiplier: 0.35),
+            subtitle.leadingAnchor.constraint(equalTo: subtitleLabel.leadingAnchor),
+            subtitle.centerYAnchor.constraint(equalTo: subtitleLabel.centerYAnchor),
+            subtitle.heightAnchor.constraint(equalTo: subtitleLabel.heightAnchor, multiplier: 0.6),
+            subtitle.widthAnchor.constraint(equalTo: postContent.widthAnchor, multiplier: 0.6),
+        ])
+        bones.isHidden = true
     }
 
     @available(*, unavailable)
@@ -445,9 +500,19 @@ final class WalletStakeCell: UICollectionViewCell {
         // Concealment is per-FLIGHT state and must not ride a recycled row.
         thumbnail.alpha = 1
         contentView.alpha = 1
+        // A fade that was running belongs to the row's previous stake.
+        postContent.layer.removeAllAnimations()
+        bones.layer.removeAllAnimations()
+        shownPhase = nil
     }
 
-    func configure(stake: WalletStake, post: GalleryPost?, now: Date, imagePipeline: ImagePipeline?) {
+    /// `phase` is where the post's lookup stands; `animated` cross-fades the
+    /// bones out when it has just landed — false from inside a data source
+    /// apply, which swallows the animation anyway.
+    func configure(
+        stake: WalletStake, post: GalleryPost?, phase: WalletStakePostLoads.State,
+        now: Date, imagePipeline: ImagePipeline?, animated: Bool
+    ) {
         // The post: who wrote it, and its opening words (a photograph with no
         // caption says what it is instead).
         if let post {
@@ -458,11 +523,37 @@ final class WalletStakeCell: UICollectionViewCell {
                 : caption.replacingOccurrences(of: "\n", with: " ")
         } else {
             titleLabel.text = "Post"
-            subtitleLabel.text = " "
+            // Under the bones while loading: a line of text holds the row's
+            // height, so the post landing moves nothing.
+            subtitleLabel.text = phase == .failed ? "Couldn't load this post" : " "
         }
         applyThumbnail(post: post, imagePipeline: imagePipeline)
         applyStatus(stake: stake, now: now)
-        accessibilityLabel = [titleLabel.text, subtitleLabel.text].compactMap { $0 }.joined(separator: ", ")
+        applyPhase(phase, animated: animated)
+        accessibilityLabel = phase == .loading
+            ? "Loading post"
+            : [titleLabel.text, subtitleLabel.text].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    /// Bones while the post is out; the post once it is in — cross-faded
+    /// when it lands under the viewer's eyes, set outright otherwise. A row
+    /// already showing its post is left alone, so a refresh in the middle of
+    /// the fade does not cut it short.
+    private func applyPhase(_ phase: WalletStakePostLoads.State, animated: Bool) {
+        let previous = shownPhase
+        shownPhase = phase
+        if phase == .loading {
+            postContent.alpha = 0
+            bones.showSkeleton()
+            return
+        }
+        guard previous == nil || previous == .loading else { return }
+        if previous == .loading, animated, window != nil {
+            bones.crossfadeSkeleton(to: postContent)
+        } else {
+            bones.isHidden = true
+            postContent.alpha = 1
+        }
     }
 
     /// The part that moves with the clock — rewritten every second for an
@@ -587,6 +678,75 @@ final class WalletEmptyStakesCell: UICollectionViewCell {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+/// Some stakes' posts could not be loaded (#834): says so at the head of the
+/// list, with Try Again — which asks for those posts only, never the whole
+/// sheet. The empty card's shape and type, so the list keeps one voice.
+final class WalletStakesFailedCell: UICollectionViewCell {
+    private let titleLabel = UILabel()
+    private let bodyLabel = UILabel()
+    private let retryButton = UIButton(configuration: .plain())
+    /// Try Again was pressed.
+    var onRetry: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.backgroundColor = WalletSheetMetrics.cardFill
+        contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
+        contentView.layer.cornerCurve = .continuous
+        Surface.applyCardEdge(to: contentView)
+        titleLabel.text = "Couldn't load some posts"
+        titleLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
+        titleLabel.adjustsFontForContentSizeCategory = true
+        bodyLabel.font = .scaledSystemFont(ofSize: 13, relativeTo: .footnote)
+        bodyLabel.adjustsFontForContentSizeCategory = true
+        bodyLabel.textColor = .secondaryLabel
+        bodyLabel.numberOfLines = 0
+
+        var button = UIButton.Configuration.plain()
+        button.contentInsets = .zero
+        button.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.appFont(forTextStyle: .subheadline)
+            return attributes
+        }
+        button.title = "Try Again"
+        retryButton.configuration = button
+        retryButton.contentHorizontalAlignment = .leading
+        retryButton.addAction(UIAction { [weak self] _ in self?.onRetry?() }, for: .primaryActionTriggered)
+
+        let column = UIStackView(arrangedSubviews: [titleLabel, bodyLabel, retryButton])
+        column.axis = .vertical
+        column.alignment = .leading
+        column.spacing = 2
+        column.setCustomSpacing(Spacing.sm, after: bodyLabel)
+        column.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(column)
+        NSLayoutConstraint.activate([
+            column.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.md),
+            column.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.md),
+            column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.md),
+            column.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.md),
+        ])
+        configure(failedAfterRetry: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onRetry = nil
+    }
+
+    /// A retry that failed too says so, rather than repeating the first
+    /// message as if nothing had been tried.
+    func configure(failedAfterRetry: Bool) {
+        bodyLabel.text = failedAfterRetry
+            ? "Still couldn't load them. Check your connection and try again in a moment."
+            : "Your stakes are safe. Check your connection and try again."
+    }
 }
 
 /// A section's title — the app's one (`SectionTitleView`) — and, at the
