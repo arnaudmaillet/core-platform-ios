@@ -589,9 +589,14 @@ public final class IconSelectorBar: UIView {
         // rule, for the same reason. A bar taken away mid-drag gets no
         // `.cancelled` from its recognizer, and the end-of-strip `CADisplayLink`
         // RETAINS its target: the bar would stay alive and ticking, its strip
-        // locked and its pill lifted between two icons. Ended as a release, so
-        // it lands where the finger left it.
-        if window == nil, drag != nil { endDrag() }
+        // locked and its pill lifted between two icons.
+        //
+        // CANCELLED, not released — where `PagedTabBar` commits. Its pager has
+        // followed the scrub page by page and must be settled somewhere; here
+        // nothing has been told anything until a release, so the honest ending
+        // of a finger that never lifted is the choice it started from, with no
+        // `onSelect` fired into a host in the middle of a window move.
+        if window == nil, drag != nil { cancelDrag() }
         guard window != nil, capsule.effect == nil, hosting.drawsBackdrop else { return }
         materialiseCapsule()
     }
@@ -770,6 +775,17 @@ extension IconSelectorBar: UIGestureRecognizerDelegate {
         // the mode it is already showing.
         guard changed else { return }
         onSelect?(landing)
+    }
+
+    /// Abandons the drag without choosing anything: the pill goes back to the
+    /// item it started on and nobody is told — see `didMoveToWindow`.
+    private func cancelDrag() {
+        guard drag != nil else { return }
+        drag = nil
+        stopEdgeScroll()
+        scroller.isScrollEnabled = true
+        progress = CGFloat(selectedIndex)
+        applyProgress()
     }
 
     /// Where a release commits.

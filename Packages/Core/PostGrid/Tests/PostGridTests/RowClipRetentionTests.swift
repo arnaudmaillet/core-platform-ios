@@ -348,6 +348,34 @@ struct RowClipRetentionTests {
         }
     }
 
+    /// Waits on the asserted state, bounded by TIME rather than by yields: a
+    /// starved parallel run hands out yields faster than work lands, and a
+    /// yield count gave up early under load (`LiveMediaBackdropTests` does the
+    /// same).
+    private func settle(within milliseconds: Int, until condition: () -> Bool) async {
+        for _ in 0..<(milliseconds / 5) where !condition() {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    /// A row with two clips, playing page 0 with page 1 warmed, then paged to
+    /// page 1 mid-fling: its loan released, its two players still bound.
+    private func releasedRow(
+        _ pool: VideoPlaybackController, _ coordinator: GridVideoPlaybackCoordinator, id: String = "post-0"
+    ) async -> PostGridListRowCell {
+        let cell = row([true, true], id: id)
+        coordinator.update(candidates: [
+            .init(id: PostID(id), url: url("clip-0"), cell: cell, distanceFromCentre: 0)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        await settle(within: 3000) { pool.activePlayerCount >= 2 }
+        cell.debugScrollCarousel(toPage: 1, animated: false)
+        coordinator.update(candidates: [
+            .init(id: PostID(id), url: url("clip-1"), cell: cell, distanceFromCentre: 0)
+        ], allowingStarts: false)
+        return cell
+    }
+
     /// ⚠️ ONE CLIP PLAYS IN A CAROUSEL. EVER.
     ///
     /// Reported from the feed: paging a card's carousel left the previous clip
@@ -463,7 +491,7 @@ struct RowClipRetentionTests {
                   cell: cell, distanceFromCentre: 0)
         ])
         _ = cell.makeVideoRenderViewIfNeeded()
-        await settle { pool.activePlayerCount >= 2 }
+        await settle(within: 3000) { pool.activePlayerCount >= 2 }
         // The denominator: the watched clip and its warmed neighbour.
         #expect(pool.activePlayerCount == 2, "nothing was ever bound, so nothing below means anything")
 
@@ -479,7 +507,7 @@ struct RowClipRetentionTests {
         coordinator.update(candidates: [], allowingStarts: false)
         // Drained until it holds or gives up: a warm-up issued by the last
         // reconcile lands on the far side of an await and undoes itself there.
-        await settle(until: { pool.activePlayerCount == 0 }, tries: 2000)
+        await settle(within: 3000) { pool.activePlayerCount == 0 }
 
         #expect(pool.activePlayerCount == 0, "a row nobody owns kept its players")
     }
@@ -497,7 +525,7 @@ struct RowClipRetentionTests {
                   cell: cell, distanceFromCentre: 0)
         ])
         _ = cell.makeVideoRenderViewIfNeeded()
-        await settle { pool.activePlayerCount >= 2 }
+        await settle(within: 3000) { pool.activePlayerCount >= 2 }
         #expect(pool.activePlayerCount == 2, "nothing was ever bound, so nothing below means anything")
 
         cell.debugScrollCarousel(toPage: 1, animated: false)
@@ -509,9 +537,55 @@ struct RowClipRetentionTests {
         // coordinator released early would make this pass for the wrong reason
         // — or, as it did, fail for one.
         withExtendedLifetime(coordinator) { cell.prepareForReuse() }
-        await settle(until: { pool.activePlayerCount == 0 }, tries: 2000)
+        await settle(within: 3000) { pool.activePlayerCount == 0 }
 
         #expect(pool.activePlayerCount == 0, "a recycled row kept its players")
+    }
+
+    /// ⚠️ A HANDOFF STOPS THE RELEASED ROWS TOO. Opening a post hides the
+    /// grid, and a hidden grid's `update` chooses nothing — but a released row
+    /// was reached only by `update`, so it played behind the whole feed.
+    @Test func aHandoffStopsARowReleasedMidFling() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
+        _ = await releasedRow(pool, coordinator)
+        #expect(pool.activePlayerCount == 2, "nothing was ever bound, so nothing below means anything")
+
+        // The viewer opens ANOTHER post.
+        coordinator.beginHandoff(PostID("post-tapped"))
+        await settle(within: 3000) { pool.activePlayerCount == 0 }
+
+        #expect(pool.activePlayerCount == 0, "a released row kept playing behind the feed")
+        withExtendedLifetime(coordinator) {}
+    }
+
+    /// ⚠️ A RELEASED ROW CHOSEN AGAIN RESUMES WARM. The next reconcile that may
+    /// start takes the loan back for the same row: the clip it arrived at is
+    /// the one already waiting, and nothing is re-decoded from zero.
+    @Test func aReleasedRowChosenAgainResumesWarm() async {
+        let pool = VideoPlaybackController(
+            source: StubVideoSource(), poolSize: 6, capacity: 6
+        )
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 6)
+        let cell = await releasedRow(pool, coordinator)
+        #expect(pool.activePlayerCount == 2, "nothing was ever bound, so nothing below means anything")
+        let itemsBefore = pool.itemCreations
+
+        coordinator.update(candidates: [
+            .init(id: PostID("post-0"), url: url("clip-1"), cell: cell, distanceFromCentre: 0)
+        ])
+        _ = cell.makeVideoRenderViewIfNeeded()
+        // Drained, not sampled: a restart would land on the far side of an
+        // await (see `arrivingAtAWarmedClipResumesItInsteadOfRestarting`).
+        await settle(within: 3000) { cell.watchedClipSurface.map { pool.isAdvancing(in: $0) } ?? false }
+        for _ in 0..<600 { await Task.yield() }
+
+        #expect(pool.activePlayerCount == 2)
+        #expect(pool.itemCreations == itemsBefore, "the row restarted a clip it had warm")
+        #expect(cell.watchedClipSurface.map { pool.isAdvancing(in: $0) } ?? false)
+        #expect(coordinator.playingIDs == [PostID("post-0")], "the loan was never taken back")
     }
 
     /// ⚠️ THE WITNESS: a row that is still chosen keeps the clip it left warm.
@@ -529,7 +603,7 @@ struct RowClipRetentionTests {
                   cell: cell, distanceFromCentre: 0)
         ])
         _ = cell.makeVideoRenderViewIfNeeded()
-        await settle { pool.activePlayerCount >= 2 }
+        await settle(within: 3000) { pool.activePlayerCount >= 2 }
         #expect(pool.activePlayerCount == 2, "nothing was ever bound, so nothing below means anything")
 
         cell.debugScrollCarousel(toPage: 1, animated: false)

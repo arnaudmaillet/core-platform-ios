@@ -542,7 +542,12 @@ public final class GridVideoPlaybackCoordinator {
         // is exempt on every path, and the tiles simply keep drawing behind
         // the dim for the few frames the stagger takes — which is invisible,
         // and arguably truer than freezing them all at the instant of the tap.
-        stopStaggered(loans.keys.filter { $0 != id }, forHandoff: id)
+        //
+        // ⚠️ AND THE RELEASED ROWS (`strays`): they hold players as surely as
+        // the loans do, and the hidden surface stops `update` from ever
+        // reaching them — left out here, they played behind the whole feed.
+        let others = Set(loans.keys).union(strays.keys).subtracting([id])
+        stopStaggered(Array(others), forHandoff: id)
         #if DEBUG
         Self.logPool(loans.count, handoff: handoffID)
         // Arm the flight probe HERE — the one moment guaranteed to precede any
@@ -590,6 +595,8 @@ public final class GridVideoPlaybackCoordinator {
             guard let self, handoffID == handoff else { return }
             if let cell = loans[next] {
                 stop(id: next, cell: cell)
+            } else {
+                stopStray(next)
             }
             stopStaggered(remaining, forHandoff: handoff)
         }
@@ -1126,7 +1133,9 @@ public final class GridVideoPlaybackCoordinator {
             let id = candidate.id
             Task { [weak self] in
                 await self?.pool.prewarm(clip.url, in: clip.surface, scope: id.rawValue)
-                guard let self, self.loans[id] != nil else {
+                // A released row (`strays`) still owns its clips and keeps
+                // what it warmed; its own sweep reclaims it if it leaves.
+                guard let self, self.loans[id] != nil || self.strays[id] != nil else {
                     self?.pool.stop(clip.surface)
                     return
                 }
