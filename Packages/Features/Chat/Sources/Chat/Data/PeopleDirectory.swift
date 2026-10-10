@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Someone the viewer can start a conversation with, as the compose picker
@@ -36,7 +37,17 @@ public struct DirectoryPage: Equatable, Sendable {
 }
 
 public enum PeopleDirectoryError: Error, Equatable, Sendable {
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension PeopleDirectoryError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// The people-lookup the compose picker searches against.
@@ -105,7 +116,7 @@ public actor PeopleDirectoryRepository: PeopleDirectoryProviding {
                 nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken
             )
         case .failure(let error):
-            throw PeopleDirectoryError.transport(message: error.message ?? "code \(error.code)")
+            throw PeopleDirectoryError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 

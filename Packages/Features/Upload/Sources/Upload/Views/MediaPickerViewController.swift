@@ -448,6 +448,12 @@ final class MediaPickerViewController: UIViewController {
             pager.topAnchor.constraint(equalTo: view.topAnchor),
             pager.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+        // ⚠️ **THE PAGES' BONES TAKE OVER FROM HERE, IN THE SAME PLACE (#831).**
+        // Every page wears its own skeleton until its album lands, laid out as
+        // this one is. Left up, this one would sit over the first page's and
+        // the two translucent fills would darken each other; removed in the
+        // turn the pager arrives, no frame shows either both or neither.
+        skeleton.removeFromSuperview()
 
         // ⚠️ **ABOVE THE PAGER, BELOW THE TRAY — AND NOT WITH `pin(to:)`.** That
         // helper calls `addSubview` unconditionally, which MOVES a view to the
@@ -508,6 +514,7 @@ final class MediaPickerViewController: UIViewController {
             // frame with a fractional page, so the neighbour is revealed as soon
             // as it is genuinely coming.
             revealPage(at: Int(progress.rounded()))
+            wakePlaceholders(near: Int(progress.rounded()))
         }
         pager.onSettled = { [weak self] index in
             guard let self, albums.indices.contains(index) else { return }
@@ -519,6 +526,16 @@ final class MediaPickerViewController: UIViewController {
             }
         }
         updateTrayReserve()
+        wakePlaceholders(near: pager.activeIndex)
+    }
+
+    /// Bones shimmer on the page in front and the two either side of it —
+    /// the ones a swipe can bring on screen — and sleep everywhere else
+    /// (`MediaAlbumPageView.setPlaceholdersAwake`).
+    private func wakePlaceholders(near index: Int) {
+        for (offset, page) in pages.enumerated() {
+            page.setPlaceholdersAwake(abs(offset - index) <= 1)
+        }
     }
 
     private func makePage() -> MediaAlbumPageView {
@@ -862,7 +879,22 @@ extension MediaPickerViewController {
     /// Internal for tests: the items the album ON SCREEN is showing.
     var debugItems: [MediaLibraryItem] { debugActivePage?.items ?? [] }
     /// Internal for tests: whether the screen is still saying it is working.
-    var debugIsLoading: Bool { skeleton.superview != nil && skeleton.alpha == 1 }
+    var debugIsLoading: Bool {
+        (skeleton.superview != nil && skeleton.alpha == 1) || debugActivePage?.debugShowsPlaceholders == true
+    }
+    /// Internal for tests: whether the album at `index` still wears its bones.
+    func debugPageShowsPlaceholders(at index: Int) -> Bool {
+        pages.indices.contains(index) && pages[index].debugShowsPlaceholders
+    }
+    /// Internal for tests: whether the album at `index` still holds bones,
+    /// shimmering or asleep.
+    func debugPageHoldsPlaceholders(at index: Int) -> Bool {
+        pages.indices.contains(index) && pages[index].debugHoldsPlaceholders
+    }
+    /// Internal for tests: the bones the album at `index` lays out.
+    func debugPagePlaceholderCount(at index: Int) -> Int {
+        pages.indices.contains(index) ? pages[index].debugPlaceholderCount : 0
+    }
     /// Internal for tests: the pager, so a test can assert the strip and the
     /// pages stay in step — which is the whole contract of this screen's chrome.
     var debugPager: HorizontalPagerView? { pager }

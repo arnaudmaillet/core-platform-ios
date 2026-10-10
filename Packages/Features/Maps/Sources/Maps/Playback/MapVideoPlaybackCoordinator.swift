@@ -31,7 +31,15 @@ final class MapVideoPlaybackCoordinator {
     private var playing: [PostID: any MapVideoHost] = [:]
     /// AND of the facts that gate playback (tab frontmost, no feed presented,
     /// app foregrounded).
-    private var isSurfaceVisible = true
+    ///
+    /// ⚠️ FALSE AT BIRTH: "never told" means "not visible" — the grid's rule
+    /// (`GridVideoPlaybackCoordinator.isSurfaceVisible`, #144), for the same
+    /// reason. `update` runs on every annotation add and every settle, and a
+    /// map that was merely constructed answered all of them by taking players
+    /// on the shared pool before anything had put it on screen. Every path
+    /// that shows the map asserts visibility first: `viewWillAppear`, the
+    /// foreground return, and a flight's close-out.
+    private var isSurfaceVisible = false
     /// The one pin `setSurfaceVisible(false, keeping:)` spared, held so the
     /// reconcile below cannot undo the sparing.
     ///

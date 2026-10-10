@@ -199,9 +199,17 @@ final class ForYouRailsView: UIView {
     /// Nil, or nothing to offer, and the card draws no "...".
     var cardAuthorMenuActions: ((_ post: GalleryPost, _ anchor: UIView) -> [PostCardMenuAction])?
     /// A TEXT card's repost was pressed. Nothing publishes a repost yet, so
-    /// nothing sets this — the list's cards fan theirs out the same way
-    /// (`ForYouGridPage.onRepostRequested`), and draw the control anyway.
+    /// nothing sets this — and, as on the list's cards
+    /// (`ForYouGridPage.onRepostRequested`), the control is not drawn until
+    /// something does (#801).
     var onCardRepostRequested: ((GalleryPost) -> Void)?
+
+    /// What a text card's repost control does: nil, which hides it, while
+    /// nothing handles a repost (#801).
+    func cardRepostHandler(for post: GalleryPost) -> (() -> Void)? {
+        guard onCardRepostRequested != nil else { return nil }
+        return { [weak self] in self?.onCardRepostRequested?(post) }
+    }
     /// The saved pile a text card's save control reads and writes — the one
     /// the list's cards, the post page and the profile's Saved tab share.
     private let bookmarks = PostBookmarkStore()
@@ -506,15 +514,16 @@ final class ForYouRailsView: UIView {
         )
         // The like chip stakes — see `PostCardStaking`.
         staking?.bind(cell, to: post.id)
-        // Always set, as on the list's cards: the card's design draws the
-        // repost whether or not anything handles it yet.
-        cell.onRepostTapped = { [weak self] in self?.onCardRepostRequested?(post) }
+        // As on the list's cards: no handler, no repost control (#801).
+        cell.onRepostTapped = cardRepostHandler(for: post)
         cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
         cell.onBookmarkTapped = { [weak self, weak cell] in
             guard let self, let cell else { return }
             MemberGates.perform(.save, from: cell) { [weak self, weak cell] in
                 guard let self else { return }
                 _ = bookmarks.toggle(post.id.rawValue)
+                // The fill says it; the hand feels it (#803).
+                Feedback.toggled()
                 cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
             }
         }
@@ -841,7 +850,7 @@ final class ForYouRailsView: UIView {
             imagePipeline: imagePipeline,
             showsAuthorMenu: showsAuthorMenu(for: post),
             actions: .init(
-                repost: true, bookmark: true, saved: bookmarks.isSaved(id.rawValue),
+                repost: onCardRepostRequested != nil, bookmark: true, saved: bookmarks.isSaved(id.rawValue),
                 stake: staking?.viewerStake(on: id)
             ),
             ageText: cell?.renderedAgeText,

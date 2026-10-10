@@ -9,7 +9,8 @@ import Foundation
 /// Concurrency: a new viewport supersedes any in-flight query (a fast pan fires
 /// several), so a slow response that lost the race is dropped rather than
 /// clobbering fresher pins. Fail-open by contract — a failed query keeps the
-/// current pins and never surfaces as a blocking error.
+/// current pins and never surfaces as a blocking error. Repeated failures are
+/// SAID, once, out of the way (`onRepeatedQueryFailure`, #798).
 @MainActor
 public final class MapsViewModel {
     private let repository: any GeoDiscoveryProviding
@@ -42,6 +43,24 @@ public final class MapsViewModel {
     /// The tile count for the last successful query — a "viewport too wide"
     /// telemetry/hint signal, not an error.
     public var onTileCount: ((Int) -> Void)?
+    /// Fires ONCE when `failureReportThreshold` queries in a row have failed,
+    /// and not again until a query succeeds (#798). The screen shows a toast.
+    ///
+    /// ⚠️ A FAILED QUERY USED TO VANISH. Fail-open is right for one — a pan
+    /// keeps the pins it has and the next settle asks again — but a map whose
+    /// every query fails looks exactly like a map of a place where nothing
+    /// was posted: empty, calm, and lying. One failure is noise (a superseded
+    /// request, a dropped packet); two in a row is the network, and the viewer
+    /// is told. Once: a toast on every pan of a dead connection would be a
+    /// nag, and it says nothing the first one did not.
+    public var onRepeatedQueryFailure: (() -> Void)?
+    /// How many failed queries in a row make `onRepeatedQueryFailure` fire.
+    nonisolated static let failureReportThreshold = 2
+    /// Failed queries since the last success. A CANCELLED query is neither:
+    /// a newer viewport superseded it, which says nothing about the network.
+    private(set) var consecutiveQueryFailures = 0
+    /// Whether this run of failures has been reported already.
+    private var reportedFailureRun = false
 
     public init(
         repository: any GeoDiscoveryProviding,
@@ -129,9 +148,16 @@ public final class MapsViewModel {
                 result = try await self.repository.queryTile(viewport, filter: filter)
             } catch {
                 // Fail-open (TIER-1): keep the pins we have, drop this attempt.
+                // Counted unless it was superseded rather than failed (#798).
+                guard !Task.isCancelled, !(error is CancellationError) else { return }
+                self.recordQueryFailure()
                 return
             }
             guard !Task.isCancelled else { return }
+            // A query that came back ends the run of failures: the next run
+            // is reported afresh.
+            self.consecutiveQueryFailures = 0
+            self.reportedFailureRun = false
             #if DEBUG
             let answered = ContinuousClock.now
             #endif
@@ -173,6 +199,15 @@ public final class MapsViewModel {
             self.apply(pins)
             self.onTileCount?(result.tileCount)
         }
+    }
+
+    /// One more failed query in a row; reported when the run reaches the
+    /// threshold, and only the first time it does.
+    private func recordQueryFailure() {
+        consecutiveQueryFailures += 1
+        guard consecutiveQueryFailures >= Self.failureReportThreshold, !reportedFailureRun else { return }
+        reportedFailureRun = true
+        onRepeatedQueryFailure?()
     }
 
     /// Reconciles the authoritative state with `incoming` and emits the diff.

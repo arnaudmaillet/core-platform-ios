@@ -71,6 +71,15 @@ public final class SkeletonBoneView: UIView {
             self, selector: #selector(reinstallIfVisible),
             name: UIApplication.willEnterForegroundNotification, object: nil
         )
+        // ⚠️ STILL WHEN DECORATION RESTS (#789): an endless window-sized sweep
+        // on a load that never answers (offline, a hung request) recomposited
+        // the whole frame forever — the #580 cost. Reduce Motion, Power Saving
+        // and an app at rest all still it; the bones stay, which is the state.
+        for name in [UIAccessibility.reduceMotionStatusDidChangeNotification, .decorativeMotionDidChange] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(reinstallIfVisible), name: name, object: nil
+            )
+        }
     }
 
     @available(*, unavailable)
@@ -120,8 +129,21 @@ public final class SkeletonBoneView: UIView {
 
     private static let sweepKey = "skeleton.sweep"
 
+    /// Whether decoration is still — a seam for tests (the real answer is
+    /// process-wide).
+    var stillsMotion: () -> Bool = { MotionPreference.stillsDecoration }
+
     private func installSweep() {
         gradient.removeAnimation(forKey: Self.sweepKey)
+        // ⚠️ STILL MEANS NO BAND, not a frozen one: without its animation the
+        // window-sized gradient falls back to its model locations and parks the
+        // highlight mid-screen — a bright stripe across the middle bones.
+        let still = stillsMotion()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        gradient.isHidden = still
+        CATransaction.commit()
+        guard !still else { return }
         let sweep = CABasicAnimation(keyPath: "locations")
         sweep.fromValue = [-0.4, -0.2, 0]
         sweep.toValue = [1, 1.2, 1.4]
@@ -135,4 +157,8 @@ public final class SkeletonBoneView: UIView {
     @objc private func reinstallIfVisible() {
         if window != nil { installSweep() }
     }
+
+    /// Whether the sweep is running, and whether its band shows. Tests.
+    var isSweeping: Bool { gradient.animation(forKey: Self.sweepKey) != nil }
+    var showsBand: Bool { !gradient.isHidden }
 }

@@ -77,7 +77,8 @@ final class ConversationThreadViewController: UIViewController {
         maskColors: SnapCommentsLayout.footerFrostMaskColors,
         maskLocations: SnapCommentsLayout.footerFrostMaskLocations
     )
-    private let statusLabel = UILabel()
+    /// A failed first load, with its way out (#797).
+    private let statusView = EmptyStateView()
     /// Under the bar while older history is on its way (#600): pinned to the
     /// screen rather than to the content, so it is where the reader is
     /// looking — at the top — whatever the scroll. Turns only while a page
@@ -715,17 +716,39 @@ final class ConversationThreadViewController: UIViewController {
         return UIMenu(children: [unmute, mute])
     }
 
+    /// A message's Copy says so (#803): the pasteboard is off-screen, and a
+    /// menu that closes on nothing reads as a tap that missed. Over the
+    /// composer, as the mute's toast is. Internal for tests.
+    func confirmCopied() {
+        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: composeBar.inputRowTopAnchor)
+    }
+
     /// Mutes or unmutes through the driver, and says so (#729): the same
     /// bottom toast as "You're signed in".
+    ///
+    /// ⚠️ SAID ONCE THE SERVER HAS ANSWERED (#802), never on the tap. The bell
+    /// flips at once; the toast waits for the write, and a refusal — which
+    /// puts the bell back — gets a failure toast instead of a confirmation
+    /// of something that did not happen.
     private func setMuted(_ mute: Bool, until: Date?, toast: String? = nil) {
-        driver.setMuted(mute, until: until)
-        ToastView.present(
-            toast ?? (mute ? "Notifications muted" : "Notifications on"),
-            symbol: mute ? "bell.slash.fill" : "bell.fill",
-            in: view,
-            // Over the composer, which rests where the toast would.
-            above: composeBar.inputRowTopAnchor
-        )
+        driver.setMuted(mute, until: until) { [weak self] confirmed in
+            guard let self else { return }
+            if confirmed {
+                Feedback.success(
+                    toast ?? (mute ? "Notifications muted" : "Notifications on"),
+                    symbol: mute ? "bell.slash.fill" : "bell.fill",
+                    from: self,
+                    // Over the composer, which rests where the toast would.
+                    above: composeBar.inputRowTopAnchor
+                )
+            } else {
+                Feedback.failure(
+                    mute ? "Couldn't mute notifications" : "Couldn't turn notifications on",
+                    from: self,
+                    above: composeBar.inputRowTopAnchor
+                )
+            }
+        }
     }
 
     /// The bell follows the conversation's mute; it appears once there is a
@@ -768,15 +791,13 @@ final class ConversationThreadViewController: UIViewController {
     #endif
 
     private func configureStatusLabel() {
-        statusLabel.font = .appFont(forTextStyle: .body)
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
+        statusView.isHidden = true
+        statusView.constrain(in: view) { parent in
+            statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            // Above the keyboard, so a raised composer never sits on it.
+            statusView.bottomAnchor.constraint(equalTo: parent.keyboardLayoutGuide.topAnchor)
+            statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
     }
 
@@ -832,12 +853,24 @@ final class ConversationThreadViewController: UIViewController {
         self.phase = phase
         switch phase {
         case .loading:
-            statusLabel.isHidden = true
+            statusView.isHidden = true
         case .failed(let message):
-            statusLabel.text = message
-            statusLabel.isHidden = hasRenderedContent
+            // ⚠️ A WAY OUT (#797). It said "Pull to retry" on a screen with no
+            // pull — by design (the composer owns the bottom edge) — so a
+            // failed first load was a dead end until the viewer backed out.
+            statusView.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.driver.refresh()
+                }
+            )
+            // Beneath the composer, which stays live on a failure: its taps
+            // are never the empty state's.
+            if composerBackdrop.superview === view { view.insertSubview(statusView, belowSubview: composerBackdrop) }
+            statusView.isHidden = hasRenderedContent
         case .content(let messages):
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             let before = messagesByID
             messagesByID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             noteSendTransitions(from: before, to: messages)
@@ -1113,8 +1146,9 @@ final class ConversationThreadViewController: UIViewController {
         let reply = UIAction(title: "Reply", image: UIImage(systemName: "arrowshape.turn.up.left")) {
             [weak self] _ in self?.driver.beginReply(to: id)
         }
-        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
+        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
             UIPasteboard.general.string = message.body
+            self?.confirmCopied()
         }
         let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
             [weak self] _ in self?.selectText(of: id)
@@ -1445,11 +1479,22 @@ extension ConversationThreadViewController {
         followInFlight = true
         relationGeneration += 1
         setPeerRelation(before.settingFollow(true))
+        // Named now: the peer can change before the graph answers.
+        let name = peer.handle.map { "@" + $0 } ?? (peer.name.isEmpty ? nil : peer.name)
         Task { [weak self] in
             let accepted = (try? await socialGraph.setFollowing(true, for: id)) != nil
             guard let self else { return }
             self.followInFlight = false
-            if !accepted, self.peer.id == id { self.setPeerRelation(before) }
+            if !accepted {
+                if self.peer.id == id { self.setPeerRelation(before) }
+                // Said either way (#802): a "+" that comes back without a
+                // word reads as a glitch. Over the composer, as the mute's is.
+                Feedback.failure(
+                    name.map { "Couldn't follow \($0)" } ?? "Couldn't follow",
+                    from: self,
+                    above: self.composeBar.inputRowTopAnchor
+                )
+            }
             // The peer changed mid-follow: its relation was never asked.
             if self.peer.id != id { self.resolvePeerRelation() }
         }

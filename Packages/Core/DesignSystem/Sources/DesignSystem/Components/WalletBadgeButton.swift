@@ -144,6 +144,14 @@ public final class WalletBadgeButton: UIButton {
                 self, selector: #selector(motionPreferenceChanged), name: name, object: nil
             )
         }
+        // ⚠️ BACKGROUNDING STRIPS BOTH ANIMATIONS (#783): the claim breath was
+        // gone, and the ring showed its model value — full, as if the claim
+        // were ready — while the countdown still ran. `SkeletonBoneView` does
+        // the same.
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(rearmAfterForeground),
+            name: UIApplication.willEnterForegroundNotification, object: nil
+        )
     }
 
     @available(*, unavailable)
@@ -295,6 +303,15 @@ public final class WalletBadgeButton: UIButton {
     /// Test seams: the breath and the glow as they are on screen.
     var isBreathing: Bool { coinView.layer.animation(forKey: Self.pulseKey) != nil }
     var isGlowing: Bool { coinView.layer.shadowOpacity > 0 }
+    /// Test seam: the countdown ring's fill is running on screen.
+    var isRingCounting: Bool { ringLayer.animation(forKey: Self.ringFillKey) != nil }
+
+    /// Re-arms what backgrounding stripped (#783).
+    @objc private func rearmAfterForeground() {
+        guard window != nil else { return }
+        if wantsPulse { addPulseIfMissing() }
+        applyRing()
+    }
 
     /// Reduce Motion, Power Saving or the app's rest changed: the breath
     /// follows, the glow stays.

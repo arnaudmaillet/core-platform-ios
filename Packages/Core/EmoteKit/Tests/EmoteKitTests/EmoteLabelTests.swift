@@ -504,6 +504,56 @@ struct EmoteLabelTests {
         #expect(abs(actual.height - expected.height) < 0.001)
     }
 
+    /// ⚠️ **A RESTING APP IS NOT WALKED** (#830): idle calm, or the song
+    /// playing behind the home screen, re-asked every label four times a second
+    /// a question nothing could have changed. On a monitor of its own, so the
+    /// app-wide `IdleCalm` is never flipped under the suites beside this one.
+    ///
+    /// Paired with its witness: once the app wakes, the very next tick walks
+    /// again and the hidden label gives its slots back — a monitor that never
+    /// walked at all would pass the first half alone.
+    @Test func theMonitorWalksNothingWhileTheAppRests() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let (label, window) = nestedLabel("🔥", engine: engine, in: container)
+        defer { window.isHidden = true }
+        let monitor = EmoteVisibilityMonitor()
+        var resting = true
+        monitor.isResting = { resting }
+        monitor.register(label)
+        defer { monitor.unregister(label) }
+        #expect(engine.animatedCount == 1)
+
+        container.isHidden = true
+        monitor.tick()
+        #expect(monitor.walkedLabelCount == 0, "a resting app was walked")
+        #expect(engine.animatedCount == 1, "witness: nothing re-asked, so nothing changed")
+
+        resting = false
+        monitor.tick()
+        #expect(monitor.walkedLabelCount == 1)
+        #expect(engine.animatedCount == 0, "awake again, the hidden label kept its slot")
+    }
+
+    /// The background is a rest too, ended by coming back to the front.
+    @Test func theMonitorWalksNothingInTheBackground() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let (label, window) = hostedLabel("🔥", engine: engine)
+        defer { window.isHidden = true }
+        let monitor = EmoteVisibilityMonitor()
+        monitor.isResting = { false }
+        monitor.register(label)
+        defer { monitor.unregister(label) }
+
+        monitor.appDidEnterBackground()
+        monitor.tick()
+        #expect(monitor.walkedLabelCount == 0, "a screen nobody can see was walked")
+
+        monitor.appWillEnterForeground()
+        monitor.tick()
+        #expect(monitor.walkedLabelCount == 1, "back in front, the monitor never walked again")
+    }
+
     /// A label with no emotes, or out of any window, is not monitored.
     @Test func onlyLabelsWithEmotesInAWindowAreMonitored() throws {
         let engine = try warmEngine(["noto:1f525"])

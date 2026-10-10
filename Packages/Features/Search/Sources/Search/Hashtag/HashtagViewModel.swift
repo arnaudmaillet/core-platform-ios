@@ -57,6 +57,9 @@ final class HashtagViewModel {
         var ids: [PostID] = []
         var nextPageToken: String?
         var isLoading = false
+        /// The load is a refresh of the first page, not a next page: no
+        /// footer spinner (`isLoadingMore`).
+        var isRefreshing = false
     }
     private var paging: [Tab: Paging] = [:]
 
@@ -91,7 +94,8 @@ final class HashtagViewModel {
     }
 
     func isLoadingMore(_ tab: Tab) -> Bool {
-        paging[tab]?.isLoading == true && !(paging[tab]?.ids.isEmpty ?? true)
+        paging[tab]?.isLoading == true && paging[tab]?.isRefreshing != true
+            && !(paging[tab]?.ids.isEmpty ?? true)
     }
 
     /// The first page of both tabs, and the count.
@@ -105,6 +109,50 @@ final class HashtagViewModel {
         async let recentDone: Void = loadPage(.recent, first: true)
         _ = await (topDone, recentDone)
         if postCount == nil, let counted = await count { postCount = counted }
+        onChange?()
+    }
+
+    /// A pull on either list, or a failed list's Try Again (#798): both tabs'
+    /// first pages asked for again.
+    ///
+    /// ⚠️ NOT `load()`. That one resets both tabs to loading, which is right
+    /// for the first visit and wrong for a pull over posts the viewer is
+    /// reading. Here a tab with posts keeps them until its new first page
+    /// replaces them, and keeps them if the page fails; a tab with nothing
+    /// (empty or failed) goes back to loading and says what came back. A tab
+    /// already loading is left to its load.
+    func refresh() async {
+        async let topDone: Void = refreshPage(.top)
+        async let recentDone: Void = refreshPage(.recent)
+        _ = await (topDone, recentDone)
+    }
+
+    private func refreshPage(_ tab: Tab) async {
+        guard paging[tab]?.isLoading != true else { return }
+        let hadPosts = !(paging[tab]?.ids.isEmpty ?? true)
+        paging[tab, default: Paging()].isLoading = true
+        paging[tab]?.isRefreshing = true
+        if !hadPosts {
+            set(tab, .loading)
+            onChange?()
+        }
+        let page: PostSearchPage
+        do {
+            page = try await repository.searchPostsPage(
+                matching: title, sort: tab.sort, limit: Self.pageSize, pageToken: nil
+            )
+        } catch {
+            paging[tab]?.isLoading = false
+            paging[tab]?.isRefreshing = false
+            if !hadPosts { set(tab, .failed(message: "Couldn\u{2019}t load \(title).")) }
+            onChange?()
+            return
+        }
+        var seen = Set<PostID>()
+        let ids = page.hits.map(\.id).filter { seen.insert($0).inserted }
+        paging[tab] = Paging(ids: ids, nextPageToken: page.nextPageToken)
+        if tab == .recent, page.nextPageToken == nil { postCount = page.hits.count }
+        set(tab, ids.isEmpty ? .empty(query: title) : .posts(ids))
         onChange?()
     }
 

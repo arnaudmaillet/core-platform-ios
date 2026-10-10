@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import Testing
 import UIKit
@@ -34,7 +35,9 @@ struct PostDetailStreamShapeTests {
         init(_ entries: [CommentEntry]) { self.entries = entries }
         nonisolated func cachedTopComments(for postID: PostID) -> [CommentEntry]? { entries }
         func loadComments(for postID: PostID) async throws -> [CommentEntry] { entries }
-        func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+        func addComment(
+            _ body: String, to postID: PostID, parentID: String?, commentID: String
+        ) async throws -> CommentEntry {
             throw CommentsError.transport(message: "not used")
         }
     }
@@ -79,6 +82,15 @@ struct PostDetailStreamShapeTests {
         }
         stream.layoutIfNeeded()
         return (controller, stream, window)
+    }
+
+    /// A comment's Copy says so (#803), over the composer.
+    @Test func copyingACommentShowsACopiedToast() async throws {
+        let (controller, _, window) = try await makeStream(Self.spreadAcrossDays)
+        defer { window.isHidden = true }
+        #expect(Self.firstView(ToastView.self, in: controller.view) == nil)
+        controller.confirmCopied()
+        #expect(Self.firstView(ToastView.self, in: controller.view)?.style == .confirmation, "the copy said nothing")
     }
 
     private static func firstView<T: UIView>(_ type: T.Type, in view: UIView) -> T? {

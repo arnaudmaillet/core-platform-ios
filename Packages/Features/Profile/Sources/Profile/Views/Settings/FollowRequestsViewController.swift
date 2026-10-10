@@ -18,6 +18,7 @@ final class FollowRequestsViewController: UIViewController {
     private let imagePipeline: ImagePipeline?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
+    private let avatarLoads = RowAvatarLoads()
 
     init(viewModel: FollowRequestsViewModel, imagePipeline: ImagePipeline?) {
         self.viewModel = viewModel
@@ -81,9 +82,10 @@ final class FollowRequestsViewController: UIViewController {
             ))
             cell.accessibilityHint = "Confirm or delete this follow request."
             cell.setAvatarImage(nil)
-            guard let url = request.avatarURL, let pipeline = self?.imagePipeline else { return }
-            Task { [weak cell] in
-                let image = try? await pipeline.image(for: url)
+            // One load per CELL, cancelled when the cell is configured again:
+            // an unkept task painted the previous person's face on a
+            // recycled row (#780).
+            self?.avatarLoads.load(request.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image in
                 cell?.setAvatarImage(image)
             }
         }

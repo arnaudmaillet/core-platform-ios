@@ -108,6 +108,15 @@ public final class EmptyStateView: UIView {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// ⚠️ ONLY THE ACTION TAKES A TOUCH (#797). The block is often laid over a
+    /// whole screen — a failed thread under its composer, a failed profile
+    /// under its bar — and its empty background must not swallow the touches
+    /// meant for what is around it.
+    public override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === self || hit === stack ? nil : hit
+    }
+
     /// Sets the whole state at once.
     ///
     /// One call rather than four properties, because these are facets of a
@@ -128,6 +137,14 @@ public final class EmptyStateView: UIView {
             actionTitle: actionTitle,
             actionHandler: actionHandler
         )
+    }
+
+    /// Shows the action working — a spinner in the button, which stops taking
+    /// taps — until the next `configure` (#797): a Try Again whose retry fails
+    /// again would otherwise look like a dead tap.
+    public func setActionBusy(_ busy: Bool) {
+        actionButton.configuration?.showsActivityIndicator = busy
+        actionButton.isEnabled = !busy
     }
 
     /// The image-taking form, for a caller whose glyph is not an SF Symbol.
@@ -156,6 +173,7 @@ public final class EmptyStateView: UIView {
         let showsAction = actionTitle?.isEmpty == false && actionHandler != nil
         actionButton.isHidden = !showsAction
         actionButton.configuration?.title = showsAction ? actionTitle : nil
+        setActionBusy(false)
 
         accessibilityLabel = [title, subtitle].compactMap { $0 }.joined(separator: ". ")
     }

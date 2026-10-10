@@ -192,7 +192,12 @@ public protocol ConversationThreadDriving: AnyObject {
     func toggleMuted()
     /// Mutes until `until` — nil: until turned back on — or unmutes (#729):
     /// the bell's long-press durations.
-    func setMuted(_ muted: Bool, until: Date?)
+    ///
+    /// `completion` answers once the SERVER has (#802): true when the mute was
+    /// written, false when it was refused and rolled back. The screen confirms
+    /// only then — a "Notifications muted" toast shown on the tap, followed by
+    /// a silent rollback, told the viewer something that did not happen.
+    func setMuted(_ muted: Bool, until: Date?, completion: @escaping @MainActor (_ confirmed: Bool) -> Void)
     /// Whether the footer offers the camera and the library (#681).
     var sendsMedia: Bool { get }
     /// Lets the viewer pick (or capture) a photo or video, presented over
@@ -209,7 +214,14 @@ public extension ConversationThreadDriving {
         set {}
     }
     func toggleMuted() {}
-    func setMuted(_ muted: Bool, until: Date?) {}
+    /// Nothing to mute: nothing was written.
+    func setMuted(_ muted: Bool, until: Date?, completion: @escaping @MainActor (_ confirmed: Bool) -> Void) {
+        completion(false)
+    }
+    /// The same change, for a caller with nothing to say about the answer.
+    func setMuted(_ muted: Bool, until: Date?) {
+        setMuted(muted, until: until, completion: { _ in })
+    }
     /// Drivers with no older history to page through.
     func loadOlder() {}
     /// Drivers that send text only.

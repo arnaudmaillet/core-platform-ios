@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 
 extension Conversation {
@@ -84,6 +85,10 @@ final class InboxCatalog {
     }
 
     private(set) var snapshot = Snapshot()
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
 
     private let repository: any ChatProviding
     private let directory: ConversationDirectory?
@@ -150,8 +155,22 @@ final class InboxCatalog {
 
     // MARK: - Loading
 
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in
+            // Only a failed inbox: a reload replaces an in-flight one, and the
+            // rows on screen are already the answer.
+            guard let self, case .failed = self.snapshot.phase else { return }
+            self.reload()
+        }
+    }
+
     /// Reloads unconditionally, superseding any in-flight load.
     func reload() {
+        armRecovery()
         load?.cancel()
         loadGeneration += 1
         let generation = loadGeneration
@@ -210,7 +229,7 @@ final class InboxCatalog {
                 // current load's problem, and must not put the inbox into a
                 // failed state while a live fetch is still running.
                 guard self.loadGeneration == generation, self.snapshot.phase != .loaded else { return }
-                self.snapshot.phase = .failed(message: "Couldn't load your messages. Pull to retry.")
+                self.snapshot.phase = .failed(message: "Couldn't load your messages.")
                 self.emit()
             }
         }
@@ -386,27 +405,55 @@ final class InboxCatalog {
 
     /// Mutes or unmutes the conversation (#719): at once on screen, written
     /// through `MuteConversation`, and put back if the server refuses.
-    func toggleMute(_ id: ConversationID) {
-        setMute(id, muted: !muted.contains(id), until: nil)
+    func toggleMute(_ id: ConversationID, completion: (@MainActor (_ confirmed: Bool) -> Void)? = nil) {
+        setMute(id, muted: !muted.contains(id), until: nil, completion: completion)
     }
 
     /// Mutes until `until` — nil: until turned back on — or unmutes (#729).
-    func setMute(_ id: ConversationID, muted mute: Bool, until: Date?) {
+    ///
+    /// The row (and the thread's bell) flips at once; `completion` answers
+    /// only once the server has (#802): true when written, false when refused
+    /// and put back. A confirmation belongs THERE — shown on the tap, it
+    /// claimed a mute the server could still refuse, and the rollback that
+    /// followed said nothing.
+    func setMute(
+        _ id: ConversationID, muted mute: Bool, until: Date?,
+        completion: (@MainActor (_ confirmed: Bool) -> Void)? = nil
+    ) {
         let wasMuted = muted.contains(id)
         if mute { muted.insert(id) } else { muted.remove(id) }
         mutesInFlight.insert(id)
+        let generation = (muteGenerations[id] ?? 0) + 1
+        muteGenerations[id] = generation
         emit()
         Task { [weak self] in
             guard let self else { return }
+            var confirmed = true
             do {
                 try await self.repository.setMuted(mute, until: until, for: id)
             } catch {
+                confirmed = false
+            }
+            defer { self.muteAnswersHandled += 1 }
+            // ⚠️ ONLY THE LATEST REQUEST SPEAKS. A mute then an unmute can be
+            // answered out of order: the superseded one neither rolls back
+            // the state the newer one set, nor clears its in-flight mark, nor
+            // toasts "Couldn't mute" for an intent the viewer already replaced.
+            guard self.muteGenerations[id] == generation else { return }
+            self.muteGenerations[id] = nil
+            if !confirmed {
                 if wasMuted { self.muted.insert(id) } else { self.muted.remove(id) }
                 self.emit()
             }
             self.mutesInFlight.remove(id)
+            completion?(confirmed)
         }
     }
+
+    /// The latest mute request per conversation, while one is on its way.
+    private var muteGenerations: [ConversationID: Int] = [:]
+    /// Mute answers taken in, superseded ones included. Tests wait on it.
+    private(set) var muteAnswersHandled = 0
 
     /// Removes conversations from the inbox (context menu or batch edit). The
     /// filter is re-applied across reloads so deleted rows never resurface

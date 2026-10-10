@@ -1,3 +1,4 @@
+import Connect
 import Foundation
 import Testing
 @testable import Profile
@@ -31,16 +32,62 @@ struct DeleteAccountTests {
         #expect(model.phase == .requested(on: earlier, permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: earlier)))
     }
 
-    /// The GDPR record is restricted on some deployments; unreadable means
-    /// "offer the button", never a dead screen.
-    @Test func anUnreadableRecordStillOffersTheButton() async {
-        let model = DeleteAccountViewModel(lifecycle: StubLifecycle(failsRead: true), now: { Self.today })
+    /// A GDPR read that got no answer is a failure with a retry, never the
+    /// button: the app doesn't know whether a deletion is already pending,
+    /// so the viewer is not offered one on a guess.
+    @Test func anUnansweredReadIsAFailureNotTheButton() async {
+        let stub = StubLifecycle(readError: .transport(message: "offline"))
+        let model = DeleteAccountViewModel(lifecycle: stub, now: { Self.today })
         await model.load()
-        guard case .ready = model.phase else { Issue.record("expected ready, got \(model.phase)"); return }
+        #expect(model.phase == .failed)
+        let layout = DeleteAccountViewController.layout(phase: model.phase, checklist: nil, offersDataExport: false, canCancel: false)
+        #expect(layout.last?.1 == [.retry])
+        #expect(layout.allSatisfy { !$0.1.contains(.delete) })
+        #expect(DeleteAccountViewController.footer(for: .failed)?.contains("try again") == true)
+
+        await stub.setReadError(nil)
+        var phases: [DeleteAccountViewModel.Phase] = []
+        model.onChange = { phases.append(model.phase) }
+        await model.load()
+        #expect(phases == [.loading, .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: Self.today))])
     }
 
     /// What gets deleted names the account's profiles and what is left in the
     /// wallet (#402), and falls back to the general wording when unread.
+    /// A deployment that refuses the GDPR read (doesn't serve it, won't show
+    /// it, has none) still offers the button: blocking would leave the
+    /// account undeletable there for good (App Review 5.1.1(v)), and a
+    /// duplicate request only restarts the 30-day clock.
+    @Test(arguments: [Code.unimplemented, .permissionDenied, .notFound])
+    func aRefusedReadStillOffersTheButton(code: Code) async {
+        let model = DeleteAccountViewModel(lifecycle: StubLifecycle(readError: .refused(code)), now: { Self.today })
+        await model.load()
+        #expect(model.phase == .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: Self.today)))
+    }
+
+    /// The repository keeps a refusal's code and folds a call that got no
+    /// answer into a transport failure; a step-up refusal stays a step-up.
+    @Test func theRepositoryTellsARefusalFromNoAnswer() {
+        for code in [Code.unimplemented, .permissionDenied, .notFound] {
+            #expect(AccountRepository.gdprError(ConnectError(code: code, message: "no")) == .refused(code))
+        }
+        for code in [Code.unavailable, .deadlineExceeded, .canceled, .unknown] {
+            guard case .transport = AccountRepository.gdprError(ConnectError(code: code, message: "down")) else {
+                Issue.record("\(code) should be a transport failure")
+                continue
+            }
+        }
+        #expect(AccountRepository.gdprError(ConnectError(code: .permissionDenied, message: "step_up_required")) == .stepUpRequired)
+    }
+
+    /// A step-up refusal on the read is not a refusal of the record: the
+    /// state is unknown, so it fails with a retry.
+    @Test func aStepUpOnTheReadIsAFailure() async {
+        let model = DeleteAccountViewModel(lifecycle: StubLifecycle(readError: .stepUpRequired), now: { Self.today })
+        await model.load()
+        #expect(model.phase == .failed)
+    }
+
     @Test func theChecklistNamesWhatWillBeLost() async {
         let checklist = DeletionChecklist(profileHandles: ["you", "you.work"], points: 1_250, gems: 3)
         let model = DeleteAccountViewModel(lifecycle: StubLifecycle(), checklist: { checklist }, now: { Self.today })
@@ -54,6 +101,37 @@ struct DeleteAccountTests {
         #expect(DeleteAccountViewController.consequences(for: nil)
             == ["Every profile on this account", "Posts, comments and messages",
                 "Followers, following and saved posts", "Points and gems in your wallet"])
+    }
+
+    /// The sections are the same before and after the account is read, so
+    /// nothing is inserted above the button when the read lands; bones stand
+    /// in for the consequence lines one for one.
+    @Test func theLayoutDoesNotMoveWhenTheReadLands() {
+        let permanent = AccountDeletionPolicy.permanentDate(requestedAt: Self.today)
+        let loading = DeleteAccountViewController.layout(phase: .loading, checklist: nil, offersDataExport: true, canCancel: true)
+        let ready = DeleteAccountViewController.layout(
+            phase: .ready(permanentOn: permanent), checklist: DeletionChecklist(profileHandles: ["you"]),
+            offersDataExport: true, canCancel: true
+        )
+        #expect(loading.map(\.0) == [.consequences, .beforeYouGo, .action])
+        #expect(ready.map(\.0) == loading.map(\.0))
+        #expect(loading[0].1.count == ready[0].1.count)
+        #expect(loading[0].1.allSatisfy { if case .skeleton = $0 { true } else { false } })
+        #expect(ready[2].1 == [.delete])
+    }
+
+    /// The checklist and the phase arrive in one change: the screen redraws
+    /// once, with the named consequences, not once with the general wording
+    /// and again with the names.
+    @Test func theChecklistAndThePhaseArriveTogether() async {
+        let checklist = DeletionChecklist(profileHandles: ["you"], points: 10, gems: nil)
+        let model = DeleteAccountViewModel(lifecycle: StubLifecycle(), checklist: { checklist }, now: { Self.today })
+        var changes: [(DeleteAccountViewModel.Phase, DeletionChecklist?)] = []
+        model.onChange = { changes.append((model.phase, model.checklist)) }
+        await model.load()
+        #expect(changes.count == 1)
+        #expect(changes.first?.1 == checklist)
+        #expect(changes.first?.0 == .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: Self.today)))
     }
 
     @Test func theChecklistWordsEachCase() {
@@ -89,20 +167,22 @@ struct DeleteAccountTests {
 
 private actor StubLifecycle: AccountLifecycleManaging {
     private let requestedAt: Date?
-    private let failsRead: Bool
+    private var readError: AccountError?
     private(set) var requests = 0
 
-    init(requestedAt: Date? = nil, failsRead: Bool = false) {
+    init(requestedAt: Date? = nil, readError: AccountError? = nil) {
         self.requestedAt = requestedAt
-        self.failsRead = failsRead
+        self.readError = readError
     }
+
+    func setReadError(_ error: AccountError?) { readError = error }
 
     func requestDeletion() async throws { requests += 1 }
 
     func requestDataExport() async throws {}
 
     func gdprStatus() async throws -> AccountGdprStatus {
-        if failsRead { throw AccountError.transport(message: "restricted") }
+        if let readError { throw readError }
         return AccountGdprStatus(deletionRequestedAt: requestedAt)
     }
 }

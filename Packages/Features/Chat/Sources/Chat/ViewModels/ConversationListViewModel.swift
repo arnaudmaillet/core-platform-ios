@@ -121,7 +121,30 @@ public final class ConversationListViewModel {
     public func isMuted(_ id: ConversationID) -> Bool { catalog.isMuted(id) }
 
     public func togglePin(_ id: ConversationID) { catalog.togglePin(id) }
-    public func toggleMute(_ id: ConversationID) { catalog.toggleMute(id) }
+    /// Mutes or unmutes from the row's menu, and answers once the server has
+    /// (#803, #802): muting from the inbox used to show nothing at all — the
+    /// bell glyph lives on the row, under a menu that just closed.
+    public func toggleMute(_ id: ConversationID) {
+        let muting = !catalog.isMuted(id)
+        catalog.toggleMute(id) { [weak self] confirmed in
+            self?.onMuteAnswered?(Self.muteAnswer(muting: muting, confirmed: confirmed), muting, confirmed)
+        }
+    }
+
+    /// A row's mute, answered by the server: the words, whether it was a mute
+    /// (or an unmute), and whether it was written (false: refused and put
+    /// back).
+    public var onMuteAnswered: ((_ message: String, _ muting: Bool, _ confirmed: Bool) -> Void)?
+
+    /// The thread's own words for the same answers — short, no period.
+    nonisolated static func muteAnswer(muting: Bool, confirmed: Bool) -> String {
+        switch (muting, confirmed) {
+        case (true, true): "Notifications muted"
+        case (false, true): "Notifications on"
+        case (true, false): "Couldn't mute notifications"
+        case (false, false): "Couldn't turn notifications on"
+        }
+    }
     public func delete(_ ids: Set<ConversationID>) { catalog.delete(ids) }
 
     // MARK: - Projection

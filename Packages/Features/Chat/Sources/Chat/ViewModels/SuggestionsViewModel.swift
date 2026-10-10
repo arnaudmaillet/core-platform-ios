@@ -127,7 +127,7 @@ public final class SuggestionsViewModel {
                 self.load = nil
                 if error is CancellationError { return }
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load suggestions. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load suggestions.")
                 }
             }
         }
@@ -153,10 +153,19 @@ public final class SuggestionsViewModel {
     /// Optimistic follow/unfollow: the row flips immediately and rolls back if
     /// the call fails, because a follow button that waits on the network reads
     /// as broken well before it reads as careful.
+    ///
+    /// ⚠️ ONE CHANGE IN FLIGHT PER PROFILE (#802). A double tap used to send a
+    /// follow AND an unfollow, racing on the wire, with the row showing
+    /// whichever flip came last — and a failed one rolled back silently. A tap
+    /// while that profile's change is on its way is ignored, and a refusal
+    /// rolls back AND says so through `onFollowFailure`.
     public func toggleFollow(_ id: ProfileID) {
+        guard !followsInFlight.contains(id) else { return }
+        followsInFlight.insert(id)
         let wasFollowing = following.contains(id)
         following.formSymmetricDifference([id])
         emit()
+        let handle = accounts.first { $0.id == id }?.handle
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -168,9 +177,25 @@ public final class SuggestionsViewModel {
             } catch {
                 self.following.formSymmetricDifference([id])
                 self.emit()
+                self.onFollowFailure?(Self.followFailureMessage(handle: handle, unfollow: wasFollowing))
             }
+            self.followsInFlight.remove(id)
         }
     }
+
+    /// A refused follow or unfollow, already rolled back on the row: the
+    /// words for a failure toast (#802).
+    public var onFollowFailure: ((String) -> Void)?
+
+    /// Short, no period — the toast's rule.
+    nonisolated static func followFailureMessage(handle: String?, unfollow: Bool) -> String {
+        let verb = unfollow ? "unfollow" : "follow"
+        guard let handle, !handle.isEmpty else { return "Couldn't \(verb)" }
+        return "Couldn't \(verb) @\(handle)"
+    }
+
+    /// Profiles whose follow change is on its way to the server.
+    private var followsInFlight: Set<ProfileID> = []
 
     /// Hides a suggestion for the session. No wire contract exists for
     /// "not interested", so the suppression is local — and honest about it:

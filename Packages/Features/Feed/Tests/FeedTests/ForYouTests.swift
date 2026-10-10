@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 import PostGrid
 import Testing
@@ -394,6 +395,95 @@ struct ForYouViewModelTests {
         #expect(provider.firstPageLoads == 2)
     }
 
+    /// #798: a refresh that fails over loaded content keeps that content —
+    /// no loading frame, no failed page — and reports the failure instead.
+    @Test func aFailedRefreshKeepsTheContentOnScreenAndSaysSo() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
+        let (viewModel, snapshots) = makeViewModel(provider)
+        var refreshFailures = 0
+        var settled = 0
+        viewModel.onRefreshFailed = { refreshFailures += 1 }
+        viewModel.onLoadSettled = { settled += 1 }
+        viewModel.viewDidLoad()
+        await settle()
+        let landed = try! #require(snapshots().last)
+        let publishedBeforeRefresh = snapshots().count
+
+        provider.failFirstPage = true
+        viewModel.refresh()
+        await settle()
+
+        #expect(provider.firstPageLoads == 2)
+        #expect(refreshFailures == 1)
+        #expect(settled == 2, "the refresh control still ends")
+        // Nothing republished: every page is still the content that landed.
+        #expect(snapshots().count == publishedBeforeRefresh)
+        #expect(snapshots().last == landed)
+        #expect(landed.discover == .content(DiscoverySource.trending.ordering(mixed)))
+        #expect(viewModel.post(for: PostID("m1")) != nil)
+    }
+
+    /// #798: a successful refresh replaces the corpus straight from content
+    /// to content, announced as a re-derivation, never through `.loading`.
+    @Test func aSuccessfulRefreshReplacesTheContentWithoutALoadingFrame() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
+        let (viewModel, snapshots) = makeViewModel(provider)
+        var resets = 0
+        var refreshFailures = 0
+        viewModel.onCorpusReset = { resets += 1 }
+        viewModel.onRefreshFailed = { refreshFailures += 1 }
+        viewModel.viewDidLoad()
+        await settle()
+        let publishedBeforeRefresh = snapshots().count
+
+        let fresh = [tile("n1", publishedAtMS: 50)] + mixed
+        provider.pages[nil] = ForYouPage(posts: fresh, nextPageToken: nil)
+        viewModel.refresh()
+        await settle()
+
+        let afterRefresh = snapshots().dropFirst(publishedBeforeRefresh)
+        #expect(!afterRefresh.contains { $0.discover == .loading })
+        #expect(afterRefresh.last?.discover == .content(DiscoverySource.trending.ordering(fresh)))
+        #expect(resets == 1)
+        #expect(refreshFailures == 0)
+    }
+
+    /// #798: a pull while the INITIAL load is out leaves that load to answer —
+    /// it used to cancel it and start nothing, and the page stayed loading
+    /// for good with its refresh control turning.
+    @Test func aPullDuringTheInitialLoadStillSettles() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
+        let (viewModel, snapshots) = makeViewModel(provider)
+        var settled = 0
+        viewModel.onLoadSettled = { settled += 1 }
+        viewModel.viewDidLoad()
+        viewModel.refresh() // before the initial load has answered
+        await settle()
+
+        #expect(settled == 1, "the refresh control ends")
+        #expect(provider.firstPageLoads == 1)
+        #expect(snapshots().last?.discover == .content(DiscoverySource.trending.ordering(mixed)))
+    }
+
+    /// #798: with nothing loaded, a failed refresh is still the failed page
+    /// (with its retry), not a toast over nothing.
+    @Test func aFailedRefreshWithNothingLoadedStillShowsTheFailedPage() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: [], nextPageToken: nil))
+        provider.failFirstPage = true
+        let (viewModel, snapshots) = makeViewModel(provider)
+        var refreshFailures = 0
+        viewModel.onRefreshFailed = { refreshFailures += 1 }
+        viewModel.viewDidLoad()
+        await settle()
+
+        viewModel.refresh()
+        await settle()
+
+        #expect(provider.firstPageLoads == 2)
+        #expect(refreshFailures == 0)
+        #expect(snapshots().last?.discover == .failed(message: "Couldn't load. Pull to retry."))
+    }
+
     @Test func aFailedLoadReportsOnEveryPage() async {
         let provider = StubForYouProvider(first: ForYouPage(posts: [], nextPageToken: nil))
         provider.failFirstPage = true
@@ -406,6 +496,35 @@ struct ForYouViewModelTests {
         #expect(last.media == last.discover)
         #expect(last.following == last.discover)
         #expect(last.friends == last.discover)
+    }
+
+    /// ⚠️ THE NETWORK COMES BACK, FOR YOU LOADS (#793): a corpus that failed
+    /// while offline reloads on recovery, without a pull.
+    ///
+    /// ⚠️ ITS OWN MONITOR: the shared one is process-wide, and flipping it
+    /// reloaded every store alive in the parallel suites.
+    @Test func aFailedForYouReloadsWhenTheNetworkReturns() async {
+        let provider = StubForYouProvider(first: ForYouPage(posts: mixed, nextPageToken: nil))
+        provider.failFirstPage = true
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
+        let (viewModel, snapshots) = makeViewModel(provider)
+        viewModel.connectivity = monitor
+        viewModel.viewDidLoad()
+        for _ in 0..<200 where snapshots().last?.discover != .failed(message: "Couldn't load. Pull to retry.") {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(snapshots().last?.discover == .failed(message: "Couldn't load. Pull to retry."))
+
+        provider.failFirstPage = false
+        monitor.report(online: false)
+        monitor.report(online: true)
+        let landed = ForYouViewModel.PageState.content(DiscoverySource.trending.ordering(mixed))
+        for _ in 0..<200 where snapshots().last?.discover != landed {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(provider.firstPageLoads == 2)
+        #expect(snapshots().last?.discover == landed)
     }
 
     /// An empty list has to name itself — and an unfiltered one offers no

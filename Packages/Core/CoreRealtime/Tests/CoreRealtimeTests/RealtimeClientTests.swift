@@ -152,3 +152,51 @@ struct RealtimeClientTests {
         await client.stop()
     }
 }
+
+/// The mock network is down (#790): the server refuses the socket, as a real
+/// one finds no route, and lets it back when the network returns.
+@Test func aRefusingServerRejectsConnectionsUntilItAcceptsAgain() async throws {
+    let server = MockRealtimeServer()
+    server.refusesConnections = true
+    await #expect(throws: URLError.self) {
+        _ = try await server.connect(edgeToken: "edge-token")
+    }
+    server.refusesConnections = false
+    _ = try await server.connect(edgeToken: "edge-token")
+    #expect(server.connectCount == 1)
+}
+
+/// A socket that opens and dies at once, saying nothing — an offline device.
+private final class DyingTransport: RealtimeTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var connects = 0
+    var connectCount: Int { lock.withLock { connects } }
+
+    func connect(edgeToken: String) async throws -> AsyncStream<RealtimeTransportEvent> {
+        lock.withLock { connects += 1 }
+        let (stream, continuation) = AsyncStream.makeStream(of: RealtimeTransportEvent.self)
+        continuation.yield(.connected)
+        continuation.yield(.disconnected(reason: "no route"))
+        continuation.finish()
+        return stream
+    }
+
+    func send(_ data: Data) async throws {}
+    func disconnect() async {}
+}
+
+/// ⚠️ THE BACKOFF GROWS WHILE NOTHING ANSWERS (#792): a connection that dies
+/// before the server says a word is a failed attempt, not a reset.
+@Test func aConnectionThatNeverHearsTheServerKeepsBackingOff() async throws {
+    let transport = DyingTransport()
+    let client = RealtimeClient(transport: transport, tokenProvider: { "edge-token" }, configuration: fastConfig)
+    await client.start()
+    var tries = 0
+    while transport.connectCount < 4, tries < 2_000 {
+        tries += 1
+        try await Task.sleep(nanoseconds: 5_000_000)
+    }
+    #expect(transport.connectCount >= 4, "the client stopped reconnecting")
+    #expect(await client.debugReconnectAttempt >= 3, "the backoff was reset by connections that never answered")
+    await client.stop()
+}

@@ -10,7 +10,17 @@ public enum CommentsError: Error, Equatable, Sendable {
     /// CMT-1005: the post's author doesn't take comments from this viewer
     /// (their "Who Can Comment" setting, #397).
     case notAllowed
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension CommentsError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// One top-level comment, hydrated with its author's display name (the
@@ -147,7 +157,16 @@ public protocol CommentsProviding: Sendable {
     /// Posts a comment as the viewer and returns the created entry.
     /// `parentID` nil posts top-level; non-nil posts a level-2 reply under
     /// that top-level comment (comment.v1's two-depth contract).
-    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry
+    ///
+    /// ⚠️ **`commentID` IS THE IDEMPOTENCY KEY, AND IT BELONGS TO THE DRAFT
+    /// (#795).** comment.v1 takes a client-supplied `comment_id`; it used to
+    /// be a fresh UUID per CALL, so a retry after a lost answer posted the
+    /// comment twice. The caller mints it once per comment the viewer wrote
+    /// and sends it again with every retry of that comment
+    /// (`PostDetailViewModel.unsent`).
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry
     /// The viewer's identity as last resolved, or nil — never a fetch.
     /// Synchronous for the one screen whose bars wear the viewer before
     /// anything has loaded: the Text Post page, whose author IS the viewer.
@@ -178,6 +197,11 @@ public extension CommentsProviding {
     func viewerIdentity() async -> ViewerIdentity? { nil }
     /// Default: nothing to adopt, for providers with no notion of a viewer.
     func setActiveViewer(_ id: ProfileID) async {}
+    /// A one-shot comment, with nothing to retry: a key of its own. A
+    /// screen that offers a retry mints the key itself and keeps it (#795).
+    func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+        try await addComment(body, to: postID, parentID: parentID, commentID: UUID().uuidString)
+    }
 }
 
 /// Reads/writes top-level comments via comment.v1, hydrating author names via
@@ -249,7 +273,7 @@ public actor CommentsRepository: CommentsProviding {
         case .success(let body):
             views = body.comments
             nextToken = body.nextToken
-        case .failure(let error): throw CommentsError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
 
         // Level 2: fan out ListReplies per top-level comment, concurrently.
@@ -291,11 +315,15 @@ public actor CommentsRepository: CommentsProviding {
         return CommentPage(entries: entries, nextPageToken: nextToken.isEmpty ? nil : nextToken)
     }
 
-    public func addComment(_ body: String, to postID: PostID, parentID: String?) async throws -> CommentEntry {
+    public func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
         let viewer = try await resolveViewerProfileID(forWrite: "addComment")
 
         var request = Comment_V1_CreateCommentRequest()
-        request.commentID = UUID().uuidString // client-supplied id for idempotency
+        // Client-supplied, and the caller's: the same id on every retry of
+        // one comment is what lets the server recognise the replay (#795).
+        request.commentID = commentID
         request.postID = postID.rawValue
         request.authorID = viewer.rawValue
         request.parentID = parentID ?? ""
@@ -319,7 +347,7 @@ public actor CommentsRepository: CommentsProviding {
             if error.code == .permissionDenied, (error.message ?? "").contains("CMT-1005") {
                 throw CommentsError.notAllowed
             }
-            throw CommentsError.transport(message: error.message ?? "code \(error.code)")
+            throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -449,7 +477,7 @@ public actor CommentsRepository: CommentsProviding {
         } catch ViewerError.noProfileForAccount {
             throw CommentsError.noProfileForAccount
         } catch let error as AccountProfilesReader.ReadError {
-            throw CommentsError.transport(message: error.message)
+            throw CommentsError.transport(message: error.message, failure: error.networkFailure)
         }
     }
 }
@@ -495,7 +523,7 @@ extension CommentsRepository: HeldCommentReviewing {
         case .failure(let error) where error.code == .notFound:
             return
         case .failure(let error):
-            throw CommentsError.transport(message: error.message ?? "code \(error.code)")
+            throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

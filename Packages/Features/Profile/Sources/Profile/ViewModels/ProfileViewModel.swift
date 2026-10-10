@@ -1,9 +1,11 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import CoreStorage
 import Foundation
 import MapsInterface
 import PostGrid
+import ProfileInterface
 import ShareSheet
 
 @MainActor
@@ -12,12 +14,18 @@ public final class ProfileViewModel {
         case loading
         case content(ProfileDisplayModel)
         case failed(message: String)
+        /// The handle or link named no one (#800). An answer, not a failure:
+        /// there is nothing to try again.
+        case notFound(message: String, detail: String?)
     }
 
     /// Whose profile this view model loads.
     public nonisolated enum Source: Equatable, Sendable {
         case currentUser
         case profile(ProfileID)
+        /// A handle or a share token, resolved once the screen is up (#800):
+        /// it becomes `.profile` with the id the lookup answers.
+        case lookup(ProfileReference)
     }
 
     /// The header's action button. `hidden` until the relationship is known, so
@@ -104,7 +112,7 @@ public final class ProfileViewModel {
         /// lets the Posts list settle its tail chunk (`MosaicChunkPlanner`).
         public var isComplete: Bool = true
         /// The viewer's saved pile. Absent on anyone else's profile — a saved
-        /// list is private by construction.
+        /// list is private by construction. Own profile only.
         public var saved: GalleryPageState = .empty(message: "")
         /// ⚠️ Always the same answer, and honestly so. `engagement.v1` can
         /// record a reaction and count reactions on a post; nothing anywhere
@@ -113,8 +121,8 @@ public final class ProfileViewModel {
         /// the shape is right when a seam arrives; what it shows until then is
         /// the truth about what can be known.
         public var reactions: GalleryPageState = .empty(message: "")
-        /// Someone else's reposts and the posts that tag them, each its own
-        /// page (#696). Absent on your own profile.
+        /// The profile's reposts and the posts that tag it, each its own page
+        /// (#696; your own profile too since #772).
         public var reposts: GalleryPageState = .empty(message: "")
         public var tagged: GalleryPageState = .empty(message: "")
         /// Whether no further page is coming for Reposts and for Tagged: each
@@ -164,6 +172,28 @@ public final class ProfileViewModel {
         case postDeleted
         case reported
         case failed(message: String)
+        /// A follow change the server refused, already rolled back on the
+        /// button (#802). Not `failed`, which is an alert: the button shows
+        /// the truth again, so there is nothing to dismiss — a failure toast
+        /// says why it flipped back, where a silent rollback read as a glitch.
+        case followFailed(message: String)
+    }
+
+    /// Which follow change failed, for its message.
+    public nonisolated enum FollowAttempt: Sendable {
+        case follow, unfollow, request, withdraw
+    }
+
+    /// The words of a refused follow change (#802) — short, no period, the
+    /// toast's rule.
+    public nonisolated static func followFailureMessage(handle: String?, change: FollowAttempt) -> String {
+        let who = handle ?? "this profile"
+        switch change {
+        case .follow: return "Couldn't follow \(who)"
+        case .unfollow: return "Couldn't unfollow \(who)"
+        case .request: return "Couldn't ask to follow \(who)"
+        case .withdraw: return "Couldn't withdraw your request"
+        }
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
@@ -208,7 +238,14 @@ public final class ProfileViewModel {
     /// while the screen is up (a post unsaved from the feed underneath) and the
     /// snapshot is rebuilt from parts.
     private var savedPage: GalleryPageState = .empty(message: "Nothing saved yet.")
-    private let source: Source
+    /// `var` for one transition only: a `.lookup` becomes the `.profile` it
+    /// resolves to.
+    private var source: Source
+    /// Answers a `.lookup` source. Nil for every other one.
+    private let lookup: ProfileLookingUp?
+    /// The handle or token a `.lookup` source opened with, kept once it
+    /// resolves.
+    private let reference: ProfileReference?
     private let router: (any Router)?
     /// Last-known profiles, shared app-wide. Nil in compositions without one
     /// (tests), which simply never seed.
@@ -218,6 +255,10 @@ public final class ProfileViewModel {
     /// on someone else's profile, the link is the `/@handle` one.
     private var shareToken: String?
 
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
@@ -324,8 +365,8 @@ public final class ProfileViewModel {
     // MARK: Gallery state
 
     public private(set) var galleryFilter = GalleryFilter()
-    /// Someone else's profile: the page on screen's source (`gallerySource`).
-    private var pushedPageSource: GalleryFilter.Source = .posts
+    /// The page on screen's source (`gallerySource`), on every profile (#772).
+    private var pageSource: GalleryFilter.Source = .posts
     /// The authored fetch (Posts + Reposts split it) and the tagged fetch,
     /// cached so selector/kind changes recompute locally without round trips.
     /// nil = in flight (page shows loading); a failure records instead.
@@ -363,9 +404,12 @@ public final class ProfileViewModel {
         router: (any Router)? = nil,
         cache: ProfileCache? = nil,
         followEvents: FollowGraphEvents? = nil,
-        shareLinks: (any ShareLinkManaging)? = nil
+        shareLinks: (any ShareLinkManaging)? = nil,
+        lookup: ProfileLookingUp? = nil
     ) {
         self.repository = repository
+        self.lookup = lookup
+        if case .lookup(let reference) = source { self.reference = reference } else { self.reference = nil }
         self.shareLinks = shareLinks
         self.mapPinning = mapPinning
         self.reporting = reporting
@@ -486,6 +530,35 @@ public final class ProfileViewModel {
     /// two extra tabs when the read lands would be a jump.
     public var isOwnProfile: Bool { source == .currentUser }
 
+    /// Whether the screen was opened by a handle or a token (#800) — it stays
+    /// true once the lookup resolves: the bar's bell was decided at frame 0
+    /// without knowing whose profile this is.
+    public var wasOpenedByReference: Bool { reference != nil }
+
+    /// Whether the lookup named no one: the screen has nobody to act on.
+    public var namesNoOne: Bool {
+        if case .notFound = phase { return true }
+        return false
+    }
+
+    /// Every key a route to this screen could carry by now (#800): the
+    /// reference it was opened with, its id once known, its handle once
+    /// loaded — what the router's repeat filter compares a new route with.
+    public var profileRouteKeys: Set<ProfileRouteKey> {
+        var keys = Set<ProfileRouteKey>()
+        switch reference {
+        case .handle(let handle): keys.insert(.handle(normalizing: handle))
+        case .shareToken(let token): keys.insert(.shareToken(token))
+        case nil: break
+        }
+        if case .profile(let id) = source { keys.insert(.id(id)) }
+        if let profile {
+            keys.insert(.id(profile.id))
+            keys.insert(.handle(normalizing: profile.handle))
+        }
+        return keys
+    }
+
     /// Everything the followers / following screen needs to open, or `nil`
     /// until the profile has loaded (the counters read "—" until then, so
     /// there is nothing to tap).
@@ -517,6 +590,13 @@ public final class ProfileViewModel {
     // MARK: - Inputs
 
     public func viewDidLoad() {
+        armRecovery()
+        seedFromCache()
+        reload()
+    }
+
+    /// Puts what the cache knows about a routed profile on screen at once.
+    private func seedFromCache() {
         // ⚠️ A REVISIT RENDERS THE CACHED PROFILE AT FRAME 0 (charter P7). The
         // cache used to be read on an account switch alone; a second visit to
         // a profile opened on a skeleton and re-revealed a page the viewer had
@@ -535,12 +615,26 @@ public final class ProfileViewModel {
         if case .profile(let id) = source, let relationship = cache?.relationship(for: id) {
             apply(relationship)
         }
-        reload()
     }
 
     /// True between a cache seed and the fetch that confirms it, so that
     /// fetch revalidates the gallery instead of resetting it.
     private var galleryWasSeeded = false
+
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        // Only a failed profile: every live one (the tab's, every pushed
+        // one) revalidating at once on each recovery was a storm.
+        guard case .failed = phase else { return }
+        refresh()
+    }
 
     /// Pull-to-refresh. Coalesced: a refresh while one is in flight is ignored.
     ///
@@ -681,10 +775,14 @@ public final class ProfileViewModel {
             do {
                 try await self.repository.setFollowing(target, for: profile.id)
             } catch {
-                // Roll back to the pre-tap state.
+                // Roll back to the pre-tap state — and say so (#802): a button
+                // that flips back on its own reads as a glitch.
                 if let current = self.profile {
                     self.applyFollow(!target, on: current)
                 }
+                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
+                    handle: self.handle, change: target ? .follow : .unfollow
+                )))
             }
             self.followInFlight = false
         }
@@ -713,6 +811,9 @@ public final class ProfileViewModel {
                 } else if let current = self.profile {
                     self.applyFollow(false, on: current)
                 }
+                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
+                    handle: self.handle, change: asks ? .request : .follow
+                )))
             }
             self.followInFlight = false
         }
@@ -727,6 +828,9 @@ public final class ProfileViewModel {
                 try await requests.cancelFollowRequest(to: profile.id)
             } catch {
                 self.showRequested(true)
+                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
+                    handle: self.handle, change: .withdraw
+                )))
             }
             self.followInFlight = false
         }
@@ -1012,42 +1116,30 @@ public final class ProfileViewModel {
         fillEmptyGalleryTab()
     }
 
-    /// The page on screen. Format pages set the format (above); on someone
-    /// else's profile the page also picks the corpus the paging, "View all"
-    /// and a feed's continuation read (#696).
+    /// The page on screen. Format pages set the format (above); the page
+    /// also picks the corpus the paging, "View all" and a feed's continuation
+    /// read (#696) — on your own profile too since #772. Saved and Liked read
+    /// no corpus of the profile's and leave it on Posts.
     public func setActiveTab(_ tab: ProfileTab) {
         if let format = tab.format { setGalleryFormat(format) }
-        guard !isOwnProfile else { return }
         let source: GalleryFilter.Source = switch tab {
         case .reposts: .reposts
         case .tagged: .tagged
         default: .posts
         }
-        guard source != pushedPageSource else { return }
-        pushedPageSource = source
+        guard source != pageSource else { return }
+        pageSource = source
         // The media "View all" shows, and an empty page fills itself.
         renderGallery()
     }
 
     /// The source the page on screen reads.
     ///
-    /// ⚠️ SOMEONE ELSE'S PROFILE IGNORES THE GLOBAL SOURCE (#696): its pages
-    /// ARE the sources — Posts (own posts, reposts excluded), Reposts,
-    /// Tagged — so it always opens on Posts, whatever the viewer last chose
-    /// on their own profile. Your own profile keeps the top filter and its
-    /// global preference.
-    var gallerySource: GalleryFilter.Source {
-        isOwnProfile ? galleryFilter.source : pushedPageSource
-    }
-
-    /// The global source modifier: recomputes every page locally, without
-    /// touching the active format tab; persists globally like the format.
-    public func setGallerySource(_ source: GalleryFilter.Source) {
-        guard galleryFilter.source != source else { return }
-        galleryFilter.source = source
-        galleryPreferences?.filter = galleryFilter
-        renderGallery()
-    }
+    /// ⚠️ EVERY PROFILE'S PAGES ARE ITS SOURCES (#696, and your own since
+    /// #772): Posts (its own posts, reposts excluded), Reposts, Tagged. So it
+    /// always opens on Posts. The stored filter's source — the top menu your
+    /// own profile had — is read by nothing any more.
+    var gallerySource: GalleryFilter.Source { pageSource }
 
     /// Fetches both corpora concurrently once the profile is known (the pager
     /// shows neighbors mid-swipe, so tagged can't be lazy). Called from the
@@ -1055,6 +1147,9 @@ public final class ProfileViewModel {
     private func loadGallery(for profile: UserProfile, reset: Bool) {
         guard let gallery else { return }
         if reset {
+            // A reset lands on Posts — the only page shown while the sources
+            // reload (#742) — so the source goes back with it (#772).
+            pageSource = .posts
             galleryLoad?.cancel()
             galleryLoad = nil
             galleryMoreLoad?.cancel()
@@ -1274,8 +1369,9 @@ public final class ProfileViewModel {
             .max()
     }
 
-    /// Recomputes the full three-page snapshot from the caches and the global
-    /// source modifier. Every data landing and source change funnels here.
+    /// Recomputes the snapshot — Posts, Reposts, Tagged, the media of the page
+    /// on screen, Saved — from the caches. Every data landing and page change
+    /// funnels here.
     private func renderGallery() {
         guard gallery != nil else { return }
 
@@ -1305,29 +1401,20 @@ public final class ProfileViewModel {
             return galleryMorePausedByFailure ? .failed(message: "Couldn't load. Pull to retry.") : .loading
         }
 
-        let snapshot: GallerySnapshot
-        if isOwnProfile {
-            let source = galleryFilter.source
-            snapshot = GallerySnapshot(
-                activity: page(.activity, source),
-                media: page(.media, source),
-                isComplete: galleryTokensToFollow(source) == (nil, nil),
-                saved: savedPage
-            )
-        } else {
-            // Three pages, three sources (#696); the media "View all" pushes
-            // is the page on screen's. The empty pages let their tab speak
-            // (`ProfileTab.emptyState`), Posts saying what it holds here.
-            snapshot = GallerySnapshot(
-                activity: page(.activity, .posts, emptyMessage: "Posts will appear here."),
-                media: page(.media, pushedPageSource),
-                isComplete: galleryTokensToFollow(.posts) == (nil, nil),
-                reposts: page(.activity, .reposts, emptyMessage: ""),
-                tagged: page(.activity, .tagged, emptyMessage: ""),
-                repostsComplete: galleryTokensToFollow(.reposts) == (nil, nil),
-                taggedComplete: galleryTokensToFollow(.tagged) == (nil, nil)
-            )
-        }
+        // Three pages, three sources (#696), on every profile since #772; the
+        // media "View all" pushes is the page on screen's. The empty pages let
+        // their tab speak (`ProfileTab.emptyState`), Posts saying what it
+        // holds here. Saved is your own profile's alone.
+        let snapshot = GallerySnapshot(
+            activity: page(.activity, .posts, emptyMessage: "Posts will appear here."),
+            media: page(.media, pageSource),
+            isComplete: galleryTokensToFollow(.posts) == (nil, nil),
+            saved: isOwnProfile ? savedPage : .empty(message: ""),
+            reposts: page(.activity, .reposts, emptyMessage: ""),
+            tagged: page(.activity, .tagged, emptyMessage: ""),
+            repostsComplete: galleryTokensToFollow(.reposts) == (nil, nil),
+            taggedComplete: galleryTokensToFollow(.tagged) == (nil, nil)
+        )
         fillEmptyGalleryTab()
         // The same pages again is no news: a revalidation that agrees with
         // the screen must cost the screen nothing.
@@ -1418,6 +1505,10 @@ public final class ProfileViewModel {
     private func reload(galleryRevalidates: Bool = false) {
         load?.cancel()
         relationshipLoad?.cancel()
+        if case .lookup(let reference) = source {
+            resolve(reference)
+            return
+        }
         // Deliberately NOT resetting `followButton` here: the controller may
         // have pre-seeded a provisional state from the route's identity stub,
         // and a refresh keeps showing the last known state. The relationship
@@ -1465,7 +1556,7 @@ public final class ProfileViewModel {
                 // Only surface a hard failure when there is nothing on screen;
                 // a failed refresh keeps the last good content.
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load this profile. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load this profile")
                 }
             }
             self.load = nil
@@ -1477,6 +1568,58 @@ public final class ProfileViewModel {
         switch source {
         case .currentUser: try await repository.currentUserProfile()
         case .profile(let id): try await repository.profile(id: id)
+        // `reload` resolves a lookup before it fetches anything.
+        case .lookup: throw CancellationError()
+        }
+    }
+
+    /// Asks whose profile a handle or a token names, then loads it like any
+    /// routed profile (#800). The screen is already up on its skeleton: the
+    /// round trip used to run on the screen the viewer tapped from, with
+    /// nothing on screen until it ended.
+    ///
+    /// The viewer's own handle loads as a routed profile, as it did when the
+    /// router resolved it: `isOwnProfile` stays false, so no tabs grow later.
+    private func resolve(_ reference: ProfileReference) {
+        load = Task { [weak self] in
+            guard let self else { return }
+            let answer = await self.lookup?(reference) ?? .unavailable
+            // Superseded by a newer load: that one answers.
+            guard !Task.isCancelled else { return }
+            self.load = nil
+            switch answer {
+            case .found(let id):
+                self.source = .profile(id)
+                self.seedFromCache()
+                self.reload()
+            case .missing:
+                self.phase = Self.notFound(reference)
+                self.onLoadSettled?()
+            case .unavailable:
+                self.phase = .failed(message: Self.unreachableMessage(reference))
+                self.onLoadSettled?()
+            }
+        }
+    }
+
+    /// What a reference that names no one says.
+    static func notFound(_ reference: ProfileReference) -> Phase {
+        switch reference {
+        case .handle:
+            .notFound(message: "This account doesn\u{2019}t exist", detail: nil)
+        case .shareToken:
+            .notFound(
+                message: "This account doesn\u{2019}t exist",
+                detail: "This link may have been reset or turned off."
+            )
+        }
+    }
+
+    /// What a lookup that did not get through says, above Try Again.
+    static func unreachableMessage(_ reference: ProfileReference) -> String {
+        switch reference {
+        case .handle(let handle): "Couldn\u{2019}t open @\(handle)"
+        case .shareToken: "Couldn\u{2019}t open this link"
         }
     }
 
@@ -1489,7 +1632,7 @@ public final class ProfileViewModel {
             // Dev convenience: `-profile-relationship-delay` holds the
             // relationship answer for a few seconds, making the nav-bar
             // skeleton capsule and its cross-fade to Follow/Following
-            // observable (the mock otherwise answers before the push starts).
+            // observable (the mock otherwise answers mid-push).
             if ProcessInfo.processInfo.arguments.contains("-profile-relationship-delay") {
                 try? await Task.sleep(for: .seconds(3))
             }

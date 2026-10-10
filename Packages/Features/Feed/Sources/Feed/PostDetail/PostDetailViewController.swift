@@ -66,6 +66,9 @@ final class PostDetailViewController: UIViewController {
     /// `.comments` screen — where nothing below runs and each row keeps its
     /// own menu.
     private let threadChrome: Bool
+    /// The threads grouped under a day chip each, in Recent order (#757):
+    /// every snap page's comments — media and text — not only a text page's.
+    private let groupsByDay: Bool
     private let streamPolicy = StreamSectionPolicy()
     private lazy var rowContextMenu = ThreadRowContextMenu()
     /// The order the engaged toolbar last chose; day grouping follows Recent
@@ -136,7 +139,10 @@ final class PostDetailViewController: UIViewController {
                         elementKind: DayPillHeaderView.elementKind,
                         alignment: .top
                     )
-                    pill.pinToVisibleBounds = true
+                    // ⚠️ NOT STICKY (#757, the owner's call 2026-10-10): the
+                    // chip scrolls with its day; the host's bar says which
+                    // day is under the header (`onDayUnderHeaderChange`).
+                    pill.pinToVisibleBounds = false
                     pill.zIndex = 2
                     section.boundarySupplementaryItems = [pill]
                 }
@@ -162,13 +168,17 @@ final class PostDetailViewController: UIViewController {
     /// `playStagedReveal`.
     private var stagedReveals: [UIView] = []
     private var commentsLoaded = false
+    /// The first page of comments failed with nothing to show (#798): the
+    /// empty row says so, with a Try Again, instead of "No comments yet".
+    private var commentsFailed = false
     private var streamModels: [String: CommentDisplayModel] = [:]
     /// The full-mode post section (header/media/engagement), built once
     /// and hosted by the stream's leading cell.
     private let postSectionHost = UIView()
     private let refreshControl = UIRefreshControl()
     private let spinner = UIActivityIndicatorView(style: .large)
-    private let statusLabel = UILabel()
+    /// A failed first load, with its way out (#797).
+    private let statusView = EmptyStateView()
 
     private let avatarView = UIView()
     private let avatarImageView = UIImageView()
@@ -276,12 +286,14 @@ final class PostDetailViewController: UIViewController {
         mode: PostDetailMode = .full,
         profileSwitcher: (any ProfileSwitcherPresenting)? = nil,
         wallet: WalletStore? = nil,
-        threadChrome: Bool = false
+        threadChrome: Bool = false,
+        groupsByDay: Bool = false
     ) {
         self.viewModel = viewModel
         self.imagePipeline = imagePipeline
         self.mode = mode
         self.threadChrome = threadChrome
+        self.groupsByDay = threadChrome || groupsByDay
         self.profileSwitcher = profileSwitcher
         self.wallet = wallet
         super.init(nibName: nil, bundle: nil)
@@ -309,6 +321,7 @@ final class PostDetailViewController: UIViewController {
         super.viewDidLayoutSubviews()
         remeasureStreamOnWidthChange()
         refitEmptyPageOnHeightChange()
+        syncDayUnderHeader()
     }
 
     /// This view's height as last laid out — see `refitEmptyPageOnHeightChange`.
@@ -666,15 +679,13 @@ final class PostDetailViewController: UIViewController {
             spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
 
-        statusLabel.font = .appFont(forTextStyle: .body)
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
+        statusView.isHidden = true
+        statusView.constrain(in: view) { parent in
+            statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            // Above the keyboard, so a raised composer never sits on it.
+            statusView.bottomAnchor.constraint(equalTo: parent.keyboardLayoutGuide.topAnchor)
+            statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
     }
 
@@ -1204,7 +1215,7 @@ final class PostDetailViewController: UIViewController {
     private func render(_ phase: PostDetailViewModel.Phase) {
         switch phase {
         case .loading:
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             if mode == .commentsOnly {
                 // The skeleton stream IS the loading state (the messages
                 // doctrine) — no spinner, no hidden surface.
@@ -1218,15 +1229,25 @@ final class PostDetailViewController: UIViewController {
         case .content(let model):
             spinner.stopAnimating()
             refreshControl.endRefreshing()
-            statusLabel.isHidden = true
+            statusView.isHidden = true
             collectionView.isHidden = false
             configure(model)
         case .failed(let message):
             spinner.stopAnimating()
             refreshControl.endRefreshing()
             collectionView.isHidden = true
-            statusLabel.text = message
-            statusLabel.isHidden = false
+            // ⚠️ A WAY OUT (#797): the refresh control it promised lives on
+            // the collection this hides, so "Pull to retry" could not be done.
+            statusView.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.viewModel.refresh()
+                }
+            )
+            // Beneath the composer: its taps are never the empty state's.
+            if composerBackdrop.superview === view { view.insertSubview(statusView, belowSubview: composerBackdrop) }
+            statusView.isHidden = false
         }
     }
 
@@ -1440,7 +1461,31 @@ final class PostDetailViewController: UIViewController {
         // bar when pushed, the panel header when sheeted) — the inline
         // section header would duplicate it.
         commentsHeaderLabel.isHidden = mode == .commentsOnly
-        guard case .loaded(let models) = state else { return }
+        let models: [CommentDisplayModel]
+        switch state {
+        case .loaded(let loaded):
+            models = loaded
+        case .failed:
+            // The empty row, in its failed words (`emptyPageCopy`): the stream
+            // has nothing, and the reason is a failure, not an empty post.
+            commentsFailed = true
+            latestComments = []
+            streamModels = [:]
+            commentsLoaded = true
+            applyStream(animated: hasAppliedStream)
+            return
+        case .loading:
+            // Ordinarily ignored: a refresh over loaded comments keeps them on
+            // screen. A Try Again from the failed row is the exception — the
+            // row goes back to bones, so the answer arrives the way a first
+            // load's does (`revealLoadedComments`).
+            guard commentsFailed else { return }
+            commentsFailed = false
+            commentsLoaded = false
+            applyStream(animated: hasAppliedStream)
+            return
+        }
+        commentsFailed = false
         latestComments = models
         let previous = streamModels
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -1671,8 +1716,15 @@ final class PostDetailViewController: UIViewController {
         // layout — but in comments-only the comments ARE the page, so its
         // emptiness is the page's emptiness, and that is exactly what
         // `EmptyStateView` is for.
-        let emptyNoteCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> { cell, _, _ in
+        let emptyNoteCell = UICollectionView.CellRegistration<UICollectionViewCell, StreamItem> {
+            [weak self] cell, _, _ in
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
+            let failed = self?.commentsFailed ?? false
+            self?.renderedEmptyNoteFailed = failed
+            if failed, let self {
+                self.installFailedNote(in: cell.contentView)
+                return
+            }
             let empty = UILabel()
             empty.text = "No comments yet. Be the first."
             empty.font = .appFont(forTextStyle: .subheadline)
@@ -1704,7 +1756,9 @@ final class PostDetailViewController: UIViewController {
                 title: fit.copy.title,
                 subtitle: fit.copy.subtitle,
                 height: fit.height,
-                blockOffset: fit.blockOffset
+                blockOffset: fit.blockOffset,
+                actionTitle: fit.copy.actionTitle,
+                action: fit.copy.actionTitle == nil ? nil : { [weak self] in self?.viewModel.retryComments() }
             )
             // What the cell was actually given — see `applyStream`.
             self?.renderedEmptyPageFit = fit
@@ -1760,7 +1814,7 @@ final class PostDetailViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: seamCell, for: indexPath, item: item)
             }
         }
-        guard threadChrome else { return }
+        guard groupsByDay else { return }
         let dayPill = UICollectionView.SupplementaryRegistration<DayPillHeaderView>(
             elementKind: DayPillHeaderView.elementKind
         ) { [weak self] pill, _, indexPath in
@@ -1785,7 +1839,7 @@ final class PostDetailViewController: UIViewController {
     /// rank, a skeleton and the empty page have no chronology to pin days over.
     private func streamSections() -> [(section: StreamSection, items: [StreamItem])] {
         let items = streamItems()
-        guard threadChrome, commentsLoaded, commentSortOrder == .recent, !latestComments.isEmpty else {
+        guard groupsByDay, commentsLoaded, commentSortOrder == .recent, !latestComments.isEmpty else {
             return [(.main, items)]
         }
         let calendar = Calendar.current
@@ -1818,8 +1872,10 @@ final class PostDetailViewController: UIViewController {
     private func rowMenu(at indexPath: IndexPath) -> UIMenu? {
         guard case .comment(let id) = streamDataSource.itemIdentifier(for: indexPath),
               let model = streamModels[id] else { return nil }
-        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
+        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
             UIPasteboard.general.string = model.body
+            // Said (#803): nothing on screen shows a copy.
+            self?.confirmCopied()
         }
         let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
             [weak self] _ in
@@ -1829,16 +1885,17 @@ final class PostDetailViewController: UIViewController {
         let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
             [weak self] _ in self?.presentCommentShare(model)
         }
-        // The moderation seams, exactly as the row's own menu has them: the
-        // affordance is honest, the mutations wait on a moderation backend.
-        let block = UIAction(title: "Block User", image: UIImage(systemName: "hand.raised"), attributes: .destructive) { _ in }
-        let report = UIAction(title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive) { _ in }
-        let moderation = UIMenu(options: .displayInline, children: [block, report])
-        guard model.canReview else { return UIMenu(children: [copy, select, share, moderation]) }
+        // ⚠️ NO MODERATION ROWS UNTIL THEY DO SOMETHING (#801). Block and
+        // Report used to sit here as `{ _ in }` no-ops: for a safety action
+        // the user believes something was filed. There is no comment report
+        // flow (`ReportSubject` has no comment case), so the same builder
+        // as the row's own menu draws nothing for the unset seams.
+        let moderation = CommentRowView.moderationMenu(onBlock: nil, onReport: nil).map { [$0] } ?? []
+        guard model.canReview else { return UIMenu(children: [copy, select, share] + moderation) }
         let review = CommentRowView.reviewActions { [weak self] approve in
             self?.viewModel.reviewHeldComment(id, approve: approve)
         }
-        return UIMenu(children: [review, copy, select, share, moderation])
+        return UIMenu(children: [review, copy, select, share] + moderation)
     }
 
     private func streamItems() -> [StreamItem] {
@@ -1919,6 +1976,14 @@ final class PostDetailViewController: UIViewController {
            !rendered.matches(currentEmptyPageFit()) {
             snapshot.reconfigureItems([.emptyState])
         }
+        // The full mode's one-line note has no fit to compare, only its two
+        // wordings (#798): empty, or failed with a Try Again.
+        if let renderedFailed = renderedEmptyNoteFailed, renderedFailed != commentsFailed,
+           snapshot.itemIdentifiers.contains(.emptyState),
+           streamDataSource.snapshot().itemIdentifiers.contains(.emptyState),
+           !snapshot.reconfiguredItemIdentifiers.contains(.emptyState) {
+            snapshot.reconfigureItems([.emptyState])
+        }
         hasAppliedStream = true
         nearEndItems = Self.nearEndItems(of: snapshot.itemIdentifiers)
         streamDataSource.apply(snapshot, animatingDifferences: animated) { completion?() }
@@ -1945,6 +2010,8 @@ final class PostDetailViewController: UIViewController {
         let symbol: String
         let title: String
         let subtitle: String
+        /// The block's button — only the failed stream's Try Again (#798).
+        var actionTitle: String?
     }
 
     static let commentsEmptyPageCopy = EmptyPageCopy(
@@ -1962,8 +2029,58 @@ final class PostDetailViewController: UIViewController {
         subtitle: "Your first message becomes the post."
     )
 
+    /// The first page of comments failed with nothing on screen (#798). The
+    /// SAME row as the empty page — same fit, same place — in other words,
+    /// because what the reader needs is the reason the stream is empty, and
+    /// the way out of it.
+    static let commentsFailedPageCopy = EmptyPageCopy(
+        symbol: "exclamationmark.triangle",
+        title: PostDetailViewModel.commentsFailureMessage,
+        subtitle: "Check your connection and try again.",
+        actionTitle: "Try Again"
+    )
+
     private var emptyPageCopy: EmptyPageCopy {
-        viewModel.isDraft ? Self.draftEmptyPageCopy : Self.commentsEmptyPageCopy
+        if commentsFailed { return Self.commentsFailedPageCopy }
+        return viewModel.isDraft ? Self.draftEmptyPageCopy : Self.commentsEmptyPageCopy
+    }
+
+    /// What the full mode's note last said: failed (true) or empty.
+    private var renderedEmptyNoteFailed: Bool?
+
+    /// The full mode's failed note (#798): one line and its Try Again, at the
+    /// note's own size — the comments are a section under the post here, not
+    /// the page.
+    private func installFailedNote(in contentView: UIView) {
+        let label = UILabel()
+        label.text = "\(PostDetailViewModel.commentsFailureMessage)."
+        label.font = .appFont(forTextStyle: .subheadline)
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = .secondaryLabel
+        label.numberOfLines = 0
+        var configuration = UIButton.Configuration.plain()
+        configuration.title = "Try Again"
+        configuration.contentInsets = .zero
+        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.appFont(forTextStyle: .subheadline)
+            return attributes
+        }
+        let retry = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
+            self?.viewModel.retryComments()
+        })
+        let stack = UIStackView(arrangedSubviews: [label, retry])
+        stack.axis = .vertical
+        stack.alignment = .leading
+        stack.spacing = Spacing.xs
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: contentView.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            stack.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
     }
 
     /// What the empty page was last configured with.
@@ -2251,6 +2368,7 @@ final class PostDetailViewController: UIViewController {
             symbolName: copy.symbol,
             title: copy.title,
             subtitle: copy.subtitle,
+            actionTitle: copy.actionTitle,
             width: width,
             contentSizeCategory: contentSizeCategory ?? traitCollection.preferredContentSizeCategory
         )
@@ -2298,6 +2416,85 @@ final class PostDetailViewController: UIViewController {
     /// Offscreen, never in the hierarchy — it exists to be measured. Held
     /// rather than rebuilt so a re-fit costs a layout pass, not a view tree.
     private lazy var captionSizingCell = CaptionBubbleCell()
+
+    // MARK: - The day under the header (#757)
+
+    /// The day of the last chip gone under the stream's top edge — what the
+    /// host's bar shows left of the points — or nil before one has, or with
+    /// no days at all (Trending, a skeleton, an empty page).
+    var onDayUnderHeaderChange: ((Date?) -> Void)?
+    private(set) var dayUnderHeader: Date?
+
+    private func syncDayUnderHeader() {
+        var day = groupsByDay ? lastDayGoneUnderTheTop() : nil
+        #if DEBUG
+        if let debugDayUnderTheTop { day = debugDayUnderTheTop() }
+        #endif
+        guard day != dayUnderHeader else { return }
+        dayUnderHeader = day
+        onDayUnderHeaderChange?(day)
+    }
+
+    private func lastDayGoneUnderTheTop() -> Date? {
+        guard let streamDataSource, collectionView.window != nil || collectionView.bounds.height > 0 else { return nil }
+        let line = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        var passed: Date?
+        for (index, section) in streamDataSource.snapshot().sectionIdentifiers.enumerated() {
+            guard case .day(let day) = section,
+                  let chip = collectionView.layoutAttributesForSupplementaryElement(
+                      ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: index)
+                  )?.frame
+            else { continue }
+            // Under the top once its middle is past the stream's edge.
+            guard chip.midY <= line else { break }
+            passed = day
+        }
+        return passed
+    }
+
+    /// Scrolls to `day`'s chip, landing it just under the stream's top edge.
+    ///
+    /// ⚠️ UNDER THE EDGE, NOT BELOW IT. The bar's day is the last chip gone
+    /// under the top, so a chip landed just below it handed the bar the day
+    /// BEFORE: a tap on "Yesterday" retitled the pill "Today", and on the
+    /// first day took it away. Under the edge, the chip is what the bar
+    /// already says, and that day's first comment opens the stream.
+    /// `animated` is false for tests, where nothing drives the animation.
+    func scrollToDay(_ day: Date, animated: Bool = true) {
+        #if DEBUG
+        debugOnScrollToDay?(day)
+        #endif
+        guard let streamDataSource,
+              let section = streamDataSource.snapshot().sectionIdentifiers.firstIndex(of: .day(day)),
+              let chip = collectionView.layoutAttributesForSupplementaryElement(
+                  ofKind: DayPillHeaderView.elementKind, at: IndexPath(item: 0, section: section)
+              )?.frame
+        else { return }
+        let insets = collectionView.adjustedContentInset
+        let maxOffset = max(-insets.top, collectionView.contentSize.height + insets.bottom - collectionView.bounds.height)
+        let offset = min(max(chip.maxY - insets.top, -insets.top), maxOffset)
+        collectionView.setContentOffset(CGPoint(x: 0, y: offset), animated: animated)
+    }
+
+    /// Re-reads the day under the top. Tests, and the host after a layout.
+    func debugSyncDayUnderHeader() { syncDayUnderHeader() }
+
+    /// The stream's days, in order, with the section each heads. Tests.
+    var debugStreamDays: [(day: Date, section: Int)] {
+        guard let streamDataSource else { return [] }
+        return streamDataSource.snapshot().sectionIdentifiers.enumerated().compactMap { index, section in
+            guard case .day(let day) = section else { return nil }
+            return (day, index)
+        }
+    }
+
+    #if DEBUG
+    /// Stands in for the stream's geometry, for tests about the HOST's bar
+    /// rather than the scroll: the day this panel reports at its next sync.
+    var debugDayUnderTheTop: (() -> Date?)?
+    /// Hears every `scrollToDay`, for tests of what a tap reaches.
+    var debugOnScrollToDay: ((Date) -> Void)?
+    #endif
 
     /// The engaged toolbar's sort selector lands here — the view model
     /// re-ranks the data and the diffable apply animates the moves.
@@ -2400,6 +2597,13 @@ final class PostDetailViewController: UIViewController {
         composeBar.setReplyPlaceholder(name: nil)
     }
 
+    /// A comment's Copy says so (#803) — over the composer, which rests where
+    /// the toast would, as in a conversation. Internal for tests.
+    func confirmCopied() {
+        let floor = composeBar.superview != nil && !composeBar.isHidden ? composeBar.inputRowTopAnchor : nil
+        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: floor)
+    }
+
     private func presentCommentShare(_ model: CommentDisplayModel) {
         let sheet = UIActivityViewController(
             activityItems: ["\(model.authorName): \(model.body)"],
@@ -2494,6 +2698,7 @@ extension PostDetailViewController: UICollectionViewDelegate {
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        syncDayUnderHeader()
         guard let onPullDismissDrive, isPullDismissArmed, !isCommittingPullDismiss else { return }
         onPullDismissDrive(.changed, overshoot(of: scrollView), 0)
     }

@@ -651,6 +651,8 @@ final class SoundSheetViewController: UIViewController {
         MemberGates.perform(.saveSound, from: self) { [weak self] in
             guard let self else { return }
             let saved = savedSounds.toggle(sound.id)
+            // The fill says it; the hand feels it (#803).
+            Feedback.toggled()
             refreshBookmark()
             trace("saved \(sound.id): \(saved)")
         }

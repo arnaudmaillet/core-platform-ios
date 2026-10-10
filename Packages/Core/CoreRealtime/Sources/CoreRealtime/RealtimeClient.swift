@@ -35,6 +35,15 @@ public actor RealtimeClient {
     private var running = false
     private var isConnected = false
     private var hasConnectedBefore = false
+    /// Failed connections in a row; the backoff grows with it.
+    ///
+    /// ⚠️ RESET ONLY BY A FRAME FROM THE SERVER (#792), not by `.connected`.
+    /// A socket that opens and dies before saying anything — what an offline
+    /// device gets — used to reset the backoff on every attempt, and the client
+    /// reconnected in a tight ~0.5 s loop, announcing a resumed connection each
+    /// time (the feed re-read its counters on every one).
+    private var reconnectAttempt = 0
+    private var awaitsProofOfLife = false
     private var loopTask: Task<Void, Never>?
 
     private var desiredChannels: Set<RealtimeChannel> = []
@@ -118,13 +127,13 @@ public actor RealtimeClient {
     // MARK: - Connection loop
 
     private func runConnectionLoop() async {
-        var attempt = 0
+        reconnectAttempt = 0
         while running, !Task.isCancelled {
             do {
                 guard let token = try await tokenProvider() else {
                     // Unauthenticated; retry once auth may exist.
-                    try await sleepWithJitter(attempt: attempt)
-                    attempt += 1
+                    try await sleepWithJitter(attempt: reconnectAttempt)
+                    reconnectAttempt += 1
                     continue
                 }
 
@@ -133,7 +142,7 @@ public actor RealtimeClient {
                     guard running else { break receive }
                     switch transportEvent {
                     case .connected:
-                        attempt = 0
+                        awaitsProofOfLife = true
                         isConnected = true
                         let resumed = hasConnectedBefore
                         hasConnectedBefore = true
@@ -141,6 +150,10 @@ public actor RealtimeClient {
                         await announceChannels()
                         broadcastConnection(.connected(resumed: resumed))
                     case .message(let data):
+                        if awaitsProofOfLife {
+                            awaitsProofOfLife = false
+                            reconnectAttempt = 0
+                        }
                         await handleServerFrame(data)
                     case .disconnected(let reason):
                         logger.info("realtime disconnected: \(reason ?? "eof")")
@@ -156,8 +169,8 @@ public actor RealtimeClient {
                 broadcastConnection(.disconnected)
             }
             guard running, !Task.isCancelled else { break }
-            attempt += 1
-            try? await sleepWithJitter(attempt: attempt)
+            reconnectAttempt += 1
+            try? await sleepWithJitter(attempt: reconnectAttempt)
         }
     }
 
@@ -268,6 +281,9 @@ public actor RealtimeClient {
             logger.error("realtime send failed: \(error)")
         }
     }
+
+    /// Failed connections in a row. Tests.
+    var debugReconnectAttempt: Int { reconnectAttempt }
 
     private func sleepWithJitter(attempt: Int) async throws {
         let exponential = configuration.reconnectBaseDelay * pow(2, Double(max(0, attempt - 1)))

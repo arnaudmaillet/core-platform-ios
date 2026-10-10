@@ -38,15 +38,16 @@ final class RouteResolver: Router {
     /// wallet and its sheet belong to the container, which builds this
     /// resolver before it has built either.
     private let attachBalance: (UIViewController) -> Void
-    /// The profile a handle names (`GetProfileByHandle`), for `.profileHandle`.
-    private let lookupHandle: (String) async -> AppContainer.HandleLookup
-    /// The profile a share token opens (`ResolveShareToken`), for
-    /// `.profileShareToken`.
-    private let lookupShareToken: (String) async -> AppContainer.HandleLookup
+    /// The profile a handle (`GetProfileByHandle`) or a share token
+    /// (`ResolveShareToken`) names — handed to the profile pushed for
+    /// `.profileHandle` / `.profileShareToken`, which asks it once on screen.
+    private let lookupProfile: ProfileLookingUp
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
-    /// The profile being prepared for its push — see `pushWhenReady`. One at a
-    /// time: any newer route supersedes it.
-    private var pendingProfile: (id: ProfileID, hold: PresentationHold)?
+    /// The profile the router pushed last — what turns a second tap on the
+    /// same author into nothing while that profile is the top screen, or
+    /// while its push waits for a running transition (#778). Keyed by the
+    /// handle or token for a profile still resolving one (#800).
+    private var repeatProfiles = RepeatPushFilter<ProfileRouteKey>()
 
     init(
         searchFeature: @escaping () -> any SearchFeatureBuilding,
@@ -54,11 +55,9 @@ final class RouteResolver: Router {
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         chatFeature: @escaping () -> any ChatFeatureBuilding,
         attachBalance: @escaping (UIViewController) -> Void,
-        lookupHandle: @escaping (String) async -> AppContainer.HandleLookup = { _ in .unavailable },
-        lookupShareToken: @escaping (String) async -> AppContainer.HandleLookup = { _ in .unavailable }
+        lookupProfile: @escaping ProfileLookingUp = { _ in .unavailable }
     ) {
-        self.lookupHandle = lookupHandle
-        self.lookupShareToken = lookupShareToken
+        self.lookupProfile = lookupProfile
         self.searchFeature = searchFeature
         self.profileFeature = profileFeature
         self.feedFeature = feedFeature
@@ -96,7 +95,10 @@ final class RouteResolver: Router {
         using navigator: AppNavigating,
         animated: Bool = true
     ) {
-        guard let navigation = navigator.activeNavigationController else { return }
+        guard let navigation = navigator.activeNavigationController else {
+            repeatProfiles.stoppedWaiting(destination)
+            return
+        }
         // A route arriving while a transition runs (a deep link during a hero
         // flight) waits for it: UIKit would drop the push silently.
         guard navigation.transitionCoordinator == nil else {
@@ -105,6 +107,7 @@ final class RouteResolver: Router {
             }
             return
         }
+        repeatProfiles.stoppedWaiting(destination)
         // The overwhelmingly common case takes the plain path, untouched. This
         // app drives pushes through custom navigation delegates — zoom
         // transitions, the pop-gesture enabler — and `setViewControllers` is a
@@ -125,54 +128,26 @@ final class RouteResolver: Router {
         navigation.setViewControllers(stack, animated: animated)
     }
 
-    /// Pushes a profile once its first frame is its settled self, or at the
-    /// hold's ceiling — charter P12a, `PresentationHold`.
-    ///
-    /// ⚠️ THE PUSH LANDS WHERE THE TAP WAS, OR NOWHERE. The origin stack and
-    /// its top screen are captured now; if the viewer has left either by the
-    /// time the profile is ready (popped, switched tab, opened something
-    /// else), the push is dropped rather than landing on a screen they never
-    /// tapped from.
-    private func pushWhenReady(_ profile: UIViewController, id: ProfileID, using navigator: AppNavigating) {
-        #if DEBUG
-        // `-presentation-hold-off`: the old immediate push, for A/B films.
-        if ProcessInfo.processInfo.arguments.contains("-presentation-hold-off") {
-            return push(profile, using: navigator)
-        }
-        #endif
-        let origin = navigator.activeNavigationController
-        let originTop = origin?.topViewController
-        let hold = PresentationHold.begin(profile) { [weak self, weak navigator] release, waited in
-            guard let self, let navigator else { return }
-            self.pendingProfile = nil
-            #if DEBUG
-            PresentationBudget.noteHold(of: profile, waited: waited, timedOut: release == .ceiling)
-            #endif
-            guard let origin, navigator.activeNavigationController === origin,
-                  origin.topViewController === originTop else {
-                self.logger.debug("Profile push dropped: the viewer left its origin while it was prepared")
-                return
-            }
-            self.push(profile, using: navigator)
-        }
-        if hold.isPending { pendingProfile = (id, hold) }
-    }
-
     func route(to route: AppRoute) {
         guard let navigator else {
             logger.debug("No navigator; dropping route: \(String(describing: route))")
             return
         }
-        // A second tap on the author whose profile is already being prepared
-        // is the same request, not a second push.
-        if case .profile(let id, _) = route, let pending = pendingProfile, pending.id == id,
-           pending.hold.isPending {
+        // A second tap on the author whose profile was just pushed is the same
+        // request, not a second push: during the slide the new profile is
+        // already the top screen. A second tap on the same `@handle` too,
+        // while the profile it pushed is still resolving it.
+        // Either way round: the top profile answers to the id a handle
+        // resolved to, and to the handle a profile opened by id loaded.
+        if let key = route.profileRouteKey,
+           repeatProfiles.isRepeat(
+               key, topScreen: navigator.activeNavigationController?.topViewController,
+               screenKeys: { ($0 as? ProfileRouteAnswering)?.profileRouteKeys ?? [] }
+           ) {
+            // Still the viewer's tap: a drawer it came from slides shut.
+            navigator.closeOverlays()
             return
         }
-        // Anything else the viewer asked for since wins over a profile still
-        // being prepared: that push would land on top of their newer choice.
-        pendingProfile?.hold.cancel()
-        pendingProfile = nil
         // A route that writes (opening a thread to message someone) needs an
         // account: a guest signs up first, and the route then runs as asked.
         // Checked here so every origin — a profile's button, a share sheet, a
@@ -234,7 +209,12 @@ final class RouteResolver: Router {
             // viewer's, on anyone's profile. Attached BEFORE the push so the
             // item rides the push instead of popping in after it.
             attachBalance(profile)
-            pushWhenReady(profile, id: profileID, using: navigator)
+            // ⚠️ AT ONCE, ON ITS LOADING STATE (#778, the owner's rule
+            // 2026-10-10: a push never waits on data). The header redacts in
+            // place and the gallery shows its bones; the data cross-fades in
+            // over the very frames it will occupy. It used to be held up to
+            // 250 ms for its data (`PresentationHold`, charter P12a).
+            pushProfile(profile, for: route, using: navigator)
 
         case .search:
             // ⚠️ NOT ANIMATED, and that is the whole point of this route being
@@ -263,38 +243,22 @@ final class RouteResolver: Router {
             }
 
         case .profileHandle(let handle):
-            // A tapped `@handle` or a `wynn.cn/@handle` link (#524): looked up,
-            // then the profile is routed like an author's. A handle that names
-            // no one (renamed, deleted) says so on the screen the viewer is on
-            // rather than pushing a dead page.
-            Task { [weak self, weak navigator] in
-                guard let self else { return }
-                switch await lookupHandle(handle) {
-                case .found(let id):
-                    // `self.`: inside `route(to:)` the bare name is the route.
-                    self.route(to: .profile(id, stub: nil))
-                case .missing:
-                    Self.toast("This account doesn\u{2019}t exist", symbol: "person.crop.circle.badge.questionmark", on: navigator)
-                case .unavailable:
-                    Self.toast("Couldn\u{2019}t open @\(handle)", symbol: "wifi.exclamationmark", on: navigator)
-                }
-            }
+            // A tapped `@handle` or a `wynn.cn/@handle` link (#524). ⚠️ PUSHED
+            // AT ONCE (#800): the profile resolves the handle behind its
+            // skeleton, then loads like an author's. The lookup used to run
+            // here first, with nothing on screen for the whole round trip. A
+            // handle that names no one (renamed, deleted) says so inside the
+            // pushed screen, and one that could not be asked offers Try Again.
+            //
+            // Your own handle lands on a routed profile, as it did when this
+            // looked the id up and routed `.profile(id, stub: nil)`.
+            routeToReference(.handle(handle), for: route, using: navigator)
 
         case .profileShareToken(let token):
-            // A scanned QR code or a `wynn.cn/s/<token>` link (#412): resolved
-            // by the server, then routed like an author's profile. A token the
-            // owner reset, or links they switched off, read as no one.
-            Task { [weak self, weak navigator] in
-                guard let self else { return }
-                switch await lookupShareToken(token) {
-                case .found(let id):
-                    self.route(to: .profile(id, stub: nil))
-                case .missing:
-                    Self.toast("This link no longer works", symbol: "link", on: navigator)
-                case .unavailable:
-                    Self.toast("Couldn\u{2019}t open this link", symbol: "wifi.exclamationmark", on: navigator)
-                }
-            }
+            // A scanned QR code or a `wynn.cn/s/<token>` link (#412): pushed at
+            // once and resolved by the screen, like a handle. A token the owner
+            // reset, or links they switched off, read as no one.
+            routeToReference(.shareToken(token), for: route, using: navigator)
 
         case .hashtag(let tag):
             // A tapped `#tag`, a hashtag completion, a searched `#tag` (#524):
@@ -366,10 +330,27 @@ final class RouteResolver: Router {
 }
 
 extension RouteResolver {
-    /// A toast over the screen the viewer is on.
-    static func toast(_ message: String, symbol: String, on navigator: (any AppNavigating)?) {
-        guard let screen = navigator?.activeNavigationController?.topViewController else { return }
-        ToastView.present(message, symbol: symbol, in: screen.view)
+    /// The profile a handle or a token names, pushed before anyone knows whose
+    /// it is (#800).
+    private func routeToReference(
+        _ reference: ProfileReference, for route: AppRoute, using navigator: AppNavigating
+    ) {
+        let profile = profileFeature().makeProfileViewController(resolving: reference, lookup: lookupProfile)
+        // The balance rides the push, as on an author's profile.
+        attachBalance(profile)
+        pushProfile(profile, for: route, using: navigator)
+    }
+
+    /// Records a profile push for the repeat filter, under the route's own
+    /// key (its id, or the handle / token it still resolves), then pushes it.
+    private func pushProfile(_ profile: UIViewController, for route: AppRoute, using navigator: AppNavigating) {
+        if let key = route.profileRouteKey {
+            repeatProfiles.willPush(
+                key, screen: profile,
+                isTransitioning: navigator.activeNavigationController?.transitionCoordinator != nil
+            )
+        }
+        push(profile, using: navigator)
     }
 }
 

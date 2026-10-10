@@ -132,6 +132,11 @@ public final class MediaPageIndicatorView: PostMetaPillView, HorizontalDragOwnin
         // theirs stand down. See `scrubGesture`.
         scrubGesture.cancelsTouchesInView = true
         isExclusiveTouch = true
+        // ...and the third, for every host at once (#771): while a scrub is
+        // in hand every other PAN — the list's scroll, a pager, the screen's
+        // slide dismissal, the stack's back swipes — must wait for it to fail,
+        // which a touch-down long press never does.
+        scrubGesture.delegate = self
         // ⚠️ This chip YIELDS horizontal space; the counters and the date do not.
         //
         // It is the only one of the four whose content can be shown partially
@@ -649,5 +654,19 @@ final class PageDotsView: UIView {
     /// cut, since a dot on its way out is exactly a dot that is no longer in it.
     var debugAllDotFrames: [CGRect] {
         dots.map(\.frame)
+    }
+}
+
+extension MediaPageIndicatorView: UIGestureRecognizerDelegate {
+    /// Every other pan waits for the scrub (#771). Pans only: a tap elsewhere
+    /// is not this touch's business, and requiring every recognizer to fail
+    /// is how a requirement cycle once froze a subtree (`PagedTabBar`).
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === scrubGesture
+            && otherGestureRecognizer is UIPanGestureRecognizer
+            && otherGestureRecognizer.view !== self
     }
 }

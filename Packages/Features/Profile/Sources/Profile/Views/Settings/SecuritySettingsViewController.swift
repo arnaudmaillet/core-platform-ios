@@ -13,14 +13,15 @@ final class SecuritySettingsViewController: UIViewController {
         case checkup, password, sessions, global, appLock, comingSoon
     }
 
-    private enum Item: Hashable {
+    enum Item: Hashable {
         case checkup
         case changePassword
         case twoStep
         case requireLock
         case lockDelay
         case session(AccountSession)
-        case loading
+        /// A session-shaped bone while the list loads (charter P8).
+        case skeleton(Int)
         case failed
         case logOutEverywhere
         case planned(String)
@@ -36,6 +37,9 @@ final class SecuritySettingsViewController: UIViewController {
     private let makeTwoStep: (() -> UIViewController)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    /// Whether the sessions section last drew bones: the swap away from them
+    /// cross-fades (P10), every other redraw is plain.
+    private var isShowingSkeleton = false
 
     init(
         viewModel: SecuritySettingsViewModel,
@@ -65,6 +69,12 @@ final class SecuritySettingsViewController: UIViewController {
         configureCollectionView()
         configureDataSource()
         viewModel.onChange = { [weak self] in self?.applySnapshot() }
+        // A refresh that fails keeps the list; the failure is a toast, not a
+        // list replaced by an error row.
+        viewModel.onRefreshFailed = { [weak self] in
+            guard let self else { return }
+            Feedback.failure("Couldn't refresh your sessions", from: self)
+        }
         applySnapshot()
         Task { await viewModel.load() }
     }
@@ -104,8 +114,14 @@ final class SecuritySettingsViewController: UIViewController {
             Self.configure(cell, for: item)
             self?.configureOwnRow(cell, for: item)
         }
+        let skeletonRegistration = UICollectionView.CellRegistration<SettingsSkeletonRowCell, Int> { cell, _, index in
+            cell.configure(redacting: Self.sessionPlaceholder(index))
+        }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
-            collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
+            if case .skeleton(let index) = item {
+                return collectionView.dequeueConfiguredReusableCell(using: skeletonRegistration, for: indexPath, item: index)
+            }
+            return collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader
@@ -164,18 +180,41 @@ final class SecuritySettingsViewController: UIViewController {
             snapshot.appendItems(passwordRows, toSection: .password)
         }
         snapshot.appendSections([.sessions, .global, .appLock, .comingSoon])
-        switch viewModel.phase {
-        case .loading:
-            snapshot.appendItems([.loading], toSection: .sessions)
-        case .failed:
-            snapshot.appendItems([.failed], toSection: .sessions)
-        case .loaded(let sessions):
-            snapshot.appendItems(sessions.map(Item.session), toSection: .sessions)
-        }
+        let sessionItems = Self.sessionItems(for: viewModel.phase)
+        snapshot.appendItems(sessionItems, toSection: .sessions)
         snapshot.appendItems([.logOutEverywhere], toSection: .global)
         snapshot.appendItems(AppLockPreference.isOn ? [.requireLock, .lockDelay] : [.requireLock], toSection: .appLock)
         snapshot.appendItems(Self.planned.map(Item.planned), toSection: .comingSoon)
-        dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+
+        let wasShowingSkeleton = isShowingSkeleton
+        isShowingSkeleton = viewModel.phase == .loading
+        if wasShowingSkeleton, !isShowingSkeleton {
+            collectionView.crossfadeSkeleton { [dataSource, snapshot] in
+                dataSource?.apply(snapshot, animatingDifferences: false)
+            }
+        } else {
+            dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        }
+    }
+
+    /// The sessions section's rows: bones the shape of a session while the
+    /// list loads — never a spinner (P8) — the retry row after a failed first
+    /// load, the sessions otherwise.
+    static func sessionItems(for phase: SecuritySettingsViewModel.Phase) -> [Item] {
+        switch phase {
+        case .loading: [.skeleton(0), .skeleton(1)]
+        case .failed: [.failed]
+        case .loaded(let sessions): sessions.map(Item.session)
+        }
+    }
+
+    /// A session row with sample words; only the bones' widths come from them.
+    private static func sessionPlaceholder(_ index: Int) -> UIListContentConfiguration {
+        var content = UIListContentConfiguration.subtitleCell()
+        content.text = index.isMultiple(of: 2) ? "iPhone" : "Web browser"
+        content.secondaryText = index.isMultiple(of: 2) ? "iOS 27.0 · This device" : "Signed in 3 days ago"
+        content.image = UIImage(systemName: "iphone")
+        return content
     }
 
     // MARK: - Rows
@@ -237,14 +276,9 @@ final class SecuritySettingsViewController: UIViewController {
             content.image = UIImage(systemName: symbol(for: session.device.kind))
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
-        case .loading:
-            var content = UIListContentConfiguration.cell()
-            content.text = "Loading…"
-            content.textProperties.color = .secondaryLabel
-            cell.contentConfiguration = content
-            let spinner = UIActivityIndicatorView(style: .medium)
-            spinner.startAnimating()
-            cell.accessories = [.customView(configuration: .init(customView: spinner, placement: .trailing()))]
+        case .skeleton:
+            // Drawn by `SettingsSkeletonRowCell`.
+            break
         case .failed:
             var content = UIListContentConfiguration.cell()
             content.text = "Couldn't load your sessions. Tap to try again."
@@ -419,7 +453,7 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .session(let session): !session.isCurrent
         case .failed, .logOutEverywhere, .checkup, .changePassword, .twoStep: true
-        case .loading, .planned, .requireLock, .lockDelay, nil: false
+        case .skeleton, .planned, .requireLock, .lockDelay, nil: false
         }
     }
 

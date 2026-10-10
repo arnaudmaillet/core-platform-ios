@@ -54,6 +54,11 @@ final class SuggestionsViewController: UIViewController {
         configureTableView()
         configureStatusViews()
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
+        // The row has already flipped back; the toast says why (#802).
+        viewModel.onFollowFailure = { [weak self] message in
+            guard let self else { return }
+            Feedback.failure(message, from: self)
+        }
         render(viewModel.phase)
     }
 
@@ -138,7 +143,10 @@ final class SuggestionsViewController: UIViewController {
         case .failed(let message):
             skeletonView.isHidden = true
             tableView.isHidden = true
-            statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
+            statusView.configure(
+                symbol: "exclamationmark.triangle", title: "Something went wrong", message: message,
+                actionTitle: "Try Again", action: { [weak self] in self?.viewModel.refresh() }
+            )
             statusView.isHidden = false
         }
     }

@@ -18,12 +18,14 @@ public enum AppRoute: Equatable, Sendable {
     /// origin knows nothing beyond the id (deep links, debug args).
     case profile(ProfileID, stub: ProfileIdentityStub?)
     /// A profile named by its handle — a tapped `@handle`, a
-    /// `wynn.cn/@handle` link (#524). The handle without its `@`; it is
-    /// looked up, and one that names no one says so instead of pushing.
+    /// `wynn.cn/@handle` link (#524). The handle without its `@`. The
+    /// profile is pushed at once and looks the handle up itself (#800); one
+    /// that names no one says so inside it.
     case profileHandle(String)
     /// A profile named by its share token — a scanned QR code or a
-    /// `wynn.cn/s/<token>` link (#412). The server resolves it; a reset or
-    /// switched-off token says so instead of pushing.
+    /// `wynn.cn/s/<token>` link (#412). Pushed at once like a handle, and
+    /// resolved by the server behind the profile's skeleton; a reset or
+    /// switched-off token says so inside it.
     case profileShareToken(String)
     case post(PostID)
     /// A full-screen feed seeded with an ordered run of posts, opened on the

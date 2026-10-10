@@ -26,8 +26,10 @@ final class AccountSettingsViewController: UIViewController {
     /// login.
     private let onDeactivated: () -> Void
 
-    private var details: AccountDetails?
-    private var isShowingSkeleton = false
+    /// The account-info rows' state: skeleton, values, or a failed row with
+    /// retry — never a default standing in for a failed read (#799).
+    private let viewModel: AccountDetailsViewModel
+    private var details: AccountDetails? { viewModel.details }
     /// A notice owed to the viewer once this list is back on screen — see
     /// `reportReadOnly`.
     private var pendingNotice: String?
@@ -52,6 +54,9 @@ final class AccountSettingsViewController: UIViewController {
         case row(Row)
         /// Shimmer stand-ins for the account-info values while they load.
         case skeleton(Int)
+        /// The account couldn't be read: one row in place of the three
+        /// values, tapped to read it again (#799).
+        case failed
     }
 
     private var collectionView: UICollectionView!
@@ -70,6 +75,7 @@ final class AccountSettingsViewController: UIViewController {
         self.contactChanger = contactChanger
         self.deletionChecklist = deletionChecklist
         self.account = account
+        self.viewModel = AccountDetailsViewModel(account: account)
         self.lifecycle = lifecycle
         self.onAccountDeleted = onAccountDeleted
         self.deactivator = deactivator
@@ -89,9 +95,10 @@ final class AccountSettingsViewController: UIViewController {
         configureCollectionView()
         configureDataSource()
         // Only the account-info values wait on the network; the rest is static.
-        isShowingSkeleton = true
-        dataSource.apply(makeSnapshot(loaded: false), animatingDifferences: false)
-        loadAccount()
+        dataSource.apply(makeSnapshot(for: viewModel.phase), animatingDifferences: false)
+        viewModel.onChange = { [weak self] in self?.render() }
+        // A first failure speaks through the failed row, so no toast here.
+        Task { await viewModel.load() }
     }
 
     // MARK: - Setup
@@ -117,6 +124,16 @@ final class AccountSettingsViewController: UIViewController {
         let skeletonRegistration = UICollectionView.CellRegistration<AccountSkeletonRowCell, Int> { cell, _, index in
             cell.configure(index: index)
         }
+        // The failed-row style every Settings screen uses.
+        let failedRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { cell, _, _ in
+            var content = UIListContentConfiguration.cell()
+            content.text = AccountDetailsViewModel.failureMessage
+            content.textProperties.color = .secondaryLabel
+            cell.contentConfiguration = content
+            cell.accessories = []
+            // Tapped to retry: VoiceOver says so.
+            cell.accessibilityTraits.insert(.button)
+        }
 
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
@@ -124,6 +141,8 @@ final class AccountSettingsViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: rowRegistration, for: indexPath, item: row)
             case .skeleton(let index):
                 return collectionView.dequeueConfiguredReusableCell(using: skeletonRegistration, for: indexPath, item: index)
+            case .failed:
+                return collectionView.dequeueConfiguredReusableCell(using: failedRegistration, for: indexPath, item: item)
             }
         }
 
@@ -142,13 +161,18 @@ final class AccountSettingsViewController: UIViewController {
 
     // MARK: - Snapshot
 
-    private func makeSnapshot(loaded: Bool) -> NSDiffableDataSourceSnapshot<Section, Item> {
+    private static let accountInfoRows: [Item] = [.row(.email), .row(.phone), .row(.birthDate)]
+
+    private func makeSnapshot(for phase: AccountDetailsViewModel.Phase) -> NSDiffableDataSourceSnapshot<Section, Item> {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.accountInfo, .management])
-        if loaded {
-            snapshot.appendItems([.row(.email), .row(.phone), .row(.birthDate)], toSection: .accountInfo)
-        } else {
+        switch phase {
+        case .content:
+            snapshot.appendItems(Self.accountInfoRows, toSection: .accountInfo)
+        case .loading, .empty:
             snapshot.appendItems([.skeleton(0), .skeleton(1), .skeleton(2)], toSection: .accountInfo)
+        case .failed:
+            snapshot.appendItems([.failed], toSection: .accountInfo)
         }
         snapshot.appendItems([.row(.dataExport), .row(.deactivate)], toSection: .management)
         if lifecycle != nil {
@@ -157,35 +181,40 @@ final class AccountSettingsViewController: UIViewController {
         return snapshot
     }
 
-    private func loadAccount() {
+    /// The failed row's retry: the skeleton comes back while it runs (so a
+    /// second tap finds no row to hit), and a read that fails again keeps
+    /// the failed row and says so with a toast.
+    private func retryAccount() {
         Task { [weak self] in
             guard let self else { return }
-            self.details = try? await self.account.currentAccount()
-            self.reveal()
+            guard await viewModel.load() == false else { return }
+            Feedback.failure("Couldn't load your account details", from: self)
         }
     }
 
     /// After the date of birth, the email or the phone changed: re-read the
-    /// account, redraw its rows.
-    private func reloadAccount() {
-        Task { [weak self] in
-            guard let self else { return }
-            self.details = try? await self.account.currentAccount()
-            var snapshot = self.dataSource.snapshot()
-            let rows: [Item] = [.row(.email), .row(.phone), .row(.birthDate)]
-            snapshot.reconfigureItems(rows.filter { snapshot.indexOfItem($0) != nil })
-            await self.dataSource.apply(snapshot, animatingDifferences: false)
-        }
+    /// account. A failed re-read shows the failed row rather than the
+    /// pre-edit values — see `AccountDetailsViewModel.reloadAfterEdit`.
+    private func reloadAfterEdit() {
+        Task { await viewModel.reloadAfterEdit() }
     }
 
-    private func reveal() {
-        guard isShowingSkeleton else { return }
-        isShowingSkeleton = false
-        // Only the account-info rows change; cross-dissolve so the shimmer melts
-        // into the loaded values rather than snapping.
-        UIView.transition(with: collectionView, duration: 0.3, options: .transitionCrossDissolve) {
-            self.dataSource.apply(self.makeSnapshot(loaded: true), animatingDifferences: false)
+    private func render() {
+        let snapshot = makeSnapshot(for: viewModel.phase)
+        let current = dataSource.snapshot()
+        let shown = current.sectionIdentifiers.contains(.accountInfo) ? current.itemIdentifiers(inSection: .accountInfo) : []
+        guard shown == snapshot.itemIdentifiers(inSection: .accountInfo) else {
+            // Skeleton, values or failed row: cross-dissolve so the shimmer
+            // melts into what replaced it rather than snapping.
+            UIView.transition(with: collectionView, duration: 0.3, options: .transitionCrossDissolve) {
+                self.dataSource.apply(snapshot, animatingDifferences: false)
+            }
+            return
         }
+        // Same rows, new values (a refresh after an edit).
+        var refreshed = snapshot
+        refreshed.reconfigureItems(Self.accountInfoRows.filter { refreshed.indexOfItem($0) != nil })
+        dataSource.apply(refreshed, animatingDifferences: false)
     }
 
     // MARK: - Row rendering
@@ -257,7 +286,7 @@ final class AccountSettingsViewController: UIViewController {
             if details?.dateOfBirth != nil {
                 presentInfo("Only you can see your date of birth. To correct it, contact support.")
             } else if let setter = account as? any AccountBirthDateSetting {
-                push(BirthDateViewController(setter: setter, onSaved: { [weak self] in self?.reloadAccount() }))
+                push(BirthDateViewController(setter: setter, onSaved: { [weak self] in self?.reloadAfterEdit() }))
             } else {
                 presentInfo("Adding your date of birth isn't available yet.")
             }
@@ -297,7 +326,7 @@ final class AccountSettingsViewController: UIViewController {
         ) { [weak self] stored in
             guard let self else { return }
             reportReadOnly(Self.contactChangedNotice(kind, to: stored))
-            reloadAccount()
+            reloadAfterEdit()
             navigationController?.popToViewController(self, animated: true)
         })
     }
@@ -472,8 +501,11 @@ final class AccountSettingsViewController: UIViewController {
 extension AccountSettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        guard case .row(let row) = dataSource.itemIdentifier(for: indexPath) else { return }
-        handle(row)
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .row(let row): handle(row)
+        case .failed: retryAccount()
+        case .skeleton, nil: break
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import DesignSystem
 import Foundation
 import Testing
@@ -53,6 +54,7 @@ private actor StubInboxProvider: ChatProviding {
     /// The REQUESTS folder; `conversations` is the INBOX.
     var requests: [Conversation]
     private var failsRequests = false
+    private var failsInbox = false
 
     init(conversations: [Conversation], requests: [Conversation] = []) {
         self.conversations = conversations
@@ -61,6 +63,9 @@ private actor StubInboxProvider: ChatProviding {
 
     /// The REQUESTS folder can't be read.
     func setFailsRequests(_ fails: Bool) { failsRequests = fails }
+
+    /// The INBOX folder can't be read: the network is gone.
+    func setFailsInbox(_ fails: Bool) { failsInbox = fails }
 
     /// The write is accepted but never reflected by later loads — replication
     /// lag, the exact condition the read bridge exists for.
@@ -96,6 +101,7 @@ private actor StubInboxProvider: ChatProviding {
     func loadInbox(_ folder: InboxFolder, after pageToken: String?) async throws -> InboxPage {
         switch folder {
         case .inbox:
+            if failsInbox { throw StubError() }
             return InboxPage(conversations: try await loadConversations(), nextPageToken: nil)
         case .requests:
             if failsRequests { throw StubError() }
@@ -303,6 +309,35 @@ struct InboxCatalogTests {
         #expect(latest?.phase == .loaded)
         #expect(latest?.active.map(\.id) == [ConversationID("active")])
         #expect(latest?.requests.isEmpty == true)
+        _ = token
+    }
+
+    /// ⚠️ THE NETWORK COMES BACK, THE INBOX LOADS (#793): an inbox that failed
+    /// while offline reloads on recovery, without a pull.
+    ///
+    /// ⚠️ ITS OWN MONITOR: the shared one is process-wide, and flipping it
+    /// reloaded every store alive in the parallel suites.
+    @Test func aFailedInboxReloadsWhenTheNetworkReturns() async {
+        let provider = StubInboxProvider(conversations: [conversation("active", peer: "friend")])
+        await provider.setFailsInbox(true)
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
+        let catalog = InboxCatalog(repository: provider)
+        catalog.connectivity = monitor
+        var latest: InboxCatalog.Snapshot?
+        let token = catalog.observe { latest = $0 }
+        catalog.reload()
+        await settle(until: { @MainActor in
+            if case .failed = latest?.phase { return true } else { return false }
+        })
+        #expect(latest?.phase == .failed(message: "Couldn't load your messages."))
+
+        await provider.setFailsInbox(false)
+        monitor.report(online: false)
+        monitor.report(online: true)
+        await settle(until: { @MainActor in latest?.phase == .loaded })
+
+        #expect(latest?.phase == .loaded)
+        #expect(latest?.active.map(\.id) == [ConversationID("active")])
         _ = token
     }
 
@@ -1140,6 +1175,45 @@ struct SuggestionsViewModelTests {
         }
         #expect(!rows[0].isFollowing)
         #expect(!viewModel.isFollowing(ProfileID("p1")))
+    }
+
+    /// ⚠️ A DOUBLE TAP IS ONE FOLLOW (#802). The second tap used to send an
+    /// unfollow racing the follow on the wire; while a profile's change is on
+    /// its way, another tap on it is ignored.
+    @Test func aDoubleTapIsIgnoredWhileTheFollowIsOnItsWay() async {
+        let repository = StubSuggestions(accounts: [account("p1")])
+        let viewModel = SuggestionsViewModel(repository: repository)
+        viewModel.loadIfNeeded()
+        await settle()
+
+        viewModel.toggleFollow(ProfileID("p1"))
+        viewModel.toggleFollow(ProfileID("p1"))
+        // Asserted before any await: the second tap changed nothing.
+        #expect(viewModel.isFollowing(ProfileID("p1")), "the second tap undid the follow")
+
+        await settle()
+        #expect(await repository.followed == [ProfileID("p1")])
+        #expect(await repository.unfollowed.isEmpty, "the second tap reached the server")
+    }
+
+    /// A refused follow rolls back AND says so (#802), naming the account.
+    @Test func aFailedFollowSaysSo() async {
+        let repository = StubSuggestions(accounts: [account("p1")], shouldFailFollow: true)
+        let viewModel = SuggestionsViewModel(repository: repository)
+        var failures: [String] = []
+        viewModel.onFollowFailure = { failures.append($0) }
+        viewModel.loadIfNeeded()
+        await settle()
+
+        viewModel.toggleFollow(ProfileID("p1"))
+        #expect(failures.isEmpty, "the failure was said before the server answered")
+        await settle()
+
+        #expect(failures == ["Couldn't follow @p1"])
+        #expect(!viewModel.isFollowing(ProfileID("p1")))
+        // The profile is free again: a retry goes through to the server.
+        viewModel.toggleFollow(ProfileID("p1"))
+        #expect(viewModel.isFollowing(ProfileID("p1")), "the retry was ignored")
     }
 
     @Test func dismissingRemovesTheRowAndEmptiesTheSurface() async {

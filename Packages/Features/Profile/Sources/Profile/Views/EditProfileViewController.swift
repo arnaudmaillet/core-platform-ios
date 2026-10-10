@@ -191,6 +191,10 @@ final class EditProfileViewController: UIViewController {
         switch state {
         case .idle, .saving:
             break
+        case .saved:
+            // Said once the server has every edit (#803): fields save as they
+            // are left, with no Done button to confirm them.
+            Feedback.success("Profile saved", from: self)
         case .failed(let message):
             // Re-sync from the server so the list can't drift from the truth
             // after a rejected optimistic edit.

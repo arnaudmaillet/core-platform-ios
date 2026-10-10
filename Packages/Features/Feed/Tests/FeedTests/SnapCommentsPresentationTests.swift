@@ -698,6 +698,50 @@ struct SnapCommentsPresentationTests {
         try #expect(backdrop(of: cell).dimOpacity == 0)
     }
 
+    /// REGRESSION (#788): a cell recycled in the middle of an engaged
+    /// dismissal — before the feed's `endEngagedDismissal` — came back with
+    /// its media at alpha 0, and the leftover flag made the next dismissal's
+    /// `begin` a no-op.
+    @Test func reuseEndsAnEngagedDismissalLeftOpen() throws {
+        let cell = makeEngagedCell()
+        let card = try mediaCard(of: cell)
+        cell.beginEngagedDismissal()
+        #expect(card.alpha == 0)
+
+        cell.prepareForReuse()
+
+        #expect(card.alpha == 1)
+        #expect(cell.contentView.mask == nil)
+        // The flag went with it: the next post's dismissal begins.
+        configurePost(cell, media: true)
+        cell.setCommentsEngaged(true)
+        cell.beginEngagedDismissal()
+        #expect(card.alpha == 0)
+    }
+
+    /// REGRESSION (#788): a cell recycled in the middle of a masked reveal —
+    /// before the feed's `endMaskedRevealForFlight` — came back with its media
+    /// hidden under the flight's window, and the leftover window made the next
+    /// reveal's `begin` a no-op.
+    @Test func reuseEndsAMaskedRevealLeftOpen() throws {
+        let cell = makeEngagedCell()
+        let card = try mediaCard(of: cell)
+        let rect = CGRect(x: 40, y: 200, width: 200, height: 260)
+        cell.beginMaskedRevealForFlight(from: rect, cornerRadius: 12)
+        #expect(card.isHidden)
+        #expect(cell.contentView.mask != nil)
+
+        cell.prepareForReuse()
+
+        #expect(card.isHidden == false)
+        #expect(cell.contentView.mask == nil)
+        // The window went with it: the next post's reveal opens one.
+        configurePost(cell, media: true)
+        cell.setCommentsEngaged(true)
+        cell.beginMaskedRevealForFlight(from: rect, cornerRadius: 12)
+        #expect(cell.contentView.mask != nil)
+    }
+
     /// The chrome canvas is hit-transparent: bare-area touches fall through
     /// to the layers beneath (media, engaged comments), while interactive
     /// subviews (the rail) still claim theirs. Without this, the full-cell

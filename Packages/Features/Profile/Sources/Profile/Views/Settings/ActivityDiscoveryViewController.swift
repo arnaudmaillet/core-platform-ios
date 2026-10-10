@@ -255,7 +255,7 @@ final class ActivityDiscoveryViewController: UIViewController {
                 guard let self else { return }
                 resetting = false
                 applySnapshot()
-                ToastView.present("New QR code and link ready", symbol: "qrcode", in: view)
+                Feedback.success("New QR code and link ready", symbol: "qrcode", from: self)
             } catch {
                 guard let self else { return }
                 resetting = false

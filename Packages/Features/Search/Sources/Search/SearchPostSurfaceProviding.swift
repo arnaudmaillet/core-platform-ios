@@ -52,6 +52,10 @@ public protocol SearchPostSurface: AnyObject {
     /// the next page and show the longer list, which is appended (#579).
     var onNearEnd: (() -> Void)? { get set }
 
+    /// The failed state's Try Again was pressed (#798): the cue to ask
+    /// again for what failed. Without it the button had nothing behind it.
+    var onRetry: (() -> Void)? { get set }
+
     /// The footer spinner, while a next page is fetched.
     func setPaging(_ paging: Bool)
 
@@ -70,6 +74,11 @@ public protocol SearchPostSurface: AnyObject {
 
 public extension SearchPostSurface {
     var onNearEnd: (() -> Void)? {
+        get { nil }
+        set {}
+    }
+
+    var onRetry: (() -> Void)? {
         get { nil }
         set {}
     }

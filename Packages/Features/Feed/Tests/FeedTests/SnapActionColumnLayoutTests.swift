@@ -608,6 +608,40 @@ struct SnapActionColumnLayoutTests {
         _ = window
     }
 
+    /// ⚠️ THE ENGAGED THREAD'S DAY RIDES THE BAR LEFT OF THE POINTS (#757):
+    /// none until a chip has gone under the header; one item per day, each
+    /// under its own identifier (the morph); held to the width the run leaves
+    /// it, so it is what truncates first.
+    @Test func theThreadsDayRidesTheBarLeftOfThePoints() throws {
+        let controller = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: ColumnSilentProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            reporting: nil
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        controller.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(controller.debugCommentsDayPill == nil)
+        #expect(!controller.debugTrailingItems.contains { $0.identifier?.hasPrefix("snap.comments.day.") == true })
+
+        let today = Calendar.current.startOfDay(for: Date())
+        controller.setCommentsDay(today)
+        let first = try #require(controller.debugTrailingItems.last, "no day in the bar")
+        #expect(first.identifier?.hasPrefix("snap.comments.day.") == true)
+        #expect(controller.debugTrailingItems.first?.identifier?.hasPrefix("snap.comments.day.") != true,
+                "the day took the corner: it stands left of the rest")
+        let budget = try #require(controller.debugCommentsDayPill?.debugMaxWidth, "the day has no width to give way in")
+        #expect(budget < 390)
+
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: today)!
+        controller.setCommentsDay(yesterday)
+        let second = try #require(controller.debugTrailingItems.last)
+        #expect(second !== first && second.identifier != first.identifier, "the day was retitled in place: no morph")
+
+        controller.setCommentsDay(nil)
+        #expect(!controller.debugTrailingItems.contains { $0.identifier?.hasPrefix("snap.comments.day.") == true })
+    }
+
     // MARK: - The toolbar and the menu
 
     /// Share left the toolbar's capsule for the repost (#671), so ⋯ leads

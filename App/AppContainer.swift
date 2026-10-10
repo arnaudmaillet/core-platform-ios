@@ -53,15 +53,47 @@ final class AppContainer {
     /// The whole in-process backend (dataset + stores + fully registered
     /// MockBFF), with network realism read from launch arguments
     /// (`-mock-latency`, `-mock-fail`, `-mock-fail-code`, `-mock-fail-rate`).
-    private lazy var mockBackend = MockBackend(
-        conditions: .fromLaunchArguments(),
-        mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic,
-        seedsMapHierarchy: Self.seedsMapPlaces,
-        // A guest's write is refused here as at the fleet's edge, so a missing
-        // gate shows up in mock mode (`[edge] REFUSED` in the console).
-        // `-mock-open-edge` turns it off for QA that predates guest mode.
-        enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge")
-    )
+    private(set) lazy var mockBackend: MockBackend = {
+        let backend = MockBackend(
+            conditions: .fromLaunchArguments(),
+            mediaCatalog: Self.usesRichMedia ? .realAssets : .synthetic,
+            seedsMapHierarchy: Self.seedsMapPlaces,
+            // A guest's write is refused here as at the fleet's edge, so a missing
+            // gate shows up in mock mode (`[edge] REFUSED` in the console).
+            // `-mock-open-edge` turns it off for QA that predates guest mode.
+            enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge")
+        )
+        backend.bff.faults = mockNetworkFaults
+        return backend
+    }()
+
+    /// Offline, timed outages, lost acks and upload faults for the WHOLE mock
+    /// network — BFF, upload transport and realtime together (#790):
+    /// `-mock-offline`, `-mock-outage 20+30`, `-mock-ack-loss <path|all>`,
+    /// `-mock-upload-fail 0.5`, and at runtime the shake sheet
+    /// (`NetworkConditionsMenu`).
+    private(set) lazy var mockNetworkFaults = MockNetworkFaults.fromLaunchArguments()
+    private var mockFaultsObserver: NSObjectProtocol?
+    private var connectivityBridge: NSObjectProtocol?
+
+    /// Starts telling the app whether the network is reachable (#793): the
+    /// system path on the fleet, the mock network's switchboard in mock mode
+    /// (a simulator's path cannot be faked).
+    @MainActor
+    func startConnectivityMonitoring() {
+        switch environment {
+        case .mock:
+            let faults = mockNetworkFaults
+            ConnectivityMonitor.shared.report(online: !faults.isOffline)
+            connectivityBridge = NotificationCenter.default.addObserver(
+                forName: MockNetworkFaults.didChange, object: faults, queue: .main
+            ) { _ in
+                MainActor.assumeIsolated { ConnectivityMonitor.shared.report(online: !faults.isOffline) }
+            }
+        case .localFleet:
+            ConnectivityMonitor.shared.startMonitoringSystemPath()
+        }
+    }
 
     /// Semantic map clusters (city/country places on the mock pins, and the
     /// European seed behind them) are the DEFAULT mock experience — no
@@ -84,7 +116,18 @@ final class AppContainer {
     /// requires network.
     static let usesRichMedia = ProcessInfo.processInfo.arguments.contains("-rich-media")
 
-    private(set) lazy var mockRealtimeServer = MockRealtimeServer()
+    private(set) lazy var mockRealtimeServer: MockRealtimeServer = {
+        let server = MockRealtimeServer()
+        // Offline refuses the socket too, and the outage's end lets it back.
+        let faults = mockNetworkFaults
+        server.refusesConnections = faults.isOffline
+        mockFaultsObserver = NotificationCenter.default.addObserver(
+            forName: MockNetworkFaults.didChange, object: faults, queue: .main
+        ) { _ in
+            if server.refusesConnections != faults.isOffline { server.refusesConnections = faults.isOffline }
+        }
+        return server
+    }()
 
     /// Bridge from the compose feature to the feed's optimistic insert.
     private let composedPostChannel = ComposedPostChannel()
@@ -199,14 +242,17 @@ final class AppContainer {
         }
     }
 
-    enum HandleLookup: Equatable {
-        case found(ProfileID)
-        case missing
-        case unavailable
+    /// The profile a handle or a share token names — what a profile pushed
+    /// from a `@handle` or a link asks once it is on screen (#800).
+    func profileID(for reference: ProfileReference) async -> ProfileLookup {
+        switch reference {
+        case .handle(let handle): await profileID(forHandle: handle)
+        case .shareToken(let token): await profileID(forShareToken: token)
+        }
     }
 
     /// The profile a `@handle` names (`profile.v1.GetProfileByHandle`, #524).
-    func profileID(forHandle handle: String) async -> HandleLookup {
+    private func profileID(forHandle handle: String) async -> ProfileLookup {
         var request = Profile_V1_GetProfileByHandleRequest()
         request.handle = handle
         let response = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
@@ -219,7 +265,7 @@ final class AppContainer {
     /// (`profile.v1.ResolveShareToken`, #412). `.missing` covers a reset
     /// token and an owner who switched links off: the server tells them apart
     /// from no one.
-    func profileID(forShareToken token: String) async -> HandleLookup {
+    private func profileID(forShareToken token: String) async -> ProfileLookup {
         var request = Profile_V1_ResolveShareTokenRequest()
         request.token = token
         let response = await Profile_V1_ProfileServiceClient(client: authenticatedRPCClient)
@@ -1285,10 +1331,9 @@ final class AppContainer {
                 makeSheet: { [unowned self] in self.makeWalletSheet() }
             )
         },
-        // A tapped `@handle` and a `wynn.cn/@handle` link (#524).
-        lookupHandle: { [unowned self] handle in await self.profileID(forHandle: handle) },
-        // A scanned QR code and a `wynn.cn/s/<token>` link (#412).
-        lookupShareToken: { [unowned self] token in await self.profileID(forShareToken: token) }
+        // A tapped `@handle`, a `wynn.cn/@handle` link (#524), a scanned QR
+        // code and a `wynn.cn/s/<token>` link (#412).
+        lookupProfile: { [weak self] reference in await self?.profileID(for: reference) ?? .unavailable }
     )
 
     var router: any Router { routeResolver }
@@ -1320,7 +1365,7 @@ final class AppContainer {
     private var mediaUploadTransport: any MediaUploadTransport {
         switch environment {
         case .mock:
-            MockMediaUploadTransport(store: mockBackend.blobStore)
+            MockMediaUploadTransport(store: mockBackend.blobStore, faults: mockNetworkFaults)
         case .localFleet:
             // The media service presigns object-store URLs against the
             // Docker-internal host (minio:9000), unreachable from the

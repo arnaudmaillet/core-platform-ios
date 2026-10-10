@@ -19,11 +19,11 @@ public enum ProfileTab: Equatable, Sendable {
     case saved
     /// Posts the viewer reacted to. Own profile only, same reason.
     case reactions
-    /// Someone else's reposts, alone (#696): their authored corpus split on
-    /// `isRepost`. Pushed profile only.
+    /// The profile's reposts, alone (#696): its authored corpus split on
+    /// `isRepost`. Every profile since #772.
     case reposts
-    /// Posts by others that mention them (#696): the tagged corpus. Pushed
-    /// profile only.
+    /// Posts by others that mention the profile (#696): the tagged corpus.
+    /// Every profile since #772.
     case tagged
 
     /// What the selector calls it.
@@ -71,10 +71,15 @@ public enum ProfileTab: Equatable, Sendable {
     /// filter (#631) — "it is no longer a sort".
     public static let publicTabs: [ProfileTab] = [.format(.activity), .reposts, .tagged]
 
-    /// What the viewer sees on their own: Posts | Saved | Liked. Saved and
-    /// Liked are other corpora, so a selector stays (the owner's call,
-    /// 2026-10-07). The own Posts keeps the top source filter (#696).
-    public static let ownTabs: [ProfileTab] = [.format(.activity), .saved, .reactions]
+    /// What the viewer sees on their own: the public pages, then Saved and
+    /// Liked — corpora nobody else can see (the owner's call, 2026-10-07).
+    ///
+    /// ⚠️ NO TOP SOURCE FILTER ANY MORE (#772, the owner's call 2026-10-10):
+    /// Reposts and Tagged were a menu in the bar's leading run (All / Posts /
+    /// Reposts / Tagged) narrowing one Posts list; they are pages in the
+    /// selector now, exactly as on someone else's profile, and like every
+    /// source they show only with something in them (#742).
+    public static let ownTabs: [ProfileTab] = publicTabs + [.saved, .reactions]
 }
 
 // MARK: - What a tab says when it is empty

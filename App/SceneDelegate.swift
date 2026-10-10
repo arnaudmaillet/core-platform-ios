@@ -1,3 +1,6 @@
+#if DEBUG
+import CoreNetworkingMocks
+#endif
 import DesignSystem
 import UIKit
 
@@ -5,6 +8,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?
     private var appCoordinator: AppCoordinator?
+    /// Offline / Back online above every screen (#793).
+    private var offlineIndicator: OfflineIndicator?
     /// Settings → Security and Login → App Lock (#418).
     private var appLock: AppLockCoordinator?
     /// Settings → Your Activity → Time Management (#489).
@@ -22,7 +27,25 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // it is set.
         ScrollIndicatorStyle.hideAppWide()
 
+        #if DEBUG
+        // Shake for the mock network's switch (#790).
+        let shakeWindow = DebugShakeWindow(windowScene: windowScene)
+        let container = AppContainer.shared
+        if container.environment == .mock {
+            shakeWindow.onShake = { [weak shakeWindow] in
+                guard var top = shakeWindow?.rootViewController else { return }
+                while let presented = top.presentedViewController { top = presented }
+                // A second shake while the sheet is up does nothing.
+                guard !(top is UIAlertController) else { return }
+                NetworkConditionsMenu.present(
+                    from: top, faults: container.mockNetworkFaults, bff: container.mockBackend.bff
+                )
+            }
+        }
+        let window: UIWindow = shakeWindow
+        #else
         let window = UIWindow(windowScene: windowScene)
+        #endif
         // Taps in a bar's area never reach the content under it; pans still
         // scroll it (#562).
         window.addGestureRecognizer(BarTapShield())
@@ -44,6 +67,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // The app's text size (the iPhone's, capped at XXXL, raised by Care
         // Mode) and Care Mode's bold text, in place before the first frame.
         CareModePreference.apply(to: [window])
+
+        // Offline / Back online, above every screen (#793).
+        AppContainer.shared.startConnectivityMonitoring()
+        offlineIndicator = OfflineIndicator.install(on: window)
 
         let coordinator = AppCoordinator(window: window, container: AppContainer.shared)
         appCoordinator = coordinator

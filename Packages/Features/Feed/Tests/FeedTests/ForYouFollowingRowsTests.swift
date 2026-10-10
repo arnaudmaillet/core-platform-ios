@@ -202,9 +202,10 @@ struct ForYouFollowingRowsTests {
         #expect(cell.debugCaptionFrame.height > line * 1.5, "two lines, not one")
         #expect(cell.debugCaptionFrame.height < line * 2.6, "two lines, not more")
 
-        // The band names the author; the closing line holds repost and save.
+        // The band names the author; the closing line holds save — and no
+        // repost, which nothing handles yet (#801).
         #expect(cell.authorBandModel?.name == "Bo")
-        #expect(cell.visibleRowActions.repost)
+        #expect(!cell.visibleRowActions.repost, "a repost with nothing behind it is drawn")
         #expect(cell.visibleRowActions.bookmark)
         // Everything on the card, the closing line at its foot.
         let closing = cell.debugClosingLineFrame
@@ -431,7 +432,7 @@ struct ForYouFollowingRowsTests {
         #expect(card.fixedCaptionLines == 2)
         #expect(card.debugCaptionFrame == cell.debugCaptionFrame)
         #expect(card.debugClosingLineFrame == cell.debugClosingLineFrame)
-        #expect(card.visibleRowActions.repost && card.visibleRowActions.bookmark)
+        #expect(card.visibleRowActions == cell.visibleRowActions, "the stand-in draws other controls than the card")
 
         // The opening hides the card under its window; the close puts it back.
         reveal.setConcealed(true)
@@ -520,6 +521,38 @@ struct ForYouFollowingRowsTests {
         return WalletStore(defaults: defaults)
     }
 
+    // MARK: - Repost follows its handler (#801)
+
+    /// ⚠️ A CONTROL IS DRAWN ONLY IF IT DOES SOMETHING. The repost used to be
+    /// drawn on every card with nothing behind it; it now appears with a
+    /// handler, and its press reaches it.
+    @Test func aTextCardDrawsRepostOnlyOnceSomethingHandlesIt() throws {
+        let cards = [Self.post("m0", kind: .photo), Self.post("t0", kind: .text, caption: "Words")]
+        let bare = Fixture(cards: cards)
+        defer { bare.window.isHidden = true }
+        let bareCell = try #require(bare.rails.debugTextCardCell(at: 1))
+        #expect(!bareCell.visibleRowActions.repost)
+        #expect(bare.rails.cardRepostHandler(for: cards[1]) == nil)
+
+        var reposted: [PostID] = []
+        let wired = Fixture(cards: cards, onRepost: { reposted.append($0.id) })
+        defer { wired.window.isHidden = true }
+        let wiredCell = try #require(wired.rails.debugTextCardCell(at: 1))
+        #expect(wiredCell.visibleRowActions.repost, "a handled repost is not drawn")
+        wiredCell.onRepostTapped?()
+        #expect(reposted == [cards[1].id])
+    }
+
+    /// The list's cards and the profile's follow the same rule: no handler,
+    /// no repost.
+    @Test func theListsCardsOfferNoRepostWithoutAHandler() {
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
+        let post = Self.post("p0", kind: .photo)
+        #expect(page.repostHandler(for: post) == nil)
+        page.onRepostRequested = { _ in }
+        #expect(page.repostHandler(for: post) != nil)
+    }
+
     private struct SilentFetcher: ImageFetching {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
@@ -532,11 +565,15 @@ struct ForYouFollowingRowsTests {
         let rails: ForYouRailsView
         let page: ForYouGridPage
 
-        init(cards: [GalleryPost], width: CGFloat = 402, staking: PostCardStaking? = nil) {
+        init(
+            cards: [GalleryPost], width: CGFloat = 402, staking: PostCardStaking? = nil,
+            onRepost: ((GalleryPost) -> Void)? = nil
+        ) {
             window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 874))
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
             rails = ForYouRailsView(imagePipeline: pipeline, videoPlayback: nil)
             rails.staking = staking
+            rails.onCardRepostRequested = onRepost
             page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
             var model = ForYouViewModel.Rails()
             model.following = cards

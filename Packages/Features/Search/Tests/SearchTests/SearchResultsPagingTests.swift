@@ -4,7 +4,9 @@ import CoreNetworking
 import CoreNetworkingMocks
 import CoreStorage
 import Foundation
+import MediaCore
 import Testing
+import UIKit
 @testable import Search
 
 // The search results, page by page (#612).
@@ -23,6 +25,8 @@ private actor PagedSearch: SearchProviding {
     private let posts: [String: [String?: PostSearchPage]]
     private(set) var asks: [Ask] = []
     private var held: Set<String> = []
+    /// How many first-page asks of each kind still fail (#798).
+    private var failuresLeft: [String: Int] = [:]
     private var heldWaiters: [String: [CheckedContinuation<Void, Never>]] = [:]
 
     init(people: [String: [String?: ProfileSearchPage]], posts: [String: [String?: PostSearchPage]] = [:]) {
@@ -31,6 +35,14 @@ private actor PagedSearch: SearchProviding {
     }
 
     func hold(_ token: String) { held.insert(token) }
+    /// The next first-page ask of `kind` ("people" / "posts") fails.
+    func failOnce(_ kind: String) { failuresLeft[kind] = 1 }
+
+    private func failIfAsked(_ kind: String, token: String?) throws {
+        guard token == nil, let left = failuresLeft[kind], left > 0 else { return }
+        failuresLeft[kind] = left - 1
+        throw SearchFailure()
+    }
     func release(_ token: String) {
         held.remove(token)
         for waiter in heldWaiters.removeValue(forKey: token) ?? [] { waiter.resume() }
@@ -51,6 +63,7 @@ private actor PagedSearch: SearchProviding {
     ) async throws -> ProfileSearchPage {
         asks.append(Ask(kind: "people", query: query, token: pageToken, limit: limit))
         await waitIfHeld(pageToken)
+        try failIfAsked("people", token: pageToken)
         return people[query]?[pageToken] ?? ProfileSearchPage(results: [], nextPageToken: nil)
     }
 
@@ -59,11 +72,14 @@ private actor PagedSearch: SearchProviding {
     ) async throws -> PostSearchPage {
         asks.append(Ask(kind: "posts", query: query, token: pageToken, limit: limit))
         await waitIfHeld(pageToken)
+        try failIfAsked("posts", token: pageToken)
         return posts[query]?[pageToken] ?? PostSearchPage(hits: [], nextPageToken: nil)
     }
 
     func suggestions(forPrefix prefix: String, limit: Int32) async throws -> [SearchSuggestion] { [] }
 }
+
+private struct SearchFailure: Error {}
 
 private func person(_ number: Int) -> ProfileSearchResult {
     ProfileSearchResult(id: ProfileID("prof-\(number)"), handle: "user\(number)", displayName: "User \(number)", isVerified: false)
@@ -222,6 +238,95 @@ struct SearchResultsPagingTests {
 
         #expect(handles(viewModel) == ["user10", "user11"])
         #expect(viewModel.hasMorePeople) // bob's own cursor, b2
+    }
+
+    /// #798: a post search that FAILED is not one that matched nothing — the
+    /// Posts tab is told it failed, and Try Again re-asks for the posts alone,
+    /// leaving the people answer as it is.
+    @Test func aFailedPostSearchIsAFailureNotNoPostsAndTryAgainReasksForThePosts() async throws {
+        let provider = PagedSearch(
+            people: ["ann": [nil: people(1...1, next: nil)]],
+            posts: ["ann": [nil: posts([0, 1], next: nil)]]
+        )
+        await provider.failOnce("posts")
+        let viewModel = makeViewModel(provider)
+        var announced = 0
+        viewModel.onPostResultsChange = { _ in announced += 1 }
+        viewModel.submitQuery("ann")
+        try #require(await settle { viewModel.postsFailed && handles(viewModel) == ["user1"] })
+
+        #expect(viewModel.postResults.isEmpty)
+        #expect(!viewModel.isSearchingPosts)
+        let announcedBeforeRetry = announced
+
+        viewModel.retryFailedSearch()
+        viewModel.retryFailedSearch() // a second tap while the first is out
+        #expect(viewModel.isSearchingPosts, "the Posts tab goes back to loading")
+        #expect(!viewModel.postsFailed)
+        #expect(announced > announcedBeforeRetry, "and is told so")
+        try #require(await settle { viewModel.postResults.count == 2 })
+
+        #expect(ids(viewModel.postResults) == ["post-0", "post-1"])
+        #expect(!viewModel.postsFailed)
+        #expect(await provider.asks("posts") == [nil, nil])
+        #expect(await provider.asks("people") == [nil], "the people answer was fine")
+        #expect(handles(viewModel) == ["user1"])
+    }
+
+    /// #798: the people search failing fails the whole answer, and its Try
+    /// Again runs the whole search again.
+    @Test func aFailedPeopleSearchIsRetriedWhole() async throws {
+        let provider = PagedSearch(people: ["ann": [nil: people(1...2, next: nil)]])
+        await provider.failOnce("people")
+        let viewModel = makeViewModel(provider)
+        viewModel.submitQuery("ann")
+        try #require(await settle {
+            if case .failed = viewModel.currentPhase { true } else { false }
+        })
+
+        viewModel.retryFailedSearch()
+        try #require(await settle { handles(viewModel) == ["user1", "user2"] })
+        #expect(await provider.asks("people") == [nil, nil])
+    }
+
+    /// #798: a pull over good posts re-asks for the posts alone, and keeps
+    /// them on the tab while it is out — and when it fails.
+    @Test func aPullOverGoodPostsReasksForThemAndKeepsThemShown() async throws {
+        let provider = PagedSearch(
+            people: ["ann": [nil: people(1...1, next: nil)]],
+            posts: ["ann": [nil: posts([0], next: nil)]]
+        )
+        let viewModel = makeViewModel(provider)
+        viewModel.submitQuery("ann")
+        try #require(await settle { viewModel.postResults.count == 1 && handles(viewModel) == ["user1"] })
+
+        await provider.failOnce("posts")
+        viewModel.retryFailedSearch()
+        #expect(viewModel.isSearchingPosts)
+        #expect(ids(viewModel.postResults) == ["post-0"], "still shown while the pull is out")
+        try #require(await settle { !viewModel.isSearchingPosts })
+
+        #expect(!viewModel.postsFailed, "a failed pull over posts keeps them")
+        #expect(ids(viewModel.postResults) == ["post-0"])
+        #expect(await provider.asks("posts") == [nil, nil])
+        #expect(await provider.asks("people") == [nil], "the people answer is not asked again")
+        #expect(handles(viewModel) == ["user1"])
+    }
+
+    /// #798: a failure clears the previous answer's rows, as an empty answer
+    /// does — left under the message, they read as this query's results.
+    @Test func theUsersTabsFailureClearsThePreviousRows() {
+        let page = SearchPeoplePage(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        page.loadViewIfNeeded()
+        page.render(.results([
+            SearchResultDisplayModel(result: person(1)),
+            SearchResultDisplayModel(result: person(2)),
+        ]))
+        #expect(page.rowCountForTesting == 2)
+
+        page.render(.failed(message: "Couldn't search. Please try again."))
+
+        #expect(page.rowCountForTesting == 0)
     }
 
     /// Over the wire: the mock pages people and posts, and the pages add up

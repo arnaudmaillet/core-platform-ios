@@ -14,6 +14,9 @@ final class SecuritySettingsViewModel {
         didSet { onChange?() }
     }
     var onChange: (() -> Void)?
+    /// A refresh over a loaded list failed. The list stays as it was (the
+    /// screen says so in passing); only a failed FIRST load is `.failed`.
+    var onRefreshFailed: (() -> Void)?
 
     private let sessions: any AccountSessionsManaging
 
@@ -26,7 +29,14 @@ final class SecuritySettingsViewModel {
         do {
             phase = .loaded(try await sessions.activeSessions())
         } catch {
-            phase = .failed
+            // The sessions on screen were true a moment ago: replacing them
+            // with an error row would make the list jump for a refresh the
+            // viewer never asked for (the screen re-reads on every return).
+            if case .loaded = phase {
+                onRefreshFailed?()
+            } else {
+                phase = .failed
+            }
         }
     }
 

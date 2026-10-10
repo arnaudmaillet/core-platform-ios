@@ -10,7 +10,7 @@ import PostGrid
 import ShareSheet
 import UIKit
 
-final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
+final class ProfileViewController: UIViewController, HeaderAccessoryHosting, ProfileRouteAnswering {
     private let viewModel: ProfileViewModel
     /// Non-nil only for the signed-in viewer's own profile (the Profile tab);
     /// nil for a profile pushed via routing, which shows no account actions.
@@ -20,6 +20,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// Handed the profile this screen holds, so the editor opens on it
     /// instead of fetching it again (charter P7).
     private let makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)?
+    /// The origin said this profile is the viewer's own (`presumesOtherProfile`).
+    private let identityStubIsSelf: Bool
     /// Builds the account settings screen (own profile only, the gear's
     /// destination). Nil for other users.
     private let makeSettingsViewController: (() -> UIViewController)?
@@ -106,60 +108,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// hand-over to animate. Built `.navigationTitle` and told to FILL, which
     /// spreads it across its host.
     private let selectorBar: PagedTabBar
-    /// The source filter: one drop-down button — the native single-selection
-    /// menu carries the options (checkmark on the active one), and the button
-    /// shows the pick's glyph. Lazy: the menu actions capture self.
-    /// The content-source filter, leading in the navigation bar.
-    ///
-    /// ⚠️ **A SYSTEM ITEM, NOT A CUSTOM VIEW, AND THE SHAPE IS WHY.** Wrapped
-    /// in a button, a glyph comes out in a 59x44 platter — an OVAL beside a
-    /// chevron that is a 44pt circle — because the button carries its own
-    /// content insets and UIKit sizes the platter around whatever it is given.
-    /// A system item has no view of its own to inflate it, so the platter is
-    /// the 44pt touch target. Measured on the search results, which made the
-    /// same move: `-header-bar-tree` drew 59x44 for the button and 44x44 for
-    /// the item.
-    ///
-    /// It carries the `UIMenu` directly — a bar item is a menu host, so there
-    /// is nothing for a wrapper view to add.
-    private lazy var sourceMenuItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "rectangle.stack"),
-            menu: UIMenu(options: .singleSelection, children: [
-                makeSourceAction(.all, title: "All", symbol: "rectangle.stack"),
-                makeSourceAction(.posts, title: "Posts", symbol: "square.and.pencil"),
-                makeSourceAction(.reposts, title: "Reposts", symbol: PostActionSymbol.repost),
-                makeSourceAction(.tagged, title: "Tagged", symbol: "at")
-            ])
-        )
-        item.accessibilityLabel = "Content source"
-        return item
-    }()
-
-    private func makeSourceAction(
-        _ source: GalleryFilter.Source, title: String, symbol: String
-    ) -> UIAction {
-        UIAction(
-            title: title,
-            image: UIImage(systemName: symbol),
-            // The checkmark starts on the user's GLOBAL preference (seeded
-            // into the view model's filter), not a hardcoded default.
-            state: source == viewModel.galleryFilter.source ? .on : .off
-        ) { [weak self] action in
-            guard let self else { return }
-            self.viewModel.setGallerySource(source)
-            // The icon-only item carries no system mirroring: adopt the
-            // picked action's glyph (and its title for VoiceOver) by hand.
-            self.sourceMenuItem.image = action.image
-            self.sourceMenuItem.accessibilityValue = action.title
-        }
-    }
     /// The pull indicator, above the header rather than inside a list — see
     /// `HeroPullToRefreshView` for why the stock control could not be used.
     private let pullIndicator = HeroPullToRefreshView()
     /// The band the spinner centres in, under the navigation bar.
     private static let pullIndicatorHeight: CGFloat = 44
-    private let statusLabel = UILabel()
+    /// A failed first load, with its way out (#797), or a handle or link
+    /// that names no one (#800).
+    private let statusView = EmptyStateView()
     /// First-load guarantee: while the skeleton screen is up, the scroll
     /// content must fill the viewport, so the gallery's shimmer rows reach
     /// the screen bottom from the very first layout pass. The pager's own
@@ -250,13 +206,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     private var followButtonState: ProfileViewModel.FollowButton = .hidden
 
-    /// The pusher's callback while it holds the push for this screen — see
-    /// `prepareForPresentation`. Nil once called, and for a screen that was
-    /// never held.
-    private var presentationReady: (@MainActor () -> Void)?
-    /// The phase last rendered, for `isSettledForPresentation`.
+    /// The phase last rendered.
     private var renderedPhase: ProfileViewModel.Phase = .loading
-    /// The gallery as last rendered, for `isSettledForPresentation`.
+    /// The gallery as last rendered.
     private var lastGallerySnapshot: ProfileViewModel.GallerySnapshot?
     #if DEBUG
     private var hasLoggedFirstFrame = false
@@ -328,6 +280,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         trayPlacement: ProfileTrayPlacement = .navigationToolbar
     ) {
         self.trayPlacement = trayPlacement
+        self.identityStubIsSelf = identityStub?.isSelf == true
         self.viewModel = viewModel
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
@@ -378,9 +331,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // capsule, NOT "Follow". The prior used to be "Follow" ("most viewed
         // profiles aren't followed"), and every followed author's profile
         // then arrived wearing a blue call to action that turned grey a
-        // moment later. The push waits for the real answer (see
-        // `prepareForPresentation`); the placeholder is only what a read
-        // slower than the hold shows.
+        // moment later. The push never waits for the answer (#778); the
+        // placeholder holds the slot until the read lands.
         if identityStub?.isSelf == true || makeEditViewController != nil {
             // Own profile: Edit from frame 1. Checked BEFORE any follow hint,
             // because "do I follow myself" is not a question — a stub that
@@ -423,21 +375,35 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             HeroScreenCost.measure("landing.relationship") {
                 self.followButtonState = state
                 self.headerView.configureAction(state)
-                // The relationship usually resolves while the push/present is
-                // still animating; bind the bar inside the transition so the
-                // toolbar composes during the animation, not after it.
-                self.alongsideTransition { $0.applyNavigationState() }
-                self.settlePresentationIfReady()
+                // A bell that has to GO (a handle that turned out to be the
+                // viewer, #800) leaves at rest and unanimated: removing a bar
+                // item mid-push pops it on device (#756).
+                if self.isShowingMuteBell, !self.showsMuteBell {
+                    self.applyNavigationStateAtRest()
+                } else {
+                    // The relationship usually resolves while the push/present
+                    // is still animating; bind the bar inside the transition so
+                    // the toolbar composes during the animation, not after it.
+                    self.alongsideTransition { $0.applyNavigationState() }
+                }
+                self.noteLandingMilestone()
             }
         }
-        viewModel.onRelationshipSettled = { [weak self] in self?.settlePresentationIfReady() }
-        headerView.onPicturesSettled = { [weak self] in self?.settlePresentationIfReady() }
+        viewModel.onRelationshipSettled = { [weak self] in
+            guard let self else { return }
+            // The button moves before the read counts as settled, so the
+            // bar it recomposed could still presume someone else: a bell the
+            // answer rules out (the viewer's own handle, #800) goes now.
+            if self.isShowingMuteBell, !self.showsMuteBell { self.applyNavigationStateAtRest() }
+            self.noteLandingMilestone()
+        }
+        headerView.onPicturesSettled = { [weak self] in self?.noteLandingMilestone() }
         viewModel.onMapPinButtonChange = { [weak self] _ in
             HeroScreenCost.measure("landing.mapPin") {
                 // The rails' rows keep the menu open (`.keepsMenuPresented`):
                 // their checkmarks follow in place.
                 self?.refreshVisibleMapRows()
-                self?.settlePresentationIfReady()
+                self?.noteLandingMilestone()
             }
         }
         viewModel.onMuteScopesChange = { [weak self] _ in self?.refreshMuteBell() }
@@ -493,7 +459,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // The media gallery "View all" pushed, if it is up, grows with
             // the pages as they land (#631).
             self?.mediaGallery?.render(snapshot.media)
-            self?.settlePresentationIfReady()
+            self?.noteLandingMilestone()
             #if DEBUG
             self?.auditPostMenu(snapshot)
             #endif
@@ -601,16 +567,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // the state a push held for it (charter P12a) should have settled.
         if !hasLoggedFirstFrame, ProcessInfo.processInfo.arguments.contains("-profile-first-frame-log") {
             hasLoggedFirstFrame = true
-            print("[profile-first-frame] settled=\(isSettledForPresentation) "
+            print("[profile-first-frame] settled=\(isSettled) "
                   + "redacted=\(debugIsHeaderRedacted) follow=\(debugFollowTitle ?? "placeholder") "
                   + "avatar=\(debugHasAvatarPicture ? "picture" : "initials") "
                   + "banner=\(headerView.bannerFormat) gallerySettled=\(isGallerySettled)")
         }
         #endif
-        // On screen, the hold is over however it ended — a ceiling release
-        // never hears back from here, so its callback is dropped now rather
-        // than kept alive until the page happens to settle.
-        presentationReady = nil
         // ⚠️ On every appearance, not once. The saved pile is mutable from
         // outside this screen — the feed's bookmark button writes to the same
         // store — so a Saved tab bound at load would be stale the first time
@@ -659,6 +621,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // A tab root always shows the bar (#769).
+        ensureAppTabBarAsTabRoot()
         // The BACKSTOP, on UIKit's own animation like every other install
         // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
         // and a committed close install from `viewWillAppear` and find nothing
@@ -1578,8 +1542,38 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// Whether the bell stands in the bar: someone else's profile, in a
     /// composition that can mute, for a member. The same rule the see-more
     /// menu's Mute submenu had (#689): a guest has no account to mute from.
+    ///
+    /// ⚠️ DECIDED AT FRAME 0 FOR A ROUTED PROFILE (#778). The relationship
+    /// read used to land before the (held) push; pushed at once, the bar went
+    /// `[coins]` → `[bell][coins]` mid-slide, and bar items changed during a
+    /// push land unanimated at its end on device (#756). Someone else's
+    /// profile — what a routed profile that is not the viewer's own is —
+    /// wears the bell from the first frame; the relationship only confirms it.
+    ///
+    /// A handle or link route (#800) wears it from frame 0 too, DISABLED until
+    /// the lookup names someone else (`isMuteBellEnabled`); a lookup that
+    /// names no one, or the viewer, takes it away once the push has settled
+    /// (`applyNavigationStateAtRest`).
     private var showsMuteBell: Bool {
-        viewModel.canMute && viewModel.canModerate && MemberGates.gate(from: self)?.isMember != false
+        guard !viewModel.namesNoOne else { return false }
+        let isOtherProfile = viewModel.canModerate
+            || (presumesOtherProfile && !viewModel.isRelationshipSettled)
+        return viewModel.canMute && isOtherProfile && MemberGates.gate(from: self)?.isMember != false
+    }
+
+    /// Whether the bell can be used yet: a handle or link route has no one to
+    /// mute until the relationship read says the lookup found someone else.
+    private var isMuteBellEnabled: Bool {
+        !viewModel.wasOpenedByReference || viewModel.canModerate
+    }
+
+    /// The keys the router's repeat filter asks about (#800).
+    var profileRouteKeys: Set<ProfileRouteKey> { viewModel.profileRouteKeys }
+
+    /// A profile reached by id that is not the viewer's own, as far as frame 0
+    /// can tell: no self stub, no Edit wiring.
+    private var presumesOtherProfile: Bool {
+        !viewModel.isOwnProfile && !identityStubIsSelf && makeEditViewController == nil
     }
 
     /// Resolved when it opens, so the checkmarks are the current scopes.
@@ -1757,7 +1751,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // Notes paste empty.
         UIPasteboard.general.url = link
         UIPasteboard.general.string = link.absoluteString
-        ToastView.present("Link copied", symbol: "link", in: view)
+        Feedback.success("Link copied", symbol: "link", from: self)
     }
 
     /// Block is destructive and, here, one-way out of the screen — so it asks
@@ -1900,28 +1894,32 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             let message = profileCount > 1
                 ? "Blocked \(handle) and \(profileCount - 1) more"
                 : "Blocked \(handle)"
-            // Hosted on the navigation controller's view, not this screen's:
-            // the block pops this view controller in the same turn, and a toast
+            // Sourced from the navigation controller, not this screen: the
+            // block pops this view controller in the same turn, and a toast
             // parented here would leave with it.
-            ToastView.present(message, symbol: "hand.raised.fill", in: navigationController?.view ?? view)
+            Feedback.success(message, symbol: "hand.raised.fill", from: navigationController ?? self)
         case .unblocked(let handle):
-            ToastView.present("Unblocked \(handle)", symbol: "hand.raised.slash.fill", in: view)
+            Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: self)
         case .muteChanged(let handle, let scopes):
-            ToastView.present(
+            Feedback.success(
                 ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
                 symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                in: view
+                from: self
             )
         case .restrictChanged(let handle, let restricted):
-            ToastView.present(
+            Feedback.success(
                 restricted ? "Restricted \(handle)" : "Unrestricted \(handle)",
                 symbol: restricted ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.checkmark",
-                in: view
+                from: self
             )
         case .postDeleted:
-            ToastView.present("Post deleted", symbol: "trash.fill", in: view)
+            Feedback.success("Post deleted", symbol: "trash.fill", from: self)
         case .reported:
-            ToastView.present("Report sent", in: view)
+            Feedback.success("Report sent", symbol: "flag.fill", from: self)
+        case .followFailed(let message):
+            // A toast, not the alert below: the button has already flipped
+            // back, so there is nothing to decide — only why it moved (#802).
+            Feedback.failure(message, from: self)
         case .failed(let message):
             let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -2131,15 +2129,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // large title has nowhere to go under an immersive banner.
         navigationItem.largeTitleDisplayMode = .never
 
-        // The content-source filter leads the bar on YOUR OWN profile only,
-        // behind the shell's bell on the tab root. Someone else's profile has
-        // no filter: its sources are pages at the foot (#696).
-        //   tab root  [bell][source] … [coins][switcher gear]
+        // No content-source filter on any profile (#772): its sources are
+        // pages at the foot, your own as anyone else's (#696).
+        //   tab root  [bell] … [coins][switcher gear]
         //   pushed    [back] … [bell][coins]
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
-        let source = viewModel.isOwnProfile ? sourceMenuItem : nil
-        let leading = [leadingAccessoryItem, source].compactMap { $0 }
+        let leading = [leadingAccessoryItem].compactMap { $0 }
         if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
             navigationItem.leftBarButtonItems = leading
         }
@@ -2168,6 +2164,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // The identity block says the name in full a finger's width below, and
         // every item up here is a control.
         updateActionBarItem(followButtonState)
+    }
+
+    /// Whether the bar wears the bell right now.
+    private var isShowingMuteBell: Bool {
+        navigationItem.rightBarButtonItems?.contains { $0 === muteBellItem } == true
+    }
+
+    /// Recomposes the bar once no transition runs, without animation — for an
+    /// item that has to leave (#800, #756).
+    private func applyNavigationStateAtRest() {
+        let apply: @MainActor () -> Void = { [weak self] in
+            UIView.performWithoutAnimation { self?.applyNavigationState() }
+        }
+        if let navigationController { navigationController.whenAtRest(apply) } else { apply() }
     }
 
     /// Runs a navigation-bar mutation eagerly during an active transition:
@@ -2267,6 +2277,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // The mute bell (#689), someone else's profile only: `[0]` is the
         // corner, as the gear is on your own — `[bell][coins]`.
         if showsMuteBell {
+            muteBellItem.isEnabled = isMuteBellEnabled
             items.append(muteBellItem)
             if trailingAccessoryItem != nil { items.append(muteBellSpacer) }
         }
@@ -2404,16 +2415,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         }
         view.bringSubviewToFront(pullIndicator)
 
-        statusLabel.font = .appFont(forTextStyle: .body)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.textAlignment = .center
-        statusLabel.numberOfLines = 0
-        statusLabel.isHidden = true
-        statusLabel.constrain(in: view) { parent in
-            statusLabel.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            statusLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor)
-            statusLabel.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor)
+        statusView.isHidden = true
+        statusView.constrain(in: view) { parent in
+            statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
+            statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
+            statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
+            statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
     }
 
@@ -2547,19 +2554,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         slideDismissal.install(on: nav)
     }
 
-    /// Records the choice and re-dresses the screen around it.
+    /// Records the choice.
     ///
     /// ⚠️ Only a FORMAT page is a filter preference. Saved and Liked are
     /// corpora, not formats, and writing one into the stored filter would mean
     /// re-opening the profile on a tab the next profile may not even have.
-    /// The source tray goes with it for the same reason: All / Posts / Reposts
-    /// / Tagged are questions about what this profile published, and there is
-    /// no answer to any of them about a post somebody else wrote.
     private func adoptTab(_ tab: ProfileTab) {
         viewModel.setActiveTab(tab)
-        // The source filter only means something on a format tab — it filters
-        // WITHIN one — so it goes when there is no format to filter.
-        sourceMenuItem.isHidden = tab.format == nil
     }
 
     /// Selects a tab the way a selector tap does — the shared path behind the
@@ -2712,6 +2713,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         selectorBar.setTitles(shown.map(\.title))
         let index = active.flatMap { shown.firstIndex(of: $0) } ?? 0
         mirrorSelection(to: index)
+        // ⚠️ THE PAGE ON SCREEN IS ADOPTED WHEN ITS TAB WENT (#772). An account
+        // switch on Reposts or Tagged cuts the tabs to Posts while every source
+        // reloads; the strip clamps quietly and the pager settles nothing, so
+        // the source stayed on the tab that left — Posts then paged and pushed
+        // "View all" from the wrong corpus.
+        if active != shown[index] { adoptTab(shown[index]) }
         if shown.count > 1 {
             let wasPlaced = selectorAccessory != nil || selectorItem != nil
             placeSelectors()
@@ -3006,7 +3013,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     private func render(_ phase: ProfileViewModel.Phase) {
         let previous = renderedPhase
         renderedPhase = phase
-        defer { settlePresentationIfReady() }
+        defer { noteLandingMilestone() }
         switch phase {
         case .loading:
             // First load renders the REAL screen in skeleton state: the
@@ -3015,7 +3022,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // through their own loading state until the view model's first
             // snapshot arrives. Hydration is a pure cross-fade over the very
             // frames the content will occupy — nothing can shift.
-            statusLabel.isHidden = true
+            statusView.isHidden = true
+            headerView.isHidden = false
             galleryPager.isHidden = false
             // The HEADER is held on a switch rather than redacted: its bones'
             // shimmer sweeps left to right, and over a fast load that sweep
@@ -3034,7 +3042,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
         case .content(let model):
             pullIndicator.endRefreshing()
-            statusLabel.isHidden = true
+            statusView.isHidden = true
+            headerView.isHidden = false
             galleryPager.isHidden = false
             // Content owns its height again; the release rides the same
             // layout pass as the (dissolve-masked) gallery height snap.
@@ -3064,40 +3073,54 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false
             headerView.setRedacted(false)
-            statusLabel.text = message
-            statusLabel.isHidden = false
+            // Nothing ever loaded (an offline handle tap, #800): an empty
+            // badge, counters and Message button would show around the block.
+            headerView.isHidden = viewModel.profile == nil
+            // ⚠️ A WAY OUT (#797): the pull lives on the gallery this hides,
+            // so "Pull to retry" could not be done.
+            statusView.configure(
+                symbolName: "exclamationmark.triangle", title: message,
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.viewModel.refresh()
+                }
+            )
+            statusView.isHidden = false
+
+        case .notFound(let message, let detail):
+            // The same block as a failure, without Try Again: an answer, not
+            // an error (#800). The header goes too — with no profile its
+            // verified badge, counter labels and Message button showed
+            // through around the block, a page for no one.
+            pullIndicator.endRefreshing()
+            galleryPager.isHidden = true
+            skeletonViewportFill?.isActive = false
+            headerView.setRedacted(false)
+            headerView.isHidden = true
+            statusView.configure(
+                symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail
+            )
+            statusView.isHidden = false
+            // The bell worn since frame 0 has no one to mute.
+            if isShowingMuteBell { applyNavigationStateAtRest() }
         }
     }
 }
 
-// MARK: - Presentation readiness (charter P12a)
+// MARK: - Landing milestones
 
-extension ProfileViewController: PresentationReadying {
-    /// Starts the loads now — they begin in `viewDidLoad`, which loading the
-    /// view runs — so the pusher can hold the slide until they land.
-    ///
-    /// Loading the view early is the same work the push would do a few
-    /// milliseconds later, moved before it; no layout runs here (the first
-    /// pass is still the push's own, P15). Everything that lands while the
-    /// screen is off-window applies without its on-screen cross-fades, which
-    /// is the point: the first frame of the slide is the finished page.
-    func prepareForPresentation(ready: @escaping @MainActor () -> Void) {
-        presentationReady = ready
-        loadViewIfNeeded()
-        settlePresentationIfReady()
-    }
-
-    /// Whether the page, pushed now, would be the page that stays: the header
+extension ProfileViewController {
+    /// Whether the page on screen is the page that stays: the header
     /// has its profile, the follow capsule has its answer (and, for someone
     /// followed, the map star its rails — it widens the tray), both pictures are
     /// drawn (or known absent), and the gallery's open page has left its
     /// bones. A failed load is settled too — nothing more is coming.
     ///
     /// The cards' own media are NOT waited for: those are per item, P13.
-    var isSettledForPresentation: Bool {
+    var isSettled: Bool {
         switch renderedPhase {
         case .loading: return false
-        case .failed: return true
+        case .failed, .notFound: return true
         case .content:
             let relationshipKnown = followButtonState != .hidden || viewModel.isRelationshipSettled
             return relationshipKnown && viewModel.isMapPinSettled
@@ -3113,13 +3136,13 @@ extension ProfileViewController: PresentationReadying {
         return snapshot.state(for: tabs[galleryPager.activePageIndex]) != .loading
     }
 
-    func settlePresentationIfReady() {
+    /// One piece of the first frame landed. Nothing waits on these any more —
+    /// the screen is pushed at once on its loading state (#778) — so this only
+    /// traces them (`-profile-first-frame-log`).
+    func noteLandingMilestone() {
         #if DEBUG
         traceReadiness()
         #endif
-        guard let ready = presentationReady, isSettledForPresentation else { return }
-        presentationReady = nil
-        ready()
     }
 }
 
@@ -3174,6 +3197,7 @@ extension ProfileViewController {
         case .loading: "loading"
         case .content: "content"
         case .failed: "failed"
+        case .notFound: "notFound"
         }
         let state = "phase=\(phase) relationship=\(followButtonState != .hidden || viewModel.isRelationshipSettled) "
             + "pin=\(viewModel.isMapPinSettled) "
@@ -3181,7 +3205,7 @@ extension ProfileViewController {
         guard state != lastTracedReadiness else { return }
         lastTracedReadiness = state
         let ms = (CACurrentMediaTime() - debugBornAt) * 1000
-        print(String(format: "[profile-ready] +%.0fms ", ms) + state + (presentationReady == nil ? "" : " (held)"))
+        print(String(format: "[profile-ready] +%.0fms ", ms) + state)
     }
 }
 
@@ -3214,8 +3238,8 @@ extension ProfileViewController {
     /// Fed from here as pages land (`onGalleryChange`), under the same
     /// source, and its posts open through `openGalleryPost` measured against
     /// ITS mosaic, so a close lands on the tile it left from.
-    /// What "View all" pushes is the page on screen's media (#696): on
-    /// someone else's profile Reposts and Tagged have their own.
+    /// What "View all" pushes is the page on screen's media (#696): Reposts
+    /// and Tagged have their own, on every profile since #772.
     private var mediaGalleryTitle: String {
         switch tabs[galleryPager.activePageIndex] {
         case .reposts: "Reposted Media"

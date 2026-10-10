@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 import Testing
 @testable import Chat
@@ -87,6 +88,14 @@ private actor NeverReturningDirectory: PeopleDirectoryProviding {
 private actor FailingDirectory: PeopleDirectoryProviding {
     func searchPeople(matching query: String, limit: Int32) async throws -> [DirectoryPerson] {
         throw ChatError.transport(message: "no")
+    }
+}
+
+/// Fails the way the real directory does with no connection: Connect's
+/// `unavailable`, kept on the repository error (#794).
+private actor OfflineDirectory: PeopleDirectoryProviding {
+    func searchPeople(matching query: String, limit: Int32) async throws -> [DirectoryPerson] {
+        throw PeopleDirectoryError.transport(message: "no", failure: .offline)
     }
 }
 
@@ -361,6 +370,23 @@ struct InboxSearchViewModelTests {
         let phase = await settle(box) { if case .failed = $0 { true } else { false } }
 
         #expect(phase == .failed(message: "Couldn't search for people. Please try again."))
+    }
+
+    /// #794: offline is the one failure the viewer can fix, so it says so
+    /// instead of the generic "couldn't search".
+    @Test func anOfflineDirectorySaysYoureOffline() async {
+        let repository = StubChatProvider(conversations: [])
+        let catalog = await makeCatalog(repository)
+        let (viewModel, box) = makeViewModel(
+            repository: repository,
+            catalog: catalog,
+            people: OfflineDirectory()
+        )
+
+        viewModel.queryChanged("sofia")
+        let phase = await settle(box) { if case .failed = $0 { true } else { false } }
+
+        #expect(phase == .failed(message: "You're offline. Check your connection and try again."))
     }
 
     /// Clearing the field lands back on the IDLE OFFER — recent threads and the

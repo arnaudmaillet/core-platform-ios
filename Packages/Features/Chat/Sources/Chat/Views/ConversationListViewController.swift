@@ -90,6 +90,15 @@ final class ConversationListViewController: UIViewController {
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onHasMoreChange = { [weak self] _ in self?.updatePagingFooter() }
+        // A row's mute, once the server has answered (#803).
+        viewModel.onMuteAnswered = { [weak self] message, muting, confirmed in
+            guard let self else { return }
+            if confirmed {
+                Feedback.success(message, symbol: muting ? "bell.slash.fill" : "bell.fill", from: self)
+            } else {
+                Feedback.failure(message, from: self)
+            }
+        }
         updatePagingFooter()
         // The view model may have moved past `.loading` before this view was
         // asked for (the catalog replays its snapshot at subscription), so the
@@ -294,13 +303,16 @@ final class ConversationListViewController: UIViewController {
             statusView.configure(
                 symbol: "bubble.left.and.bubble.right",
                 title: "No conversations yet",
-                message: "Start one from someone's profile, or tap the compose button."
+                message: "Start one from someone's profile, or from search."
             )
             statusView.isHidden = false
         case .failed(let message):
             skeletonView.isHidden = true
             tableView.isHidden = true
-            statusView.configure(symbol: "exclamationmark.triangle", title: "Something went wrong", message: message)
+            statusView.configure(
+                symbol: "exclamationmark.triangle", title: "Something went wrong", message: message,
+                actionTitle: "Try Again", action: { [weak self] in self?.viewModel.refresh() }
+            )
             statusView.isHidden = false
         }
     }

@@ -165,6 +165,58 @@ struct MapsViewModelTests {
                 "the tile response reaches the diff wearing the injected tags")
     }
 
+    // MARK: - Repeated failures (#798)
+
+    /// Two failed queries in a row are reported once; more failures in the
+    /// same run say nothing new.
+    @Test func twoFailedQueriesInARowAreReportedOnce() async {
+        let provider = FakeGeoProvider()
+        provider.failing = true
+        let viewModel = MapsViewModel(repository: provider)
+        var reports = 0
+        viewModel.onRepeatedQueryFailure = { reports += 1 }
+
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 1 }
+        #expect(reports == 0, "one failure is noise")
+
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 2 }
+        #expect(reports == 1)
+
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 3 }
+        #expect(reports == 1, "not repeated within the run")
+    }
+
+    /// A query that comes back ends the run: the next two failures are
+    /// reported again, and a failure either side of a success is not a run.
+    @Test func aSuccessfulQueryResetsTheRun() async {
+        let provider = FakeGeoProvider()
+        provider.failing = true
+        let viewModel = MapsViewModel(repository: provider)
+        var reports = 0
+        viewModel.onRepeatedQueryFailure = { reports += 1 }
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 1 }
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 2 }
+        #expect(reports == 1)
+
+        provider.failing = false
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 0 }
+
+        provider.failing = true
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 1 }
+        #expect(reports == 1, "a single failure after a success is not a run")
+
+        viewModel.viewportChanged(Self.paris)
+        await waitUntil { viewModel.consecutiveQueryFailures == 2 }
+        #expect(reports == 2, "a new run is reported afresh")
+    }
+
     /// Bounded yield-polling: the fake answers synchronously, so the query
     /// task only needs scheduler turns, never wall-clock time.
     private func waitUntil(_ condition: () -> Bool) async {
@@ -184,9 +236,21 @@ private final class FakeGeoProvider: GeoDiscoveryProviding, @unchecked Sendable 
     /// What every query answers with — empty by default, which is what the
     /// choreography tests want; the decoration test seeds real pins.
     var stubbedPins: [MapPin] = []
+    private var _failing = false
+    /// Every query throws while set (#798).
+    var failing: Bool {
+        get { lock.withLock { _failing } }
+        set { lock.withLock { _failing = newValue } }
+    }
+
+    struct Offline: Error {}
 
     func queryTile(_ viewport: MapViewport, filter: MapFilter?) async throws -> TileResult {
-        lock.withLock { _calls.append(Call(viewport: viewport, filter: filter)) }
+        let fails = lock.withLock {
+            _calls.append(Call(viewport: viewport, filter: filter))
+            return _failing
+        }
+        if fails { throw Offline() }
         return TileResult(pins: lock.withLock { stubbedPins }, tileCount: 1)
     }
 }

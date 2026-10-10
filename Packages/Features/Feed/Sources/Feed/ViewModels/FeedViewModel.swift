@@ -1,6 +1,7 @@
 import CoreContracts
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import CoreRealtime
 import CoreStorage
 import Foundation
@@ -93,6 +94,10 @@ public final class FeedViewModel {
     private let now: @Sendable () -> Date
 
     private var phase: Phase = .loading
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload a failed timeline — the shared
+    /// one; a test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var items: [FeedItemDisplayModel] = []
     private var engagement: [PostID: EngagementState] = [:]
     private var likesInFlight: Set<PostID> = []
@@ -106,12 +111,33 @@ public final class FeedViewModel {
     /// one moment a swipe up past the end may close the feed.
     ///
     /// True only when a page said so (`FeedPage.isEndOfSource`) AND left no
-    /// cursor: a window cut from a longer grid, a page still to come, or a
-    /// page that FAILED (its cursor is kept) all read false — an error is not
-    /// "the end" (the owner's call, 2026-10-07).
+    /// cursor. ⚠️ No longer the end-of-list gate (#761): the snap feed's
+    /// upward grab closes past the last post LOADED, on every feed — a failed
+    /// page included, which the 2026-10-07 rule kept from counting; the
+    /// owner's "systematic" call of 2026-10-10 supersedes it.
     public private(set) var isSourceExhausted = false
+
+    /// Whether posts are on their way — the first page, or a next one (#761):
+    /// until they land, the last post loaded is not the end of the list.
+    public var isLoadingNextPage: Bool { pagingLoad != nil || initialLoad != nil }
+
+    /// The last index a cell displayed at — so the near-end check can run
+    /// again once a cursor arrives (a seeded feed opened on its last tile
+    /// displayed it before the first page said more would follow).
+    private var lastDisplayedIndex: Int?
     private var builder: FeedDisplayModelBuilder?
     private var initialLoad: Task<Void, Never>?
+    /// Which first-page load is current (#836): bumped each time the slot is
+    /// filled. A superseded load touches NOTHING once it wakes — not the
+    /// slot, not the posts, not the phase.
+    ///
+    /// ⚠️ CANCELLING IS NOT ENOUGH: `loadFirstPage()` and `build()` (a
+    /// detached task) finish anyway. A load superseded by `refresh()` or
+    /// `repoint()` used to clear its successor's slot (`isLoadingNextPage`
+    /// read false with the new first page on its way), and after a
+    /// `repoint` its late answer wrote the old window's posts, cursor and
+    /// counter subscriptions into the new one — or `.failed` over it.
+    private var initialLoadGeneration = 0
     private var pagingLoad: Task<Void, Never>?
     private var realtimeTasks: [Task<Void, Never>] = []
     private let tickerBuilder = CommentTickerBuilder()
@@ -166,8 +192,10 @@ public final class FeedViewModel {
 
     /// Called once the view is laid out; kicks the initial load.
     public func viewDidLoad() {
+        armRecovery()
         builder = FeedDisplayModelBuilder()
-        initialLoad = Task { await loadInitial() }
+        let generation = nextInitialLoadGeneration()
+        initialLoad = Task { await loadInitial(generation: generation) }
         startRealtimeIfConfigured()
         startComposedPostsIfConfigured()
     }
@@ -207,10 +235,38 @@ public final class FeedViewModel {
         }
     }
 
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        // A pull already on its way is the answer; cancelling it would flash
+        // the failure again.
+        guard case .failed = phase, initialLoad == nil else { return }
+        refresh()
+    }
+
     public func refresh() {
-        guard pagingLoad == nil else { return }
-        initialLoad?.cancel()
-        initialLoad = Task { await loadFirstPageFromNetwork(renderCacheFirst: false) }
+        // A first load already on its way is the answer to a second ask: a
+        // double-tapped Try Again cancelled it, and the cancelled load's
+        // catch flashed the failure before the new one landed (#797).
+        guard pagingLoad == nil, initialLoad == nil else { return }
+        let generation = nextInitialLoadGeneration()
+        initialLoad = Task { await loadFirstPageFromNetwork(renderCacheFirst: false, generation: generation) }
+    }
+
+    private func nextInitialLoadGeneration() -> Int {
+        initialLoadGeneration += 1
+        return initialLoadGeneration
+    }
+
+    /// Whether the load of `generation` is still the current one.
+    private func isCurrentInitialLoad(_ generation: Int) -> Bool {
+        generation == initialLoadGeneration
     }
 
     /// Author tapped in a cell — hand off to cross-feature routing. The feed
@@ -356,6 +412,11 @@ public final class FeedViewModel {
         if items.indices.contains(index) {
             ensureCommentStreams(for: items[index].id)
         }
+        lastDisplayedIndex = index
+        startPagingIfNearEnd(index)
+    }
+
+    private func startPagingIfNearEnd(_ index: Int) {
         guard nextPageToken != nil, pagingLoad == nil, index >= items.count - 5 else { return }
         pagingLoad = Task { await loadNextPage() }
     }
@@ -391,6 +452,10 @@ public final class FeedViewModel {
         guard let repointable = repository as? any RepointableFeedProviding else { return }
         initialLoad?.cancel()
         pagingLoad?.cancel()
+        // Gone with its window: a cancelled page left set read as "still
+        // loading" for good, and nothing would ever page again (#761).
+        pagingLoad = nil
+        lastDisplayedIndex = nil
         for task in streamLoads.values { task.cancel() }
         streamLoads = [:]
         streamsByPost = [:]
@@ -405,29 +470,40 @@ public final class FeedViewModel {
         // derivation state, and reusing one across windows is the kind of
         // thing that shows up later as one post wearing another's furniture.
         builder = FeedDisplayModelBuilder()
+        let generation = nextInitialLoadGeneration()
         initialLoad = Task {
             await repointable.repoint(to: ids)
             guard !Task.isCancelled else { return }
-            await loadInitial()
+            await loadInitial(generation: generation)
         }
     }
 
-    private func loadInitial() async {
+    private func loadInitial(generation: Int) async {
         // Offline-first: render the snapshot immediately if there is one…
-        if let cached = await repository.cachedFirstPage(), let models = await build(cached) {
+        if let cached = await repository.cachedFirstPage(), isCurrentInitialLoad(generation),
+           let models = await build(cached), isCurrentInitialLoad(generation) {
             items = models
             seedEngagement(from: cached)
             phase = .content
             emit()
         }
         // …then replace it with the network truth.
-        await loadFirstPageFromNetwork(renderCacheFirst: true)
+        guard isCurrentInitialLoad(generation) else { return }
+        await loadFirstPageFromNetwork(renderCacheFirst: true, generation: generation)
     }
 
-    private func loadFirstPageFromNetwork(renderCacheFirst: Bool) async {
+    private func loadFirstPageFromNetwork(renderCacheFirst: Bool, generation: Int) async {
         do {
             let page = try await repository.loadFirstPage()
-            guard let models = await build(page.entries) else { return }
+            // Superseded: its successor owns the slot, the posts and the phase.
+            guard isCurrentInitialLoad(generation) else { return }
+            let built = await build(page.entries)
+            guard isCurrentInitialLoad(generation) else { return }
+            guard let models = built else {
+                // No builder yet: nothing to render, but the slot is freed.
+                initialLoad = nil
+                return
+            }
             items = models
             seedEngagement(from: page.entries)
             subscribeToCounters(for: models.map(\.id))
@@ -436,18 +512,26 @@ public final class FeedViewModel {
             isColdRefreshing = page.isCold
             phase = models.isEmpty ? .empty : .content
         } catch {
+            // A superseded load's failure is not the feed's.
+            guard isCurrentInitialLoad(generation) else { return }
             // Keep showing cached content on failure; only fail visibly when
             // there is nothing at all to show.
             if items.isEmpty {
-                phase = .failed(message: "Couldn't load your timeline. Pull to retry.")
+                phase = .failed(message: "Couldn't load your timeline")
             }
         }
         initialLoad = nil
         emit()
+        // A cursor that arrived after the viewer's cell displayed: the
+        // near-end check runs again for it (#761).
+        if let lastDisplayedIndex { startPagingIfNearEnd(lastDisplayedIndex) }
     }
 
     private func loadNextPage() async {
-        guard let token = nextPageToken else { return }
+        guard let token = nextPageToken else {
+            if !Task.isCancelled { pagingLoad = nil }
+            return
+        }
         do {
             let page = try await repository.loadPage(afterToken: token)
             if let models = await build(page.entries) {
@@ -463,7 +547,8 @@ public final class FeedViewModel {
         } catch {
             // Silent: the trigger fires again on further scrolling.
         }
-        pagingLoad = nil
+        // A cancelled page (a `repoint`) leaves the slot to its successor.
+        if !Task.isCancelled { pagingLoad = nil }
         emit()
     }
 

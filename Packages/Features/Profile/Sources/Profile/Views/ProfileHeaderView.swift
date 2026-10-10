@@ -812,9 +812,8 @@ final class ProfileHeaderView: UIView {
             // relationship is read the slot holds a BLANK quiet capsule as
             // wide as Following, inert, beside Message: the tray's geometry is
             // already right, and nothing on it claims an answer it does not
-            // have. The push normally waits for the answer (see
-            // `ProfileViewController.prepareForPresentation`); this is what a
-            // slow read shows instead.
+            // have. The push never waits for the answer (#778): this holds
+            // the slot until the read lands.
             followButton.isHidden = false
             var config = Self.capsule(prominent: false)
             config.title = "Following"

@@ -32,9 +32,24 @@ public final class URLSessionWebSocketTransport: RealtimeTransport, @unchecked S
 
         let (stream, continuation) = AsyncStream.makeStream(of: RealtimeTransportEvent.self)
         task.resume()
-        continuation.yield(.connected)
 
         Task {
+            // ⚠️ CONNECTED MEANS THE SOCKET ANSWERED (#792). It was announced
+            // right after `resume()`, before any handshake: offline, every
+            // attempt "connected" and died at once. A ping's pong proves the
+            // upgrade went through.
+            do {
+                try await withCheckedThrowingContinuation { (proof: CheckedContinuation<Void, Error>) in
+                    task.sendPing { error in
+                        if let error { proof.resume(throwing: error) } else { proof.resume() }
+                    }
+                }
+            } catch {
+                continuation.yield(.disconnected(reason: error.localizedDescription))
+                continuation.finish()
+                return
+            }
+            continuation.yield(.connected)
             while true {
                 do {
                     let message = try await task.receive()

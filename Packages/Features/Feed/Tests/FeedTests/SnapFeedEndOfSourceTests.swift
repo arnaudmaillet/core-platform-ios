@@ -151,12 +151,52 @@ struct SnapFeedEndOfSourceTests {
         #expect(!feed.zoomUpwardDismissalPermitted(at: centre(of: feed), in: feed.view))
     }
 
-    /// Last page + more (a window cut from a longer grid): no claim — the feed
-    /// does not know it is at the end, so it is not.
-    @Test func theLastPostOfAWindowDoesNotClaim() async throws {
+    /// ⚠️ A WINDOW'S LAST POST CLAIMS TOO (#761): every full-screen feed —
+    /// For You's window, a profile's gallery — closes past its last post, not
+    /// only a source that said it was finished.
+    @Test func theLastPostOfAWindowClaimsToo() async throws {
         let feed = try await feed(FixedPostsFeedProvider(base: Photos(), ids: ids("a", "b", "c")))
         page(feed, to: 2)
+        let point = centre(of: feed)
 
+        #expect(feed.isAtEndOfSource)
+        #expect(feed.zoomUpwardDismissalPermitted(at: point, in: feed.view)
+                == feed.zoomVerticalDismissalPermitted(at: point, in: feed.view))
+    }
+
+    /// ⚠️ AT THE END, THE PAGE DRIVE'S DRAGS CLOSE (#770): on an engaged text
+    /// page the composer bar and the header band are the only drags that page,
+    /// and at the last post they have nowhere to go. The rail keeps its own;
+    /// the stream below the band decides by its bottom.
+    @MainActor
+    @Test func thePageDrivesTerritoryClosesAtTheEnd() {
+        let bar = CommentsInputBar()
+        let field = UIView()
+        bar.addSubview(field)
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: field, inPageDriveBand: false) == .closes,
+                "the composer bar's drag pages a text post: at the end it closes")
+
+        let container = SnapCommentsContainerView()
+        let row = UIView()
+        container.addSubview(row)
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: row, inPageDriveBand: true) == .closes,
+                "the header band's drag pages a text post: at the end it closes")
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: row, inPageDriveBand: false) == .streamDecides,
+                "below the band the stream yields only at its bottom")
+
+        let rail = SnapShortcutRailView()
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: rail, inPageDriveBand: true) == .refuses)
+        #expect(SnapFeedViewController.upwardCloseTerritory(from: UIView(), inPageDriveBand: false) == .closes)
+    }
+
+    /// While the next page is on its way, the last post loaded is not the end.
+    @Test func aPageOnItsWayIsNotTheEnd() async throws {
+        let feed = try await feed(FixedPostsFeedProvider(base: Photos(), ids: ids("a", "b", "c")) { _ in
+            try? await Task.sleep(for: .seconds(30))
+            return nil
+        })
+        page(feed, to: 2)
+        try #require(await settle { feed.debugIsLoadingNextPage }, "guard: no page was asked for")
         #expect(!feed.isAtEndOfSource)
         #expect(!feed.zoomUpwardDismissalPermitted(at: centre(of: feed), in: feed.view))
     }
@@ -196,12 +236,30 @@ struct SnapFeedEndOfSourceTests {
         withExtendedLifetime((pushStack, revealStack)) {}
     }
 
-    @Test func aPlainPushOrRevealIsStillAWindow() async throws {
+    /// ⚠️ A FEED OPENED ON ITS LAST LOADED TILE ASKS FOR MORE ONCE THE FIRST
+    /// PAGE SAYS MORE FOLLOWS (#761): the cell displayed before the cursor
+    /// arrived, and the near-end check runs again — so the grab does not close
+    /// a profile whose gallery has more pages.
+    @Test func aCursorArrivingLateStillPagesFromTheDisplayedTile() async throws {
+        var asked = 0
+        let provider = FixedPostsFeedProvider(base: Photos(), ids: ids("a", "b")) { _ in
+            asked += 1
+            return []
+        }
+        let viewModel = FeedViewModel(repository: provider)
+        viewModel.willDisplayItem(at: 1)
+        viewModel.viewDidLoad()
+        #expect(await settle { asked >= 1 }, "the late cursor never paged from the displayed tile")
+    }
+
+    /// A plain push or reveal (For You, search, profile) ends with its last
+    /// post too (#761).
+    @Test func aPlainPushOrRevealEndsWithItsLastPost() async throws {
         let (push, pushStack) = try await routed { builder, presenter in
             builder.pushSnapFeed(postIDs: ids("a", "b", "c"), from: presenter)
         }
         page(push, to: 2)
-        #expect(!push.isAtEndOfSource)
+        #expect(await settle { push.isAtEndOfSource })
 
         let (reveal, revealStack) = try await routed { builder, presenter in
             builder.revealSnapFeed(
@@ -209,7 +267,7 @@ struct SnapFeedEndOfSourceTests {
             )
         }
         page(reveal, to: 2)
-        #expect(!reveal.isAtEndOfSource)
+        #expect(await settle { reveal.isAtEndOfSource })
         withExtendedLifetime((pushStack, revealStack)) {}
     }
 

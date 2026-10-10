@@ -1,4 +1,5 @@
 import AuthInterface
+import Connect
 import CoreContracts
 import CoreModels
 import CoreNetworking
@@ -15,15 +16,58 @@ private struct AuthenticatedSessionStub: AuthSessionProviding {
     func logout() async {}
 }
 
+/// Fails every call whose path contains `pathContains` ("" = every call) the
+/// way Connect-Swift's URLSession client does with no connection: an
+/// `unavailable` CARRYING the `URLError` in `exception` (#794). Everything
+/// else goes to the wrapped mock server.
+///
+/// ⚠️ A wrapper, not `MockBFF.simulatedConditions`: the mock's injected
+/// faults are bare codes with no `URLError`, which correctly read as a server
+/// outage, not as offline. One per repository, never process-wide.
+private struct OfflineTransport: HTTPClientInterface {
+    let bff: MockBFF
+    let pathContains: String
+
+    func unary(
+        request: HTTPRequest<Data?>,
+        onMetrics: @escaping @Sendable (HTTPMetrics) -> Void,
+        onResponse: @escaping @Sendable (HTTPResponse) -> Void
+    ) -> Cancelable {
+        guard pathContains.isEmpty || request.url.path.contains(pathContains) else {
+            return bff.unary(request: request, onMetrics: onMetrics, onResponse: onResponse)
+        }
+        let error = ConnectError(
+            code: .unavailable,
+            message: "The Internet connection appears to be offline.",
+            exception: URLError(.notConnectedToInternet)
+        )
+        // Off the caller's stack, as URLSession (and MockBFF) deliver.
+        DispatchQueue.global().async {
+            onResponse(HTTPResponse(
+                code: .unavailable, headers: [:], message: nil, trailers: [:], error: error, tracingInfo: nil
+            ))
+        }
+        return Cancelable {}
+    }
+
+    func stream(request: HTTPRequest<Data?>, responseCallbacks: ResponseCallbacks) -> RequestCallbacks<Data> {
+        bff.stream(request: request, responseCallbacks: responseCallbacks)
+    }
+}
+
 /// Drives the read path — repository → generated clients → real ProtocolClient
 /// → MockBFF — with production wire bytes, in-process.
 struct NotificationsRepositoryTests {
-    private func makeRepository(withPosts: Bool = true) -> NotificationsRepository {
+    private func makeRepository(
+        withPosts: Bool = true,
+        offlineFor offlinePath: String? = nil
+    ) -> NotificationsRepository {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         MockSocialServices(dataset: dataset).register(on: bff) // viewer, senders, posts
         MockNotificationService(dataset: dataset).register(on: bff)
-        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let transport: any HTTPClientInterface = offlinePath.map { OfflineTransport(bff: bff, pathContains: $0) } ?? bff
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: transport)
         return NotificationsRepository(
             notificationClient: Notification_V1_NotificationServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
@@ -111,5 +155,34 @@ struct NotificationsRepositoryTests {
         #expect(try await repository.unreadCount() == 0)
         let items = try await repository.loadNotifications(limit: 50)
         #expect(items.allSatisfy { $0.isRead })
+    }
+
+    // MARK: - Why a call failed (#794)
+
+    /// Connect answers a lost connection with `unavailable`. The
+    /// `NotificationsError` it becomes must still say offline, or the screen
+    /// can only ever say "couldn't load".
+    @Test func aLostConnectionStaysOfflineThroughTheRepositoryError() async {
+        let repository = makeRepository(offlineFor: "NotificationService")
+
+        let error = await #expect(throws: NotificationsError.self) {
+            _ = try await repository.loadNotifications(limit: 50)
+        }
+
+        #expect(error?.networkFailure == .offline)
+        #expect(error.flatMap { NetworkFailure.of($0) } == .offline)
+    }
+
+    /// The viewer lookup fails first when every route is down: the failure
+    /// survives `AccountProfilesReader.ReadError` on its way to the feature
+    /// error too.
+    @Test func aLostConnectionStaysOfflineThroughTheViewerLookup() async {
+        let repository = makeRepository(offlineFor: "")
+
+        let error = await #expect(throws: NotificationsError.self) {
+            _ = try await repository.loadNotifications(limit: 50)
+        }
+
+        #expect(error?.networkFailure == .offline)
     }
 }

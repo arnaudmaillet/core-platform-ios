@@ -530,6 +530,10 @@ final class SearchResultsViewController: UIViewController {
         // Each tab's near-end asks for ITS answer's next page (#612).
         postsPage.onNearEnd = { [weak self] in self?.viewModel.loadMorePosts() }
         peoplePage.onNearEnd = { [weak self] in self?.viewModel.loadMorePeople() }
+        // Both failed states' Try Again (#798): the view model knows which
+        // half failed, and re-asks for that.
+        postsPage.onRetry = { [weak self] in self?.viewModel.retryFailedSearch() }
+        peoplePage.onRetry = { [weak self] in self?.viewModel.retryFailedSearch() }
 
         for page in [postsPage.viewController, peoplePage] {
             addChild(page)
@@ -961,13 +965,21 @@ final class SearchResultsViewController: UIViewController {
     ///
     /// The phase is still read for LOADING and FAILED, which are properties of
     /// the request rather than of either answer.
+    ///
+    /// ⚠️ AND THE POST SEARCH'S OWN FAILURE IS NOT "NO POSTS" (#798). It used
+    /// to be `[]` and read as an empty answer; it is the surface's failed
+    /// state now, whose Try Again re-asks for the posts alone.
     private func postState(for phase: SearchViewModel.Phase) -> SearchPostSurfaceState {
         switch phase {
-        case .loading where viewModel.postResults.isEmpty:
-            .loading
         case .failed(let message):
             .failed(message: message)
         case .explore, .suggesting:
+            .loading
+        case _ where viewModel.postsFailed:
+            .failed(message: SearchViewModel.postsFailureMessage)
+        case _ where viewModel.postResults.isEmpty && viewModel.isSearchingPosts:
+            .loading
+        case .loading where viewModel.postResults.isEmpty:
             .loading
         case .loading, .results, .empty:
             viewModel.postResults.isEmpty

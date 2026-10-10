@@ -154,7 +154,7 @@ final class RecentlyDeletedViewController: UIViewController {
             guard let self else { return }
             do {
                 try await viewModel.restore(deleted)
-                ToastView.present("Post restored", symbol: "arrow.uturn.backward", in: view)
+                Feedback.success("Post restored", symbol: "arrow.uturn.backward", from: self)
             } catch {
                 let message = (error as? PostRestoreError) == .tooLate
                     ? "This post was deleted more than 30 days ago and can't be restored."

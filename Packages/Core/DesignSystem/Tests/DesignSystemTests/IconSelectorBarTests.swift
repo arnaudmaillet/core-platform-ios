@@ -315,6 +315,46 @@ struct IconSelectorBarTests {
         #expect(bar.debugStripAcceptsScrolling, "and handed back after it")
     }
 
+    /// ⚠️ **A DRAG DOES NOT SURVIVE THE WINDOW IT WAS IN** — `PagedTabBar`'s
+    /// rule. A bar taken off screen mid-drag (a pop, a sheet swapped out) gets
+    /// no `.cancelled` from a recognizer that is no longer in any hierarchy, so
+    /// the strip stayed locked, the pill stayed lifted between two icons, and
+    /// the end-of-strip `CADisplayLink` — which RETAINS its target — kept the
+    /// bar alive and ticking for the rest of the session.
+    ///
+    /// Cancelled rather than released: the finger never lifted, so nothing was
+    /// chosen and nobody is told — the pill goes home.
+    ///
+    /// The window is never made visible: `didMoveToWindow` needs a window, not
+    /// a screen, and no visible window outlives this test.
+    @Test func aDragIsCancelledWhenTheBarLeavesItsWindow() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 200))
+        let bar = bar()
+        window.addSubview(bar)
+        var told: [Int] = []
+        bar.onSelect = { told.append($0) }
+        let home = lensCentre(bar)
+        // In the scrolled content, so a strip the drag scrolled cannot fake it.
+        let homeInContent = bar.debugLensCentreX
+
+        bar.debugBeginDrag(atX: home)
+        for step in 1...4 {
+            bar.debugDrag(toX: home + CGFloat(step) * 12, after: 0.05)
+        }
+        // The denominator: a drag really is in progress, and has moved the pill.
+        #expect(bar.debugStripAcceptsScrolling == false, "no drag was ever under way")
+        #expect(bar.debugEdgeScrollIsArmed, "no drag was ever under way")
+        #expect(abs(bar.debugLensCentreX - homeInContent) > 10, "the pill never left home")
+
+        bar.removeFromSuperview()
+
+        #expect(bar.debugStripAcceptsScrolling, "the strip stayed locked after the bar left")
+        #expect(bar.debugEdgeScrollIsArmed == false, "the display link kept the bar alive")
+        #expect(told.isEmpty, "a finger that never lifted chose something")
+        #expect(bar.selectedIndex == 0)
+        #expect(abs(bar.debugLensCentreX - homeInContent) < 0.5, "the pill was left where the finger was")
+    }
+
     @Test func theWidthGrowsWithTheIconsSoOverflowIsReal() {
         let two = Array(Self.four.prefix(2))
         let narrow = bar(two).intrinsicContentSize.width

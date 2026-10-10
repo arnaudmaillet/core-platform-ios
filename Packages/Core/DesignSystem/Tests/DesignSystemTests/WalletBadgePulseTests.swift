@@ -58,4 +58,54 @@ struct WalletBadgePulseTests {
         #expect(!badge.isGlowing)
         _ = window
     }
+
+    /// ⚠️ BACK FROM THE BACKGROUND, THE BREATH IS BACK (#783): backgrounding
+    /// strips layer animations, and only a re-attach used to re-arm them.
+    @Test func comingBackToTheForegroundRearmsTheBreath() {
+        let badge = WalletBadgeButton()
+        badge.reducesMotion = { false }
+        let window = onScreen(badge)
+        badge.update(balance: 120, claimAvailable: true)
+        #expect(badge.isBreathing, "guard: a claim waiting breathes")
+
+        // What the system does to a backgrounded app's layers.
+        func strip(_ layer: CALayer) {
+            layer.removeAllAnimations()
+            layer.sublayers?.forEach(strip)
+        }
+        strip(badge.layer)
+        #expect(!badge.isBreathing, "guard: the animations were stripped")
+
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+        #expect(badge.isBreathing, "the breath stayed gone after coming back")
+        _ = window
+    }
+
+    /// ⚠️ BACK FROM THE BACKGROUND, THE RING COUNTS AGAIN (#783): stripped,
+    /// the ring stood at its model value, full, as if the claim were ready
+    /// while the countdown still ran.
+    @Test func comingBackToTheForegroundRearmsTheCountdownRing() {
+        let badge = WalletBadgeButton()
+        badge.reducesMotion = { false }
+        let window = onScreen(badge)
+        badge.update(
+            balance: 120, claimAvailable: false,
+            claimProgress: .init(fraction: 0.25, remaining: 3600)
+        )
+        #expect(badge.isRingCounting, "guard: a running countdown fills the ring")
+
+        // What the system does to a backgrounded app's layers.
+        func strip(_ layer: CALayer) {
+            layer.removeAllAnimations()
+            layer.sublayers?.forEach(strip)
+        }
+        strip(badge.layer)
+        #expect(!badge.isRingCounting, "guard: the animations were stripped")
+
+        NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+
+        #expect(badge.isRingCounting, "the ring stayed still after coming back")
+        _ = window
+    }
 }

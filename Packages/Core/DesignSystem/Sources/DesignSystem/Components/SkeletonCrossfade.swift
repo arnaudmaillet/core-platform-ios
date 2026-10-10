@@ -9,7 +9,7 @@ import UIKit
 /// hidden or removed afterwards. One helper, one duration, and a screen
 /// that reimplements it is a review comment.
 ///
-/// Two shapes:
+/// Three shapes:
 ///
 /// - `fadeOut(removing:)` when the skeleton is a view laid over the content
 ///   (the common case): it fades to clear and is then hidden, or removed
@@ -17,6 +17,9 @@ import UIKit
 ///   content would keep animating for nothing).
 /// - `crossfade(to:)` when the skeleton and the content are two views that
 ///   swap: both animate in the one block, so there is no frame with neither.
+/// - `crossfadeSkeleton(swapping:)` when the skeleton is cells of the
+///   content's own list (P9): the view cross-dissolves while `swap` replaces
+///   the bone rows with the real ones, at the same duration.
 ///
 /// Both are safe to call when nothing is showing: a hidden skeleton is left
 /// alone, and calling twice while the fade runs restarts it from where it is.
@@ -61,5 +64,17 @@ public extension UIView {
             guard self.alpha == 0 else { return }
             self.isHidden = true
         }
+    }
+
+    /// Cross-dissolves this view (a list whose skeleton is its own cells)
+    /// while `swap` replaces the bone rows with the content — typically a
+    /// diffable apply without animated differences. Off screen there is
+    /// nothing to see, and `swap` runs at once.
+    func crossfadeSkeleton(swapping swap: @escaping () -> Void) {
+        guard window != nil else {
+            swap()
+            return
+        }
+        UIView.transition(with: self, duration: Self.skeletonFadeDuration, options: .transitionCrossDissolve, animations: swap)
     }
 }

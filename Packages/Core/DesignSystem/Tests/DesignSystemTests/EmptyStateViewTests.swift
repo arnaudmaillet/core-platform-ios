@@ -32,6 +32,16 @@ struct EmptyStateViewTests {
         return view
     }
 
+    /// ⚠️ ONLY THE ACTION TAKES A TOUCH (#797): laid over a whole screen,
+    /// the block's background lets touches through to what is around it.
+    @Test func onlyTheActionTakesATouch() throws {
+        let view = laidOut { $0.configure(title: "Couldn't load", actionTitle: "Try Again", actionHandler: {}) }
+        #expect(view.hitTest(CGPoint(x: 5, y: 5), with: nil) == nil, "the background swallowed a touch")
+        let button = try #require(view.subviews.flatMap(\.subviews).compactMap { $0 as? UIButton }.first)
+        let centre = button.convert(CGPoint(x: button.bounds.midX, y: button.bounds.midY), to: view)
+        #expect(view.hitTest(centre, with: nil) === button)
+    }
+
     @Test func aTitleAloneDrawsOnlyATitle() {
         let view = laidOut { $0.configure(title: "No activity yet") }
         let content = visibleContent(of: view)

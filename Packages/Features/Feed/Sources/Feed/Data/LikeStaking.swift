@@ -1,5 +1,6 @@
 import AuthInterface
 import CoreContracts
+import CoreNetworking
 import CoreStorage
 import Foundation
 import SwiftProtobuf
@@ -47,6 +48,27 @@ public struct LikeStakeAnswer: Equatable, Sendable {
     }
 }
 
+/// A stake the server will never take, however often it is sent (#796): the
+/// request itself is wrong (a target that is gone, an argument refused). Its
+/// batch leaves the outbox and its likes go back, rather than holding every
+/// batch behind it.
+public struct LikeStakeRejected: Error, Equatable, Sendable {
+    public let reason: String
+    public init(reason: String) { self.reason = reason }
+}
+
+/// A batch that cannot go AS THE CURRENT VIEWER (#796): signed out, or taken
+/// by another account. It stays queued for its own account's return, and
+/// holds nothing behind it.
+///
+/// ⚠️ NEVER DROPPED: the outbox is one list for every account while the
+/// wallet follows whoever is signed in. Dropping refunded into the wrong
+/// wallet (or none), and a session that expired lost likes the user still
+/// sees filled once they sign back in.
+public struct LikeStakeNotNow: Error, Equatable, Sendable {
+    public init() {}
+}
+
 /// `LikeStaking` over the edge, as the signed-in account.
 public actor WalletLikeStaking: LikeStaking {
     private let walletClient: any Wallet_V1_WalletServiceClientInterface
@@ -59,7 +81,12 @@ public actor WalletLikeStaking: LikeStaking {
 
     public func stake(_ batch: LikeOutbox.Batch) async throws -> LikeStakeAnswer {
         guard case .member(let account, _) = await viewer.current() else {
-            throw FeedError.notAuthenticated
+            throw LikeStakeNotNow()
+        }
+        // Another account's batch, sent with this one's token, is refused as
+        // "may not act as the requested account" — wait for its owner.
+        if let owner = batch.accountID, owner != account.rawValue {
+            throw LikeStakeNotNow()
         }
         var request = Wallet_V1_StakeRequest()
         request.accountID = batch.accountID ?? account.rawValue
@@ -81,7 +108,17 @@ public actor WalletLikeStaking: LikeStaking {
         request.firstTapAt = Google_Protobuf_Timestamp(date: batch.firstTapAt)
         let response = await walletClient.stake(request: request, headers: [:])
         if let error = response.error {
-            throw FeedError.transport(message: error.message ?? "code \(error.code)")
+            // ⚠️ A REFUSAL IS NOT A LOST CONNECTION (#796): these codes answer
+            // the same however often the batch is resent. `permissionDenied`
+            // is not one of them: a profile created after the access token
+            // was issued is refused until the next refresh.
+            switch error.code {
+            case .invalidArgument, .notFound, .alreadyExists,
+                 .failedPrecondition, .outOfRange, .unimplemented:
+                throw LikeStakeRejected(reason: error.message ?? "code \(error.code)")
+            default:
+                throw FeedError.transport(message: error.message ?? "code \(error.code)")
+            }
         }
         guard let message = response.message else {
             throw FeedError.transport(message: "empty stake response")
@@ -121,11 +158,14 @@ public final class LikeOutboxSender {
     private let staking: any LikeStaking
     /// Waits after a failed commit, the last repeated.
     private let retryDelays: [TimeInterval]
-    private var failures = 0
+    private(set) var failures = 0
     private var isSending = false
     private var timer: Timer?
     /// Removed with the sender (the token bag's deinit, not a main-actor one).
     private let observers = NotificationObserverTokenBag()
+    /// Whose recoveries flush the outbox; read by `start()`. Tests hand in
+    /// their own — ⚠️ never flip `.shared`, other suites listen to it.
+    var connectivity: ConnectivityMonitor = .shared
 
     public init(
         outbox: LikeOutbox, wallet: WalletStore, staking: any LikeStaking,
@@ -150,6 +190,16 @@ public final class LikeOutboxSender {
             },
             center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.schedule() }
+            },
+            // The network is back (#793): what failed while it was gone goes
+            // now, not after its backoff.
+            center.addObserver(
+                forName: ConnectivityMonitor.didRecoverNotification, object: connectivity, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.failures = 0
+                    self?.schedule()
+                }
             }
         ]
         schedule()
@@ -187,18 +237,31 @@ public final class LikeOutboxSender {
         }
     }
 
-    /// Commits every due batch, in order; stops at the first failure and
-    /// tries again after a growing wait.
+    /// Commits every due batch, in order; stops at the first failure that a
+    /// retry may cure and tries again after a growing wait.
+    ///
+    /// ⚠️ A BATCH THE SERVER REFUSES FOR GOOD LEAVES (#796). Every failure used
+    /// to stop the flush and retry forever, so one batch that could never go
+    /// (a deleted post, a refused argument) held every like queued behind it.
+    /// It is dropped with its likes given back, and the flush moves on. A
+    /// batch that only cannot go as the current viewer (`LikeStakeNotNow`)
+    /// stays queued and is looked at again later, holding nothing.
     func flush() async {
         guard !isSending else { return }
         isSending = true
         var failed = false
+        var parked = false
         for batch in outbox.takeDue() {
             do {
                 let answer = try await staking.stake(batch)
                 outbox.complete(batch.idempotencyKey)
                 settle(batch, with: answer)
                 failures = 0
+            } catch is LikeStakeRejected {
+                outbox.complete(batch.idempotencyKey)
+                settle(batch, with: LikeStakeAnswer(outcome: .unknown, spent: 0, myTotal: 0))
+            } catch is LikeStakeNotNow {
+                parked = true
             } catch {
                 failed = true
                 failures += 1
@@ -206,8 +269,18 @@ public final class LikeOutboxSender {
             }
         }
         isSending = false
-        if failed {
-            let delay = retryDelays[min(failures - 1, retryDelays.count - 1)]
+        if failed || parked {
+            // ⚠️ A parked batch is sealed, and `schedule()` flushes at once
+            // while a sealed batch waits — a busy loop. It is looked at again
+            // after the longest wait, or with the next like.
+            //
+            // ⚠️ …but no later than the current account's next due batch
+            // (#836): waiting the longest delay committed this viewer's likes
+            // up to 60 s late instead of 10 s, behind someone else's batch.
+            var delay = failed ? retryDelays[min(failures - 1, retryDelays.count - 1)] : retryDelays[retryDelays.count - 1]
+            if !failed, let due = outbox.nextDueDate {
+                delay = min(delay, max(0.05, due.timeIntervalSinceNow))
+            }
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {

@@ -103,11 +103,9 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
 
     private func followRequestSummaries() async throws -> [SocialGraph_V1_EdgeSummary] {
         let owner = try await resolveViewerProfileID()
-        var summaries: [SocialGraph_V1_EdgeSummary] = []
-        var pageToken = ""
         // Bounded, like the block list: a server that kept handing back a
         // page token must not spin this loop forever.
-        for _ in 0..<20 {
+        return try await TokenPager.collect(maxPages: 20) { pageToken in
             var request = SocialGraph_V1_ListFollowRequestsRequest()
             request.ownerID = owner.rawValue
             request.limit = 50
@@ -115,14 +113,11 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
             let response = await socialGraphClient.listFollowRequests(request: request, headers: [:])
             switch response.result {
             case .success(let body):
-                summaries += body.requests
-                pageToken = body.nextPageToken
+                return (body.requests, body.nextPageToken)
             case .failure(let error):
                 throw ProfileError.transport(message: error.message ?? "code \(error.code)")
             }
-            if pageToken.isEmpty { break }
         }
-        return summaries
     }
 
     public func approveFollowRequest(from profileID: ProfileID) async throws {

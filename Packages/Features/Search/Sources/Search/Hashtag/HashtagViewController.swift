@@ -91,6 +91,12 @@ final class HashtagViewController: UIViewController {
             Task { await self.viewModel.loadMore(.top) }
         }
         page.onLeadRowTitleTapped = { [weak self] in self?.pushRecent() }
+        // A pull, and the failed state's Try Again (#798) — without it the
+        // pull snapped shut doing nothing and Try Again was dead.
+        page.onRetry = { [weak self] in
+            guard let self else { return }
+            Task { await self.viewModel.refresh() }
+        }
     }
 
     private func render() {
@@ -151,6 +157,11 @@ final class HashtagRecentViewController: UIViewController {
         list.onNearEnd = { [weak self] in
             guard let self else { return }
             Task { await self.viewModel.loadMore(.recent) }
+        }
+        // See `HashtagViewController.configurePage` (#798).
+        list.onRetry = { [weak self] in
+            guard let self else { return }
+            Task { await self.viewModel.refresh() }
         }
         render()
     }

@@ -113,4 +113,29 @@ struct IdleCalmTests {
         #expect(badge.isBreathing, "waking left the badge still")
         _ = window
     }
+
+    /// ⚠️ THE BONES REST WITH THE APP (#789): an endless window-sized sweep on
+    /// a load that never answers recomposited the whole frame forever — and a
+    /// still bone shows no band at all, never a frozen one mid-screen.
+    @Test func aSkeletonsSweepRestsAndWakesWithTheApp() {
+        let bone = SkeletonBoneView()
+        var still = false
+        bone.stillsMotion = { still }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
+        window.addSubview(bone)
+        bone.frame = CGRect(x: 0, y: 0, width: 120, height: 12)
+        #expect(bone.isSweeping, "guard: a bone on screen sweeps")
+        #expect(bone.showsBand)
+
+        still = true
+        NotificationCenter.default.post(name: .decorativeMotionDidChange, object: nil)
+        #expect(!bone.isSweeping, "the bone swept on at rest")
+        #expect(!bone.showsBand, "a frozen band was left mid-screen")
+
+        still = false
+        NotificationCenter.default.post(name: .decorativeMotionDidChange, object: nil)
+        #expect(bone.isSweeping, "waking left the bone still")
+        #expect(bone.showsBand)
+        _ = window
+    }
 }

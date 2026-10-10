@@ -119,8 +119,76 @@ struct CoreNetworkingTests {
 
         let response = await client.login(request: makeLoginRequest(), headers: [:])
 
-        #expect(response.error?.code == .unauthenticated)
+        // Offline, so `unavailable` — not the `unauthenticated` an expired
+        // session gives (#791).
+        #expect(response.error?.code == .unavailable)
         // The request must never reach the wire with a missing/stale token.
+        #expect(bff.recordedRequests.isEmpty)
+    }
+
+    /// ⚠️ OFFLINE IS NOT SIGNED OUT (#791): a token the network could not
+    /// fetch fails the call as `unavailable`; anything else stays
+    /// `unauthenticated`.
+    @Test func aTokenFailureIsWordedByItsCause() {
+        struct Offline: NetworkUnavailabilityDescribing { var isNetworkUnavailable: Bool { true } }
+        struct Revoked: Error {}
+        #expect(AuthInterceptor.code(forTokenFailure: Offline()) == .unavailable)
+        #expect(AuthInterceptor.code(forTokenFailure: URLError(.notConnectedToInternet)) == .unavailable)
+        #expect(AuthInterceptor.code(forTokenFailure: ConnectError(code: .deadlineExceeded, message: nil)) == .deadlineExceeded)
+        #expect(AuthInterceptor.code(forTokenFailure: Revoked()) == .unauthenticated)
+    }
+
+    /// ⚠️ OFFLINE READS AS OFFLINE ON SCREEN (#791 + #794): `NetworkFailure`
+    /// trusts only a `URLError` in `exception`, so the interceptor's failure
+    /// must carry one — the real one when there is one, else
+    /// `notConnectedToInternet` for a failure only described as offline.
+    @Test func aTokenFailureForWantOfANetworkClassifiesAsOffline() {
+        struct Offline: NetworkUnavailabilityDescribing { var isNetworkUnavailable: Bool { true } }
+        let described = AuthInterceptor.connectError(forTokenFailure: Offline())
+        #expect(described.code == .unavailable)
+        #expect(NetworkFailure.of(described) == .offline)
+
+        let lost = AuthInterceptor.connectError(forTokenFailure: URLError(.networkConnectionLost))
+        #expect((lost.exception as? URLError)?.code == .networkConnectionLost)
+        #expect(NetworkFailure.of(lost) == .offline)
+
+        let wrapped = AuthInterceptor.connectError(forTokenFailure: ConnectError(
+            code: .unavailable, message: nil, exception: URLError(.notConnectedToInternet)
+        ))
+        #expect(NetworkFailure.of(wrapped) == .offline)
+    }
+
+    /// A failure the server answered is not a network failure: no `URLError`
+    /// is invented for it, so it never reads as offline.
+    @Test func aTokenFailureTheServerAnsweredCarriesNoNetworkError() {
+        struct Revoked: Error {}
+        struct Online: NetworkUnavailabilityDescribing { var isNetworkUnavailable: Bool { false } }
+        #expect(AuthInterceptor.connectError(forTokenFailure: Revoked()).exception == nil)
+        #expect(AuthInterceptor.connectError(forTokenFailure: Online()).exception == nil)
+        let revoked = AuthInterceptor.connectError(forTokenFailure: Revoked())
+        #expect(NetworkFailure.of(revoked) == .refused(code: "unauthenticated"))
+        let busy = AuthInterceptor.connectError(forTokenFailure: ConnectError(code: .unavailable, message: "503"))
+        #expect(NetworkFailure.of(busy) == .server(code: "unavailable"))
+    }
+
+    /// End to end: the call a described-offline refresh fails reaches the
+    /// caller as offline.
+    @Test func aCallWhoseRefreshFoundNoNetworkFailsAsOffline() async {
+        struct Offline: NetworkUnavailabilityDescribing { var isNetworkUnavailable: Bool { true } }
+        let bff = MockBFF()
+        MockAuthService().register(on: bff)
+        let client = Auth_V1_AuthServiceClient(
+            client: ConnectClientFactory.makeAuthenticated(
+                host: "https://mock.bff.local",
+                tokenProvider: StubTokenProvider(error: Offline()),
+                httpClient: bff
+            )
+        )
+
+        let response = await client.login(request: makeLoginRequest(), headers: [:])
+
+        #expect(response.error?.code == .unavailable)
+        #expect(response.error.flatMap { NetworkFailure.of($0) } == .offline)
         #expect(bff.recordedRequests.isEmpty)
     }
 

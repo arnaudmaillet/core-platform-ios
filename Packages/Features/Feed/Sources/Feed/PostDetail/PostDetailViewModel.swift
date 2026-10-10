@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 
 /// The comments stream's sort orders (the engaged toolbar's selector).
@@ -42,6 +43,15 @@ public final class PostDetailViewModel {
     public nonisolated enum CommentsState: Equatable, Sendable {
         case loading
         case loaded([CommentDisplayModel])
+        /// The FIRST page failed and there is nothing on screen to keep (#798).
+        /// `retryComments()` asks for it again.
+        ///
+        /// ⚠️ Never sent over comments already shown — a prefetched page, a
+        /// refresh, pages below the first: a failure leaves those as they are.
+        /// Only an empty stream that never got an answer reads as failed,
+        /// because that is the one case where the alternative — `.loaded([])`
+        /// — says "No comments yet" about a post that may have hundreds.
+        case failed(message: String)
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
@@ -85,7 +95,30 @@ public final class PostDetailViewModel {
     private let router: (any Router)?
     private let now: @Sendable () -> Date
 
-    private var comments: [CommentEntry] = []
+    private var comments: [CommentEntry] = [] {
+        didSet { forgetUnsentIfItLanded() }
+    }
+    /// The comment that failed last — its text, its parent and the id it was
+    /// sent under — kept so that sending it again is a RETRY (#795).
+    ///
+    /// ⚠️ **THE ID IS comment.v1's IDEMPOTENCY KEY.** A failure is not proof
+    /// the server didn't take it: the write can land and only the answer be
+    /// lost. The failed text goes back into the composer
+    /// (`onCommentFailed`), and when the viewer sends that same text under
+    /// the same parent it goes under the same id, so the server answers with
+    /// the comment it already has instead of posting a twin. Edited text, or
+    /// another parent, is a new comment and takes a new id.
+    private var unsent: (body: String, parentID: String?, commentID: String)?
+
+    /// ⚠️ **A FAILED COMMENT THAT TURNS UP IN THE STREAM DID LAND.** Its id is
+    /// spent: kept, the viewer's next comment with the same words would go
+    /// out under it and be answered with the one already there — a comment
+    /// they meant to post again, swallowed. Asked on every change to the
+    /// stream, so a refresh, a page or a merge all count.
+    private func forgetUnsentIfItLanded() {
+        guard let id = unsent?.commentID, comments.contains(where: { $0.id == id }) else { return }
+        unsent = nil
+    }
     /// Where the next page of comments starts; nil when there is none, or
     /// before the first page has answered (#589).
     private var nextPageToken: String?
@@ -96,7 +129,25 @@ public final class PostDetailViewModel {
     private var pagingGeneration = 0
     /// The first page's load is out: a near-end reached meanwhile is honoured
     /// as soon as it says whether there is more.
-    private var isLoadingFirstPage = false
+    /// Internal-readable for the test that overlaps two first-page loads.
+    private(set) var isLoadingFirstPage = false
+    /// Bumped by every first-page load (#798). First-page loads OVERLAP — a
+    /// pull while the first is out, the check after a review — and without a
+    /// token whichever ended first cleared `isLoadingFirstPage` for the one
+    /// still out, and a late failure could cover an answer that had landed.
+    /// Only the latest load clears the flag or reports a failure.
+    private var firstPageGeneration = 0
+    /// The newest first-page load whose answer has landed: an OLDER answer
+    /// arriving after it is stale and dropped.
+    private var appliedFirstPageGeneration = 0
+    /// The view is showing an answer — a loaded stream, empty or not — rather
+    /// than its skeleton or the failed row. What a failure must never cover.
+    private var showsAnswer = false
+    /// The last first-page load failed with nothing on screen (`.failed`):
+    /// what `retryComments()` answers to.
+    private var firstPageFailed = false
+    /// What the failed stream says (#798).
+    nonisolated static let commentsFailureMessage = "Couldn't load comments"
     private var wantsNextPage = false
     /// Pages beyond the first are on screen: a refresh merges its first page
     /// over them rather than replacing the stream.
@@ -120,6 +171,10 @@ public final class PostDetailViewModel {
     private var reviewing: Set<String> = []
     private var isComposing = false
 
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
@@ -193,11 +248,13 @@ public final class PostDetailViewModel {
     // MARK: - Inputs
 
     public func viewDidLoad() {
+        armRecovery()
         // A DRAFT HAS NOTHING TO LOAD — no post, so no comments — and it shows
         // a LOADED empty stream on its first frame rather than a skeleton: the
         // page is empty because it is new, not because it is waiting. Only the
         // viewer is asked for, because the viewer is the author.
         guard !isDraft else {
+            showsAnswer = true
             onCommentsChange?(.loaded([]))
             loadViewerIdentity()
             return
@@ -221,6 +278,19 @@ public final class PostDetailViewModel {
         loadViewerIdentity()
     }
 
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        guard case .failed = phase else { return }
+        refresh()
+    }
+
     public func refresh() {
         guard load == nil, !isDraft else { return }
         // Explicitly, because the comment load is no longer chained to the
@@ -228,6 +298,13 @@ public final class PostDetailViewModel {
         // comments would be the obvious cost of unchaining them.
         loadComments()
         reload()
+    }
+
+    /// The failed stream's Try Again (#798): the first page, asked again. A
+    /// no-op unless the stream is showing `.failed` and nothing is already out.
+    public func retryComments() {
+        guard firstPageFailed, !isLoadingFirstPage else { return }
+        loadComments()
     }
 
     public var engagementState: EngagementState { engagement }
@@ -276,15 +353,27 @@ public final class PostDetailViewModel {
         guard !body.isEmpty, !isComposing else { return }
         if let draft { return publish(body, through: draft) }
         guard let commentsProvider, let postID else { return }
+        let commentID: String
+        if let unsent, unsent.body == body, unsent.parentID == parentID {
+            commentID = unsent.commentID
+        } else {
+            commentID = UUID().uuidString
+        }
         setComposing(true)
         Task { [weak self] in
             guard let self else { return }
             do {
-                let entry = try await commentsProvider.addComment(body, to: postID, parentID: parentID)
+                let entry = try await commentsProvider.addComment(
+                    body, to: postID, parentID: parentID, commentID: commentID
+                )
+                self.unsent = nil
                 self.insertSubmitted(entry)
                 self.emitComments()
                 self.setComposing(false)
             } catch {
+                self.unsent = (body, parentID, commentID)
+                // A reload during the send may already have shown it landed.
+                self.forgetUnsentIfItLanded()
                 self.setComposing(false)
                 self.onCommentFailed?(body, (error as? CommentsError) == .notAllowed)
             }
@@ -353,6 +442,14 @@ public final class PostDetailViewModel {
     }
 
     private func insertSubmitted(_ entry: CommentEntry) {
+        // ⚠️ A REPLAY CAN ANSWER WITH A COMMENT ALREADY ON SCREEN (#795): the
+        // write landed, a reload brought it in, and the resend's answer is
+        // that same comment. Inserted again, the stream holds one id twice —
+        // and a diffable snapshot traps on a duplicate identifier.
+        if let index = comments.firstIndex(where: { $0.id == entry.id }) {
+            comments[index] = entry
+            return
+        }
         guard let parentID = entry.parentID,
               let parentIndex = comments.firstIndex(where: { $0.id == parentID }) else {
             comments.insert(entry, at: 0)
@@ -403,7 +500,7 @@ public final class PostDetailViewModel {
                 // Superseded; leave the phase alone.
             } catch {
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load this post. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load this post")
                 }
             }
             self.load = nil
@@ -423,8 +520,10 @@ public final class PostDetailViewModel {
         onEngagementChange?(engagement)
     }
 
-    /// Comments are best-effort: a failure just shows an empty section rather
-    /// than failing the whole post.
+    /// Comments are best-effort: a failure never fails the whole post. It
+    /// leaves comments already on screen as they are, and an empty stream that
+    /// never got an answer shows `.failed` with a retry — not the empty
+    /// section it used to, which read as "No comments yet" (#798).
     ///
     /// `shown`: comments already on screen, treated exactly like a prefetched
     /// page — no skeleton, and silence unless the refresh finds different ones.
@@ -448,14 +547,37 @@ public final class PostDetailViewModel {
         }
         let didShowPrefetch = prefetched != nil
         isLoadingFirstPage = true
+        firstPageFailed = false
+        firstPageGeneration += 1
+        let generation = firstPageGeneration
         // Refreshed regardless: the cache is a head start, not the truth. A
         // page prefetched a minute ago can have missed a comment since.
         Task { [weak self] in
             guard let self else { return }
             let page = try? await commentsProvider.loadCommentsPage(for: postID, after: nil)
-            self.isLoadingFirstPage = false
+            // A load another one has superseded neither clears the flag the
+            // newer one holds nor reports a failure; its answer, if it has
+            // one, still lands unless a newer answer already has (#798).
+            let isCurrent = generation == self.firstPageGeneration
+            if isCurrent { self.isLoadingFirstPage = false }
+            // ⚠️ A FAILURE IS NOT AN EMPTY PAGE (#798). With nothing on screen
+            // — the view sitting in `.loading` — it is said as `.failed`, with
+            // a retry; with anything on screen (a prefetched page, the stream
+            // a refresh is checking, a published draft's, an answer an
+            // overlapping load landed), it changes nothing. Decided before the
+            // later-pages branch below on purpose: that branch only runs with
+            // comments shown, and keeps them too.
+            guard let page else {
+                if isCurrent, !didShowPrefetch, self.comments.isEmpty, !self.showsAnswer {
+                    self.firstPageFailed = true
+                    self.onCommentsChange?(.failed(message: Self.commentsFailureMessage))
+                }
+                return
+            }
+            guard generation > self.appliedFirstPageGeneration else { return }
+            self.appliedFirstPageGeneration = generation
             defer {
-                if self.wantsNextPage {
+                if isCurrent, self.wantsNextPage {
                     self.wantsNextPage = false
                     self.loadMoreComments()
                 }
@@ -465,15 +587,14 @@ public final class PostDetailViewModel {
             // after a review, must not cut the stream under the viewer. A
             // failure leaves it all as it is.
             if self.hasLaterPages {
-                guard let page else { return }
                 let merged = Self.merging(firstPage: page.entries, over: self.comments)
                 guard merged != self.comments else { return }
                 self.comments = merged
                 self.emitComments()
                 return
             }
-            let loaded = page?.entries ?? []
-            self.nextPageToken = page?.nextPageToken
+            let loaded = page.entries
+            self.nextPageToken = page.nextPageToken
             // The equality skip applies ONLY when a prefetched page is already
             // on screen. Without one the view is sitting in `.loading` and has
             // to be told, even when the answer is the empty list it started
@@ -610,6 +731,7 @@ public final class PostDetailViewModel {
         let now = now()
         let ordered = Self.sortedForDisplay(comments, order: commentSort, liked: likedComments, pageStarts: pageStarts)
         let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
+        showsAnswer = true
         onCommentsChange?(.loaded(ordered.map {
             CommentDisplayModel(entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id))
         }))

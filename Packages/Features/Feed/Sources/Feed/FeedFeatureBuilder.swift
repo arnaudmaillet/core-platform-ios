@@ -535,11 +535,16 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // each other on the same grab rather than argued about.
         if ProcessInfo.processInfo.arguments.contains("-tabbar-flag") {
             destination.hidesBottomBarWhenPushed = true
-        } else {
+        } else if !nav.flagHidesAppTabBar(at: nav.topViewController) {
             nav.tabBarController?.setTabBarHidden(true, animated: true)
         }
         #else
-        nav.tabBarController?.setTabBarHidden(true, animated: true)
+        // ⚠️ NOT UNDER `hidesBottomBarWhenPushed` (#769): a profile over a
+        // conversation has handed the bar to UIKit already, and an explicit
+        // hide there outlived the pops (`flagHidesAppTabBar`).
+        if !nav.flagHidesAppTabBar(at: nav.topViewController) {
+            nav.tabBarController?.setTabBarHidden(true, animated: true)
+        }
         #endif
         session.takeDelegateSlot()
         // No `session.prepareDestination()`: this feed is built fresh on every
@@ -838,7 +843,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // fade its alpha out as the page grew past it (the bar covers the
         // bottom 26pt of the row a reveal departs from); UIKit's own animation
         // uncovers that strip now.
-        nav.tabBarController?.hideTabBarNatively()
+        //
+        // ⚠️ Not under `hidesBottomBarWhenPushed` (#769, `flagHidesAppTabBar`).
+        if !nav.flagHidesAppTabBar(at: nav.topViewController) {
+            nav.tabBarController?.hideTabBarNatively()
+        }
 
         if let reveal, revealing {
             // The OPENING is this reveal's, and it has to say so: a geometry
@@ -900,7 +909,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // and one per opened post.
             dismissal.prepareForDismissal = { [weak landing, weak dismissal] axis in
                 guard let dismissal else { return }
-                // Up or down, a place feed closes onto its page (#685).
+                // Down onto the place page; right and up (#761) onto the marker.
                 guard axis.landsBeneath else {
                     dismissal.revealGeometry = markerGeometry
                     return
@@ -1380,7 +1389,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             mode: .commentsOnly,
             profileSwitcher: makeProfileSwitcher?(),
             wallet: wallet,
-            threadChrome: threadChrome
+            threadChrome: threadChrome,
+            // Every snap page's comments group by day under Recent (#757).
+            groupsByDay: true
         )
     }
 

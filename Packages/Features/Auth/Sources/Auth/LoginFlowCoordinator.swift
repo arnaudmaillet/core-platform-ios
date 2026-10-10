@@ -53,6 +53,16 @@ final class LoginFlowCoordinator {
     private var suggestedName: String?
     private var dateOfBirth: DateComponents?
 
+    /// A call the flow never has out twice (#827): a second tap while one is
+    /// out does nothing, rather than sending a second SMS or opening a second
+    /// Apple sheet.
+    enum Call: Hashable {
+        case sendCode, resendCode, federatedSignIn
+    }
+
+    /// The calls out right now.
+    private(set) var callsInFlight: Set<Call> = []
+
     /// One toolbar item set for the WHOLE flow, shared by every step (see
     /// `flowToolbarItems` on the base controller for why identical instances
     /// matter): Privacy & Legal pinned leading, Contact pinned trailing, one
@@ -173,7 +183,7 @@ final class LoginFlowCoordinator {
     private func select(_ method: SignInMethod) {
         switch method {
         case .provider(.apple) where signUp != nil && federated != nil:
-            signIn(with: .apple)
+            signIn(with: .apple, from: method)
         case .provider(let provider):
             presentFederatedUnavailable(provider)
         case .email:
@@ -185,9 +195,9 @@ final class LoginFlowCoordinator {
 
     private func showPhoneAuth() {
         let phone = PhoneAuthViewController()
-        phone.onSendCode = { [self] e164, display in
+        phone.onSendCode = { [self, weak phone] e164, display in
             if signUp != nil {
-                sendCode(.sms, to: e164, display: display, from: nil)
+                sendCode(.sms, to: e164, display: display, from: phone)
             } else {
                 beginOTPVerification(e164: e164, display: display)
             }
@@ -250,12 +260,15 @@ final class LoginFlowCoordinator {
         step.navigationItem.rightBarButtonItem = makeLanguageNavItem()
     }
 
+    /// `step` is the screen whose button sent it — the email step, or the
+    /// phone screen — and shows the call until it ends.
     private func sendCode(
-        _ channel: VerificationChannel, to destination: String, display: String, from step: SignUpStepViewController?
+        _ channel: VerificationChannel, to destination: String, display: String, from step: (any WorkingIndicating)?
     ) {
-        guard let signUp else { return }
+        guard let signUp, callsInFlight.insert(.sendCode).inserted else { return }
         step?.setWorking(true)
         Task { [weak self] in
+            defer { self?.callsInFlight.remove(.sendCode) }
             do {
                 let challenge = try await signUp.startVerification(
                     channel, to: destination, locale: Locale.current.identifier(.bcp47)
@@ -264,7 +277,7 @@ final class LoginFlowCoordinator {
                 self?.showCode(challenge, display: display)
             } catch {
                 step?.setWorking(false)
-                self?.presentFlowError(error, on: step)
+                self?.presentFlowError(error, on: step as? SignUpStepViewController)
             }
         }
     }
@@ -278,13 +291,25 @@ final class LoginFlowCoordinator {
         push(step)
     }
 
+    /// The spinner sits on the link that asked: the code step's one trailing
+    /// row.
     private func resendCode(from step: VerificationCodeViewController?) {
-        guard let signUp, let current = challenge else { return }
+        guard let signUp, let current = challenge, callsInFlight.insert(.resendCode).inserted else { return }
+        step?.setTrailingRowWorking(true, at: 0)
         Task { [weak self] in
+            defer {
+                step?.setTrailingRowWorking(false, at: 0)
+                self?.callsInFlight.remove(.resendCode)
+            }
             do {
                 let fresh = try await signUp.startVerification(
                     current.channel, to: current.destination, locale: Locale.current.identifier(.bcp47)
                 )
+                // ⚠️ ONLY OVER THE CHALLENGE IT WAS ASKED FOR. Going back and
+                // sending a code to another address while this was out made a
+                // newer challenge; a late resend must not put the old one back
+                // under the code step now showing.
+                guard self?.challenge?.id == current.id else { return }
                 self?.challenge = fresh
                 step?.codeResent(resendAfter: fresh.resendAfter)
             } catch {
@@ -325,11 +350,20 @@ final class LoginFlowCoordinator {
     /// Sign in with Apple (#507): a nonce from the server, Apple's sheet,
     /// then the id_token signs in — or, for an Apple ID with no account,
     /// the sign-up steps follow with it. Closing Apple's sheet says nothing.
-    private func signIn(with provider: FederatedProvider) {
-        guard let signUp, let federated, let screen = navigationController?.topViewController else { return }
+    /// `method`'s row shows the sign-in until it ends.
+    private func signIn(with provider: FederatedProvider, from method: SignInMethod) {
+        guard let signUp, let federated, let screen = navigationController?.topViewController,
+              callsInFlight.insert(.federatedSignIn).inserted
+        else { return }
+        let methods = screen as? MethodSelectionViewController
+        methods?.setWorking(method)
         screen.view.isUserInteractionEnabled = false
         Task { [weak self] in
-            defer { screen.view.isUserInteractionEnabled = true }
+            defer {
+                screen.view.isUserInteractionEnabled = true
+                methods?.setWorking(nil)
+                self?.callsInFlight.remove(.federatedSignIn)
+            }
             do {
                 let nonce = try await signUp.startFederatedSignIn()
                 let result = try await federated.signIn(with: provider, nonce: nonce)

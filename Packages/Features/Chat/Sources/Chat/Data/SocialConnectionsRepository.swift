@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// A ranked account recommendation, hydrated for display.
@@ -47,7 +48,17 @@ public protocol SuggestionsProviding: Sendable {
 }
 
 public enum SuggestionsError: Error, Equatable, Sendable {
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension SuggestionsError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Answers *who should I follow next* (Suggestions) from `social_graph.v1`,
@@ -125,7 +136,7 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         let suggested: [SocialGraph_V1_SuggestedProfile]
         switch await suggestedTask.result {
         case .success(let body): suggested = body.profiles
-        case .failure(let error): throw SuggestionsError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         let followers = await followersTask ?? []
 
@@ -143,7 +154,7 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         request.targetID = profileID.rawValue
         let response = await socialGraphClient.follow(request: request, headers: [:])
         if case .failure(let error) = response.result {
-            throw SuggestionsError.transport(message: error.message ?? "code \(error.code)")
+            throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         followEvents?.publish(FollowChange(profileID: profileID, isFollowing: true))
     }
@@ -155,7 +166,7 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         request.targetID = profileID.rawValue
         let response = await socialGraphClient.unfollow(request: request, headers: [:])
         if case .failure(let error) = response.result {
-            throw SuggestionsError.transport(message: error.message ?? "code \(error.code)")
+            throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         followEvents?.publish(FollowChange(profileID: profileID, isFollowing: false))
     }
@@ -169,7 +180,7 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         let response = await socialGraphClient.listFollowers(request: request, headers: [:])
         switch response.result {
         case .success(let body): return Set(body.followers.map { ProfileID($0.profileID) })
-        case .failure(let error): throw SuggestionsError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 

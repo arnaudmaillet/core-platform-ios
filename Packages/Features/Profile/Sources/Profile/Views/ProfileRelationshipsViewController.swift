@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import MediaCore
 import UIKit
@@ -252,7 +253,7 @@ final class ProfileRelationshipsViewController: UIViewController {
             }
         }
         #endif
-        tabBarController?.setTabBarHidden(true, animated: true)
+        if ownsAppTabBar { tabBarController?.setTabBarHidden(true, animated: true) }
         // ⚠️ The caret is HIDDEN for the length of the morph. It is drawn at the
         // text's insertion point, and that point is only final once the field has
         // its destination width — so on the way there the caret rendered mid-field
@@ -324,7 +325,15 @@ final class ProfileRelationshipsViewController: UIViewController {
             self.navigationItem.title = self.viewModel.title
             self.navigationItem.rightBarButtonItems = self.restingRightItems
         }
-        tabBarController?.setTabBarHidden(false, animated: true)
+        if ownsAppTabBar { tabBarController?.setTabBarHidden(false, animated: true) }
+    }
+
+    /// ⚠️ ONLY A BAR THIS SCREEN SHOWS (#782). Pushed with
+    /// `hidesBottomBarWhenPushed`, the bar is UIKit's: the search's hide did
+    /// nothing, and its show on Cancel slid the tab bar in over the list and
+    /// its toolbar — with nothing to take it away again after the pop.
+    private var ownsAppTabBar: Bool {
+        navigationController?.showsAppTabBar(for: self) ?? false
     }
 
     /// The whole input contract, as on the inbox: a string.
@@ -634,7 +643,7 @@ final class ProfileRelationshipsViewController: UIViewController {
     private func render(_ result: ProfileRelationshipsViewModel.ActionResult) {
         switch result {
         case .failed(let message):
-            ToastView.present(message, symbol: "exclamationmark.triangle", in: view)
+            Feedback.failure(message, from: self)
         }
     }
 

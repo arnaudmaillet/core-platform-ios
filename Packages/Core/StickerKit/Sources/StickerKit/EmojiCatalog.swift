@@ -1,4 +1,5 @@
 import CoreText
+import Synchronization
 import UIKit
 
 /// One emoji a picker can offer.
@@ -29,8 +30,10 @@ public struct Emoji: Hashable, Sendable, Identifiable {
 /// swatches and letter boxes, are left out on purpose.
 ///
 /// ⚠️ **BUILT ON FIRST USE, ABOUT A FIFTH OF A SECOND** (measured on a busy
-/// simulator: 1,395 scalars and 259 flags, each laid out once). Touch `all` off
-/// the main actor before a picker needs it.
+/// simulator: 1,395 scalars and 259 flags, each laid out once). A screen never
+/// reads `all` on the main actor: it starts the build with `prewarm()`, shows
+/// `ready` when there is one, and awaits `load()` otherwise — the build then
+/// runs once, off the main actor (#827).
 public enum EmojiCatalog {
     /// Groups, by where Unicode put each emoji. Unicode's own groups live only
     /// in `emoji-test.txt`, so these follow its blocks instead.
@@ -79,6 +82,19 @@ public enum EmojiCatalog {
         return sorted + flags().filter { drawsAsOneEmojiGlyph($0.glyph) }
     }()
 
+    /// Builds `all` off the main actor, once, for every screen that asks.
+    public static let loader = EmojiCatalogLoader { all }
+
+    /// `all`, if it has been built through `loader` — nil until then. Asking
+    /// never builds it, so the main actor can ask.
+    public static var ready: [Emoji]? { loader.ready }
+
+    /// `all`, built off the main actor on the first call.
+    public static func load() async -> [Emoji] { await loader.load() }
+
+    /// Starts building `all` off the main actor, and returns at once.
+    public static func prewarm() { loader.prewarm() }
+
     /// The entries of one section, in catalogue order.
     public static func emoji(in section: Section) -> [Emoji] {
         all.filter { $0.section == section }
@@ -88,9 +104,15 @@ public enum EmojiCatalog {
     /// ignoring case and accents: "grin fa" finds "grinning face". An empty
     /// query finds everything.
     public static func search(_ query: String) -> [Emoji] {
+        search(query, in: all)
+    }
+
+    /// `search(_:)` over `entries` — a list already loaded, so the main actor
+    /// can search without touching `all`.
+    public static func search(_ query: String, in entries: [Emoji]) -> [Emoji] {
         let terms = words(of: query)
-        guard !terms.isEmpty else { return all }
-        return all.filter { emoji in
+        guard !terms.isEmpty else { return entries }
+        return entries.filter { emoji in
             terms.allSatisfy { term in emoji.words.contains { $0.hasPrefix(term) } }
         }
     }
@@ -162,5 +184,76 @@ public enum EmojiCatalog {
         text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
             .split { !$0.isLetter && !$0.isNumber }
             .map(String.init)
+    }
+}
+
+/// Builds an emoji list once, off the main actor, for whoever asks first;
+/// every later caller, and every caller waiting meanwhile, gets that same list
+/// (#827).
+///
+/// ⚠️ **`ready` NEVER BUILDS.** That is the point of the type: reading
+/// `EmojiCatalog.all` on the main actor runs the whole build there, a fifth of
+/// a second of a frozen sheet. A screen reads `ready`, and awaits `load()`
+/// when it is nil.
+///
+/// A seam as well as a cache: `EmojiCatalog.loader` builds the real
+/// catalogue, and a test hands its own closure to count and place the build.
+public final class EmojiCatalogLoader: Sendable {
+    private enum State: Sendable {
+        case idle
+        case building(Task<[Emoji], Never>)
+        case built([Emoji])
+    }
+
+    private let build: @Sendable () -> [Emoji]
+    private let state = Mutex(State.idle)
+
+    public init(build: @escaping @Sendable () -> [Emoji]) {
+        self.build = build
+    }
+
+    /// The list, if it is built — nil until then.
+    public var ready: [Emoji]? {
+        state.withLock { current in
+            guard case .built(let entries) = current else { return nil }
+            return entries
+        }
+    }
+
+    /// Starts the build if nothing has, and returns at once.
+    public func prewarm() {
+        _ = buildTask()
+    }
+
+    /// The list, built off the main actor on the first call.
+    public func load() async -> [Emoji] {
+        if let built = ready { return built }
+        return await buildTask().value
+    }
+
+    /// The one build: started on the first call, shared after that.
+    private func buildTask() -> Task<[Emoji], Never> {
+        state.withLock { current in
+            switch current {
+            case .building(let task):
+                return task
+            case .built(let entries):
+                return Task { entries }
+            case .idle:
+                // Detached: inheriting the caller's actor would put the build
+                // right back on the main actor it is here to stay off.
+                let task = Task.detached(priority: .userInitiated) { [build] in
+                    let entries = build()
+                    self.finish(entries)
+                    return entries
+                }
+                current = .building(task)
+                return task
+            }
+        }
+    }
+
+    private func finish(_ entries: [Emoji]) {
+        state.withLock { $0 = .built(entries) }
     }
 }

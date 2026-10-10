@@ -88,6 +88,7 @@ final class WalletClaimViewController: UIViewController {
         case summary
         case stake(String)
         case noActiveStakes
+        case postsFailed
     }
 
     private var collectionView: UICollectionView!
@@ -102,7 +103,9 @@ final class WalletClaimViewController: UIViewController {
     private var stakes: [WalletStake] = []
     private var stakesByID: [String: WalletStake] = [:]
     private var entries: [PostID: GalleryPost] = [:]
-    private var requestedPosts: Set<PostID> = []
+    /// Where each stake's post lookup stands — what its row draws (bones,
+    /// the post, or "couldn't load") and whether the failed row shows (#834).
+    private var postLoads = WalletStakePostLoads()
 
     private var countdownTimer: Timer?
     private let walletObservers = WalletObserverTokenBag()
@@ -363,12 +366,17 @@ final class WalletClaimViewController: UIViewController {
             summaryCell = cell
         }
         let stakeRegistration = UICollectionView.CellRegistration<WalletStakeCell, Item> { [weak self] cell, _, item in
-            guard let self, case .stake(let id) = item, let stake = stakesByID[id] else { return }
-            cell.configure(
-                stake: stake, post: entries[PostID(id)], now: Date(), imagePipeline: imagePipeline
-            )
+            guard let self, case .stake(let id) = item else { return }
+            // Inside the apply: never animated (it would be swallowed). A post
+            // landing on a visible row is cross-faded by `postsArrived`.
+            configure(cell, stakeID: id, animated: false)
         }
         let emptyRegistration = UICollectionView.CellRegistration<WalletEmptyStakesCell, Item> { _, _, _ in }
+        let failedRegistration = UICollectionView.CellRegistration<WalletStakesFailedCell, Item> { [weak self] cell, _, _ in
+            guard let self else { return }
+            cell.configure(retrying: postLoads.isRetrying, failedAfterRetry: postLoads.failedAfterRetry)
+            cell.onRetry = { [weak self] in self?.retryFailedPosts() }
+        }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .summary:
@@ -377,6 +385,8 @@ final class WalletClaimViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(using: stakeRegistration, for: indexPath, item: item)
             case .noActiveStakes:
                 collectionView.dequeueConfiguredReusableCell(using: emptyRegistration, for: indexPath, item: item)
+            case .postsFailed:
+                collectionView.dequeueConfiguredReusableCell(using: failedRegistration, for: indexPath, item: item)
             }
         }
         let headerRegistration = UICollectionView.SupplementaryRegistration<WalletSectionHeader>(
@@ -607,21 +617,36 @@ final class WalletClaimViewController: UIViewController {
         summaryCell.map { configureSummary($0.summary) }
         applyClaimButtonState()
 
+        // Marked loading BEFORE the list is built, so a new stake's row
+        // arrives as bones rather than as a row about nothing.
+        let missing = lookUpPosts == nil ? [] : postLoads.begin(
+            stakes.map(\.targetID).filter { entries[PostID($0)] == nil }
+        )
+        // Rows whose stake moved (settled, grew) are reconfigured in place.
+        applyList(reconfiguring: Set(stakes.map(\.targetID)))
+        lookUp(missing)
+    }
+
+    /// The list as it stands: the summary, then the stakes as
+    /// `WalletStakeList` lays them out — the failed row at their head when a
+    /// post could not be loaded, the empty card when no stake is active.
+    /// `stakeIDs` names the stake rows to redraw in place.
+    private func applyList(reconfiguring stakeIDs: Set<String>) {
+        let layout = WalletStakeList(stakes: stakes, loads: postLoads)
         var list = NSDiffableDataSourceSnapshot<Section, Item>()
         list.appendSections([.summary, .active])
         list.appendItems([.summary], toSection: .summary)
-        let active = stakes.filter { !$0.isSettled }
-        list.appendItems(active.isEmpty ? [.noActiveStakes] : active.map { .stake($0.targetID) }, toSection: .active)
-        let settled = stakes.filter(\.isSettled)
-        if !settled.isEmpty {
+        list.appendItems(layout.active.map(Self.item), toSection: .active)
+        if let settled = layout.settled {
             list.appendSections([.settled])
-            list.appendItems(settled.map { .stake($0.targetID) }, toSection: .settled)
+            list.appendItems(settled.map(Self.item), toSection: .settled)
         }
-        // Rows whose stake moved (settled, grew) are reconfigured in place.
         let previous = Set(dataSource.snapshot().itemIdentifiers)
         list.reconfigureItems(list.itemIdentifiers.filter {
             switch $0 {
-            case .stake: previous.contains($0)
+            case .stake(let id): stakeIDs.contains(id) && previous.contains($0)
+            // The failed row's message follows the latest answer.
+            case .postsFailed: previous.contains($0)
             default: false
             }
         })
@@ -634,26 +659,93 @@ final class WalletClaimViewController: UIViewController {
                   ) as? WalletSectionHeader else { continue }
             configure(header, for: kind)
         }
-        loadMissingPosts()
     }
 
-    /// Asks for the posts behind stakes it has not seen yet, and redraws those
-    /// rows when they arrive.
-    private func loadMissingPosts() {
-        guard let lookUpPosts else { return }
-        let missing = stakes.map { PostID($0.targetID) }
-            .filter { entries[$0] == nil && !requestedPosts.contains($0) }
-        guard !missing.isEmpty else { return }
-        requestedPosts.formUnion(missing)
-        Task { [weak self] in
-            let found = await lookUpPosts(missing)
-            guard let self, !found.isEmpty else { return }
-            entries.merge(found) { _, new in new }
-            var list = dataSource.snapshot()
-            let rows = found.keys.map { Item.stake($0.rawValue) }.filter { list.indexOfItem($0) != nil }
-            list.reconfigureItems(rows)
-            await dataSource.apply(list, animatingDifferences: false)
+    private static func item(_ row: WalletStakeRow) -> Item {
+        switch row {
+        case .stake(let id): .stake(id)
+        case .noActiveStakes: .noActiveStakes
+        case .postsFailed: .postsFailed
         }
+    }
+
+    /// Where `id`'s post stands, for its row. Without a lookup there is
+    /// nothing to wait for: the row is drawn as it is.
+    private func postPhase(for id: String) -> WalletStakePostLoads.State {
+        if entries[PostID(id)] != nil || lookUpPosts == nil { return .loaded }
+        return postLoads.state(of: id) ?? .loading
+    }
+
+    private func configure(_ cell: WalletStakeCell, stakeID id: String, animated: Bool) {
+        guard let stake = stakesByID[id] else { return }
+        cell.configure(
+            stake: stake, post: entries[PostID(id)], phase: postPhase(for: id),
+            pressable: isPressable(stakeID: id), now: Date(), imagePipeline: imagePipeline, animated: animated
+        )
+    }
+
+    /// Whether a tap on `id`'s row does anything: open its post, or try
+    /// again when its post could not be loaded. A row on its bones does
+    /// nothing, so it neither gives under the finger nor selects.
+    private func isPressable(stakeID id: String) -> Bool {
+        if postPhase(for: id) == .failed { return true }
+        return entries[PostID(id)] != nil && openFeedHero != nil
+    }
+
+    /// Asks for the posts behind `ids` — already marked loading — and draws
+    /// the answer.
+    ///
+    /// ⚠️ An empty answer is an answer: every post it lacks FAILED. The
+    /// lookup swallows each read's error (`FeedFeature.galleryPosts`), and
+    /// the sheet used to drop an empty answer and never ask again, leaving
+    /// rows about nothing for its lifetime.
+    private func lookUp(_ ids: [String]) {
+        guard let lookUpPosts, !ids.isEmpty else { return }
+        Task { [weak self] in
+            let found = await lookUpPosts(ids.map { PostID($0) })
+            self?.postsArrived(found, requested: ids)
+        }
+    }
+
+    private func postsArrived(_ found: [PostID: GalleryPost], requested: [String]) {
+        entries.merge(found) { _, new in new }
+        let retryFailed = postLoads.finish(requested: requested, found: Set(found.keys.map(\.rawValue)))
+        // A Try Again that failed too: the sheet's own warning, and the failed
+        // row's message says it (`WalletStakesFailedCell`). No toast.
+        if retryFailed, viewIfLoaded?.window != nil {
+            HapticNotification().notificationOccurred(.warning)
+        }
+        // Visible rows are drawn HERE, outside the apply, so their bones can
+        // cross-fade to the post; the apply redraws the others.
+        var offscreen: Set<String> = []
+        for id in requested {
+            if let cell = stakeCell(for: id) {
+                configure(cell, stakeID: id, animated: true)
+            } else {
+                offscreen.insert(id)
+            }
+        }
+        applyList(reconfiguring: offscreen)
+    }
+
+    /// Try Again — the failed row's button, or a tap on a failed stake row:
+    /// the failed posts only. Their rows go back to bones; the failed row
+    /// STAYS, "Trying Again…" with its button off, so nothing below it moves
+    /// (`WalletStakeList`). The summary and the rest of the list are not
+    /// touched.
+    private func retryFailedPosts() {
+        let ids = postLoads.retry()
+        guard !ids.isEmpty else { return }
+        var offscreen: Set<String> = []
+        for id in ids {
+            if let cell = stakeCell(for: id) {
+                configure(cell, stakeID: id, animated: false)
+            } else {
+                offscreen.insert(id)
+            }
+        }
+        applyList(reconfiguring: offscreen)
+        lookUp(ids)
     }
 
     private func applyClaimButtonState() {
@@ -875,17 +967,22 @@ final class WalletClaimViewController: UIViewController {
 }
 
 extension WalletClaimViewController: UICollectionViewDelegate {
-    /// A stake row opens its post; nothing else on the list is pressable.
+    /// A stake row opens its post, or tries again when its post could not be
+    /// loaded; nothing else on the list is pressable (the failed row has its
+    /// own button).
     func collectionView(_ collectionView: UICollectionView, shouldSelectItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .stake(let id): entries[PostID(id)] != nil && openFeedHero != nil
+        case .stake(let id): isPressable(stakeID: id)
         default: false
         }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: false)
-        if case .stake(let id) = dataSource.itemIdentifier(for: indexPath) {
+        guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
+        if postPhase(for: id) == .failed {
+            retryFailedPosts()
+        } else {
             openFeed(fromStake: id)
         }
     }

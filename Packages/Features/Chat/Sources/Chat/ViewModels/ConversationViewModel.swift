@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 import UIKit
 
@@ -110,6 +111,10 @@ public final class ConversationViewModel {
     /// under them rather than cutting the transcript back to one page.
     private var hasOlderPages = false
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var isSending = false
     private var load: Task<Void, Never>?
     /// The DM correspondent, once known — the header identity's destination.
@@ -139,7 +144,15 @@ public final class ConversationViewModel {
         var failed = false
 
         enum Payload {
-            case media(ChatMediaUpload)
+            /// The picture or clip, and the media.v1 idempotency key its
+            /// upload goes under (#795).
+            ///
+            /// ⚠️ **MINTED WITH THE BUBBLE, NOT WITH THE ATTEMPT.** `retry`
+            /// sends the same payload again, key included, so a message whose
+            /// first answer was lost replays its upload instead of storing
+            /// the picture a second time. (Text has no key: chat.v1
+            /// `SendMessage` carries none — see `ChatRepository.sendMessage`.)
+            case media(ChatMediaUpload, uploadKey: String)
             case text(String)
         }
 
@@ -183,6 +196,7 @@ public final class ConversationViewModel {
     }
 
     public func viewDidLoad() {
+        armRecovery()
         loadTitle()
         switch target {
         case .existing:
@@ -199,6 +213,19 @@ public final class ConversationViewModel {
             phase = .loading
             _ = resolveConversation()
         }
+    }
+
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        guard case .failed = phase else { return }
+        refresh()
     }
 
     public func refresh() {
@@ -302,7 +329,8 @@ public final class ConversationViewModel {
             let id = "pending-\(pendingCount)"
             ids.append(id)
             pendingSends.append(PendingSend(
-                id: id, payload: .media(upload), replyTo: index == 0 ? replyTo : nil, createdAt: Date()
+                id: id, payload: .media(upload, uploadKey: UUID().uuidString),
+                replyTo: index == 0 ? replyTo : nil, createdAt: Date()
             ))
         }
         emit()
@@ -342,9 +370,9 @@ public final class ConversationViewModel {
             switch pending.payload {
             case .text(let body):
                 message = try await repository.send(body, to: id, replyingTo: pending.replyTo)
-            case .media(let upload):
+            case .media(let upload, let uploadKey):
                 message = try await repository.send(
-                    media: upload, caption: "", to: id, replyingTo: pending.replyTo
+                    media: upload, caption: "", to: id, replyingTo: pending.replyTo, idempotencyKey: uploadKey
                 )
                 if let preview = upload.preview {
                     localPreviews[message.id] = preview
@@ -478,7 +506,7 @@ public final class ConversationViewModel {
                 // Superseded.
             } catch {
                 if case .content = self.phase {} else {
-                    self.phase = .failed(message: "Couldn't load this conversation. Pull to retry.")
+                    self.phase = .failed(message: "Couldn't load this conversation")
                 }
             }
             self.load = nil
@@ -587,7 +615,7 @@ public final class ConversationViewModel {
         let models = shown.map { MessageDisplayModel(message: $0, preview: previews[$0.id]) }
         let pending = pendingSends.map { send -> MessageDisplayModel in
             switch send.payload {
-            case .media(let upload):
+            case .media(let upload, _):
                 MessageDisplayModel(pending: send.id, upload: upload, sender: senderID, sentAt: send.createdAt, failed: send.failed)
             case .text(let body):
                 MessageDisplayModel(

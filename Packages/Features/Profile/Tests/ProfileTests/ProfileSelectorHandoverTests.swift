@@ -151,66 +151,41 @@ struct ProfileSelectorHandoverTests {
         #expect(screen.navigationItem.hidesBackButton == false)
     }
 
-    /// ⚠️ **A SYSTEM ITEM, AND THE SHAPE IS THE REASON.** Wrapped in a button
-    /// the glyph came out in a 59x44 platter — an OVAL beside a chevron that is
-    /// a 44pt circle — because the button carries its own content insets and
-    /// UIKit sizes the platter around whatever it is given.
-    @Test func theSourceFilterHasNoCustomViewToInflateItsPlatter() async {
+    /// ⚠️ **NO SOURCE FILTER IN YOUR OWN PROFILE'S BAR (#772).** It led the
+    /// bar (All / Posts / Reposts / Tagged); Reposts and Tagged are tabs at
+    /// the foot now, as on anyone else's profile.
+    @Test func yourOwnProfileHasNoSourceFilterInTheBar() async {
         guard let screen = await loadedScreen() else { return }
-        let filter = screen.navigationItem.leftBarButtonItems?
-            .first { $0.accessibilityLabel == "Content source" }
-        #expect(filter?.customView == nil)
-        #expect(filter?.menu != nil, "the item is the menu host; nothing wraps it")
-    }
-
-    // MARK: - Which one is on screen
-
-    /// At the top of the profile the selector is the inline one, and the
-    /// ⚠️ **SIX TESTS WENT WITH THE MECHANISM THEY DROVE.** There were two
-    /// selector copies — an inline one in the header's slot and a docked one in
-    /// the navigation bar — crossfading at a threshold, and four tests pushed
-    /// `debugSetBarDocked` across it while two more checked that selecting on
-    /// one copy mirrored to the other without feeding back. The strip lives at
-    /// the foot of the screen now and never moves: no threshold, no crossfade,
-    /// no second copy to mirror into.
-    ///
-    /// ⚠️ AND ONE OF THEM WAS ALREADY VACUOUS.
-    /// `theRestingSelectorSurvivesTheBarRewritingItsAlpha` poked
-    /// `navigationItem.titleView?.alpha` — but on this screen the title view
-    /// was the ZERO-SIZED empty view the leading-selector install planted, never
-    /// the docked bar. It would have passed unchanged after the selector left
-    /// the bar entirely. Deleting it removes a test that proved nothing.
-    ///
-    /// What survives below is the pair that was never about the hand-over: the
-    /// source filter keeping its place across a tab change.
-
-    /// ⚠️ **THE DEFECT THESE TWO WERE WRITTEN FOR IS GONE WITH ITS
-    /// MECHANISM.** They watched a bar item's custom view being STOLEN: the
-    /// inline tray was lazy, its initialiser wrapped the source button in a
-    /// glass capsule and adopted it as a subview, and building the tray
-    /// therefore took the button off the toolbar — leaving a bar item with an
-    /// empty custom view, a full-width blank capsule at the foot. It only
-    /// showed after a tab change, because that was the only thing that built
-    /// the tray, which is why the first tab looked right and the second did
-    /// not. There is no tray and no custom view now; the filter is a system bar
-    /// item and nothing can adopt it.
-    ///
-    /// What is still worth pinning is what the tab change was always supposed
-    /// to do to it: the filter belongs to a FORMAT tab, so it goes when there
-    /// is no format to filter and comes back when there is.
-    @Test func theSourceFilterFollowsWhetherTheTabHasAFormat() async {
-        guard let screen = await loadedScreen() else { return }
-        let filter = screen.navigationItem.leftBarButtonItems?
-            .first { $0.accessibilityLabel == "Content source" }
-        #expect(filter != nil)
-
-        for index in [1, 2, 0, 1] {
+        #expect(screen.navigationItem.leftBarButtonItems?
+            .contains { $0.accessibilityLabel == "Content source" } != true,
+            "your own profile kept the source filter")
+        for index in screen.debugTabTitles.indices {
             screen.selectTab(at: index)
             #expect(screen.navigationItem.leftBarButtonItems?
-                .contains { $0 === filter } == true,
-                "the filter left the bar on tab \(index)")
-            #expect(filter?.customView == nil, "something wrapped the filter")
+                .contains { $0.accessibilityLabel == "Content source" } != true,
+                "the source filter came back on tab \(index)")
         }
+    }
+
+    /// ⚠️ **POSTS · REPOSTS · TAGGED IN THE TAB ROOT'S ACCESSORY (#772)**, each
+    /// with something in it — Saved and Liked join only once they hold
+    /// something (#742).
+    @Test func yourOwnProfileListsRepostsAndTaggedInTheAccessory() async {
+        guard let screen = await loadedScreen(trayPlacement: .aboveBottomSafeArea) else { return }
+        #expect(screen.debugTabTitles == ["Posts", "Reposts", "Tagged"])
+        #expect(screen.debugSelectorTitles == ["Posts", "Reposts", "Tagged"])
+        #expect(screen.debugPageCount == 3)
+        #expect(screen.selectorAccessory != nil, "no selector in the accessory")
+        #expect(screen.debugActivePageIndex == 0, "it does not open on Posts")
+    }
+
+    /// And a source with nothing in it has no tab on your own profile either.
+    @Test func yourOwnEmptySourceHasNoTab() async {
+        guard let screen = await loadedScreen(
+            trayPlacement: .aboveBottomSafeArea, gallery: StockedGallery(reposts: false)
+        ) else { return }
+        #expect(screen.debugTabTitles == ["Posts", "Tagged"])
+        #expect(screen.debugSelectorTitles == ["Posts", "Tagged"])
     }
 
     // MARK: - Someone else's profile (#696)
@@ -229,14 +204,18 @@ struct ProfileSelectorHandoverTests {
             "someone else's profile kept the source filter")
     }
 
-    /// The viewer's own with nothing saved: Liked has no source to fill it
-    /// (no API answers it) and Saved is empty, so Posts alone — no selector
-    /// (#742).
-    @Test func yourOwnProfileWithNothingSavedIsPostsAlone() async {
-        guard let screen = await loadedScreen() else { return }
+    /// The viewer's own with no reposts, no tags and nothing saved: Liked has
+    /// no source to fill it (no API answers it) and the rest are empty, so
+    /// Posts alone — no selector (#742, #772).
+    @Test(arguments: [ProfileTrayPlacement.navigationToolbar, .aboveBottomSafeArea])
+    func yourOwnProfileWithNothingElseIsPostsAlone(placement: ProfileTrayPlacement) async {
+        guard let screen = await loadedScreen(
+            trayPlacement: placement, gallery: StockedGallery(reposts: false, tagged: false)
+        ) else { return }
         #expect(screen.debugTabTitles == ["Posts"])
         #expect(screen.debugPageCount == 1)
         #expect(screen.selectorItem == nil, "a selector with one tab")
+        #expect(screen.selectorAccessory == nil, "an accessory with one tab")
         #expect(screen.toolbarItems?.isEmpty != false)
     }
 

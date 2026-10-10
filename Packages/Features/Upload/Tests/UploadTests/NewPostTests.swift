@@ -260,6 +260,10 @@ struct NewPostTests {
         }
 
         private(set) var calls: [Call] = []
+        /// Publishes to fail before one succeeds — each still recorded (#795).
+        private var failures: Int
+
+        init(failures: Int = 0) { self.failures = failures }
 
         func publish(
             media: [ComposeMedia], caption: String, as author: AuthorSummary?
@@ -280,6 +284,10 @@ struct NewPostTests {
                 mediaCount: media.count, caption: caption,
                 images: pictures, kinds: kinds, videos: clips
             ))
+            if failures > 0 {
+                failures -= 1
+                throw ComposeError.transport("the answer was lost")
+            }
             let by = author ?? AuthorSummary(
                 id: ProfileID("first"), handle: "first", displayName: "First", avatarURL: nil
             )
@@ -335,10 +343,10 @@ struct NewPostTests {
         edits: [String: MediaEdits] = [:],
         reducesMotion: Bool = false,
         landed: Bool = true,
-        photoLibrary: StubPhotoLibrary = StubPhotoLibrary()
+        photoLibrary: StubPhotoLibrary = StubPhotoLibrary(),
+        composer: RecordingComposer = RecordingComposer()
     ) -> Screen {
         let library = StubLibrary()
-        let composer = RecordingComposer()
         let preview = StubPreview()
         let handed = Handed()
         let post = NewPostViewController(
@@ -496,6 +504,33 @@ struct NewPostTests {
         let pixel = try #require(Self.centrePixel(of: picture.image))
         #expect(pixel.r > pixel.g + 60, "still the red the library answered with: \(pixel)")
         #expect(pixel.r > pixel.b + 60, "untouched, not levelled: \(pixel)")
+    }
+
+    /// ⚠️ **A RETRIED POST UPLOADS EACH PICTURE UNDER THE KEY IT FIRST WENT UP
+    /// WITH (#795).** A failed publish rebuilds every picture from the library;
+    /// a key minted with them was a new one per attempt, so a retry after a
+    /// lost answer stored every picture again. Two pictures are two assets and
+    /// never share a key.
+    @Test func aRetriedPostReusesEachPicturesUploadKey() async throws {
+        let screen = open(Self.items(2), composer: RecordingComposer(failures: 1))
+        let postButton = try #require(screen.post.navigationItem.rightBarButtonItems?.first)
+
+        screen.post.debugTapPost()
+        try await settle(until: { postButton.isEnabled == false })
+        try await settle(until: { postButton.isEnabled })
+        screen.post.debugTapPost()
+        var calls: [RecordingComposer.Call] = []
+        for _ in 0..<3000 where calls.count < 2 {
+            calls = await screen.composer.calls
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        try #require(calls.count == 2, "publishes: \(calls.count)")
+        let first = calls[0].images.map(\.uploadKey)
+        let retry = calls[1].images.map(\.uploadKey)
+        #expect(first.count == 2)
+        #expect(retry == first, "the retry uploaded under new keys")
+        #expect(Set(first).count == 2, "two pictures shared one key")
     }
 
     /// ⚠️ **THE CROP MUST REACH THE UPLOAD TOO, AND NOTHING ASSERTED THAT UNTIL
@@ -1465,6 +1500,184 @@ struct NewPostTests {
 
         #expect(post.debugFlowEndedBy === root,
                 "the flow was ended by \(String(describing: post.debugFlowEndedBy)), not the sheet's presenter")
+    }
+
+    /// ⚠️ A PUBLISHED POST SAYS "Posted" (#803) — from the sheet's presenter,
+    /// once the sheet has gone; it used to end in silence. The dismissal's
+    /// completion never runs in the test host (see above), so what is pinned
+    /// is what it calls: the toast lands on the tab the author is on, whose
+    /// safe area clears the tab bar.
+    @Test func aPublishedPostIsConfirmedOverThePresentersTab() {
+        #expect(NewPostViewController.publishedMessage == "Posted")
+        let tabs = UITabBarController()
+        let feed = UINavigationController(rootViewController: UIViewController())
+        tabs.viewControllers = [feed]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = tabs
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+
+        NewPostViewController.confirmPublished(on: tabs)
+
+        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        #expect(toast?.style == .confirmation, "no toast over the author's tab")
+        #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
+    }
+
+    /// Holds every publish until `fail()` is called, then fails it — so a test
+    /// decides WHEN the answer comes, with no clock in the race (#795).
+    private final class HeldFailingComposer: PostComposing, @unchecked Sendable {
+        private let lock = NSLock()
+        private var released = false
+        private var _started = false
+
+        var started: Bool { lock.withLock { _started } }
+        func fail() { lock.withLock { released = true } }
+
+        func publish(
+            media: [ComposeMedia], caption: String, as author: AuthorSummary?
+        ) async throws -> FeedEntry {
+            lock.withLock { _started = true }
+            while !lock.withLock({ released }) {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            throw ComposeError.transport("offline")
+        }
+    }
+
+    /// Every toast anywhere under `view`.
+    private static func toasts(under view: UIView) -> [ToastView] {
+        view.subviews.flatMap { subview -> [ToastView] in
+            (subview as? ToastView).map { [$0] } ?? toasts(under: subview)
+        }
+    }
+
+    /// ⚠️ **A PUBLISH THAT FAILS ONCE ITS SCREEN HAS LEFT THE WINDOW IS STILL
+    /// SAID (#795).** The task holds the screen, not the sheet: swiped away
+    /// mid-publish, the failure alert used to be presented on a screen in no
+    /// window, and UIKit dropped it — the author believed in a post that never
+    /// went up. The failure is now said from the sheet's presenter.
+    ///
+    /// ⚠️ **NO DISMISSAL IS PERFORMED, AND THAT IS THE TEST HOST, NOT A
+    /// SHORTCUT.** Measured: here a presented sheet never reaches the window
+    /// (`post.view.window` stays nil after `present`) and `dismiss` never
+    /// clears `presentedViewController`, animated or not. So the screen is
+    /// already in the one state that matters — out of every window, where an
+    /// alert is never seen — and what is pinned is that the failure toast is
+    /// sourced from the presenter (`Feedback.host(for:)` places it; its own
+    /// rules are DesignSystem's `FeedbackTests`).
+    @Test(.timeLimit(.minutes(10)))
+    func aPublishThatFailsOffScreenIsSaidFromTheSheetsPresenter() async throws {
+        let composer = HeldFailingComposer()
+        let post = NewPostViewController(
+            items: Self.items(1), library: StubLibrary(), composer: composer, preview: StubPreview(),
+            photoLibrary: StubPhotoLibrary(), reducesMotion: { true }
+        ) { _ in }
+        let sheet = UINavigationController(rootViewController: post)
+        let root = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = root
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        root.present(sheet, animated: false)
+        try await settle(until: { root.presentedViewController === sheet })
+        try #require(post.presentingViewController === root, "guard: the screen sits in a presented sheet")
+        try #require(post.viewIfLoaded?.window == nil, "guard: the screen is in no window")
+
+        post.debugTapPost()
+        try await settle(until: { composer.started })
+        try #require(composer.started, "guard: the publish is on its way")
+        let host = Feedback.host(for: root).view!
+        try #require(Self.toasts(under: host).isEmpty, "guard: nothing said before the answer")
+
+        composer.fail()
+        try await settle(until: { !Self.toasts(under: host).isEmpty })
+
+        #expect(Self.toasts(under: host).first?.style == .failure, "the failure was lost with the screen")
+    }
+
+    /// What `reportPublishFailure(on:)` does, pinned the way "Posted" is: a
+    /// failure toast on the tab the author is on, clear of the tab bar.
+    @Test func aPublishFailureIsSaidOverThePresentersTab() {
+        #expect(NewPostViewController.publishFailedMessage == "Couldn't publish your post")
+        let tabs = UITabBarController()
+        let feed = UINavigationController(rootViewController: UIViewController())
+        tabs.viewControllers = [feed]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = tabs
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+
+        NewPostViewController.reportPublishFailure(on: tabs)
+
+        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        #expect(toast?.style == .failure, "no failure toast over the author's tab")
+        #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
+    }
+
+    /// ⚠️ **A COPY THAT FAILS OFF SCREEN STILL ENDS THE FLOW (#795).** Its
+    /// alert was the only way to `endTheFlow`; presented on a screen in no
+    /// window it was dropped, and the flow never ended — no "Posted", no
+    /// word about the copy. (In the test host a presented sheet is in no
+    /// window: see `aPublishThatFailsOffScreenIsSaidFromTheSheetsPresenter`.)
+    @Test(.timeLimit(.minutes(10)))
+    func aCopyThatFailsOffScreenStillEndsTheFlow() async throws {
+        let photoLibrary = StubPhotoLibrary(fails: true)
+        let post = NewPostViewController(
+            items: Self.items(1), library: StubLibrary(), composer: RecordingComposer(), preview: StubPreview(),
+            photoLibrary: photoLibrary, reducesMotion: { true }
+        ) { _ in }
+        let root = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = root
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        root.present(UINavigationController(rootViewController: post), animated: false)
+        try await settle(until: { post.presentingViewController === root })
+        try #require(post.viewIfLoaded?.window == nil, "guard: the screen is in no window")
+        post.debugFlip(saveToPhotos: true)
+        try await settle(until: { photoLibrary.asked == 1 })
+
+        post.debugTapPost()
+        try await settle(until: { post.debugFlowEndedBy != nil })
+
+        #expect(post.debugFlowEndedBy === root, "the flow never ended")
+        #expect(post.presentedViewController == nil, "an alert went to a screen nobody can see")
+    }
+
+    /// What the off-screen copy failure says, pinned like "Posted".
+    @Test func anOffScreenCopyFailureIsSaidOverThePresentersTab() {
+        #expect(NewPostViewController.copyFailedMessage == "Posted, but the copy couldn't be saved to Photos")
+        let tabs = UITabBarController()
+        let feed = UINavigationController(rootViewController: UIViewController())
+        tabs.viewControllers = [feed]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = tabs
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+
+        NewPostViewController.reportCopyFailure(on: tabs)
+
+        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        #expect(toast?.style == .failure, "no failure toast over the author's tab")
     }
 
     /// Six switches in one card is a wall. Grouped, each card asks one question
