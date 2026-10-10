@@ -3315,6 +3315,21 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // message a no-op — the page would never start.
         ownsViewport = false
         cancelMediaLoader()
+        // ⚠️ AN UNFINISHED DISMISSAL OR MASKED REVEAL ENDS HERE (#788).
+        //
+        // Both are put back only by the feed's own `end…` calls, and a cell
+        // can be recycled before they come: the next post then arrived with
+        // its media at alpha 0 or hidden, under a leftover mask, and with the
+        // flags still set, so the next `begin…` declined to run. Ended first,
+        // while still engaged, the way the feed would have ended them — and
+        // then the media is put back to a fresh page's own values, because
+        // what either restores was captured from a page that no longer exists.
+        endEngagedDismissal()
+        endMaskedRevealForFlight()
+        // The reveal's spring may still be carrying the stage to identity.
+        pageStage.layer.removeAllAnimations()
+        mediaCard.isHidden = false
+        mediaCard.alpha = 1
         // Instant (unanimated) disengage: a recycled cell must come back
         // full-bleed. Ordered before the media/chrome resets it restores.
         setCommentsEngaged(false)

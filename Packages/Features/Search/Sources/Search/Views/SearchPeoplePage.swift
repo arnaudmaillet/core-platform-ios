@@ -42,7 +42,7 @@ final class SearchPeoplePage: UIViewController {
     private let statusView = EmptyStateView()
 
     private var modelsByID: [ProfileID: SearchResultDisplayModel] = [:]
-    private var avatarTasks: [ProfileID: Task<Void, Never>] = [:]
+    private let avatarLoads = RowAvatarLoads()
 
     init(imagePipeline: ImagePipeline) {
         self.imagePipeline = imagePipeline
@@ -94,7 +94,7 @@ final class SearchPeoplePage: UIViewController {
                 monogram: model.monogram,
                 context: model.context
             ))
-            self.loadAvatar(model.avatarURL, into: cell, for: id)
+            self.loadAvatar(model.avatarURL, into: cell)
         }
         dataSource = UICollectionViewDiffableDataSource<Int, ProfileID>(
             collectionView: collectionView
@@ -258,15 +258,14 @@ final class SearchPeoplePage: UIViewController {
         }
     }
 
-    /// ⚠️ KEYED BY PERSON, NOT BY CELL. A cell is reused; a task started for
-    /// the row that was there before must not paint the row that is there now.
-    private func loadAvatar(_ url: URL?, into cell: PersonListCell, for id: ProfileID) {
-        guard let url else { return }
-        avatarTasks[id]?.cancel()
-        avatarTasks[id] = Task { [weak self, weak cell] in
-            guard let image = try? await self?.imagePipeline.image(for: url) else { return }
-            guard let cell, !Task.isCancelled else { return }
-            cell.setAvatarImage(image)
+    /// ⚠️ KEYED BY CELL, NOT BY PERSON (#780). A cell is reused; a task
+    /// started for the row that was there before must not paint the row that
+    /// is there now. Keyed by person, nothing cancelled A's load when its cell
+    /// was configured for B, and A's face landed on B's row after a fast
+    /// scroll. See `RowAvatarLoads`.
+    private func loadAvatar(_ url: URL?, into cell: PersonListCell) {
+        avatarLoads.load(url, using: imagePipeline, for: cell) { [weak cell] image in
+            cell?.setAvatarImage(image)
         }
     }
 }

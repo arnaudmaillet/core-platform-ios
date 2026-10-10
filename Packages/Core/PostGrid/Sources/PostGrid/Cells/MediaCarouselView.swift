@@ -510,12 +510,20 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// Concealment applies to the page, and a walk for image views answers for
     /// the layers inside one.
     private(set) var pageViews: [CarouselPageView] = []
-    private var loadTasks: [Task<Void, Never>] = []
+    /// The page loads still in flight, by page. An entry leaves when its load
+    /// lands, so whatever is left here when the work is cancelled is exactly
+    /// the pages that never got their picture (#779).
+    private var loadTasks: [Int: Task<Void, Never>] = [:]
     private var pages: [GalleryPost.MediaPage] = []
     private var imagePipeline: ImagePipeline?
     /// Which pages have been asked for. A SET rather than a count, because the
     /// window moves in both directions and a page must never be fetched twice.
-    private var loadedPages: Set<Int> = []
+    ///
+    /// ⚠️ A page whose load is CANCELLED leaves this set (`cancelPendingWork`).
+    /// It used to stay: the page counted as fetched, the window skipped it, and
+    /// a row recycled mid-load and dequeued again for the same post kept an
+    /// empty fill for good (#779). Readable inside the package for that test.
+    private(set) var loadedPages: Set<Int> = []
     private let style: Style
 
     public init(style: Style = .card, frame: CGRect = .zero) {
@@ -584,7 +592,15 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         // three landed on page three and then slid back to page one on its own.
         // It also means any later model refresh cannot yank a viewer's carousel
         // out from under them.
-        guard pages != self.pages else { return }
+        //
+        // ⚠️ But it still asks for the window: a page whose load was cancelled
+        // since (the row recycled, the card hidden) is no longer counted as
+        // loaded, and this is the next time it is shown (#779). Pages that
+        // already have their picture are skipped, so this costs nothing.
+        guard pages != self.pages else {
+            loadPagesAroundCurrent()
+            return
+        }
         cancelPendingWork()
         pageViews.forEach { $0.removeFromSuperview() }
         self.pages = pages
@@ -660,10 +676,14 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
                 applyFraming(onPage: index)
                 continue
             }
-            loadTasks.append(Task { [weak self] in
-                guard let image = try? await imagePipeline.image(for: url),
-                      !Task.isCancelled, let self,
-                      self.pageViews.indices.contains(index) else { return }
+            loadTasks[index] = Task { [weak self] in
+                let image = try? await imagePipeline.image(for: url)
+                // A cancelled load returns without touching `loadTasks`: the
+                // cancel already retired its entry, and the slot may belong to
+                // a newer load of the same page by now.
+                guard !Task.isCancelled, let self else { return }
+                self.loadTasks[index] = nil
+                guard let image, self.pageViews.indices.contains(index) else { return }
                 let page = self.pageViews[index]
                 // The whole page dissolves, not only its cover: a fitted page
                 // gains its backdrop in the same beat as its picture, and a
@@ -675,7 +695,7 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
                     page.cover.image = image
                     self.applyFraming(onPage: index)
                 }
-            })
+            }
         }
     }
 
@@ -803,8 +823,14 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
 
     private var isCurrentPageConcealed = false
 
+    /// Cancels the page loads still in flight, and forgets that those pages
+    /// were asked for, so the next configure or scroll that shows them asks
+    /// again (#779). Pages that already landed keep their picture.
     public func cancelPendingWork() {
-        loadTasks.forEach { $0.cancel() }
+        for (index, task) in loadTasks {
+            task.cancel()
+            loadedPages.remove(index)
+        }
         loadTasks.removeAll()
     }
 
