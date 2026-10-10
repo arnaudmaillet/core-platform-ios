@@ -20,12 +20,13 @@ import XCTest
 /// trait, `.regular` (360pt) → `.inline` (234pt).
 final class AccessoryCollapseUITests: XCTestCase {
 
-    /// The three tabs whose root screen hosts its selector in the accessory.
+    /// The tabs whose root screen hosts its selector in the accessory.
     /// Indices into `AppTab.allCases` — `-select-tab` takes an INDEX, and a
     /// name is a silent no-op that lands on Explore and fakes a missing
-    /// selector.
+    /// selector. For You has no band since 2026-09-29, and its bar never
+    /// collapses (#758).
     private static let accessorySurfaces: [(name: String, tab: Int)] = [
-        ("For You", 1), ("Messages", 2), ("Profile", 3),
+        ("Messages", 2), ("Profile", 3),
     ]
 
     override func setUp() { continueAfterFailure = false }
