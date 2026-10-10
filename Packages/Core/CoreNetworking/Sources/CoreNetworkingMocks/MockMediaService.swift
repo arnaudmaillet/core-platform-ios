@@ -19,18 +19,38 @@ public final class MockBlobStore: @unchecked Sendable {
 
     private let lock = NSLock()
     private var assets: [String: AssetRecord] = [:]
+    /// The asset each (owner, idempotency key) reserved (#795).
+    private var assetsByKey: [String: String] = [:]
 
     public init() {}
 
-    func createPending(ownerID: String, mimeType: String, size: UInt64, sha256: String) -> String {
-        let assetID = "asset-\(UUID().uuidString.prefix(12))"
+    /// How many assets have been reserved — what a test counts to tell a
+    /// replayed upload from a second one (#795).
+    public var assetCount: Int { lock.withLock { assets.count } }
+
+    /// Reserves an asset — or, under an idempotency key an earlier ticket
+    /// already used for this owner, answers with THAT asset and its record
+    /// (`replayed`), reserving nothing (#795).
+    ///
+    /// ⚠️ **LOOKUP AND RESERVATION ARE ONE CRITICAL SECTION.** Two tickets
+    /// racing under one key must not both miss and reserve two assets — the
+    /// very duplicate the key exists to prevent.
+    func reserve(
+        ownerID: String, mimeType: String, size: UInt64, sha256: String, idempotencyKey: String
+    ) -> (assetID: String, replayed: AssetRecord?) {
         lock.withLock {
+            let keyed = idempotencyKey.isEmpty ? nil : ownerID + "\u{1F}" + idempotencyKey
+            if let keyed, let assetID = assetsByKey[keyed], let record = assets[assetID] {
+                return (assetID, record)
+            }
+            let assetID = "asset-\(UUID().uuidString.prefix(12))"
             assets[assetID] = AssetRecord(
                 ownerID: ownerID, mimeType: mimeType, declaredSize: size,
                 sha256: sha256, state: .mediaAssetStatePending, bytes: nil
             )
+            if let keyed { assetsByKey[keyed] = assetID }
+            return (assetID, nil)
         }
-        return assetID
     }
 
     func putBytes(_ data: Data, assetID: String) -> Bool {
@@ -114,12 +134,26 @@ public final class MockMediaService: @unchecked Sendable {
         guard !request.ownerID.isEmpty else {
             return .failure(ConnectError(code: .invalidArgument, message: "owner_id required"))
         }
-        let assetID = store.createPending(
+        let (assetID, replayed) = store.reserve(
             ownerID: request.ownerID,
             mimeType: request.declaredMimeType,
             size: request.declaredSizeBytes,
-            sha256: request.contentSha256
+            sha256: request.contentSha256,
+            idempotencyKey: request.idempotencyKey
         )
+
+        // ⚠️ A REPLAYED KEY IS ANSWERED WITH THE ASSET IT ALREADY RESERVED
+        // (#795): one already READY — the bytes stored and committed, only
+        // the answer lost — comes back `deduplicated`, so the client uploads
+        // nothing; one still pending gets a ticket to the SAME asset. The
+        // fleet's media.v1 accepts the key but does not honour it yet (its
+        // "Phase-4 cache adapter"); this is the behaviour the field promises.
+        if replayed?.state == .mediaAssetStateReady {
+            var response = Media_V1_IssueUploadTicketResponse()
+            response.assetID = assetID
+            response.deduplicated = true
+            return .success(response)
+        }
 
         var ticket = Media_V1_UploadTicket()
         ticket.uploadURL = "mock://upload/\(assetID)"
