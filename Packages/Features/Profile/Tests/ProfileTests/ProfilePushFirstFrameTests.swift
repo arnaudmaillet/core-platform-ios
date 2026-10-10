@@ -1,5 +1,4 @@
 import CoreModels
-import CoreNavigation
 import Foundation
 import MapsInterface
 import MediaCore
@@ -8,22 +7,19 @@ import Testing
 import UIKit
 @testable import Profile
 
-/// **A pushed profile's first frame is its final one** (charter P12a).
+/// **A pushed profile's first frame is honest, and it settles in place.**
 ///
 /// Filmed on device, 1 October 2026: from a chat, the author's profile slid in
 /// as its loading self — initials, bones, a BLUE "Follow" — and turned into the
-/// real page ("Following", the face, the cards) as the slide ended. The data
-/// was a few milliseconds away; it simply landed after the push had started.
+/// real page ("Following", the face, the cards) as the slide ended. The push
+/// was then held for the data (charter P12a); since #778 (the owner's rule,
+/// 2026-10-10) it never waits: the screen slides in on its loading state and
+/// the data lands in place. What stays is the honesty — an unknown
+/// relationship never draws as "Follow" — and a revisit seeded at frame 0.
 ///
-/// The push is now held (`PresentationHold`) until the screen says it is
-/// settled, and an unknown relationship no longer draws as "Follow" at all.
-///
-/// ⚠️ NO TEST HERE RACES A CLOCK. Every hold runs with a `.manual` ceiling:
-/// a test that asserts `.ready` has no timer to lose to, and the one that
-/// asserts `.ceiling` fires it itself. Waits poll the actual signal, with no
-/// bound but the suite's time limit. CI's first run of this suite took ~105 s
-/// per test — the whole package was starved — and every wall-clock ceiling,
-/// even a "generous" 60 s, fired before the page it bounded had settled.
+/// ⚠️ NO TEST HERE RACES A CLOCK. Waits poll the actual signal, with no bound
+/// but the suite's time limit: CI's first run of this suite took ~105 s per
+/// test — the whole package was starved.
 @MainActor
 @Suite(.timeLimit(.minutes(10)))
 struct ProfilePushFirstFrameTests {
@@ -113,60 +109,36 @@ struct ProfilePushFirstFrameTests {
         )
     }
 
-    /// Runs the hold the router runs — with no ceiling: the only way out is
-    /// the screen saying it is ready.
-    private func holdUntilReady(_ screen: ProfileViewController) async -> PresentationHold.Release {
-        await withCheckedContinuation { continuation in
-            PresentationHold.begin(screen, ceiling: .manual) { release, _ in
-                continuation.resume(returning: release)
-            }
-        }
-    }
+    // MARK: - Pushed on its loading state, settled in place (#778)
 
-    // MARK: - The push waits for the settled page
-
-    /// ⚠️ THE FILMED CASE: a followed author, data available within the
-    /// budget. The push lets go because the screen is READY, not because the
-    /// ceiling passed — and what it lets go of is the finished header.
-    @Test func aProfileWhoseDataArrivesInTimeIsPushedAsItself() async {
+    /// ⚠️ NOTHING WAITS: the screen built for a push is its loading self —
+    /// the header redacted in place — and fills in as the data lands, with no
+    /// one holding the slide for it.
+    @Test func aRoutedProfileStartsOnItsLoadingStateAndSettlesInPlace() async {
         let screen = routedProfile(Profiles(relationship: .other(isFollowing: true, isBlocked: false)))
 
-        let release = await holdUntilReady(screen)
-        #expect(release == .ready)
-        #expect(!screen.debugIsHeaderRedacted, "pushed on the header's bones")
-        #expect(screen.debugFollowTitle == "Following", "pushed wearing \(String(describing: screen.debugFollowTitle))")
+        screen.loadViewIfNeeded()
+        #expect(screen.debugIsHeaderRedacted, "a cold profile's first frame claimed data it did not have")
+
+        await settle(until: {
+            !screen.debugIsHeaderRedacted && screen.debugFollowTitle == "Following" && screen.debugHasAvatarPicture
+        })
+        #expect(!screen.debugIsHeaderRedacted)
+        #expect(screen.debugFollowTitle == "Following")
         #expect(!screen.debugFollowIsProminent, "Following is a state, not the blue call to action")
-        #expect(screen.debugHasAvatarPicture, "pushed on the initials instead of the face")
+        #expect(screen.debugHasAvatarPicture)
     }
 
     /// A stranger's profile settles on "Follow" — the prominent capsule is
     /// right when it is the ANSWER, not when it is a guess.
     @Test func aStrangersProfileSettlesOnFollow() async {
         let screen = routedProfile(Profiles(relationship: .other(isFollowing: false, isBlocked: false)))
+        screen.loadViewIfNeeded()
 
-        let release = await holdUntilReady(screen)
+        await settle(until: { screen.debugFollowTitle == "Follow" })
 
-        #expect(release == .ready)
         #expect(screen.debugFollowTitle == "Follow")
         #expect(screen.debugFollowIsProminent)
-    }
-
-    /// The ceiling is what keeps the hold honest: a read that never answers
-    /// is never waited out — the push goes ahead on what the page has, and
-    /// what it has is a placeholder, not a guess.
-    @Test func aRelationshipThatNeverAnswersIsPushedOnItsPlaceholder() async {
-        let screen = routedProfile(Profiles(relationship: nil))
-        var releases: [PresentationHold.Release] = []
-        let hold = PresentationHold.begin(screen, ceiling: .manual) { release, _ in releases.append(release) }
-
-        // The profile lands; the relationship never does, so nothing releases.
-        await settle(until: { !screen.debugIsHeaderRedacted })
-        #expect(releases.isEmpty, "released without a relationship")
-
-        hold.releaseAtCeiling()
-
-        #expect(releases == [.ceiling])
-        #expect(screen.debugFollowTitle == nil, "pushed wearing \(String(describing: screen.debugFollowTitle))")
     }
 
     // MARK: - An unknown relationship is never "Follow"
@@ -200,17 +172,13 @@ struct ProfilePushFirstFrameTests {
 
     // MARK: - A revisit is ready at once
 
-    /// ⚠️ A REVISIT'S HEADER DOES NOT WAIT. The profile AND the relationship
-    /// come out of the cache in the same turn, so a screen with nothing else
-    /// to fetch releases the hold before `begin` even returns — the push
-    /// starts on the tap, already finished. (A gallery or a map star still
-    /// costs its own read: measured ~90 ms on the simulator.)
+    /// ⚠️ A REVISIT'S HEADER IS ITS FIRST FRAME. The profile AND the
+    /// relationship come out of the cache in the same turn as `viewDidLoad`,
+    /// so the screen pushed on the tap is already the finished header — no
+    /// await anywhere. (A gallery or a map star still costs its own read.)
     ///
     /// Everything it reads is its own — a fresh cache and a fresh pipeline —
-    /// so no other suite can warm or cool it. Its CI failure was the first
-    /// visit's hold running out on a starved runner before the picture was
-    /// decoded: the second visit then really did have to wait for it. The
-    /// first visit now ends on READY, and the test says so before relying on it.
+    /// so no other suite can warm or cool it.
     @Test func aRevisitsHeaderIsReadyBeforeAnyAwait() async throws {
         let id = ProfileID("prof-kenji")
         let cache = ProfileCache()
@@ -222,7 +190,10 @@ struct ProfilePushFirstFrameTests {
             imagePipeline: pipeline,
             onLogout: nil
         )
-        #expect(await holdUntilReady(first) == .ready)
+        first.loadViewIfNeeded()
+        await settle(until: {
+            cache.relationship(for: id) != nil && !first.debugIsHeaderRedacted && first.debugHasAvatarPicture
+        })
         try #require(cache.profile(for: id) != nil, "the first visit's profile was not cached")
         try #require(cache.relationship(for: id) != nil, "the first visit's relationship was not cached")
         let avatar = try #require(ProfilePushFirstFrameTests.kenji().avatarURL)
@@ -235,11 +206,8 @@ struct ProfilePushFirstFrameTests {
             imagePipeline: pipeline,
             onLogout: nil
         )
-        var releasedSynchronously = false
-        PresentationHold.begin(second, ceiling: .manual) { release, _ in
-            releasedSynchronously = release == .ready
-        }
-        #expect(releasedSynchronously, "a fully cached profile still waited for the network")
+        second.loadViewIfNeeded()
+        #expect(!second.debugIsHeaderRedacted, "a fully cached profile opened on its bones")
         #expect(second.debugFollowTitle == "Following")
     }
 
@@ -276,10 +244,9 @@ struct ProfilePushFirstFrameTests {
         func setCategories(_ categories: Set<MapFavoriteCategory>, for id: ProfileID) async {}
     }
 
-    /// ⚠️ FILMED: for someone followed, the star arrived mid-slide beside
-    /// Message and squeezed both capsules to make room. Its rails are part of
-    /// what the hold waits for.
-    @Test func aFollowedProfileWaitsForItsMapStar() async {
+    /// The star lands in place: the page is up without it, and its rails fill
+    /// the tray when they answer — nothing waits on them.
+    @Test func aFollowedProfilesMapStarLandsInPlace() async {
         let pinning = GatedPinning()
         let viewModel = ProfileViewModel(
             repository: Profiles(relationship: .other(isFollowing: true, isBlocked: false)),
@@ -291,21 +258,17 @@ struct ProfilePushFirstFrameTests {
             imagePipeline: ImagePipeline(fetcher: PictureFetcher()),
             onLogout: nil
         )
-        var releases: [PresentationHold.Release] = []
-        let hold = PresentationHold.begin(screen, ceiling: .manual) { release, _ in releases.append(release) }
+        screen.loadViewIfNeeded()
         // Everything but the star lands; the rails are gated shut.
         await settle(until: {
             viewModel.isRelationshipSettled && !screen.debugIsHeaderRedacted && screen.debugHasAvatarPicture
         })
-        #expect(releases.isEmpty, "pushed before the star knew its rails")
         #expect(!viewModel.isMapPinSettled)
 
         await pinning.open()
-        await settle(until: { !releases.isEmpty })
+        await settle(until: { viewModel.isMapPinSettled })
 
-        #expect(releases == [.ready])
         #expect(viewModel.mapPinButton.isFavorited)
-        withExtendedLifetime(hold) {}
     }
 
     // MARK: - The two reads run side by side

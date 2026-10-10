@@ -44,9 +44,9 @@ final class RouteResolver: Router {
     /// `.profileShareToken`.
     private let lookupShareToken: (String) async -> AppContainer.HandleLookup
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
-    /// The profile being prepared for its push — see `pushWhenReady`. One at a
-    /// time: any newer route supersedes it.
-    private var pendingProfile: (id: ProfileID, hold: PresentationHold)?
+    /// The profile the router pushed last, while it is still the top screen —
+    /// what turns a second tap on the same author into nothing (#778).
+    private var lastPushedProfile: (id: ProfileID, screen: Weak<UIViewController>)?
 
     init(
         searchFeature: @escaping () -> any SearchFeatureBuilding,
@@ -125,37 +125,11 @@ final class RouteResolver: Router {
         navigation.setViewControllers(stack, animated: animated)
     }
 
-    /// Pushes a profile once its first frame is its settled self, or at the
-    /// hold's ceiling — charter P12a, `PresentationHold`.
-    ///
-    /// ⚠️ THE PUSH LANDS WHERE THE TAP WAS, OR NOWHERE. The origin stack and
-    /// its top screen are captured now; if the viewer has left either by the
-    /// time the profile is ready (popped, switched tab, opened something
-    /// else), the push is dropped rather than landing on a screen they never
-    /// tapped from.
-    private func pushWhenReady(_ profile: UIViewController, id: ProfileID, using navigator: AppNavigating) {
-        #if DEBUG
-        // `-presentation-hold-off`: the old immediate push, for A/B films.
-        if ProcessInfo.processInfo.arguments.contains("-presentation-hold-off") {
-            return push(profile, using: navigator)
-        }
-        #endif
-        let origin = navigator.activeNavigationController
-        let originTop = origin?.topViewController
-        let hold = PresentationHold.begin(profile) { [weak self, weak navigator] release, waited in
-            guard let self, let navigator else { return }
-            self.pendingProfile = nil
-            #if DEBUG
-            PresentationBudget.noteHold(of: profile, waited: waited, timedOut: release == .ceiling)
-            #endif
-            guard let origin, navigator.activeNavigationController === origin,
-                  origin.topViewController === originTop else {
-                self.logger.debug("Profile push dropped: the viewer left its origin while it was prepared")
-                return
-            }
-            self.push(profile, using: navigator)
-        }
-        if hold.isPending { pendingProfile = (id, hold) }
+    /// Whether `id`'s profile, pushed by this router, is the active stack's top
+    /// screen right now — a second tap on the author, not a second profile.
+    private func isTopScreen(profile id: ProfileID, in navigator: AppNavigating) -> Bool {
+        guard let last = lastPushedProfile, last.id == id, let screen = last.screen.value else { return false }
+        return navigator.activeNavigationController?.topViewController === screen
     }
 
     func route(to route: AppRoute) {
@@ -163,16 +137,12 @@ final class RouteResolver: Router {
             logger.debug("No navigator; dropping route: \(String(describing: route))")
             return
         }
-        // A second tap on the author whose profile is already being prepared
-        // is the same request, not a second push.
-        if case .profile(let id, _) = route, let pending = pendingProfile, pending.id == id,
-           pending.hold.isPending {
+        // A second tap on the author whose profile was just pushed is the same
+        // request, not a second push: during the slide the new profile is
+        // already the top screen.
+        if case .profile(let id, _) = route, isTopScreen(profile: id, in: navigator) {
             return
         }
-        // Anything else the viewer asked for since wins over a profile still
-        // being prepared: that push would land on top of their newer choice.
-        pendingProfile?.hold.cancel()
-        pendingProfile = nil
         // A route that writes (opening a thread to message someone) needs an
         // account: a guest signs up first, and the route then runs as asked.
         // Checked here so every origin — a profile's button, a share sheet, a
@@ -234,7 +204,13 @@ final class RouteResolver: Router {
             // viewer's, on anyone's profile. Attached BEFORE the push so the
             // item rides the push instead of popping in after it.
             attachBalance(profile)
-            pushWhenReady(profile, id: profileID, using: navigator)
+            // ⚠️ AT ONCE, ON ITS LOADING STATE (#778, the owner's rule
+            // 2026-10-10: a push never waits on data). The header redacts in
+            // place and the gallery shows its bones; the data cross-fades in
+            // over the very frames it will occupy. It used to be held up to
+            // 250 ms for its data (`PresentationHold`, charter P12a).
+            push(profile, using: navigator)
+            lastPushedProfile = (profileID, Weak(profile))
 
         case .search:
             // ⚠️ NOT ANIMATED, and that is the whole point of this route being
@@ -389,4 +365,10 @@ private extension AppRoute {
             nil
         }
     }
+}
+
+/// A weak reference as a value.
+private struct Weak<Value: AnyObject> {
+    weak var value: Value?
+    init(_ value: Value) { self.value = value }
 }

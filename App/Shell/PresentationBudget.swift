@@ -657,16 +657,6 @@ enum PresentationBudget {
         String(format: "%.1f", ms)
     }
 
-    /// A push held for its destination's first frame (`PresentationHold`):
-    /// how long the tap waited before the slide began. Not a turn — the hold
-    /// spans many idle ones — so it is its own line, and printed whether or
-    /// not the harness is installed: it is the number a profile push costs.
-    static func noteHold(of controller: UIViewController, waited: TimeInterval, timedOut: Bool) {
-        let line = "[budget] hold \(String(describing: type(of: controller))) waited=\(format(waited * 1000))ms"
-            + (timedOut ? " CEILING (pushed on its skeleton)" : " ready")
-        guard isInstalled else { return print(line) }
-        emit(line)
-    }
 
     nonisolated private static func emit(_ text: String) {
         logQueue.async { write(text) }
