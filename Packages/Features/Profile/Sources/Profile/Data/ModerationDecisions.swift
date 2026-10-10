@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreModels
 import Foundation
 
 /// Why a restriction was imposed: the decision's Statement of Reasons
@@ -158,23 +159,18 @@ extension AccountStatusRepository: ModerationDecisionReviewing {
 extension AccountStatusRepository {
     /// Up to 100 — far more than anyone has — in pages of 50.
     public func myAppeals() async throws -> [FiledAppeal] {
-        var appeals: [FiledAppeal] = []
-        var token = ""
-        for _ in 0..<2 {
+        try await TokenPager.collect(maxPages: 2) { token in
             var request = Moderation_V1_ListMyAppealsRequest()
             request.pageSize = 50
             request.pageToken = token
             let response = await moderationClient.listMyAppeals(request: request, headers: [:])
             switch response.result {
             case .success(let body):
-                appeals += body.appeals.map(FiledAppeal.init)
-                token = body.nextPageToken
+                return (body.appeals.map(FiledAppeal.init), body.nextPageToken)
             case .failure(let error):
                 throw AccountStatusError.transport(message: error.message ?? "code \(error.code)")
             }
-            if token.isEmpty { break }
         }
-        return appeals
     }
 }
 
