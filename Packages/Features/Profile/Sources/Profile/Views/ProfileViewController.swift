@@ -1249,118 +1249,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         )
     }
 
-    /// The mutual's rail menu: a two-row CHECKLIST, Friends and Following,
-    /// each an independent toggle showing whether the profile is on that rail.
-    ///
-    /// Two rows, not three. Two rails have four states, and two checkmarks
-    /// show all four and reach any of them in a tap — including "both", which
-    /// an explicit Both row used to spell a second time. That row also had to
-    /// mean two different things depending on state it could not itself show
-    /// (add both, or clear both), which is exactly the ambiguity a checkmark
-    /// does not have.
-    ///
-    /// `.keepsMenuPresented` because a checklist that closes after one tick
-    /// makes setting both rails a two-open chore. The marks are updated in
-    /// the open menu as the state changes (`refreshVisibleMapRows`), so they
-    /// track what was just chosen.
-    ///
-    /// ⚠️ A SUBMENU OF SEE-MORE, NOT A STAR (#689, the owner's call
-    /// 2026-10-08): the star left the header's row. Same rows, same rule —
-    /// only a followed profile, Friends only for a mutual, only when the app
-    /// wired a pinning service (`ProfileViewModel.MapPinButton`).
-    private func mapFavoriteSubmenu() -> UIMenu? {
-        let state = viewModel.mapPinButton
-        guard state != .hidden else { return nil }
-        let rows = mapFavoriteMenuActions()
-        return UIMenu(
-            title: "Map",
-            subtitle: Self.mapFavoriteSubtitle(rows),
-            image: UIImage(systemName: state.isFavorited ? "star.circle.fill" : "star.circle"),
-            identifier: Self.mapMenuIdentifier,
-            children: rows
-        )
-    }
-
     /// Ticks the rail rows of the open see-more menu to the current state:
-    /// a row keeps the menu open, and its mark must follow.
-    ///
-    /// ⚠️ THE BLOCK RUNS ONCE PER MENU ON SCREEN — the root, then the open
-    /// Map submenu (simulator, 2026-10-09). Rebuilding the root's children in
-    /// it put the whole see-more menu inside the Map submenu, so each run
-    /// only re-ticks the rail rows it holds, by identifier, on copies.
+    /// a row keeps the menu open, and its mark must follow
+    /// (`ProfileMenuBuilder.retickingMapRows`).
     private func refreshVisibleMapRows() {
         let current = viewModel.mapPinButton.categories
         headerView.updateVisibleMoreMenu { menu in
-            Self.retickingMapRows(in: menu, to: current)
+            ProfileMenuBuilder.retickingMapRows(in: menu, to: current)
         }
     }
 
-    private static func retickingMapRows(in menu: UIMenu, to current: Set<MapFavoriteCategory>) -> UIMenu {
-        let reticked = menu.replacingChildren(menu.children.map { child in
-            if let submenu = child as? UIMenu { return retickingMapRows(in: submenu, to: current) }
-            guard let action = child as? UIAction,
-                  let category = mapCategory(for: action.identifier),
-                  let copy = action.copy() as? UIAction else { return child }
-            copy.state = current.contains(category) ? .on : .off
-            return copy
-        })
-        // The Map submenu's subtitle lists the rails it is on.
-        if menu.identifier == mapMenuIdentifier {
-            reticked.subtitle = mapFavoriteSubtitle(reticked.children.compactMap { $0 as? UIAction })
-        }
-        return reticked
-    }
-
-    private static let mapMenuIdentifier = UIMenu.Identifier("profile.map")
-
-    /// "Map Dock, Following Filter" — the ticked rows, or nothing.
-    private static func mapFavoriteSubtitle(_ rows: [UIAction]) -> String? {
-        let on = rows.filter { $0.state == .on }.map(\.title)
-        return on.isEmpty ? nil : on.joined(separator: ", ")
-    }
-
-    /// Stable identities for the rail rows: how an open menu's rows are
-    /// found again to re-tick them.
-    private static func mapRowIdentifier(_ category: MapFavoriteCategory) -> UIAction.Identifier {
-        switch category {
-        case .dock: UIAction.Identifier("profile.map.dock")
-        case .following: UIAction.Identifier("profile.map.following")
-        case .friends: UIAction.Identifier("profile.map.friends")
-        }
-    }
-
-    private static func mapCategory(for identifier: UIAction.Identifier) -> MapFavoriteCategory? {
-        [MapFavoriteCategory.dock, .following, .friends].first { mapRowIdentifier($0) == identifier }
-    }
-
-    /// The checklist's rows for the CURRENT state, apart from the menu that
-    /// hosts them — the same split `moreMenuElements` uses, and for the same
-    /// reason: a `UIMenu` opens on a tap, the simulator has none, and this is
-    /// what `-profile-map-pin-audit` prints instead of guessing.
+    /// The map rails' rows for the current state (`ProfileMenuBuilder`).
     private func mapFavoriteMenuActions() -> [UIAction] {
-        let current = viewModel.mapPinButton.categories
-        var rows: [(MapFavoriteCategory, String, String)] = [
-            (.dock, "Map Dock", "pin"),
-            (.following, "Following Filter", "person.badge.plus")
-        ]
-        // Friends is OMITTED for someone who is not a mutual, not shown
-        // disabled: a greyed row invites a tap that can never work and
-        // explains nothing about why. The view model refuses the write anyway
-        // — this is the same rule, said in the place the viewer reads.
-        if viewModel.mapPinButton.includesFriends {
-            rows.append((.friends, "Friends Filter", "person.2"))
-        }
-        return rows.map { category, title, symbol in
-            let action = UIAction(
-                title: title,
-                image: UIImage(systemName: symbol),
-                identifier: Self.mapRowIdentifier(category),
-                state: current.contains(category) ? .on : .off
-            ) { [weak self] _ in
-                self?.viewModel.toggleMapCategory(category)
-            }
-            action.attributes = .keepsMenuPresented
-            return action
+        ProfileMenuBuilder.mapFavoriteMenuActions(viewModel.mapPinButton) { [weak self] category in
+            self?.viewModel.toggleMapCategory(category)
         }
     }
 
@@ -1422,22 +1324,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         }])
     }
 
-    /// One toggle per scope: muting is a set of quiet preferences, not one
-    /// switch (backend #722). Titled "Mute", or "Muted" over a summary of
-    /// what is.
+    /// The scoped Mute menu for the current scopes (`ProfileMenuBuilder`).
     private func muteMenuElements() -> [UIMenuElement] {
-        let scopes = viewModel.muteScopes
-        return [UIMenu(
-            title: scopes.isEmpty ? "Mute" : "Muted",
-            subtitle: scopes.isEmpty ? nil : scopes.summary,
-            options: .displayInline,
-            children: MuteScope.allCases.map { scope in
-                UIAction(
-                    title: scope.title,
-                    state: scopes.contains(scope) ? .on : .off
-                ) { [weak self] _ in self?.viewModel.toggleMute(scope) }
-            }
-        )]
+        ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
+            self?.viewModel.toggleMute(scope)
+        }
     }
 
     /// The glyph and the spoken value follow the scopes; the item stays the
@@ -1481,72 +1372,26 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     }
 
     private func moreMenuElements() -> [UIMenuElement] {
-        // Sharing needs a loaded handle; until then the menu is honestly empty
-        // rather than offering an action that would no-op.
-        var groups: [UIMenuElement] = []
-        if viewModel.shareCard != nil {
-            groups.append(UIMenu(options: .displayInline, children: [
-                UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) {
-                    [weak self] _ in self?.presentShareSheet()
-                },
-                UIAction(title: "Copy Link", image: UIImage(systemName: "link")) {
-                    [weak self] _ in self?.copyProfileLink()
-                }
-            ]))
-        }
-        // The map's rails (#689), where the star beside Message used to be.
-        if let map = mapFavoriteSubmenu() {
-            groups.append(UIMenu(options: .displayInline, children: [map]))
-        }
-        // Own profile (and the pre-relationship window) offers no moderation:
-        // you cannot block or report yourself, and guessing is worse than
-        // waiting — the menu is rebuilt on the next open either way.
-        guard viewModel.canModerate else { return groups }
-
-        let report = UIAction(
-            title: "Report",
-            image: UIImage(systemName: "flag"),
-            attributes: .destructive
-        ) { [weak self] _ in self?.presentReportReasons() }
-        // A guest can report (anyone may flag illegal content, DSA Art. 16)
-        // but has no account to block from.
-        if MemberGates.gate(from: self)?.isMember == false {
-            groups.append(UIMenu(options: .displayInline, children: [report]))
-            return groups
-        }
-
-        // Mute is the nav bar's bell now (#689, `muteMenuElements`).
-        if viewModel.canRestrict {
-            let restricted = viewModel.isRestricted
-            // Restrict (#416): their comments on your posts are seen only
-            // by them and you.
-            groups.append(UIMenu(options: .displayInline, children: [UIAction(
-                title: restricted ? "Unrestrict" : "Restrict",
-                image: UIImage(systemName: restricted ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.minus")
-            ) { [weak self] _ in self?.viewModel.toggleRestrict() }]))
-        }
-
-        let blocked = viewModel.isBlocked
-        groups.append(UIMenu(options: .displayInline, children: [
-            UIAction(
-                title: blocked ? "Unblock" : "Block",
-                image: UIImage(systemName: blocked ? "hand.raised.slash" : "hand.raised"),
-                // Unblocking is a restorative action, so it sheds the
-                // destructive red that blocking earns.
-                attributes: blocked ? [] : .destructive
-            ) { [weak self] _ in
-                guard let self else { return }
-                // Unblocking is harmless and reversible — it goes straight
-                // through; blocking asks first, and asks how far it reaches.
-                if blocked {
-                    self.viewModel.unblock()
-                } else {
-                    self.confirmBlock()
-                }
-            },
-            report
-        ]))
-        return groups
+        ProfileMenuBuilder.moreMenuElements(
+            ProfileMenuBuilder.MoreMenuState(
+                canShare: viewModel.shareCard != nil,
+                mapPin: viewModel.mapPinButton,
+                canModerate: viewModel.canModerate,
+                isGuest: MemberGates.gate(from: self)?.isMember == false,
+                canRestrict: viewModel.canRestrict,
+                isRestricted: viewModel.isRestricted,
+                isBlocked: viewModel.isBlocked
+            ),
+            handlers: ProfileMenuBuilder.MoreMenuHandlers(
+                share: { [weak self] in self?.presentShareSheet() },
+                copyLink: { [weak self] in self?.copyProfileLink() },
+                toggleMapCategory: { [weak self] category in self?.viewModel.toggleMapCategory(category) },
+                report: { [weak self] in self?.presentReportReasons() },
+                toggleRestrict: { [weak self] in self?.viewModel.toggleRestrict() },
+                unblock: { [weak self] in self?.viewModel.unblock() },
+                confirmBlock: { [weak self] in self?.confirmBlock() }
+            )
+        )
     }
 
     /// Opens the unified share surface — the QR sheet — rather than jumping
@@ -1638,28 +1483,17 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// that raises the same question: two screens asking a viewer to classify
     /// a report must ask it in the same words, and the second copy would have
     /// been written the day the card grew a Report row.
-    /// Report only.
-    ///
-    /// Unfollow is deliberately absent: this screen already centralises the
-    /// relationship on the header's one control, and a second way to change it
-    /// — sitting on a row, worded differently, reachable while the header says
-    /// the opposite — is how two truths about one relationship end up on screen
-    /// at once.
+    /// Report only — or, on the viewer's own post, Edit and Delete
+    /// (`ProfileMenuBuilder.galleryMenuActions`).
     private func galleryMenuActions(
         for context: ProfileGalleryGridView.AuthorMenuContext
     ) -> [PostCardMenuAction] {
-        // The viewer's OWN post offers what a post of one's own is for. Edit
-        // is named before it exists (its handler is empty); Delete sends the
-        // post to Recently Deleted for 30 days (#408).
-        if viewModel.isViewerPost(by: context.authorID) {
-            return [.edit {}, .delete { [weak self] in
-                self?.confirmDeletePost(context)
-            }]
-        }
-        guard viewModel.canReportPost(by: context.authorID) else { return [] }
-        return [.report { [weak self] in
-            self?.presentPostReportReasons(for: context)
-        }]
+        ProfileMenuBuilder.galleryMenuActions(
+            isViewerPost: viewModel.isViewerPost(by: context.authorID),
+            canReport: viewModel.canReportPost(by: context.authorID),
+            onDelete: { [weak self] in self?.confirmDeletePost(context) },
+            onReport: { [weak self] in self?.presentPostReportReasons(for: context) }
+        )
     }
 
     static let deletePostMessage = "You can restore it from Settings → Your Activity → Recently Deleted for 30 days."
