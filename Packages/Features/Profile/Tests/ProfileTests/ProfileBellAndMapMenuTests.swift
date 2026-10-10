@@ -91,7 +91,11 @@ struct ProfileBellAndMapMenuTests {
     /// again when none is — and the menu's checkmarks with it.
     @Test func theBellsGlyphFollowsTheMutedScopes() async throws {
         let (screen, viewModel, repository) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
-        let bell = try #require(await settle { screen.debugMuteBellItem != nil } ? screen.debugMuteBellItem : nil)
+        // The bell is up from frame 0 (#778); muting waits for the
+        // relationship to say whose profile this is.
+        let bell = try #require(
+            await settle { screen.debugMuteBellItem != nil && viewModel.canModerate } ? screen.debugMuteBellItem : nil
+        )
         #expect(bell.image == UIImage(systemName: "bell"))
 
         viewModel.toggleMute(.posts)

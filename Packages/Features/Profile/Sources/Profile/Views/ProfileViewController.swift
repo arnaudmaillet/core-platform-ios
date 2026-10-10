@@ -20,6 +20,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// Handed the profile this screen holds, so the editor opens on it
     /// instead of fetching it again (charter P7).
     private let makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)?
+    /// The origin said this profile is the viewer's own (`presumesOtherProfile`).
+    private let identityStubIsSelf: Bool
     /// Builds the account settings screen (own profile only, the gear's
     /// destination). Nil for other users.
     private let makeSettingsViewController: (() -> UIViewController)?
@@ -276,6 +278,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         trayPlacement: ProfileTrayPlacement = .navigationToolbar
     ) {
         self.trayPlacement = trayPlacement
+        self.identityStubIsSelf = identityStub?.isSelf == true
         self.viewModel = viewModel
         self.onLogout = onLogout
         self.makeEditViewController = makeEditViewController
@@ -548,7 +551,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // the state a push held for it (charter P12a) should have settled.
         if !hasLoggedFirstFrame, ProcessInfo.processInfo.arguments.contains("-profile-first-frame-log") {
             hasLoggedFirstFrame = true
-            print("[profile-first-frame] settled=\(isSettledForPresentation) "
+            print("[profile-first-frame] settled=\(isSettled) "
                   + "redacted=\(debugIsHeaderRedacted) follow=\(debugFollowTitle ?? "placeholder") "
                   + "avatar=\(debugHasAvatarPicture ? "picture" : "initials") "
                   + "banner=\(headerView.bannerFormat) gallerySettled=\(isGallerySettled)")
@@ -1523,8 +1526,23 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// Whether the bell stands in the bar: someone else's profile, in a
     /// composition that can mute, for a member. The same rule the see-more
     /// menu's Mute submenu had (#689): a guest has no account to mute from.
+    ///
+    /// ⚠️ DECIDED AT FRAME 0 FOR A ROUTED PROFILE (#778). The relationship
+    /// read used to land before the (held) push; pushed at once, the bar went
+    /// `[coins]` → `[bell][coins]` mid-slide, and bar items changed during a
+    /// push land unanimated at its end on device (#756). Someone else's
+    /// profile — what a routed profile that is not the viewer's own is —
+    /// wears the bell from the first frame; the relationship only confirms it.
     private var showsMuteBell: Bool {
-        viewModel.canMute && viewModel.canModerate && MemberGates.gate(from: self)?.isMember != false
+        let isOtherProfile = viewModel.canModerate
+            || (presumesOtherProfile && !viewModel.isRelationshipSettled)
+        return viewModel.canMute && isOtherProfile && MemberGates.gate(from: self)?.isMember != false
+    }
+
+    /// A profile reached by id that is not the viewer's own, as far as frame 0
+    /// can tell: no self stub, no Edit wiring.
+    private var presumesOtherProfile: Bool {
+        !viewModel.isOwnProfile && !identityStubIsSelf && makeEditViewController == nil
     }
 
     /// Resolved when it opens, so the checkmarks are the current scopes.
@@ -3023,7 +3041,7 @@ extension ProfileViewController {
     /// bones. A failed load is settled too — nothing more is coming.
     ///
     /// The cards' own media are NOT waited for: those are per item, P13.
-    var isSettledForPresentation: Bool {
+    var isSettled: Bool {
         switch renderedPhase {
         case .loading: return false
         case .failed: return true

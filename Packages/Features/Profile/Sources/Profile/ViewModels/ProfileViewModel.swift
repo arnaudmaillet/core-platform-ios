@@ -1472,7 +1472,7 @@ public final class ProfileViewModel {
             // Dev convenience: `-profile-relationship-delay` holds the
             // relationship answer for a few seconds, making the nav-bar
             // skeleton capsule and its cross-fade to Follow/Following
-            // observable (the mock otherwise answers before the push starts).
+            // observable (the mock otherwise answers mid-push).
             if ProcessInfo.processInfo.arguments.contains("-profile-relationship-delay") {
                 try? await Task.sleep(for: .seconds(3))
             }

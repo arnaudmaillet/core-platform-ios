@@ -47,6 +47,10 @@ final class RouteResolver: Router {
     /// The profile the router pushed last, while it is still the top screen —
     /// what turns a second tap on the same author into nothing (#778).
     private var lastPushedProfile: (id: ProfileID, screen: Weak<UIViewController>)?
+    /// A profile whose push waits for a running transition (`push` defers it
+    /// to `whenAtRest`): not on the stack yet, so `lastPushedProfile` cannot
+    /// see it — a second tap meanwhile is still the same request.
+    private var deferredProfileID: ProfileID?
 
     init(
         searchFeature: @escaping () -> any SearchFeatureBuilding,
@@ -101,6 +105,7 @@ final class RouteResolver: Router {
         // flight) waits for it: UIKit would drop the push silently.
         guard navigation.transitionCoordinator == nil else {
             navigation.whenAtRest { [weak self] in
+                self?.deferredProfileID = nil
                 self?.push(destination, using: navigator, animated: animated)
             }
             return
@@ -140,7 +145,10 @@ final class RouteResolver: Router {
         // A second tap on the author whose profile was just pushed is the same
         // request, not a second push: during the slide the new profile is
         // already the top screen.
-        if case .profile(let id, _) = route, isTopScreen(profile: id, in: navigator) {
+        if case .profile(let id, _) = route,
+           isTopScreen(profile: id, in: navigator) || deferredProfileID == id {
+            // Still the viewer's tap: a drawer it came from slides shut.
+            navigator.closeOverlays()
             return
         }
         // A route that writes (opening a thread to message someone) needs an
@@ -209,6 +217,9 @@ final class RouteResolver: Router {
             // place and the gallery shows its bones; the data cross-fades in
             // over the very frames it will occupy. It used to be held up to
             // 250 ms for its data (`PresentationHold`, charter P12a).
+            if navigator.activeNavigationController?.transitionCoordinator != nil {
+                deferredProfileID = profileID
+            }
             push(profile, using: navigator)
             lastPushedProfile = (profileID, Weak(profile))
 
