@@ -20,13 +20,13 @@ public enum NetworkFailure: Equatable, Sendable {
     /// mid-call, cellular data is off for the app. The person can fix it
     /// themselves; the copy should say so.
     ///
-    /// ⚠️ Built from Connect's `unavailable`, which Connect also uses for HTTP
-    /// 429/502/503/504. When Connect hands us the `URLError` behind the code
-    /// (`ConnectError.exception`) we classify from that instead, so a host we
-    /// cannot reach reads as `.server`, not as "you're offline". A bare
-    /// `unavailable` with no `URLError` behind it (a gateway's 503, the mock's
-    /// injected faults) still reads as offline: the cheaper mistake, since both
-    /// get the same retry.
+    /// ⚠️ Built ONLY from a `URLError` (`notConnectedToInternet` and friends),
+    /// never from Connect's `unavailable` code alone. Connect-Swift attaches
+    /// the URLSession error to `ConnectError.exception` for every real
+    /// transport failure; an `unavailable` WITHOUT one means a server did
+    /// answer — the BFF's own `unavailable`, an HTTP 429/502/503/504, a
+    /// gateway's HTML 503 — and telling the person "you're offline" then
+    /// sends them to fix a connection that works. Those read as `.server`.
     case offline
     /// The call ran out of time (`deadlineExceeded`, `URLError.timedOut`). The
     /// network may be slow rather than gone; worth another try.
@@ -55,31 +55,15 @@ public extension NetworkFailure {
     }
 
     /// Classifies a Connect failure. The `URLError` Connect wraps in
-    /// `exception` wins when there is one: it is the more precise of the two
-    /// (Connect folds a dropped link and an unreachable host into one code).
+    /// `exception` decides when there is one: it is the only evidence the
+    /// device itself is offline (Connect folds a dropped link, an unreachable
+    /// host and a server's 503 into one `unavailable`). Without one, a server
+    /// answered, and the code says how.
     init(_ error: ConnectError) {
         if let urlError = error.exception as? URLError {
             self.init(urlError)
         } else {
             self.init(code: error.code)
-        }
-    }
-
-    /// Classifies a bare Connect code, as the server or Connect's own
-    /// URLSession mapping produced it.
-    init(code: Code) {
-        switch code {
-        case .unavailable:
-            self = .offline
-        case .deadlineExceeded:
-            self = .timeout
-        case .canceled:
-            self = .cancelled
-        case .invalidArgument, .notFound, .alreadyExists, .permissionDenied,
-             .failedPrecondition, .outOfRange, .unimplemented, .unauthenticated:
-            self = .refused(code: code.name)
-        case .ok, .unknown, .resourceExhausted, .aborted, .internalError, .dataLoss:
-            self = .server(code: code.name)
         }
     }
 
@@ -100,7 +84,33 @@ public extension NetworkFailure {
             self = .server(code: "urlerror_\(error.code.rawValue)")
         }
     }
+}
 
+extension NetworkFailure {
+    /// Classifies a code a SERVER answered with (no `URLError` behind it).
+    ///
+    /// ⚠️ Internal on purpose: a bare code cannot tell offline from a server
+    /// outage, so it never yields `.offline` — `unavailable` reads as
+    /// `.server`. Screens go through `init(_: ConnectError)` or
+    /// `NetworkFailure.of(_:)`, which see the `URLError` when there is one.
+    init(code: Code) {
+        switch code {
+        case .unavailable:
+            self = .server(code: code.name)
+        case .deadlineExceeded:
+            self = .timeout
+        case .canceled:
+            self = .cancelled
+        case .invalidArgument, .notFound, .alreadyExists, .permissionDenied,
+             .failedPrecondition, .outOfRange, .unimplemented, .unauthenticated:
+            self = .refused(code: code.name)
+        case .ok, .unknown, .resourceExhausted, .aborted, .internalError, .dataLoss:
+            self = .server(code: code.name)
+        }
+    }
+}
+
+public extension NetworkFailure {
     /// The failure behind any error a repository may throw, or nil when it did
     /// not come from the network (a missing session, a domain refusal the
     /// feature already names).

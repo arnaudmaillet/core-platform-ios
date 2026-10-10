@@ -18,8 +18,18 @@ private enum StubFeatureError: Error, NetworkFailureCarrying {
 struct NetworkFailureTests {
     // MARK: - Connect codes
 
+    /// Connect-Swift keeps the URLSession error in `exception` for a real
+    /// transport failure: that is what says offline.
     @Test func aLostConnectionReadsAsOffline() {
-        #expect(NetworkFailure(code: .unavailable) == .offline)
+        let error = ConnectError(code: .unavailable, message: "x", exception: URLError(.notConnectedToInternet))
+        #expect(NetworkFailure(error) == .offline)
+    }
+
+    /// No `URLError` behind it: a server answered `unavailable` (the BFF, a
+    /// gateway's 503). The device is online; saying otherwise misleads.
+    @Test func aServerSentUnavailableIsNotOffline() {
+        #expect(NetworkFailure(ConnectError(code: .unavailable, message: "x")) == .server(code: "unavailable"))
+        #expect(NetworkFailure(code: .unavailable) == .server(code: "unavailable"))
     }
 
     @Test func aDeadlineReadsAsATimeout() {
@@ -87,7 +97,9 @@ struct NetworkFailureTests {
     }
 
     @Test func aRawConnectOrURLErrorIsReadDirectly() {
-        #expect(NetworkFailure.of(ConnectError(code: .unavailable, message: nil)) == .offline)
+        let offline = ConnectError(code: .unavailable, message: nil, exception: URLError(.networkConnectionLost))
+        #expect(NetworkFailure.of(offline) == .offline)
+        #expect(NetworkFailure.of(ConnectError(code: .unavailable, message: nil)) == .server(code: "unavailable"))
         #expect(NetworkFailure.of(URLError(.timedOut)) == .timeout)
     }
 
