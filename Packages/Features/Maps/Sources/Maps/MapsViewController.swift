@@ -2109,16 +2109,12 @@ final class MapsViewController: UIViewController {
     private func bindViewModel() {
         viewModel.onDiff = { [weak self] diff in self?.handleDiff(diff) }
         // Queries failing in a row (#798): the pins stay, the toast says the
-        // map is not up to date. The view model says it once per run. On the
-        // topmost presented controller: a sheet over the map (a marker
-        // preview, the sub-filter sheet) would otherwise cover the toast.
+        // map is not up to date. The view model says it once per run.
+        // `Feedback` puts it on the topmost presented screen: a sheet over the
+        // map (a marker preview, the sub-filter sheet) would otherwise cover it.
         viewModel.onRepeatedQueryFailure = { [weak self] in
             guard let self else { return }
-            var host: UIViewController = self
-            while let presented = host.presentedViewController, !presented.isBeingDismissed {
-                host = presented
-            }
-            ToastView.present("Couldn't load the map", symbol: "exclamationmark.triangle.fill", in: host.view)
+            Feedback.failure("Couldn't load the map", from: self)
         }
         // `onTileCount` is a "zoom in for more" hint hook; wired to UI later.
     }
