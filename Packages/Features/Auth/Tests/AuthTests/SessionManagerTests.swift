@@ -316,7 +316,8 @@ struct SessionManagerTests {
         let store = InMemorySessionStore(session: expiredSession())
         let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
 
-        await #expect(throws: AuthError.transport(message: "offline")) {
+        // `offline`, not a generic transport failure (#791).
+        await #expect(throws: AuthError.offline) {
             try await manager.validAccessToken()
         }
 
@@ -482,6 +483,25 @@ struct SessionManagerTests {
         #expect(try await manager.validAccessToken() == "gt-2")
         #expect(client.lastRefreshToken == "grt-1")
         #expect(client.guestRequests.isEmpty)
+    }
+
+    /// ⚠️ OFFLINE KEEPS THE GUEST'S SESSION (#791): a renewal that finds no
+    /// network is not a refusal — the stored session stays for when it returns.
+    @Test func anOfflineRenewalKeepsTheGuestSession() async throws {
+        let client = FakeAuthClient()
+        client.refreshResult = .failure(ConnectError(code: .unavailable, message: "offline"))
+        client.guestResult = .failure(ConnectError(code: .unavailable, message: "offline"))
+        let stale = AuthSession(
+            accountID: AccountID("guest-1"), sessionID: SessionID("guest-sess-1"),
+            accessToken: "gt-stale", accessTokenExpiry: Date(timeIntervalSince1970: 100), refreshToken: "grt-1"
+        )
+        let guestStore = InMemorySessionStore(session: stale)
+        let manager = guestManager(client, guestStore: guestStore)
+
+        _ = try? await manager.validAccessToken()
+
+        #expect(try guestStore.load() == stale, "a dead network wiped the guest's session")
+        #expect(client.guestRequests.isEmpty, "a new session was attempted while the network was down")
     }
 
     @Test func aGuestSessionTheServerForgotIsReplaced() async throws {

@@ -1,4 +1,5 @@
 import Connect
+import CoreNetworking
 import Foundation
 
 /// Auth failures surfaced to callers and the UI, normalized from transport
@@ -10,6 +11,10 @@ public enum AuthError: Error, Equatable, Sendable {
     /// the local session has been cleared and the user must sign in again.
     case sessionExpired
     case transport(message: String)
+    /// The network did not answer — no route, or a timeout (#791). Apart from
+    /// `transport` (any other failure, a server error included) so a call made
+    /// offline reads as offline and nothing else does.
+    case offline
     /// A one-time code that was wrong, expired, or already used.
     case invalidCode
     /// Under the minimum age to hold an account (13; 16 in some countries —
@@ -64,4 +69,10 @@ public enum LoginOutcome: Equatable, Sendable {
     case signedIn
     /// Two-step sign-in is on: the holder's code finishes it.
     case needsSecondStep(SecondStepChallenge)
+}
+
+extension AuthError: NetworkUnavailabilityDescribing {
+    /// Only `offline`: a server error during a refresh is not the network's
+    /// (#791).
+    public var isNetworkUnavailable: Bool { self == .offline }
 }
