@@ -17,6 +17,15 @@ protocol SettingsSectionLinking: AnyObject {
 /// daily limit and no purchases (`TeenProtections`).
 ///
 /// An adult sees the same list as what a teen account gets, without links.
+///
+/// ⚠️ **AN UNREAD AGE IS NOT AN ADULT ONE (#799).** The age used to be read
+/// as `(try? …isTeen) ?? false`, so a dropped connection told a 14-year-old
+/// "Your account is 18 or over, so they don't apply" and took the links to
+/// their protections away. Until the age is known, nothing age-dependent is
+/// drawn — no header, no footer, no protections — and a failed read shows a
+/// failed row with retry. Hiding beats guessing either way: "teen" would
+/// misstate an adult's account just as surely, and this page changes nothing
+/// by itself, so showing nothing costs only a tap on Retry.
 final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinking {
     enum Section: Hashable {
         case protections, supervision
@@ -34,18 +43,24 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         case protection(Protection)
         case supervision
         case loading
+        case failed
     }
 
+    static let failedText = "Couldn't load your account's age. Tap to try again."
+
     var openSection: ((SettingsSection) -> Void)?
-    private let isTeen: () async -> Bool
+    /// The account's age bracket, read on arrival and from the failed row;
+    /// its closure throws when the account can't be read.
+    private let ageCheck: TeenAgeCheck
     private let screenTime: ScreenTimeStore
-    /// Nil while the account is being read.
-    private var teen: Bool?
+    private var age: Loadable<Bool> { ageCheck.age }
+    /// True or false once known; nil while loading or after a failed read.
+    private var teen: Bool? { age.content }
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(isTeen: @escaping () async -> Bool, screenTime: ScreenTimeStore = .standard) {
-        self.isTeen = isTeen
+    init(isTeen: @escaping () async throws -> Bool, screenTime: ScreenTimeStore = .standard) {
+        ageCheck = TeenAgeCheck(isTeen: isTeen)
         self.screenTime = screenTime
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.familyAndTeens.title
@@ -71,10 +86,30 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         view.addSubview(collectionView)
         configureDataSource()
         applySnapshot()
+        readAge()
+    }
+
+    /// Reads the age; a retry that fails again keeps the failed row and says
+    /// so. A tap while a read runs sends nothing (`TeenAgeCheck`).
+    private func readAge() {
+        let isRetry = age.isFailed
         Task { [weak self] in
             guard let self else { return }
-            teen = await isTeen()
+            let succeeded = await ageCheck.read()
             applySnapshot()
+            if isRetry, !succeeded {
+                Feedback.failure("Couldn't load your account's age", from: self)
+            }
+        }
+    }
+
+    /// The age as the page draws it: known, or failed — a read that throws
+    /// is never folded into "adult". Pure, so the rule is pinned by tests.
+    static func readAge(_ isTeen: () async throws -> Bool) async -> Loadable<Bool> {
+        do {
+            return .content(try await isTeen())
+        } catch {
+            return .failed(message: failedText)
         }
     }
 
@@ -130,6 +165,8 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         let registration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             guard let self else { return }
             cell.accessories = []
+            // Only a failed row is tapped to retry: VoiceOver says so (#799).
+            cell.accessibilityTraits.remove(.button)
             var content = UIListContentConfiguration.subtitleCell()
             content.secondaryTextProperties.color = .secondaryLabel
             switch item {
@@ -147,6 +184,11 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                 content = .cell()
                 content.text = "Loading…"
                 content.textProperties.color = .secondaryLabel
+            case .failed:
+                content = .cell()
+                content.text = Self.failedText
+                content.textProperties.color = .secondaryLabel
+                cell.accessibilityTraits.insert(.button)
             }
             cell.contentConfiguration = content
         }
@@ -158,7 +200,10 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         ) { [weak self] view, _, indexPath in
             guard let self else { return }
             var content = UIListContentConfiguration.header()
-            content.text = dataSource.sectionIdentifier(for: indexPath.section).map { Self.header($0, teen: self.teen ?? false) }
+            // No age-dependent wording until the age is known (#799).
+            content.text = self.teen.flatMap { teen in
+                self.dataSource.sectionIdentifier(for: indexPath.section).map { Self.header($0, teen: teen) }
+            }
             view.contentConfiguration = content
         }
         let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
@@ -166,8 +211,9 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         ) { [weak self] view, _, indexPath in
             guard let self else { return }
             var content = UIListContentConfiguration.footer()
-            content.text = teen == nil ? nil
-                : dataSource.sectionIdentifier(for: indexPath.section).map { Self.footer($0, teen: self.teen ?? false) }
+            content.text = self.teen.flatMap { teen in
+                self.dataSource.sectionIdentifier(for: indexPath.section).map { Self.footer($0, teen: teen) }
+            }
             view.contentConfiguration = content
         }
         dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
@@ -181,9 +227,12 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         guard dataSource != nil else { return }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.protections])
-        if teen == nil {
+        switch age {
+        case .loading, .empty:
             snapshot.appendItems([.loading], toSection: .protections)
-        } else {
+        case .failed:
+            snapshot.appendItems([.failed], toSection: .protections)
+        case .content:
             let protections = Self.protections(dailyLimitMinutes: screenTime.settings.dailyLimitMinutes)
             snapshot.appendItems(protections.map(Item.protection), toSection: .protections)
             snapshot.appendSections([.supervision])
@@ -197,12 +246,14 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
 
 extension FamilyAndTeensViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        if case .failed = dataSource.itemIdentifier(for: indexPath) { return true }
         guard teen == true, case .protection(let protection) = dataSource.itemIdentifier(for: indexPath) else { return false }
         return protection.section != nil
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
+        if case .failed = dataSource.itemIdentifier(for: indexPath) { return readAge() }
         guard teen == true, case .protection(let protection) = dataSource.itemIdentifier(for: indexPath),
               let section = protection.section else { return }
         openSection?(section)

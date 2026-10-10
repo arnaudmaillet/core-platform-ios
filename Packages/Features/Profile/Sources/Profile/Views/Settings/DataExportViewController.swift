@@ -58,6 +58,8 @@ final class DataExportViewController: UIViewController {
             return "Requested on \(dateFormatter.string(from: requestedOn)). Preparing the file can take up to 30 days; it will be sent \(destination)."
         case .ready(let completedOn):
             return "Your file was prepared on \(dateFormatter.string(from: completedOn)) and sent \(destination)."
+        case .failed:
+            return "Couldn't check your data download. Tap to try again."
         }
     }
 
@@ -81,6 +83,12 @@ final class DataExportViewController: UIViewController {
             switch item {
             case .status:
                 content.text = Self.statusText(for: viewModel.phase, email: email)
+                // Failed, the status row is tapped to retry: VoiceOver says so (#799).
+                if viewModel.phase == .failed {
+                    cell.accessibilityTraits.insert(.button)
+                } else {
+                    cell.accessibilityTraits.remove(.button)
+                }
                 content.textProperties.color = .secondaryLabel
                 content.image = UIImage(systemName: "doc.zipper")
                 content.imageProperties.tintColor = .label
@@ -116,7 +124,9 @@ final class DataExportViewController: UIViewController {
         case .ready:
             snapshot.appendSections([1])
             snapshot.appendItems([.request(title: "Request a New Copy")], toSection: 1)
-        case .loading, .preparing:
+        case .loading, .preparing, .failed:
+            // Failed: no request is offered over a record that couldn't be
+            // read — one may already be on its way (#799).
             break
         }
         snapshot.reconfigureItems([.status])
@@ -135,18 +145,31 @@ final class DataExportViewController: UIViewController {
             }
         }
     }
+
+    /// The failed status row's retry; a retry that fails again says so.
+    private func retryLoad() {
+        Task { [weak self] in
+            guard let self, await viewModel.load() == false else { return }
+            Feedback.failure("Couldn't check your data download", from: self)
+        }
+    }
 }
 
 extension DataExportViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        if case .request = dataSource.itemIdentifier(for: indexPath) { return true }
-        return false
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .request: true
+        case .status: viewModel.phase == .failed
+        case nil: false
+        }
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        if case .request = dataSource.itemIdentifier(for: indexPath) {
-            requestExport()
+        switch dataSource.itemIdentifier(for: indexPath) {
+        case .request: requestExport()
+        case .status where viewModel.phase == .failed: retryLoad()
+        default: break
         }
     }
 }
