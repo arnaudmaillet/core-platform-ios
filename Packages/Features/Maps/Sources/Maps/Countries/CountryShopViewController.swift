@@ -527,7 +527,8 @@ public final class CountryShopViewController: UIViewController {
         case .packStillActive(let shotsLeft):
             return "Your pack is still active, \(shotsLeft) left"
         case .insufficientGems(let needed, let have):
-            return "\(max(needed - have, 1)) more gems needed"
+            let missing = max(needed - have, 1)
+            return missing == 1 ? "1 more gem needed" : "\(missing) more gems needed"
         }
     }
 

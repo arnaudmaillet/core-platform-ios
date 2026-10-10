@@ -144,10 +144,15 @@ public final class EditProfileViewModel {
     ///
     /// `.saved` waits for the LAST queued save: two quick edits confirm once,
     /// when both are on the server, not once per field.
+    ///
+    /// ⚠️ AND ONLY IF NONE OF THEM FAILED. A refused username followed by a
+    /// bio edit that lands must not end on "Profile saved": the queue that
+    /// had a failure ends `.idle` — its `.failed` already spoke.
     private func performSave(_ operation: @escaping (any ProfileProviding) async throws -> Void) {
         let previous = saveTask
         let repository = repository
         saveState = .saving
+        if savesInFlight == 0 { queueFailed = false }
         savesInFlight += 1
         saveTask = Task { [weak self] in
             await previous?.value
@@ -155,17 +160,26 @@ public final class EditProfileViewModel {
                 try await operation(repository)
                 guard let self else { return }
                 self.savesInFlight -= 1
-                self.saveState = self.savesInFlight == 0 ? .saved : .saving
+                if self.savesInFlight > 0 {
+                    self.saveState = .saving
+                } else {
+                    self.saveState = self.queueFailed ? .idle : .saved
+                }
                 self.onSaved()
             } catch {
-                self?.savesInFlight -= 1
-                self?.saveState = .failed(message: "Couldn't save. Please try again.")
+                guard let self else { return }
+                self.savesInFlight -= 1
+                self.queueFailed = true
+                self.saveState = .failed(message: "Couldn't save. Please try again.")
             }
         }
     }
 
     /// Saves queued or on their way.
     private var savesInFlight = 0
+    /// Whether a save in the current queue (since `savesInFlight` last left
+    /// zero) failed — which takes the queue's "Profile saved" away.
+    private var queueFailed = false
 
     private static func trimmed(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)

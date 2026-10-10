@@ -152,8 +152,11 @@ public enum Feedback {
     /// does. A screen not in a window (dismissed, popped) keeps its own view:
     /// there is nothing better to guess.
     ///
-    /// The walk stops under an alert (an alert's view is not somewhere to
-    /// draw) and under a screen already on its way out.
+    /// The walk stops under a screen already on its way out, and under a
+    /// SYSTEM SURFACE (`isSystemSurface`): an alert, a share sheet, a photo
+    /// picker, a Safari view, a popover. Their views are not ours to draw in —
+    /// a toast added inside a share sheet's remote UI is clipped, misplaced,
+    /// or simply lost.
     ///
     /// A tab shell is never the host itself, for the same safe-area reason:
     /// a toast sourced from it (a sheet's presenter, after the sheet has gone
@@ -163,7 +166,7 @@ public enum Feedback {
         var top = root
         while let presented = top.presentedViewController,
               !presented.isBeingDismissed,
-              !(presented is UIAlertController) {
+              !isSystemSurface(presented) {
             top = presented
         }
         var ancestor: UIViewController? = source
@@ -172,6 +175,27 @@ public enum Feedback {
             ancestor = current.parent
         }
         return intoSelectedTab(top)
+    }
+
+    /// Whether a presented controller is one the system draws — never a toast
+    /// host.
+    ///
+    /// Named where UIKit lets us (alerts, share sheets) and for any popover;
+    /// otherwise by where its class lives: a controller defined in a system
+    /// framework (PhotosUI's picker, SafariServices, document pickers…) is the
+    /// system's, except the generic containers the app presents its own
+    /// screens in. Asked by class rather than by import, so DesignSystem
+    /// needs neither PhotosUI nor SafariServices.
+    static func isSystemSurface(_ controller: UIViewController) -> Bool {
+        if controller is UIAlertController || controller is UIActivityViewController { return true }
+        if controller.modalPresentationStyle == .popover { return true }
+        let controllerClass: AnyClass = type(of: controller)
+        let ordinary: [AnyClass] = [
+            UIViewController.self, UINavigationController.self, UITabBarController.self,
+            UISplitViewController.self, UIPageViewController.self, UISearchController.self,
+        ]
+        if ordinary.contains(where: { $0 == controllerClass }) { return false }
+        return Bundle(for: controllerClass).bundlePath.contains("/System/Library/")
     }
 
     private static func intoSelectedTab(_ host: UIViewController) -> UIViewController {

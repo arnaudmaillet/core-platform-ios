@@ -105,7 +105,9 @@ enum GalleryPostProjection {
             extraMedia: Array(post.pages.dropFirst()),
             // The tile's own shape — what the page frames by, and a hero composes
             // with, before it has downloaded a picture to measure.
-            headAspectRatio: post.pages.first?.aspectRatio
+            headAspectRatio: post.pages.first?.aspectRatio,
+            // The hydrated model carries it too, so seed and entry agree.
+            authorHandle: post.authorHandle
         )
     }
 }

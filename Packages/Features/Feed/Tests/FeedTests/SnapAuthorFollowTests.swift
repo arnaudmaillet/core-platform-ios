@@ -231,6 +231,18 @@ struct SnapAuthorFollowTests {
         #expect(toast.style == .failure)
     }
 
+    /// The failure names the author by the model's handle, never by parsing
+    /// the meta line; a model with none falls back to the display name.
+    @Test func aFollowFailureNamesTheAuthorByTheModelsHandle() {
+        let named = FeedItemDisplayModel(
+            id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava", metaText: "2h",
+            avatarURL: nil, caption: nil, mediaURL: nil, mediaKind: .image, thumbnailURL: nil,
+            audioText: nil, authorHandle: "ava"
+        )
+        #expect(SnapFeedViewController.followName(of: named) == "@ava")
+        #expect(SnapFeedViewController.followName(of: Self.model(authorID: "bo")) == "Name bo")
+    }
+
     private static func toast(in view: UIView) -> ToastView? {
         if let toast = view as? ToastView { return toast }
         return view.subviews.lazy.compactMap { toast(in: $0) }.first

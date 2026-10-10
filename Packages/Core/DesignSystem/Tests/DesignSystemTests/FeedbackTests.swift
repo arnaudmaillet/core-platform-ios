@@ -110,6 +110,50 @@ struct FeedbackTests {
         }
     }
 
+    /// ⚠️ A share sheet is the system's: a toast fired while one is up goes
+    /// to the screen under it, never inside it.
+    ///
+    /// The share sheet is reported presented by the root rather than really
+    /// presented: in the package test host its presentation never lands
+    /// (`presentedViewController` stays nil, measured), and the walk only
+    /// reads that property.
+    @Test func aShareSheetIsNeverTheHost() {
+        final class PresentingRoot: UIViewController {
+            var reportedPresented: UIViewController?
+            override var presentedViewController: UIViewController? { reportedPresented }
+        }
+        let root = PresentingRoot()
+        let screen = UIViewController()
+        root.addChild(screen)
+        root.view.addSubview(screen.view)
+        screen.didMove(toParent: root)
+        hosting(root) {
+            let share = UIActivityViewController(activityItems: ["https://example.com"], applicationActivities: nil)
+            root.reportedPresented = share
+            #expect(root.presentedViewController === share, "guard: the share sheet is presented")
+            #expect(Feedback.host(for: screen) === screen)
+            _ = recordingHaptics {
+                let toast = Feedback.success("Link copied", from: screen)
+                #expect(toast.superview === screen.view, "the toast went inside the share sheet")
+            }
+        }
+    }
+
+    /// What counts as the system's: share sheets, alerts, popovers, and
+    /// controllers defined in system frameworks — never the generic
+    /// containers the app's own screens are presented in.
+    @Test func systemSurfacesAreToldFromTheAppsOwnScreens() {
+        #expect(Feedback.isSystemSurface(UIActivityViewController(activityItems: [], applicationActivities: nil)))
+        #expect(Feedback.isSystemSurface(UIAlertController(title: nil, message: nil, preferredStyle: .alert)))
+        let popover = UIViewController()
+        popover.modalPresentationStyle = .popover
+        #expect(Feedback.isSystemSurface(popover))
+        #expect(!Feedback.isSystemSurface(UIViewController()))
+        #expect(!Feedback.isSystemSurface(UINavigationController(rootViewController: UIViewController())))
+        final class AppScreen: UIViewController {}
+        #expect(!Feedback.isSystemSurface(AppScreen()))
+    }
+
     /// A screen out of any window keeps its own view: nothing better to guess.
     @Test func aScreenOutOfAWindowHostsItsOwnToast() {
         let screen = UIViewController()
@@ -169,6 +213,15 @@ struct FeedbackTests {
             #expect(notifications.isEmpty, "a toggle played a notification haptic")
             #expect(!screen.view.subviews.contains { $0 is ToastView })
         }
+    }
+
+    /// VoiceOver hears the toast as a QUEUED announcement, so a context
+    /// menu's own dismissal does not drop it.
+    @Test func theAnnouncementIsQueued() {
+        let spoken = ToastView.announcement("Copied")
+        #expect(spoken.string == "Copied")
+        let queued = spoken.attribute(.accessibilitySpeechQueueAnnouncement, at: 0, effectiveRange: nil) as? Bool
+        #expect(queued == true)
     }
 
     /// A second toast replaces the first rather than stacking.

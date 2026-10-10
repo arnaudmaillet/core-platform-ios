@@ -20,6 +20,14 @@ struct ChatSendAndMuteTests {
         return condition()
     }
 
+    private func settleAsync(_ condition: () async -> Bool) async -> Bool {
+        for _ in 0..<400 {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return await condition()
+    }
+
     // MARK: - Sending
 
     /// ⚠️ OPTIMISTIC: the text is on screen before the server answers, on its
@@ -189,10 +197,37 @@ struct ChatSendAndMuteTests {
         #expect(ConversationListViewModel.muteAnswer(muting: true, confirmed: false) == "Couldn't mute notifications")
     }
 
+    /// ⚠️ ANSWERS OUT OF ORDER: a mute then an unmute, the unmute answered
+    /// first and the mute refused after. Only the latest request speaks — the
+    /// stale refusal neither toasts "Couldn't mute" nor puts the mute back.
+    @Test func aSupersededMuteNeverSpeaksOrRollsBack() async {
+        let provider = GatedMuteProvider()
+        let catalog = InboxCatalog(repository: provider)
+        let said = Said()
+        catalog.setMute(ConversationID("c1"), muted: true, until: nil) { said.items.append("mute \($0)") }
+        catalog.setMute(ConversationID("c1"), muted: false, until: nil) { said.items.append("unmute \($0)") }
+        #expect(await settleAsync { await provider.pendingCount == 2 })
+
+        await provider.answer(muted: false, refused: false)
+        #expect(await settle { catalog.muteAnswersHandled == 1 })
+        #expect(said.items == ["unmute true"])
+
+        await provider.answer(muted: true, refused: true)
+        #expect(await settle { catalog.muteAnswersHandled == 2 })
+        #expect(said.items == ["unmute true"], "the superseded mute spoke")
+        #expect(!catalog.isMuted(ConversationID("c1")), "the stale refusal put the mute back")
+    }
+
     /// What a completion answered, read after an await.
     @MainActor
     private final class Answers {
         var items: [Bool] = []
+    }
+
+    /// What the completions said, in order.
+    @MainActor
+    private final class Said {
+        var items: [String] = []
     }
 
     /// The server's mute reaches the inbox on load (`InboxEntryView.muted`).
@@ -268,6 +303,44 @@ struct ChatSendAndMuteTests {
 struct MuteCall: Equatable {
     let id: String
     let muted: Bool
+}
+
+/// Holds every mute until the test answers it, so answers can arrive in any
+/// order.
+private actor GatedMuteProvider: ChatProviding {
+    private var pending: [(muted: Bool, continuation: CheckedContinuation<Void, Error>)] = []
+    var pendingCount: Int { pending.count }
+
+    /// Answers the waiting request for `muted`.
+    func answer(muted: Bool, refused: Bool) {
+        guard let index = pending.firstIndex(where: { $0.muted == muted }) else { return }
+        let request = pending.remove(at: index)
+        if refused {
+            request.continuation.resume(throwing: ChatError.transport(message: "refused"))
+        } else {
+            request.continuation.resume()
+        }
+    }
+
+    func viewerProfileID() async throws -> ProfileID { ProfileID("me") }
+    func loadConversations() async throws -> [Conversation] { [] }
+    func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] { [] }
+    func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
+        throw ChatError.transport(message: "unused")
+    }
+    func send(
+        media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?
+    ) async throws -> ChatMessage {
+        throw ChatError.mediaUpload(message: "unused")
+    }
+    func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws {}
+    func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("c") }
+    func setMuted(_ muted: Bool, for conversationID: ConversationID) async throws {
+        try await withCheckedThrowingContinuation { pending.append((muted, $0)) }
+    }
+    func setMuted(_ muted: Bool, until: Date?, for conversationID: ConversationID) async throws {
+        try await setMuted(muted, for: conversationID)
+    }
 }
 
 /// Fails the first `failures` text sends, then delivers; records mutes.

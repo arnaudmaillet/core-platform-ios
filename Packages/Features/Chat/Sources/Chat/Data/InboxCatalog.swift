@@ -404,6 +404,8 @@ final class InboxCatalog {
         let wasMuted = muted.contains(id)
         if mute { muted.insert(id) } else { muted.remove(id) }
         mutesInFlight.insert(id)
+        let generation = (muteGenerations[id] ?? 0) + 1
+        muteGenerations[id] = generation
         emit()
         Task { [weak self] in
             guard let self else { return }
@@ -412,6 +414,15 @@ final class InboxCatalog {
                 try await self.repository.setMuted(mute, until: until, for: id)
             } catch {
                 confirmed = false
+            }
+            defer { self.muteAnswersHandled += 1 }
+            // ⚠️ ONLY THE LATEST REQUEST SPEAKS. A mute then an unmute can be
+            // answered out of order: the superseded one neither rolls back
+            // the state the newer one set, nor clears its in-flight mark, nor
+            // toasts "Couldn't mute" for an intent the viewer already replaced.
+            guard self.muteGenerations[id] == generation else { return }
+            self.muteGenerations[id] = nil
+            if !confirmed {
                 if wasMuted { self.muted.insert(id) } else { self.muted.remove(id) }
                 self.emit()
             }
@@ -419,6 +430,11 @@ final class InboxCatalog {
             completion?(confirmed)
         }
     }
+
+    /// The latest mute request per conversation, while one is on its way.
+    private var muteGenerations: [ConversationID: Int] = [:]
+    /// Mute answers taken in, superseded ones included. Tests wait on it.
+    private(set) var muteAnswersHandled = 0
 
     /// Removes conversations from the inbox (context menu or batch edit). The
     /// filter is re-applied across reloads so deleted rows never resurface

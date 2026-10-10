@@ -117,13 +117,31 @@ public final class ToastView: UIView {
         return toast
     }
 
+    /// What VoiceOver is handed: the message, as a QUEUED announcement.
+    ///
+    /// ⚠️ QUEUED, AND POSTED ON THE NEXT RUN LOOP. A toast usually follows a
+    /// menu row (Copy, Mute, Report): posted at once from `init`, the
+    /// announcement competed with the context menu's own dismissal and was
+    /// dropped. Queued behind whatever VoiceOver is saying, a turn later, it
+    /// is heard.
+    static func announcement(_ message: String) -> NSAttributedString {
+        NSAttributedString(string: message, attributes: [.accessibilitySpeechQueueAnnouncement: true])
+    }
+
+    private static func announce(_ message: String) {
+        // A task, so it runs on a LATER turn of the main actor, never inline.
+        Task { @MainActor in
+            UIAccessibility.post(notification: .announcement, argument: announcement(message))
+        }
+    }
+
     private init(message: String, symbol: String?, style: Style) {
         self.style = style
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         // Announced rather than read on focus: the user's attention is on what
         // they just did, and the capsule is gone before VoiceOver could reach it.
-        UIAccessibility.post(notification: .announcement, argument: message)
+        Self.announce(message)
 
         // The capsule's shape is driven by the corner CONFIGURATION, not a
         // layer radius: the glass renders its own boundary refraction against

@@ -1876,11 +1876,10 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// How a follow failure names the author: their `@handle` when the meta
-    /// line carries one, otherwise their display name.
-    private static func followName(of model: FeedItemDisplayModel) -> String {
-        let first = model.metaText.components(separatedBy: " · ").first ?? ""
-        return first.hasPrefix("@") ? first : model.authorName
+    /// How a follow failure names the author: their `@handle` from the
+    /// model, otherwise their display name.
+    static func followName(of model: FeedItemDisplayModel) -> String {
+        model.authorHandle.map { "@" + $0 } ?? model.authorName
     }
 
 

@@ -317,6 +317,8 @@ struct CountryShopViewControllerTests {
                 == "Your pack is still active, 3 left")
         #expect(CountryShopViewController.refusalMessage(for: .insufficientGems(needed: 50, have: 20))
                 == "30 more gems needed")
+        #expect(CountryShopViewController.refusalMessage(for: .insufficientGems(needed: 50, have: 49))
+                == "1 more gem needed")
         #expect(CountryShopViewController.refusalMessage(for: .bought(shots: 3, remainingGems: 20)) == nil)
     }
 
