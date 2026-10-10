@@ -143,6 +143,27 @@ public extension UITabBarController {
 }
 
 @MainActor
+public extension UIViewController {
+    /// ⚠️ A TAB'S ROOT ALWAYS SHOWS THE TAB BAR (#769, the owner's rule
+    /// 2026-10-10). Called by every tab root as it appears: whatever a path
+    /// back left behind — an explicit hide that no close took back, under a
+    /// pushed screen whose `hidesBottomBarWhenPushed` owned the bar — the
+    /// root puts the bar back. Without a navigation delegate (they cost the
+    /// bar-hiding screens their full-surface back swipe).
+    ///
+    /// Only the root of the SELECTED tab's stack, at rest, with nothing
+    /// presented over it; idempotent.
+    func ensureAppTabBarAsTabRoot() {
+        guard let nav = navigationController, nav.viewControllers.first === self,
+              let tabs = tabBarController, tabs.selectedViewController === nav,
+              presentedViewController == nil, nav.transitionCoordinator == nil,
+              tabs.isTabBarHidden
+        else { return }
+        tabs.showTabBarNatively()
+    }
+}
+
+@MainActor
 public extension UINavigationController {
     /// Whether `screen`, on this stack, shows the app's tab bar — what a
     /// close landing on it may give back.

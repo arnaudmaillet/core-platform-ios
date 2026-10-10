@@ -535,11 +535,18 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // each other on the same grab rather than argued about.
         if ProcessInfo.processInfo.arguments.contains("-tabbar-flag") {
             destination.hidesBottomBarWhenPushed = true
-        } else {
+        } else if nav.showsAppTabBar(for: nav.topViewController) {
             nav.tabBarController?.setTabBarHidden(true, animated: true)
         }
         #else
-        nav.tabBarController?.setTabBarHidden(true, animated: true)
+        // ⚠️ ONLY A BAR THIS STACK SHOWS (#769). Under a screen pushed with
+        // `hidesBottomBarWhenPushed` (a profile over a conversation) the bar
+        // is UIKit's already; an explicit hide there was never taken back —
+        // every close asks `showsAppTabBar`, false under the flag — and it
+        // outlived the pops: the inbox came back with no bar.
+        if nav.showsAppTabBar(for: nav.topViewController) {
+            nav.tabBarController?.setTabBarHidden(true, animated: true)
+        }
         #endif
         session.takeDelegateSlot()
         // No `session.prepareDestination()`: this feed is built fresh on every

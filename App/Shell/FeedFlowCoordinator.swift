@@ -76,7 +76,11 @@ final class FeedFlowCoordinator: Coordinator {
         // push, keep hidden through cancelled swipes, restore on the
         // completed pop (`restoreTabBar`) and on tab switches
         // (`MainTabCoordinator.syncTabBarVisibility`).
-        navigationController.tabBarController?.setTabBarHidden(true, animated: true)
+        // Only a bar this stack shows (#769): under `hidesBottomBarWhenPushed`
+        // the bar is UIKit's, and an explicit hide would outlive the pops.
+        if navigationController.showsAppTabBar(for: navigationController.topViewController) {
+            navigationController.tabBarController?.setTabBarHidden(true, animated: true)
+        }
         navigationController.pushViewController(feed, animated: true)
     }
 

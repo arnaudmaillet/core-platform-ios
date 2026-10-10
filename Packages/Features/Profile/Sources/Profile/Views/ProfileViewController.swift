@@ -659,6 +659,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // A tab root always shows the bar (#769).
+        ensureAppTabBarAsTabRoot()
         // The BACKSTOP, on UIKit's own animation like every other install
         // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
         // and a committed close install from `viewWillAppear` and find nothing

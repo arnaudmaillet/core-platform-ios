@@ -144,4 +144,40 @@ struct ShowsAppTabBarTests {
         #expect(root.isStillTheScreenOnShow)
         #expect(!UIViewController().isStillTheScreenOnShow, "off-window")
     }
+
+    /// ⚠️ A TAB'S ROOT ALWAYS SHOWS THE TAB BAR (#769): an explicit hide left
+    /// behind by a path back is undone by the selected tab's root as it
+    /// appears — and only by it: a pushed screen, or another tab's root,
+    /// leaves the bar alone.
+    @MainActor
+    @Test func theSelectedTabsRootPutsTheBarBack() {
+        let inbox = UIViewController()
+        let profile = UIViewController()
+        let tabs = UITabBarController()
+        let messages = UINavigationController(rootViewController: inbox)
+        let other = UINavigationController(rootViewController: profile)
+        tabs.viewControllers = [messages, other]
+        tabs.selectedViewController = messages
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = tabs
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        tabs.view.layoutIfNeeded()
+
+        let pushed = UIViewController()
+        messages.pushViewController(pushed, animated: false)
+        tabs.setTabBarHidden(true, animated: false)
+        pushed.ensureAppTabBarAsTabRoot()
+        #expect(tabs.isTabBarHidden, "a pushed screen showed the bar")
+        profile.ensureAppTabBarAsTabRoot()
+        #expect(tabs.isTabBarHidden, "another tab's root showed the bar")
+
+        messages.popToRootViewController(animated: false)
+        tabs.setTabBarHidden(true, animated: false)
+        inbox.ensureAppTabBarAsTabRoot()
+        #expect(!tabs.isTabBarHidden, "the selected tab's root left the bar hidden")
+    }
 }
