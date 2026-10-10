@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 import UIKit
 
@@ -110,6 +111,10 @@ public final class ConversationViewModel {
     /// under them rather than cutting the transcript back to one page.
     private var hasOlderPages = false
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var isSending = false
     private var load: Task<Void, Never>?
     /// The DM correspondent, once known — the header identity's destination.
@@ -183,6 +188,7 @@ public final class ConversationViewModel {
     }
 
     public func viewDidLoad() {
+        armRecovery()
         loadTitle()
         switch target {
         case .existing:
@@ -199,6 +205,19 @@ public final class ConversationViewModel {
             phase = .loading
             _ = resolveConversation()
         }
+    }
+
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        guard case .failed = phase else { return }
+        refresh()
     }
 
     public func refresh() {

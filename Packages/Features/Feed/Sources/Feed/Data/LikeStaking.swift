@@ -1,5 +1,6 @@
 import AuthInterface
 import CoreContracts
+import CoreNetworking
 import CoreStorage
 import Foundation
 import SwiftProtobuf
@@ -186,6 +187,16 @@ public final class LikeOutboxSender {
             },
             center.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.schedule() }
+            },
+            // The network is back (#793): what failed while it was gone goes
+            // now, not after its backoff.
+            center.addObserver(
+                forName: ConnectivityMonitor.didRecoverNotification, object: ConnectivityMonitor.shared, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.failures = 0
+                    self?.schedule()
+                }
             }
         ]
         schedule()

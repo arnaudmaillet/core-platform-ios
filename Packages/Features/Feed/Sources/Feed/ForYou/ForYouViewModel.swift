@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 import PostGrid
 
@@ -207,6 +208,10 @@ public final class ForYouViewModel {
     /// (`hasDiscovery`); otherwise Discover is `corpus`, as before.
     private var discovery: [GalleryPost]?
     private var discoveryToken: String?
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     /// Whether the repository answered with a discovery corpus of its own.
     private var hasDiscovery = false
     /// The instant this session counts from, frozen the first time a corpus
@@ -250,6 +255,22 @@ public final class ForYouViewModel {
     }
 
     public func viewDidLoad() {
+        armRecovery()
+        loadFirstPage(reset: false)
+    }
+
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        // Only a corpus that never arrived, or a failure: `refresh` drops a
+        // loaded one.
+        guard corpus == nil || failure != nil else { return }
         loadFirstPage(reset: false)
     }
 

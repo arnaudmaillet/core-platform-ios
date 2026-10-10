@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import CoreStorage
 import Foundation
 import MapsInterface
@@ -218,6 +219,10 @@ public final class ProfileViewModel {
     /// on someone else's profile, the link is the `/@handle` one.
     private var shareToken: String?
 
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload this store — the shared one; a
+    /// test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
@@ -517,6 +522,7 @@ public final class ProfileViewModel {
     // MARK: - Inputs
 
     public func viewDidLoad() {
+        armRecovery()
         // ⚠️ A REVISIT RENDERS THE CACHED PROFILE AT FRAME 0 (charter P7). The
         // cache used to be read on an account switch alone; a second visit to
         // a profile opened on a skeleton and re-revealed a page the viewer had
@@ -541,6 +547,21 @@ public final class ProfileViewModel {
     /// True between a cache seed and the fetch that confirms it, so that
     /// fetch revalidates the gallery instead of resetting it.
     private var galleryWasSeeded = false
+
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        // Only a failed profile: every live one (the tab's, every pushed
+        // one) revalidating at once on each recovery was a storm.
+        guard case .failed = phase else { return }
+        refresh()
+    }
 
     /// Pull-to-refresh. Coalesced: a refresh while one is in flight is ignored.
     ///
