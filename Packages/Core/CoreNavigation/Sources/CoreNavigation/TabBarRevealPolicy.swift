@@ -143,6 +143,42 @@ public extension UITabBarController {
 }
 
 @MainActor
+public extension UIViewController {
+    /// ⚠️ A TAB'S ROOT ALWAYS SHOWS THE TAB BAR (#769, the owner's rule
+    /// 2026-10-10). Called by every tab root as it appears: whatever a path
+    /// back left behind — an explicit hide that no close took back, under a
+    /// pushed screen whose `hidesBottomBarWhenPushed` owned the bar — the
+    /// root puts the bar back. Without a navigation delegate (they cost the
+    /// bar-hiding screens their full-surface back swipe).
+    ///
+    /// Only the root of the SELECTED tab's stack, on top, at rest, with
+    /// nothing presented over it — and `stillWanted` (the inbox's search hides
+    /// the bar on purpose); idempotent.
+    ///
+    /// ⚠️ ONE TURN LATER, RE-ASKED THEN. Called from `viewDidAppear`, where an
+    /// inline un-hide was measured never to render (see `whenCommitted`): the
+    /// bar read as shown and nothing painted — and every next-turn backstop,
+    /// seeing it shown, stood down.
+    func ensureAppTabBarAsTabRoot(stillWanted: @escaping @MainActor () -> Bool = { true }) {
+        guard isSelectedTabRootAtRest, tabBarController?.isTabBarHidden == true else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.isSelectedTabRootAtRest, stillWanted(),
+                  let tabs = self.tabBarController else { return }
+            tabs.showTabBarNatively()
+        }
+    }
+
+    private var isSelectedTabRootAtRest: Bool {
+        guard let nav = navigationController, nav.viewControllers.first === self,
+              nav.topViewController === self,
+              let tabs = tabBarController, tabs.selectedViewController === nav,
+              presentedViewController == nil, nav.transitionCoordinator == nil
+        else { return false }
+        return true
+    }
+}
+
+@MainActor
 public extension UINavigationController {
     /// Whether `screen`, on this stack, shows the app's tab bar — what a
     /// close landing on it may give back.
@@ -159,8 +195,20 @@ public extension UINavigationController {
     func showsAppTabBar(for screen: UIViewController?) -> Bool {
         guard let screen else { return false }
         if (screen as? any ZoomTransitionDestination)?.concealsAppTabBar == true { return false }
-        guard let index = viewControllers.firstIndex(of: screen) else { return true }
-        return !viewControllers[...index].dropFirst().contains { $0.hidesBottomBarWhenPushed }
+        return !flagHidesAppTabBar(at: screen)
+    }
+
+    /// Whether UIKit's `hidesBottomBarWhenPushed` owns the bar at `screen`: a
+    /// screen above the root, up to and including `screen`, carries the flag.
+    ///
+    /// ⚠️ NO EXPLICIT HIDE THERE (#769). The flag's hide and
+    /// `setTabBarHidden(true)` are two separate states; every close asks
+    /// `showsAppTabBar` — false under the flag — so an explicit hide issued
+    /// there was never taken back, and it outlived the pops: the inbox came
+    /// back with no bar.
+    func flagHidesAppTabBar(at screen: UIViewController?) -> Bool {
+        guard let screen, let index = viewControllers.firstIndex(of: screen) else { return false }
+        return viewControllers[...index].dropFirst().contains { $0.hidesBottomBarWhenPushed }
     }
 }
 

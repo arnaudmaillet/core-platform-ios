@@ -1867,6 +1867,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // A tab root always shows the bar (#769).
+        ensureAppTabBarAsTabRoot()
         // BELT (#758): no band here, so nothing for the bar's collapse to make
         // room for — whatever arm a screen left behind, the shell's own
         // behaviour comes back.

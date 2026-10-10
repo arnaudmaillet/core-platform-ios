@@ -144,4 +144,71 @@ struct ShowsAppTabBarTests {
         #expect(root.isStillTheScreenOnShow)
         #expect(!UIViewController().isStillTheScreenOnShow, "off-window")
     }
+
+    /// ⚠️ A TAB'S ROOT ALWAYS SHOWS THE TAB BAR (#769): an explicit hide left
+    /// behind by a path back is undone by the selected tab's root as it
+    /// appears — and only by it: a pushed screen, or another tab's root,
+    /// leaves the bar alone.
+    @MainActor
+    @Test func theSelectedTabsRootPutsTheBarBack() async {
+        let inbox = UIViewController()
+        let profile = UIViewController()
+        let tabs = UITabBarController()
+        let messages = UINavigationController(rootViewController: inbox)
+        let other = UINavigationController(rootViewController: profile)
+        tabs.viewControllers = [messages, other]
+        tabs.selectedViewController = messages
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = tabs
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+        tabs.view.layoutIfNeeded()
+
+        let pushed = UIViewController()
+        messages.pushViewController(pushed, animated: false)
+        tabs.setTabBarHidden(true, animated: false)
+        pushed.ensureAppTabBarAsTabRoot()
+        profile.ensureAppTabBarAsTabRoot()
+        await nextMainTurn()
+        #expect(tabs.isTabBarHidden, "a pushed screen, or another tab's root, showed the bar")
+
+        messages.popToRootViewController(animated: false)
+        tabs.setTabBarHidden(true, animated: false)
+        inbox.ensureAppTabBarAsTabRoot(stillWanted: { false })
+        await nextMainTurn()
+        #expect(tabs.isTabBarHidden, "a root that no longer wants the bar showed it")
+
+        inbox.ensureAppTabBarAsTabRoot()
+        // ⚠️ Not inline: an un-hide from `viewDidAppear` never renders.
+        #expect(tabs.isTabBarHidden, "the bar was shown inline")
+        await nextMainTurn()
+        #expect(!tabs.isTabBarHidden, "the selected tab's root left the bar hidden")
+    }
+
+    /// UIKit's flag owns the bar from the first flagged screen up (#769).
+    @MainActor
+    @Test func theFlagOwnsTheBarFromTheFirstFlaggedScreenUp() {
+        let root = UIViewController()
+        let conversation = UIViewController()
+        conversation.hidesBottomBarWhenPushed = true
+        let profile = UIViewController()
+        let nav = UINavigationController(rootViewController: root)
+        nav.setViewControllers([root, conversation, profile], animated: false)
+
+        #expect(!nav.flagHidesAppTabBar(at: root))
+        #expect(nav.flagHidesAppTabBar(at: conversation))
+        #expect(nav.flagHidesAppTabBar(at: profile))
+        #expect(!nav.flagHidesAppTabBar(at: UIViewController()), "a screen off the stack")
+        #expect(!nav.showsAppTabBar(for: profile))
+    }
+
+    @MainActor
+    private func nextMainTurn() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
 }

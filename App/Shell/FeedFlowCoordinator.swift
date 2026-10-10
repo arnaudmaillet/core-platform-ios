@@ -76,7 +76,11 @@ final class FeedFlowCoordinator: Coordinator {
         // push, keep hidden through cancelled swipes, restore on the
         // completed pop (`restoreTabBar`) and on tab switches
         // (`MainTabCoordinator.syncTabBarVisibility`).
-        navigationController.tabBarController?.setTabBarHidden(true, animated: true)
+        // Only a bar this stack shows (#769): under `hidesBottomBarWhenPushed`
+        // the bar is UIKit's, and an explicit hide would outlive the pops.
+        if !navigationController.flagHidesAppTabBar(at: navigationController.topViewController) {
+            navigationController.tabBarController?.setTabBarHidden(true, animated: true)
+        }
         navigationController.pushViewController(feed, animated: true)
     }
 
@@ -93,9 +97,10 @@ final class FeedFlowCoordinator: Coordinator {
     /// point the old proxy started refusing the restore over a screen that
     /// never owned the bar in the first place.
     private func restoreTabBar(on navigationController: UINavigationController) {
-        let top = navigationController.topViewController
+        // `showsAppTabBar` also answers UIKit's flag (#769): the pin feed
+        // closing onto a pushed conversation or profile gives back no bar.
         guard feedViewController.navigationController == nil,
-              (top as? any ZoomTransitionDestination)?.concealsAppTabBar != true
+              navigationController.showsAppTabBar(for: navigationController.topViewController)
         else { return }
         navigationController.tabBarController?.setTabBarHidden(false, animated: true)
     }

@@ -815,6 +815,8 @@ final class MapsViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // A tab root always shows the bar (#769).
+        ensureAppTabBarAsTabRoot()
         // Kick the first query; coalesces with any region-settle callback.
         scheduleQuery()
         // Any marker a departed flow concealed comes back now. The window
