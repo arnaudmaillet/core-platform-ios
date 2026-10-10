@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// Who else may see one of the active profile's relationship lists (#403,
@@ -77,7 +78,7 @@ extension ProfileRepository: ListPrivacyManaging {
         let response = await socialGraphClient.getListPrivacy(request: request, headers: [:])
         switch response.result {
         case .success(let privacy): return ListPrivacy(privacy)
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -90,7 +91,7 @@ extension ProfileRepository: ListPrivacyManaging {
         let response = await socialGraphClient.setListPrivacy(request: request, headers: [:])
         switch response.result {
         case .success(let privacy): return ListPrivacy(privacy)
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

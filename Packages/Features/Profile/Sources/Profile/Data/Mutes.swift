@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// What of a profile the viewer has muted (#403, backend #722). Softer than a
@@ -105,7 +106,7 @@ extension ProfileRepository: ProfileMuting {
         let response = await socialGraphClient.getRelationStatus(request: request, headers: [:])
         switch response.result {
         case .success(let view): return MuteScopes(view.muted)
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -139,7 +140,7 @@ extension ProfileRepository: ProfileMuting {
             case .success(let body):
                 return (body.mutes, body.nextPageToken)
             case .failure(let error):
-                throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
         let views = await withTaskGroup(of: (String, Profile_V1_ProfileView?).self) { group in

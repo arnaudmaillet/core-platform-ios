@@ -119,11 +119,25 @@ public enum ComposeError: Error, Equatable, Sendable {
     case notAuthenticated
     case noViewerProfile
     case emptyPost
-    case media(String)
+    /// The media could not be prepared or uploaded. `failure` keeps WHY an
+    /// upload failed (#794); nil when it never reached the network.
+    case media(String, failure: NetworkFailure? = nil)
     /// PST-1009: someone the post mentions doesn't allow mentions from the
     /// author ("Who Can Mention", #397). Nothing was created.
     case mentionRefused
-    case transport(String)
+    /// A post.v1 / profile.v1 call failed. `failure` keeps WHY (#794):
+    /// offline, a timeout, a refusal, a server fault. Defaulted, so every
+    /// `.transport("…")` still builds and every `case .transport:` matches.
+    case transport(String, failure: NetworkFailure? = nil)
+}
+
+extension ComposeError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        switch self {
+        case .media(_, let failure), .transport(_, let failure): failure
+        case .notAuthenticated, .noViewerProfile, .emptyPost, .mentionRefused: nil
+        }
+    }
 }
 
 extension ComposeError: LocalizedError {
@@ -441,7 +455,7 @@ public actor PostComposer: PostComposing {
                 idempotencyKey: idempotencyKey
             ).url
         } catch let error as MediaAssetUploader.UploadError {
-            throw ComposeError.media(error.message)
+            throw ComposeError.media(error.message, failure: error.networkFailure)
         }
     }
 
@@ -459,7 +473,10 @@ public actor PostComposer: PostComposing {
 
         let response = await postClient.createPost(request: request, headers: [:])
         if (response.error?.message ?? "").contains("PST-1009") { throw ComposeError.mentionRefused }
-        let body = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
+        let body = try unwrap(
+            response.message, errorMessage: response.error?.message,
+            failure: response.error.flatMap { NetworkFailure.of($0) }
+        )
         return PostID(body.postID)
     }
 
@@ -468,7 +485,10 @@ public actor PostComposer: PostComposing {
         request.postID = postID.rawValue
         request.profileID = profileID.rawValue
         let response = await postClient.publishPost(request: request, headers: [:])
-        _ = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
+        _ = try unwrap(
+            response.message, errorMessage: response.error?.message,
+            failure: response.error.flatMap { NetworkFailure.of($0) }
+        )
     }
 
     /// The profile a post is published as: `author` when the account holds it,
@@ -509,7 +529,10 @@ public actor PostComposer: PostComposing {
         var request = Profile_V1_ListProfilesByAccountRequest()
         request.accountID = accountID.rawValue
         let response = await profileClient.listProfilesByAccount(request: request, headers: [:])
-        let body = try unwrap(response.message, errorMessage: response.error?.message, as: ComposeError.transport)
+        let body = try unwrap(
+            response.message, errorMessage: response.error?.message,
+            failure: response.error.flatMap { NetworkFailure.of($0) }
+        )
         let profiles = body.profiles.map { profile in
             AuthorSummary(
                 id: ProfileID(profile.profileID),
@@ -533,9 +556,11 @@ public actor PostComposer: PostComposing {
         return input
     }
 
-    private func unwrap<T>(_ message: T?, errorMessage: String?, as wrap: (String) -> ComposeError) throws -> T {
+    /// The answer's body, or a `transport` failure that keeps why the call
+    /// failed (#794).
+    private func unwrap<T>(_ message: T?, errorMessage: String?, failure: NetworkFailure?) throws -> T {
         guard let message else {
-            throw wrap(errorMessage ?? "unknown error")
+            throw ComposeError.transport(errorMessage ?? "unknown error", failure: failure)
         }
         return message
     }

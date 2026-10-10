@@ -117,7 +117,7 @@ public actor WalletLikeStaking: LikeStaking {
                  .failedPrecondition, .outOfRange, .unimplemented:
                 throw LikeStakeRejected(reason: error.message ?? "code \(error.code)")
             default:
-                throw FeedError.transport(message: error.message ?? "code \(error.code)")
+                throw FeedError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
         guard let message = response.message else {

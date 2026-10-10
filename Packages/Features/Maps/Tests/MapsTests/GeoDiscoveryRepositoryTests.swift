@@ -299,6 +299,26 @@ struct GeoDiscoveryRepositoryTests {
             ))
         }
     }
+
+    /// The error keeps WHY the call failed (#794): a lost connection reads
+    /// offline (the mock's own switchboard, never the shared one), a missing
+    /// route a refusal.
+    @Test func aTransportErrorKeepsWhyTheCallFailed() async throws {
+        let bff = MockBFF()
+        let faults = MockNetworkFaults()
+        faults.isForcedOffline = true
+        bff.faults = faults
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = GeoDiscoveryRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: client))
+        let viewport = MapViewport.make(centerLat: 0, centerLng: 0, latitudeSpan: 1, longitudeSpan: 1)
+
+        let offline = await #expect(throws: GeoDiscoveryError.self) { _ = try await repository.queryTile(viewport) }
+        #expect(offline?.networkFailure == .offline)
+
+        faults.isForcedOffline = false
+        let refused = await #expect(throws: GeoDiscoveryError.self) { _ = try await repository.queryTile(viewport) }
+        #expect(refused?.networkFailure == .refused(code: "unimplemented"))
+    }
 }
 
 private final class RequestBox: @unchecked Sendable {

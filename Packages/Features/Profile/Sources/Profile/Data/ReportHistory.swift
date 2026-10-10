@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// One report the viewer made, with what became of it (Settings → Safety →
@@ -92,7 +93,7 @@ extension ProfileReportRepository: ReportHistoryProviding {
                 nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken
             )
         case .failure(let error):
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

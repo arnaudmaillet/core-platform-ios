@@ -1,5 +1,6 @@
 import Connect
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// A two-step enrolment waiting for its first code (`StartMfaEnrollment`).
@@ -49,7 +50,17 @@ public enum TwoStepError: Error, Equatable {
     case enrollmentExpired
     /// Already on (AUT-5022) or already off (AUT-5020): the screen is stale.
     case alreadyChanged
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension TwoStepError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Settings → Security and Login → Two-Step Sign-In (#383, backend #649).
@@ -108,6 +119,6 @@ extension AccountSessionsRepository: TwoStepManaging {
         if message.contains("AUT-5021") { return .enrollmentExpired }
         if message.contains("AUT-5017") { return .wrongCode }
         if message.contains("AUT-5020") || message.contains("AUT-5022") { return .alreadyChanged }
-        return .transport(message: message.isEmpty ? "code \(error.code)" : message)
+        return .transport(message: message.isEmpty ? "code \(error.code)" : message, failure: NetworkFailure(error))
     }
 }

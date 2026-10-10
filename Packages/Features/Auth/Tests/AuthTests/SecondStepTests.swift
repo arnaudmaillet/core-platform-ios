@@ -92,6 +92,20 @@ struct SecondStepTests {
         #expect(await manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
     }
 
+    /// An AuthError keeps WHY the call failed (#794): a lost connection
+    /// (the URLError Connect attaches) reads offline, a bare `unavailable`
+    /// is a server's answer, and `offline` (#791) says it already.
+    @Test func anAuthErrorKeepsWhyTheCallFailed() {
+        let lost = ConnectError(code: .unavailable, message: nil, exception: URLError(.notConnectedToInternet))
+        #expect(AuthError.loginFailure(lost).networkFailure == .offline)
+        #expect(AuthError.secondStepFailure(lost).networkFailure == .offline)
+
+        let outage = ConnectError(code: .unavailable, message: "down")
+        #expect(AuthError.loginFailure(outage).networkFailure == .server(code: "unavailable"))
+        #expect(AuthError.offline.networkFailure == .offline)
+        #expect(AuthError.invalidCredentials.networkFailure == nil)
+    }
+
     @MainActor
     @Test func theCodeFieldKeepsToItsMode() {
         typealias Step = SecondStepViewController

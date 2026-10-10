@@ -10,7 +10,11 @@ public enum AuthError: Error, Equatable, Sendable {
     /// The refresh token was rejected (expired, revoked, or reuse-detected);
     /// the local session has been cleared and the user must sign in again.
     case sessionExpired
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
     /// The network did not answer — no route, or a timeout (#791). Apart from
     /// `transport` (any other failure, a server error included) so a call made
     /// offline reads as offline and nothing else does.
@@ -38,7 +42,7 @@ public enum AuthError: Error, Equatable, Sendable {
         case .unauthenticated, .permissionDenied:
             .invalidCredentials
         default:
-            .transport(message: error.message ?? "code \(error.code)")
+            .transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -47,7 +51,18 @@ public enum AuthError: Error, Equatable, Sendable {
         if message.contains("AUT-5021") { return .secondStepExpired }
         if message.contains("AUT-5018") || error.code == .resourceExhausted { return .secondStepLocked }
         if message.contains("AUT-5017") || error.code == .unauthenticated { return .wrongSecondStepCode }
-        return .transport(message: message.isEmpty ? "code \(error.code)" : message)
+        return .transport(message: message.isEmpty ? "code \(error.code)" : message, failure: NetworkFailure(error))
+    }
+}
+
+extension AuthError: NetworkFailureCarrying {
+    /// `offline` already says it (#791); a `transport` says what it kept.
+    public var networkFailure: NetworkFailure? {
+        switch self {
+        case .offline: .offline
+        case .transport(_, let failure): failure
+        default: nil
+        }
     }
 }
 

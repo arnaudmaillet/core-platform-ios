@@ -28,19 +28,30 @@ public struct MediaAssetUploader: Sendable {
     }
 
     /// Where an upload failed, with the server's (or transport's) message.
-    public enum UploadError: Error, Equatable, Sendable {
-        case ticket(String)
-        case upload(String)
-        case commit(String)
+    ///
+    /// `failure` keeps WHY a step failed (#794), so a composer can say
+    /// "You're offline" rather than "upload failed". Defaulted, so every
+    /// `.upload("…")` still builds and every `case .upload:` still matches.
+    public enum UploadError: Error, Equatable, Sendable, NetworkFailureCarrying {
+        case ticket(String, failure: NetworkFailure? = nil)
+        case upload(String, failure: NetworkFailure? = nil)
+        case commit(String, failure: NetworkFailure? = nil)
         /// Processed too slowly: no rendition within the poll budget.
         case notReady(assetID: String)
 
         public var message: String {
             switch self {
-            case .ticket(let message): "ticket: \(message)"
-            case .upload(let message): "upload failed: \(message)"
-            case .commit(let message): "commit: \(message)"
+            case .ticket(let message, _): "ticket: \(message)"
+            case .upload(let message, _): "upload failed: \(message)"
+            case .commit(let message, _): "commit: \(message)"
             case .notReady(let assetID): "media still processing (asset \(assetID) not ready)"
+            }
+        }
+
+        public var networkFailure: NetworkFailure? {
+            switch self {
+            case .ticket(_, let failure), .upload(_, let failure), .commit(_, let failure): failure
+            case .notReady: nil
             }
         }
     }
@@ -103,7 +114,9 @@ public struct MediaAssetUploader: Sendable {
 
         let ticketResponse = await mediaClient.issueUploadTicket(request: ticketRequest, headers: [:])
         guard let ticketBody = ticketResponse.message else {
-            throw UploadError.ticket(ticketResponse.error?.message ?? "unknown error")
+            throw UploadError.ticket(
+                ticketResponse.error?.message ?? "unknown error", failure: ticketResponse.error.map { NetworkFailure($0) }
+            )
         }
         let assetID = ticketBody.assetID
 
@@ -125,7 +138,9 @@ public struct MediaAssetUploader: Sendable {
                 case .file(let url): etag = try await transport.upload(fileURL: url, using: ticket)
                 }
             } catch {
-                throw UploadError.upload(String(describing: error))
+                // The object-store PUT is a plain URLSession call: its
+                // URLError says whether the device was offline.
+                throw UploadError.upload(String(describing: error), failure: NetworkFailure.of(error))
             }
 
             var commitRequest = Media_V1_CommitUploadRequest()
@@ -138,7 +153,9 @@ public struct MediaAssetUploader: Sendable {
             // replayed ticket brought the bytes to an asset that was done —
             // and there is nothing left to finalise. Asked once, not polled.
             if commitResponse.message == nil, await delivery(of: assetID)?.state.isPastPending != true {
-                throw UploadError.commit(commitResponse.error?.message ?? "unknown error")
+                throw UploadError.commit(
+                    commitResponse.error?.message ?? "unknown error", failure: commitResponse.error.map { NetworkFailure($0) }
+                )
             }
         }
 

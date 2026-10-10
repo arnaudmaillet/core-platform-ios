@@ -112,8 +112,10 @@ public struct MockMediaUploadTransport: MediaUploadTransport {
     public func upload(_ data: Data, using ticket: MediaUploadTicket) async throws -> String {
         // The PUT bypasses the BFF, so the fault switchboard is asked here too
         // (#790): offline, or a failed PUT at the configured rate.
+        // Offline throws what URLSession throws, so the upload reads as
+        // offline the way a real one does (#794).
         if faults?.isOffline == true {
-            throw MediaUploadError.transport("The Internet connection appears to be offline.")
+            throw URLError(.notConnectedToInternet)
         }
         if faults?.failsUpload() == true {
             throw MediaUploadError.transport("simulated upload failure")

@@ -1,5 +1,6 @@
 import Connect
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// One signed-in session of the viewer's account, as "Where you're logged
@@ -86,7 +87,17 @@ public protocol AccountSessionsManaging: Sendable {
 }
 
 public enum AccountSessionsError: Error, Equatable {
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension AccountSessionsError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Settings → Security and Login → Change Password (#382), on
@@ -119,7 +130,17 @@ public enum StepUpError: Error, Equatable {
     case wrongPassword
     /// The two-step code didn't match (AUT-5017).
     case wrongCode
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension StepUpError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 public enum PasswordChangeError: Error, Equatable {
@@ -129,7 +150,11 @@ public enum PasswordChangeError: Error, Equatable {
     /// IdP's policy (FAILED_PRECONDITION). `reason` is the server's rule,
     /// without its error code, ready to show.
     case rejected(reason: String)
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
 
     /// "AUT-VAL-024: the new password must be…" → "The new password must be…".
     static func readable(_ message: String?) -> String {
@@ -140,6 +165,12 @@ public enum PasswordChangeError: Error, Equatable {
             text = text[text.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
         return text.prefix(1).uppercased() + text.dropFirst() + (text.hasSuffix(".") ? "" : ".")
+    }
+}
+
+extension PasswordChangeError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
     }
 }
 
@@ -168,7 +199,7 @@ public actor AccountSessionsRepository: AccountSessionsManaging, AccountPassword
             await tokenInstaller?.installStepUpToken(body.accessToken, expiresIn: body.expiresIn)
         case .failure(let error):
             if error.code == .unauthenticated { throw StepUpError.wrongCode }
-            throw StepUpError.transport(message: error.message ?? "code \(error.code)")
+            throw StepUpError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -184,7 +215,7 @@ public actor AccountSessionsRepository: AccountSessionsManaging, AccountPassword
                (error.message ?? "").contains("AUT-5002") || !(error.message ?? "").contains("AUT-") {
                 throw StepUpError.wrongPassword
             }
-            throw StepUpError.transport(message: error.message ?? "code \(error.code)")
+            throw StepUpError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -194,7 +225,7 @@ public actor AccountSessionsRepository: AccountSessionsManaging, AccountPassword
         case .success(let body):
             return Self.sessions(from: body.sessions)
         case .failure(let error):
-            throw AccountSessionsError.transport(message: error.message ?? "code \(error.code)")
+            throw AccountSessionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -203,14 +234,14 @@ public actor AccountSessionsRepository: AccountSessionsManaging, AccountPassword
         request.sessionID = id
         let response = await authClient.logout(request: request, headers: [:])
         if case .failure(let error) = response.result {
-            throw AccountSessionsError.transport(message: error.message ?? "code \(error.code)")
+            throw AccountSessionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
     public func revokeAllSessions() async throws {
         let response = await authClient.logoutAllSessions(request: Auth_V1_LogoutAllSessionsRequest(), headers: [:])
         if case .failure(let error) = response.result {
-            throw AccountSessionsError.transport(message: error.message ?? "code \(error.code)")
+            throw AccountSessionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -230,7 +261,7 @@ public actor AccountSessionsRepository: AccountSessionsManaging, AccountPassword
             case .unauthenticated where (error.message ?? "").contains("AUT-5002") || !(error.message ?? "").contains("AUT-"):
                 throw PasswordChangeError.wrongCurrentPassword
             case .failedPrecondition, .invalidArgument: throw PasswordChangeError.rejected(reason: PasswordChangeError.readable(error.message))
-            default: throw PasswordChangeError.transport(message: error.message ?? "code \(error.code)")
+            default: throw PasswordChangeError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
     }

@@ -10,7 +10,17 @@ public enum ProfileError: Error, Equatable, Sendable {
     case notAuthenticated
     case noProfileForAccount
     case notFound
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension ProfileError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// A follower/following count. Modelled as an estimate, not a bare number,
@@ -412,7 +422,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         case .success(let view):
             return view.status
         case .failure(let error):
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -517,7 +527,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
     /// Throws unless the command round-tripped and the server accepted it.
     static func ensureAccepted(_ response: ResponseMessage<SocialGraph_V1_CommandResponse>) throws {
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         // A follow of a private profile answers with a pending request.
         guard response.message?.success == true || response.message?.requested == true else {
@@ -549,7 +559,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
 
         let response = await profileClient.updateProfile(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         guard response.message?.success == true else {
             throw ProfileError.transport(message: "profile update rejected")
@@ -566,7 +576,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
 
         let response = await profileClient.changeHandle(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         guard response.message?.success == true else {
             throw ProfileError.transport(message: "handle change rejected")
@@ -594,7 +604,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         case .success(let view):
             return view
         case .failure(let error):
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -609,7 +619,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         } catch ViewerError.noProfileForAccount {
             throw ProfileError.noProfileForAccount
         } catch let error as AccountProfilesReader.ReadError {
-            throw ProfileError.transport(message: error.message)
+            throw ProfileError.transport(message: error.message, failure: error.networkFailure)
         }
     }
 
@@ -633,7 +643,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
                 )
             }
         case .failure(let error):
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -674,7 +684,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
             case .success(let body):
                 return (body.blocks, body.nextPageToken)
             case .failure(let error):
-                throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
         // One read per blocked profile (the contract has no batch read). A
@@ -723,7 +733,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         request.visibility = isPrivate ? .private : .public
         let response = await profileClient.setVisibility(request: request, headers: [:])
         if case .failure(let error) = response.result {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 

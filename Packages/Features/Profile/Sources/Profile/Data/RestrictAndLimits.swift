@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 // MARK: - Restrict
@@ -40,7 +41,7 @@ extension ProfileRepository: ProfileRestricting {
         let response = await socialGraphClient.getRelationStatus(request: request, headers: [:])
         switch response.result {
         case .success(let view): return view.restricted
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -72,7 +73,7 @@ extension ProfileRepository: ProfileRestricting {
             case .success(let body):
                 return (body.restricted, body.nextPageToken)
             case .failure(let error):
-                throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
         let views = await withTaskGroup(of: (String, Profile_V1_ProfileView?).self) { group in
@@ -175,7 +176,7 @@ extension ProfileRepository: InteractionLimitsManaging {
         request.untilMs = Int64(limit.until.timeIntervalSince1970 * 1_000)
         let response = await profileClient.setInteractionLimit(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -184,7 +185,7 @@ extension ProfileRepository: InteractionLimitsManaging {
         request.profileID = try await resolveViewerProfileID(forWrite: "clearInteractionLimit").rawValue
         let response = await profileClient.clearInteractionLimit(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -210,7 +211,7 @@ extension ProfileRepository: InteractionLimitsManaging {
         request.settings = settings
         let response = await profileClient.setInteractionSettings(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

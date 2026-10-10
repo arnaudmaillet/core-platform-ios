@@ -67,6 +67,20 @@ struct WalletLikeStakingTests {
         }
     }
 
+    /// The retried error keeps WHY (#794): a lost connection reads offline,
+    /// a timeout a timeout. The mock's own switchboard, never a shared one.
+    @Test func aRetriedStakeKeepsWhyItFailed() async {
+        let (staking, bff) = makeStaking(answering: .deadlineExceeded)
+        let timedOut = await #expect(throws: FeedError.self) { try await staking.stake(batch()) }
+        #expect(timedOut?.networkFailure == .timeout)
+
+        let faults = MockNetworkFaults()
+        faults.isForcedOffline = true
+        bff.faults = faults
+        let offline = await #expect(throws: FeedError.self) { try await staking.stake(batch()) }
+        #expect(offline?.networkFailure == .offline)
+    }
+
     /// ⚠️ ANOTHER ACCOUNT'S BATCH IS NEVER SENT with this account's token: the
     /// server would refuse it, and the refund would land in the wrong wallet.
     @Test func anotherAccountsBatchWaitsWithoutBeingSent() async {

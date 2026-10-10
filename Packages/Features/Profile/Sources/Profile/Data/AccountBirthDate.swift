@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreNetworking
 import CoreStorage
 import Foundation
 
@@ -97,7 +98,17 @@ public enum BirthDateError: Error, Equatable {
     case underMinimumAge
     /// A date of birth is already on file; support changes it.
     case alreadySet
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension BirthDateError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 extension AccountRepository: AccountBirthDateSetting {
@@ -116,7 +127,7 @@ extension AccountRepository: AccountBirthDateSetting {
             let message = error.message ?? ""
             if message.contains("ACC-2004") { throw BirthDateError.underMinimumAge }
             if error.code == .failedPrecondition || error.code == .alreadyExists { throw BirthDateError.alreadySet }
-            throw BirthDateError.transport(message: error.message ?? "code \(error.code)")
+            throw BirthDateError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

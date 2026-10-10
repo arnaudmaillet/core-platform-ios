@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// The presence and discovery switches the server enforces (#406, #412;
@@ -102,7 +103,7 @@ extension ProfileRepository: ActivityDiscoveryManaging {
         }
         let response = await profileClient.setDiscoverySettings(request: request, headers: [:])
         if let error = response.error {
-            throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+            throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }
@@ -124,7 +125,7 @@ extension ProfileRepository: ShareLinkManaging {
         let response = await profileClient.getShareToken(request: request, headers: [:])
         switch response.result {
         case .success(let body): return body.token
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -134,7 +135,7 @@ extension ProfileRepository: ShareLinkManaging {
         let response = await profileClient.rotateShareToken(request: request, headers: [:])
         switch response.result {
         case .success(let body): return body.token
-        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

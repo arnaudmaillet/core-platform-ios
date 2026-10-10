@@ -248,7 +248,7 @@ public actor SessionManager {
                     throw AuthError.sessionExpired
                 }
                 if GuestAttempt.isUnreachable(error.code) { throw AuthError.offline }
-                throw AuthError.transport(message: error.message ?? "code \(error.code)")
+                throw AuthError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
         refreshTask = task

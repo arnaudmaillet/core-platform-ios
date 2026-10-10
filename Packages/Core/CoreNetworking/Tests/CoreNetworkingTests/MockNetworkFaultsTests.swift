@@ -52,6 +52,7 @@ struct MockNetworkFaultsTests {
         let response = await login(bff)
 
         #expect(response.error?.code == .unavailable)
+        #expect(response.error.flatMap { NetworkFailure.of($0) } == .offline, "mock offline must read as offline (#794)")
         #expect(calls.count == 0, "an offline call reached the server")
 
         faults.isForcedOffline = false
@@ -117,7 +118,7 @@ struct MockNetworkFaultsTests {
             uploadURL: URL(string: "mock://upload/a1")!, httpMethod: "PUT", requiredHeaders: [:], maxSizeBytes: 1_000
         )
 
-        await #expect(throws: MediaUploadError.self) {
+        await #expect(throws: URLError(.notConnectedToInternet)) {
             _ = try await transport.upload(Data([1, 2, 3]), using: ticket)
         }
     }

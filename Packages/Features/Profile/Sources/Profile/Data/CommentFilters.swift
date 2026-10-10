@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// What the active profile hides from the comments on its posts (#404,
@@ -39,7 +40,17 @@ public struct CommentFilterSettings: Equatable, Sendable {
 public enum CommentFiltersError: Error, Equatable {
     /// PRF-9001: more than 200 words, or one longer than 64 characters.
     case tooMany
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension CommentFiltersError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// Settings → Safety → Hidden Words.
@@ -66,7 +77,7 @@ extension ProfileRepository: CommentFiltersManaging {
         let response = await profileClient.setCommentFilters(request: request, headers: [:])
         if let error = response.error {
             if (error.message ?? "").contains("PRF-9001") { throw CommentFiltersError.tooMany }
-            throw CommentFiltersError.transport(message: error.message ?? "code \(error.code)")
+            throw CommentFiltersError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         return stored
     }
