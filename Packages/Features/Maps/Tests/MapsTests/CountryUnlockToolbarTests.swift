@@ -1,3 +1,4 @@
+import MapKit
 import MapsInterface
 import Testing
 import UIKit
@@ -67,5 +68,28 @@ struct CountryUnlockToolbarTests {
         let (sheet, _) = try makeSheet()
         #expect(sheet.toolbarBand > 0)
         #expect(sheet.sheetHeight == sheet.contentHeight + sheet.toolbarBand)
+    }
+
+    /// ⚠️ FROM ONE LOCKED COUNTRY STRAIGHT TO ANOTHER (#760): the open sheet
+    /// takes the new country in place — header, pitch and price — instead of
+    /// closing and making the user tap again.
+    @Test func anotherCountryReplacesTheOfferInPlace() throws {
+        let (sheet, _) = try makeSheet()
+        let italy = try #require(CountryAtlas.shared.country(code: "IT"))
+        sheet.show(italy)
+        #expect(sheet.country.code == "IT")
+        let labels = Self.descendants(of: sheet.view).compactMap { ($0 as? UILabel)?.text }
+        #expect(labels.contains("Unlock \(italy.name) to see its posts on your map."), "\(labels)")
+        #expect(!labels.contains { $0.contains("Spain") }, "the first country is still on show: \(labels)")
+        #expect(sheet.unlockButton.configuration?.title == "Unlock · 50")
+    }
+
+    /// A country's flag disc answers its own tap: MapKit's selection of it,
+    /// landing a beat later, must never reach the offer — it closed it, the
+    /// zoom in and straight back out (#760).
+    @Test func mapKitsSelectionOfAFlagDiscOpensNothing() throws {
+        let spain = try #require(CountryAtlas.shared.country(code: "ES"))
+        #expect(!MapsViewController.mapSelectionOpens(CountryFlagAnnotation(country: spain, isLocked: true, rank: 4)))
+        #expect(MapsViewController.mapSelectionOpens(MKPointAnnotation()))
     }
 }
