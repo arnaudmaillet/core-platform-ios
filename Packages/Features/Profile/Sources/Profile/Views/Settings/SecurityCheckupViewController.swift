@@ -10,6 +10,9 @@ struct SecurityCheckupItem: Hashable, Sendable {
         case unavailable
         /// Advice with nothing to tick: not counted, it points somewhere.
         case info
+        /// Couldn't be read (#799): a failed line with retry, never counted
+        /// as done — and named in the summary so it can't read all clear.
+        case failed
     }
 
     let id: String
@@ -24,10 +27,24 @@ struct SecurityCheckupItem: Hashable, Sendable {
 /// app can't judge how strong it is); two-factor is listed as unavailable
 /// rather than hidden: their contracts are internal today (#382, #383), and a
 /// checkup that skipped them would look complete when it isn't.
+///
+/// The same goes for a read that failed (#799): its line stays, as a failed
+/// line. Only a source the screen doesn't have (nil) or a read still running
+/// leaves a line out.
 enum SecurityCheckup {
-    static func items(account: AccountDetails?, sessionCount: Int?, appLockOn: Bool, lockMethod: String?) -> [SecurityCheckupItem] {
+    static let failedAccountTitle = "Couldn't load your email and phone. Tap to try again."
+    static let failedSessionsTitle = "Couldn't load your logged-in devices. Tap to try again."
+
+    static func items(
+        account: Loadable<AccountDetails>?, sessionCount: Loadable<Int>?, appLockOn: Bool, lockMethod: String?
+    ) -> [SecurityCheckupItem] {
         var items: [SecurityCheckupItem] = []
-        if let account {
+        if case .failed = account {
+            items.append(SecurityCheckupItem(
+                id: "account", title: failedAccountTitle, detail: "", symbolName: "envelope", state: .failed
+            ))
+        }
+        if let account = account?.content {
             items.append(SecurityCheckupItem(
                 id: "email",
                 title: account.emailVerified ? "Email verified" : "Verify your email",
@@ -48,7 +65,12 @@ enum SecurityCheckup {
                 state: hasPhone && account.phoneVerified ? .done : (hasPhone ? .recommended : .unavailable)
             ))
         }
-        if let sessionCount {
+        if case .failed = sessionCount {
+            items.append(SecurityCheckupItem(
+                id: "sessions", title: failedSessionsTitle, detail: "", symbolName: "laptopcomputer.and.iphone", state: .failed
+            ))
+        }
+        if let sessionCount = sessionCount?.content {
             items.append(SecurityCheckupItem(
                 id: "sessions",
                 title: sessionCount <= 1 ? "Only this device is logged in" : "Review \(sessionCount) logged-in devices",
@@ -82,11 +104,15 @@ enum SecurityCheckup {
         return items
     }
 
-    /// "2 of 4 done" over what the viewer can act on.
+    /// "2 of 4 done" over what the viewer can act on; ", 1 couldn't be
+    /// checked" when a read failed, so a partial checkup never reads as a
+    /// complete one.
     static func summary(_ items: [SecurityCheckupItem]) -> String {
-        let actionable = items.filter { $0.state != .unavailable && $0.state != .info }
+        let actionable = items.filter { $0.state == .done || $0.state == .recommended }
         let done = actionable.filter { $0.state == .done }.count
-        return "\(done) of \(actionable.count) done"
+        let failed = items.filter { $0.state == .failed }.count
+        let tally = "\(done) of \(actionable.count) done"
+        return failed == 0 ? tally : "\(tally), \(failed) couldn't be checked"
     }
 }
 
@@ -95,16 +121,14 @@ enum SecurityCheckup {
 /// that lives on the Security page (devices, App Lock) takes the viewer back
 /// there.
 final class SecurityCheckupViewController: UIViewController {
-    private let account: (any AccountProviding)?
-    private let sessions: (any AccountSessionsManaging)?
+    private let viewModel: SecurityCheckupViewModel
     private let authenticator: any DeviceAuthenticating
     private var items: [SecurityCheckupItem] = []
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, SecurityCheckupItem>!
 
     init(account: (any AccountProviding)?, sessions: (any AccountSessionsManaging)?, authenticator: any DeviceAuthenticating) {
-        self.account = account
-        self.sessions = sessions
+        viewModel = SecurityCheckupViewModel(account: account, sessions: sessions)
         self.authenticator = authenticator
         super.init(nibName: nil, bundle: nil)
         title = "Security Checkup"
@@ -129,6 +153,15 @@ final class SecurityCheckupViewController: UIViewController {
         view.addSubview(collectionView)
 
         let registration = UICollectionView.CellRegistration<UICollectionViewListCell, SecurityCheckupItem> { cell, _, item in
+            guard item.state != .failed else {
+                // The failed-row style every Settings screen uses (#799).
+                var content = UIListContentConfiguration.cell()
+                content.text = item.title
+                content.textProperties.color = .secondaryLabel
+                cell.contentConfiguration = content
+                cell.accessories = []
+                return
+            }
             var content = UIListContentConfiguration.subtitleCell()
             content.text = item.title
             content.secondaryText = item.detail
@@ -155,6 +188,7 @@ final class SecurityCheckupViewController: UIViewController {
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
             collectionView.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)
         }
+        viewModel.onChange = { [weak self] in self?.rebuild() }
         apply()
     }
 
@@ -166,13 +200,26 @@ final class SecurityCheckupViewController: UIViewController {
     private func load() {
         Task { [weak self] in
             guard let self else { return }
-            let details = try? await account?.currentAccount()
-            let count = try? await sessions?.activeSessions().count
-            items = SecurityCheckup.items(
-                account: details, sessionCount: count,
-                appLockOn: AppLockPreference.isOn, lockMethod: authenticator.availableMethod()
-            )
-            apply()
+            await viewModel.load()
+            rebuild()
+        }
+    }
+
+    /// App Lock is read on the device, each time, beside the server's parts.
+    private func rebuild() {
+        items = SecurityCheckup.items(
+            account: viewModel.account, sessionCount: viewModel.sessionCount,
+            appLockOn: AppLockPreference.isOn, lockMethod: authenticator.availableMethod()
+        )
+        apply()
+    }
+
+    /// The failed line's retry: only that part is read again. A retry that
+    /// fails again leaves the line and says so.
+    private func retry(_ part: SecurityCheckupViewModel.Part) {
+        Task { [weak self] in
+            guard let self, await viewModel.reload(part) == false else { return }
+            ToastView.present("Couldn't load this check", symbol: "exclamationmark.triangle", in: view)
         }
     }
 
@@ -190,6 +237,7 @@ final class SecurityCheckupViewController: UIViewController {
         case .recommended: "exclamationmark.circle.fill"
         case .unavailable: "minus.circle"
         case .info: "info.circle"
+        case .failed: "exclamationmark.arrow.circlepath"
         }
     }
 
@@ -198,7 +246,7 @@ final class SecurityCheckupViewController: UIViewController {
         case .done: .systemGreen
         case .recommended: .systemOrange
         case .unavailable: .tertiaryLabel
-        case .info: .secondaryLabel
+        case .info, .failed: .secondaryLabel
         }
     }
 }
@@ -206,13 +254,19 @@ final class SecurityCheckupViewController: UIViewController {
 extension SecurityCheckupViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
-        return (item.state == .recommended && (item.id == "sessions" || item.id == "appLock")) || item.id == "password"
+        return item.state == .failed
+            || (item.state == .recommended && (item.id == "sessions" || item.id == "appLock")) || item.id == "password"
     }
 
     /// Devices, App Lock and Change Password live on the Security page this
-    /// was pushed from.
+    /// was pushed from; a failed line reads its part again.
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
+        guard let item = dataSource.itemIdentifier(for: indexPath) else { return }
+        if item.state == .failed {
+            retry(item.id == "account" ? .account : .sessions)
+            return
+        }
         navigationController?.popViewController(animated: true)
     }
 }

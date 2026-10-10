@@ -21,6 +21,9 @@ final class PrivacySectionViewController: UIViewController {
         case downloads
         case loading
         case failed
+        /// A side setting that couldn't be read: tapped, it reads only
+        /// that one again (#799).
+        case sideFailed(PrivacySectionViewModel.SideSetting)
         case hideLists
         case activityDiscovery
         case locationSharing
@@ -34,6 +37,18 @@ final class PrivacySectionViewController: UIViewController {
             + (viewModel.sharing == nil ? ["Downloads of your posts and who sees your likes"] : [])
             + (makeLocationSharing == nil ? ["Location sharing"] : [])
             + ["Hide profile tabs from others"]
+    }
+
+    /// The failed row of a side setting, in the wording every Settings
+    /// screen uses.
+    static func failedText(_ side: PrivacySectionViewModel.SideSetting) -> String {
+        let what = switch side {
+        case .postWindow: "who sees your older posts"
+        case .commentAudience: "who can comment"
+        case .interactionAudiences: "who can mention and message you"
+        case .postSharing: "your like count and download settings"
+        }
+        return "Couldn't load \(what). Tap to try again."
     }
 
     /// "3", or nothing while unread or when none are pending.
@@ -173,6 +188,9 @@ final class PrivacySectionViewController: UIViewController {
         case .failed:
             content.text = "Couldn't load your privacy setting. Tap to try again."
             content.textProperties.color = .secondaryLabel
+        case .sideFailed(let side):
+            content.text = Self.failedText(side)
+            content.textProperties.color = .secondaryLabel
         case .followRequests:
             content = .valueCell()
             content.text = "Follow Requests"
@@ -278,18 +296,26 @@ final class PrivacySectionViewController: UIViewController {
         if viewModel.windows != nil, viewModel.postWindow != nil {
             snapshot.appendItems([.postWindow], toSection: .visibility)
             snapshot.reconfigureItems([.postWindow])
+        } else if viewModel.failedSides.contains(.postWindow) {
+            snapshot.appendItems([.sideFailed(.postWindow)], toSection: .visibility)
         }
         if viewModel.comments != nil, viewModel.commentAudience != nil {
             snapshot.appendItems([.commentAudience], toSection: .visibility)
             snapshot.reconfigureItems([.commentAudience])
+        } else if viewModel.failedSides.contains(.commentAudience) {
+            snapshot.appendItems([.sideFailed(.commentAudience)], toSection: .visibility)
         }
         if viewModel.audiences != nil, viewModel.mentionAudience != nil, viewModel.messageAudience != nil {
             snapshot.appendItems([.mentionAudience, .messageAudience], toSection: .visibility)
             snapshot.reconfigureItems([.mentionAudience, .messageAudience])
+        } else if viewModel.failedSides.contains(.interactionAudiences) {
+            snapshot.appendItems([.sideFailed(.interactionAudiences)], toSection: .visibility)
         }
         if viewModel.sharing != nil, viewModel.postSharing != nil {
             snapshot.appendItems([.likeCounts, .downloads], toSection: .visibility)
             snapshot.reconfigureItems([.likeCounts, .downloads])
+        } else if viewModel.failedSides.contains(.postSharing) {
+            snapshot.appendItems([.sideFailed(.postSharing)], toSection: .visibility)
         }
         snapshot.appendItems(
             (makeListPrivacy == nil ? [] : [.hideLists])
@@ -363,6 +389,15 @@ final class PrivacySectionViewController: UIViewController {
         }
     }
 
+    /// The failed row's retry: only that setting is read again. A retry that
+    /// fails again leaves the row and says so.
+    private func retry(_ side: PrivacySectionViewModel.SideSetting) {
+        Task { [weak self] in
+            guard let self, await viewModel.reload(side) == false else { return }
+            ToastView.present("Couldn't load this setting", symbol: "exclamationmark.triangle", in: view)
+        }
+    }
+
     private func setPrivate(_ isPrivate: Bool) {
         Task { [weak self] in
             guard let self else { return }
@@ -382,7 +417,7 @@ final class PrivacySectionViewController: UIViewController {
 extension PrivacySectionViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .followRequests, .hideLists, .activityDiscovery, .locationSharing, .dataTransparency, .failed: true
+        case .followRequests, .hideLists, .activityDiscovery, .locationSharing, .dataTransparency, .failed, .sideFailed: true
         default: false
         }
     }
@@ -414,6 +449,8 @@ extension PrivacySectionViewController: UICollectionViewDelegate {
             }
         case .failed:
             Task { await viewModel.load() }
+        case .sideFailed(let side):
+            retry(side)
         default:
             break
         }

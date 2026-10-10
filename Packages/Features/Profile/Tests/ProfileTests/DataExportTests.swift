@@ -34,10 +34,38 @@ struct DataExportTests {
         #expect(model.phase == .preparing(requestedOn: Self.t0))
     }
 
-    @Test func anUnreadableRecordStillOffersTheRequest() async {
+    /// #799: an unreadable record used to offer "Request Download", as if
+    /// nothing were on its way.
+    @Test func anUnreadableRecordIsFailedNotAvailable() async {
+        let model = DataExportViewModel(lifecycle: StubExport(failsRead: true))
+        #expect(await model.load() == false)
+        #expect(model.phase == .failed)
+        #expect(DataExportViewController.statusText(for: .failed, email: nil).hasPrefix("Couldn't check"))
+    }
+
+    @Test func aRetryAfterAFailedReadLoadsTheRecord() async {
+        let stub = StubExport(failsRead: true, status: AccountGdprStatus(exportRequestedAt: Self.t0))
+        let model = DataExportViewModel(lifecycle: stub)
+        await model.load()
+        await stub.recover()
+        #expect(await model.load())
+        #expect(model.phase == .preparing(requestedOn: Self.t0))
+    }
+
+    @Test func aRetryThatFailsAgainStaysFailedAndReportsIt() async {
         let model = DataExportViewModel(lifecycle: StubExport(failsRead: true))
         await model.load()
-        #expect(model.phase == .available)
+        #expect(await model.load() == false)
+        #expect(model.phase == .failed)
+    }
+
+    @Test func aFailedRefreshKeepsTheStateAlreadyShown() async {
+        let stub = StubExport(status: AccountGdprStatus(exportRequestedAt: Self.t0))
+        let model = DataExportViewModel(lifecycle: stub)
+        await model.load()
+        await stub.breakReads()
+        #expect(await model.load() == false)
+        #expect(model.phase == .preparing(requestedOn: Self.t0))
     }
 
     @Test func theStatusSaysWhereTheFileGoes() {
@@ -50,16 +78,23 @@ struct DataExportTests {
 }
 
 private actor StubExport: AccountLifecycleManaging {
-    private let failsRead: Bool
+    private var failsRead: Bool
+    private let status: AccountGdprStatus
     private(set) var exports = 0
 
-    init(failsRead: Bool = false) { self.failsRead = failsRead }
+    init(failsRead: Bool = false, status: AccountGdprStatus = AccountGdprStatus()) {
+        self.failsRead = failsRead
+        self.status = status
+    }
+
+    func recover() { failsRead = false }
+    func breakReads() { failsRead = true }
 
     func requestDeletion() async throws {}
     func requestDataExport() async throws { exports += 1 }
 
     func gdprStatus() async throws -> AccountGdprStatus {
         if failsRead { throw AccountError.transport(message: "restricted") }
-        return AccountGdprStatus()
+        return status
     }
 }

@@ -345,13 +345,14 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         )
                                     }
                                 case .familyAndTeens:
+                                    // Throws on a failed read: never "adult" by default (#799).
                                     FamilyAndTeensViewController(isTeen: {
-                                        (try? await account.currentAccount().ageBracket.isTeen) ?? false
+                                        try await account.currentAccount().ageBracket.isTeen
                                     })
                                 case .whatYouSee:
                                     (repository as? any FeedPreferencesManaging).map { preferences in
                                         WhatYouSeeViewController(preferences: preferences, interestTags: interestTags, isTeen: {
-                                            (try? await account.currentAccount().ageBracket.isTeen) ?? false
+                                            try await account.currentAccount().ageBracket.isTeen
                                         })
                                     }
                                 default: nil

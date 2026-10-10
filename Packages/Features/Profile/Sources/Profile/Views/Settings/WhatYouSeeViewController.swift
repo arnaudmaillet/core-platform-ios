@@ -43,7 +43,14 @@ final class WhatYouSeeViewController: UIViewController {
     private let preferences: any FeedPreferencesManaging
     private let interestTags: (any InterestTagsManaging)?
     /// Under 18: Standard isn't offered (the server clamps it anyway).
-    private let isTeen: () async -> Bool
+    ///
+    /// ⚠️ **AN UNREAD AGE IS NOT AN ADULT ONE (#799).** It throws when the
+    /// account can't be read, and the sensitive-content section then shows
+    /// its failed row — retry reads the age with the settings — rather than
+    /// offering Standard and the adult footer to an account that may be 14.
+    /// The failed row over a guess: "teen" would grey out Standard for an
+    /// adult just as wrongly.
+    private let isTeen: () async throws -> Bool
     private var teen = false
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
@@ -62,7 +69,7 @@ final class WhatYouSeeViewController: UIViewController {
     init(
         preferences: any FeedPreferencesManaging,
         interestTags: (any InterestTagsManaging)? = nil,
-        isTeen: @escaping () async -> Bool = { false }
+        isTeen: @escaping () async throws -> Bool = { false }
     ) {
         self.preferences = preferences
         self.interestTags = interestTags
@@ -104,19 +111,37 @@ final class WhatYouSeeViewController: UIViewController {
     }
 
     private func load() {
+        // A retry from the failed row that fails again says so.
+        let wasFailed = phase == .failed
         phase = .loading
         Task { [weak self] in
             guard let self else { return }
-            teen = await isTeen()
-            do {
-                async let level = preferences.sensitiveContent()
-                async let personalized = preferences.personalizedFeed()
-                phase = .loaded(try await level, personalized: try await personalized)
-            } catch {
-                phase = .failed
+            let (next, teen) = await Self.loadSensitive(preferences: preferences, isTeen: isTeen)
+            self.teen = teen ?? self.teen
+            phase = next
+            if wasFailed, next == .failed {
+                ToastView.present("Couldn't load these settings", symbol: "exclamationmark.triangle", in: view)
             }
         }
         loadInterests()
+    }
+
+    /// The sensitive-content section's read: the level, the For You switch
+    /// and the age that decides whether Standard is offered. Any of the
+    /// three failing fails the section — the age included (#799). Pure, so
+    /// the rule is pinned by tests.
+    static func loadSensitive(
+        preferences: any FeedPreferencesManaging,
+        isTeen: () async throws -> Bool
+    ) async -> (phase: Phase, teen: Bool?) {
+        do {
+            async let level = preferences.sensitiveContent()
+            async let personalized = preferences.personalizedFeed()
+            let teen = try await isTeen()
+            return (.loaded(try await level, personalized: try await personalized), teen)
+        } catch {
+            return (.failed, nil)
+        }
     }
 
     private func loadInterests() {

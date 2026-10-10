@@ -14,7 +14,7 @@ struct SecurityCheckupTests {
     }
 
     @Test func aWellProtectedAccountIsAllDoneExceptWhatTheAppCantDo() {
-        let items = SecurityCheckup.items(account: account(), sessionCount: 1, appLockOn: true, lockMethod: "Face ID")
+        let items = SecurityCheckup.items(account: .content(account()), sessionCount: .content(1), appLockOn: true, lockMethod: "Face ID")
         #expect(items.map(\.id) == ["email", "phone", "sessions", "appLock", "password", "twoFactor"])
         #expect(SecurityCheckup.summary(items) == "4 of 4 done")
         #expect(state("password", in: items) == .info)
@@ -23,7 +23,7 @@ struct SecurityCheckupTests {
 
     @Test func gapsAreRecommended() {
         let items = SecurityCheckup.items(
-            account: account(emailVerified: false, phoneVerified: false), sessionCount: 3, appLockOn: false, lockMethod: "Face ID"
+            account: .content(account(emailVerified: false, phoneVerified: false)), sessionCount: .content(3), appLockOn: false, lockMethod: "Face ID"
         )
         #expect(state("email", in: items) == .recommended)
         #expect(state("phone", in: items) == .recommended)
@@ -36,17 +36,77 @@ struct SecurityCheckupTests {
     /// The app can't add a phone number, nor set up App Lock on a device with
     /// no passcode: those aren't counted against the viewer.
     @Test func whatTheViewerCantActOnIsNotCounted() {
-        let items = SecurityCheckup.items(account: account(phone: ""), sessionCount: 1, appLockOn: false, lockMethod: nil)
+        let items = SecurityCheckup.items(account: .content(account(phone: "")), sessionCount: .content(1), appLockOn: false, lockMethod: nil)
         #expect(state("phone", in: items) == .unavailable)
         #expect(state("appLock", in: items) == .unavailable)
         #expect(SecurityCheckup.summary(items) == "2 of 2 done")
     }
 
-    /// When the account or the sessions don't load, their lines are left out
-    /// rather than guessed.
-    @Test func unknownsAreLeftOut() {
-        let items = SecurityCheckup.items(account: nil, sessionCount: nil, appLockOn: false, lockMethod: "Passcode")
-        #expect(items.map(\.id) == ["appLock", "password", "twoFactor"])
-        #expect(items.first?.title == "Turn on App Lock")
+    /// A source the screen doesn't have, or a read still running, leaves its
+    /// lines out: there is nothing to say about it yet.
+    @Test func absentSourcesAndRunningReadsAreLeftOut() {
+        let absent = SecurityCheckup.items(account: nil, sessionCount: nil, appLockOn: false, lockMethod: "Passcode")
+        #expect(absent.map(\.id) == ["appLock", "password", "twoFactor"])
+        #expect(absent.first?.title == "Turn on App Lock")
+        let running = SecurityCheckup.items(account: .loading, sessionCount: .loading, appLockOn: false, lockMethod: "Passcode")
+        #expect(running.map(\.id) == ["appLock", "password", "twoFactor"])
+    }
+
+    /// #799: a failed read keeps its line, as a failed line, and the summary
+    /// names it — it used to vanish and leave "1 of 1 done".
+    @Test func aFailedReadIsAFailedLineAndTheSummaryNeverReadsAllClear() {
+        let items = SecurityCheckup.items(
+            account: .failed(message: "x"), sessionCount: .failed(message: "x"), appLockOn: true, lockMethod: "Face ID"
+        )
+        #expect(items.map(\.id) == ["account", "sessions", "appLock", "password", "twoFactor"])
+        #expect(state("account", in: items) == .failed)
+        #expect(state("sessions", in: items) == .failed)
+        #expect(items.first?.title == SecurityCheckup.failedAccountTitle)
+        #expect(SecurityCheckup.summary(items) == "1 of 1 done, 2 couldn't be checked")
+    }
+
+    @Test func aFailedLoadBecomesFailedLinesNotAnAllClear() async {
+        let model = SecurityCheckupViewModel(
+            account: SwitchableAccount(fails: true), sessions: SwitchableSessions(count: 3, fails: true)
+        )
+        await model.load()
+        #expect(model.account?.isFailed == true)
+        #expect(model.sessionCount?.isFailed == true)
+    }
+
+    @Test func retryingOnePartLoadsOnlyThatPart() async {
+        let account = SwitchableAccount(fails: true)
+        let sessions = SwitchableSessions(count: 3, fails: true)
+        let model = SecurityCheckupViewModel(account: account, sessions: sessions)
+        await model.load()
+        await account.setFails(false)
+        #expect(await model.reload(.account))
+        #expect(model.account == .content(SwitchableAccount.sample))
+        #expect(model.sessionCount?.isFailed == true)
+        await sessions.setFails(false)
+        #expect(await model.reload(.sessions))
+        #expect(model.sessionCount == .content(3))
+    }
+
+    @Test func aRetryThatFailsAgainStaysFailedAndReportsIt() async {
+        let model = SecurityCheckupViewModel(account: SwitchableAccount(fails: true), sessions: nil)
+        await model.load()
+        #expect(await model.reload(.account) == false)
+        #expect(model.account?.isFailed == true)
+        #expect(model.sessionCount == nil)
+    }
+
+    /// The checkup reloads on every appearance; a line it already knows
+    /// keeps its value when a later read fails.
+    @Test func aFailedRefreshKeepsTheLinesAlreadyShown() async {
+        let account = SwitchableAccount()
+        let sessions = SwitchableSessions(count: 2)
+        let model = SecurityCheckupViewModel(account: account, sessions: sessions)
+        await model.load()
+        await account.setFails(true)
+        await sessions.setFails(true)
+        await model.load()
+        #expect(model.account == .content(SwitchableAccount.sample))
+        #expect(model.sessionCount == .content(2))
     }
 }

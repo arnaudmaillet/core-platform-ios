@@ -5,12 +5,19 @@ import Foundation
 final class DataExportViewModel {
     enum Phase: Equatable {
         case loading
-        /// Nothing requested (or the record could not be read): offer it.
+        /// Nothing requested: offer it.
         case available
         /// Requested and still being prepared.
         case preparing(requestedOn: Date)
         /// The latest request is done.
         case ready(completedOn: Date)
+        /// The record couldn't be read, and nothing older is on screen.
+        ///
+        /// ⚠️ **NOT `.available` (#799).** A failed read used to offer
+        /// "Request Download", which says no copy is on its way when one may
+        /// be: a second request on top of a pending one, or a viewer told
+        /// nothing was prepared when the file is already in their inbox.
+        case failed
     }
 
     private(set) var phase: Phase = .loading {
@@ -26,12 +33,20 @@ final class DataExportViewModel {
         self.now = now
     }
 
-    func load() async {
-        guard let status = try? await lifecycle.gdprStatus() else {
-            phase = .available
-            return
+    /// Reads where the export stands. A retry from the failed state shows
+    /// "Checking…" while it runs; a refresh over a known state keeps it when
+    /// the read fails. Returns false when the read failed, so the screen can
+    /// say a retry failed again.
+    @discardableResult
+    func load() async -> Bool {
+        if phase == .failed { phase = .loading }
+        do {
+            phase = Self.phase(for: try await lifecycle.gdprStatus())
+            return true
+        } catch {
+            if phase == .loading { phase = .failed }
+            return false
         }
-        phase = Self.phase(for: status)
     }
 
     /// Where an export stands. A completion older than the latest request

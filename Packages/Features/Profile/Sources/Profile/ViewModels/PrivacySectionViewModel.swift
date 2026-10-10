@@ -14,6 +14,11 @@ final class PrivacySectionViewModel {
         case failed
     }
 
+    /// A setting read beside Private Account, each with its own row.
+    enum SideSetting: Hashable, CaseIterable {
+        case postWindow, commentAudience, interactionAudiences, postSharing
+    }
+
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
     }
@@ -47,6 +52,16 @@ final class PrivacySectionViewModel {
     }
     private(set) var messageAudience: InteractionAudience? {
         didSet { onChange?() }
+    }
+    /// Side settings whose read failed with nothing older to show (#799).
+    ///
+    /// ⚠️ **THEY USED TO VANISH.** Each was read with `try?`, and the screen
+    /// draws a row only once its value is known, so a failed read simply
+    /// removed "Who Can Comment" or "Allow Downloads" from Privacy: a
+    /// screen that read as complete, missing the very setting the viewer came
+    /// to check. A failed one now shows a failed row that reloads only it.
+    private(set) var failedSides: Set<SideSetting> = [] {
+        didSet { if failedSides != oldValue { onChange?() } }
     }
     var onChange: (() -> Void)?
 
@@ -112,26 +127,72 @@ final class PrivacySectionViewModel {
         postSharing = next
     }
 
+    /// Reads everything the screen shows, side by side. Returns once every
+    /// read has settled, so a caller (or a test) sees the whole outcome; each
+    /// row still appears as soon as its own value lands.
+    ///
+    /// The follow-request count is not a side setting: unread it only leaves
+    /// the row's badge blank, and the inbox it opens loads, fails and retries
+    /// on its own.
     func load() async {
         if case .failed = phase { phase = .loading }
-        if let sharing {
-            Task { self.postSharing = (try? await sharing.postSharing()) ?? self.postSharing }
+        await withDiscardingTaskGroup { group in
+            group.addTask { await self.refreshRequestCount() }
+            for side in SideSetting.allCases {
+                group.addTask { await self.reload(side) }
+            }
+            group.addTask { await self.loadVisibility() }
         }
-        if let audiences {
-            Task { self.mentionAudience = (try? await audiences.audience(for: .mentions)) ?? self.mentionAudience }
-            Task { self.messageAudience = (try? await audiences.audience(for: .messages)) ?? self.messageAudience }
-        }
-        Task { await refreshRequestCount() }
-        if let windows {
-            Task { self.postWindow = (try? await windows.postWindow()) ?? self.postWindow }
-        }
-        if let comments {
-            Task { self.commentAudience = (try? await comments.commentAudience()) ?? self.commentAudience }
-        }
+    }
+
+    private func loadVisibility() async {
         do {
             phase = .loaded(isPrivate: try await visibility.activeProfileIsPrivate())
         } catch {
             phase = .failed
+        }
+    }
+
+    /// Reads one side setting — the failed row's retry. A value already on
+    /// screen outlives a failed refresh; with none, the side is marked
+    /// failed. Returns false when the read failed (the screen toasts a
+    /// retry that fails again). A side the screen can't set reads as done.
+    @discardableResult
+    func reload(_ side: SideSetting) async -> Bool {
+        do {
+            switch side {
+            case .postWindow:
+                guard let windows else { return true }
+                postWindow = try await windows.postWindow()
+            case .commentAudience:
+                guard let comments else { return true }
+                commentAudience = try await comments.commentAudience()
+            case .interactionAudiences:
+                guard let audiences else { return true }
+                // One row pair, one read: both or the failed row.
+                async let mentions = audiences.audience(for: .mentions)
+                async let messages = audiences.audience(for: .messages)
+                let (mention, message) = try await (mentions, messages)
+                mentionAudience = mention
+                messageAudience = message
+            case .postSharing:
+                guard let sharing else { return true }
+                postSharing = try await sharing.postSharing()
+            }
+            failedSides.remove(side)
+            return true
+        } catch {
+            if !hasValue(side) { failedSides.insert(side) }
+            return false
+        }
+    }
+
+    private func hasValue(_ side: SideSetting) -> Bool {
+        switch side {
+        case .postWindow: postWindow != nil
+        case .commentAudience: commentAudience != nil
+        case .interactionAudiences: mentionAudience != nil && messageAudience != nil
+        case .postSharing: postSharing != nil
         }
     }
 
