@@ -158,11 +158,14 @@ public final class LikeOutboxSender {
     private let staking: any LikeStaking
     /// Waits after a failed commit, the last repeated.
     private let retryDelays: [TimeInterval]
-    private var failures = 0
+    private(set) var failures = 0
     private var isSending = false
     private var timer: Timer?
     /// Removed with the sender (the token bag's deinit, not a main-actor one).
     private let observers = NotificationObserverTokenBag()
+    /// Whose recoveries flush the outbox; read by `start()`. Tests hand in
+    /// their own — ⚠️ never flip `.shared`, other suites listen to it.
+    var connectivity: ConnectivityMonitor = .shared
 
     public init(
         outbox: LikeOutbox, wallet: WalletStore, staking: any LikeStaking,
@@ -191,7 +194,7 @@ public final class LikeOutboxSender {
             // The network is back (#793): what failed while it was gone goes
             // now, not after its backoff.
             center.addObserver(
-                forName: ConnectivityMonitor.didRecoverNotification, object: ConnectivityMonitor.shared, queue: .main
+                forName: ConnectivityMonitor.didRecoverNotification, object: connectivity, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.failures = 0

@@ -1,3 +1,4 @@
+import CoreNetworking
 import CoreStorage
 import Foundation
 import Testing
@@ -22,6 +23,16 @@ private final class ScriptedStaking: LikeStaking, @unchecked Sendable {
 }
 
 private struct Offline: Error {}
+
+/// Polls `condition` on the main actor, at most `attempts` times 50 ms apart.
+@MainActor
+private func eventually(attempts: Int = 200, _ condition: () -> Bool) async -> Bool {
+    for _ in 0..<attempts {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+    return condition()
+}
 
 /// The sender commits the outbox (#676): each due batch once, retried with
 /// its key after a failure, settled against the wallet when answered.
@@ -136,5 +147,29 @@ struct LikeOutboxSenderTests {
         #expect(wallet.balance == start)
         #expect(wallet.boostTotal(forTarget: "p1") == 0)
         #expect(outbox.batches.isEmpty, "a refusal is an answer: the batch leaves")
+    }
+
+    // MARK: - Recovery (#796)
+
+    /// The network is back (#796): what failed while it was gone is sent now,
+    /// its backoff forgotten, not after the retry wait (an hour here).
+    @Test func aRecoveryResetsTheBackoffAndFlushesTheOutbox() async {
+        let (sender, wallet, outbox, staking) = make()
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
+        sender.connectivity = monitor
+        sender.start()
+        staking.then(.failure(Offline()))
+        wallet.stake(.points(1), on: "p1")
+        wallet.commitStakes(on: "p1")
+        #expect(await eventually { sender.failures == 1 }, "the sealed batch never failed")
+        #expect(outbox.batches.count == 1, "a failed commit dropped the likes")
+
+        monitor.report(online: false)
+        monitor.report(online: true)
+
+        #expect(sender.failures == 0, "the recovery kept the backoff")
+        #expect(await eventually { outbox.batches.isEmpty }, "the recovery did not flush the outbox")
+        #expect(staking.sent.count == 2)
+        #expect(Set(staking.sent.map(\.idempotencyKey)).count == 1, "the retry changed the key")
     }
 }
