@@ -73,6 +73,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     /// See `PostSetSurface.onNearEnd`.
     var onNearEnd: (() -> Void)?
+    /// See `PostSetSurface.onRetry`.
+    var onRetry: (() -> Void)?
 
     /// See `PostSetSurface.setHasMore` — whether the caller has another page.
     private(set) var hasMore = false
@@ -139,6 +141,16 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         ])
         page.onItemTapped = { [weak self] index in self?.openTile(at: index) }
         page.onNearEnd = { [weak self] in self?.onNearEnd?() }
+        // ⚠️ The page's `onRefresh` is BOTH its failed state's Try Again and
+        // its pull-to-refresh (#798). Unset, the Try Again was a button with
+        // nothing behind it, and a pull left the spinner turning for good. The
+        // caller decides whether there is anything to ask again for; the
+        // spinner ends at once either way, because the answer, if one comes,
+        // arrives through `show` like any other.
+        page.onRefresh = { [weak self] in
+            self?.page.endRefreshing()
+            self?.onRetry?()
+        }
         if style == .discover { wireDiscover() }
     }
 

@@ -425,6 +425,12 @@ public protocol PostSetSurface: AnyObject {
     /// hydrated, and nothing already shown moves. Nil: the set is whole.
     var onNearEnd: (() -> Void)? { get set }
 
+    /// The failed state's Try Again was pressed — the caller's cue to ask
+    /// again for what failed (#798). Also what a pull on the surface reports:
+    /// the caller decides whether there is anything to ask again for. Nil: the
+    /// surface has no one to retry for.
+    var onRetry: (() -> Void)? { get set }
+
     /// The footer spinner, while the caller fetches its next page.
     func setPaging(_ paging: Bool)
 
@@ -447,6 +453,11 @@ public protocol PostSetSurface: AnyObject {
 
 public extension PostSetSurface {
     var onNearEnd: (() -> Void)? {
+        get { nil }
+        set {}
+    }
+
+    var onRetry: (() -> Void)? {
         get { nil }
         set {}
     }

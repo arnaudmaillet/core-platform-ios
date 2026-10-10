@@ -222,6 +222,22 @@ public final class SearchViewModel {
     /// which is exactly that query.
     public var onPostResultsChange: (([PostID]) -> Void)?
 
+    /// The POST search of the last submitted query failed (#798).
+    ///
+    /// ⚠️ A FAILURE IS NOT "NO POSTS". The post answer used to be read through
+    /// `try?`, so a request that never came back published `[]` — the same
+    /// value as a query that matched nothing, and the Posts tab said "No
+    /// results" about a search it never ran. Kept alongside `postResults`, like
+    /// it, and announced through `onPostResultsChange`, which is the one
+    /// channel the Posts tab re-reads on.
+    public private(set) var postsFailed = false
+    /// The post search is out and nothing of its answer is shown yet — what
+    /// the Posts tab shows as loading, whatever the people answer is doing
+    /// (a Try Again after the people answer has landed, #798).
+    public private(set) var isSearchingPosts = false
+    /// What the Posts tab says when its search failed.
+    nonisolated static let postsFailureMessage = "Couldn't search posts."
+
     /// A next page of POSTS starting (true) and landing (false) — the Posts
     /// tab's footer spinner (#612).
     public var onPostsPagingChange: ((Bool) -> Void)?
@@ -858,7 +874,64 @@ public final class SearchViewModel {
         }
     }
 
+    /// The failed state's Try Again, from either tab (#798).
+    ///
+    /// The PEOPLE search failing fails the whole answer (`.failed`), so the
+    /// whole search runs again. The POST search failing alone re-asks only
+    /// for the posts: the people answer on the other tab is fine, and running
+    /// it again would flash its rows back to a spinner for nothing. A no-op
+    /// when nothing failed — a pull on a good answer.
+    public func retryFailedSearch() {
+        let trimmed = submittedQuery
+        guard !trimmed.isEmpty else { return }
+        if case .failed = phase {
+            searchTask?.cancel()
+            searchTask = Task { [weak self] in
+                await self?.runSearch(trimmed)
+            }
+            return
+        }
+        guard postsFailed, !isSearchingPosts else { return }
+        loadPosts(trimmed)
+    }
+
     // MARK: - Search
+
+    /// The POST half of a search: its own task, its own failure (#798).
+    ///
+    /// ⚠️ ITS OWN TASK, deliberately unawaited by the people search. The two
+    /// are separate round trips (see `SearchProviding.searchPosts` for why they cannot be one
+    /// federated page), and making the list of people wait for the list of
+    /// posts would spend the slower of the two on a tab the viewer is probably
+    /// not looking at.
+    private func loadPosts(_ trimmed: String) {
+        postsTask?.cancel()
+        postsFailed = false
+        isSearchingPosts = true
+        // Announced: the tab goes back to loading (a Try Again, or a new
+        // question) before anything has come back.
+        onPostResultsChange?(postResults)
+        postsTask = Task { [weak self] in
+            guard let self else { return }
+            let page: PostSearchPage?
+            do {
+                page = try await self.repository.searchPostsPage(
+                    matching: trimmed, sort: self.sortOrder, limit: self.pageSize, pageToken: nil
+                )
+            } catch {
+                page = nil
+            }
+            guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
+            self.isSearchingPosts = false
+            guard let page else {
+                self.postsFailed = true
+                self.onPostResultsChange?(self.postResults)
+                return
+            }
+            self.postsNextToken = page.nextPageToken
+            self.postResults = page.hits.map(\.id)
+        }
+    }
 
     private func runSearch(_ trimmed: String) async {
         phase = .loading
@@ -868,22 +941,7 @@ public final class SearchViewModel {
         postsNextToken = nil
         peopleNextToken = nil
         postResults = []
-        // ⚠️ ITS OWN TASK, deliberately unawaited by the people search. The two
-        // are separate round trips (see `searchPosts` for why they cannot be
-        // one federated page), and making the list of people wait for the list
-        // of posts would spend the slower of the two on a tab the viewer is
-        // probably not looking at.
-        postsTask?.cancel()
-        postsTask = Task { [weak self] in
-            guard let self else { return }
-            let page = try? await self.repository.searchPostsPage(
-                matching: trimmed, sort: self.sortOrder, limit: self.pageSize, pageToken: nil
-            )
-            let hits = page?.hits ?? []
-            guard !Task.isCancelled, self.submittedQuery == trimmed else { return }
-            self.postsNextToken = page?.nextPageToken
-            self.postResults = hits.map(\.id)
-        }
+        loadPosts(trimmed)
         do {
             let page = try await repository.searchProfilesPage(
                 matching: trimmed, sort: sortOrder, limit: pageSize, pageToken: nil
