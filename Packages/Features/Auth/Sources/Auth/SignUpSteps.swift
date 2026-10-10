@@ -66,7 +66,9 @@ final class VerificationCodeViewController: SignUpStepViewController {
     private static let length = 6
     private let codeCell = TextFieldCell()
     private lazy var resendCell = makeLinkCell(title: "Resend Code")
-    private var resendAvailableAt = Date()
+    /// When a new code may be asked for. Readable inside the module so a test
+    /// can check that a step coming back keeps its deadline (#784).
+    private(set) var resendAvailableAt = Date()
     /// Readable inside the module so a test can watch the countdown end with
     /// its screen (#784); only this screen starts or stops it.
     private(set) var resendTimer: Timer?

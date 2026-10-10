@@ -53,6 +53,7 @@ struct ResendCountdownTests {
         step.loadViewIfNeeded()
         appear(step)
         let first = try #require(step.resendTimer, "guard: the step shows no countdown")
+        let deadline = step.resendAvailableAt
         disappear(step)
         try #require(!first.isValid, "guard: the countdown did not stop when the step left")
 
@@ -60,6 +61,8 @@ struct ResendCountdownTests {
 
         let resumed = try #require(step.resendTimer, "the countdown did not come back with its step")
         #expect(resumed.isValid, "the countdown came back stopped")
+        // From the time left, not a fresh full countdown.
+        #expect(step.resendAvailableAt == deadline, "the countdown started over instead of resuming")
         disappear(step)
     }
 

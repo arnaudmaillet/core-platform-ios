@@ -68,14 +68,14 @@ public final class EmoteKeyboard: NSObject {
     /// way (a layout guide in one, a show-time notification in another), so
     /// the strip covered the feed's composer outright. Floating in the window
     /// above the field touches no one's layout.
-    public weak var suggestionAnchor: UIView? {
-        didSet {
-            guard suggestionAnchor !== oldValue else { return }
-            watchWindow(of: suggestionAnchor ?? textView)
-        }
-    }
-    /// Rides inside the anchor and reports when it leaves its window.
+    public weak var suggestionAnchor: UIView?
+    /// Rides inside the text view and reports when it leaves its window.
     /// `nonisolated(unsafe)` for the same `deinit` as the strips.
+    ///
+    /// ⚠️ IN THE TEXT VIEW, NEVER IN THE ANCHOR. The comments composer's
+    /// anchor is a `UIVisualEffectView`, which forbids subviews of its own.
+    /// In every host the text view sits inside the anchor, so the text view
+    /// leaving the window means the anchor has left too.
     nonisolated(unsafe) private let windowWatch: WindowExitWatch
 
     /// Whether `@` and `#` complete. On by default.
@@ -125,8 +125,8 @@ public final class EmoteKeyboard: NSObject {
         strip.onSelect = { [weak self] emote in self?.acceptSuggestion(emote) }
         completionStrip.onSelect = { [weak self] completion in self?.acceptCompletion(completion) }
         heights.track(self)
-        windowWatch.onLeaveWindow = { [weak self] in self?.anchorLeftWindow() }
-        watchWindow(of: textView)
+        windowWatch.onLeaveWindow = { [weak self] in self?.fieldLeftWindow() }
+        textView.addSubview(windowWatch)
 
         toggleButton.accessibilityIdentifier = "emote-toggle"
         toggleButton.addAction(UIAction { [weak self] _ in self?.toggle() }, for: .primaryActionTriggered)
@@ -191,22 +191,13 @@ public final class EmoteKeyboard: NSObject {
     /// removed from its screen. The strips stayed behind in the window,
     /// over whatever came next. They go at once: there is no field left for
     /// them to shrink back into.
-    private func anchorLeftWindow() {
+    private func fieldLeftWindow() {
         stripGeneration += 1
         strip.layer.removeAllAnimations()
         strip.transform = .identity
         strip.removeFromSuperview()
         strip.show([])
         hideCompletions()
-    }
-
-    /// Moves the watch into `view`, the one the strips float over.
-    private func watchWindow(of view: UIView?) {
-        guard let view, windowWatch.superview !== view else { return }
-        // A move between two views of one window is no exit.
-        windowWatch.isRelocating = true
-        view.addSubview(windowWatch)
-        windowWatch.isRelocating = false
     }
 
     @objc private func textDidEndEditing(_ note: Notification) {
@@ -514,7 +505,6 @@ public final class EmoteKeyboard: NSObject {
 /// window. UIKit tells a view, not its observers, so the watch sits inside.
 private final class WindowExitWatch: UIView {
     var onLeaveWindow: (() -> Void)?
-    var isRelocating = false
 
     init() {
         super.init(frame: .zero)
@@ -528,7 +518,7 @@ private final class WindowExitWatch: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        guard window == nil, !isRelocating else { return }
+        guard window == nil else { return }
         onLeaveWindow?()
     }
 }
