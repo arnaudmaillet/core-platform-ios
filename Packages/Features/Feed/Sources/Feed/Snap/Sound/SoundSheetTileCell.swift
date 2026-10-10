@@ -62,6 +62,17 @@ final class SoundSheetTileCell: UICollectionViewCell {
     private var footFrozen = false
     private var loading: Task<Void, Never>?
     private var postID: PostID?
+    /// The shimmer over a placeholder's fill (#831): a post still on its way
+    /// reads as coming, not as a broken grey tile. Made only for a
+    /// placeholder and removed once it is filled in — an endless sweep under
+    /// every loaded tile would recomposite for nothing.
+    ///
+    /// ⚠️ **NO FAILED TILE, AND THAT IS THE SHEET'S DESIGN.** A post that cannot
+    /// be loaded leaves the sheet and the sections are dealt again without it
+    /// (`SnapFeedViewController.presentSoundSheet`, `SoundSheetSections`): its
+    /// tile would lead nowhere, and "Popular" may go with it. A quiet failed
+    /// tile left in place would be a dead end in a grid of things to open.
+    private var bone: SkeletonBoneView?
 
     /// Every corner of every tile, wherever it is: in scale with the grid's
     /// gutter (`SoundSheetViewController.gutter`, 8pt) — a radius much larger
@@ -219,6 +230,9 @@ final class SoundSheetTileCell: UICollectionViewCell {
         contentView.alpha = 1
         loading?.cancel()
         imageView.image = nil
+        postID = nil
+        bone?.removeFromSuperview()
+        bone = nil
     }
 
     /// The picture on the tile, for the hero to take off with.
@@ -369,7 +383,38 @@ final class SoundSheetTileCell: UICollectionViewCell {
         contentView.alpha = concealed ? 0 : 1
     }
 
+    /// Whether the placeholder's shimmer shows — what a test reads.
+    var showsPlaceholderBone: Bool { bone.map { !$0.isHidden && $0.alpha > 0 } ?? false }
+
+    /// The bone on a placeholder; off a loaded tile — cross-faded away when
+    /// the same post is filled in (charter P10), dropped at once when the
+    /// cell now stands for another.
+    private func setPlaceholder(_ placeholder: Bool, fillingIn: Bool) {
+        if placeholder {
+            if bone == nil {
+                let bone = SkeletonBoneView(rounding: .fixed(0))
+                // The tile's own fill is the ground; the bone adds only the
+                // sweep, so a placeholder keeps the tile's colour.
+                bone.backgroundColor = .clear
+                bone.frame = contentView.bounds
+                bone.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                contentView.insertSubview(bone, aboveSubview: imageView)
+                self.bone = bone
+            }
+            bone?.showSkeleton()
+        } else if let bone {
+            self.bone = nil
+            if fillingIn {
+                bone.fadeOutSkeleton(removing: true)
+            } else {
+                bone.removeFromSuperview()
+            }
+        }
+    }
+
     func configure(_ tile: SoundSheetViewController.Tile, pipeline: ImagePipeline) {
+        let fillingIn = postID == tile.postID
+        setPlaceholder(!tile.isLoaded, fillingIn: fillingIn)
         postID = tile.postID
         originalBadge.isHidden = !tile.isOriginal
         currentBadge.isHidden = !tile.isCurrent
