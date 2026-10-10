@@ -1,3 +1,4 @@
+import CoreNetworking
 import CoreStorage
 import Foundation
 import Testing
@@ -8,13 +9,18 @@ private final class ScriptedStaking: LikeStaking, @unchecked Sendable {
     private let lock = NSLock()
     private var script: [Result<LikeStakeAnswer, Error>] = []
     private(set) var batches: [LikeOutbox.Batch] = []
+    /// Batches of this account are parked (`LikeStakeNotNow`), however often
+    /// they are sent: another account's, after a switch.
+    private var foreignAccount: String?
 
     func then(_ result: Result<LikeStakeAnswer, Error>) { lock.withLock { script.append(result) } }
+    func parkBatches(of account: String) { lock.withLock { foreignAccount = account } }
     var sent: [LikeOutbox.Batch] { lock.withLock { batches } }
 
     func stake(_ batch: LikeOutbox.Batch) async throws -> LikeStakeAnswer {
         let next: Result<LikeStakeAnswer, Error> = lock.withLock {
             batches.append(batch)
+            if let foreignAccount, batch.accountID == foreignAccount { return .failure(LikeStakeNotNow()) }
             return script.isEmpty ? .success(LikeStakeAnswer(outcome: .staked, spent: batch.points, myTotal: batch.points)) : script.removeFirst()
         }
         return try next.get()
@@ -22,6 +28,26 @@ private final class ScriptedStaking: LikeStaking, @unchecked Sendable {
 }
 
 private struct Offline: Error {}
+
+/// The outbox's clock, moved by hand: a tap can be recorded as if it landed
+/// seconds ago, so it falls due soon on the real clock the timers run on.
+private final class ShiftedClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var offset: TimeInterval = 0
+
+    func setOffset(_ seconds: TimeInterval) { lock.withLock { offset = seconds } }
+    func now() -> Date { Date().addingTimeInterval(lock.withLock { offset }) }
+}
+
+/// Polls `condition` on the main actor, at most `attempts` times 50 ms apart.
+@MainActor
+private func eventually(attempts: Int = 200, _ condition: () -> Bool) async -> Bool {
+    for _ in 0..<attempts {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(50))
+    }
+    return condition()
+}
 
 /// The sender commits the outbox (#676): each due batch once, retried with
 /// its key after a failure, settled against the wallet when answered.
@@ -136,5 +162,67 @@ struct LikeOutboxSenderTests {
         #expect(wallet.balance == start)
         #expect(wallet.boostTotal(forTarget: "p1") == 0)
         #expect(outbox.batches.isEmpty, "a refusal is an answer: the batch leaves")
+    }
+
+    // MARK: - Recovery (#796) and a parked batch's delay (#836)
+
+    /// The network is back (#796): what failed while it was gone is sent now,
+    /// its backoff forgotten, not after the retry wait (an hour here).
+    @Test func aRecoveryResetsTheBackoffAndFlushesTheOutbox() async {
+        let (sender, wallet, outbox, staking) = make()
+        let monitor = ConnectivityMonitor(offlineGrace: 0)
+        sender.connectivity = monitor
+        sender.start()
+        staking.then(.failure(Offline()))
+        wallet.stake(.points(1), on: "p1")
+        wallet.commitStakes(on: "p1")
+        #expect(await eventually { sender.failures == 1 }, "the sealed batch never failed")
+        #expect(outbox.batches.count == 1, "a failed commit dropped the likes")
+
+        monitor.report(online: false)
+        monitor.report(online: true)
+
+        #expect(sender.failures == 0, "the recovery kept the backoff")
+        #expect(await eventually { outbox.batches.isEmpty }, "the recovery did not flush the outbox")
+        #expect(staking.sent.count == 2)
+        #expect(Set(staking.sent.map(\.idempotencyKey)).count == 1, "the retry changed the key")
+    }
+
+    /// ⚠️ ANOTHER ACCOUNT'S PARKED BATCH NEVER DELAYS THIS ONE'S (#836): the
+    /// retry used to wait the longest delay (an hour here, 60 s in the app),
+    /// and this viewer's likes went that late instead of at their 10 s.
+    @Test func aDueBatchOfTheCurrentAccountGoesWhenDueDespiteAParkedForeignBatch() async {
+        let name = "like-sender-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        let clock = ShiftedClock()
+        let scope = StorageScope(owner: .member(account: "acct-1", profile: "prof-1"))
+        let wallet = WalletStore(defaults: defaults, scope: scope)
+        let outbox = LikeOutbox(defaults: defaults, scope: scope, now: { clock.now() })
+        wallet.likeOutbox = outbox
+        // The same queue, tapped by another account before a switch.
+        let foreign = LikeOutbox(
+            defaults: defaults, scope: StorageScope(owner: .member(account: "acct-2", profile: "prof-2"))
+        )
+        foreign.recordShot(on: .post("p0"), points: 100)
+        let staking = ScriptedStaking()
+        staking.parkBatches(of: "acct-2")
+        let sender = LikeOutboxSender(outbox: outbox, wallet: wallet, staking: staking, retryDelays: [3600])
+        sender.connectivity = ConnectivityMonitor(offlineGrace: 0)
+        sender.start()
+        #expect(await eventually { !staking.sent.isEmpty }, "the foreign batch was never tried")
+
+        // A tap that landed 9 s ago: due in about a second on the real clock.
+        clock.setOffset(-9)
+        wallet.stake(.points(1), on: "p1")
+        clock.setOffset(0)
+
+        #expect(
+            await eventually {
+                staking.sent.contains { $0.target == .post("p1") } && outbox.batches.map(\.target) == [.post("p0")]
+            },
+            "the current account's batch waited behind the parked one"
+        )
+        #expect(outbox.batches.map(\.target) == [.post("p0")], "the parked batch was dropped")
     }
 }

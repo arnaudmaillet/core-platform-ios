@@ -127,6 +127,17 @@ public final class FeedViewModel {
     private var lastDisplayedIndex: Int?
     private var builder: FeedDisplayModelBuilder?
     private var initialLoad: Task<Void, Never>?
+    /// Which first-page load is current (#836): bumped each time the slot is
+    /// filled. A superseded load touches NOTHING once it wakes — not the
+    /// slot, not the posts, not the phase.
+    ///
+    /// ⚠️ CANCELLING IS NOT ENOUGH: `loadFirstPage()` and `build()` (a
+    /// detached task) finish anyway. A load superseded by `refresh()` or
+    /// `repoint()` used to clear its successor's slot (`isLoadingNextPage`
+    /// read false with the new first page on its way), and after a
+    /// `repoint` its late answer wrote the old window's posts, cursor and
+    /// counter subscriptions into the new one — or `.failed` over it.
+    private var initialLoadGeneration = 0
     private var pagingLoad: Task<Void, Never>?
     private var realtimeTasks: [Task<Void, Never>] = []
     private let tickerBuilder = CommentTickerBuilder()
@@ -183,7 +194,8 @@ public final class FeedViewModel {
     public func viewDidLoad() {
         armRecovery()
         builder = FeedDisplayModelBuilder()
-        initialLoad = Task { await loadInitial() }
+        let generation = nextInitialLoadGeneration()
+        initialLoad = Task { await loadInitial(generation: generation) }
         startRealtimeIfConfigured()
         startComposedPostsIfConfigured()
     }
@@ -243,7 +255,18 @@ public final class FeedViewModel {
         // double-tapped Try Again cancelled it, and the cancelled load's
         // catch flashed the failure before the new one landed (#797).
         guard pagingLoad == nil, initialLoad == nil else { return }
-        initialLoad = Task { await loadFirstPageFromNetwork(renderCacheFirst: false) }
+        let generation = nextInitialLoadGeneration()
+        initialLoad = Task { await loadFirstPageFromNetwork(renderCacheFirst: false, generation: generation) }
+    }
+
+    private func nextInitialLoadGeneration() -> Int {
+        initialLoadGeneration += 1
+        return initialLoadGeneration
+    }
+
+    /// Whether the load of `generation` is still the current one.
+    private func isCurrentInitialLoad(_ generation: Int) -> Bool {
+        generation == initialLoadGeneration
     }
 
     /// Author tapped in a cell — hand off to cross-feature routing. The feed
@@ -447,31 +470,38 @@ public final class FeedViewModel {
         // derivation state, and reusing one across windows is the kind of
         // thing that shows up later as one post wearing another's furniture.
         builder = FeedDisplayModelBuilder()
+        let generation = nextInitialLoadGeneration()
         initialLoad = Task {
             await repointable.repoint(to: ids)
             guard !Task.isCancelled else { return }
-            await loadInitial()
+            await loadInitial(generation: generation)
         }
     }
 
-    private func loadInitial() async {
+    private func loadInitial(generation: Int) async {
         // Offline-first: render the snapshot immediately if there is one…
-        if let cached = await repository.cachedFirstPage(), let models = await build(cached) {
+        if let cached = await repository.cachedFirstPage(), isCurrentInitialLoad(generation),
+           let models = await build(cached), isCurrentInitialLoad(generation) {
             items = models
             seedEngagement(from: cached)
             phase = .content
             emit()
         }
         // …then replace it with the network truth.
-        await loadFirstPageFromNetwork(renderCacheFirst: true)
+        guard isCurrentInitialLoad(generation) else { return }
+        await loadFirstPageFromNetwork(renderCacheFirst: true, generation: generation)
     }
 
-    private func loadFirstPageFromNetwork(renderCacheFirst: Bool) async {
+    private func loadFirstPageFromNetwork(renderCacheFirst: Bool, generation: Int) async {
         do {
             let page = try await repository.loadFirstPage()
-            guard let models = await build(page.entries) else {
-                // Not for a cancelled load: its successor owns the slot now.
-                if !Task.isCancelled { initialLoad = nil }
+            // Superseded: its successor owns the slot, the posts and the phase.
+            guard isCurrentInitialLoad(generation) else { return }
+            let built = await build(page.entries)
+            guard isCurrentInitialLoad(generation) else { return }
+            guard let models = built else {
+                // No builder yet: nothing to render, but the slot is freed.
+                initialLoad = nil
                 return
             }
             items = models
@@ -482,6 +512,8 @@ public final class FeedViewModel {
             isColdRefreshing = page.isCold
             phase = models.isEmpty ? .empty : .content
         } catch {
+            // A superseded load's failure is not the feed's.
+            guard isCurrentInitialLoad(generation) else { return }
             // Keep showing cached content on failure; only fail visibly when
             // there is nothing at all to show.
             if items.isEmpty {

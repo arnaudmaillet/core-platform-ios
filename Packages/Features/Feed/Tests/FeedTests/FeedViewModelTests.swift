@@ -40,6 +40,70 @@ private final class FakeFeedProvider: FeedProviding, @unchecked Sendable {
     }
 }
 
+/// Holds every first-page call until the test answers it, by call number.
+private final class GatedFirstPageProvider: RepointableFeedProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiting: [Int: CheckedContinuation<Result<FeedPage, FeedError>, Never>] = [:]
+    private var calls = 0
+    private var returned = 0
+
+    /// First-page calls made so far.
+    var callCount: Int { lock.withLock { calls } }
+    /// Answered calls handed back to the view model.
+    var returnedCount: Int { lock.withLock { returned } }
+
+    /// Answers call `number` (0-based, in call order).
+    func answer(call number: Int, with result: Result<FeedPage, FeedError>) {
+        let continuation = lock.withLock { waiting.removeValue(forKey: number) }
+        continuation?.resume(returning: result)
+    }
+
+    func cachedFirstPage() async -> [FeedEntry]? { nil }
+
+    /// A window change: the next first-page call is the new window's.
+    func repoint(to ids: [PostID]) async {}
+
+    func loadFirstPage() async throws -> FeedPage {
+        let result = await withCheckedContinuation { continuation in
+            lock.withLock {
+                waiting[calls] = continuation
+                calls += 1
+            }
+        }
+        lock.withLock { returned += 1 }
+        return try result.get()
+    }
+
+    func loadPage(afterToken token: String) async throws -> FeedPage {
+        throw FeedError.transport(message: "unstubbed")
+    }
+
+    func loadPost(_ id: PostID) async throws -> FeedEntry {
+        throw FeedError.transport(message: "unstubbed")
+    }
+}
+
+/// Polls `condition` on the main actor, at most `attempts` times 10 ms apart.
+@MainActor
+private func eventually(attempts: Int = 500, _ condition: () -> Bool) async -> Bool {
+    for _ in 0..<attempts {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return condition()
+}
+
+/// Whether `condition` holds on every main-actor turn of a short window — the
+/// view model's continuation after an answered call runs inside it.
+@MainActor
+private func keepsHolding(turns: Int = 20, _ condition: () -> Bool) async -> Bool {
+    for _ in 0..<turns {
+        guard condition() else { return false }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return condition()
+}
+
 private func makeEntries(_ range: Range<Int>) -> [FeedEntry] {
     range.map { index in
         FeedEntry(
@@ -174,6 +238,69 @@ struct FeedViewModelTests {
         let observed = await recovered
 
         #expect(observed.last?.items.count == 3)
+    }
+
+    /// A feed whose first load (call 0) was superseded by a window change
+    /// (call 1), both still waiting, with every state it emits recorded.
+    ///
+    /// A `repoint`, not a pull: since #797 a pull while the first load is on
+    /// its way is ignored rather than cancelling it.
+    private func supersededFirstPage() async -> (FeedViewModel, GatedFirstPageProvider, () -> [FeedViewModel.RenderState]) {
+        let provider = GatedFirstPageProvider()
+        let viewModel = FeedViewModel(repository: provider)
+        viewModel.connectivity = ConnectivityMonitor(offlineGrace: 0)
+        var states: [FeedViewModel.RenderState] = []
+        viewModel.onStateChange = { states.append($0) }
+        viewModel.viewDidLoad()
+        #expect(await eventually { provider.callCount == 1 }, "the first load never asked")
+        viewModel.repoint(to: [PostID("post-new-window")])
+        #expect(await eventually { provider.callCount == 2 }, "the new window never asked")
+        return (viewModel, provider, { states })
+    }
+
+    /// ⚠️ A SUPERSEDED FIRST PAGE LEAVES ITS SUCCESSOR'S SLOT ALONE (#836):
+    /// the first load, cancelled by a window change, ended by clearing the
+    /// slot of the load that replaced it, and the feed read "nothing on its way" — the
+    /// end of the list — with the new first page still in flight.
+    @Test func aFirstPageSupersededByARepointLeavesTheNewLoadsSlotSet() async {
+        let (viewModel, provider, _) = await supersededFirstPage()
+
+        provider.answer(call: 0, with: .success(FeedPage(entries: makeEntries(0..<5), nextPageToken: nil, isCold: false)))
+        #expect(await eventually { provider.returnedCount == 1 })
+        #expect(await keepsHolding { viewModel.isLoadingNextPage }, "the superseded load cleared its successor's slot")
+
+        provider.answer(call: 1, with: .success(FeedPage(entries: makeEntries(0..<3), nextPageToken: nil, isCold: false)))
+        #expect(await eventually { !viewModel.isLoadingNextPage }, "the new load kept the slot once finished")
+    }
+
+    /// ⚠️ A SUPERSEDED FIRST PAGE WRITES NOTHING (#836): cancelling does not
+    /// stop the fetch or the build, and its late answer replaced the new
+    /// load's posts — after a `repoint`, the old window's in the new one.
+    @Test func aSupersededFirstPagesSuccessWritesNothing() async {
+        let (viewModel, provider, states) = await supersededFirstPage()
+        provider.answer(call: 1, with: .success(FeedPage(entries: makeEntries(0..<3), nextPageToken: nil, isCold: false)))
+        #expect(await eventually { states().last?.items.count == 3 }, "the current load never landed")
+        let emitted = states().count
+
+        provider.answer(call: 0, with: .success(FeedPage(entries: makeEntries(10..<15), nextPageToken: "stale", isCold: true)))
+        #expect(await eventually { provider.returnedCount == 2 })
+
+        #expect(await keepsHolding { states().count == emitted }, "the superseded load emitted")
+        #expect(states().last?.items.map(\.id) == makeEntries(0..<3).map(\.post.id))
+        #expect(states().last?.isColdRefreshing == false)
+    }
+
+    /// ⚠️ A SUPERSEDED FIRST PAGE'S FAILURE IS NOT THE FEED'S (#836): it set
+    /// `.failed` over a feed whose current load was still on its way.
+    @Test func aSupersededFirstPagesFailureEmitsNoFailure() async {
+        let (_, provider, states) = await supersededFirstPage()
+
+        provider.answer(call: 0, with: .failure(.transport(message: "superseded")))
+        #expect(await eventually { provider.returnedCount == 1 })
+
+        #expect(await keepsHolding {
+            !states().contains { if case .failed = $0.phase { return true } else { return false } }
+        }, "the superseded load's failure reached the feed")
     }
 
     @Test func networkFailureKeepsCachedContentVisible() async {
