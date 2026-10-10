@@ -74,6 +74,26 @@ final class AppContainer {
     /// (`NetworkConditionsMenu`).
     private(set) lazy var mockNetworkFaults = MockNetworkFaults.fromLaunchArguments()
     private var mockFaultsObserver: NSObjectProtocol?
+    private var connectivityBridge: NSObjectProtocol?
+
+    /// Starts telling the app whether the network is reachable (#793): the
+    /// system path on the fleet, the mock network's switchboard in mock mode
+    /// (a simulator's path cannot be faked).
+    @MainActor
+    func startConnectivityMonitoring() {
+        switch environment {
+        case .mock:
+            let faults = mockNetworkFaults
+            ConnectivityMonitor.shared.report(online: !faults.isOffline)
+            connectivityBridge = NotificationCenter.default.addObserver(
+                forName: MockNetworkFaults.didChange, object: faults, queue: .main
+            ) { _ in
+                MainActor.assumeIsolated { ConnectivityMonitor.shared.report(online: !faults.isOffline) }
+            }
+        case .localFleet:
+            ConnectivityMonitor.shared.startMonitoringSystemPath()
+        }
+    }
 
     /// Semantic map clusters (city/country places on the mock pins, and the
     /// European seed behind them) are the DEFAULT mock experience — no

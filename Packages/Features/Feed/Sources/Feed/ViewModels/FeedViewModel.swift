@@ -1,6 +1,7 @@
 import CoreContracts
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import CoreRealtime
 import CoreStorage
 import Foundation
@@ -93,6 +94,10 @@ public final class FeedViewModel {
     private let now: @Sendable () -> Date
 
     private var phase: Phase = .loading
+    private var recovery: RecoveryObservation?
+    /// The monitor whose recoveries reload a failed timeline — the shared
+    /// one; a test hands its own (the shared one is process-wide).
+    var connectivity: ConnectivityMonitor = .shared
     private var items: [FeedItemDisplayModel] = []
     private var engagement: [PostID: EngagementState] = [:]
     private var likesInFlight: Set<PostID> = []
@@ -176,6 +181,7 @@ public final class FeedViewModel {
 
     /// Called once the view is laid out; kicks the initial load.
     public func viewDidLoad() {
+        armRecovery()
         builder = FeedDisplayModelBuilder()
         initialLoad = Task { await loadInitial() }
         startRealtimeIfConfigured()
@@ -215,6 +221,19 @@ public final class FeedViewModel {
             }
             self.likesInFlight.remove(id)
         }
+    }
+
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = connectivity.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        guard case .failed = phase else { return }
+        refresh()
     }
 
     public func refresh() {

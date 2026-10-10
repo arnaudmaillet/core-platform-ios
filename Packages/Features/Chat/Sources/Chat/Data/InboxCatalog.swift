@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import Foundation
 
 extension Conversation {
@@ -84,6 +85,7 @@ final class InboxCatalog {
     }
 
     private(set) var snapshot = Snapshot()
+    private var recovery: RecoveryObservation?
 
     private let repository: any ChatProviding
     private let directory: ConversationDirectory?
@@ -151,7 +153,16 @@ final class InboxCatalog {
     // MARK: - Loading
 
     /// Reloads unconditionally, superseding any in-flight load.
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.reload() }
+    }
+
     func reload() {
+        armRecovery()
         load?.cancel()
         loadGeneration += 1
         let generation = loadGeneration

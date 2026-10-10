@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import CoreStorage
 import Foundation
 import MapsInterface
@@ -218,6 +219,7 @@ public final class ProfileViewModel {
     /// on someone else's profile, the link is the `/@handle` one.
     private var shareToken: String?
 
+    private var recovery: RecoveryObservation?
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
@@ -517,6 +519,7 @@ public final class ProfileViewModel {
     // MARK: - Inputs
 
     public func viewDidLoad() {
+        armRecovery()
         // ⚠️ A REVISIT RENDERS THE CACHED PROFILE AT FRAME 0 (charter P7). The
         // cache used to be read on an account switch alone; a second visit to
         // a profile opened on a skeleton and re-revealed a page the viewer had
@@ -549,6 +552,21 @@ public final class ProfileViewModel {
     /// back identical publish nothing at all. It used to reset the corpora,
     /// so every pull blanked all three pages to their skeletons and rebuilt
     /// them under a cross-dissolve a moment later — the release's hitch.
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        // A refresh revalidates in place (it never falls back to bones), so
+        // a profile on screen picks up what changed while it was offline, and
+        // a failed one loads.
+        refresh()
+    }
+
     public func refresh() {
         guard load == nil else { return }
         reload(galleryRevalidates: true)

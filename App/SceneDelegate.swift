@@ -8,6 +8,8 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?
     private var appCoordinator: AppCoordinator?
+    /// Offline / Back online above every screen (#793).
+    private var offlineIndicator: OfflineIndicator?
     /// Settings → Security and Login → App Lock (#418).
     private var appLock: AppLockCoordinator?
     /// Settings → Your Activity → Time Management (#489).
@@ -65,6 +67,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // The app's text size (the iPhone's, capped at XXXL, raised by Care
         // Mode) and Care Mode's bold text, in place before the first frame.
         CareModePreference.apply(to: [window])
+
+        // Offline / Back online, above every screen (#793).
+        AppContainer.shared.startConnectivityMonitoring()
+        offlineIndicator = OfflineIndicator.install(on: window)
 
         let coordinator = AppCoordinator(window: window, container: AppContainer.shared)
         appCoordinator = coordinator

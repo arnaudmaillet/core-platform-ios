@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import Foundation
+import CoreNetworking
 import Testing
 @testable import Feed
 
@@ -147,6 +148,32 @@ struct FeedViewModelTests {
         let observed = await states
 
         #expect(observed.last?.phase == .failed(message: "Couldn't load your timeline. Pull to retry."))
+    }
+
+    /// ⚠️ THE NETWORK COMES BACK, THE TIMELINE LOADS (#793): a timeline that
+    /// failed while offline reloads on recovery, without a tap.
+    ///
+    /// ⚠️ ITS OWN MONITOR: the shared one is process-wide, and flipping it
+    /// reloaded every store alive in the parallel suites.
+    @Test func aFailedTimelineReloadsWhenTheNetworkReturns() async {
+        let provider = FakeFeedProvider()
+        provider.pages[""] = .failure(.transport(message: "offline"))
+        let monitor = ConnectivityMonitor()
+        let viewModel = FeedViewModel(repository: provider)
+        viewModel.connectivity = monitor
+        async let failed = collectStates(viewModel) {
+            if case .failed = $0.phase { return true } else { return false }
+        }
+        viewModel.viewDidLoad()
+        _ = await failed
+
+        provider.pages[""] = .success(FeedPage(entries: makeEntries(0..<3), nextPageToken: nil, isCold: false))
+        async let recovered = collectStates(viewModel) { $0.items.count == 3 }
+        monitor.report(online: false)
+        monitor.report(online: true)
+        let observed = await recovered
+
+        #expect(observed.last?.items.count == 3)
     }
 
     @Test func networkFailureKeepsCachedContentVisible() async {

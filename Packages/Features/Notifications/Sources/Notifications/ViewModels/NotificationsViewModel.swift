@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import DesignSystem
 import Foundation
 
@@ -57,6 +58,7 @@ public final class NotificationsViewModel {
 
     private var items: [NotificationItem] = []
     private var phase: Phase = .loading { didSet { onPhaseChange?(phase) } }
+    private var recovery: RecoveryObservation?
     private var load: Task<Void, Never>?
     private var hasLoaded = false
     /// Where the next page starts; nil when there are no more.
@@ -87,6 +89,7 @@ public final class NotificationsViewModel {
     // MARK: - Inputs
 
     public func viewDidLoad() {
+        armRecovery()
         reload()
     }
 
@@ -116,6 +119,18 @@ public final class NotificationsViewModel {
         } else if wasExpanded {
             emitContent()
         }
+    }
+
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        refresh()
     }
 
     public func refresh() {

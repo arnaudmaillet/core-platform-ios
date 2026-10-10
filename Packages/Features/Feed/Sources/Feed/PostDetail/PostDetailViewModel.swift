@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import CoreNetworking
 import Foundation
 
 /// The comments stream's sort orders (the engaged toolbar's selector).
@@ -120,6 +121,7 @@ public final class PostDetailViewModel {
     private var reviewing: Set<String> = []
     private var isComposing = false
 
+    private var recovery: RecoveryObservation?
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
@@ -193,6 +195,7 @@ public final class PostDetailViewModel {
     // MARK: - Inputs
 
     public func viewDidLoad() {
+        armRecovery()
         // A DRAFT HAS NOTHING TO LOAD — no post, so no comments — and it shows
         // a LOADED empty stream on its first frame rather than a skeleton: the
         // page is empty because it is new, not because it is waiting. Only the
@@ -219,6 +222,19 @@ public final class PostDetailViewModel {
         loadComments()
         reload()
         loadViewerIdentity()
+    }
+
+    /// Reloads after an outage (#793): what failed while the network was gone
+    /// comes back on its own when it returns — the viewer no longer has to
+    /// find a way to retry, screen by screen.
+    private func armRecovery() {
+        guard recovery == nil else { return }
+        recovery = ConnectivityMonitor.shared.onRecovery { [weak self] in self?.recoverFromOutage() }
+    }
+
+    private func recoverFromOutage() {
+        guard case .failed = phase else { return }
+        refresh()
     }
 
     public func refresh() {
