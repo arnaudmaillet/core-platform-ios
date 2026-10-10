@@ -92,7 +92,7 @@ struct MediaAssetUploaderTests {
 
     /// ⚠️ THE TICKET CARRIES THE CALLER'S KEY, EVERY TIME (#795). It used to
     /// be minted inside `upload`, a new one per call — so no retry could ever
-    /// be recognised as one.
+    /// be recognised as one. On the wire it is joined to the content's hash.
     @Test func everyAttemptAsksForItsTicketUnderTheKeyTheCallerHands() async throws {
         let (uploader, _, relay) = relayedUploader(transport: FailingTransport())
         for _ in 0..<2 {
@@ -101,6 +101,24 @@ struct MediaAssetUploaderTests {
                 sizeBytes: 3, sha256: String(repeating: "c", count: 64), idempotencyKey: "bubble-7"
             )
         }
-        #expect(relay.ticketKeys == ["bubble-7", "bubble-7"])
+        let expected = "bubble-7:" + String(repeating: "c", count: 16)
+        #expect(relay.ticketKeys == [expected, expected])
+    }
+
+    /// ⚠️ ONE INTENT, OTHER BYTES, OTHER WIRE KEY (#795). A clip re-exported
+    /// on a retry has a new SHA-256; under the bare intent key the server
+    /// would refuse it, or answer with the old bytes.
+    @Test func changedBytesForTheSameIntentAskUnderAnotherKey() async throws {
+        let (uploader, blobs, relay) = relayedUploader()
+        for fill in [UInt8(1), 2] {
+            let bytes = Data(repeating: fill, count: 64)
+            _ = try await uploader.upload(
+                .data(bytes), ownerID: MockAuthService.accountID, mimeType: "image/jpeg",
+                sizeBytes: 64, sha256: String(repeating: fill == 1 ? "e" : "f", count: 64),
+                idempotencyKey: "clip-3"
+            )
+        }
+        #expect(Set(relay.ticketKeys).count == 2, "keys: \(relay.ticketKeys)")
+        #expect(blobs.assetCount == 2, "the second content was answered with the first asset")
     }
 }

@@ -77,6 +77,13 @@ public struct MediaAssetUploader: Sendable {
     /// of it, so media.v1 can answer a replay with the asset it already has.
     /// No default on purpose: a default is exactly the per-call key this
     /// replaced.
+    ///
+    /// ⚠️ **WHAT GOES ON THE WIRE IS THE INTENT'S KEY AND THE CONTENT'S HASH
+    /// (`wireKey`).** A retry can carry different BYTES for the same intent: a
+    /// clip re-exported gets new timestamps (a new SHA-256), a library picture
+    /// can come back degraded first and full later. One key over two contents
+    /// would have the server refuse the commit — or answer with the OLD bytes.
+    /// Keyed on both, identical bytes replay and changed bytes are a new asset.
     public func upload(
         _ payload: Payload,
         ownerID: String,
@@ -92,7 +99,7 @@ public struct MediaAssetUploader: Sendable {
         ticketRequest.declaredMimeType = mimeType
         ticketRequest.declaredSizeBytes = sizeBytes
         ticketRequest.contentSha256 = sha256
-        ticketRequest.idempotencyKey = idempotencyKey
+        ticketRequest.idempotencyKey = Self.wireKey(idempotencyKey, sha256: sha256)
 
         let ticketResponse = await mediaClient.issueUploadTicket(request: ticketRequest, headers: [:])
         guard let ticketBody = ticketResponse.message else {
@@ -126,12 +133,23 @@ public struct MediaAssetUploader: Sendable {
             commitRequest.etag = etag
             commitRequest.contentSha256 = sha256
             let commitResponse = await mediaClient.commitUpload(request: commitRequest, headers: [:])
-            guard commitResponse.message != nil else {
+            // ⚠️ A FAILED COMMIT ON AN ASSET ALREADY PAST PENDING IS A SUCCESS
+            // (#795): the commit landed before — the answer was lost, or a
+            // replayed ticket brought the bytes to an asset that was done —
+            // and there is nothing left to finalise. Asked once, not polled.
+            if commitResponse.message == nil, await delivery(of: assetID)?.state.isPastPending != true {
                 throw UploadError.commit(commitResponse.error?.message ?? "unknown error")
             }
         }
 
         return Asset(assetID: assetID, url: try await resolveDeliveryURL(assetID: assetID))
+    }
+
+    /// The key a ticket carries for `intent` over content `sha256`: the
+    /// intent's own key while the bytes are the same, a new one when they
+    /// changed (see `upload`). Internal for tests.
+    static func wireKey(_ intent: String, sha256: String) -> String {
+        sha256.isEmpty ? intent : intent + ":" + String(sha256.prefix(16))
     }
 
     /// Polls ResolveDelivery until the asset has a rendition URL: processing
@@ -141,16 +159,26 @@ public struct MediaAssetUploader: Sendable {
             if attempt > 0 {
                 try? await Task.sleep(for: .seconds(resolvePollSeconds))
             }
-            var request = Media_V1_ResolveDeliveryRequest()
-            request.assetID = assetID
-            request.preferred = .mediaRenditionKindLarge
-            let response = await mediaClient.resolveDelivery(request: request, headers: [:])
-            if let body = response.message,
-               let urlString = body.media.renditions.first(where: { !$0.url.isEmpty })?.url,
+            if let urlString = await delivery(of: assetID)?.renditions.first(where: { !$0.url.isEmpty })?.url,
                let url = URL(string: urlString) {
                 return url
             }
         }
         throw UploadError.notReady(assetID: assetID)
+    }
+
+    /// One ResolveDelivery answer, or nil when it failed.
+    private func delivery(of assetID: String) async -> Media_V1_DeliveredMedia? {
+        var request = Media_V1_ResolveDeliveryRequest()
+        request.assetID = assetID
+        request.preferred = .mediaRenditionKindLarge
+        return await mediaClient.resolveDelivery(request: request, headers: [:]).message?.media
+    }
+}
+
+private extension Media_V1_AssetState {
+    /// Committed already: uploaded, processing, or ready.
+    var isPastPending: Bool {
+        self == .mediaAssetStateUploaded || self == .mediaAssetStateProcessing || self == .mediaAssetStateReady
     }
 }

@@ -196,8 +196,6 @@ final class NewPostViewController: UIViewController {
     /// the outcome is said if the sheet has gone by the time it is known —
     /// `presentingViewController` is nil by then.
     private weak var publishPresenter: UIViewController?
-    /// The sheet Post was tapped in — what `endTheFlow` may dismiss.
-    private weak var publishSheet: UIViewController?
 
     /// Which chosen item leads the carousel — a photo or a video.
     private var coverID: String?
@@ -1167,7 +1165,6 @@ final class NewPostViewController: UIViewController {
         guard !isPublishing else { return }
         isPublishing = true
         publishPresenter = presentingViewController
-        publishSheet = presentingViewController?.presentedViewController
         postItem.isEnabled = false
         // ⚠️ **THE FORM FREEZES WHILE THE POST GOES OUT.** A clip's export and
         // upload take seconds, and a switch flipped meanwhile — Save to Photos
@@ -1284,6 +1281,9 @@ final class NewPostViewController: UIViewController {
                 // is tried once the post exists, and a failure is said before
                 // the sheet goes rather than swallowed with it.
                 if settings.savesToPhotos, !(await keepACopy(of: media, published: entry)) {
+                    // ⚠️ OFF SCREEN THE ALERT WOULD BE DROPPED — and with it
+                    // the only call to `endTheFlow` (#795).
+                    guard isShown else { return endTheFlow(copyFailed: true) }
                     present(Self.copyFailureAlert { [weak self] in self?.endTheFlow() }, animated: true)
                     return
                 }
@@ -1367,24 +1367,41 @@ final class NewPostViewController: UIViewController {
     /// post was on its way, this screen has no presenter left to ask — the
     /// one captured when Post was tapped (`publishPresenter`) still confirms,
     /// at once, since there is no dismissal to wait for.
-    private func endTheFlow() {
+    ///
+    /// ⚠️ **A SHEET IS DISMISSED ONLY WHILE THIS SCREEN IS STILL IN IT.** The
+    /// author can step back to the editor mid-publish, come forward again and
+    /// start a SECOND post in the same sheet; the first landing then must not
+    /// close the sheet under the second. Off the sheet (`presentingViewController`
+    /// nil, whether the sheet went or this screen was stepped back from), a
+    /// landing only says so — and whatever the presenter shows by then, the
+    /// author opened since and keeps.
+    ///
+    /// `copyFailed`: the post is up but its copy in Photos could not be kept —
+    /// said instead of "Posted" where no alert can be seen (see `post()`).
+    private func endTheFlow(copyFailed: Bool = false) {
         let presenter = presentingViewController ?? publishPresenter
         #if DEBUG
         debugFlowEndedBy = presenter
         #endif
         guard let presenter else { return }
-        // ⚠️ ONLY THE SHEET THIS POST WAS TAPPED IN is dismissed: once it has
-        // gone, whatever the presenter shows now is something else the author
-        // opened since, and a post landing must not close it.
-        let sheetIsUp = presentingViewController != nil
-            || (publishSheet.map { presenter.presentedViewController === $0 } ?? false)
-        guard sheetIsUp else {
-            Self.confirmPublished(on: presenter)
+        let confirm = {
+            copyFailed ? Self.reportCopyFailure(on: presenter) : Self.confirmPublished(on: presenter)
+        }
+        guard presentingViewController != nil else {
+            confirm()
             return
         }
-        presenter.dismiss(animated: true) {
-            Self.confirmPublished(on: presenter)
-        }
+        presenter.dismiss(animated: true, completion: confirm)
+    }
+
+    /// What the author is told when the post is up but its copy is not, and
+    /// the sheet that would have shown the alert has gone (#795).
+    static let copyFailedMessage = "Posted, but the copy couldn't be saved to Photos"
+
+    /// `copyFailedMessage`, from the sheet's presenter — the off-screen form
+    /// of `copyFailureAlert`, whose alert would be dropped with the sheet.
+    static func reportCopyFailure(on presenter: UIViewController) {
+        Feedback.failure(copyFailedMessage, from: presenter)
     }
 
     /// What the author is told once the sheet has gone.

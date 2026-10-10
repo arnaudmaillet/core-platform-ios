@@ -28,20 +28,36 @@ public final class MockBlobStore: @unchecked Sendable {
     /// replayed upload from a second one (#795).
     public var assetCount: Int { lock.withLock { assets.count } }
 
+    /// What a ticket request reserved (#795).
+    enum Reservation {
+        /// A new asset.
+        case fresh(String)
+        /// The asset an earlier ticket under the same key reserved.
+        case replay(String)
+        /// The key was used before for DIFFERENT content.
+        case conflict
+    }
+
     /// Reserves an asset — or, under an idempotency key an earlier ticket
-    /// already used for this owner, answers with THAT asset and its record
-    /// (`replayed`), reserving nothing (#795).
+    /// already used for this owner, answers with THAT asset, reserving
+    /// nothing (#795).
+    ///
+    /// ⚠️ **ONE KEY, ONE CONTENT.** A key replayed with another SHA-256 is
+    /// refused (`conflict`), never answered with the first asset: that would
+    /// hand back the OLD bytes for a picture the caller has since changed.
+    /// The client keys on the content too (`MediaAssetUploader.wireKey`), so
+    /// this only fires for a caller that does not.
     ///
     /// ⚠️ **LOOKUP AND RESERVATION ARE ONE CRITICAL SECTION.** Two tickets
     /// racing under one key must not both miss and reserve two assets — the
     /// very duplicate the key exists to prevent.
     func reserve(
         ownerID: String, mimeType: String, size: UInt64, sha256: String, idempotencyKey: String
-    ) -> (assetID: String, replayed: AssetRecord?) {
+    ) -> Reservation {
         lock.withLock {
             let keyed = idempotencyKey.isEmpty ? nil : ownerID + "\u{1F}" + idempotencyKey
             if let keyed, let assetID = assetsByKey[keyed], let record = assets[assetID] {
-                return (assetID, record)
+                return record.sha256 == sha256 ? .replay(assetID) : .conflict
             }
             let assetID = "asset-\(UUID().uuidString.prefix(12))"
             assets[assetID] = AssetRecord(
@@ -49,22 +65,27 @@ public final class MockBlobStore: @unchecked Sendable {
                 sha256: sha256, state: .mediaAssetStatePending, bytes: nil
             )
             if let keyed { assetsByKey[keyed] = assetID }
-            return (assetID, nil)
+            return .fresh(assetID)
         }
     }
 
+    /// Stages the bytes. The asset stays PENDING until its commit, as on the
+    /// fleet; a finalised asset keeps the bytes it was committed with (a
+    /// replayed ticket's second PUT changes nothing).
     func putBytes(_ data: Data, assetID: String) -> Bool {
         lock.withLock {
-            guard assets[assetID] != nil else { return false }
-            assets[assetID]?.bytes = data
-            assets[assetID]?.state = .mediaAssetStateUploaded
+            guard let record = assets[assetID] else { return false }
+            if record.state == .mediaAssetStatePending { assets[assetID]?.bytes = data }
             return true
         }
     }
 
+    /// Idempotent like media.v1's (`commit_upload.rs`): an asset already
+    /// past pending is returned unchanged.
     func commit(assetID: String) -> AssetRecord? {
         lock.withLock {
             guard var record = assets[assetID], record.bytes != nil else { return nil }
+            guard record.state == .mediaAssetStatePending else { return record }
             record.state = .mediaAssetStateReady
             assets[assetID] = record
             return record
@@ -134,25 +155,28 @@ public final class MockMediaService: @unchecked Sendable {
         guard !request.ownerID.isEmpty else {
             return .failure(ConnectError(code: .invalidArgument, message: "owner_id required"))
         }
-        let (assetID, replayed) = store.reserve(
+        // ⚠️ A REPLAYED KEY GETS "THE SAME ASSET/TICKET RATHER THAN A NEW
+        // ONE", in the proto's words (#795), and is NOT `deduplicated`: that
+        // flag means a content-hash match onto an asset already READY, which
+        // this mock never does (dedup is off by default on the fleet too). A
+        // replay of a finished asset therefore gets its ticket back; the
+        // second PUT changes nothing and the commit is idempotent. The fleet's
+        // media.v1 accepts the key but does not honour it yet (its "Phase-4
+        // cache adapter"); this is the behaviour the field promises.
+        let assetID: String
+        switch store.reserve(
             ownerID: request.ownerID,
             mimeType: request.declaredMimeType,
             size: request.declaredSizeBytes,
             sha256: request.contentSha256,
             idempotencyKey: request.idempotencyKey
-        )
-
-        // ⚠️ A REPLAYED KEY IS ANSWERED WITH THE ASSET IT ALREADY RESERVED
-        // (#795): one already READY — the bytes stored and committed, only
-        // the answer lost — comes back `deduplicated`, so the client uploads
-        // nothing; one still pending gets a ticket to the SAME asset. The
-        // fleet's media.v1 accepts the key but does not honour it yet (its
-        // "Phase-4 cache adapter"); this is the behaviour the field promises.
-        if replayed?.state == .mediaAssetStateReady {
-            var response = Media_V1_IssueUploadTicketResponse()
-            response.assetID = assetID
-            response.deduplicated = true
-            return .success(response)
+        ) {
+        case .fresh(let id), .replay(let id):
+            assetID = id
+        case .conflict:
+            return .failure(ConnectError(
+                code: .failedPrecondition, message: "idempotency_key already used for different content"
+            ))
         }
 
         var ticket = Media_V1_UploadTicket()
@@ -185,18 +209,21 @@ public final class MockMediaService: @unchecked Sendable {
         return .success(response)
     }
 
+    /// Renditions only for a finalised asset: a pending one answers with its
+    /// state and nothing to play, as the fleet does before its worker runs.
     private func resolve(_ request: Media_V1_ResolveDeliveryRequest) -> Result<Media_V1_ResolveDeliveryResponse, ConnectError> {
-        guard store.record(for: request.assetID) != nil else {
+        guard let record = store.record(for: request.assetID) else {
             return .failure(ConnectError(code: .notFound, message: "asset \(request.assetID) not found"))
         }
-        var rendition = Media_V1_DeliveredRendition()
-        rendition.kind = .mediaRenditionKindLarge
-        rendition.url = "mock://asset/\(request.assetID)"
-
         var media = Media_V1_DeliveredMedia()
         media.assetID = request.assetID
-        media.state = .mediaAssetStateReady
-        media.renditions = [rendition]
+        media.state = record.state
+        if record.state == .mediaAssetStateReady {
+            var rendition = Media_V1_DeliveredRendition()
+            rendition.kind = .mediaRenditionKindLarge
+            rendition.url = "mock://asset/\(request.assetID)"
+            media.renditions = [rendition]
+        }
 
         var response = Media_V1_ResolveDeliveryResponse()
         response.media = media

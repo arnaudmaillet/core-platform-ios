@@ -74,19 +74,74 @@ struct MediaUploadReplayTests {
         )
     }
 
-    /// The commit landed and its answer did not: the retry finds the asset
-    /// READY and is told so (`deduplicated`), uploading nothing again.
-    @Test func aRetryAfterALostCommitAnswerReusesTheCommittedAsset() async throws {
+    /// The commit landed and its answer did not: a failed commit on an asset
+    /// already past pending is a success — the upload completes on the asset
+    /// it made, with no retry and no second asset.
+    @Test func aLostCommitAnswerOnACommittedAssetIsASuccess() async throws {
         let (uploader, blobs) = uploader(losingOne: "/CommitUpload")
 
-        await #expect(throws: MediaAssetUploader.UploadError.self) {
-            _ = try await upload(uploader, key: "photo-1")
-        }
-        try #require(blobs.assetCount == 1, "guard: the first attempt reserved its asset")
-        let retried = try await upload(uploader, key: "photo-1")
+        let asset = try await upload(uploader, key: "photo-1")
 
-        #expect(blobs.assetCount == 1, "the retry reserved a second asset")
-        #expect(retried.url.absoluteString.contains(retried.assetID))
+        #expect(blobs.assetCount == 1)
+        #expect(asset.url.absoluteString.contains(asset.assetID))
+    }
+
+    /// A retried upload of a finished asset — same intent, same bytes — is the
+    /// same asset: its ticket comes back, the second PUT and commit change
+    /// nothing.
+    @Test func aRetryOfAFinishedUploadIsTheSameAsset() async throws {
+        let (uploader, blobs) = uploader(losingOne: "/none")
+
+        let first = try await upload(uploader, key: "photo-2")
+        let again = try await upload(uploader, key: "photo-2")
+
+        #expect(again.assetID == first.assetID)
+        #expect(blobs.assetCount == 1)
+    }
+
+    /// ⚠️ THE MOCK SPEAKS media.v1's WORDS: a replayed key returns the same
+    /// asset AND ITS TICKET, never `deduplicated` — that flag is a
+    /// content-hash match onto a READY asset. And one key over other bytes is
+    /// refused, not answered with the first asset's old bytes.
+    @Test func aReplayedTicketIsTheSameAssetAndTicketAndOtherBytesAreRefused() async throws {
+        let bff = MockBFF()
+        let blobs = MockBlobStore()
+        MockMediaService(store: blobs).register(on: bff)
+        let client = Media_V1_MediaServiceClient(
+            client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        )
+        var request = Media_V1_IssueUploadTicketRequest()
+        request.ownerID = MockAuthService.accountID
+        request.declaredMimeType = "image/jpeg"
+        request.declaredSizeBytes = 4
+        request.contentSha256 = String(repeating: "1", count: 64)
+        request.idempotencyKey = "wire-key"
+
+        let firstAnswer = await client.issueUploadTicket(request: request, headers: [:])
+        let first = try #require(firstAnswer.message)
+        let uploadURL = try #require(URL(string: first.ticket.uploadURL))
+        _ = try await MockMediaUploadTransport(store: blobs).upload(
+            Data([1, 2, 3, 4]),
+            using: MediaUploadTicket(uploadURL: uploadURL, httpMethod: "PUT", requiredHeaders: [:], maxSizeBytes: 64)
+        )
+        var commit = Media_V1_CommitUploadRequest()
+        commit.assetID = first.assetID
+        let committed = await client.commitUpload(request: commit, headers: [:])
+        try #require(committed.message != nil, "guard: the first commit lands")
+
+        let replayAnswer = await client.issueUploadTicket(request: request, headers: [:])
+        let replay = try #require(replayAnswer.message)
+        #expect(replay.assetID == first.assetID)
+        #expect(replay.deduplicated == false, "a key replay is not a content-hash dedup")
+        #expect(replay.ticket.uploadURL == first.ticket.uploadURL)
+        let recommitted = await client.commitUpload(request: commit, headers: [:])
+        #expect(recommitted.message?.asset.state == .mediaAssetStateReady,
+                "a second commit on a ready asset is not idempotent")
+
+        request.contentSha256 = String(repeating: "2", count: 64)
+        let other = await client.issueUploadTicket(request: request, headers: [:])
+        #expect(other.message == nil && other.error?.code == .failedPrecondition)
+        #expect(blobs.assetCount == 1)
     }
 
     /// The ticket was issued and its answer lost: the retry is handed a

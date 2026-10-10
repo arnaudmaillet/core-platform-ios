@@ -80,6 +80,50 @@ private actor FlakyCommentsProvider: CommentsProviding {
     }
 }
 
+/// A server that keeps what it is sent, keyed by comment id like comment.v1:
+/// it can lose an answer AFTER storing the comment, or hold an answer until
+/// told — so a test decides when a reload and an answer cross (#795).
+///
+/// ⚠️ A CLASS WITH A LOCK, NOT AN ACTOR, so the synchronous `settle(until:)`
+/// condition can read it.
+private final class StoringCommentsProvider: CommentsProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [CommentEntry] = []
+    private var answersToLose: Int
+    private var holding: Bool
+
+    init(losing answersToLose: Int = 0, holding: Bool = false) {
+        self.answersToLose = answersToLose
+        self.holding = holding
+    }
+
+    var storedIDs: [String] { lock.withLock { stored.map(\.id) } }
+    func release() { lock.withLock { holding = false } }
+
+    func loadComments(for postID: PostID) async throws -> [CommentEntry] { lock.withLock { stored } }
+
+    func addComment(
+        _ body: String, to postID: PostID, parentID: String?, commentID: String
+    ) async throws -> CommentEntry {
+        let entry = CommentEntry(
+            id: commentID, authorID: ProfileID("prof-me"), authorName: "Me", authorHandle: "me",
+            body: body, createdAt: Date(timeIntervalSince1970: 100), parentID: parentID
+        )
+        let loses: Bool = lock.withLock {
+            // A replayed id is answered with what is already stored.
+            if !stored.contains(where: { $0.id == commentID }) { stored.insert(entry, at: 0) }
+            guard answersToLose > 0 else { return false }
+            answersToLose -= 1
+            return true
+        }
+        if loses { throw CommentsError.transport(message: "the answer was lost") }
+        while lock.withLock({ holding }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return entry
+    }
+}
+
 private func comment(_ id: String, _ body: String) -> CommentEntry {
     CommentEntry(id: id, authorID: ProfileID("prof-1"), authorName: "Ava", authorHandle: "ava", body: body, createdAt: Date(timeIntervalSince1970: 0))
 }
@@ -234,6 +278,72 @@ struct PostDetailCommentsTests {
         }
         let after = await provider.sentIDs
         #expect(after.count == 4 && after[3] != after[2], "a delivered comment's id was reused: \(after)")
+    }
+
+    /// ⚠️ AN ANSWER THAT IS ALREADY ON SCREEN IS NOT INSERTED AGAIN (#795).
+    /// The comment landed, a refresh brought it in while the send was still
+    /// out, and then the answer arrived with the same id: inserted twice, the
+    /// stream carried one id twice and the diffable snapshot trapped.
+    @Test(.timeLimit(.minutes(10)))
+    func anAnswerAlreadyBroughtInByARefreshIsNotInsertedTwice() async {
+        let provider = StoringCommentsProvider(holding: true)
+        let viewModel = makeViewModel(provider)
+        var lastComments: PostDetailViewModel.CommentsState?
+        viewModel.onCommentsChange = { lastComments = $0 }
+        var composing = false
+        viewModel.onComposingChange = { composing = $0 }
+        viewModel.viewDidLoad()
+        await settle { if case .loaded = lastComments { true } else { false } }
+
+        viewModel.submitComment("crossed")
+        await settle { provider.storedIDs.count == 1 }
+        viewModel.refresh()
+        await settle {
+            if case .loaded(let models) = lastComments { return models.count == 1 }
+            return false
+        }
+        provider.release()
+        await settle { !composing }
+
+        guard case .loaded(let models) = lastComments else {
+            Issue.record("no stream: \(String(describing: lastComments))")
+            return
+        }
+        #expect(models.map(\.id) == provider.storedIDs, "the answer was inserted beside its own row")
+        #expect(Set(models.map(\.id)).count == models.count, "duplicate ids in the snapshot")
+    }
+
+    /// ⚠️ A FAILED COMMENT THAT A REFRESH SHOWS LANDED HAS SPENT ITS ID
+    /// (#795). Kept, the viewer's next comment in the same words would go out
+    /// under it and be answered with the one already there — swallowed.
+    @Test(.timeLimit(.minutes(10)))
+    func aFailedCommentThatLandedFreesItsWordsForANewComment() async {
+        let provider = StoringCommentsProvider(losing: 1)
+        let viewModel = makeViewModel(provider)
+        var failures = 0
+        viewModel.onCommentFailed = { _, _ in failures += 1 }
+        var lastComments: PostDetailViewModel.CommentsState?
+        viewModel.onCommentsChange = { lastComments = $0 }
+        viewModel.viewDidLoad()
+        await settle { if case .loaded = lastComments { true } else { false } }
+
+        viewModel.submitComment("twice on purpose")
+        await settle { failures == 1 }
+        viewModel.refresh()
+        await settle {
+            if case .loaded(let models) = lastComments { return models.count == 1 }
+            return false
+        }
+        viewModel.submitComment("twice on purpose")
+        await settle {
+            if case .loaded(let models) = lastComments { return models.count == 2 }
+            return false
+        }
+
+        let ids = provider.storedIDs
+        #expect(ids.count == 2 && Set(ids).count == 2, "the second comment was swallowed: \(ids)")
+        guard case .loaded(let models) = lastComments else { return }
+        #expect(Set(models.map(\.id)).count == models.count, "duplicate ids in the snapshot")
     }
 
     /// Trending is THREAD-ranked by the engagement comment.v1 carries

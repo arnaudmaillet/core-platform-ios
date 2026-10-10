@@ -1626,6 +1626,60 @@ struct NewPostTests {
         #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
     }
 
+    /// ⚠️ **A COPY THAT FAILS OFF SCREEN STILL ENDS THE FLOW (#795).** Its
+    /// alert was the only way to `endTheFlow`; presented on a screen in no
+    /// window it was dropped, and the flow never ended — no "Posted", no
+    /// word about the copy. (In the test host a presented sheet is in no
+    /// window: see `aPublishThatFailsOffScreenIsSaidFromTheSheetsPresenter`.)
+    @Test(.timeLimit(.minutes(10)))
+    func aCopyThatFailsOffScreenStillEndsTheFlow() async throws {
+        let photoLibrary = StubPhotoLibrary(fails: true)
+        let post = NewPostViewController(
+            items: Self.items(1), library: StubLibrary(), composer: RecordingComposer(), preview: StubPreview(),
+            photoLibrary: photoLibrary, reducesMotion: { true }
+        ) { _ in }
+        let root = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = root
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        root.present(UINavigationController(rootViewController: post), animated: false)
+        try await settle(until: { post.presentingViewController === root })
+        try #require(post.viewIfLoaded?.window == nil, "guard: the screen is in no window")
+        post.debugFlip(saveToPhotos: true)
+        try await settle(until: { photoLibrary.asked == 1 })
+
+        post.debugTapPost()
+        try await settle(until: { post.debugFlowEndedBy != nil })
+
+        #expect(post.debugFlowEndedBy === root, "the flow never ended")
+        #expect(post.presentedViewController == nil, "an alert went to a screen nobody can see")
+    }
+
+    /// What the off-screen copy failure says, pinned like "Posted".
+    @Test func anOffScreenCopyFailureIsSaidOverThePresentersTab() {
+        #expect(NewPostViewController.copyFailedMessage == "Posted, but the copy couldn't be saved to Photos")
+        let tabs = UITabBarController()
+        let feed = UINavigationController(rootViewController: UIViewController())
+        tabs.viewControllers = [feed]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = tabs
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+
+        NewPostViewController.reportCopyFailure(on: tabs)
+
+        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        #expect(toast?.style == .failure, "no failure toast over the author's tab")
+    }
+
     /// Six switches in one card is a wall. Grouped, each card asks one question
     /// — and the engagement four are the group the author actually thinks about
     /// together.
