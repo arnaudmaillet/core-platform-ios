@@ -20,6 +20,22 @@ struct ComposedFrameReaderTests {
 
     private static let frame = 1.0 / 30
 
+    /// The look budget for a reader's FIRST answer after a start or a restart
+    /// — a fresh reader, a jump, a retry — in `poll`'s seconds of looks (200
+    /// looks a second, so 6000 looks).
+    ///
+    /// ⚠️ **A FIRST ANSWER IS A DECODE FROM THE KEYFRAME, AND ITS COST IS THE
+    /// MACHINE'S.** Measured at 38ms to 1.5s here, several times that on the
+    /// legacy AVPlayerLayer lane, where the player composites every frame
+    /// through the same compositor. Counting looks does not help when it is the
+    /// DECODER that is starved, not the test: develop job 114313276734 ran a
+    /// 600-look budget dry on a jump back (#599). So the budget is the one the
+    /// retry test already needed on that lane. Waiting for the reader is a
+    /// precondition, not what these tests measure: a reader that answers is
+    /// never waited on longer than it takes, and only one that never answers —
+    /// or answers only from the old place — spends the whole budget and fails.
+    private static let firstAnswerBudget: Double = 30
+
     /// A second of red dissolving into a second and a half of blue and white —
     /// overlapping by half a second, so two seconds that need a compositor,
     /// and the arrangement has something to read.
@@ -193,8 +209,14 @@ struct ComposedFrameReaderTests {
     /// be answered with THAT film — not left waiting, and not given the stale
     /// frame from where it was.
     ///
-    /// Measured answering in 38ms; the bound is three seconds because the
-    /// suites around this one export through the same compositor.
+    /// ⚠️ **WAITED FOR ON A FIRST ANSWER'S BUDGET, NOT A FEW SECONDS** (#599).
+    /// Measured answering in 38ms, but the jump restarts the reader — a decode
+    /// from the keyframe — and a starved legacy lane spent more than three
+    /// seconds' worth of looks on it (develop job 114313276734). What is judged
+    /// is WHICH frame answers, not how soon: a reader that ignores the jump
+    /// still holds only frames from 2s on, has none at or before 0.4s, and
+    /// answers nil on every look; one that hands its stale frame fails the
+    /// time and colour checks; and the generation shows the restart itself.
     @Test func aBackwardJumpIsAnsweredFromTheNewPlace() async throws {
         let (arrangement, composed) = try await arranged([
             VideoExportSegment(start: 0, end: 1, transitionOut: .dissolve),
@@ -203,10 +225,15 @@ struct ComposedFrameReaderTests {
         let reader = ComposedFrameReader(composed)
         defer { reader.close() }
         // 2s is 1.5s into the second piece, which started at 0.5s: the file's 3.5s.
-        let late = try #require(try await poll(reader, at: 2), "guard: nothing answered 2s")
+        let late = try #require(try await poll(reader, at: 2, within: Self.firstAnswerBudget), "guard: nothing answered 2s")
         #expect(colour(of: late.buffer, x: 0.1, y: 0.5).near(.white), "guard: 2s is not the file's white")
+        let generation = reader.debugState.generation
 
-        let early = try #require(try await poll(reader, at: 0.4, within: 3), "the jump back was never answered")
+        let early = try #require(
+            try await poll(reader, at: 0.4, within: Self.firstAnswerBudget), "the jump back was never answered: \(reader.debugState)"
+        )
+        #expect(reader.debugState.generation == generation + 1,
+                "the jump back restarted the reader \(reader.debugState.generation - generation) times")
         let at = early.time.seconds
         #expect(at <= 0.4 + 0.000_001 && 0.4 - at < Self.frame + 0.001, "the jump back to 0.4s handed the frame at \(at)s")
         let read = colour(of: early.buffer, x: 0.1, y: 0.5)
@@ -289,7 +316,7 @@ struct ComposedFrameReaderTests {
         ])
         let reader = ComposedFrameReader(composed)
         defer { reader.close() }
-        _ = try #require(try await poll(reader, at: 0, within: 8), "guard: nothing answered the start")
+        _ = try #require(try await poll(reader, at: 0, within: Self.firstAnswerBudget), "guard: nothing answered the start")
         // What a start costs is measured, not guessed — the lead is only as
         // good as that number.
         #expect(reader.debugStart.cost > 0, "the first start's cost was never noted")
@@ -311,7 +338,7 @@ struct ComposedFrameReaderTests {
         let (_, composed) = try await arranged()
         let reader = ComposedFrameReader(composed)
         defer { reader.close() }
-        _ = try #require(try await poll(reader, at: 0, within: 8), "guard: nothing answered the start")
+        _ = try #require(try await poll(reader, at: 0, within: Self.firstAnswerBudget), "guard: nothing answered the start")
         reader.debugSetLastStartCost(0.5)
 
         _ = reader.frame(at: time(1.2))
@@ -342,7 +369,7 @@ struct ComposedFrameReaderTests {
         let (_, composed) = try await arranged()
         let reader = ComposedFrameReader(composed)
         defer { reader.close() }
-        _ = try #require(try await poll(reader, at: 1.8, within: 8), "guard: nothing answered 1.8s")
+        _ = try #require(try await poll(reader, at: 1.8, within: Self.firstAnswerBudget), "guard: nothing answered 1.8s")
         let last = try #require(
             try await pollUntilReached(reader, 2 - Self.frame, within: 8),
             "guard: nothing answered the last frame"
@@ -436,7 +463,7 @@ struct ComposedFrameReaderTests {
         // several times as much on the CI runner that composites every frame
         // through the player. At ten seconds this called that runner a reader
         // that never tried again.
-        let got = try await poll(reader, at: 0.5, within: 30)
+        let got = try await poll(reader, at: 0.5, within: Self.firstAnswerBudget)
         #expect(got != nil, "the reader never tried again")
         #expect(reader.debugState.generation == 2, "tried \(reader.debugState.generation - 1) times")
     }
