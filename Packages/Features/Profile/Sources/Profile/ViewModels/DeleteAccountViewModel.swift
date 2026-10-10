@@ -19,6 +19,10 @@ final class DeleteAccountViewModel {
         case ready(permanentOn: Date)
         /// Already requested: when, and when it becomes permanent.
         case requested(on: Date, permanentOn: Date)
+        /// Whether a deletion is already pending couldn't be read. The screen
+        /// offers a retry, never the button: deleting on a state the app
+        /// doesn't know is not a choice it hands the viewer.
+        case failed
     }
 
     private(set) var phase: Phase = .loading {
@@ -44,17 +48,27 @@ final class DeleteAccountViewModel {
     }
 
     func load() async {
+        // A retry shows the bones again while it reads.
+        if case .failed = phase { phase = .loading }
         async let checklist = readChecklist()
-        // A record we cannot read (the endpoint is restricted on some
-        // deployments) is treated as "no request yet": the screen then offers
-        // the button, and a duplicate request is harmless server-side.
-        let requestedAt = try? await lifecycle.gdprStatus().deletionRequestedAt
+        // A record that can't be read is a failure, not "no request yet": the
+        // button would otherwise be offered on a guess.
+        let status: AccountGdprStatus?
+        do {
+            status = try await lifecycle.gdprStatus()
+        } catch {
+            status = nil
+        }
         // Both reads land in ONE change: the checklist first (it publishes
         // nothing by itself), then the phase. Publishing the phase and then
         // the checklist redrew the screen twice, the consequence lines
         // rewrapping under the viewer's eyes a moment after it settled.
         self.checklist = await checklist
-        if let requestedAt {
+        guard let status else {
+            phase = .failed
+            return
+        }
+        if let requestedAt = status.deletionRequestedAt {
             phase = .requested(on: requestedAt, permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: requestedAt))
         } else {
             phase = .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: now()))

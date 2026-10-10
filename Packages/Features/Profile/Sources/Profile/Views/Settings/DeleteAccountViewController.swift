@@ -26,6 +26,8 @@ final class DeleteAccountViewController: UIViewController {
         case delete
         case requested
         case cancelRequest
+        /// The account couldn't be checked: read it again.
+        case retry
     }
 
     /// What gets deleted, as concrete as the account allows (#402): the
@@ -122,6 +124,8 @@ final class DeleteAccountViewController: UIViewController {
             "You asked to delete this account on \(dateFormatter.string(from: on)). "
                 + "It becomes permanent on \(dateFormatter.string(from: permanentOn)). "
                 + "Until then you can cancel it here, or by logging back in."
+        case .failed:
+            "Couldn't check whether a deletion is already pending. Check your connection and try again."
         }
     }
 
@@ -166,6 +170,9 @@ final class DeleteAccountViewController: UIViewController {
                 content.textProperties.color = .secondaryLabel
             case .cancelRequest:
                 content.text = "Cancel Deletion Request"
+                content.textProperties.color = .tintColor
+            case .retry:
+                content.text = "Try Again"
                 content.textProperties.color = .tintColor
             }
             cell.contentConfiguration = content
@@ -257,6 +264,8 @@ final class DeleteAccountViewController: UIViewController {
             layout.append((.action, [.delete]))
         case .requested:
             layout.append((.action, canCancel ? [.requested, .cancelRequest] : [.requested]))
+        case .failed:
+            layout.append((.action, [.retry]))
         }
         return layout
     }
@@ -379,7 +388,7 @@ extension DeleteAccountViewController {
 extension DeleteAccountViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         let item = dataSource.itemIdentifier(for: indexPath)
-        return item == .delete || item == .downloadData || item == .cancelRequest
+        return item == .delete || item == .downloadData || item == .cancelRequest || item == .retry
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
@@ -389,6 +398,8 @@ extension DeleteAccountViewController: UICollectionViewDelegate {
             confirmDeletion()
         case .cancelRequest:
             cancelRequest()
+        case .retry:
+            Task { await viewModel.load() }
         case .downloadData:
             if let export = makeDataExport() {
                 navigationController?.pushViewController(export, animated: true)

@@ -31,12 +31,24 @@ struct DeleteAccountTests {
         #expect(model.phase == .requested(on: earlier, permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: earlier)))
     }
 
-    /// The GDPR record is restricted on some deployments; unreadable means
-    /// "offer the button", never a dead screen.
-    @Test func anUnreadableRecordStillOffersTheButton() async {
-        let model = DeleteAccountViewModel(lifecycle: StubLifecycle(failsRead: true), now: { Self.today })
+    /// An unreadable GDPR record is a failure with a retry, never the
+    /// button: the app doesn't know whether a deletion is already pending,
+    /// so the viewer is not offered one on a guess.
+    @Test func anUnreadableRecordIsAFailureNotTheButton() async {
+        let stub = StubLifecycle(failsRead: true)
+        let model = DeleteAccountViewModel(lifecycle: stub, now: { Self.today })
         await model.load()
-        guard case .ready = model.phase else { Issue.record("expected ready, got \(model.phase)"); return }
+        #expect(model.phase == .failed)
+        let layout = DeleteAccountViewController.layout(phase: model.phase, checklist: nil, offersDataExport: false, canCancel: false)
+        #expect(layout.last?.1 == [.retry])
+        #expect(layout.allSatisfy { !$0.1.contains(.delete) })
+        #expect(DeleteAccountViewController.footer(for: .failed)?.contains("try again") == true)
+
+        await stub.setFailsRead(false)
+        var phases: [DeleteAccountViewModel.Phase] = []
+        model.onChange = { phases.append(model.phase) }
+        await model.load()
+        #expect(phases == [.loading, .ready(permanentOn: AccountDeletionPolicy.permanentDate(requestedAt: Self.today))])
     }
 
     /// What gets deleted names the account's profiles and what is left in the
@@ -120,13 +132,15 @@ struct DeleteAccountTests {
 
 private actor StubLifecycle: AccountLifecycleManaging {
     private let requestedAt: Date?
-    private let failsRead: Bool
+    private var failsRead: Bool
     private(set) var requests = 0
 
     init(requestedAt: Date? = nil, failsRead: Bool = false) {
         self.requestedAt = requestedAt
         self.failsRead = failsRead
     }
+
+    func setFailsRead(_ value: Bool) { failsRead = value }
 
     func requestDeletion() async throws { requests += 1 }
 
