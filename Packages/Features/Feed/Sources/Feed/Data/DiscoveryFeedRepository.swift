@@ -1,5 +1,6 @@
 import CoreContracts
 import CoreModels
+import CoreNetworking
 import Foundation
 
 /// Which posts Discover may show — the active profile's Sensitive Content
@@ -120,7 +121,7 @@ public actor DiscoveryFeedRepository: FeedProviding {
         let body: Timeline_V1_GetDiscoveryFeedResponse
         switch response.result {
         case .success(let value): body = value
-        case .failure(let error): throw FeedError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw FeedError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         let entries = try await FixedPostsFeedProvider(
             base: base, ids: body.items.map { PostID($0.postID) }

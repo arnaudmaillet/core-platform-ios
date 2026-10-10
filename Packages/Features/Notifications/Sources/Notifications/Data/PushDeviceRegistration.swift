@@ -1,4 +1,5 @@
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// Which APNs gateway a token belongs to — APNs routes by it, so a sandbox
@@ -41,7 +42,7 @@ extension NotificationsRepository: PushDeviceRegistering {
         request.timezone = TimeZone.current.identifier
         let response = await notificationClient.registerDevice(request: request, headers: [:])
         if let error = response.error {
-            throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
+            throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -51,7 +52,7 @@ extension NotificationsRepository: PushDeviceRegistering {
         request.deviceID = deviceID
         let response = await notificationClient.unregisterDevice(request: request, headers: [:])
         if let error = response.error {
-            throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
+            throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

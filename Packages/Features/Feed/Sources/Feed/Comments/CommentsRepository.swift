@@ -10,7 +10,17 @@ public enum CommentsError: Error, Equatable, Sendable {
     /// CMT-1005: the post's author doesn't take comments from this viewer
     /// (their "Who Can Comment" setting, #397).
     case notAllowed
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension CommentsError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// One top-level comment, hydrated with its author's display name (the
@@ -249,7 +259,7 @@ public actor CommentsRepository: CommentsProviding {
         case .success(let body):
             views = body.comments
             nextToken = body.nextToken
-        case .failure(let error): throw CommentsError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
 
         // Level 2: fan out ListReplies per top-level comment, concurrently.
@@ -319,7 +329,7 @@ public actor CommentsRepository: CommentsProviding {
             if error.code == .permissionDenied, (error.message ?? "").contains("CMT-1005") {
                 throw CommentsError.notAllowed
             }
-            throw CommentsError.transport(message: error.message ?? "code \(error.code)")
+            throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -449,7 +459,7 @@ public actor CommentsRepository: CommentsProviding {
         } catch ViewerError.noProfileForAccount {
             throw CommentsError.noProfileForAccount
         } catch let error as AccountProfilesReader.ReadError {
-            throw CommentsError.transport(message: error.message)
+            throw CommentsError.transport(message: error.message, failure: error.networkFailure)
         }
     }
 }
@@ -495,7 +505,7 @@ extension CommentsRepository: HeldCommentReviewing {
         case .failure(let error) where error.code == .notFound:
             return
         case .failure(let error):
-            throw CommentsError.transport(message: error.message ?? "code \(error.code)")
+            throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 }

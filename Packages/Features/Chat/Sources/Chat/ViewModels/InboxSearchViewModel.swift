@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNetworking
 import CoreStorage
 import Foundation
 
@@ -227,8 +228,13 @@ final class InboxSearchViewModel {
             guard !Task.isCancelled, isCurrent(trimmed) else { return }
             // A directory failure is not a search failure: the local matches are
             // already on screen and are most of what the viewer came for. Only a
-            // query with nothing local behind it surfaces the error.
-            searchState = .failed(message: "Couldn't search for people. Please try again.")
+            // query with nothing local behind it surfaces the error — and says
+            // "you're offline" when that is why, the one cause the viewer can
+            // fix themselves (#794).
+            searchState = .failed(message: FailureCopy.message(
+                for: error,
+                fallback: "Couldn't search for people. Please try again."
+            ))
             emit()
         }
     }

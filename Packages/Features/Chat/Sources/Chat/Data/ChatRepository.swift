@@ -16,7 +16,17 @@ public enum ChatError: Error, Equatable, Sendable {
     case mediaUpload(message: String)
     /// This provider sends no media.
     case mediaUnsupported
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension ChatError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// A conversation summary for the list: a title (the other member(s)), the last
@@ -364,7 +374,7 @@ public actor ChatRepository: ChatProviding {
             entries = body.entries
             nextToken = body.nextPageToken
         case .failure(let error):
-            throw ChatError.transport(message: error.message ?? "code \(error.code)")
+            throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
 
         let details = await Self.fetchDetails(for: entries, viewer: viewer, client: chatClient)
@@ -466,7 +476,7 @@ public actor ChatRepository: ChatProviding {
         request.untilMs = muted ? until.map { Int64($0.timeIntervalSince1970 * 1000) } ?? 0 : 0
         let response = await chatClient.muteConversation(request: request, headers: [:])
         if let error = response.error {
-            throw ChatError.transport(message: error.message ?? "code \(error.code)")
+            throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -494,7 +504,7 @@ public actor ChatRepository: ChatProviding {
                 .map { Self.makeMessage(from: $0, viewer: viewer) }
             return MessagePage(messages: messages, olderPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
         case .failure(let error):
-            throw ChatError.transport(message: error.message ?? "code \(error.code)")
+            throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -588,7 +598,7 @@ public actor ChatRepository: ChatProviding {
             )
         case .failure(let error):
             if (error.message ?? "").contains("CHT-1011") { throw ChatError.messagesRefused }
-            throw ChatError.transport(message: error.message ?? "code \(error.code)")
+            throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -618,7 +628,7 @@ public actor ChatRepository: ChatProviding {
         create.ownerID = viewer.rawValue
         let response = await chatClient.createConversation(request: create, headers: [:])
         guard let id = response.message?.conversationID, !id.isEmpty else {
-            throw ChatError.transport(message: response.error?.message ?? "couldn't start a conversation")
+            throw ChatError.transport(message: response.error?.message ?? "couldn't start a conversation", failure: response.error.map { NetworkFailure($0) })
         }
         let conversationID = ConversationID(id)
         for member in [viewer, profileID] {
@@ -752,7 +762,7 @@ public actor ChatRepository: ChatProviding {
         } catch ViewerError.noProfileForAccount {
             throw ChatError.noProfileForAccount
         } catch let error as AccountProfilesReader.ReadError {
-            throw ChatError.transport(message: error.message)
+            throw ChatError.transport(message: error.message, failure: error.networkFailure)
         }
     }
 }

@@ -18,9 +18,14 @@ private struct AuthenticatedSessionStub: AuthSessionProviding {
 /// Drives the read path — repository → generated clients → real ProtocolClient
 /// → MockBFF — with production wire bytes, in-process.
 struct NotificationsRepositoryTests {
-    private func makeRepository(withPosts: Bool = true) -> NotificationsRepository {
+    private func makeRepository(
+        withPosts: Bool = true,
+        failing failures: [SimulatedConditions.FailureRule] = []
+    ) -> NotificationsRepository {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
+        // Per-BFF, not process-wide: parallel suites never see it.
+        bff.simulatedConditions = SimulatedConditions(failures: failures)
         MockSocialServices(dataset: dataset).register(on: bff) // viewer, senders, posts
         MockNotificationService(dataset: dataset).register(on: bff)
         let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
@@ -111,5 +116,34 @@ struct NotificationsRepositoryTests {
         #expect(try await repository.unreadCount() == 0)
         let items = try await repository.loadNotifications(limit: 50)
         #expect(items.allSatisfy { $0.isRead })
+    }
+
+    // MARK: - Why a call failed (#794)
+
+    /// Connect answers a lost connection with `unavailable`. The
+    /// `NotificationsError` it becomes must still say offline, or the screen
+    /// can only ever say "couldn't load".
+    @Test func aLostConnectionStaysOfflineThroughTheRepositoryError() async {
+        let repository = makeRepository(failing: [.init(pathContains: "NotificationService")])
+
+        let error = await #expect(throws: NotificationsError.self) {
+            _ = try await repository.loadNotifications(limit: 50)
+        }
+
+        #expect(error?.networkFailure == .offline)
+        #expect(error.flatMap { NetworkFailure.of($0) } == .offline)
+    }
+
+    /// The viewer lookup fails first when every route is down: the failure
+    /// survives `AccountProfilesReader.ReadError` on its way to the feature
+    /// error too.
+    @Test func aLostConnectionStaysOfflineThroughTheViewerLookup() async {
+        let repository = makeRepository(failing: [.init()])
+
+        let error = await #expect(throws: NotificationsError.self) {
+            _ = try await repository.loadNotifications(limit: 50)
+        }
+
+        #expect(error?.networkFailure == .offline)
     }
 }
