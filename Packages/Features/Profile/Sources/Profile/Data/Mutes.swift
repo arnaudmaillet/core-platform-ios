@@ -128,10 +128,8 @@ extension ProfileRepository: ProfileMuting {
 
     public func mutedProfiles() async throws -> [MutedProfile] {
         let viewer = try await resolveViewerProfileID()
-        var summaries: [SocialGraph_V1_MuteSummary] = []
-        var pageToken = ""
         // Bounded, like the block list.
-        for _ in 0..<20 {
+        let summaries = try await TokenPager.collect(maxPages: 20) { pageToken in
             var request = SocialGraph_V1_ListMutesRequest()
             request.profileID = viewer.rawValue
             request.limit = 100
@@ -139,12 +137,10 @@ extension ProfileRepository: ProfileMuting {
             let response = await socialGraphClient.listMutes(request: request, headers: [:])
             switch response.result {
             case .success(let body):
-                summaries += body.mutes
-                pageToken = body.nextPageToken
+                return (body.mutes, body.nextPageToken)
             case .failure(let error):
                 throw ProfileError.transport(message: error.message ?? "code \(error.code)")
             }
-            if pageToken.isEmpty { break }
         }
         let views = await withTaskGroup(of: (String, Profile_V1_ProfileView?).self) { group in
             for summary in summaries {

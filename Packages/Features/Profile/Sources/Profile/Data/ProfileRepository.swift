@@ -662,11 +662,9 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
 
     public func blockedProfiles() async throws -> [BlockedProfile] {
         let viewer = try await resolveViewerProfileID()
-        var summaries: [SocialGraph_V1_BlockSummary] = []
-        var pageToken = ""
         // Bounded: a block list is short, and a server that kept handing back
         // a page token must not spin this loop forever.
-        for _ in 0..<20 {
+        let summaries = try await TokenPager.collect(maxPages: 20) { pageToken in
             var request = SocialGraph_V1_ListBlocksRequest()
             request.blockerID = viewer.rawValue
             request.limit = 100
@@ -674,12 +672,10 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
             let response = await socialGraphClient.listBlocks(request: request, headers: [:])
             switch response.result {
             case .success(let body):
-                summaries += body.blocks
-                pageToken = body.nextPageToken
+                return (body.blocks, body.nextPageToken)
             case .failure(let error):
                 throw ProfileError.transport(message: error.message ?? "code \(error.code)")
             }
-            if pageToken.isEmpty { break }
         }
         // One read per blocked profile (the contract has no batch read). A
         // profile that no longer resolves still lists, by id, so it can be

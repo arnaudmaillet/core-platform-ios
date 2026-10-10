@@ -62,9 +62,7 @@ extension ProfileRepository: ProfileRestricting {
 
     public func restrictedProfiles() async throws -> [RestrictedProfile] {
         let viewer = try await resolveViewerProfileID()
-        var summaries: [SocialGraph_V1_RestrictedSummary] = []
-        var pageToken = ""
-        for _ in 0..<20 {
+        let summaries = try await TokenPager.collect(maxPages: 20) { pageToken in
             var request = SocialGraph_V1_ListRestrictedRequest()
             request.profileID = viewer.rawValue
             request.limit = 100
@@ -72,12 +70,10 @@ extension ProfileRepository: ProfileRestricting {
             let response = await socialGraphClient.listRestricted(request: request, headers: [:])
             switch response.result {
             case .success(let body):
-                summaries += body.restricted
-                pageToken = body.nextPageToken
+                return (body.restricted, body.nextPageToken)
             case .failure(let error):
                 throw ProfileError.transport(message: error.message ?? "code \(error.code)")
             }
-            if pageToken.isEmpty { break }
         }
         let views = await withTaskGroup(of: (String, Profile_V1_ProfileView?).self) { group in
             for summary in summaries {
