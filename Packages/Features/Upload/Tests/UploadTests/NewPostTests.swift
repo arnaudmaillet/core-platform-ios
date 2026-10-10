@@ -1467,6 +1467,32 @@ struct NewPostTests {
                 "the flow was ended by \(String(describing: post.debugFlowEndedBy)), not the sheet's presenter")
     }
 
+    /// ⚠️ A PUBLISHED POST SAYS "Posted" (#803) — from the sheet's presenter,
+    /// once the sheet has gone; it used to end in silence. The dismissal's
+    /// completion never runs in the test host (see above), so what is pinned
+    /// is what it calls: the toast lands on the tab the author is on, whose
+    /// safe area clears the tab bar.
+    @Test func aPublishedPostIsConfirmedOverThePresentersTab() {
+        #expect(NewPostViewController.publishedMessage == "Posted")
+        let tabs = UITabBarController()
+        let feed = UINavigationController(rootViewController: UIViewController())
+        tabs.viewControllers = [feed]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = tabs
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+
+        NewPostViewController.confirmPublished(on: tabs)
+
+        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        #expect(toast?.style == .confirmation, "no toast over the author's tab")
+        #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
+    }
+
     /// Six switches in one card is a wall. Grouped, each card asks one question
     /// — and the engagement four are the group the author actually thinks about
     /// together.

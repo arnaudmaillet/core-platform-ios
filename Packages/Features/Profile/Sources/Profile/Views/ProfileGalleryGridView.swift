@@ -84,9 +84,16 @@ final class ProfileGalleryGridView: UIView {
     /// decides, because this view knows nothing about what can be serviced.
     var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
     /// Fired when the viewer asks to repost a row's post. Nothing sets it yet
-    /// — the same open seam For You has (`ForYouGridPage.onRepostRequested`):
-    /// the control is drawn because the card's design calls for it.
+    /// — the same open seam For You has (`ForYouGridPage.onRepostRequested`) —
+    /// so, as there, no card draws the control until something does (#801).
     var onRepostRequested: ((GalleryPost) -> Void)?
+
+    /// What a card's repost control does for `post`: nil, which hides it,
+    /// while nothing handles a repost (#801).
+    func repostHandler(for post: GalleryPost) -> (() -> Void)? {
+        guard onRepostRequested != nil else { return nil }
+        return { [weak self] in self?.onRepostRequested?(post) }
+    }
     /// The viewer's saved pile, the SAME store the Saved tab reads, so a card
     /// here and the tab below cannot disagree about whether a post is saved.
     /// Nil where no pile exists (anyone else's profile in some setups); the
@@ -780,9 +787,10 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                 imagePipeline: imagePipeline,
                 captionExpanded: captionExpansion.isExpanded(post.id)
             )
-            // See `ForYouGridPage`: repost has no action yet and is drawn
-            // anyway; save toggles the shared pile and reads its answer back.
-            cell.onRepostTapped = { [weak self] in self?.onRepostRequested?(post) }
+            // See `ForYouGridPage`: repost has no action yet, so it is not
+            // drawn (#801); save toggles the shared pile and reads its answer
+            // back.
+            cell.onRepostTapped = repostHandler(for: post)
             // The like chip stakes — see `PostCardStaking`.
             staking?.bind(cell, to: post.id)
             // The comment chip opens the post at its thread, resolved through
@@ -798,6 +806,8 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                     guard let cell else { return }
                     MemberGates.perform(.save, from: cell) { [weak cell] in
                         _ = bookmarks.toggle(post.id.rawValue)
+                        // The fill says it; the hand feels it (#803).
+                        Feedback.toggled()
                         cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
                     }
                 }
@@ -1134,11 +1144,12 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // row.
             captionExpanded: captionExpansion.isExpanded(postID),
             showsAuthorMenu: showsAuthorMenu(for: post),
-            // What the row wires — see `configure`: repost always, save when
-            // there is a pile — so the stand-in lands on a card drawing the
-            // same controls rather than ending with one vanishing.
+            // What the row wires — see `configure`: repost once something
+            // handles it (#801), save when there is a pile — so the stand-in
+            // lands on a card drawing the same controls rather than ending
+            // with one vanishing.
             actions: .init(
-                repost: true, bookmark: bookmarks != nil,
+                repost: onRepostRequested != nil, bookmark: bookmarks != nil,
                 saved: bookmarks?.isSaved(postID.rawValue) ?? false,
                 // And the like as the row draws it — see For You's twin.
                 stake: staking?.viewerStake(on: postID)

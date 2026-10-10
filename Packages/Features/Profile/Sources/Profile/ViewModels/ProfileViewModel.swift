@@ -165,6 +165,28 @@ public final class ProfileViewModel {
         case postDeleted
         case reported
         case failed(message: String)
+        /// A follow change the server refused, already rolled back on the
+        /// button (#802). Not `failed`, which is an alert: the button shows
+        /// the truth again, so there is nothing to dismiss — a failure toast
+        /// says why it flipped back, where a silent rollback read as a glitch.
+        case followFailed(message: String)
+    }
+
+    /// Which follow change failed, for its message.
+    public nonisolated enum FollowAttempt: Sendable {
+        case follow, unfollow, request, withdraw
+    }
+
+    /// The words of a refused follow change (#802) — short, no period, the
+    /// toast's rule.
+    public nonisolated static func followFailureMessage(handle: String?, change: FollowAttempt) -> String {
+        let who = handle ?? "this profile"
+        switch change {
+        case .follow: return "Couldn't follow \(who)"
+        case .unfollow: return "Couldn't unfollow \(who)"
+        case .request: return "Couldn't ask to follow \(who)"
+        case .withdraw: return "Couldn't withdraw your request"
+        }
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
@@ -702,10 +724,14 @@ public final class ProfileViewModel {
             do {
                 try await self.repository.setFollowing(target, for: profile.id)
             } catch {
-                // Roll back to the pre-tap state.
+                // Roll back to the pre-tap state — and say so (#802): a button
+                // that flips back on its own reads as a glitch.
                 if let current = self.profile {
                     self.applyFollow(!target, on: current)
                 }
+                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
+                    handle: self.handle, change: target ? .follow : .unfollow
+                )))
             }
             self.followInFlight = false
         }
@@ -734,6 +760,9 @@ public final class ProfileViewModel {
                 } else if let current = self.profile {
                     self.applyFollow(false, on: current)
                 }
+                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
+                    handle: self.handle, change: asks ? .request : .follow
+                )))
             }
             self.followInFlight = false
         }
@@ -748,6 +777,9 @@ public final class ProfileViewModel {
                 try await requests.cancelFollowRequest(to: profile.id)
             } catch {
                 self.showRequested(true)
+                self.onActionResult?(.followFailed(message: Self.followFailureMessage(
+                    handle: self.handle, change: .withdraw
+                )))
             }
             self.followInFlight = false
         }

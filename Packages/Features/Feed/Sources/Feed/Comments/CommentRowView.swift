@@ -105,9 +105,11 @@ final class CommentRowView: UIView {
     var onLikeTap: (() -> Void)?
     /// Row tapped — enter the composer's reply state for this thread.
     var onReplyTap: (() -> Void)?
-    /// Context-menu actions. Share presents the system sheet; block and
-    /// report are seams (no moderation backend yet — the repost/save
-    /// posture: honest affordances, unwired mutations).
+    /// Context-menu actions. Share presents the system sheet. Block and
+    /// report are seams with no comment moderation backend yet
+    /// (`ReportSubject` has no comment case) — and ⚠️ an unset seam is NOT
+    /// drawn (#801): a Report row that files nothing lets the user believe a
+    /// safety report went out. See `moderationMenu(onBlock:onReport:)`.
     var onShare: (() -> Void)?
     var onBlock: (() -> Void)?
     var onReport: (() -> Void)?
@@ -324,6 +326,36 @@ final class CommentRowView: UIView {
                 title: "Decline Comment", image: UIImage(systemName: "xmark.circle"), attributes: .destructive
             ) { _ in review(false) },
         ])
+    }
+
+    /// Block and Report, as one inline group — only the ones that do
+    /// something (#801). Nil when neither has a handler: a moderation row
+    /// that files nothing is worse than no row, because the user believes
+    /// something was filed. Shared by the row's own menu and the stream's.
+    static func moderationMenu(onBlock: (() -> Void)?, onReport: (() -> Void)?) -> UIMenu? {
+        var children: [UIMenuElement] = []
+        if let onBlock {
+            children.append(UIAction(
+                title: "Block User", image: UIImage(systemName: "hand.raised"), attributes: .destructive
+            ) { _ in onBlock() })
+        }
+        if let onReport {
+            children.append(UIAction(
+                title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive
+            ) { _ in onReport() })
+        }
+        return children.isEmpty ? nil : UIMenu(options: .displayInline, children: children)
+    }
+
+    /// The row's own long-press menu: review (a held comment), Share, and
+    /// whichever moderation actions are wired.
+    func menuElements() -> [UIMenuElement] {
+        let review: [UIMenuElement] = onReview.map { [Self.reviewActions($0)] } ?? []
+        let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
+            [weak self] _ in self?.onShare?()
+        }
+        let moderation: [UIMenuElement] = Self.moderationMenu(onBlock: onBlock, onReport: onReport).map { [$0] } ?? []
+        return review + [share] + moderation
     }
 
     /// Fetches the picture and draws it over the monogram — off the main
@@ -643,23 +675,7 @@ extension CommentRowView: UIContextMenuInteractionDelegate {
         configurationForMenuAtLocation location: CGPoint
     ) -> UIContextMenuConfiguration? {
         UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
-            let review: [UIMenuElement] = self?.onReview.map { review in [Self.reviewActions(review)] } ?? []
-            return UIMenu(children: review + [
-                UIAction(
-                    title: "Share Comment",
-                    image: UIImage(systemName: "square.and.arrow.up")
-                ) { _ in self?.onShare?() },
-                UIAction(
-                    title: "Block User",
-                    image: UIImage(systemName: "hand.raised"),
-                    attributes: .destructive
-                ) { _ in self?.onBlock?() },
-                UIAction(
-                    title: "Report",
-                    image: UIImage(systemName: "flag"),
-                    attributes: .destructive
-                ) { _ in self?.onReport?() },
-            ])
+            UIMenu(children: self?.menuElements() ?? [])
         }
     }
 }

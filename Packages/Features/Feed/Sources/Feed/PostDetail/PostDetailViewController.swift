@@ -1863,8 +1863,10 @@ final class PostDetailViewController: UIViewController {
     private func rowMenu(at indexPath: IndexPath) -> UIMenu? {
         guard case .comment(let id) = streamDataSource.itemIdentifier(for: indexPath),
               let model = streamModels[id] else { return nil }
-        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { _ in
+        let copy = UIAction(title: "Copy", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
             UIPasteboard.general.string = model.body
+            // Said (#803): nothing on screen shows a copy.
+            self?.confirmCopied()
         }
         let select = UIAction(title: "Select Text", image: UIImage(systemName: "text.magnifyingglass")) {
             [weak self] _ in
@@ -1874,16 +1876,17 @@ final class PostDetailViewController: UIViewController {
         let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
             [weak self] _ in self?.presentCommentShare(model)
         }
-        // The moderation seams, exactly as the row's own menu has them: the
-        // affordance is honest, the mutations wait on a moderation backend.
-        let block = UIAction(title: "Block User", image: UIImage(systemName: "hand.raised"), attributes: .destructive) { _ in }
-        let report = UIAction(title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive) { _ in }
-        let moderation = UIMenu(options: .displayInline, children: [block, report])
-        guard model.canReview else { return UIMenu(children: [copy, select, share, moderation]) }
+        // ⚠️ NO MODERATION ROWS UNTIL THEY DO SOMETHING (#801). Block and
+        // Report used to sit here as `{ _ in }` no-ops: for a safety action
+        // the user believes something was filed. There is no comment report
+        // flow (`ReportSubject` has no comment case), so the same builder
+        // as the row's own menu draws nothing for the unset seams.
+        let moderation = CommentRowView.moderationMenu(onBlock: nil, onReport: nil).map { [$0] } ?? []
+        guard model.canReview else { return UIMenu(children: [copy, select, share] + moderation) }
         let review = CommentRowView.reviewActions { [weak self] approve in
             self?.viewModel.reviewHeldComment(id, approve: approve)
         }
-        return UIMenu(children: [review, copy, select, share, moderation])
+        return UIMenu(children: [review, copy, select, share] + moderation)
     }
 
     private func streamItems() -> [StreamItem] {
@@ -2583,6 +2586,13 @@ final class PostDetailViewController: UIViewController {
     private func clearReplyState() {
         replyTarget = nil
         composeBar.setReplyPlaceholder(name: nil)
+    }
+
+    /// A comment's Copy says so (#803) — over the composer, which rests where
+    /// the toast would, as in a conversation. Internal for tests.
+    func confirmCopied() {
+        let floor = composeBar.superview != nil && !composeBar.isHidden ? composeBar.inputRowTopAnchor : nil
+        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: floor)
     }
 
     private func presentCommentShare(_ model: CommentDisplayModel) {

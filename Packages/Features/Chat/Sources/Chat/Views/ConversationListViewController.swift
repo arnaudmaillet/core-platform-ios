@@ -90,6 +90,15 @@ final class ConversationListViewController: UIViewController {
 
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onHasMoreChange = { [weak self] _ in self?.updatePagingFooter() }
+        // A row's mute, once the server has answered (#803).
+        viewModel.onMuteAnswered = { [weak self] message, muting, confirmed in
+            guard let self else { return }
+            if confirmed {
+                Feedback.success(message, symbol: muting ? "bell.slash.fill" : "bell.fill", from: self)
+            } else {
+                Feedback.failure(message, from: self)
+            }
+        }
         updatePagingFooter()
         // The view model may have moved past `.loading` before this view was
         // asked for (the catalog replays its snapshot at subscription), so the

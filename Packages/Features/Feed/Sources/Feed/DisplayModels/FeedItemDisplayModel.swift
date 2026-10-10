@@ -28,6 +28,10 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     let authorID: ProfileID
     let authorName: String
     let metaText: String // "@handle · 3m"
+    /// The author's raw @handle, without the "@" — nil when unknown. Read
+    /// where the handle itself is wanted (a follow failure's toast, #802)
+    /// rather than parsed back out of `metaText`.
+    let authorHandle: String?
     let avatarURL: URL?
     let caption: String?
     let mediaURL: URL?
@@ -103,8 +107,10 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         timestampText: String = "",
         cardMetrics: PostCardMetrics? = nil,
         extraMedia: [GalleryPost.MediaPage] = [],
-        headAspectRatio: Double? = nil
+        headAspectRatio: Double? = nil,
+        authorHandle: String? = nil
     ) {
+        self.authorHandle = authorHandle.flatMap { $0.isEmpty ? nil : $0 }
         self.headAspectRatio = headAspectRatio.flatMap { $0 > 0 && $0.isFinite ? $0 : nil }
         self.id = id
         self.authorID = authorID
@@ -193,7 +199,8 @@ public struct FeedDisplayModelBuilder: Sendable {
             // a landing that snaps once the real picture arrives.
             headAspectRatio: attachment.flatMap {
                 $0.pixelWidth > 0 && $0.pixelHeight > 0 ? $0.aspectRatio : nil
-            }
+            },
+            authorHandle: entry.author.handle
         )
     }
 

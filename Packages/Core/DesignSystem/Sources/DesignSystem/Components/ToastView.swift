@@ -9,6 +9,11 @@ import UIKit
 /// prompt either — the profile's bar is transparent over media and owns no
 /// spare row.
 ///
+/// ⚠️ CALL `Feedback`, NOT THIS (#804). `Feedback.success/failure/info` picks
+/// the host (the topmost presented screen, so a toast fired under a sheet
+/// shows above it), the style and the paired haptic; this type only draws.
+/// `FeedbackTests` fails the suite if `present` is called anywhere else.
+///
 /// Presentation is view-controller-agnostic (`present(_:in:)` takes any view),
 /// and toasts are self-owning: the caller fires and forgets. Only one shows at
 /// a time per host view — a second replaces the first rather than stacking, so
@@ -46,6 +51,22 @@ public final class ToastView: UIView {
     /// retire it instead of overlapping.
     private static let hostTag = 0x70A570
 
+    /// How the capsule reads. One material for both — the glass is the
+    /// toast's identity — so the difference rides on the glyph.
+    public enum Style: Sendable {
+        /// Something the user did has happened ("Copied", "Report sent").
+        case confirmation
+        /// Something the user did has NOT happened: it was rolled back, or
+        /// must be retried (#804). The glyph takes the system red — over a
+        /// glass that resolves its own luminance, a tinted glyph is the one
+        /// mark that still reads as "this went wrong" at a glance, without a
+        /// second material or a coloured capsule.
+        case failure
+    }
+
+    /// The style this toast was drawn in (read by tests).
+    public let style: Style
+
     private var dismissWorkItem: DispatchWorkItem?
     private let backdrop = UIVisualEffectView(effect: nil)
     /// The capsule's distance below its resting place. Driven instead of a
@@ -63,15 +84,18 @@ public final class ToastView: UIView {
     ///   - floor: what the capsule stands on instead of the safe area — the
     ///     top of a composer resting on it, which would otherwise cover it
     ///     (#729).
+    ///   - style: a confirmation, or a failure (#804).
+    @discardableResult
     public static func present(
         _ message: String,
         symbol: String? = "checkmark.circle.fill",
         in host: UIView,
-        above floor: NSLayoutYAxisAnchor? = nil
-    ) {
+        above floor: NSLayoutYAxisAnchor? = nil,
+        style: Style = .confirmation
+    ) -> ToastView {
         host.viewWithTag(hostTag).flatMap { $0 as? ToastView }?.dismiss(animated: false)
 
-        let toast = ToastView(message: message, symbol: symbol)
+        let toast = ToastView(message: message, symbol: symbol, style: style)
         toast.tag = hostTag
         let slide = toast.bottomAnchor.constraint(
             equalTo: floor ?? host.safeAreaLayoutGuide.bottomAnchor,
@@ -90,14 +114,34 @@ public final class ToastView: UIView {
             )
         }
         toast.animateIn()
+        return toast
     }
 
-    private init(message: String, symbol: String?) {
+    /// What VoiceOver is handed: the message, as a QUEUED announcement.
+    ///
+    /// ⚠️ QUEUED, AND POSTED ON THE NEXT RUN LOOP. A toast usually follows a
+    /// menu row (Copy, Mute, Report): posted at once from `init`, the
+    /// announcement competed with the context menu's own dismissal and was
+    /// dropped. Queued behind whatever VoiceOver is saying, a turn later, it
+    /// is heard.
+    static func announcement(_ message: String) -> NSAttributedString {
+        NSAttributedString(string: message, attributes: [.accessibilitySpeechQueueAnnouncement: true])
+    }
+
+    private static func announce(_ message: String) {
+        // A task, so it runs on a LATER turn of the main actor, never inline.
+        Task { @MainActor in
+            UIAccessibility.post(notification: .announcement, argument: announcement(message))
+        }
+    }
+
+    private init(message: String, symbol: String?, style: Style) {
+        self.style = style
         super.init(frame: .zero)
         isUserInteractionEnabled = false
         // Announced rather than read on focus: the user's attention is on what
         // they just did, and the capsule is gone before VoiceOver could reach it.
-        UIAccessibility.post(notification: .announcement, argument: message)
+        Self.announce(message)
 
         // The capsule's shape is driven by the corner CONFIGURATION, not a
         // layer radius: the glass renders its own boundary refraction against
@@ -129,7 +173,7 @@ public final class ToastView: UIView {
         var arranged: [UIView] = []
         if let symbol, let image = UIImage(systemName: symbol) {
             let glyph = UIImageView(image: image)
-            glyph.tintColor = .label
+            glyph.tintColor = style == .failure ? .systemRed : .label
             glyph.contentMode = .scaleAspectFit
             glyph.setContentHuggingPriority(.required, for: .horizontal)
             arranged.append(glyph)

@@ -1317,12 +1317,34 @@ final class NewPostViewController: UIViewController {
     /// a screen that is itself presenting something — an alert — dismisses
     /// THAT, and the sheet stayed up over a post that was already live, with
     /// its Post button dead for good.
+    ///
+    /// Only ever called once the post is up, so the dismissal ends with the
+    /// confirmation (#803): see `confirmPublished(on:)`.
     private func endTheFlow() {
         let presenter = presentingViewController
-        presenter?.dismiss(animated: true)
+        presenter?.dismiss(animated: true) {
+            guard let presenter else { return }
+            Self.confirmPublished(on: presenter)
+        }
         #if DEBUG
         debugFlowEndedBy = presenter
         #endif
+    }
+
+    /// What the author is told once the sheet has gone.
+    static let publishedMessage = "Posted"
+
+    /// "Posted", with the success haptic, over the screen the sheet was
+    /// raised from (#803).
+    ///
+    /// Publishing used to end with the sheet simply going: no toast, no
+    /// haptic, and a post that lands in a feed the author is not looking at
+    /// is exactly the result that is easy to miss. Shown from the sheet's
+    /// PRESENTER, after the dismissal — on the sheet itself, it would leave
+    /// with it. `Feedback` resolves the presenter (the tab shell) to the
+    /// screen on top of its selected tab, whose safe area clears the tab bar.
+    static func confirmPublished(on presenter: UIViewController) {
+        Feedback.success(publishedMessage, symbol: "paperplane.fill", from: presenter)
     }
 
     /// Adds what was just published to the library. False when nothing, or

@@ -369,7 +369,7 @@ public final class ProfileRelationshipsViewModel {
             } catch {
                 self.applyFollow(!target, to: profileID)
                 self.onActionResult?(.failed(
-                    message: target ? "Couldn't follow this profile." : "Couldn't unfollow this profile."
+                    message: target ? "Couldn't follow this profile" : "Couldn't unfollow this profile"
                 ))
             }
             self.mutating.remove(profileID)
@@ -397,7 +397,7 @@ public final class ProfileRelationshipsViewModel {
                 self.onSegmentTitlesChange?(self.segmentTitles)
                 self.emit()
             } catch {
-                self.onActionResult?(.failed(message: "Couldn't remove this follower."))
+                self.onActionResult?(.failed(message: "Couldn't remove this follower"))
             }
             self.mutating.remove(profileID)
         }
@@ -677,7 +677,7 @@ public final class ProfileRelationshipsViewModel {
                     $0.canFollow = false
                 }
             } catch {
-                self.onActionResult?(.failed(message: "Couldn't follow this profile."))
+                self.onActionResult?(.failed(message: "Couldn't follow this profile"))
             }
             self.mutating.remove(profileID)
         }
@@ -693,7 +693,7 @@ public final class ProfileRelationshipsViewModel {
                 try await requests.cancelFollowRequest(to: profileID)
             } catch {
                 self.update(profileID) { $0.viewerRequested = true }
-                self.onActionResult?(.failed(message: "Couldn't withdraw your request."))
+                self.onActionResult?(.failed(message: "Couldn't withdraw your request"))
             }
             self.mutating.remove(profileID)
         }

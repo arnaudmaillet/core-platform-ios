@@ -1720,7 +1720,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // Notes paste empty.
         UIPasteboard.general.url = link
         UIPasteboard.general.string = link.absoluteString
-        ToastView.present("Link copied", symbol: "link", in: view)
+        Feedback.success("Link copied", symbol: "link", from: self)
     }
 
     /// Block is destructive and, here, one-way out of the screen — so it asks
@@ -1863,28 +1863,32 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             let message = profileCount > 1
                 ? "Blocked \(handle) and \(profileCount - 1) more"
                 : "Blocked \(handle)"
-            // Hosted on the navigation controller's view, not this screen's:
-            // the block pops this view controller in the same turn, and a toast
+            // Sourced from the navigation controller, not this screen: the
+            // block pops this view controller in the same turn, and a toast
             // parented here would leave with it.
-            ToastView.present(message, symbol: "hand.raised.fill", in: navigationController?.view ?? view)
+            Feedback.success(message, symbol: "hand.raised.fill", from: navigationController ?? self)
         case .unblocked(let handle):
-            ToastView.present("Unblocked \(handle)", symbol: "hand.raised.slash.fill", in: view)
+            Feedback.success("Unblocked \(handle)", symbol: "hand.raised.slash.fill", from: self)
         case .muteChanged(let handle, let scopes):
-            ToastView.present(
+            Feedback.success(
                 ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
                 symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                in: view
+                from: self
             )
         case .restrictChanged(let handle, let restricted):
-            ToastView.present(
+            Feedback.success(
                 restricted ? "Restricted \(handle)" : "Unrestricted \(handle)",
                 symbol: restricted ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.checkmark",
-                in: view
+                from: self
             )
         case .postDeleted:
-            ToastView.present("Post deleted", symbol: "trash.fill", in: view)
+            Feedback.success("Post deleted", symbol: "trash.fill", from: self)
         case .reported:
-            ToastView.present("Report sent", in: view)
+            Feedback.success("Report sent", symbol: "flag.fill", from: self)
+        case .followFailed(let message):
+            // A toast, not the alert below: the button has already flipped
+            // back, so there is nothing to decide — only why it moved (#802).
+            Feedback.failure(message, from: self)
         case .failed(let message):
             let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "OK", style: .default))

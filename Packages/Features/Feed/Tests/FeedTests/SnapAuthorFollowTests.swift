@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import Testing
 import UIKit
@@ -211,8 +212,9 @@ struct SnapAuthorFollowTests {
         return nil
     }
 
-    /// A refused follow puts the "+" back.
-    @Test func aRefusedFollowBringsTheFollowBack() async throws {
+    /// A refused follow puts the "+" back — and says so (#802), in a failure
+    /// toast naming the author.
+    @Test func aRefusedFollowBringsTheFollowBackAndSaysSo() async throws {
         let graph = FollowGraphStub(failsFollow: true)
         let feed = Self.feed(graph: graph)
         feed.setFollowRelation(.notFollowing, for: ProfileID("prof-2"))
@@ -220,10 +222,30 @@ struct SnapAuthorFollowTests {
 
         feed.followAuthor(ProfileID("prof-2"))
         #expect(try Self.pill(feed).offersFollow == false)
+        #expect(Self.toast(in: feed.view) == nil, "the failure was said before the graph answered")
         for _ in 0..<200 where (try? Self.pill(feed).offersFollow) == false {
             try await Task.sleep(for: .milliseconds(5))
         }
         #expect(try Self.pill(feed).offersFollow)
+        let toast = try #require(Self.toast(in: feed.view), "the refused follow was silent")
+        #expect(toast.style == .failure)
+    }
+
+    /// The failure names the author by the model's handle, never by parsing
+    /// the meta line; a model with none falls back to the display name.
+    @Test func aFollowFailureNamesTheAuthorByTheModelsHandle() {
+        let named = FeedItemDisplayModel(
+            id: PostID("p"), authorID: ProfileID("a"), authorName: "Ava", metaText: "2h",
+            avatarURL: nil, caption: nil, mediaURL: nil, mediaKind: .image, thumbnailURL: nil,
+            audioText: nil, authorHandle: "ava"
+        )
+        #expect(SnapFeedViewController.followName(of: named) == "@ava")
+        #expect(SnapFeedViewController.followName(of: Self.model(authorID: "bo")) == "Name bo")
+    }
+
+    private static func toast(in view: UIView) -> ToastView? {
+        if let toast = view as? ToastView { return toast }
+        return view.subviews.lazy.compactMap { toast(in: $0) }.first
     }
 
     /// A follow accepted ELSEWHERE — on the author's own profile — takes the

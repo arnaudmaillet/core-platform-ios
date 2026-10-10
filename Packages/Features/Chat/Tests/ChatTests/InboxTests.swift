@@ -1142,6 +1142,45 @@ struct SuggestionsViewModelTests {
         #expect(!viewModel.isFollowing(ProfileID("p1")))
     }
 
+    /// ⚠️ A DOUBLE TAP IS ONE FOLLOW (#802). The second tap used to send an
+    /// unfollow racing the follow on the wire; while a profile's change is on
+    /// its way, another tap on it is ignored.
+    @Test func aDoubleTapIsIgnoredWhileTheFollowIsOnItsWay() async {
+        let repository = StubSuggestions(accounts: [account("p1")])
+        let viewModel = SuggestionsViewModel(repository: repository)
+        viewModel.loadIfNeeded()
+        await settle()
+
+        viewModel.toggleFollow(ProfileID("p1"))
+        viewModel.toggleFollow(ProfileID("p1"))
+        // Asserted before any await: the second tap changed nothing.
+        #expect(viewModel.isFollowing(ProfileID("p1")), "the second tap undid the follow")
+
+        await settle()
+        #expect(await repository.followed == [ProfileID("p1")])
+        #expect(await repository.unfollowed.isEmpty, "the second tap reached the server")
+    }
+
+    /// A refused follow rolls back AND says so (#802), naming the account.
+    @Test func aFailedFollowSaysSo() async {
+        let repository = StubSuggestions(accounts: [account("p1")], shouldFailFollow: true)
+        let viewModel = SuggestionsViewModel(repository: repository)
+        var failures: [String] = []
+        viewModel.onFollowFailure = { failures.append($0) }
+        viewModel.loadIfNeeded()
+        await settle()
+
+        viewModel.toggleFollow(ProfileID("p1"))
+        #expect(failures.isEmpty, "the failure was said before the server answered")
+        await settle()
+
+        #expect(failures == ["Couldn't follow @p1"])
+        #expect(!viewModel.isFollowing(ProfileID("p1")))
+        // The profile is free again: a retry goes through to the server.
+        viewModel.toggleFollow(ProfileID("p1"))
+        #expect(viewModel.isFollowing(ProfileID("p1")), "the retry was ignored")
+    }
+
     @Test func dismissingRemovesTheRowAndEmptiesTheSurface() async {
         let viewModel = SuggestionsViewModel(repository: StubSuggestions(accounts: [account("p1")]))
         var phases: [SuggestionsViewModel.Phase] = []

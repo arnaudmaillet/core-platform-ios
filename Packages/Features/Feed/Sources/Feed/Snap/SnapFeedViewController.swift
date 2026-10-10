@@ -1967,12 +1967,25 @@ final class SnapFeedViewController: UIViewController {
               let before = followRelationsByAuthor[author] else { return }
         followsInFlight.insert(author)
         setFollowRelation(before.settingFollow(true), for: author)
+        // Named now, while the pill shows them: by the time the graph answers
+        // the viewer may have swiped to someone else.
+        let name = authorIdentityView.shownAuthor.flatMap { $0.authorID == author ? Self.followName(of: $0) : nil }
         Task { [weak self] in
             let accepted = (try? await socialGraph.setFollowing(true, for: author)) != nil
             guard let self else { return }
             self.followsInFlight.remove(author)
-            if !accepted { self.setFollowRelation(before, for: author) }
+            guard !accepted else { return }
+            // The "+" comes back — and says why (#802): a mark that undoes
+            // itself without a word reads as a glitch, or is missed entirely.
+            self.setFollowRelation(before, for: author)
+            Feedback.failure(name.map { "Couldn't follow \($0)" } ?? "Couldn't follow", from: self)
         }
+    }
+
+    /// How a follow failure names the author: their `@handle` from the
+    /// model, otherwise their display name.
+    static func followName(of model: FeedItemDisplayModel) -> String {
+        model.authorHandle.map { "@" + $0 } ?? model.authorName
     }
 
 
@@ -2209,6 +2222,8 @@ final class SnapFeedViewController: UIViewController {
     private func toggleBookmark(for id: PostID) {
         MemberGates.perform(.save, from: self) { [weak self] in
             self?.bookmarks.toggle(id.rawValue)
+            // The fill says it; the hand feels it (#803).
+            Feedback.toggled()
             self?.refreshBookmarkGlyph(for: id)
         }
     }
@@ -5175,7 +5190,7 @@ final class SnapFeedViewController: UIViewController {
         // acknowledge a menu tap is a worse answer than the one they asked for.
         // The next render drops it — see `render(_:)` — so it goes when they
         // move on, which is when "not interested" means anything.
-        ToastView.present("Hidden from this feed", symbol: "hand.thumbsdown", in: view)
+        Feedback.info("Hidden from this feed", symbol: "hand.thumbsdown", from: self)
     }
 
     private func presentReportReasons(for id: PostID) {
@@ -5195,10 +5210,10 @@ final class SnapFeedViewController: UIViewController {
                 // reports.
                 try await reporting.report(.post(id), reason: reason, surface: "ios.feed")
                 guard let self else { return }
-                ToastView.present("Report sent", symbol: "flag.fill", in: view)
+                Feedback.success("Report sent", symbol: "flag.fill", from: self)
             } catch {
                 guard let self else { return }
-                ToastView.present("Couldn't send this report", symbol: "exclamationmark.triangle", in: view)
+                Feedback.failure("Couldn't send this report", from: self)
             }
         }
     }

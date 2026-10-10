@@ -6,13 +6,17 @@ import Testing
 private actor EditStubProvider: ProfileProviding {
     private let profile: UserProfile
     private let updateError: Error?
+    /// Refuses only the handle change (a taken username), on top of
+    /// `updateError`.
+    private let handleError: Error?
     private(set) var updateCalls: [(displayName: String, bio: String, website: String, links: [ProfileLink])] = []
     private(set) var handleCalls: [String] = []
     private(set) var profileReads = 0
 
-    init(profile: UserProfile, updateError: Error? = nil) {
+    init(profile: UserProfile, updateError: Error? = nil, handleError: Error? = nil) {
         self.profile = profile
         self.updateError = updateError
+        self.handleError = handleError
     }
 
     func currentUserProfile() async throws -> UserProfile {
@@ -33,7 +37,7 @@ private actor EditStubProvider: ProfileProviding {
 
     func changeHandle(_ newHandle: String) async throws -> UserProfile {
         handleCalls.append(newHandle)
-        if let updateError { throw updateError }
+        if let error = handleError ?? updateError { throw error }
         return profile
     }
 }
@@ -61,6 +65,13 @@ struct EditProfileViewModelTests {
     private func settle() async {
         await Task.yield()
         try? await Task.sleep(for: .milliseconds(50))
+    }
+
+    /// Waits for what the test is about rather than for the clock.
+    private func settle(until condition: () -> Bool) async {
+        for _ in 0..<400 where !condition() {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
     }
 
     @Test func prefillsFieldsFromCurrentProfile() async {
@@ -166,6 +177,59 @@ struct EditProfileViewModelTests {
             Issue.record("expected failed save state, got \(String(describing: lastSaveState))")
             return
         }
+    }
+
+    /// A save that lands says so (#803): `.saved`, which the editor shows as
+    /// "Profile saved" — and only once the server has answered.
+    @Test func aSuccessfulSaveEndsSaved() async {
+        let provider = EditStubProvider(profile: viewerProfile())
+        let viewModel = EditProfileViewModel(repository: provider, onSaved: {})
+        var states: [EditProfileViewModel.SaveState] = []
+        viewModel.onSaveStateChange = { states.append($0) }
+
+        viewModel.saveMetadata(.init(displayName: "Ada", username: "ada", bio: "", website: "", links: []))
+        #expect(states == [.saving], "confirmed before the server answered")
+        await settle(until: { states.last == .saved })
+
+        #expect(states == [.saving, .saved])
+    }
+
+    /// Two quick edits confirm once, when both are on the server.
+    @Test func queuedSavesConfirmOnceWhenTheLastLands() async {
+        let provider = EditStubProvider(profile: viewerProfile())
+        let viewModel = EditProfileViewModel(repository: provider, onSaved: {})
+        var states: [EditProfileViewModel.SaveState] = []
+        viewModel.onSaveStateChange = { states.append($0) }
+
+        viewModel.saveMetadata(.init(displayName: "Ada", username: "ada", bio: "", website: "", links: []))
+        viewModel.saveUsername("ada2")
+        await settle(until: { states.last == .saved })
+
+        #expect(states.filter { $0 == .saved }.count == 1, "\(states)")
+        #expect(states.last == .saved)
+    }
+
+    /// ⚠️ A queue with a failure in it never ends on "Profile saved": a
+    /// refused username followed by a bio edit that lands ends `.idle` — the
+    /// failure already spoke.
+    @Test func aQueueWithAFailedSaveDoesNotEndSaved() async {
+        let provider = EditStubProvider(profile: viewerProfile(), handleError: SaveError())
+        let viewModel = EditProfileViewModel(repository: provider, onSaved: {})
+        var states: [EditProfileViewModel.SaveState] = []
+        viewModel.onSaveStateChange = { states.append($0) }
+
+        viewModel.saveUsername("taken")
+        viewModel.saveMetadata(.init(displayName: "Ada", username: "ada", bio: "New bio", website: "", links: []))
+        await settle(until: { states.last == .idle || states.last == .saved })
+
+        #expect(!states.contains(.saved), "\(states)")
+        #expect(states.contains(.failed(message: "Couldn't save. Please try again.")))
+        #expect(states.last == .idle)
+
+        // A fresh queue starts clean: the next edit that lands confirms.
+        viewModel.saveMetadata(.init(displayName: "Ada", username: "ada", bio: "Again", website: "", links: []))
+        await settle(until: { states.last == .saved })
+        #expect(states.last == .saved)
     }
 
     @Test func sequentialSavesAllRun() async {

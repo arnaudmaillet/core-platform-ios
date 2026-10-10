@@ -634,7 +634,7 @@ final class ProfileRelationshipsViewController: UIViewController {
     private func render(_ result: ProfileRelationshipsViewModel.ActionResult) {
         switch result {
         case .failed(let message):
-            ToastView.present(message, symbol: "exclamationmark.triangle", in: view)
+            Feedback.failure(message, from: self)
         }
     }
 
