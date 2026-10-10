@@ -10,13 +10,15 @@ private actor OneHandle: TextCompletionProviding {
     }
 }
 
-/// The floating strips leave the window with their keyboard (#785).
+/// The floating strips leave the window with their keyboard, and with their
+/// field (#785).
 ///
 /// ⚠️ **THEY FLOAT IN THE WINDOW, NOT IN THE COMPOSER.** The `:query` strip
 /// and the `@`/`#` strip are window subviews in front of everything, and they
 /// left only when the field stopped editing. An owner released without its
 /// field resigning (a closed composer, a recycled cell) took the keyboard
-/// with it and left a strip floating over whatever came next.
+/// with it and left a strip floating over whatever came next; a field taken
+/// off screen while still editing left its strip the same way.
 @MainActor
 @Suite(.serialized, .sharesMainThread)
 struct EmoteKeyboardStripLifetimeTests {
@@ -93,5 +95,43 @@ struct EmoteKeyboardStripLifetimeTests {
         try #require(released == nil, "guard: something still holds the keyboard, so it was never released")
         #expect(strip.superview == nil, "the completion strip outlived its keyboard")
         #expect(!window.subviews.contains(strip), "the completion strip is still floating in the window")
+    }
+
+    @Test func theEmoteStripLeavesTheWindowWhenItsFieldDoes() throws {
+        let (window, field) = makeWindow()
+        defer { takeDown(window) }
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        let keyboard = makeKeyboard(for: textView, anchoredTo: field)
+        let strip = keyboard.suggestionStrip
+        type("gg :lol", in: textView)
+        try #require(strip.window === window, "guard: the emote strip never floated in the window")
+
+        // The keyboard stays alive and the field never resigns: only the
+        // field leaving can take the strip away.
+        field.removeFromSuperview()
+
+        #expect(strip.superview == nil, "the emote strip outlived its field in the window")
+        #expect(!window.subviews.contains(strip), "the emote strip is still floating in the window")
+        withExtendedLifetime(keyboard) {}
+    }
+
+    @Test func theCompletionStripLeavesTheWindowWhenItsFieldDoes() async throws {
+        let (window, field) = makeWindow()
+        defer { takeDown(window) }
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 300, height: 44))
+        let keyboard = makeKeyboard(for: textView, anchoredTo: field)
+        keyboard.textCompleter = OneHandle()
+        keyboard.completionDebounce = .zero
+        let strip = keyboard.textCompletionStrip
+
+        type("ride with @ke", in: textView)
+        try #require(await settle { keyboard.isShowingCompletions }, "guard: the completion strip never showed")
+        try #require(strip.window === window, "guard: the completion strip does not float in the window")
+
+        field.removeFromSuperview()
+
+        #expect(strip.superview == nil, "the completion strip outlived its field in the window")
+        #expect(!window.subviews.contains(strip), "the completion strip is still floating in the window")
+        withExtendedLifetime(keyboard) {}
     }
 }
