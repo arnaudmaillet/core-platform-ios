@@ -35,7 +35,7 @@ private final class ShiftedClock: @unchecked Sendable {
     private let lock = NSLock()
     private var offset: TimeInterval = 0
 
-    func shift(by seconds: TimeInterval) { lock.withLock { offset = seconds } }
+    func setOffset(_ seconds: TimeInterval) { lock.withLock { offset = seconds } }
     func now() -> Date { Date().addingTimeInterval(lock.withLock { offset }) }
 }
 
@@ -213,9 +213,9 @@ struct LikeOutboxSenderTests {
         #expect(await eventually { !staking.sent.isEmpty }, "the foreign batch was never tried")
 
         // A tap that landed 9 s ago: due in about a second on the real clock.
-        clock.shift(by: -9)
+        clock.setOffset(-9)
         wallet.stake(.points(1), on: "p1")
-        clock.shift(by: 0)
+        clock.setOffset(0)
 
         #expect(
             await eventually {
