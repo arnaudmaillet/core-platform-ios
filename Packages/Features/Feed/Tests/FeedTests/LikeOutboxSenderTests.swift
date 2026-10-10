@@ -76,6 +76,25 @@ struct LikeOutboxSenderTests {
         #expect(outbox.batches.isEmpty)
     }
 
+    /// ⚠️ A BATCH REFUSED FOR GOOD NEVER HOLDS THE OTHERS (#796): it leaves
+    /// with its likes given back, and the next batch goes in the same flush.
+    @Test func aRejectedBatchLeavesAndTheNextOneGoes() async {
+        let (sender, wallet, outbox, staking) = make()
+        let start = wallet.balance
+        staking.then(.failure(LikeStakeRejected(reason: "post gone")))
+        wallet.stake(.points(2), on: "p1")
+        wallet.commitStakes(on: "p1")
+        wallet.stake(.points(1), on: "p2")
+        wallet.commitStakes(on: "p2")
+
+        await sender.flush()
+
+        #expect(staking.sent.map(\.target) == [.post("p1"), .post("p2")], "the refused batch held the next one")
+        #expect(outbox.batches.isEmpty)
+        #expect(wallet.boostTotal(forTarget: "p1") == 0, "the refused likes were not given back")
+        #expect(wallet.balance == start - 1)
+    }
+
     /// What the server clamped off goes back to the balance.
     @Test func aClampedBatchGivesTheRestBack() async {
         let (sender, wallet, _, staking) = make()
