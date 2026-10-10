@@ -77,7 +77,8 @@ struct ConversationThreadViewControllerTests {
     private func makeScreen(
         mode: ConversationThreadMode = .full,
         prefill: String = "",
-        phase: ConversationThreadPhase = .content(transcript)
+        phase: ConversationThreadPhase = .content(transcript),
+        now: Date? = nil
     ) -> (ConversationThreadViewController, FakeDriver, FakeAccessory, UIWindow) {
         let driver = FakeDriver(initial: phase)
         let accessory = FakeAccessory()
@@ -85,6 +86,9 @@ struct ConversationThreadViewControllerTests {
             driver: driver, mode: mode, prefill: prefill,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
+        // One "now" for the seed and the titles: a run crossing midnight
+        // read the clock on either side of it.
+        if let now { screen.dayClock = { now } }
         let navigation = UINavigationController(rootViewController: screen)
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = navigation
@@ -144,7 +148,8 @@ struct ConversationThreadViewControllerTests {
     /// own identifier, so a change of day morphs.
     @Test func theDayIsABarItemLeftOfTheBell() async throws {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let now = Date()
+        let today = calendar.startOfDay(for: now)
         let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
         let messages = (0..<60).map { index -> ConversationThreadMessage in
             let day = index < 30 ? yesterday : today
@@ -154,7 +159,7 @@ struct ConversationThreadViewControllerTests {
                 isMine: index.isMultiple(of: 2), quote: nil
             )
         }
-        let (screen, _, _, window) = makeScreen(phase: .content(messages))
+        let (screen, _, _, window) = makeScreen(phase: .content(messages), now: now)
         defer { window.isHidden = true }
         screen.view.layoutIfNeeded()
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
@@ -215,7 +220,8 @@ struct ConversationThreadViewControllerTests {
     /// short, and the item popped in on the device.
     @Test func theDayAppearsInOnePlacementEvenWhenItChangesInTheSameTurn() async throws {
         let calendar = Calendar.current
-        let today = calendar.startOfDay(for: Date())
+        let now = Date()
+        let today = calendar.startOfDay(for: now)
         let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
         let messages = (0..<60).map { index -> ConversationThreadMessage in
             ConversationThreadMessage(
@@ -225,7 +231,7 @@ struct ConversationThreadViewControllerTests {
                 isMine: index.isMultiple(of: 2), quote: nil
             )
         }
-        let (screen, _, _, window) = makeScreen(phase: .content(messages))
+        let (screen, _, _, window) = makeScreen(phase: .content(messages), now: now)
         defer { window.isHidden = true }
         screen.view.layoutIfNeeded()
         let stream = try #require(Self.firstView(UICollectionView.self, in: screen.view))
