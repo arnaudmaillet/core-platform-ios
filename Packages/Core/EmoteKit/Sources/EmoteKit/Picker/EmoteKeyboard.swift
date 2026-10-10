@@ -465,6 +465,8 @@ public final class EmoteKeyboard: NSObject {
     func search() { startSearch() }
     var completionTokens: [String] { completionStrip.completions.map(\.token) }
     var isShowingCompletions: Bool { completionStrip.superview != nil && !completionStrip.isHidden }
+    /// The `@`/`#` strip itself, so a test can hold it past its keyboard (#785).
+    var textCompletionStrip: TextCompletionStrip { completionStrip }
     func selectCompletion(at index: Int) {
         guard index < completionStrip.completions.count else { return }
         acceptCompletion(completionStrip.completions[index])
