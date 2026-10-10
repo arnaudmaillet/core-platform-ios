@@ -247,6 +247,7 @@ public actor SessionManager {
                 if error.code == .unauthenticated || error.code == .permissionDenied {
                     throw AuthError.sessionExpired
                 }
+                if GuestAttempt.isUnreachable(error.code) { throw AuthError.offline }
                 throw AuthError.transport(message: error.message ?? "code \(error.code)")
             }
         }
@@ -328,9 +329,15 @@ public actor SessionManager {
             return nil
         }
 
-        /// The codes a dead or timing-out network answers with.
         static func failure(_ error: ConnectError) -> GuestAttempt {
-            error.code == .unavailable || error.code == .deadlineExceeded ? .unreachable : .refused
+            isUnreachable(error.code) ? .unreachable : .refused
+        }
+
+        /// The codes a dead or timing-out network answers with. `unknown` too:
+        /// Connect maps the URL errors it has no code for (a DNS failure,
+        /// "cannot load from network") there.
+        static func isUnreachable(_ code: Code) -> Bool {
+            code == .unavailable || code == .deadlineExceeded || code == .unknown
         }
     }
 

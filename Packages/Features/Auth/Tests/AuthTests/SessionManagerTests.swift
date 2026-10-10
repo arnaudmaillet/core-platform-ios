@@ -316,7 +316,8 @@ struct SessionManagerTests {
         let store = InMemorySessionStore(session: expiredSession())
         let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
 
-        await #expect(throws: AuthError.transport(message: "offline")) {
+        // `offline`, not a generic transport failure (#791).
+        await #expect(throws: AuthError.offline) {
             try await manager.validAccessToken()
         }
 
