@@ -1,6 +1,13 @@
 import DesignSystem
 import UIKit
 
+/// A screen that started a call and shows it is out: a spinner on the
+/// control that started it, the inputs locked, until the call ends (#827).
+@MainActor
+protocol WorkingIndicating: AnyObject {
+    func setWorking(_ working: Bool)
+}
+
 /// The shape every sign-up step shares (guest mode B4): the flow's hero
 /// header, the step's own rows, and one full-width primary button — on the
 /// bottom-anchored table the credential screens use, so a step sits above
@@ -65,6 +72,25 @@ class SignUpStepViewController: BottomAnchoredTableViewController {
         }
     }
 
+    /// A spinner on the trailing row at `index` — a link that started a call
+    /// ("Resend Code") — and the row deaf to taps until the call ends (#827).
+    ///
+    /// ⚠️ AN ACCESSORY, NOT THE ROW'S TEXT. A row may rewrite its own content
+    /// while the call runs (the resend countdown does, every second), and a
+    /// spinner kept in that configuration would be wiped by the next tick.
+    func setTrailingRowWorking(_ working: Bool, at index: Int) {
+        guard trailingRows.indices.contains(index) else { return }
+        let row = trailingRows[index]
+        if working {
+            let spinner = UIActivityIndicatorView(style: .medium)
+            spinner.startAnimating()
+            row.accessoryView = spinner
+        } else {
+            row.accessoryView = nil
+        }
+        row.isUserInteractionEnabled = !working
+    }
+
     /// Whether the step's input is complete. Subclasses override.
     var canContinue: Bool { true }
 
@@ -126,3 +152,5 @@ class SignUpStepViewController: BottomAnchoredTableViewController {
         }
     }
 }
+
+extension SignUpStepViewController: WorkingIndicating {}
