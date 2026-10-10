@@ -441,8 +441,11 @@ final class SnapFeedViewController: UIViewController {
     /// card's Unfollow — for the screen's life (`FollowGraphEvents`). Nil
     /// without a channel, and then a return re-asks instead.
     private var followSubscription: FollowGraphSubscription?
-    /// See `FeedFeatureBuilder.soundProvider` / `useSound`.
-    private let soundProvider: (any PostSoundProviding)?
+    /// The page's sound: which sound a post is set to, what it draws, what is
+    /// heard, and the sound sheet's inputs (`SnapSoundState`), over
+    /// `FeedFeatureBuilder.soundProvider`.
+    private let soundState: SnapSoundState
+    /// See `FeedFeatureBuilder.useSound`.
     private let useSound: (@MainActor (PostSound) -> Void)?
     /// Opens a new feed with the hero — the sound sheet's grid uses it.
     private let openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
@@ -470,7 +473,7 @@ final class SnapFeedViewController: UIViewController {
         prewarmPosts: (@Sendable ([PostID]) async -> Void)? = nil
     ) {
         self.prewarmPosts = prewarmPosts
-        self.soundProvider = soundProvider
+        self.soundState = SnapSoundState(provider: soundProvider)
         self.useSound = useSound
         self.openFeedHero = openFeedHero
         self.galleryPost = galleryPost
@@ -2367,7 +2370,7 @@ final class SnapFeedViewController: UIViewController {
     /// through playing off screen — only when the viewer turned it on, the
     /// feed's sound is on, and this screen (not one under it) owns the sound.
     private func continueInBackground() -> Bool {
-        guard MediaPlaybackPolicy.playsInBackground, FeedSound.isOn, isOnScreen, !isAudioYielded,
+        guard MediaPlaybackPolicy.playsInBackground, soundState.isOn, isOnScreen, !isAudioYielded,
               let videoPlayback, let surface = ownAudibleSurface,
               surface === videoPlayback.currentAudibleSurface
         else { return false }
@@ -2606,16 +2609,9 @@ final class SnapFeedViewController: UIViewController {
     /// a spend (or a claim on another screen) enables/disables the control
     /// and updates the menu it will build on its next long-press.
     /// What the sound bubble and the composer's rail slot draw for `model`
-    /// (#671): the sound's cover and the mute state — and for a post with no
-    /// sound, media or text, a greyed `music.note.slash` that keeps the slot
-    /// (#683).
+    /// (#671) — see `SnapSoundState.face`.
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
-        let postSound = sound(for: model)
-        return SnapSoundFace(
-            coverURL: SnapMediaAttributionView.coverURL(for: model, cover: attributionContent(for: model).cover),
-            isAvailable: postSound != nil,
-            isMuted: !FeedSound.isOn
-        )
+        soundState.face(for: model, playingClip: playingClip(of: model))
     }
 
     /// Every visible sound bubble, and the open panel's rail slot, after the
@@ -4279,18 +4275,11 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// What the attribution draws for `model`: the sound's line, and a cover
-    /// that is the SOUND's — its artwork, a note for a song that has none, and
-    /// the post's own picture only for a sound with neither.
+    /// that is the SOUND's (`SnapSoundState.attribution`).
     private func attributionContent(
         for model: FeedItemDisplayModel
     ) -> (sound: SnapMediaAttributionView.SoundCredit, cover: SnapMediaAttributionView.Cover) {
-        let postSound = sound(for: model)
-        let cover: SnapMediaAttributionView.Cover = switch (postSound?.artworkURL, postSound?.isOriginal) {
-        case (let artwork?, _): .artwork(artwork)
-        case (nil, false): .note
-        default: .post
-        }
-        return (soundLine(for: model).map { .sound($0) } ?? .none, cover)
+        soundState.attribution(for: model, playingClip: playingClip(of: model))
     }
 
     // MARK: - Bar pills under the scroll
@@ -4386,7 +4375,7 @@ final class SnapFeedViewController: UIViewController {
         refreshPictureInPicture(ownerCell: ownerCell)
         guard let videoPlayback else { return }
         var surface: VideoRenderView?
-        if FeedSound.isOn, isOnScreen, isForeground, !isAudioYielded, let owner = playbackOwner,
+        if soundState.isOn, isOnScreen, isForeground, !isAudioYielded, let owner = playbackOwner,
            let cell = ownerCell ?? lifecycleCell(at: owner) as? SnapFeedCell {
             surface = cell.audibleSurface
         }
@@ -4431,27 +4420,16 @@ final class SnapFeedViewController: UIViewController {
 
     /// The sound of a page with no clip — a photograph, a collection of
     /// them, a text post — played while that page owns the screen, under the
-    /// same rules as a clip's (see `FeedSongPlayer`).
-    ///
-    /// ⚠️ **NOTHING UNDER POWER SAVING (#580).** A clip under Power Saving
-    /// does not start on its own; a photograph's song is the same thing
-    /// without a picture, so it is silent too — the viewer's decision.
+    /// same rules as a clip's (see `FeedSongPlayer`), and nothing under Power
+    /// Saving (#580; `SnapSoundState.song`).
     private func refreshSong() {
         var song: URL?
-        if Self.pageSongPlays(soundOn: FeedSound.isOn, powerSaving: PowerSavingPreference.isOn),
-           isOnScreen, isForeground, !isAudioYielded,
+        if isOnScreen, isForeground, !isAudioYielded,
            let owner = playbackOwner, orderedIDs.indices.contains(owner),
-           let model = modelsByID[orderedIDs[owner]],
-           !(model.mediaKind == .video || model.extraMedia.contains { $0.videoURL != nil }) {
-            song = sound(for: model)?.previewURL
+           let model = modelsByID[orderedIDs[owner]] {
+            song = soundState.song(for: model, playingClip: playingClip(of: model))
         }
         songPlayer.play(song)
-    }
-
-    /// Whether a page's song may be heard at all: the feed's sound on, and
-    /// Power Saving off (#580).
-    static func pageSongPlays(soundOn: Bool, powerSaving: Bool) -> Bool {
-        soundOn && !powerSaving
     }
 
     /// Turns the attribution's cover while the page's media plays — a clip
@@ -4466,7 +4444,7 @@ final class SnapFeedViewController: UIViewController {
         // The sound bubble's record turns while the post plays AUDIBLY: the
         // player's play and pause, and the mute (#683) — and so does the
         // panel's slot, where a TEXT page's sound lives (#692).
-        let audible = playing && FeedSound.isOn
+        let audible = soundState.isAudible(playing: playing)
         activeSnapCell?.setSoundSpinning(audible)
         (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(audible)
         (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(audible)
@@ -4484,7 +4462,7 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func toggleSound() {
-        FeedSound.toggle()
+        soundState.toggle()
         refreshAudibleSurface()
         // The page's sound bubble and the panel's slot wear the new state.
         refreshVisibleSoundFaces()
@@ -4500,77 +4478,33 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Sound sheet
 
-    /// The clip a post's sound belongs to: the one on screen when this is the
-    /// active page (a collection's pages are different clips, with different
-    /// sounds), else its head, or its first clip page.
-    private func soundVideoURL(of model: FeedItemDisplayModel) -> URL? {
-        if model.id == activeModel?.id, let playing = activeSnapCell?.currentClipURL { return playing }
-        if model.mediaKind == .video, let url = model.mediaURL { return url }
-        return model.extraMedia.first { $0.videoURL != nil }?.videoURL
-    }
-
-    /// The sound `model` is set to: the provider's answer, or — with nobody to
-    /// ask — the clip's own "original sound", played from the clip itself
-    /// when a player can open it.
-    private func sound(for model: FeedItemDisplayModel) -> PostSound? {
-        let clip = soundVideoURL(of: model)
-        if let known = soundProvider?.sound(forPost: model.id, clip: clip) { return known }
-        guard let url = clip else { return nil }
-        let playable = url.isFileURL || ["http", "https"].contains(url.scheme?.lowercased() ?? "")
-        return PostSound(
-            id: "original-\(model.id.rawValue)", title: nil, artist: nil,
-            previewURL: playable ? url : nil, artworkURL: model.thumbnailURL, duration: nil
-        )
-    }
-
-    /// The attribution's second line: the track, or the author's original
-    /// sound. Nil for a post with nothing to hear.
-    private func soundLine(for model: FeedItemDisplayModel) -> String? {
-        guard let sound = sound(for: model) else { return nil }
-        guard let title = sound.title else {
-            return "Original sound · \(sound.artist ?? "@\(Self.handle(of: model))")"
-        }
-        return [title, sound.artist].compactMap { $0 }.joined(separator: " · ")
-    }
-
-    /// "@handle" off the meta line ("@handle · 3m"), the author's name
-    /// otherwise.
-    private static func handle(of model: FeedItemDisplayModel) -> String {
-        let first = model.metaText.components(separatedBy: " · ").first ?? ""
-        return first.hasPrefix("@") ? String(first.dropFirst()) : model.authorName
+    /// The clip the active page's cell is showing, for `model` when it is the
+    /// active page; nil for every other page (`SnapSoundState.clip`).
+    private func playingClip(of model: FeedItemDisplayModel) -> URL? {
+        model.id == activeModel?.id ? activeSnapCell?.currentClipURL : nil
     }
 
     /// The attribution's tap: the sound the page is set to, in a sheet.
     private func presentSoundSheet() {
         guard presentedViewController == nil, let model = activeModel,
-              let sound = sound(for: model) else { return }
+              let inputs = soundState.sheetInputs(for: model, playingClip: playingClip(of: model))
+        else { return }
         // The sheet lists EVERY post set to this sound, not only this feed's
-        // (`SoundSheetSections`): popular — only when the provider gives the
-        // sound one; the sound's original post first when it is a media
-        // post, then the page it was opened from — then recent: every post
-        // the popular row does not show, newest first.
-        let rankings = soundProvider?.rankings(using: sound) ?? .empty
-        // With nobody to ask, a clip's own sound (`sound(for:)`) is this
-        // page's: it is its own original.
-        let original = soundProvider?.originalPostID(of: sound)
-            ?? (sound.id == "original-\(model.id.rawValue)" ? model.id : nil)
+        // (`SnapSoundState.sheetInputs`).
+        let rankings = inputs.rankings
+        let original = inputs.original
         let current = model.id
         let content = soundSheetContent(current: current, original: original, rankings: rankings)
         let sheet = SoundSheetViewController(
-            sound: sound,
-            authorHandle: Self.handle(of: model),
-            // An original sound stands for the post it came from; a named song
-            // with no artwork keeps the sheet's neutral note rather than
-            // borrowing somebody's photo.
-            fallbackArtworkURL: sound.isOriginal ? (model.thumbnailURL ?? model.avatarURL) : nil,
+            sound: inputs.sound,
+            authorHandle: inputs.authorHandle,
+            fallbackArtworkURL: inputs.fallbackArtworkURL,
             sections: content.sections,
             tiles: content.tiles,
             imagePipeline: imagePipeline
         )
-        // Only a sound the device HOLDS can go under a new clip: the editor
-        // lays it from a file. A clip's own sound streamed from the fleet is
-        // not one yet, and the button is not offered for it.
-        if sound.previewURL?.isFileURL == true, let useSound {
+        // Only a sound the device HOLDS can go under a new clip.
+        if inputs.offersUseSound, let useSound {
             sheet.onUseSound = { sound in useSound(sound) }
         }
         // The cell that is covered now is the one to uncover, whatever the
