@@ -7,7 +7,17 @@ import Foundation
 public enum NotificationsError: Error, Equatable, Sendable {
     case notAuthenticated
     case noProfileForAccount
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension NotificationsError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// A person behind a notification: who, and their picture when they have one.
@@ -199,7 +209,7 @@ public actor NotificationsRepository: NotificationsProviding {
         case .success(let body):
             views = body.notifications
             nextToken = body.nextPageToken
-        case .failure(let error): throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
 
         // Two independent hydrations: people, and the posts they acted on.
@@ -214,7 +224,7 @@ public actor NotificationsRepository: NotificationsProviding {
         request.profileID = viewer.rawValue
         let response = await notificationClient.markAllRead(request: request, headers: [:])
         if let error = response.error {
-            throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
+            throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -225,7 +235,7 @@ public actor NotificationsRepository: NotificationsProviding {
         let response = await notificationClient.getUnreadCount(request: request, headers: [:])
         switch response.result {
         case .success(let body): return Int(body.unreadCount)
-        case .failure(let error): throw NotificationsError.transport(message: error.message ?? "code \(error.code)")
+        case .failure(let error): throw NotificationsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
 
@@ -368,7 +378,7 @@ public actor NotificationsRepository: NotificationsProviding {
         } catch ViewerError.noProfileForAccount {
             throw NotificationsError.noProfileForAccount
         } catch let error as AccountProfilesReader.ReadError {
-            throw NotificationsError.transport(message: error.message)
+            throw NotificationsError.transport(message: error.message, failure: error.networkFailure)
         }
     }
 }

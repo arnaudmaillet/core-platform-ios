@@ -9,8 +9,11 @@ import Foundation
 /// of the generated contracts. Ids are plain strings for the same reason
 /// `PostCounterReader` keys by string: nothing above the contracts comes with it.
 public enum AccountProfilesReader {
-    public struct ReadError: Error, Equatable, Sendable {
+    public struct ReadError: Error, Equatable, Sendable, NetworkFailureCarrying {
         public let message: String
+        /// Why the read failed (#794), so the feature error it becomes can
+        /// still tell offline from a refusal.
+        public let networkFailure: NetworkFailure?
     }
 
     public static func profileIDs(
@@ -24,7 +27,7 @@ public enum AccountProfilesReader {
         case .success(let body):
             return body.profiles.map(\.profileID)
         case .failure(let error):
-            throw ReadError(message: error.message ?? "code \(error.code)")
+            throw ReadError(message: error.message ?? "code \(error.code)", networkFailure: NetworkFailure(error))
         }
     }
 }

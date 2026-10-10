@@ -9,7 +9,17 @@ import OSLog
 public enum FeedError: Error, Equatable, Sendable {
     case notAuthenticated
     case noProfileForAccount
-    case transport(message: String)
+    /// The call failed on the way to or at the server. `failure` keeps WHY
+    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
+    /// not come from the network. Defaulted, so every `.transport(message:)`
+    /// still builds and every `case .transport:` still matches.
+    case transport(message: String, failure: NetworkFailure? = nil)
+}
+
+extension FeedError: NetworkFailureCarrying {
+    public var networkFailure: NetworkFailure? {
+        if case .transport(_, let failure) = self { failure } else { nil }
+    }
 }
 
 /// What the feed UI consumes; implemented by `FeedRepository`, faked in
@@ -215,7 +225,7 @@ public actor FeedRepository: FeedProviding {
         request.postID = id.rawValue
         let response = await postClient.getPost(request: request, headers: [:])
         guard let view = response.message else {
-            throw FeedError.transport(message: response.error?.message ?? "post \(id) unavailable")
+            throw FeedError.transport(message: response.error?.message ?? "post \(id) unavailable", failure: response.error.map { NetworkFailure($0) })
         }
         let post = Self.makePost(from: view)
 
@@ -307,7 +317,7 @@ public actor FeedRepository: FeedProviding {
         case .success(let value):
             body = value
         case .failure(let error):
-            throw FeedError.transport(message: error.message ?? "code \(error.code)")
+            throw FeedError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
 
         let entries = await hydrate(items: body.items)
@@ -399,7 +409,7 @@ public actor FeedRepository: FeedProviding {
         } catch ViewerError.noProfileForAccount {
             throw FeedError.noProfileForAccount
         } catch let error as AccountProfilesReader.ReadError {
-            throw FeedError.transport(message: error.message)
+            throw FeedError.transport(message: error.message, failure: error.networkFailure)
         }
     }
 
@@ -460,7 +470,7 @@ extension FeedRepository: EngagementProviding {
                     counts[PostID(view.target.postID)] = view.count
                 }
             case .failure(let error):
-                throw FeedError.transport(message: error.message ?? "code \(error.code)")
+                throw FeedError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
         return counts
