@@ -3017,7 +3017,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
             // so "Pull to retry" could not be done.
             statusView.configure(
                 symbolName: "exclamationmark.triangle", title: message,
-                actionTitle: "Try Again", actionHandler: { [weak self] in self?.viewModel.refresh() }
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.viewModel.refresh()
+                }
             )
             statusView.isHidden = false
         }

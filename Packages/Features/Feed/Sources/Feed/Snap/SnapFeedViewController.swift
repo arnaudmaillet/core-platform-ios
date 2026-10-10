@@ -2220,8 +2220,8 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func configureStatusLabel() {
-        // ⚠️ NOT WHITE: the shared empty state's ink follows the trait, so it
-        // reads over the tone of the card that was tapped as over black.
+        // The shared empty state's ink follows the trait; over the default
+        // black ground it is forced dark (`render`), so it reads in light mode.
         statusView.isHidden = true
         statusView.constrain(in: view) { parent in
             statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
@@ -2464,6 +2464,9 @@ final class SnapFeedViewController: UIViewController {
             }
         }
 
+        // ⚠️ BLACK INK ON BLACK in light mode otherwise: the empty ground is
+        // black unless a tapped card lent its tone.
+        statusView.overrideUserInterfaceStyle = emptyGround == .black ? .dark : .unspecified
         switch state.phase {
         case .loading, .content:
             statusView.isHidden = true
@@ -2477,7 +2480,10 @@ final class SnapFeedViewController: UIViewController {
             // retry" was a promise it could not keep.
             statusView.configure(
                 symbolName: "exclamationmark.triangle", title: message,
-                actionTitle: "Try Again", actionHandler: { [weak self] in self?.viewModel.refresh() }
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.viewModel.refresh()
+                }
             )
             statusView.isHidden = false
         }

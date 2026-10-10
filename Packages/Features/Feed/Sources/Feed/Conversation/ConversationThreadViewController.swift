@@ -772,7 +772,8 @@ final class ConversationThreadViewController: UIViewController {
         statusView.isHidden = true
         statusView.constrain(in: view) { parent in
             statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
-            statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
+            // Above the keyboard, so a raised composer never sits on it.
+            statusView.bottomAnchor.constraint(equalTo: parent.keyboardLayoutGuide.topAnchor)
             statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
@@ -837,8 +838,14 @@ final class ConversationThreadViewController: UIViewController {
             // failed first load was a dead end until the viewer backed out.
             statusView.configure(
                 symbolName: "exclamationmark.triangle", title: message,
-                actionTitle: "Try Again", actionHandler: { [weak self] in self?.driver.refresh() }
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.driver.refresh()
+                }
             )
+            // Beneath the composer, which stays live on a failure: its taps
+            // are never the empty state's.
+            if composerBackdrop.superview === view { view.insertSubview(statusView, belowSubview: composerBackdrop) }
             statusView.isHidden = hasRenderedContent
         case .content(let messages):
             statusView.isHidden = true

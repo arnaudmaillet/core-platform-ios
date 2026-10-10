@@ -673,7 +673,8 @@ final class PostDetailViewController: UIViewController {
         statusView.isHidden = true
         statusView.constrain(in: view) { parent in
             statusView.topAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.topAnchor)
-            statusView.bottomAnchor.constraint(equalTo: parent.safeAreaLayoutGuide.bottomAnchor)
+            // Above the keyboard, so a raised composer never sits on it.
+            statusView.bottomAnchor.constraint(equalTo: parent.keyboardLayoutGuide.topAnchor)
             statusView.leadingAnchor.constraint(equalTo: parent.leadingAnchor)
             statusView.trailingAnchor.constraint(equalTo: parent.trailingAnchor)
         }
@@ -1230,8 +1231,13 @@ final class PostDetailViewController: UIViewController {
             // the collection this hides, so "Pull to retry" could not be done.
             statusView.configure(
                 symbolName: "exclamationmark.triangle", title: message,
-                actionTitle: "Try Again", actionHandler: { [weak self] in self?.viewModel.refresh() }
+                actionTitle: "Try Again", actionHandler: { [weak self] in
+                    self?.statusView.setActionBusy(true)
+                    self?.viewModel.refresh()
+                }
             )
+            // Beneath the composer: its taps are never the empty state's.
+            if composerBackdrop.superview === view { view.insertSubview(statusView, belowSubview: composerBackdrop) }
             statusView.isHidden = false
         }
     }

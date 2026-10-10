@@ -218,8 +218,10 @@ public final class FeedViewModel {
     }
 
     public func refresh() {
-        guard pagingLoad == nil else { return }
-        initialLoad?.cancel()
+        // A first load already on its way is the answer to a second ask: a
+        // double-tapped Try Again cancelled it, and the cancelled load's
+        // catch flashed the failure before the new one landed (#797).
+        guard pagingLoad == nil, initialLoad == nil else { return }
         initialLoad = Task { await loadFirstPageFromNetwork(renderCacheFirst: false) }
     }
 

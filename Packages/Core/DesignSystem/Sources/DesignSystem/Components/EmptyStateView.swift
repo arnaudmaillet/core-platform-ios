@@ -139,6 +139,14 @@ public final class EmptyStateView: UIView {
         )
     }
 
+    /// Shows the action working — a spinner in the button, which stops taking
+    /// taps — until the next `configure` (#797): a Try Again whose retry fails
+    /// again would otherwise look like a dead tap.
+    public func setActionBusy(_ busy: Bool) {
+        actionButton.configuration?.showsActivityIndicator = busy
+        actionButton.isEnabled = !busy
+    }
+
     /// The image-taking form, for a caller whose glyph is not an SF Symbol.
     public func configure(
         image: UIImage?,
@@ -165,6 +173,7 @@ public final class EmptyStateView: UIView {
         let showsAction = actionTitle?.isEmpty == false && actionHandler != nil
         actionButton.isHidden = !showsAction
         actionButton.configuration?.title = showsAction ? actionTitle : nil
+        setActionBusy(false)
 
         accessibilityLabel = [title, subtitle].compactMap { $0 }.joined(separator: ". ")
     }
