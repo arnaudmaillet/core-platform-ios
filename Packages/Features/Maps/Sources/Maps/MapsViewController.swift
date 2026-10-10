@@ -250,6 +250,10 @@ final class MapsViewController: UIViewController {
     /// A pick waiting to become a flight and an offer (`mapTapped`).
     private var pendingOffer: DispatchWorkItem?
     /// The open offer, if any.
+    /// The marker the instant tap just opened, and when: MapKit's own
+    /// selection of it lands about 0.3 s later and must not open it twice (#760).
+    private var instantTap: (annotation: ObjectIdentifier, at: CFTimeInterval)?
+
     private weak var offerSheet: CountryUnlockSheetViewController?
     /// Where the map was before the offer flew it to its country.
     private var offerCamera: MKMapCamera?
@@ -1199,6 +1203,15 @@ final class MapsViewController: UIViewController {
     /// presents what unlocking it would open. The camera it left from is kept:
     /// closing the offer flies back to it.
     private func offer(_ country: CountryAtlas.Country) {
+        // ⚠️ FROM ONE LOCKED COUNTRY STRAIGHT TO ANOTHER (#760): the open
+        // offer takes the new country in place — outline, camera, sheet — and
+        // the camera it left from stays the first one's, so closing returns
+        // home. It used to bail here, and MapKit's own selection then closed
+        // the first offer: the second tap only reached neutral.
+        if let open = offerSheet, !open.isLeaving {
+            switchOffer(open, to: country)
+            return
+        }
         guard let countryAccess, presentedViewController == nil else { return }
         if offerCamera == nil { offerCamera = mapView.camera.copy() as? MKMapCamera }
         countryLayer.select(country.code)
@@ -1208,14 +1221,37 @@ final class MapsViewController: UIViewController {
         // The country being sold stands ABOVE the sheet, not under it.
         sheet.loadViewIfNeeded()
         frame(country, bottomInset: offerBottomInset(sheet))
-        sheet.onClosing = { [weak self] in self?.offerClosing(country) }
-        sheet.onCloseCancelled = { [weak self, weak sheet] in
-            guard let sheet else { return }
-            self?.offerCloseCancelled(country, sheet: sheet)
-        }
-        sheet.onDismissed = { [weak self] in self?.offerDidClose(country) }
+        bindOffer(sheet)
         offerSheet = sheet
         present(presented, animated: true)
+    }
+
+    /// The open offer's callbacks, for the country it shows NOW — read off
+    /// the sheet, so a switch (`switchOffer`) never leaves them on the first.
+    private func bindOffer(_ sheet: CountryUnlockSheetViewController) {
+        sheet.onClosing = { [weak self, weak sheet] in
+            guard let sheet else { return }
+            self?.offerClosing(sheet.country)
+        }
+        sheet.onCloseCancelled = { [weak self, weak sheet] in
+            guard let sheet else { return }
+            self?.offerCloseCancelled(sheet.country, sheet: sheet)
+        }
+        sheet.onDismissed = { [weak self, weak sheet] in
+            guard let sheet else { return }
+            self?.offerDidClose(sheet.country)
+        }
+    }
+
+    /// The open offer moves to `country` without closing (#760).
+    private func switchOffer(_ sheet: CountryUnlockSheetViewController, to country: CountryAtlas.Country) {
+        guard country.code != sheet.country.code else { return }
+        #if DEBUG
+        OfferLog.note("switch \(sheet.country.code) -> \(country.code)")
+        #endif
+        countryLayer.select(country.code)
+        sheet.show(country)
+        frame(country, bottomInset: offerBottomInset(sheet))
     }
 
     /// The band left above an offer's sheet, where its country is framed.
@@ -3298,6 +3334,7 @@ extension MapsViewController: MKMapViewDelegate {
             )
             // Instant tap — bypasses MapKit's ~0.3s selection delay.
             view?.onSelect = { [weak self, weak view] in
+                self?.noteInstantTap(on: cluster)
                 self?.openAnnotation(cluster, thumbnail: view?.heroImage)
             }
             view?.onDressed = { [weak self, weak view] in
@@ -3319,6 +3356,7 @@ extension MapsViewController: MKMapViewDelegate {
             iconCatalog: iconCatalog, previewCatalog: previewCatalog
         )
         view?.onSelect = { [weak self, weak view] in
+            self?.noteInstantTap(on: pinAnnotation)
             self?.openAnnotation(pinAnnotation, thumbnail: view?.heroImage)
         }
         view?.onTouchDown = { [weak self] in self?.beginPlaybackWarm(for: pinAnnotation) }
@@ -3352,6 +3390,43 @@ extension MapsViewController: MKMapViewDelegate {
     /// Whether a marker tap only closes the open offer and opens nothing
     /// (#686). Pure, for tests.
     static func markerTapClosesOffer(offerOpen: Bool) -> Bool { offerOpen }
+
+    /// What a marker tap does while an offer is up (#760): another locked
+    /// country's teaser moves the offer straight to that country; its own
+    /// teaser leaves it be; any other marker closes it (#686).
+    enum TapUnderOffer: Equatable { case switchTo(String), keep, close }
+
+    static func tapUnderOffer(teaserCountry: String?, offeredCountry: String?) -> TapUnderOffer {
+        guard let teaserCountry else { return .close }
+        return teaserCountry == offeredCountry ? .keep : .switchTo(teaserCountry)
+    }
+
+    private func noteInstantTap(on annotation: any MKAnnotation) {
+        instantTap = (ObjectIdentifier(annotation as AnyObject), CACurrentMediaTime())
+    }
+
+    /// Whether `didSelect` for `annotation` is the echo of an instant tap
+    /// already handled. ⚠️ (#760) The echo used to reach `openAnnotation`
+    /// with the offer the tap had just opened, and CLOSE it: the map zoomed
+    /// in and straight back out.
+    private func isEchoOfInstantTap(_ annotation: any MKAnnotation) -> Bool {
+        guard let instantTap, instantTap.annotation == ObjectIdentifier(annotation as AnyObject) else { return false }
+        return Self.isSelectionEcho(tappedAt: instantTap.at, now: CACurrentMediaTime())
+    }
+
+    /// MapKit selects ~0.3 s after the touch; a second deliberate tap on the
+    /// same marker comes later than this. Pure, for tests.
+    static func isSelectionEcho(tappedAt: CFTimeInterval, now: CFTimeInterval) -> Bool {
+        now - tappedAt < 1.0
+    }
+
+    /// The locked country `annotation` is a teaser for, if it is one.
+    private func lockedTeaserCountry(of annotation: any MKAnnotation) -> String? {
+        guard let pin = (annotation as? MapComputedCluster)?.representative ?? (annotation as? MapAnnotation)?.pin,
+              case .offer(let code) = Self.markerTap(for: dress(for: annotation), countryCode: countryCode(of: pin))
+        else { return nil }
+        return code
+    }
 
     private func beginPlaybackWarm(for annotation: MapAnnotation) {
         // ⚠️ NOT `pin.kind == .video`: production classifies every media pin
@@ -3531,7 +3606,16 @@ extension MapsViewController: MKMapViewDelegate {
         // meet it. A sheet already on its way down still swallows it — a fast
         // second tap must not open a post during the descent.
         if Self.markerTapClosesOffer(offerOpen: offerSheet != nil) {
-            closeOffer(returning: true)
+            switch Self.tapUnderOffer(
+                teaserCountry: lockedTeaserCountry(of: annotation), offeredCountry: offerSheet?.country.code
+            ) {
+            case .switchTo(let code):
+                if let country = CountryAtlas.shared.country(code: code) { offer(country) }
+            case .keep:
+                break
+            case .close:
+                closeOffer(returning: true)
+            }
             return
         }
         guard openGate.canOpen else { return }
@@ -3641,12 +3725,23 @@ extension MapsViewController: MKMapViewDelegate {
         }
     }
 
+    /// Whether MapKit's selection of `annotation` opens it: never a country's
+    /// flag disc, whose own recognizer took the tap (#760).
+    static func mapSelectionOpens(_ annotation: any MKAnnotation) -> Bool {
+        !(annotation is CountryFlagAnnotation)
+    }
+
     func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
         // Deselect immediately so the pin can be tapped again after dismissal.
         // The instant-tap recognizer normally fires first; this is the fallback
         // (and clears MapKit's own selection either way).
         guard let annotation = view.annotation else { return }
         mapView.deselectAnnotation(annotation, animated: false)
+        // ⚠️ A COUNTRY'S FLAG DISC HAS TAKEN ITS TAP ALREADY (#760): its own
+        // recognizer offered the country; MapKit's selection, landing a beat
+        // later, read as a tap under the open offer and CLOSED it — the zoom
+        // in and straight back out.
+        guard Self.mapSelectionOpens(annotation), !isEchoOfInstantTap(annotation) else { return }
 
         let thumbnail = (view as? MapAnnotationView)?.heroImage
             ?? (view as? MapClusterAnnotationView)?.heroImage

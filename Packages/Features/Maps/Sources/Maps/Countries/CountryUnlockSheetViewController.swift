@@ -45,7 +45,7 @@ final class CountryUnlockSheetViewController: UIViewController {
     /// The sheet is gone, unlocked or not.
     var onDismissed: (() -> Void)?
 
-    private let country: CountryAtlas.Country
+    private(set) var country: CountryAtlas.Country
     private let access: any CountryAccess
     private let stack = UIStackView()
     /// The unlock — the toolbar's one item.
@@ -104,18 +104,7 @@ final class CountryUnlockSheetViewController: UIViewController {
         super.viewDidLoad()
         // Clear: the sheet's own glass is the surface.
         view.backgroundColor = .clear
-        let standing = access.standing(of: country.code)
-
-        let header = Self.header(country: country, standing: standing)
-
-        let pitch = UILabel()
-        pitch.text = "Unlock \(country.name) to see its posts on your map."
-        pitch.font = .appFont(forTextStyle: .subheadline)
-        pitch.textColor = .secondaryLabel
-        pitch.numberOfLines = 0
-
-        let price = standing?.price ?? CountryStanding.price(forRank: .max)
-        configureUnlockButton(price: price)
+        configureUnlockButton()
         let unlockItem = UIBarButtonItem(customView: unlockButton)
         // Its own prominent capsule is its background: no bubble in a bubble.
         unlockItem.hidesSharedBackground = true
@@ -123,16 +112,11 @@ final class CountryUnlockSheetViewController: UIViewController {
 
         balanceLabel.font = .appFont(forTextStyle: .footnote)
         balanceLabel.textColor = .secondaryLabel
-        refreshBalance(price: price)
 
         stack.axis = .vertical
         stack.alignment = .fill
         stack.spacing = Spacing.xs
-        stack.addArrangedSubview(header)
-        stack.setCustomSpacing(Spacing.lg, after: header)
-        stack.addArrangedSubview(pitch)
-        stack.setCustomSpacing(Spacing.sm, after: pitch)
-        stack.addArrangedSubview(balanceLabel)
+        fillContent()
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -141,6 +125,42 @@ final class CountryUnlockSheetViewController: UIViewController {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -Spacing.lg),
         ])
         measure()
+    }
+
+    /// The country's header, pitch, price and balance, in the stack.
+    private func fillContent() {
+        stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let standing = access.standing(of: country.code)
+        let header = Self.header(country: country, standing: standing)
+        let pitch = UILabel()
+        pitch.text = "Unlock \(country.name) to see its posts on your map."
+        pitch.font = .appFont(forTextStyle: .subheadline)
+        pitch.textColor = .secondaryLabel
+        pitch.numberOfLines = 0
+        let price = standing?.price ?? CountryStanding.price(forRank: .max)
+        unlockButton.configuration?.title = "Unlock · \(price)"
+        refreshBalance(price: price)
+        stack.addArrangedSubview(header)
+        stack.setCustomSpacing(Spacing.lg, after: header)
+        stack.addArrangedSubview(pitch)
+        stack.setCustomSpacing(Spacing.sm, after: pitch)
+        stack.addArrangedSubview(balanceLabel)
+    }
+
+    /// Offers another country in place (#760): from one locked country
+    /// straight to the next, the sheet staying up — no close, no neutral
+    /// state between. The content cross-fades, and the detent follows its
+    /// new height.
+    func show(_ country: CountryAtlas.Country) {
+        guard country.code != self.country.code else { return }
+        self.country = country
+        guard isViewLoaded else { return }
+        UIView.transition(with: stack, duration: 0.25, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+            self.fillContent()
+        }
+        measure()
+        let presentation = navigationController?.sheetPresentationController
+        presentation?.animateChanges { presentation?.invalidateDetents() }
     }
 
     override func viewIsAppearing(_ animated: Bool) {
@@ -234,11 +254,10 @@ final class CountryUnlockSheetViewController: UIViewController {
     /// `.prominent` title item's `width` is ignored on iOS 27. A custom view
     /// that hugs nothing and asks, at the lowest priority, for more room than
     /// any bar has is stretched by the bar to exactly what it leaves.
-    private func configureUnlockButton(price: Int) {
+    private func configureUnlockButton() {
         var configuration = UIButton.Configuration.prominentGlass()
         configuration.image = UIImage(systemName: "diamond.fill")
         configuration.imagePadding = Spacing.sm
-        configuration.title = "Unlock · \(price)"
         configuration.cornerStyle = .capsule
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes

@@ -178,4 +178,12 @@ final class CountryFlagAnnotationView: MKAnnotationView {
         HapticImpact(style: .light).impactOccurred()
         onSelect?()
     }
+
+    /// VoiceOver's activation takes the tap's path: MapKit's selection
+    /// ignores flag discs (#760), the disc's own recognizer answers.
+    override func accessibilityActivate() -> Bool {
+        guard let onSelect else { return false }
+        onSelect()
+        return true
+    }
 }
