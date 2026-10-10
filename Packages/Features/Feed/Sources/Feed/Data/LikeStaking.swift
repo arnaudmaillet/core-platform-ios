@@ -273,7 +273,14 @@ public final class LikeOutboxSender {
             // ⚠️ A parked batch is sealed, and `schedule()` flushes at once
             // while a sealed batch waits — a busy loop. It is looked at again
             // after the longest wait, or with the next like.
-            let delay = failed ? retryDelays[min(failures - 1, retryDelays.count - 1)] : retryDelays[retryDelays.count - 1]
+            //
+            // ⚠️ …but no later than the current account's next due batch
+            // (#836): waiting the longest delay committed this viewer's likes
+            // up to 60 s late instead of 10 s, behind someone else's batch.
+            var delay = failed ? retryDelays[min(failures - 1, retryDelays.count - 1)] : retryDelays[retryDelays.count - 1]
+            if !failed, let due = outbox.nextDueDate {
+                delay = min(delay, max(0.05, due.timeIntervalSinceNow))
+            }
             timer?.invalidate()
             timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {

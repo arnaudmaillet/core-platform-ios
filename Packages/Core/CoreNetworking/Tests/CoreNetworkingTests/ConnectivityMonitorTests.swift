@@ -52,4 +52,22 @@ struct ConnectivityMonitorTests {
         #expect(recoveries == 0)
         withExtendedLifetime(observation) {}
     }
+
+    /// A second loss reported during the grace is the same loss (#836): the
+    /// path monitor sends two unsatisfied updates in one blip, and announcing
+    /// on the second one set every failed store reloading on return.
+    @Test func twoLossesWithinTheGraceThenOnlineAnnounceNothing() {
+        let monitor = ConnectivityMonitor(offlineGrace: 60)
+        var recoveries = 0
+        let observation = monitor.onRecovery { recoveries += 1 }
+
+        monitor.report(online: false)
+        monitor.report(online: false)
+        #expect(monitor.isOnline, "the second loss skipped the grace")
+        monitor.report(online: true)
+
+        #expect(monitor.isOnline)
+        #expect(recoveries == 0)
+        withExtendedLifetime(observation) {}
+    }
 }

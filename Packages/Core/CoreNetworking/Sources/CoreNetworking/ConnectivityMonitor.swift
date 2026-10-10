@@ -67,6 +67,12 @@ public final class ConnectivityMonitor {
             pendingOffline = work
             DispatchQueue.main.asyncAfter(deadline: .now() + offlineGrace, execute: work)
             return
+        } else if !online, pendingOffline != nil {
+            // ⚠️ A second loss during the grace is the same loss (#836):
+            // NWPathMonitor sends two unsatisfied updates in one blip, and the
+            // mock's fault switch fires again mid-outage. Falling through to
+            // `apply` announced the blip at once — exactly what the grace is for.
+            return
         }
         apply(online: online)
     }

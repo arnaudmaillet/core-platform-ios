@@ -40,6 +40,49 @@ private final class FakeFeedProvider: FeedProviding, @unchecked Sendable {
     }
 }
 
+/// Holds every first-page call until the test answers it, in call order.
+private final class GatedFirstPageProvider: FeedProviding, @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiting: [CheckedContinuation<Result<FeedPage, FeedError>, Never>] = []
+
+    var waitingCalls: Int { lock.withLock { waiting.count } }
+
+    /// Answers the oldest call still waiting.
+    func answerOldest(with result: Result<FeedPage, FeedError>) {
+        let continuation: CheckedContinuation<Result<FeedPage, FeedError>, Never>? = lock.withLock {
+            waiting.isEmpty ? nil : waiting.removeFirst()
+        }
+        continuation?.resume(returning: result)
+    }
+
+    func cachedFirstPage() async -> [FeedEntry]? { nil }
+
+    func loadFirstPage() async throws -> FeedPage {
+        let result = await withCheckedContinuation { continuation in
+            lock.withLock { waiting.append(continuation) }
+        }
+        return try result.get()
+    }
+
+    func loadPage(afterToken token: String) async throws -> FeedPage {
+        throw FeedError.transport(message: "unstubbed")
+    }
+
+    func loadPost(_ id: PostID) async throws -> FeedEntry {
+        throw FeedError.transport(message: "unstubbed")
+    }
+}
+
+/// Polls `condition` on the main actor, at most `attempts` times 10 ms apart.
+@MainActor
+private func eventually(attempts: Int = 500, _ condition: () -> Bool) async -> Bool {
+    for _ in 0..<attempts {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return condition()
+}
+
 private func makeEntries(_ range: Range<Int>) -> [FeedEntry] {
     range.map { index in
         FeedEntry(
@@ -174,6 +217,33 @@ struct FeedViewModelTests {
         let observed = await recovered
 
         #expect(observed.last?.items.count == 3)
+    }
+
+    /// ⚠️ A CANCELLED FIRST PAGE LEAVES ITS SUCCESSOR'S SLOT ALONE (#836):
+    /// the first load, cancelled by a pull, ended by clearing the slot of the
+    /// load that replaced it, and the feed read "nothing on its way" — the
+    /// end of the list — with the new first page still in flight.
+    @Test func aFirstPageCancelledByRefreshLeavesTheNewLoadsSlotSet() async {
+        let provider = GatedFirstPageProvider()
+        let viewModel = FeedViewModel(repository: provider)
+        viewModel.connectivity = ConnectivityMonitor(offlineGrace: 0)
+        viewModel.viewDidLoad()
+        #expect(await eventually { provider.waitingCalls == 1 }, "the first load never asked")
+        viewModel.refresh()
+        #expect(await eventually { provider.waitingCalls == 2 }, "the pull never asked")
+
+        // The cancelled load ends (it fails, nothing being on screen).
+        async let cancelledEnded = collectStates(viewModel) {
+            if case .failed = $0.phase { return true } else { return false }
+        }
+        provider.answerOldest(with: .failure(.transport(message: "cancelled")))
+        _ = await cancelledEnded
+        #expect(viewModel.isLoadingNextPage, "the cancelled load cleared its successor's slot")
+
+        async let landed = collectStates(viewModel) { $0.items.count == 3 }
+        provider.answerOldest(with: .success(FeedPage(entries: makeEntries(0..<3), nextPageToken: nil, isCold: false)))
+        _ = await landed
+        #expect(!viewModel.isLoadingNextPage, "the new load kept the slot once finished")
     }
 
     @Test func networkFailureKeepsCachedContentVisible() async {
