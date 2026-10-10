@@ -257,8 +257,8 @@ struct ProfileGalleryViewModelTests {
         #expect(box.items.isEmpty)
     }
 
-    /// Your own Posts (every post, under the source filter) and the media
-    /// its "View all" pushes (#631).
+    /// Your own Posts — its own posts, reposts and tags being their own pages
+    /// since #772 — and the media its "View all" pushes (#631).
     @Test func landsWithPostsAndTheirMediaResolved() async {
         let gallery = StubGalleryProvider(authored: authored, tagged: tagged)
         let (viewModel, snapshots) = makeViewModel(gallery: gallery, source: .currentUser)
@@ -270,15 +270,14 @@ struct ProfileGalleryViewModelTests {
             Issue.record("expected a snapshot")
             return
         }
-        // Default source = All: every page carries the merged timeline slice.
         guard case .content(let activity) = snapshot.activity,
               case .content(let media) = snapshot.media else {
             Issue.record("expected content on both lists")
             return
         }
-        #expect(activity.count == 7)
+        #expect(activity.count == 3)
         #expect(activity.contains { $0.id == PostID("p-text") }, "text posts are cards in Posts")
-        #expect(media.count == 5)
+        #expect(media.count == 2)
         #expect(snapshot.isComplete, "one page each: nothing more is coming")
         // Both corpora fetch eagerly (the pager shows neighbors mid-swipe),
         // with the mention query built from the loaded handle.
@@ -287,30 +286,48 @@ struct ProfileGalleryViewModelTests {
         #expect(await gallery.lastTaggedHandle == "ada")
     }
 
-    /// Your own profile's source filter (someone else's has none, #696).
-    @Test func sourceModifierRecomputesEveryPageLocally() async {
+    /// ⚠️ YOUR OWN PROFILE'S PAGES ARE ITS SOURCES TOO (#772): Posts without
+    /// reposts, Reposts, Tagged — what the bar's source menu used to narrow
+    /// one list to — from the same two fetches, the media "View all" pushes
+    /// following the page on screen.
+    @Test func yourOwnPagesArePostsRepostsAndTagged() async throws {
         let gallery = StubGalleryProvider(authored: authored, tagged: tagged)
         let (viewModel, snapshots) = makeViewModel(gallery: gallery, source: .currentUser)
         viewModel.viewDidLoad()
-        await settle()
+        await settle { snapshots().last.map { $0.tagged != .loading && $0.activity != .loading } ?? false }
+        let snapshot = try #require(snapshots().last)
 
-        viewModel.setGallerySource(.reposts)
-
-        guard let snapshot = snapshots().last else {
-            Issue.record("expected a snapshot")
-            return
+        func ids(_ state: ProfileViewModel.GalleryPageState) -> [String] {
+            guard case .content(let posts) = state else { return [] }
+            return posts.map(\.id.rawValue)
         }
-        #expect(snapshot.media == .content([
-            tile("r-photo", kind: .photo, isRepost: true, publishedAtMS: 30),
-            tile("r-video", kind: .video, isRepost: true, publishedAtMS: 20)
-        ]))
-        #expect(snapshot.activity == .content([
-            tile("r-photo", kind: .photo, isRepost: true, publishedAtMS: 30),
-            tile("r-video", kind: .video, isRepost: true, publishedAtMS: 20)
-        ]))
-        // No refetch: the source axis filters the cached datasets.
+        #expect(ids(snapshot.activity) == ["p-photo", "p-video", "p-text"])
+        #expect(ids(snapshot.reposts) == ["r-photo", "r-video"])
+        #expect(ids(snapshot.tagged) == ["t-photo", "t-text"])
+        #expect(ids(snapshot.media) == ["p-photo", "p-video"])
+        viewModel.setActiveTab(.reposts)
+        let onReposts = try #require(snapshots().last)
+        #expect(ids(onReposts.media) == ["r-photo", "r-video"])
+        // No refetch: the pages split the cached datasets.
         #expect(await gallery.authoredCalls == 1)
         #expect(await gallery.taggedCalls == 1)
+    }
+
+    /// ⚠️ AN ACCOUNT SWITCH LANDS ON POSTS (#772): the gallery starts over,
+    /// only Posts shows while the sources reload, and the source goes back
+    /// with it — a switch made on Tagged left Posts paging the tagged corpus.
+    @Test func anAccountSwitchPutsTheSourceBackOnPosts() async throws {
+        let gallery = StubGalleryProvider(authored: authored, tagged: tagged)
+        let (viewModel, snapshots) = makeViewModel(gallery: gallery, source: .currentUser)
+        viewModel.viewDidLoad()
+        await settle { snapshots().last.map { $0.tagged != .loading } ?? false }
+        viewModel.setActiveTab(.tagged)
+        try #require(viewModel.gallerySource == .tagged, "guard: the page did not pick its source")
+
+        viewModel.revalidate(after: nil)
+        await settle { viewModel.gallerySource == .posts }
+
+        #expect(viewModel.gallerySource == .posts)
     }
 
     /// SOMEONE ELSE'S PROFILE: three pages, three sources (#696). Posts is
@@ -395,7 +412,6 @@ struct ProfileGalleryViewModelTests {
             galleryPreferences: preferences
         )
         first.setGalleryFormat(.media)
-        first.setGallerySource(.reposts)
 
         // A NEW view model (a newly opened profile) lands on the stored pair.
         let second = ProfileViewModel(
@@ -408,10 +424,11 @@ struct ProfileGalleryViewModelTests {
             gallery: StubGalleryProvider(authored: authored, tagged: tagged),
             galleryPreferences: preferences
         )
-        // ⚠️ THE SOURCE CARRIES OVER, THE FORMAT DOES NOT (#631): the format
-        // named one of three pages, and a profile opens on its one list,
-        // every post — a stored Gallery would narrow it to media unseen.
-        #expect(second.galleryFilter == GalleryFilter(format: .activity, source: .reposts))
+        // ⚠️ THE FORMAT DOES NOT CARRY OVER (#631): the format named one of
+        // three pages, and a profile opens on its one list, every post — a
+        // stored Gallery would narrow it to media unseen. (No source either:
+        // the menu that set one is gone, #772.)
+        #expect(second.galleryFilter.format == .activity)
     }
 
     @Test func withoutAStoreTheFilterStaysSessionLocal() async {

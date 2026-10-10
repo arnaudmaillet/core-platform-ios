@@ -106,54 +106,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
     /// hand-over to animate. Built `.navigationTitle` and told to FILL, which
     /// spreads it across its host.
     private let selectorBar: PagedTabBar
-    /// The source filter: one drop-down button — the native single-selection
-    /// menu carries the options (checkmark on the active one), and the button
-    /// shows the pick's glyph. Lazy: the menu actions capture self.
-    /// The content-source filter, leading in the navigation bar.
-    ///
-    /// ⚠️ **A SYSTEM ITEM, NOT A CUSTOM VIEW, AND THE SHAPE IS WHY.** Wrapped
-    /// in a button, a glyph comes out in a 59x44 platter — an OVAL beside a
-    /// chevron that is a 44pt circle — because the button carries its own
-    /// content insets and UIKit sizes the platter around whatever it is given.
-    /// A system item has no view of its own to inflate it, so the platter is
-    /// the 44pt touch target. Measured on the search results, which made the
-    /// same move: `-header-bar-tree` drew 59x44 for the button and 44x44 for
-    /// the item.
-    ///
-    /// It carries the `UIMenu` directly — a bar item is a menu host, so there
-    /// is nothing for a wrapper view to add.
-    private lazy var sourceMenuItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(
-            image: UIImage(systemName: "rectangle.stack"),
-            menu: UIMenu(options: .singleSelection, children: [
-                makeSourceAction(.all, title: "All", symbol: "rectangle.stack"),
-                makeSourceAction(.posts, title: "Posts", symbol: "square.and.pencil"),
-                makeSourceAction(.reposts, title: "Reposts", symbol: PostActionSymbol.repost),
-                makeSourceAction(.tagged, title: "Tagged", symbol: "at")
-            ])
-        )
-        item.accessibilityLabel = "Content source"
-        return item
-    }()
-
-    private func makeSourceAction(
-        _ source: GalleryFilter.Source, title: String, symbol: String
-    ) -> UIAction {
-        UIAction(
-            title: title,
-            image: UIImage(systemName: symbol),
-            // The checkmark starts on the user's GLOBAL preference (seeded
-            // into the view model's filter), not a hardcoded default.
-            state: source == viewModel.galleryFilter.source ? .on : .off
-        ) { [weak self] action in
-            guard let self else { return }
-            self.viewModel.setGallerySource(source)
-            // The icon-only item carries no system mirroring: adopt the
-            // picked action's glyph (and its title for VoiceOver) by hand.
-            self.sourceMenuItem.image = action.image
-            self.sourceMenuItem.accessibilityValue = action.title
-        }
-    }
     /// The pull indicator, above the header rather than inside a list — see
     /// `HeroPullToRefreshView` for why the stock control could not be used.
     private let pullIndicator = HeroPullToRefreshView()
@@ -2133,15 +2085,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         // large title has nowhere to go under an immersive banner.
         navigationItem.largeTitleDisplayMode = .never
 
-        // The content-source filter leads the bar on YOUR OWN profile only,
-        // behind the shell's bell on the tab root. Someone else's profile has
-        // no filter: its sources are pages at the foot (#696).
-        //   tab root  [bell][source] … [coins][switcher gear]
+        // No content-source filter on any profile (#772): its sources are
+        // pages at the foot, your own as anyone else's (#696).
+        //   tab root  [bell] … [coins][switcher gear]
         //   pushed    [back] … [bell][coins]
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
-        let source = viewModel.isOwnProfile ? sourceMenuItem : nil
-        let leading = [leadingAccessoryItem, source].compactMap { $0 }
+        let leading = [leadingAccessoryItem].compactMap { $0 }
         if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
             navigationItem.leftBarButtonItems = leading
         }
@@ -2549,19 +2499,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         slideDismissal.install(on: nav)
     }
 
-    /// Records the choice and re-dresses the screen around it.
+    /// Records the choice.
     ///
     /// ⚠️ Only a FORMAT page is a filter preference. Saved and Liked are
     /// corpora, not formats, and writing one into the stored filter would mean
     /// re-opening the profile on a tab the next profile may not even have.
-    /// The source tray goes with it for the same reason: All / Posts / Reposts
-    /// / Tagged are questions about what this profile published, and there is
-    /// no answer to any of them about a post somebody else wrote.
     private func adoptTab(_ tab: ProfileTab) {
         viewModel.setActiveTab(tab)
-        // The source filter only means something on a format tab — it filters
-        // WITHIN one — so it goes when there is no format to filter.
-        sourceMenuItem.isHidden = tab.format == nil
     }
 
     /// Selects a tab the way a selector tap does — the shared path behind the
@@ -2714,6 +2658,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting {
         selectorBar.setTitles(shown.map(\.title))
         let index = active.flatMap { shown.firstIndex(of: $0) } ?? 0
         mirrorSelection(to: index)
+        // ⚠️ THE PAGE ON SCREEN IS ADOPTED WHEN ITS TAB WENT (#772). An account
+        // switch on Reposts or Tagged cuts the tabs to Posts while every source
+        // reloads; the strip clamps quietly and the pager settles nothing, so
+        // the source stayed on the tab that left — Posts then paged and pushed
+        // "View all" from the wrong corpus.
+        if active != shown[index] { adoptTab(shown[index]) }
         if shown.count > 1 {
             let wasPlaced = selectorAccessory != nil || selectorItem != nil
             placeSelectors()
@@ -3216,8 +3166,8 @@ extension ProfileViewController {
     /// Fed from here as pages land (`onGalleryChange`), under the same
     /// source, and its posts open through `openGalleryPost` measured against
     /// ITS mosaic, so a close lands on the tile it left from.
-    /// What "View all" pushes is the page on screen's media (#696): on
-    /// someone else's profile Reposts and Tagged have their own.
+    /// What "View all" pushes is the page on screen's media (#696): Reposts
+    /// and Tagged have their own, on every profile since #772.
     private var mediaGalleryTitle: String {
         switch tabs[galleryPager.activePageIndex] {
         case .reposts: "Reposted Media"

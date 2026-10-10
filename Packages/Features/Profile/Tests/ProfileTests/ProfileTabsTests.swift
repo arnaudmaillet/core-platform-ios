@@ -20,10 +20,12 @@ struct ProfileTabsTests {
 
     // MARK: - Who sees what
 
-    /// Posts | Saved | Liked — the owner's call for #631 (2026-10-07).
-    @Test func yourOwnProfileCarriesSavedAndLiked() {
-        #expect(ProfileTab.ownTabs == [.format(.activity), .saved, .reactions])
-        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Saved", "Liked"])
+    /// ⚠️ THE PUBLIC PAGES, THEN SAVED AND LIKED (#772): Reposts and Tagged
+    /// left the bar's source menu for the selector, as on anyone else's
+    /// profile; Saved and Liked stay yours alone (#631).
+    @Test func yourOwnProfileCarriesThePublicPagesThenSavedAndLiked() {
+        #expect(ProfileTab.ownTabs == [.format(.activity), .reposts, .tagged, .saved, .reactions])
+        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Reposts", "Tagged", "Saved", "Liked"])
     }
 
     /// ⚠️ And nobody else's does. A saved pile has no owner but the device it
@@ -108,7 +110,7 @@ struct ProfileTabsTests {
     /// count used to be a constant, and a selector with more segments than
     /// the pager has pages indexes past the end on the last tab.
     @Test func thePagerBuildsOnePageForEachTab() {
-        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 3)
+        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 5)
         #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 3)
     }
 
@@ -132,7 +134,7 @@ struct ProfileTabsTests {
         let pager = pager(ProfileTab.ownTabs)
         var settled: [ProfileTab] = []
         pager.onPageSettled = { settled.append($0) }
-        pager.debugScrollView.contentOffset = CGPoint(x: 2 * pager.bounds.width, y: 0)
+        pager.debugScrollView.contentOffset = CGPoint(x: 4 * pager.bounds.width, y: 0)
         pager.scrollViewDidEndDecelerating(pager.debugScrollView)
         #expect(settled == [.reactions])
     }
