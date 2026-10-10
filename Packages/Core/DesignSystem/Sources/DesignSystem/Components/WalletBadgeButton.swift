@@ -303,6 +303,8 @@ public final class WalletBadgeButton: UIButton {
     /// Test seams: the breath and the glow as they are on screen.
     var isBreathing: Bool { coinView.layer.animation(forKey: Self.pulseKey) != nil }
     var isGlowing: Bool { coinView.layer.shadowOpacity > 0 }
+    /// Test seam: the countdown ring's fill is running on screen.
+    var isRingCounting: Bool { ringLayer.animation(forKey: Self.ringFillKey) != nil }
 
     /// Re-arms what backgrounding stripped (#783).
     @objc private func rearmAfterForeground() {
