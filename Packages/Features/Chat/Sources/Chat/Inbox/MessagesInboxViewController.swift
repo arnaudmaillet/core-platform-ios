@@ -297,7 +297,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         super.viewDidAppear(animated)
         // A tab root always shows the bar (#769) — search mode hides it on
         // purpose.
-        if !isSearching { ensureAppTabBarAsTabRoot() }
+        if !isSearching {
+            ensureAppTabBarAsTabRoot(stillWanted: { [weak self] in self?.isSearching == false })
+        }
         // The pager's horizontal pan yields to the stack's edge-swipe pop, so
         // a back gesture is never stolen by a page change. Wired once the view
         // is in a window — the recognizer doesn't exist before then.

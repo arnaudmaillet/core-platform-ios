@@ -535,16 +535,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // each other on the same grab rather than argued about.
         if ProcessInfo.processInfo.arguments.contains("-tabbar-flag") {
             destination.hidesBottomBarWhenPushed = true
-        } else if nav.showsAppTabBar(for: nav.topViewController) {
+        } else if !nav.flagHidesAppTabBar(at: nav.topViewController) {
             nav.tabBarController?.setTabBarHidden(true, animated: true)
         }
         #else
-        // ⚠️ ONLY A BAR THIS STACK SHOWS (#769). Under a screen pushed with
-        // `hidesBottomBarWhenPushed` (a profile over a conversation) the bar
-        // is UIKit's already; an explicit hide there was never taken back —
-        // every close asks `showsAppTabBar`, false under the flag — and it
-        // outlived the pops: the inbox came back with no bar.
-        if nav.showsAppTabBar(for: nav.topViewController) {
+        // ⚠️ NOT UNDER `hidesBottomBarWhenPushed` (#769): a profile over a
+        // conversation has handed the bar to UIKit already, and an explicit
+        // hide there outlived the pops (`flagHidesAppTabBar`).
+        if !nav.flagHidesAppTabBar(at: nav.topViewController) {
             nav.tabBarController?.setTabBarHidden(true, animated: true)
         }
         #endif
@@ -845,7 +843,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // fade its alpha out as the page grew past it (the bar covers the
         // bottom 26pt of the row a reveal departs from); UIKit's own animation
         // uncovers that strip now.
-        nav.tabBarController?.hideTabBarNatively()
+        //
+        // ⚠️ Not under `hidesBottomBarWhenPushed` (#769, `flagHidesAppTabBar`).
+        if !nav.flagHidesAppTabBar(at: nav.topViewController) {
+            nav.tabBarController?.hideTabBarNatively()
+        }
 
         if let reveal, revealing {
             // The OPENING is this reveal's, and it has to say so: a geometry

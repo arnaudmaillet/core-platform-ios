@@ -600,7 +600,8 @@ final class SnapFeedViewController: UIViewController {
     /// abandoned (filmed on a device: page onto a text post, grab down, let go).
     /// So the bar goes back only when the abandoned transition was ARRIVING here.
     private func retireTabBarOnReturn() {
-        guard isClosable, let tabBarController, !tabBarController.isTabBarHidden else { return }
+        guard isClosable, !barIsUIKitsByFlag,
+              let tabBarController, !tabBarController.isTabBarHidden else { return }
         guard let coordinator = transitionCoordinator else {
             tabBarController.setTabBarHidden(true, animated: false)
             return
@@ -628,7 +629,7 @@ final class SnapFeedViewController: UIViewController {
         coordinator.animate(alongsideTransition: nil) { [weak self] context in
             guard context.isCancelled else { return }
             DispatchQueue.main.async { [weak self] in
-                guard let self, isClosable, view.window != nil,
+                guard let self, isClosable, !barIsUIKitsByFlag, view.window != nil,
                       navigationController?.topViewController === self,
                       let tabBarController else { return }
                 // Through UIKit, on its animation: native chrome is never
@@ -636,6 +637,13 @@ final class SnapFeedViewController: UIViewController {
                 tabBarController.hideTabBarNatively()
             }
         }
+    }
+
+    /// A screen beneath this feed was pushed with `hidesBottomBarWhenPushed`
+    /// (a profile over a conversation): the bar is UIKit's, and an explicit
+    /// hide here would outlive every pop back to the tab's root (#769).
+    private var barIsUIKitsByFlag: Bool {
+        navigationController?.flagHidesAppTabBar(at: self) ?? false
     }
 
     private var isClosable: Bool {
@@ -839,7 +847,8 @@ final class SnapFeedViewController: UIViewController {
         // the chevron raised the dock before the pop and the flight was caught
         // and thrown back. Hidden without animation, the dock that had been
         // rising over the returning feed vanished in a single frame.
-        if hasAppeared, isClosable, let tabBarController, !tabBarController.isTabBarHidden {
+        if hasAppeared, isClosable, !barIsUIKitsByFlag,
+           let tabBarController, !tabBarController.isTabBarHidden {
             tabBarController.hideTabBarNatively()
         }
         #if DEBUG
