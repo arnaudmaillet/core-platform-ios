@@ -29,6 +29,25 @@ struct DecisionsAndReportsTests {
         AccountStatusRepository(moderationClient: moderationClient(service), authSession: Session())
     }
 
+    // MARK: - Loading (charter P8)
+
+    /// The decision section opens on bones where the detail rows will be —
+    /// as many as a dated decision has — not on an empty section that the
+    /// rows then pop into.
+    @Test func theDecisionOpensOnBonesInTheDetailRowsPlace() {
+        let loading = DecisionDetailViewController.layout(phase: .loading, appeal: nil)
+        #expect(loading.map(\.0) == [.decision])
+        #expect(loading.first?.1 == [.restriction, .skeleton(0), .skeleton(1), .skeleton(2)])
+
+        let statement = DecisionStatement(
+            decisionID: "dec-a", policy: "Spam", action: nil, facts: "", legalGround: "",
+            policyVersion: "", automated: false, decidedAt: Date(timeIntervalSince1970: 1_790_000_000)
+        )
+        let loaded = DecisionDetailViewController.layout(phase: .loaded(statement), appeal: nil)
+        #expect(loaded.first?.1.count == loading.first?.1.count, "the bones stand in for the rows one for one")
+        #expect(loaded.allSatisfy { !$0.1.contains(.skeleton(0)) })
+    }
+
     // MARK: - Statement of reasons
 
     @Test func aRestrictionCarriesTheDecisionThatImposedIt() async throws {

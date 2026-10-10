@@ -12,17 +12,19 @@ final class DecisionDetailViewController: UIViewController {
         case failed
     }
 
-    private enum Section: Int, CaseIterable {
+    enum Section: Int, CaseIterable {
         case decision, facts, rule, appeal
     }
 
-    private enum Item: Hashable {
+    enum Item: Hashable {
         case restriction
         case detail(title: String, value: String)
         case text(String)
         case appeal
         case appealStatus(FiledAppeal)
         case retry
+        /// A detail-shaped bone while the statement loads (charter P8).
+        case skeleton(Int)
     }
 
     private let restriction: AccountRestriction
@@ -35,6 +37,9 @@ final class DecisionDetailViewController: UIViewController {
     private var appeal: FiledAppeal?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+    /// Whether the decision section last drew bones: leaving them cross-fades
+    /// (P10).
+    private var isShowingSkeleton = false
 
     init(restriction: AccountRestriction, decisionID: String, reviewer: any ModerationDecisionReviewing) {
         self.restriction = restriction
@@ -193,10 +198,19 @@ final class DecisionDetailViewController: UIViewController {
                 content.text = "Try Again"
                 content.textProperties.color = .tintColor
                 cell.contentConfiguration = content
+            case .skeleton:
+                // Drawn by `SettingsSkeletonRowCell`.
+                break
             }
         }
+        let skeletonRegistration = UICollectionView.CellRegistration<SettingsSkeletonRowCell, Int> { cell, _, index in
+            cell.configure(redacting: Self.detailPlaceholder(index))
+        }
         dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
-            collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
+            if case .skeleton(let index) = item {
+                return collectionView.dequeueConfiguredReusableCell(using: skeletonRegistration, for: indexPath, item: index)
+            }
+            return collectionView.dequeueConfiguredReusableCell(using: registration, for: indexPath, item: item)
         }
         let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionHeader
@@ -222,33 +236,60 @@ final class DecisionDetailViewController: UIViewController {
     private func applySnapshot() {
         guard dataSource != nil else { return }
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.decision])
-        snapshot.appendItems([.restriction], toSection: .decision)
+        for (section, items) in Self.layout(phase: phase, appeal: appeal) {
+            snapshot.appendSections([section])
+            snapshot.appendItems(items, toSection: section)
+        }
+        snapshot.reloadSections(snapshot.sectionIdentifiers)
+
+        let wasShowingSkeleton = isShowingSkeleton
+        isShowingSkeleton = phase == .loading
+        if wasShowingSkeleton, !isShowingSkeleton {
+            collectionView.crossfadeFromSkeleton { [dataSource, snapshot] in
+                dataSource?.apply(snapshot, animatingDifferences: false)
+            }
+        } else {
+            dataSource.apply(snapshot, animatingDifferences: false)
+        }
+    }
+
+    /// The screen's sections and rows for `phase`. While the statement loads
+    /// the decision section carries bones in the detail rows' place — the
+    /// usual Policy / Decided on / Decided by — rather than nothing at all.
+    static func layout(phase: Phase, appeal: FiledAppeal?) -> [(Section, [Item])] {
         switch phase {
         case .loading:
-            break
+            return [(.decision, [.restriction, .skeleton(0), .skeleton(1), .skeleton(2)])]
         case .failed:
-            snapshot.appendItems([.retry], toSection: .decision)
+            return [(.decision, [.restriction, .retry])]
         case .loaded(let statement):
-            var details: [Item] = [.detail(title: "Policy", value: statement.policy)]
+            var details: [Item] = [.restriction, .detail(title: "Policy", value: statement.policy)]
             if let decidedAt = statement.decidedAt {
                 details.append(.detail(title: "Decided on", value: Self.dateFormatter.string(from: decidedAt)))
             }
             details.append(.detail(title: "Decided by", value: Self.decidedBy(automated: statement.automated)))
-            snapshot.appendItems(details, toSection: .decision)
+            var layout: [(Section, [Item])] = [(.decision, details)]
             if !statement.facts.isEmpty {
-                snapshot.appendSections([.facts])
-                snapshot.appendItems([.text(statement.facts)], toSection: .facts)
+                layout.append((.facts, [.text(statement.facts)]))
             }
             if !statement.legalGround.isEmpty {
-                snapshot.appendSections([.rule])
-                snapshot.appendItems([.text(statement.legalGround)], toSection: .rule)
+                layout.append((.rule, [.text(statement.legalGround)]))
             }
-            snapshot.appendSections([.appeal])
-            snapshot.appendItems([appeal.map(Item.appealStatus) ?? .appeal], toSection: .appeal)
+            layout.append((.appeal, [appeal.map(Item.appealStatus) ?? .appeal]))
+            return layout
         }
-        snapshot.reloadSections(snapshot.sectionIdentifiers)
-        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    /// A detail row with sample words, stacked like the real ones; only the
+    /// bones' widths come from them.
+    private static func detailPlaceholder(_ index: Int) -> UIListContentConfiguration {
+        let samples = [("Policy", "Community guidelines"), ("Decided on", "4 Oct 2026"), ("Decided by", "A member of our safety team")]
+        let sample = samples[index % samples.count]
+        var content = UIListContentConfiguration.valueCell()
+        content.text = sample.0
+        content.secondaryText = sample.1
+        content.prefersSideBySideTextAndSecondaryText = false
+        return content
     }
 
     // MARK: - Appeal

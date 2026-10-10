@@ -1,6 +1,8 @@
 import CoreContracts
+import DesignSystem
 import Foundation
 import Testing
+import UIKit
 @testable import Profile
 
 /// Settings → Security and Login (#384): how a session's device is named, the
@@ -96,6 +98,44 @@ struct SecuritySettingsTests {
         await model.load()
         guard case .loaded(let sessions) = model.phase else { Issue.record("not loaded"); return }
         #expect(sessions.count == 2)
+    }
+
+    /// The sessions section opens on bones shaped like sessions, never a
+    /// spinner row (charter P8), and the model goes from loading straight to
+    /// the list, with no phase in between.
+    @Test func theSessionsOpenOnBonesThenTheListWithNothingInBetween() async {
+        let items = SecuritySettingsViewController.sessionItems(for: .loading)
+        #expect(!items.isEmpty)
+        #expect(items.allSatisfy { if case .skeleton = $0 { true } else { false } })
+
+        let model = SecuritySettingsViewModel(sessions: StubSessions())
+        var phases: [SecuritySettingsViewModel.Phase] = []
+        model.onChange = { phases.append(model.phase) }
+        await model.load()
+        #expect(phases.count == 1)
+        guard case .loaded(let sessions)? = phases.first else { Issue.record("expected the list, got \(phases)"); return }
+        #expect(SecuritySettingsViewController.sessionItems(for: model.phase) == sessions.map { .session($0) })
+    }
+
+    /// A skeleton row lays one bone over each part of the row it stands for
+    /// — symbol, title, subtitle — sized by the real row's own layout.
+    @Test func aSkeletonRowLaysABoneOverEachPartOfTheRow() {
+        let cell = SettingsSkeletonRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
+        var content = UIListContentConfiguration.subtitleCell()
+        content.text = "iPhone"
+        content.secondaryText = "iOS 27.0 · This device"
+        content.image = UIImage(systemName: "iphone")
+        cell.configure(redacting: content)
+        cell.layoutIfNeeded()
+        let bones = cell.contentView.subviews.compactMap { $0 as? SkeletonBoneView }.filter { !$0.isHidden }
+        #expect(bones.count == 3)
+        #expect(bones.allSatisfy { $0.bounds.width > 0 && $0.bounds.height > 0 })
+
+        var titleOnly = UIListContentConfiguration.cell()
+        titleOnly.text = "Delete Account"
+        cell.configure(redacting: titleOnly)
+        cell.layoutIfNeeded()
+        #expect(cell.contentView.subviews.compactMap { $0 as? SkeletonBoneView }.filter { !$0.isHidden }.count == 1)
     }
 
     @Test func logOutEverywhereCallsTheGlobalRevoke() async throws {
