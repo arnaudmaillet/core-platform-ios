@@ -112,8 +112,8 @@ final class ForYouGridPage: UIView {
     /// the fling gate for free. A feed that warms while the viewer is throwing
     /// it spends a request per card it will never show for longer than a
     /// glance; the same argument that stops a player being ATTACHED above
-    /// `maximumStartVelocity` stops the warm above it, and the two can never
-    /// drift apart because they are one decision.
+    /// `ForYouGridAutoplayDriver.maximumStartVelocity` stops the warm above
+    /// it, and the two can never drift apart because they are one decision.
     var onWarmRequested: (([GalleryPost]) -> Void)?
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
@@ -570,17 +570,10 @@ final class ForYouGridPage: UIView {
     /// there means "holds a loan", not "is moving".
     private let videoPool: VideoPlaybackController?
 
-    /// How many videos may play at once, per shape.
-    ///
-    /// Both surfaces rank candidates by distance from the viewport centre and
-    /// keep the nearest N; N is the only thing that differs. Five for a
-    /// timeline rather than the mosaic's six because a column fits fewer
-    /// previews on screen at once, so the sixth slot would go to a row well
-    /// outside the viewport — and the idle-player cache is six, which the two
-    /// pages share. Discover counts as a timeline: a chunk on screen is a few
-    /// tiles among cards, and its tiles compete on the same distance.
+    /// How many videos may play at once, per shape — see
+    /// `ForYouGridAutoplayDriver.concurrentPlayers(for:)`.
     static func concurrentPlayers(for style: Style) -> Int {
-        style == .grid ? 6 : 5
+        ForYouGridAutoplayDriver.concurrentPlayers(for: style)
     }
     private let style: Style
 
@@ -667,9 +660,10 @@ final class ForYouGridPage: UIView {
     /// Two flights, two kinds of concealment, two slots. They are OR-ed at the
     /// one place that applies them, so neither can clear the other.
     private var revealConcealedPostID: PostID?
-    /// Throttle state for the during-scroll autoplay reconcile.
-    private var lastReconcileTime: CFTimeInterval = 0
-    private var lastReconcileOffset: CGFloat = 0
+    /// The autoplay decisions this page measures for — the during-scroll
+    /// throttle's state and the last cover range fetched among them. See
+    /// `ForYouGridAutoplayDriver`.
+    private var autoplayDriver = ForYouGridAutoplayDriver()
     #if DEBUG
     /// Internal (not private) only for the +QA hooks.
     var hasScheduledDiagnostics = false
@@ -1081,14 +1075,16 @@ final class ForYouGridPage: UIView {
         onAutoplayReconcile?(allowingStarts)
         guard let playback else { return }
         if let playerReserve, let videoPool {
-            playback.maxConcurrent = max(0, min(
-                Self.concurrentPlayers(for: style), videoPool.capacity - playerReserve()
-            ))
+            playback.maxConcurrent = ForYouGridAutoplayDriver.playerBudget(
+                for: style, poolCapacity: videoPool.capacity, reserve: playerReserve()
+            )
         }
         let viewport = autoplayViewport
-        let centreY = viewport.midY
-        let candidates = collectionView.indexPathsForVisibleItems.compactMap {
-            indexPath -> GridVideoPlaybackCoordinator.Candidate? in
+        // The measuring stays here, in its old order — the cover gate applies
+        // a cached cover as it answers, so it runs for exactly the items it
+        // always ran for. The viewport and the ranking are the driver's.
+        let tiles = collectionView.indexPathsForVisibleItems.compactMap {
+            indexPath -> ForYouGridAutoplayDriver.Tile? in
             guard !showsSkeleton, posts.indices.contains(flatIndex(for: indexPath)) else { return nil }
             let post = posts[flatIndex(for: indexPath)]
             guard post.id != heroFlyingPostID, // its twin is in the air
@@ -1096,37 +1092,19 @@ final class ForYouGridPage: UIView {
                   let held = playableURL(for: post, in: cell),
                   hasCover(for: post, in: cell)
             else { return nil }
-            // Held versus ADVANCING. A row keeps its player while the viewer is
-            // on another page of the same collection — the clip is still on
-            // screen there, peeking, and stopping it would put that page's
-            // thumbnail back.
-            // ⚠️ A SINGLE ATTACHMENT IS ALWAYS ON ITS OWN PAGE.
-            //
-            // `currentPageVideoURL` answers for a CAROUSEL and is nil for a row
-            // showing one video — so comparing it to the held URL said "not
-            // advancing" for every single-video row in the feed, and the
-            // coordinator dutifully started each one and paused it on its first
-            // frame. Reported as "the first frame is there but the media does
-            // not advance", with a recording that shows exactly that.
-            //
-            // The question only means anything for a collection: is the viewer
-            // on the clip's page, or on a photograph beside it.
+            // Held versus ADVANCING — see `ForYouGridAutoplayDriver.isAdvancing`.
             let advancing = (cell as? PostGridListRowCell).map {
-                !$0.showsCarousel || $0.currentPageVideoURL == held
+                ForYouGridAutoplayDriver.isAdvancing(
+                    showsCarousel: $0.showsCarousel, currentPageVideoURL: $0.currentPageVideoURL, held: held
+                )
             } ?? true
-
-            // Measured against the cell's MEDIA, which each shape locates for
-            // itself (`videoMediaRect`) — a tile's is its bounds, a row's is
-            // the preview box inside its card.
-            let frame = cell.convert(cell.videoMediaRect, to: collectionView)
-            guard GridPlaybackVisibility.autoplays(frame, in: viewport) else { return nil }
-
             return .init(
                 id: post.id, url: held, cell: cell,
-                distanceFromCentre: abs(frame.midY - centreY),
-                isPaused: !advancing
+                mediaFrame: cell.convert(cell.videoMediaRect, to: collectionView),
+                isAdvancing: advancing
             )
         }
+        let candidates = ForYouGridAutoplayDriver.candidates(from: tiles, in: viewport)
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
         preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
         #if DEBUG
@@ -1433,13 +1411,6 @@ final class ForYouGridPage: UIView {
         return true
     }
 
-    /// How far beyond the visible range to pull covers for autoplaying posts.
-    private static let autoplayCoverLookahead = 6
-
-    /// The visible range covers were last requested for, so a scroll does not
-    /// rebuild the same URL list 30 times a second.
-    private var preloadedCoverRange: ClosedRange<Int>?
-
     /// Fetches cover images for autoplay-capable posts before their tiles need
     /// them.
     ///
@@ -1459,15 +1430,8 @@ final class ForYouGridPage: UIView {
         // the list's "New"/"Recent") an item number restarts every section.
         let flat = visible.map(flatIndex(for:))
         guard !showsSkeleton, !posts.isEmpty,
-              let first = flat.min(),
-              let last = flat.max()
+              let range = autoplayDriver.coverRangeToPreload(aroundFlatIndices: flat, postCount: posts.count)
         else { return }
-        let lower = max(0, first - Self.autoplayCoverLookahead)
-        let upper = min(posts.count - 1, last + Self.autoplayCoverLookahead)
-        guard lower <= upper else { return }
-        let range = lower...upper
-        guard range != preloadedCoverRange else { return }
-        preloadedCoverRange = range
 
         let urls = posts[range].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
         guard !urls.isEmpty else { return }
@@ -1476,13 +1440,14 @@ final class ForYouGridPage: UIView {
 
     /// The first-load case, where there are no cells yet to be "around".
     private func preloadLeadingAutoplayCovers() {
-        guard !showsSkeleton, !posts.isEmpty else { return }
-        let upper = min(posts.count - 1, Self.autoplayCoverLookahead * 2)
-        let urls = posts[0...upper].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
+        guard !showsSkeleton, !posts.isEmpty,
+              let range = ForYouGridAutoplayDriver.leadingCoverRange(postCount: posts.count)
+        else { return }
+        let urls = posts[range].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
         guard !urls.isEmpty else { return }
-        // Leaves `preloadedCoverRange` unset on purpose: the first real
-        // reconcile should still run against the actual visible set rather than
-        // believe this guess already covered it.
+        // Leaves the driver's `preloadedCoverRange` unset on purpose: the first
+        // real reconcile should still run against the actual visible set rather
+        // than believe this guess already covered it.
         imagePipeline.prefetch(urls)
     }
 
@@ -3396,55 +3361,23 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     /// then but the shape of what is coming.
     private func requestWarm(_ allowing: Bool) {
         guard allowing, !showsSkeleton, onWarmRequested != nil else { return }
-        let visible = collectionView.indexPathsForVisibleItems
-            .sorted()
-            .map(flatIndex(for:))
-            .filter(posts.indices.contains)
-            .prefix(Self.warmWindow)
-            .map { posts[$0] }
+        // At most the driver's `warmWindow` — see the ⚠️ there.
+        let visible = ForYouGridAutoplayDriver.warmIndices(
+            visibleFlatIndices: collectionView.indexPathsForVisibleItems.sorted().map(flatIndex(for:)),
+            postCount: posts.count
+        ).map { posts[$0] }
         guard !visible.isEmpty else { return }
         onWarmRequested?(visible)
     }
 
-    /// ⚠️ A CEILING ON THE BURST, because "visible" is not always three cards.
-    ///
-    /// These rows SELF-SIZE, and until a cell has been measured the layout
-    /// holds it at its estimate — so the first reconcile after a render reports
-    /// a dozen items inside the viewport, and the trace showed exactly that:
-    /// twelve posts asked for at once, each in its own task. Four is what fits
-    /// on screen once the heights are real, plus room for the one arriving.
-    private static let warmWindow = 4
-
-    /// Reconcile cadence during a scroll, in seconds. ~30 Hz: fast enough that
-    /// a tile is playing by the time the eye has settled on it, slow enough
-    /// that the diff cost stays invisible next to the scroll itself.
-    private static let scrollReconcileInterval: CFTimeInterval = 1.0 / 30
-
-    /// Points-per-second past which a *new* player is not started.
-    ///
-    /// The reconcile still runs at speed — tiles that leave stop immediately —
-    /// but nothing starts during a hard fling. At 4000 pt/s a brick crosses the
-    /// viewport in about a fifth of a second, so starting it means an item
-    /// allocation and a segment fetch for something already gone. Dragging by
-    /// hand rarely exceeds ~1500 pt/s, so the behaviour the request is about —
-    /// tiles playing while the finger is still moving — sits well inside this.
-    private static let maximumStartVelocity: CGFloat = 2200
-
+    /// The cadence and the fling gate are the driver's
+    /// (`scrollReconcileInterval`, `maximumStartVelocity`).
     private func throttledAutoplayReconcile(_ scrollView: UIScrollView) {
         guard playback != nil, !showsSkeleton else { return }
-        let now = CACurrentMediaTime()
-        let elapsed = now - lastReconcileTime
-        guard elapsed >= Self.scrollReconcileInterval else { return }
-
-        let offset = scrollView.contentOffset.y
-        // Velocity from the sampling interval itself; `panGestureRecognizer
-        // .velocity` reports zero once the finger lifts, which is exactly the
-        // decelerating stretch this needs to measure.
-        let velocity = elapsed > 0 ? abs(offset - lastReconcileOffset) / CGFloat(elapsed) : 0
-        lastReconcileTime = now
-        lastReconcileOffset = offset
-
-        updateAutoplay(allowingStarts: velocity <= Self.maximumStartVelocity)
+        guard let allowingStarts = autoplayDriver.scrollTick(
+            offset: scrollView.contentOffset.y, at: CACurrentMediaTime()
+        ) else { return }
+        updateAutoplay(allowingStarts: allowingStarts)
     }
 
     /// A fling that ends without deceleration still needs a final reconcile:
