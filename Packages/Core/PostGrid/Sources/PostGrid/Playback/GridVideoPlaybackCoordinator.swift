@@ -521,8 +521,9 @@ public final class GridVideoPlaybackCoordinator {
     ///   a decoder for nothing until `endHandoff`.
     public func beginHandoff(_ id: PostID, parkingReturn: Bool = false) {
         // A new scope means the previous one is over: its return player can
-        // never be landed on now.
+        // never be landed on now, and its landing has long settled (#963).
         releaseReturnPlaybacks()
+        returnLandedID = nil
         if parkingReturn { parkReturnPlayback(of: id) }
         handoffID = id
         isSurfaceVisible = false
@@ -953,8 +954,18 @@ public final class GridVideoPlaybackCoordinator {
         return pool.hasReturnPlayback(of: url, scope: id.rawValue, owner: returnOwner)
     }
 
-    /// The post whose landing took its return player, until the scope ends —
-    /// the one landing that waits on its clip rather than on its still.
+    /// The post whose landing took its return player — the one landing that
+    /// waits on its clip rather than on its still.
+    ///
+    /// ⚠️ IT OUTLIVES THE SCOPE (#963). A tap-back or a grab completes the
+    /// transition, and `completeTransition(true)` runs the landing screen's
+    /// `viewDidAppear` in the same turn — which ends the scope
+    /// (`endPlaybackHandoff`, the profile's `setAutoplayActive(true)`) before
+    /// the landing hold's first tick. Cleared with the scope, the hold then
+    /// asked about the still, which was up, and let the card go before the
+    /// clip drew. So it is kept until the hold has seen the clip
+    /// (`isReturnLandingReady` answering yes) or the next scope begins. It is a
+    /// value on this coordinator, so a torn-down grid takes it with it.
     public private(set) var returnLandedID: PostID?
 
     /// A close from another post landing on `id`'s tile: the tile takes the
@@ -988,7 +999,12 @@ public final class GridVideoPlaybackCoordinator {
     public func isReturnLandingReady(
         for id: PostID, cell: (any GridPlaybackCell)?, hasThumbnail: Bool
     ) -> Bool {
-        if returnLandedID == id { return isSurfaceRendering(for: id) }
+        if returnLandedID == id {
+            guard isSurfaceRendering(for: id) else { return false }
+            // The hold has what it waited for: the landing is settled.
+            returnLandedID = nil
+            return true
+        }
         guard let cell, hasThumbnail else { return true }
         return cell.renderedCover != nil
     }
@@ -1000,7 +1016,6 @@ public final class GridVideoPlaybackCoordinator {
         }
         returnURLs.removeAll()
         returnParkTasks.removeAll()
-        returnLandedID = nil
     }
 
     #if DEBUG

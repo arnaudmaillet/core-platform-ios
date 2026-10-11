@@ -111,6 +111,35 @@ struct GridReturnPlaybackTests {
         #expect(pool.activePlayerCount == 1)
     }
 
+    /// ⚠️ THE SCOPE ENDS IN THE LANDING'S OWN TURN (#963). A tap-back or a
+    /// grab completes the transition, and `completeTransition(true)` runs the
+    /// landing screen's `viewDidAppear` at once — `endHandoff` — before the
+    /// landing hold has asked anything. The hold must still wait for the clip
+    /// the landing took, not for the still that is already up; and the next
+    /// scope starts clean.
+    @Test func aLandingKeepsWaitingForItsClipWhenTheScopeEndsInTheSameTurn() async throws {
+        let pool = makePool()
+        let tapped = candidate(0)
+        let grid = await openedGrid(on: pool, tapped: tapped)
+        tapped.cell.applyCover(UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { _ in })
+        let flying = try #require(grid.makeReturnSurface(for: tapped.id))
+        #expect(grid.landReturnPlayback(flying, for: tapped.id, cell: tapped.cell))
+
+        // `viewDidAppear`, in the same turn as the transition's completion.
+        grid.endHandoff()
+
+        // Nothing decodes in a test host, so the clip is not drawing yet: the
+        // hold must say so rather than settle on the cover.
+        #expect(!grid.isReturnLandingReady(for: tapped.id, cell: tapped.cell, hasThumbnail: true),
+                "the card was let go on the tile's still before its clip drew")
+        #expect(grid.returnLandedID == tapped.id)
+
+        // The next round trip asks afresh.
+        grid.beginHandoff(candidate(1).id)
+        #expect(grid.returnLandedID == nil, "a settled landing leaked into the next scope")
+        #expect(grid.isReturnLandingReady(for: tapped.id, cell: tapped.cell, hasThumbnail: true))
+    }
+
     /// A close that went another way (same post, the card window, a push
     /// reversed) leaves the parked player unused: the scope's end releases it.
     @Test func closingTheScopeReleasesAnUnusedReturnPlayer() async {
