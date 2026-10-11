@@ -2888,6 +2888,10 @@ extension ProfileViewController {
         // that was under the card is replaced by another. What travels
         // instead is the PAGE, into the row it left from.
         let anchorID = post.id
+        // The tapped tile's clip is parked, paused at its playhead, for a
+        // close that pages on and comes home to it (#951). The scope ends
+        // when this screen is the viewer's again (`setAutoplayActive(true)`).
+        galleryPager.beginReturnHandoff(of: post.id)
         let origin = SnapFeedHeroOrigin(
             post: post,
             stream: window,
@@ -3035,6 +3039,16 @@ extension ProfileViewController {
                     }
                 }
             ),
+            // A close from another post comes home with the tile's OWN clip,
+            // parked at the tap (#951) — never the page's.
+            returnLiveMedia: { [weak galleryPager] in galleryPager?.returnFlightSurface(for: anchorID) },
+            pauseReturnLiveMedia: { [weak galleryPager] in galleryPager?.pauseReturnPlayback(for: anchorID) },
+            adoptReturnLiveMedia: { [weak galleryPager] view in
+                galleryPager?.landReturnPlayback(view, for: anchorID)
+            },
+            returnLandingIsReady: { [weak galleryPager] in
+                galleryPager?.isReturnLandingReady(for: anchorID) ?? true
+            },
             // The tile's words, worn by the card as For You's tiles' are
             // (#910): the card takes off wearing what the tile wore and lands
             // wearing what the tile will, rather than landing as the bare
@@ -3050,5 +3064,13 @@ extension ProfileViewController {
             }
         )
         feedHero(window.map(\.id), presenter, origin)
+        // ⚠️ A REFUSED OPEN PUSHES NOTHING (the stack mid-transition), and the
+        // scope opened above would then hold this still-visible grid silent:
+        // only the screen's next appearance ends it, and it never disappeared.
+        // The push is synchronous, so the stack already says which happened.
+        if let navigation = presenter.navigationController,
+           navigation.topViewController === presenter, presenter.presentedViewController == nil {
+            galleryPager.endReturnHandoff()
+        }
     }
 }

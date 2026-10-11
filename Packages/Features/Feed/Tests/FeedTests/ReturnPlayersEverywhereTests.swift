@@ -1,0 +1,417 @@
+import CoreModels
+import FeedInterface
+import Foundation
+import MediaCore
+import MediaPlayback
+import PostGrid
+import Testing
+import UIKit
+@testable import Feed
+
+/// #951: every surface that opens a post from a playing tile parks that tile's
+/// clip for a close that pages on and comes home, and lands it back on the
+/// tile — For You's list and rows (#923), and now the grids opened through
+/// `ExternalHeroZoomSource`: the Discover gallery, the pushed lists, the search
+/// and hashtag surface, the place page, and the sound sheet.
+///
+/// Two families here, as the code has them: the surfaces drawn by a
+/// `ForYouGridPage`, and the sound sheet's own tiles. Each is pinned for the
+/// parking (the tap parks the tile's clip), the landing choice (a close from
+/// another post hands the tile its own clip, a same-post close is unchanged),
+/// and the still fallback. The profile's gallery is pinned in its own package
+/// (`ProfileReturnPlaybackTests`).
+@MainActor
+struct ReturnPlayersEverywhereTests {
+    private struct SilentFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data { Data() }
+    }
+
+    private struct FixedVideoSource: VideoSource {
+        let url: URL
+        func playableURL(for url: URL) async throws -> URL { self.url }
+    }
+
+    private static func makePool() -> VideoPlaybackController {
+        VideoPlaybackController(source: FixedVideoSource(
+            url: FileManager.default.temporaryDirectory.appendingPathComponent("return-everywhere.mp4")
+        ))
+    }
+
+    private static func picture() -> UIImage {
+        UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }
+    }
+
+    /// Portrait clips, so a mosaic brick autoplays as well as a row.
+    private static func videos(_ count: Int = 8, prefix: String = "v") -> [GalleryPost] {
+        (0..<count).map { index in
+            GalleryPost(
+                id: PostID("\(prefix)\(index)"), kind: .video, isRepost: false,
+                thumbnailURL: URL(string: "https://example.test/\(prefix)\(index).jpg"),
+                videoURL: URL(string: "mock://video/\(prefix)\(index)"),
+                aspectRatio: 0.75, caption: "clip \(index)", publishedAtMS: 0
+            )
+        }
+    }
+
+    /// The app-wide autoplay gate is another suite's to set
+    /// (`FeedFeatureBuilder` points it at the playback policy); a tile can only
+    /// be playing once it allows it.
+    private static func whenAutoplayIsAllowed() async {
+        for _ in 0..<1_000 where !GridVideoPlaybackCoordinator.allowsAutoplay() {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
+    private static func settle(_ condition: () -> Bool) async {
+        await whenAutoplayIsAllowed()
+        for _ in 0..<1_000 {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
+    // MARK: - The ForYouGridPage family (Discover gallery, pushed lists, search, place page)
+
+    /// A page in a window whose first tile is PLAYING, as the one a finger
+    /// taps is.
+    private func playingPage(
+        _ style: ForYouGridPage.Style, pool: VideoPlaybackController, prefix: String = "v"
+    ) async throws -> (page: ForYouGridPage, tapped: PostID, window: UIWindow) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let page = ForYouGridPage(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style, videoPlayback: pool
+        )
+        page.frame = window.bounds
+        window.addSubview(page)
+        window.isHidden = false
+        page.render(.content(Self.videos(prefix: prefix)))
+        page.layoutIfNeeded()
+        for post in page.posts {
+            (page.debugCell(for: post.id) as? any GridPlaybackCell)?.applyCover(Self.picture())
+        }
+        await Self.whenAutoplayIsAllowed()
+        page.setAutoplayActive(true)
+        // The tile a finger would tap: one that is playing — which ones the
+        // ranking chose is the page's business.
+        func playing() -> PostID? {
+            page.posts.first { post in
+                guard let surface = (page.debugCell(for: post.id) as? any GridPlaybackCell)?
+                    .loadedVideoRenderView else { return false }
+                return pool.hasPlayer(in: surface)
+            }?.id
+        }
+        // Reconciled again until it takes — see `whenAutoplayIsAllowed`.
+        await Self.settle {
+            page.updateAutoplay()
+            return playing() != nil
+        }
+        let tapped = try #require(playing(), "precondition: a tile is playing")
+        return (page, tapped, window)
+    }
+
+    /// The tap parks the tile's clip; the close resumes it on a surface of its
+    /// own; the landing gives it to the tile, which then waits on its clip.
+    @Test(arguments: [ForYouGridPage.Style.grid, .list])
+    func aGridPageParksAndLandsTheTilesOwnClip(_ style: ForYouGridPage.Style) async throws {
+        let pool = Self.makePool()
+        let (page, tapped, window) = try await playingPage(style, pool: pool)
+        defer { window.isHidden = true }
+
+        page.beginPlaybackHandoff(of: tapped, parkingReturn: true)
+        await Self.settle { pool.returnPlaybackCount == 1 }
+        #expect(pool.returnPlaybackCount == 1, "the tap parked nothing")
+        let active = pool.activePlayerCount
+
+        let flying = try #require(page.returnFlightSurface(for: tapped))
+        #expect(pool.activePlayerCount == active, "a resumed return player took a slot")
+        #expect(page.landReturnPlayback(flying, for: tapped))
+        #expect(pool.returnPlaybackCount == 0, "the landing did not claim the parked player")
+        let tile = try #require((page.debugCell(for: tapped) as? any GridPlaybackCell)?.loadedVideoRenderView)
+        #expect(pool.hasPlayer(in: tile))
+
+        page.endPlaybackHandoff()
+        #expect(pool.hasPlayer(in: tile), "the scope's end took the landed clip away")
+    }
+
+    /// Nothing parked (evicted, or never playing): no surface, nothing landed,
+    /// and the hold waits on the tile's still alone.
+    @Test func aGridPageWithNothingParkedFallsBackToTheStill() async throws {
+        let pool = Self.makePool()
+        let (page, tapped, window) = try await playingPage(.grid, pool: pool)
+        defer { window.isHidden = true }
+        page.beginPlaybackHandoff(of: tapped, parkingReturn: true)
+        await Self.settle { pool.returnPlaybackCount == 1 }
+        pool.releaseAllReturnPlaybacks()
+
+        #expect(page.returnFlightSurface(for: tapped) == nil)
+        #expect(page.isReturnLandingReady(for: tapped), "the still is up; nothing else to wait for")
+    }
+
+    /// Each opener in the family hands the shared flight the return path, and
+    /// parks when it opens.
+    @Test func theDiscoverGalleryWiresTheReturn() async throws {
+        let pool = Self.makePool()
+        var opened: SnapFeedHeroOrigin?
+        let gallery = DiscoverGalleryViewController(
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            videoPlayback: pool,
+            header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
+            openPost: { _, origin, _ in opened = origin }
+        )
+        gallery.loadViewIfNeeded()
+        gallery.view.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        gallery.render(.content(Self.videos(30)))
+        gallery.view.layoutIfNeeded()
+        #expect(gallery.debugOpenTile(at: 0))
+        try Self.expectReturnWired(opened)
+    }
+
+    @Test func aPushedListWiresTheReturn() throws {
+        var opened: SnapFeedHeroOrigin?
+        let list = ForYouPostListViewController(
+            kind: .following,
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            videoPlayback: Self.makePool(),
+            staking: nil,
+            header: PushedScreenHeader(wallet: nil, makeWalletSheet: nil, router: nil),
+            openPost: { _, origin, _ in opened = origin }
+        )
+        let navigation = UINavigationController(rootViewController: list)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        list.render(.content(Self.videos(12)), newPosts: [])
+        window.layoutIfNeeded()
+        #expect(list.debugOpenRow(at: 0))
+        try Self.expectReturnWired(opened)
+    }
+
+    @Test func theSearchAndHashtagSurfaceWiresTheReturn() async throws {
+        let posts = Self.videos(8)
+        let byID = Dictionary(uniqueKeysWithValues: posts.map { ($0.id, $0) })
+        let surface = PostSetSurfaceViewController(
+            style: .discover,
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            videoPlayback: Self.makePool(),
+            hydrate: { ids in ids.compactMap { byID[$0] } }
+        )
+        var opened: SnapFeedHeroOrigin?
+        surface.openPost = { _, origin, _ in opened = origin }
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = UINavigationController(rootViewController: surface)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        surface.show(.posts(posts.map(\.id)))
+        await Self.settle {
+            window.layoutIfNeeded()
+            return surface.debugOpenTile(at: 0) && opened != nil
+        }
+        try Self.expectReturnWired(opened)
+    }
+
+    @Test func thePlacePageWiresTheReturn() async throws {
+        let posts = Self.videos(12)
+        var opened: SnapFeedHeroOrigin?
+        let place = PlaceProfileViewController(
+            postIDs: posts.map(\.id),
+            placeName: "Paris • City Cluster",
+            rank: nil,
+            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            videoPlayback: Self.makePool(),
+            following: nil,
+            wallet: nil,
+            loadPosts: { posts },
+            openPost: { _, origin, _ in opened = origin }
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = UINavigationController(rootViewController: place)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        // The builder starts the hydration at creation, not on appearance.
+        place.beginLoading()
+        place.debugSelectTab(.discover)
+        await Self.settle {
+            window.layoutIfNeeded()
+            return place.debugOpenDiscoverTile(at: 0) && opened != nil
+        }
+        try Self.expectReturnWired(opened)
+    }
+
+    private static func expectReturnWired(_ origin: SnapFeedHeroOrigin?) throws {
+        let origin = try #require(origin, "the tap never reached the shared flight")
+        #expect(origin.returnLiveMedia != nil)
+        #expect(origin.pauseReturnLiveMedia != nil)
+        #expect(origin.adoptReturnLiveMedia != nil)
+        #expect(origin.returnLandingIsReady != nil)
+        // Same-post closes are untouched: none of these adopted the page's
+        // playback before, and they still do not.
+        #expect(origin.adoptLandingLiveMedia == nil)
+    }
+
+    // MARK: - The landing choice through the shared flight
+
+    /// A close from another post through an origin wired like the family's:
+    /// the tile takes its own clip through `adoptReturnLiveMedia`, at the
+    /// reveal, and the hold asks the return gate. A same-post close goes
+    /// through neither.
+    @Test func aCloseFromAnotherPostUsesTheReturnPathAndASamePostCloseDoesNot() throws {
+        var returned: [UIView] = []
+        var landed: [UIView] = []
+        var returnGateAsked = 0
+        let surface = VideoRenderView()
+        func origin() -> SnapFeedHeroOrigin {
+            SnapFeedHeroOrigin(
+                post: Self.videos(1)[0], cover: Self.picture(), style: .tile,
+                frame: { _ in .zero }, isOnScreen: { true }, setConcealed: { _ in },
+                adoptLandingLiveMedia: { landed.append($0) },
+                returnLiveMedia: { surface },
+                pauseReturnLiveMedia: {},
+                adoptReturnLiveMedia: { returned.append($0) },
+                returnLandingIsReady: { returnGateAsked += 1; return true }
+            )
+        }
+        let other = ExternalHeroZoomSource(origin: origin(), settle: { (id: PostID("elsewhere"), cover: nil) })
+        other.zoomSourceWillStageDismissal()
+        _ = other.makeZoomFlightCard()
+        other.zoomAdoptLiveMediaView(VideoRenderView())
+        #expect(returned.isEmpty, "the tile took its clip while still concealed")
+        other.setZoomSourceHidden(false)
+        #expect(returned.count == 1 && returned.first === surface)
+        #expect(landed.isEmpty, "the page's playback was handed to the tile")
+        _ = other.zoomLandingMediaIsReady
+        #expect(returnGateAsked == 1)
+
+        let same = ExternalHeroZoomSource(origin: origin(), settle: { (id: PostID("v0"), cover: nil) })
+        same.zoomSourceWillStageDismissal()
+        _ = same.makeZoomFlightCard()
+        let departure = VideoRenderView()
+        same.zoomAdoptLiveMediaView(departure)
+        same.setZoomSourceHidden(false)
+        #expect(returned.count == 1, "a same-post close took the return path")
+        #expect(landed.count == 1 && landed.first === departure)
+        _ = same.zoomLandingMediaIsReady
+        #expect(returnGateAsked == 1)
+    }
+
+    // MARK: - The sound sheet
+
+    /// The sheet's tiles: the tap parks the tile's clip and stops the tile's
+    /// own player (its flight carries the poster, so nothing else would), the
+    /// landing hands the clip back, and the scope's end keeps it.
+    @Test func theSoundSheetParksStopsAndLandsTheTilesOwnClip() async throws {
+        let pool = Self.makePool()
+        let autoplay = SoundSheetAutoplay(pool: pool, imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        autoplay.setActive(true)
+        let cell = SoundSheetTileCell(frame: CGRect(x: 0, y: 0, width: 120, height: 160))
+        let id = PostID("s0")
+        let tile = cell.makeVideoRenderViewIfNeeded()
+        // Asked again until it takes: the app-wide autoplay gate is other
+        // suites' to flip, and a reconcile is idempotent.
+        await Self.settle {
+            autoplay.playback.update(candidates: [.init(
+                id: id, url: URL(string: "mock://video/s0")!, cell: cell, distanceFromCentre: 0
+            )])
+            return pool.hasPlayer(in: tile)
+        }
+        #expect(pool.hasPlayer(in: tile), "precondition: the tile is playing")
+
+        autoplay.beginOpen(of: id)
+        #expect(!pool.hasPlayer(in: tile), "the tapped tile kept decoding behind the feed")
+        await Self.settle { pool.returnPlaybackCount == 1 }
+        #expect(pool.returnPlaybackCount == 1)
+        autoplay.setActive(false)
+
+        let flying = try #require(autoplay.playback.makeReturnSurface(for: id))
+        #expect(autoplay.playback.landReturnPlayback(flying, for: id, cell: cell))
+        #expect(pool.returnPlaybackCount == 0)
+
+        autoplay.setActive(true)
+        autoplay.endOpen()
+        #expect(pool.hasPlayer(in: cell.loadedVideoRenderView ?? tile))
+    }
+
+    /// A screen left behind (not the viewer's when the feed closes) ends the
+    /// scope and plays nothing.
+    @Test func aSoundSheetScreenLeftBehindEndsTheScopeAndPlaysNothing() async throws {
+        let pool = Self.makePool()
+        let autoplay = SoundSheetAutoplay(pool: pool, imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        autoplay.setActive(true)
+        let cell = SoundSheetTileCell(frame: CGRect(x: 0, y: 0, width: 120, height: 160))
+        let id = PostID("s0")
+        await Self.settle {
+            autoplay.playback.update(candidates: [.init(
+                id: id, url: URL(string: "mock://video/s0")!, cell: cell, distanceFromCentre: 0
+            )])
+            return pool.activePlayerCount == 1
+        }
+        autoplay.beginOpen(of: id)
+        await Self.settle { pool.returnPlaybackCount == 1 }
+        autoplay.setActive(false)
+
+        autoplay.endOpen()
+        #expect(!autoplay.playback.isHandingOff)
+        #expect(pool.returnPlaybackCount == 0, "an unused return player outlived the trip")
+        #expect(!autoplay.playback.debugIsSurfaceVisible, "a covered screen went back to playing")
+    }
+
+    // MARK: - The bound, across surfaces
+
+    /// ⚠️ STACKED PUSHES ACROSS SURFACES. A list post opened into a sound
+    /// sheet whose tile opens another post, opened in turn from a place page's
+    /// grid: three surfaces, three parks, one pool. The two most recent fly
+    /// their clip, the oldest lands on its still, and a fresh grid still gets
+    /// its whole budget.
+    @Test func stackedPushesAcrossSurfacesNeverStarveThePlaybackPool() async throws {
+        let pool = Self.makePool()
+        let (list, listTapped, listWindow) = try await playingPage(.list, pool: pool, prefix: "list")
+        defer { listWindow.isHidden = true }
+        list.beginPlaybackHandoff(of: listTapped, parkingReturn: true)
+        await Self.settle { pool.returnPlaybackCount == 1 }
+
+        let sheet = SoundSheetAutoplay(pool: pool, imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        sheet.setActive(true)
+        let sheetCell = SoundSheetTileCell(frame: CGRect(x: 0, y: 0, width: 120, height: 160))
+        let sheetID = PostID("sheet-tile")
+        await Self.settle {
+            sheet.playback.update(candidates: [.init(
+                id: sheetID, url: URL(string: "mock://video/sheet")!, cell: sheetCell, distanceFromCentre: 0
+            )])
+            return pool.hasPlayer(in: sheetCell.makeVideoRenderViewIfNeeded())
+        }
+        sheet.beginOpen(of: sheetID)
+        await Self.settle { pool.returnPlaybackCount == 2 }
+
+        let (grid, gridTapped, gridWindow) = try await playingPage(.grid, pool: pool, prefix: "grid")
+        defer { gridWindow.isHidden = true }
+        grid.beginPlaybackHandoff(of: gridTapped, parkingReturn: true)
+        await Self.settle { grid.hasReturnPlayback(for: gridTapped) }
+        #expect(grid.hasReturnPlayback(for: gridTapped))
+        #expect(!list.hasReturnPlayback(for: listTapped), "the oldest was not the one evicted")
+
+        #expect(pool.returnPlaybackCount == VideoPlaybackController.returnPlaybackCapacity)
+        #expect(list.returnFlightSurface(for: listTapped) == nil, "the oldest was not the one evicted")
+        #expect(list.isReturnLandingReady(for: listTapped), "an evicted return waited for a clip")
+        #expect(sheet.playback.makeReturnSurface(for: sheetID) != nil)
+        #expect(grid.returnFlightSurface(for: gridTapped) != nil)
+
+        let fresh = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        fresh.setSurfaceVisible(true)
+        let cells = (0..<3).map { _ in PostGridTileCell(frame: CGRect(x: 0, y: 0, width: 120, height: 160)) }
+        let candidates = cells.enumerated().map { index, cell in
+            GridVideoPlaybackCoordinator.Candidate(
+                id: PostID("fresh\(index)"), url: URL(string: "mock://video/fresh\(index)")!,
+                cell: cell, distanceFromCentre: CGFloat(index)
+            )
+        }
+        await Self.settle {
+            fresh.update(candidates: candidates)
+            return cells.allSatisfy { pool.hasPlayer(in: $0.makeVideoRenderViewIfNeeded()) }
+        }
+        #expect(cells.allSatisfy { pool.hasPlayer(in: $0.makeVideoRenderViewIfNeeded()) },
+                "a parked return player took a slot from a fresh grid")
+    }
+}

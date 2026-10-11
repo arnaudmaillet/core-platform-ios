@@ -335,6 +335,40 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].restingOverlay(for: postID)
     }
 
+    // The return player's questions (#951), asked of the ACTIVE page — the
+    // page the post was opened from, which a covered screen cannot change.
+
+    func beginReturnHandoff(of postID: PostID) {
+        guard pages.indices.contains(activeIndex) else { return }
+        pages[activeIndex].beginReturnHandoff(of: postID)
+    }
+
+    func endReturnHandoff() {
+        guard pages.indices.contains(activeIndex) else { return }
+        pages[activeIndex].endReturnHandoff()
+    }
+
+    func returnFlightSurface(for postID: PostID) -> VideoRenderView? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].returnFlightSurface(for: postID)
+    }
+
+    func pauseReturnPlayback(for postID: PostID) {
+        guard pages.indices.contains(activeIndex) else { return }
+        pages[activeIndex].pauseReturnPlayback(for: postID)
+    }
+
+    @discardableResult
+    func landReturnPlayback(_ view: UIView, for postID: PostID) -> Bool {
+        guard pages.indices.contains(activeIndex) else { return false }
+        return pages[activeIndex].landReturnPlayback(view, for: postID)
+    }
+
+    func isReturnLandingReady(for postID: PostID) -> Bool {
+        guard pages.indices.contains(activeIndex) else { return true }
+        return pages[activeIndex].isReturnLandingReady(for: postID)
+    }
+
     /// The any-kind floor under `textRowFrame` — see the grid's own note.
     func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
         guard pages.indices.contains(activeIndex) else { return nil }

@@ -256,21 +256,21 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     /// `SnapFeedHeroOrigin.adoptLandingLiveMedia`. A no-op for an origin that
     /// cannot, which is today's landing.
     func zoomAdoptLiveMediaView(_ view: UIView) {
-        // On a close from another post `view` is the PAGE's clip (#923).
-        if landsOnAnotherPost {
-            adoptLandingSurface()
-            return
-        }
+        // On a close from another post `view` is the PAGE's clip (#923), and
+        // the item takes its own from the reveal instead — see
+        // `setZoomSourceHidden`.
+        guard !landsOnAnotherPost else { return }
         origin.adoptLandingLiveMedia?(view)
     }
 
-    /// Hands the item its own clip, once, from whichever landing hook runs
-    /// first: a card flying no departure surface never reaches
-    /// `zoomAdoptLiveMediaView`, so the reveal calls this too.
+    /// Hands the item its own clip, once, at the reveal: the item is out of
+    /// concealment by then, so the surface it takes is in a drawing hierarchy
+    /// and the landing's hold can see it draw (#951). Every completed landing
+    /// reveals, with a departure surface or without one.
     private func adoptLandingSurface() {
         guard landsOnAnotherPost, !didAdoptLanding, let landingSurface else { return }
         didAdoptLanding = true
-        origin.adoptLandingLiveMedia?(landingSurface)
+        (origin.adoptReturnLiveMedia ?? origin.adoptLandingLiveMedia)?(landingSurface)
     }
 
     func zoomSourceDidAbandonDismissal() {
@@ -286,7 +286,8 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
 
     /// The card is held over the landing until the item is drawing.
     var zoomLandingMediaIsReady: Bool {
-        origin.landingMediaIsReady?() ?? true
+        if landsOnAnotherPost, let returnReady = origin.returnLandingIsReady { return returnReady() }
+        return origin.landingMediaIsReady?() ?? true
     }
 
     func setZoomSourceHidden(_ hidden: Bool) {

@@ -267,7 +267,7 @@ final class ForYouPostListViewController: UIViewController {
         let hero = page.hero(for: tapped.id, in: view)
         let appearance = page.heroAppearance(for: tapped.id)
         // The tapped row's player is the flight's from here.
-        page.beginPlaybackHandoff(of: tapped.id)
+        page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         #if DEBUG
         PushedListJumpTrace.mark("\(kind.rawValue) open", page: page, host: view)
         #endif
@@ -288,6 +288,12 @@ final class ForYouPostListViewController: UIViewController {
             opensComments: showingComments && tapped.kind != .text,
             depthView: { [weak page] in page },
             textReveal: textRowReveal(for: tapped),
+            // A close from another post comes home with the tile's OWN clip,
+            // parked at the tap (#951) — never the page's.
+            returnLiveMedia: { [weak page] in page?.returnFlightSurface(for: tapped.id) },
+            pauseReturnLiveMedia: { [weak page] in page?.pauseReturnPlayback(for: tapped.id) },
+            adoptReturnLiveMedia: { [weak page] view in page?.landReturnPlayback(view, for: tapped.id) },
+            returnLandingIsReady: { [weak page] in page?.isReturnLandingReady(for: tapped.id) ?? true },
             // Already pinned since the tap; pinned again in case a cancelled
             // window close handed it back meanwhile.
             willStageDismissal: { [weak page] in page?.pinForPushedClose() },

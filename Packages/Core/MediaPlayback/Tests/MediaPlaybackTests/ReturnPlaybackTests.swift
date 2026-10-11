@@ -92,6 +92,28 @@ struct ReturnPlaybackTests {
         #expect(!controller.hasReturnPlayback(of: clip(1), scope: "post-1"))
     }
 
+    /// ⚠️ TWO SURFACES CAN PARK ONE POST (#951) — a Following card and the
+    /// sound sheet tile opened from it. Each park is its owner's: neither
+    /// replaces, resumes nor releases the other's.
+    @Test func twoOwnersParkingOneClipKeepTheirOwnPlayers() async {
+        final class Owner {}
+        let first = Owner(), second = Owner()
+        let controller = pool()
+        await controller.parkReturnPlayback(of: clip(0), scope: "post-0", owner: ObjectIdentifier(first), at: 0)
+        await controller.parkReturnPlayback(of: clip(0), scope: "post-0", owner: ObjectIdentifier(second), at: 0)
+        #expect(controller.returnPlaybackCount == 2)
+
+        controller.releaseReturnPlayback(of: clip(0), scope: "post-0", owner: ObjectIdentifier(first))
+        #expect(!controller.hasReturnPlayback(of: clip(0), scope: "post-0", owner: ObjectIdentifier(first)))
+        #expect(controller.hasReturnPlayback(of: clip(0), scope: "post-0", owner: ObjectIdentifier(second)))
+        #expect(!controller.attachReturnSurface(
+            VideoRenderView(), of: clip(0), scope: "post-0", owner: ObjectIdentifier(first)
+        ))
+        #expect(controller.attachReturnSurface(
+            VideoRenderView(), of: clip(0), scope: "post-0", owner: ObjectIdentifier(second)
+        ))
+    }
+
     // MARK: - The landing claims it
 
     /// A close that flew the clip lands it: the tile's surface takes the

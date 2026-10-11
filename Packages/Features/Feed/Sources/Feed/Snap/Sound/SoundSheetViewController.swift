@@ -1492,15 +1492,24 @@ final class SoundSheetViewController: UIViewController {
         stopPreview()
         isShowingFeed = true
         refreshCover()
+        // The tapped tile's clip is parked for a close that pages on and comes
+        // home to it (#951), on the screen it was tapped on.
+        let screenAutoplay: SoundSheetAutoplay?
+        switch source {
+        case .gallery(let pushed): screenAutoplay = pushed.autoplay
+        case .sheet: screenAutoplay = autoplay
+        }
+        screenAutoplay?.beginOpen(of: id)
         // The feed covers the tiles for the trip — its host is presented
         // over full screen, so no screen hears it disappear: told here. The
         // tapped tile is concealed, and its card flies its poster.
         setAutoplayActive(false)
         pushedGallery?.setAutoplayActive(false)
-        OverSheetFeedHost.present(over: presenter, onFinished: { [weak self] in
+        OverSheetFeedHost.present(over: presenter, onFinished: { [weak self, weak screenAutoplay] in
             self?.isShowingFeed = false
             self?.refreshCover()
             self?.resumeTilesAfterFeed()
+            screenAutoplay?.endOpen()
         }) { host in
             #if DEBUG
             Self.debugFeedHost = host
@@ -1609,6 +1618,11 @@ final class SoundSheetViewController: UIViewController {
         // the card is taken away.
         var flown = post
         if let likes = tile.likeCount { flown.reactionCount = likes }
+        // The screen the tile is on, whose players hold its parked clip (#951).
+        let screenAutoplay: () -> SoundSheetAutoplay? = { [weak self] in
+            fromGallery ? gallery?.autoplay : self?.autoplay
+        }
+        let hasThumbnail = tile.thumbnailURL != nil
         return SnapFeedHeroOrigin(
             post: flown,
             stream: stream,
@@ -1647,6 +1661,20 @@ final class SoundSheetViewController: UIViewController {
             // flash at the end of every close. A 12pt SQUIRCLE, like the tile.
             cornerRadius: SoundSheetTileCell.cornerRadius,
             cornerCurve: .continuous,
+            // A close from another post comes home with the tile's OWN clip,
+            // parked at the tap (#951) — never the page's. The source reveals
+            // the tile before it lands it.
+            returnLiveMedia: { screenAutoplay()?.playback.makeReturnSurface(for: id) },
+            pauseReturnLiveMedia: { screenAutoplay()?.playback.pauseReturnPlayback(of: id) },
+            adoptReturnLiveMedia: { view in
+                guard let view = view as? VideoRenderView, let tileCell = cell() else { return }
+                screenAutoplay()?.playback.landReturnPlayback(view, for: id, cell: tileCell)
+            },
+            returnLandingIsReady: {
+                screenAutoplay()?.playback.isReturnLandingReady(
+                    for: id, cell: cell(), hasThumbnail: hasThumbnail
+                ) ?? true
+            },
             // The tile's marks, worn at the source end and faded as the card
             // grows, so a close does not pop them on at the landing.
             restingOverlay: {

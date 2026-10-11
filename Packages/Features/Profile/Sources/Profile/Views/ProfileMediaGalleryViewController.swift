@@ -28,6 +28,16 @@ protocol ProfileHeroSurface: UIView {
     /// The words a tile wears over its picture, for a flight to wear as the
     /// tile's resting furniture, or nil for a post that wears none (#910).
     func restingOverlay(for postID: PostID) -> UIView?
+    /// A post opens from this surface: its tile's clip is parked for a close
+    /// from another post (#951) — see `ProfileGalleryGridView`.
+    func beginReturnHandoff(of postID: PostID)
+    /// The open was refused: the scope `beginReturnHandoff` opened closes now.
+    func endReturnHandoff()
+    func returnFlightSurface(for postID: PostID) -> VideoRenderView?
+    func pauseReturnPlayback(for postID: PostID)
+    @discardableResult
+    func landReturnPlayback(_ view: UIView, for postID: PostID) -> Bool
+    func isReturnLandingReady(for postID: PostID) -> Bool
 }
 
 /// How a TILE meets the window closing onto it: its corner and its fill. The

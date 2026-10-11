@@ -1476,6 +1476,35 @@ final class ForYouGridPage: UIView {
         playback?.pauseReturnPlayback(of: postID)
     }
 
+    /// Whether `postID`'s tile has a return player parked right now.
+    func hasReturnPlayback(for postID: PostID) -> Bool {
+        playback?.hasReturnPlayback(for: postID) ?? false
+    }
+
+    /// A close from another post landing on `postID`'s tile, for an opener
+    /// that flies through `ExternalHeroZoomSource` (#951): the tile, out of
+    /// concealment, takes the return player `view` draws. The For You list's
+    /// own landing goes through `adoptLivePlayback`.
+    @discardableResult
+    func landReturnPlayback(_ view: UIView, for postID: PostID) -> Bool {
+        guard let view = view as? VideoRenderView, let playback,
+              let tile = cell(for: postID) as? any GridPlaybackCell
+        else { return false }
+        Self.applyHeroConcealment(false, to: tile as? UICollectionViewCell)
+        return playback.landReturnPlayback(view, for: postID, cell: tile)
+    }
+
+    /// The same landing's hold: the tile's clip once it took the return
+    /// player, its still otherwise.
+    func isReturnLandingReady(for postID: PostID) -> Bool {
+        guard let playback else { return true }
+        return playback.isReturnLandingReady(
+            for: postID,
+            cell: cell(for: postID) as? any GridPlaybackCell,
+            hasThumbnail: post(for: postID)?.thumbnailURL != nil
+        )
+    }
+
     /// Points the handoff scope at the post a dismissal is actually landing on.
     /// See `GridVideoPlaybackCoordinator.retargetHandoff`.
     func retargetPlaybackHandoff(to postID: PostID) {

@@ -54,6 +54,31 @@ final class SoundSheetAutoplay {
         playback.setSurfaceVisible(active)
     }
 
+    /// A post opens from tile `id`: its clip is parked, paused at its
+    /// playhead, for a close that pages on and comes home to it (#951).
+    ///
+    /// ⚠️ AND EVERY TILE STOPS NOW, the tapped one included. The scope just
+    /// opened makes the surface invisible, so the `setActive(false)` that
+    /// follows finds nothing to change: the others would only be let go one
+    /// hop at a time (the scope's stagger, made for a flight that carries the
+    /// tapped tile's player — this sheet's carries its poster), and the tapped
+    /// one never, decoding behind the feed for the whole trip. The park has
+    /// read the playhead already.
+    func beginOpen(of id: PostID) {
+        playback.beginHandoff(id, parkingReturn: true)
+        playback.stopAll()
+    }
+
+    /// The feed opened from a tile is gone, whichever way: the scope ends, and
+    /// with it a return player the close did not land. After the landing,
+    /// which claimed the one it used; after `setActive`, whose answer it keeps
+    /// — a screen that is not the viewer's goes back to playing nothing.
+    func endOpen() {
+        guard playback.isHandingOff else { return }
+        playback.endHandoff()
+        if !isActive { playback.setSurfaceVisible(false) }
+    }
+
     /// Reconciles the tiles' players against `items`, measured in
     /// `collectionView` — the visible tiles that may play. Cheap and
     /// idempotent: called as the posts scroll, as a row scrolls sideways, as

@@ -922,13 +922,18 @@ final class SnapFeedViewController: UIViewController {
         // `viewDidAppear`, and without the flag each re-appearance (a sheet
         // dismissed over the feed, a pop back onto it) armed ANOTHER close —
         // a second `closeFeed()` 2.5s later against whatever was then on top.
-        if !didDebugAutoDismiss, ProcessInfo.processInfo.arguments.contains("-snap-auto-dismiss"), isClosable {
+        let arguments = ProcessInfo.processInfo.arguments
+        // `-snap-auto-dismiss [delay]`: the delay (2.5s by default) lets a run
+        // page first (`-snap-fling`, +3s) and film the close from another post
+        // on any surface (#951), not only For You's (`-foryou-demo-close`).
+        if !didDebugAutoDismiss, let position = arguments.firstIndex(of: "-snap-auto-dismiss"), isClosable {
             didDebugAutoDismiss = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            let delay = arguments.indices.contains(position + 1)
+                ? (Double(arguments[position + 1]) ?? 2.5) : 2.5
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 self?.closeFeed()
             }
         }
-        let arguments = ProcessInfo.processInfo.arguments
         // `-snap-page-demo [delay]`: drive the page swipe once the feed has
         // settled, so the animated page change can be filmed.
         if !didDebugPageSwipe, let position = arguments.firstIndex(of: "-snap-page-demo") {
