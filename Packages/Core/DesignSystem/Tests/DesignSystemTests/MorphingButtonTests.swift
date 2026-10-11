@@ -68,17 +68,50 @@ struct MorphingButtonTests {
         #expect(!button.isMorphing)
     }
 
-    /// A press scales the button down; a release bounces it back.
-    @Test func aPressScalesDownAndTheReleaseBouncesBack() async {
+    /// The handlers registered for touch-down: one per press effect wired to
+    /// the button.
+    private func touchDownHandlers(_ control: UIControl) -> Int {
+        var count = 0
+        control.enumerateEventHandlers { _, _, event, _ in
+            if event.contains(.touchDown) { count += 1 }
+        }
+        return count
+    }
+
+    /// ⚠️ ONE PRESS, THE APP'S (#866). A long press used to shrink in two
+    /// steps — 0.94 on touch-down, then 0.88 once a timer saw it held — because
+    /// the button scaled ITS OWN `transform` from `isHighlighted`. Its press is
+    /// `PressFeedback` now: one give, decided once, held for as long as the
+    /// finger stays, and nothing written to the model however the highlight
+    /// toggles.
+    @Test func aPressIsOneSharedPressThatNeverTakesASecondStep() throws {
         let button = MorphingButton(configuration: Self.capsule("Follow"))
         let (window, _) = hosted(button)
         defer { window.isHidden = true }
+        let press = try #require(PressFeedback.attached(to: button), "the button has no shared press")
+        #expect(press.debugTarget === button, "the press moves something else")
+        #expect(touchDownHandlers(button) == 1, "more than one press is wired to touch-down")
+
+        let expected = MotionPreference.reducesMotion ? 1 : PressFeedback.pressedScale(for: button.bounds.size)
+        // What UIKit does at touch-down: the highlight, then the event.
         button.isHighlighted = true
-        #expect(abs(button.transform.a - MorphingButton.pressScale) < 0.001, "a press did not scale it down")
-        #expect(await settle { button.isLongPressed }, "a held press did not count as a long press")
-        #expect(abs(button.transform.a - MorphingButton.longPressScale) < 0.001)
+        button.sendActions(for: .touchDown)
+        #expect(press.isPressed)
+        #expect(press.scale == expected, "the press is not the shared depth: \(press.scale)")
+        #expect(button.transform.isIdentity, "the button scaled itself under the press")
+
+        // A finger held long, wandering inside: the highlight flickers, the
+        // press does not take a second step.
         button.isHighlighted = false
-        #expect(button.transform.isIdentity, "the release did not bring it home")
-        #expect(!button.isLongPressed)
+        button.isHighlighted = true
+        button.sendActions(for: .touchDragEnter)
+        #expect(button.transform.isIdentity, "a held press wrote a second scale")
+        let presses = press.debugEvents.filter { if case .pressed = $0 { true } else { false } }
+        #expect(presses.count == 1, "the press was decided more than once: \(press.debugEvents)")
+
+        button.isHighlighted = false
+        button.sendActions(for: .touchUpInside)
+        #expect(!press.isPressed && press.scale == 1, "the release did not bring it home")
+        #expect(button.transform.isIdentity)
     }
 }

@@ -9,27 +9,27 @@ import UIKit
 /// - **The capsule resizes on a spring**, the new title's width reached
 ///   with a small overshoot — the superview's layout runs inside the same
 ///   spring, so a button pinned to one edge grows from the other.
-/// - **It keeps a native button's feel**: a press scales it down, a long
-///   press further, and the release bounces it back.
+/// - **Its press is the app's one press** (`PressFeedback`): it gives ONCE
+///   under the finger, holds there however long the finger stays, and springs
+///   back once on release — the same press as every button beside it.
+///
+/// ⚠️ **ONE PRESS, AND IT IS `PressFeedback`, ATTACHED HERE** (#866). The
+/// button used to scale ITSELF from `isHighlighted` — 0.94 on touch-down, then
+/// a timer took it on to 0.88 after 0.45 s held — so a long press shrank in
+/// two steps, and the profile header, which also attaches `PressFeedback` to
+/// its tray, stacked a second scale on top of the first. A host must NOT
+/// attach another press to a `MorphingButton`: it already has one.
 ///
 /// It IS a `UIButton` with a `UIButton.Configuration`: everything else —
 /// styles, highlight tinting, accessibility, actions — is UIKit's.
 open class MorphingButton: UIButton {
     /// How long a whole morph takes: blur in, swap, blur out.
     public static let morphDuration: TimeInterval = 0.36
-    /// How far a press, and a long press, scale the button down.
-    public static let pressScale: CGFloat = 0.94
-    public static let longPressScale: CGFloat = 0.88
-    /// How long a press must be held to count as a long press.
-    public static let longPressDelay: TimeInterval = 0.45
 
     /// The veil the content blurs under while it changes.
     private let veil = UIVisualEffectView(effect: nil)
-    private var longPressTimer: Timer?
     /// Whether a state change is on screen now. Public for tests.
     public private(set) var isMorphing = false
-    /// Whether the press is being held long. Public for tests.
-    public private(set) var isLongPressed = false
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
@@ -45,6 +45,9 @@ open class MorphingButton: UIButton {
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func setUp() {
+        // Silent: the action answers (a Follow morphs). The configuration's
+        // own highlight is the dim, so only the shrink is added.
+        PressFeedback.attach(to: self, sound: nil)
         veil.isUserInteractionEnabled = false
         veil.cornerConfiguration = .capsule()
         veil.clipsToBounds = true
@@ -94,46 +97,6 @@ open class MorphingButton: UIButton {
         self.configuration = configuration
         invalidateIntrinsicContentSize()
         superview?.setNeedsLayout()
-    }
-
-    // MARK: - Press
-
-    override open var isHighlighted: Bool {
-        didSet {
-            guard isHighlighted != oldValue else { return }
-            if isHighlighted {
-                pressDown()
-            } else {
-                release()
-            }
-        }
-    }
-
-    private func pressDown() {
-        longPressTimer?.invalidate()
-        animateScale(to: Self.pressScale, damping: 0.8)
-        longPressTimer = Timer.scheduledTimer(withTimeInterval: Self.longPressDelay, repeats: false) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self, self.isHighlighted else { return }
-                self.isLongPressed = true
-                self.animateScale(to: Self.longPressScale, damping: 0.8)
-            }
-        }
-    }
-
-    private func release() {
-        longPressTimer?.invalidate()
-        longPressTimer = nil
-        isLongPressed = false
-        // Back past its size and home: the bounce.
-        animateScale(to: 1, damping: 0.45)
-    }
-
-    private func animateScale(to scale: CGFloat, damping: CGFloat) {
-        UIView.animate(withDuration: 0.4, delay: 0, usingSpringWithDamping: damping,
-                       initialSpringVelocity: 0.6, options: [.allowUserInteraction, .beginFromCurrentState]) {
-            self.transform = CGAffineTransform(scaleX: scale, y: scale)
-        }
     }
 
     /// The veil's blur, nil when clear. Public for tests.
