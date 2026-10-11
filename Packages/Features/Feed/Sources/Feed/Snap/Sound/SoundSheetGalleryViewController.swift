@@ -1,6 +1,8 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
+import PostGrid
 import UIKit
 
 /// What "Popular"'s title and chevron push INSIDE the sound sheet: its whole
@@ -21,7 +23,8 @@ import UIKit
 ///
 /// It draws nothing of its own: tiles, order and what a tap does are the
 /// sheet's (`SoundSheetViewController`), so a tile here and one on the sheet
-/// are the same object.
+/// are the same object. Its video tiles play as the sheet's do
+/// (`SoundSheetAutoplay`, #884), on a coordinator of its own.
 final class SoundSheetGalleryViewController: UIViewController {
     let kind: SoundSheetSection.Kind
     private(set) var ids: [PostID]
@@ -30,6 +33,8 @@ final class SoundSheetGalleryViewController: UIViewController {
 
     private let tile: (PostID) -> SoundSheetViewController.Tile?
     private let imagePipeline: ImagePipeline
+    /// The video tiles playing on their own; nil without a pool.
+    private(set) var autoplay: SoundSheetAutoplay?
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private var dataSource: UICollectionViewDiffableDataSource<Int, PostID>!
 
@@ -37,12 +42,14 @@ final class SoundSheetGalleryViewController: UIViewController {
         kind: SoundSheetSection.Kind,
         ids: [PostID],
         tile: @escaping (PostID) -> SoundSheetViewController.Tile?,
-        imagePipeline: ImagePipeline
+        imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController? = nil
     ) {
         self.kind = kind
         self.ids = ids
         self.tile = tile
         self.imagePipeline = imagePipeline
+        autoplay = videoPlayback.map { SoundSheetAutoplay(pool: $0, imagePipeline: imagePipeline) }
         super.init(nibName: nil, bundle: nil)
         title = kind.title
     }
@@ -78,11 +85,23 @@ final class SoundSheetGalleryViewController: UIViewController {
         let registration = UICollectionView.CellRegistration<SoundSheetTileCell, PostID> { [weak self] cell, _, id in
             guard let tile = self?.tile(id) else { return }
             cell.configure(tile, pipeline: pipeline)
+            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, id in
             view.dequeueConfiguredReusableCell(using: registration, for: path, item: id)
         }
         dataSource.apply(snapshot(), animatingDifferences: false)
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        setAutoplayActive(true)
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // Popped, or the sheet going: the tiles give their players back now.
+        setAutoplayActive(false)
     }
 
     private func makeLayout() -> UICollectionViewCompositionalLayout {
@@ -106,6 +125,32 @@ final class SoundSheetGalleryViewController: UIViewController {
         var snapshot = snapshot()
         snapshot.reconfigureItems(changed.filter { newIDs.contains($0) })
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        reconcileAutoplay()
+    }
+
+    // MARK: - Autoplay
+
+    /// The tiles are (or are no longer) the viewer's — on screen, not covered
+    /// by a feed opened from one (the sheet says, `SoundSheetViewController
+    /// .openFeed`). Inactive, every one gives its player back at once.
+    func setAutoplayActive(_ active: Bool) {
+        guard let autoplay else { return }
+        autoplay.setActive(active)
+        guard active, isViewLoaded else { return }
+        collectionView.layoutIfNeeded()
+        reconcileAutoplay()
+    }
+
+    /// Every visible tile may play: nothing here is faint.
+    func reconcileAutoplay(allowingStarts: Bool = true) {
+        guard let autoplay, dataSource != nil else { return }
+        let items = collectionView.indexPathsForVisibleItems.compactMap { path -> SoundSheetAutoplay.Item? in
+            guard let id = dataSource.itemIdentifier(for: path), let tile = tile(id),
+                  let cell = collectionView.cellForItem(at: path) as? SoundSheetTileCell
+            else { return nil }
+            return .init(tile: tile, cell: cell)
+        }
+        autoplay.reconcile(items, in: collectionView, allowingStarts: allowingStarts)
     }
 
     // MARK: - Tiles, for the hero
@@ -133,5 +178,24 @@ extension SoundSheetGalleryViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         onSelect?(id)
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        reconcileAutoplay(allowingStarts: GridAutoplayRanking.allowsStarts(
+            atVelocity: scrollView.panGestureRecognizer.velocity(in: scrollView).y
+        ))
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        reconcileAutoplay()
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        // A tile that left gives its player back now — the pool is shared.
+        autoplay?.stop(cell)
     }
 }

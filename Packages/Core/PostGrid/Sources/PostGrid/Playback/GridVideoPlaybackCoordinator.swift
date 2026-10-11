@@ -1062,6 +1062,13 @@ public final class GridVideoPlaybackCoordinator {
             return
         }
         startTasks[id] = Task { [weak self, pool] in
+            // ⚠️ A START STOPPED BEFORE IT RAN PLAYS NOTHING (#884). A stop in
+            // the same turn as its start — a grid covered as it appears, a
+            // reconcile the gate turned down before the task was scheduled —
+            // cancels a task that has not called `play` yet. `pool.stop` then
+            // found nothing to detach, and the task, run later, bound a player
+            // no loan knew about: it played for the rest of the session.
+            guard !Task.isCancelled else { return }
             // Scoped to the POST: two rows carrying the same file are two
             // playbacks and must not share a clock. See `playingScope`.
             await pool.play(url, in: renderView, peakBitRate: cap, scope: id.rawValue)
