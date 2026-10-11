@@ -7,8 +7,8 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The thread's send states and bell (#719): a text on its way is drawn
-/// faded with a spinner, a failed one with a red mark that retries on a tap,
+/// The thread's send states and bell (#719): a text on its way shows a spinner
+/// in its time's place at full ink (#919), a failed one a red mark that retries on a tap,
 /// and the bar's bell mutes the conversation through the driver.
 @MainActor
 struct ConversationThreadSendAndMuteTests {
@@ -262,14 +262,25 @@ struct ConversationThreadSendAndMuteTests {
 
     // MARK: - Sending
 
-    /// A text on its way is faded with a spinner; delivered, plain.
-    @Test func aTextOnItsWayIsFadedWithASpinner() throws {
+    /// A text on its way is drawn at FULL INK (#919): the loader in its
+    /// time's place is the only sign it is pending. Delivered, plain.
+    @Test func aTextOnItsWayIsAtFullInkWithALoaderForItsTime() throws {
         let sending = Self.message("p1", mine: true, minutes: 2, delivery: .sending)
         let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1), sending]))
         defer { window.isHidden = true }
         let row = try #require(cell("Message p1", in: screen), "the pending text is not drawn")
         #expect(row.delivery == .sending)
-        #expect(abs(row.row.alpha - ThreadRowCell.sendingAlpha) < 0.01)
+        // Every layer between the cell and the text: none is faded. (The
+        // arrival's rise animates the content view's PRESENTATION only; its
+        // model value is already full ink.)
+        #expect(row.row.alpha == 1, "the pending row is faded: \(row.row.alpha)")
+        #expect(row.contentView.alpha == 1, "the pending cell is faded: \(row.contentView.alpha)")
+        #expect(row.row.bodyTextLabel.alpha == 1)
+        #expect(row.row.bodyTextLabel.textColor == .label)
+        // The time slot holds the loader, not the time.
+        #expect(row.sendingSpinnerView.isAnimating, "no loader while pending")
+        #expect(row.row.headerTextLabel.text == "You · ",
+                "the time shows while pending: \(row.row.headerTextLabel.text ?? "-")")
         #expect(row.accessibilityValue == "Sending")
 
         let other = try #require(cell("Message m1", in: screen))
@@ -366,6 +377,8 @@ struct ConversationThreadSendAndMuteTests {
         screen.view.layoutIfNeeded()
         let rising = try #require(cell("Message p1", in: screen))
         #expect(rising.isBouncingInSpinner)
+        // Mid-rise and pending: full ink (#919) — the rise is the only fade.
+        #expect(rising.row.alpha == 1, "the rising pending row is faded")
 
         driver.onPhaseChange?(.content([them, ConversationThreadMessage(
             id: "t1", senderID: ProfileID("me"), body: "Message p1", sentAt: pending.sentAt, isMine: true, quote: nil

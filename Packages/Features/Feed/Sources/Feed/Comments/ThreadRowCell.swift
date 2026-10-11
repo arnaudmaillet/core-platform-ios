@@ -34,8 +34,6 @@ final class ThreadRowCell: UICollectionViewCell {
     /// else's message. Internal for tests.
     private(set) var delivery: ConversationThreadDelivery?
 
-    /// How faded a message on its way is drawn.
-    static let sendingAlpha: CGFloat = 0.55
     private var selection: SelectableTextOverlay?
 
     /// The quote strip was tapped — the host scrolls to the original.
@@ -108,10 +106,14 @@ final class ThreadRowCell: UICollectionViewCell {
     }
 
     /// Shows (or, with nil, hides) the message this one answers.
-    /// The row's delivery state (#719): a message on its way is drawn faded
-    /// with a small spinner just right of its time, a failed one at full ink
-    /// with a red mark there (tap to retry), a delivered one plainly. Text
-    /// rows only — a photo or video draws its own (`ThreadMediaView`).
+    /// The row's delivery state (#719): a message on its way shows a small
+    /// spinner in its time's place, a failed one a red mark there (tap to
+    /// retry), a delivered one its time. Text rows only — a photo or video
+    /// draws its own (`ThreadMediaView`).
+    ///
+    /// ⚠️ ALWAYS AT FULL INK (#919, the owner's call 2026-10-11). A pending
+    /// message used to be drawn faded until it was sent; the spinner standing
+    /// in for the time is now the only sign it is on its way.
     /// `time`: what the line will say once delivered — its width is held
     /// while the spinner or the mark stands in it (see `reserveHeaderWidth`).
     func setDelivery(_ delivery: ConversationThreadDelivery?, time: String? = nil) {
@@ -120,7 +122,6 @@ final class ThreadRowCell: UICollectionViewCell {
         reserveHeaderWidth(awaiting ? time.map { (row.headerTextLabel.text ?? "") + $0 } : nil)
         let wasSending = self.delivery == .sending
         self.delivery = delivery == .sent ? nil : delivery
-        row.alpha = delivery == .sending ? Self.sendingAlpha : 1
         failedMark.isHidden = delivery != .failed
         accessibilityValue = switch delivery {
         case .sending: "Sending"
@@ -166,7 +167,7 @@ final class ThreadRowCell: UICollectionViewCell {
     static let indicatorGap: CGFloat = 0
 
     /// The message rises into place from the composer (#719): a short spring
-    /// up and in, landing at its on-its-way ink. A delivery that comes back
+    /// up and in, landing at full ink. A delivery that comes back
     /// sooner waits for it to land (`ConversationThreadViewController`).
     func playArrival() {
         contentView.transform = CGAffineTransform(translationX: 0, y: Self.arrivalRise)
@@ -178,9 +179,9 @@ final class ThreadRowCell: UICollectionViewCell {
         }
     }
 
-    /// Delivered: the faded message comes up to full ink, its spinner —
-    /// carried over from the pending row it replaces — scales out, and the
-    /// time it stood in for fades in in its place (#725).
+    /// Delivered: its spinner — carried over from the pending row it
+    /// replaces — scales out, and the time it stood in for bounces in in its
+    /// place (#725).
     ///
     /// `carryingSpinner: false` plays it on the pending row itself, the
     /// moment the server answers — from wherever its spinner is, mid
@@ -194,7 +195,6 @@ final class ThreadRowCell: UICollectionViewCell {
             // Configured with its time: the spinner stands in it first.
             full = current
             if current.hasSuffix(time) { label.text = String(current.dropLast(time.count)) }
-            row.alpha = Self.sendingAlpha
             sendingSpinner.transform = Self.spinnerScale
             sendingSpinner.alpha = 1
             sendingSpinner.startAnimating()
@@ -208,7 +208,6 @@ final class ThreadRowCell: UICollectionViewCell {
         isBouncingInSpinner = false
         isScalingOutSpinner = true
         UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
-            self.row.alpha = 1
             self.sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
             self.sendingSpinner.alpha = 0
         } completion: { _ in
