@@ -216,6 +216,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     var debugLeadRowIDs: [PostID] { rails?.cards.map(\.id) ?? [] }
     /// Whether this surface has a lead header at all (`.discover` only).
     var debugHasLeadHeader: Bool { rails != nil }
+    /// Taps item `index` through the page's own selection path, the one a
+    /// finger reaches. False while that item is not loaded yet.
+    func debugOpenTile(at index: Int) -> Bool { page.debugSelectItem(at: index) }
+    /// Whether the grid's inset is pinned rather than tracking the safe area.
+    var debugIsGridInsetPinned: Bool { page.debugIsInsetPinned }
     #endif
 
     /// Sizes the list's leading header to the rows it holds.
@@ -325,6 +330,20 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// that player is in the air — the grid is about to be covered, and its
     /// slots are what the feed needs.
     ///
+    /// ⚠️ **THE INSET IS PINNED FROM THE TAP UNTIL THIS SCREEN IS BACK (#883)**
+    /// — `ForYouGridPage.openHoldingStill`, Discover's gallery's arrangement.
+    /// This grid adds the safe area to its inset, and a close reinstalls it
+    /// under the flight's depth recede — the page scaled to 0.95 about its
+    /// centre — while the pop brings the screen's chrome back. The safe area
+    /// re-resolved then is the SCALED frame's, 2.5% of the height in from
+    /// each edge (874pt: `adjustedContentInset` t116 → t94, b34 → b12,
+    /// measured with `-list-jump-trace`). The offset followed the inset, so
+    /// every row slid 22pt up under the card; the grab re-reads its landing
+    /// through that drift, the card came down 22pt above the tile, and the
+    /// tile dropped into place once the screen was back. For You's
+    /// own grid never did this — its flight source pins the page as the close
+    /// stages (`ForYouGridZoomSource.zoomSourceWillStageDismissal`).
+    ///
     /// What is deliberately NOT copied is the place profile's text-post window
     /// and its `tileDeparture` bookkeeping. The window is a caption growing
     /// into a page; it would transfer, since these are the same rows, but it is
@@ -360,11 +379,30 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             opensComments: false,
             depthView: { [weak page] in page },
             textReveal: nil,
+            // Pinned since the tap; asked again in case a refused push handed
+            // the inset back (`openHoldingStill`).
+            willStageDismissal: { [weak page] in page?.pinForPushedClose() },
             // On past the window into what this surface holds, then into the
             // caller's next page (#638).
             continuation: { [weak self] after in await self?.postIDs(after: after) }
         )
-        openPost(self, origin, stream.map(\.id))
+        #if DEBUG
+        PushedListJumpTrace.mark("search open", page: page, host: view)
+        #endif
+        page.openHoldingStill(from: stackScreen) { openPost(self, origin, stream.map(\.id)) }
+    }
+
+    /// The screen this surface is hosted in that the navigation stack itself
+    /// holds — what a push from here covers.
+    ///
+    /// ⚠️ NOT `self`: this surface is a CHILD (a page of the search results'
+    /// pager), so the stack's top is never this controller, and
+    /// `openHoldingStill`'s "did the push happen" check would read every push
+    /// as refused or every refusal as a push, depending on how it is asked.
+    private var stackScreen: UIViewController {
+        var screen: UIViewController = self
+        while let parent = screen.parent, !(parent is UINavigationController) { screen = parent }
+        return screen
     }
 
     #if DEBUG
@@ -416,6 +454,13 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// the page at the active index.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Back: the inset tracks the safe area again, offset carried across —
+        // here and not in `closeOpeningRoundTrip`, which the host can also ask
+        // for while the pop is still settling the chrome.
+        page.endHeroFreeze()
+        #if DEBUG
+        PushedListJumpTrace.mark("search did-appear", page: page, host: view)
+        #endif
         closeOpeningRoundTrip()
     }
 

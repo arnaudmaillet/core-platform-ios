@@ -1497,6 +1497,10 @@ final class ForYouGridPage: UIView {
     /// The realized cell drawing `postID`, if any.
     func debugCell(for postID: PostID) -> UICollectionViewCell? { cell(for: postID) }
 
+    /// Whether the inset is pinned (`beginHeroFreeze`) rather than tracking
+    /// the safe area.
+    var debugIsInsetPinned: Bool { frozenContentInset != nil }
+
     /// The three numbers that decide where a cell is on screen, for tracing a
     /// landing that missed. A rect alone cannot say WHY it moved; these can.
     var debugInsetState: String {
