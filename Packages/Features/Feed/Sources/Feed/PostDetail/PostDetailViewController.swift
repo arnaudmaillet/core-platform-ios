@@ -2683,6 +2683,9 @@ final class PostDetailViewController: UIViewController {
     var debugDayUnderTheTop: (() -> Date?)?
     /// Hears every `scrollToDay`, for tests of what a tap reaches.
     var debugOnScrollToDay: ((Date) -> Void)?
+    /// Whether the composer's input row may rise with the keyboard — the bar's
+    /// own answer, not this controller's record of it (#969).
+    var debugComposerTracksKeyboard: Bool { composeBar.tracksKeyboard }
     #endif
 
     /// The engaged toolbar's sort selector lands here — the view model
