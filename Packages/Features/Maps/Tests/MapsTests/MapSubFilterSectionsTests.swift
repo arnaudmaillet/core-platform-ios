@@ -81,4 +81,64 @@ struct MapSubFilterSectionsTests {
         #expect(overflowed == false)
         #expect(sections == before)
     }
+
+    // MARK: - A row given over the cap (#867)
+
+    /// Twelve people in the bar, two more on offer — the shape the favorites
+    /// repository serves (rails of up to 12) against a default cap of 6.
+    private static let crowd = people((1...14).map { "p\($0)" })
+    private static let twelve = Array(crowd.prefix(12)).map(\.subFilter)
+
+    @Test("A row given over the default cap is taken as it is, and its header never reads more active than its max")
+    func anOverCapRowRaisesTheCapToItsOwnSize() {
+        let sections = MapSubFilterSections(all: Self.crowd, activeSubFilters: Self.twelve)
+        #expect(sections.active.count == 12)
+        #expect(sections.maxActive == 12)
+        #expect(sections.active.count <= sections.maxActive)
+        #expect(sections.capacityLabel == "12 of 12")
+    }
+
+    @Test("A row at or under the default cap keeps the default")
+    func aRowUnderTheCapKeepsTheDefault() {
+        let sections = MapSubFilterSections(all: Self.crowd, activeSubFilters: Array(Self.twelve.prefix(2)))
+        #expect(sections.maxActive == MapSubFilterSections.defaultMaxActive)
+        #expect(sections.capacityLabel == "2 of 6")
+    }
+
+    @Test("Reordering the active section of an over-cap row is accepted")
+    func reorderingAnOverCapRowIsAccepted() {
+        var sections = MapSubFilterSections(all: Self.crowd, activeSubFilters: Self.twelve)
+        let reordered = Array(sections.active.reversed())
+        let available = sections.available
+        let adopted = sections.adopt(active: reordered, available: available)
+        #expect(adopted)
+        #expect(sections.active == reordered)
+    }
+
+    @Test("An over-cap row still refuses to grow past the size it was given")
+    func anOverCapRowRefusesToGrow() {
+        var sections = MapSubFilterSections(all: Self.crowd, activeSubFilters: Self.twelve)
+        #expect(sections.isFull)
+        let promoted = sections.activate(Self.crowd[12].subFilter)
+        #expect(promoted == false)
+        // A drop that carries a thirteenth person across the divide is refused too.
+        let before = sections
+        let thirteen = sections.active + [sections.available[0]]
+        let rest = Array(sections.available.dropFirst())
+        let adopted = sections.adopt(active: thirteen, available: rest)
+        #expect(adopted == false)
+        #expect(sections == before)
+    }
+
+    @Test("Demoting from an over-cap row frees a seat that can be taken back")
+    func aDemotionFromAnOverCapRowFreesASeat() {
+        var sections = MapSubFilterSections(all: Self.crowd, activeSubFilters: Self.twelve)
+        sections.deactivate(Self.twelve[0], naturalOrder: Self.crowd.map(\.subFilter))
+        #expect(sections.capacityLabel == "11 of 12")
+        let retaken = sections.activate(Self.crowd[13].subFilter)
+        #expect(retaken)
+        #expect(sections.capacityLabel == "12 of 12")
+        let thirteenth = sections.activate(Self.twelve[0])
+        #expect(thirteenth == false)
+    }
 }

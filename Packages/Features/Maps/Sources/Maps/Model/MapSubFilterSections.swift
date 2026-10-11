@@ -5,7 +5,9 @@ import Foundation
 ///
 /// - **active** — the refinements the bar currently shows, in the viewer's
 ///   own order, capped at `maxActive` (a row you have to scroll for a minute
-///   to reach the end of is not a filter bar).
+///   to reach the end of is not a filter bar). The cap governs GROWING the
+///   row from the sheet; it is never a reason to refuse what the row already
+///   carries — see `maxActive`.
 /// - **available** — everything else this primary could offer: what was
 ///   removed, unfollowed, or simply never promoted.
 ///
@@ -18,6 +20,18 @@ struct MapSubFilterSections: Equatable {
 
     private(set) var active: [MapSubFilterOption]
     private(set) var available: [MapSubFilterOption]
+    /// The effective cap for this editing session: the requested one, or the
+    /// size of the row the sheet was GIVEN when that is larger.
+    ///
+    /// People rows are not capped at `defaultMaxActive` upstream — the
+    /// favorites repository serves rails of up to 12, and a curated row is as
+    /// long as the viewer made it. Clamping to 6 here turned such a row into
+    /// "12 of 6", refused every drag (any reorder leaves 12 in Active) and
+    /// would have forced the viewer to delete people just to rearrange them
+    /// (#867). Silently trimming the row on open would be worse: Done would
+    /// publish a shorter row than the viewer asked for. So the sheet takes the
+    /// row as it found it — "12 of 12", reorderable — and only refuses to grow
+    /// it further. A row at or under the default keeps the default.
     let maxActive: Int
 
     var isFull: Bool { active.count >= maxActive }
@@ -36,8 +50,12 @@ struct MapSubFilterSections: Equatable {
         let activeIDs = Set(active.map(\.subFilter))
         self.active = active
         self.available = all.filter { !activeIDs.contains($0.subFilter) }
-        self.maxActive = maxActive
+        self.maxActive = Swift.max(maxActive, active.count)
     }
+
+    /// The Active header's counter, `3 of 6`. Never reads more active than
+    /// allowed, because `maxActive` is never below what the sheet was given.
+    var capacityLabel: String { "\(active.count) of \(maxActive)" }
 
     /// Promotes an available refinement to the end of the active list — the
     /// end, never the front: the order above it is the viewer's arrangement,

@@ -240,4 +240,17 @@ struct MapSubFilterSheetTests {
         sheet.commitAndDismiss()
         #expect(recorder.published.isEmpty)
     }
+
+    @Test("A sheet opened on a twelve-person row reads twelve of twelve and refuses a thirteenth")
+    func anOverCapRowOpensFullNotOverfull() {
+        let ids = (1...14).map { "p\($0)" }
+        let twelve = Array(ids.prefix(12))
+        let (sheet, recorder) = Self.makeSheet(all: ids, active: twelve)
+        #expect(sheet.sections.capacityLabel == "12 of 12")
+        #expect(sheet.activate(Self.sub("p13")) == false)
+        #expect(sheet.sections.active.map(\.subFilter) == twelve.map(Self.sub))
+        #expect(sheet.hasChanges == false)
+        sheet.commitAndDismiss()
+        #expect(recorder.published.isEmpty)
+    }
 }
