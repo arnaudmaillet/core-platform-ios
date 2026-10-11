@@ -41,9 +41,21 @@ struct UnifiedThreadChromeTests {
     private static func entry(_ id: String, ageInDays: Double, parent: String? = nil) -> CommentEntry {
         CommentEntry(
             id: id, authorID: ProfileID("prof-1"), authorName: "Ava Moreau", authorHandle: "ava",
-            body: "Comment \(id)", createdAt: Date().addingTimeInterval(-ageInDays * 86_400), parentID: parent
+            body: "Comment \(id)", createdAt: anchor.addingTimeInterval(-ageInDays * 86_400), parentID: parent
         )
     }
+
+    /// ⚠️ NOON YESTERDAY, NOT `Date()`. The stream pins one chip per CALENDAR
+    /// day, so ages counted back from the wall clock split a few-hour cluster
+    /// across midnight whenever the run starts in the small hours: at 05:30
+    /// the oldest cluster became two days, the last one too short to reach
+    /// the top, and the bar at the bottom read the day before it. Counted
+    /// back from noon, every cluster used here stays inside its own day.
+    private static let anchor: Date = {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        return calendar.date(byAdding: .hour, value: -12, to: today) ?? today.addingTimeInterval(-12 * 3_600)
+    }()
 
     /// Newest first, the way Recent reads: today, the day before, three back.
     private static let spreadAcrossDays = [
@@ -138,7 +150,7 @@ struct UnifiedThreadChromeTests {
         let (controller, stream, window) = try await makeStream(Self.longAcrossDays)
         defer { window.isHidden = true }
         let days = controller.debugStreamDays
-        try #require(days.count >= 3, "the premise: three days in the thread")
+        try #require(days.count == 3, "the premise: three days in the thread, none split at midnight: \(days.count)")
 
         // From the end of the thread, where the oldest day is under the top.
         let bottom = stream.contentSize.height + stream.adjustedContentInset.bottom - stream.bounds.height
