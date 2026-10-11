@@ -239,32 +239,20 @@ public final class GridVideoPlaybackCoordinator {
     /// feed alone asked — measured as the same idle cost either way.
     public static var allowsAutoplay: () -> Bool = { !PowerSavingPreference.isOn }
 
-    /// This grid's answer to `allowsAutoplay`, asked on every reconcile —
-    /// and no tile plays on its own while the app rests (`IdleCalm`, #580):
-    /// a playing tile is decoration, and it keeps the whole screen redrawing.
+    /// This grid's answer to `allowsAutoplay`, asked on every reconcile.
     /// Swappable for tests, which must not flip the app-wide rule under
     /// suites running beside them.
-    var autoplayAllowed: () -> Bool = { GridVideoPlaybackCoordinator.allowsAutoplay() && !IdleCalm.isCalm }
-
-    /// The candidates of the last reconcile, so the app resting or waking
-    /// can reconcile again without a scroll to ask (`IdleCalm`).
-    private var lastCandidates: [Candidate] = []
-    /// The rest/wake observer, holding this coordinator weakly.
-    private lazy var calmProxy = CalmProxy(self)
+    ///
+    /// ⚠️ **NOT `IdleCalm`** (#882). #650 rested the tiles with the rest of
+    /// the decoration after 30 s without a touch, and the viewer read it as
+    /// the videos pausing on their own: a tile playing is a video on screen,
+    /// and a video on screen keeps playing (the owner's decision,
+    /// 2026-10-11). Power Saving still stops them (`allowsAutoplay`).
+    var autoplayAllowed: () -> Bool = { GridVideoPlaybackCoordinator.allowsAutoplay() }
 
     public init(pool: VideoPlaybackController, maxConcurrent: Int = 6) {
         self.pool = pool
         self.maxConcurrent = maxConcurrent
-        NotificationCenter.default.addObserver(
-            calmProxy, selector: #selector(CalmProxy.decorativeMotionChanged),
-            name: .decorativeMotionDidChange, object: nil
-        )
-    }
-
-    /// The app rested or woke: the tiles stop, or start again, where they
-    /// are — nobody scrolled to ask.
-    fileprivate func reconcileForCalm() {
-        update(candidates: lastCandidates)
     }
 
     /// Reconciles playback against the currently visible video tiles. Stops
@@ -275,7 +263,6 @@ public final class GridVideoPlaybackCoordinator {
     /// runs: a tile that has left the viewport must give its player back
     /// immediately whatever the scroll is doing, or the pool starves.
     public func update(candidates: [Candidate], allowingStarts: Bool = true) {
-        lastCandidates = candidates
         // The post in flight is excluded from BOTH halves. Stopping it would
         // kill the player the card is rendering; starting it would attach a
         // competing layer. Its lifecycle belongs to the handoff scope until
@@ -1315,18 +1302,4 @@ public final class GridVideoPlaybackCoordinator {
         for task in tasks { await task.value }
     }
     #endif
-}
-
-/// Observes `IdleCalm` for a coordinator without holding it — the
-/// notification centre drops a selector observer when it goes away.
-private final class CalmProxy: NSObject {
-    weak var owner: GridVideoPlaybackCoordinator?
-    init(_ owner: GridVideoPlaybackCoordinator) { self.owner = owner }
-
-    /// `IdleCalm.set` is main-actor, and a selector observer is called on
-    /// the posting thread: this is the main thread, synchronously.
-    @objc nonisolated func decorativeMotionChanged() {
-        let owner = self.owner
-        MainActor.assumeIsolated { owner?.reconcileForCalm() }
-    }
 }
