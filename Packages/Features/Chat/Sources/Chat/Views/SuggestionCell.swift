@@ -1,3 +1,4 @@
+import CoreModels
 import DesignSystem
 import Foundation
 import MediaCore
@@ -21,8 +22,14 @@ final class SuggestionCell: UITableViewCell {
     private let handleLabel = UILabel()
     private let reasonLabel = UILabel()
     private let separatorLabel = UILabel()
-    private let followButton = UIButton(type: .system)
-    private let dismissButton = UIButton(type: .system)
+    /// UIKit's system capsule, shared with every person row (#885): Follow ⇄
+    /// Following cross-fades, and its press is the configuration's highlight.
+    private let followButton = RowActionButton(frame: .zero)
+    private let dismissButton = RowActionButton(frame: .zero)
+    /// Who the row shows and whether it said Following: the same person
+    /// flipping cross-fades the button, a new person (a reused cell) does not.
+    private var shownID: ProfileID?
+    private var shownIsFollowing: Bool?
 
     private var imagePipeline: ImagePipeline?
     private var currentAvatarURL: URL?
@@ -40,6 +47,10 @@ final class SuggestionCell: UITableViewCell {
         super.prepareForReuse()
         onToggleFollow = nil
         onDismiss = nil
+        // A reconfigure keeps the cell without coming through here, so only
+        // a real reuse forgets who the row showed.
+        shownID = nil
+        shownIsFollowing = nil
         avatarTask?.cancel()
         avatarTask = nil
         currentAvatarURL = nil
@@ -57,24 +68,31 @@ final class SuggestionCell: UITableViewCell {
         // trailing a stray bullet.
         reasonLabel.isHidden = model.reasonText.isEmpty
         separatorLabel.isHidden = reasonLabel.isHidden || model.handleText.isEmpty
-        applyFollowState(model.isFollowing, name: model.displayName)
+        let flips = shownID == model.id && shownIsFollowing != nil && shownIsFollowing != model.isFollowing
+        applyFollowState(model.isFollowing, name: model.displayName, animated: flips)
+        shownID = model.id
+        shownIsFollowing = model.isFollowing
         dismissButton.accessibilityLabel = "Remove suggestion \(model.displayName)"
         loadAvatar(model.avatarURL)
     }
 
-    private func applyFollowState(_ isFollowing: Bool, name: String) {
-        var configuration: UIButton.Configuration = isFollowing ? .gray() : .borderedProminent()
-        configuration.cornerStyle = .capsule
-        configuration.buttonSize = .small
-        configuration.attributedTitle = AttributedString(
-            isFollowing ? "Following" : "Follow",
-            attributes: AttributeContainer([
-                .font: UIFont.appFont(forTextStyle: .subheadline)
-            ])
-        )
-        followButton.configuration = configuration
+    private func applyFollowState(_ isFollowing: Bool, name: String, animated: Bool) {
+        followButton.setConfiguration(Self.followConfiguration(isFollowing: isFollowing), animated: animated)
         followButton.accessibilityLabel = isFollowing ? "Unfollow \(name)" : "Follow \(name)"
     }
+
+    /// Filled while it invites, grey once it states a fact — the same two
+    /// looks as the relationship lists' rows.
+    private static func followConfiguration(isFollowing: Bool) -> UIButton.Configuration {
+        isFollowing
+            ? RowActionButton.configuration(title: "Following", prominence: .secondary)
+            : RowActionButton.configuration(title: "Follow", prominence: .prominent)
+    }
+
+    /// The follow button. Internal for tests.
+    var debugFollowButton: RowActionButton { followButton }
+    /// The ✕. Internal for tests.
+    var debugDismissButton: RowActionButton { dismissButton }
 
     /// The image dissolves in over the monogram, which stays behind it as the
     /// permanent fallback — a suggestion never renders as an empty disc.
@@ -129,7 +147,7 @@ final class SuggestionCell: UITableViewCell {
         dismissConfiguration.image = UIImage(systemName: "xmark")
         dismissConfiguration.baseForegroundColor = .tertiaryLabel
         dismissConfiguration.buttonSize = .small
-        dismissButton.configuration = dismissConfiguration
+        dismissButton.setConfiguration(dismissConfiguration, animated: false)
         dismissButton.addAction(UIAction { [weak self] _ in self?.onDismiss?() }, for: .primaryActionTriggered)
         dismissButton.setContentHuggingPriority(.required, for: .horizontal)
 
