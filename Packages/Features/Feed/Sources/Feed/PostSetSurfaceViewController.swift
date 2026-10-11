@@ -208,6 +208,9 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             row.following = ids.compactMap { byID[$0] }
             self.rails?.render(row)
             self.updateLeadHeight()
+            #if DEBUG
+            self.openCardForQAIfRequested()
+            #endif
         }
     }
 
@@ -219,6 +222,13 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// Taps item `index` through the page's own selection path, the one a
     /// finger reaches. False while that item is not loaded yet.
     func debugOpenTile(at index: Int) -> Bool { page.debugSelectItem(at: index) }
+    /// Taps lead-row card `index` through the row's own tap handler. False
+    /// while that card is not loaded yet.
+    func debugOpenLeadCard(at index: Int) -> Bool {
+        guard let rails, rails.cards.indices.contains(index), let tap = rails.onCardTapped else { return false }
+        tap(index)
+        return true
+    }
     /// Whether the grid's inset is pinned rather than tracking the safe area.
     var debugIsGridInsetPinned: Bool { page.debugIsInsetPinned }
     #endif
@@ -243,6 +253,20 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     /// A lead-row card opens the way For You's Following cards do
     /// (`ForYouViewController.openCard`, `ForYouRowOrigins.card`).
+    ///
+    /// ⚠️ **PINNED FROM THE TAP, AND HANDED BACK ONLY IN `viewDidAppear`
+    /// (#924)** — the arrangement `openTile` got in #883, which this door
+    /// missed. The row is the list's leading header, so it rides the list's
+    /// inset, and For You's card origin hands that inset back as the card
+    /// lands (`setConcealed(false)`, the window's `dismissalDidEnd`). On a
+    /// pushed screen closed by a grab or a swipe, that is while the screen is
+    /// still under the depth recede: the inset re-resolved against the SCALED
+    /// frame (t116 → t94.1, b34 → b12.1), and once the screen was back at full
+    /// size UIKit carried the difference into the offset (-116 → -138). The
+    /// whole page dropped 22pt as the card landed, and stayed there —
+    /// measured with `-list-jump-trace` on the hashtag page's Recent row, a
+    /// picture card's grab and a words card's swipe alike.
+    /// `thawsOnLanding: false` leaves the thaw to this screen's appearance.
     private func openCard(at index: Int) {
         guard let rails, let openPost else { return }
         let cards = rails.cards
@@ -254,8 +278,13 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         // The card's player is the flight's from here; the list stops.
         rails.beginPlaybackHandoff(of: tapped.id)
         page.setAutoplayActive(false)
-        let origin = ForYouRowOrigins.card(tapped, stream: stream, rails: rails, page: page, host: view)
-        openPost(self, origin, stream.map(\.id))
+        let origin = ForYouRowOrigins.card(
+            tapped, stream: stream, rails: rails, page: page, host: view, thawsOnLanding: false
+        )
+        #if DEBUG
+        PushedListJumpTrace.mark("search card open", page: page, host: view)
+        #endif
+        page.openHoldingStill(from: stackScreen) { openPost(self, origin, stream.map(\.id)) }
     }
 
     /// "View all": For You's media gallery over this page's media posts, fed
@@ -344,12 +373,12 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// own grid never did this — its flight source pins the page as the close
     /// stages (`ForYouGridZoomSource.zoomSourceWillStageDismissal`).
     ///
-    /// What is deliberately NOT copied is the place profile's text-post window
-    /// and its `tileDeparture` bookkeeping. The window is a caption growing
-    /// into a page; it would transfer, since these are the same rows, but it is
-    /// a second flight family and this change is about the first one arriving
-    /// at all. A text row keeps the plain push here — the honest floor, and
-    /// written down so it reads as a choice rather than an omission.
+    /// ⚠️ **A TEXT POST OPENS AS A WINDOW (#924)**, and it did not: this
+    /// origin carried no `textReveal`, a text row has no picture to fly
+    /// (`hasHero` false), and the builder's floor for that is the stack's
+    /// plain slide — so every text post on the hashtag page and its Recent
+    /// list slid in and out sideways while the same post opened out of its
+    /// card on For You and on the profile. See `textReveal(for:)`.
     private func openTile(at index: Int) {
         let posts = page.posts
         // One opening at a time — checked BEFORE the handoff begins, which a
@@ -378,7 +407,12 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             donateLiveMedia: { [weak page] in page?.liveFlightSurface(for: tapped.id) },
             opensComments: false,
             depthView: { [weak page] in page },
-            textReveal: nil,
+            textReveal: textReveal(for: tapped),
+            // A paired card's or a large tile's words, worn by the card at the
+            // tile's end (#910) — the gallery's and the profile's arrangement.
+            restingOverlay: { [weak page] in page?.restingOverlay(for: tapped.id) },
+            // A tile's heart flies red once the viewer has staked.
+            viewerStake: { [weak page] in page?.viewerStake(on: tapped.id) ?? 0 },
             // Pinned since the tap; asked again in case a refused push handed
             // the inset back (`openHoldingStill`).
             willStageDismissal: { [weak page] in page?.pinForPushedClose() },
@@ -390,6 +424,72 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         PushedListJumpTrace.mark("search open", page: page, host: view)
         #endif
         page.openHoldingStill(from: stackScreen) { openPost(self, origin, stream.map(\.id)) }
+    }
+
+    /// The window a TEXT post opens through, and ANY post closes through once
+    /// the feed has paged onto words — the profile's description of the same
+    /// rows (`ProfileViewController`'s `textReveal`), since these are For
+    /// You's own cards: the page grows out of the card with its caption
+    /// aligned to the card's, the card's author band borrowed for the flight,
+    /// and the close carrying the card home (`RevealDismissCardView`) onto the
+    /// row it opened from. A TILE (a mosaic brick, a paired card) answers with
+    /// its own window instead (`ForYouGridPage.tileWindow`): its shape and
+    /// ground, nothing to align. Nil for a row the page cannot find, the plain
+    /// push then being the honest floor.
+    ///
+    /// ⚠️ OFFERED FOR MEDIA POSTS TOO. `hasHero` decides the opening; this
+    /// decides whether a close that has nothing left to fly has anywhere to
+    /// go (`RowCardCloseLanding`) — the rows' rule (`ForYouRowOrigins`).
+    ///
+    /// ⚠️ NO THAW HERE: `viewDidAppear` hands the inset back. A window's close
+    /// ends before the pop has settled the chrome, and a thaw then re-bases
+    /// the list on a mid-flight inset
+    /// (`ForYouPostListViewController.textRowReveal`).
+    private func textReveal(for post: GalleryPost) -> TextRevealOrigin? {
+        let anchor = post.id
+        let staged: () -> Void = { [weak self] in
+            guard let self else { return }
+            // Pinned since the tap; the row brought back clear of the chrome
+            // before the landing is measured.
+            view.layoutIfNeeded()
+            page.pinForPushedClose()
+            page.revealPost(anchor, clearing: UIEdgeInsets(
+                top: view.safeAreaInsets.top, left: 0, bottom: view.safeAreaInsets.bottom, right: 0
+            ))
+            view.layoutIfNeeded()
+        }
+        let ended: (Bool) -> Void = { [weak page] committed in
+            if !committed { page?.clearRevealConcealment() }
+        }
+        if page.drawsAsTile(anchor) {
+            return page.tileWindow(
+                for: post, willStageDismissal: staged, dismissalDidEnd: ended
+            )
+        }
+        guard page.rowFrame(for: anchor, in: page) != nil else { return nil }
+        return TextRevealOrigin(
+            // The text row's rect, or any row's: the anchor may be a media
+            // row, which `textRowFrame` refuses on purpose.
+            rowFrame: { [weak page] space in
+                page?.textRowFrame(for: anchor, in: space) ?? page?.rowFrame(for: anchor, in: space)
+            },
+            // Read once, at the tap, while the row is realized by definition.
+            captionEnd: page.textRowCaptionEnd(for: anchor),
+            depthView: { [weak page] in page },
+            captionTop: page.textRowCaptionTop(for: anchor),
+            authorBand: page.textRowAuthorBand(for: anchor),
+            makeDismissStandIn: { [weak page] _ in page?.makeDismissStandIn(for: anchor) },
+            alignsPageToSource: true,
+            // The media fills the window, always — see `RevealPageFit.covering`.
+            pageFit: .covering,
+            // The list's card, its own curve and fill (the initialiser's
+            // defaults are the card's).
+            setConcealed: { [weak page] concealed in
+                page?.setRevealConcealed(concealed, for: anchor)
+            },
+            willStageDismissal: { _ in staged() },
+            dismissalDidEnd: ended
+        )
     }
 
     /// The screen this surface is hosted in that the navigation stack itself
@@ -443,7 +543,42 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// Set when the hook ARMS: the wait above then covers a slow hydration
     /// (and gives up out loud), so a republication never stacks a second tap.
     private var didOpenForQA = false
+
+    /// `-search-open-card <index>` taps a card of the lead row (the hashtag
+    /// page's Recent row) through `openCard`, the hook above's twin, so a
+    /// close from the row can be filmed and traced without a finger (#924).
+    private func openCardForQAIfRequested() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let position = arguments.firstIndex(of: "-search-open-card"),
+              position + 1 < arguments.count,
+              let index = Int(arguments[position + 1]),
+              !didOpenCardForQA
+        else { return }
+        didOpenCardForQA = true
+        let label = "-search-open-card \(index)"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            QAWait.until(label, { [weak self] in
+                guard let self, let rails = self.rails else { return false }
+                return rails.cards.indices.contains(index) && rails.window != nil && self.openPost != nil
+            }) { [weak self] in
+                guard let self, let rails = self.rails else { return }
+                print("[qa] \(label): opening \(rails.cards[index].id) of \(rails.cards.count)")
+                self.openCard(at: index)
+            }
+        }
+    }
+
+    private var didOpenCardForQA = false
     #endif
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        #if DEBUG
+        // Followed frame by frame across a close: a drop at the landing is a
+        // change in the first row's top edge (`-list-jump-trace`).
+        PushedListJumpTrace.begin("search will-appear", page: page, host: view)
+        #endif
+    }
 
     /// ⚠️ THE PAGE PLAYS NOTHING UNTIL IT IS TOLD IT IS VISIBLE, and handing it
     /// the pool is not that. `ForYouGridPage` gates its whole autoplay
