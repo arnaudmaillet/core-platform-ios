@@ -25,6 +25,9 @@ protocol ProfileHeroSurface: UIView {
     func makeDismissStandIn(for postID: PostID) -> UIView?
     /// The tile a card-shaped close lands on, or nil for a row (#888).
     func tileRevealShape(for postID: PostID) -> ProfileTileRevealShape?
+    /// The words a tile wears over its picture, for a flight to wear as the
+    /// tile's resting furniture, or nil for a post that wears none (#910).
+    func restingOverlay(for postID: PostID) -> UIView?
 }
 
 /// How a TILE meets the window closing onto it: its corner and its fill. The
