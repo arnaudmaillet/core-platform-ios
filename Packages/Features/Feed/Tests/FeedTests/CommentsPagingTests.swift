@@ -500,4 +500,35 @@ struct CommentsPagingTests {
         // Only the first page is the cache the panel mounts from.
         #expect(repository.cachedTopComments(for: post)?.count == 30)
     }
+
+    /// The cached first pages were filtered for their reader (blocks, hidden
+    /// words, held comments): a viewer change drops them, so the next
+    /// viewer's panel loads its own (#892).
+    @Test func aViewerChangeDropsTheCachedFirstPages() async throws {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockSocialServices(dataset: dataset).register(on: bff)
+        MockCommentService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let repository = CommentsRepository(
+            commentClient: Comment_V1_CommentServiceClient(client: client),
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            authSession: PagingSessionStub(),
+            pageSize: 30
+        )
+        let fetched = PostID("post-0011")
+        let seeded = PostID("post-0001")
+        await repository.prefetchTopComments(for: fetched)
+        repository.seedTopComments(try await repository.loadComments(for: fetched), for: seeded)
+        #expect(repository.cachedTopComments(for: fetched) != nil)
+        #expect(repository.cachedTopComments(for: seeded) != nil)
+
+        await repository.viewerDidChange(.member(AccountID("acct-2"), activeProfile: ProfileID("prof-2")))
+
+        #expect(repository.cachedTopComments(for: fetched) == nil, "the previous viewer's page survived")
+        #expect(repository.cachedTopComments(for: seeded) == nil)
+        // And the next prefetch reads again rather than finding it cached.
+        await repository.prefetchTopComments(for: fetched)
+        #expect(repository.cachedTopComments(for: fetched)?.count == 30)
+    }
 }

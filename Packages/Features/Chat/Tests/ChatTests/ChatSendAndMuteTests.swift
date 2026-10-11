@@ -271,6 +271,25 @@ struct ChatSendAndMuteTests {
         #expect(!catalog.isMuted(ConversationID("c1")), "the stale refusal put the mute back")
     }
 
+    /// A mute still on its way when the viewer changes is the previous
+    /// viewer's (#892): its refusal neither speaks ("Couldn't mute" for a
+    /// conversation the new viewer never saw) nor touches the new state.
+    @Test func aMuteInFlightAcrossAViewerChangeNeverSpeaks() async {
+        let provider = GatedMuteProvider()
+        let catalog = InboxCatalog(repository: provider)
+        let said = Said()
+        catalog.setMute(ConversationID("c1"), muted: true, until: nil) { said.items.append("mute \($0)") }
+        #expect(await settleAsync { await provider.pendingCount == 1 })
+
+        catalog.reset()
+        #expect(!catalog.isMuted(ConversationID("c1")))
+
+        await provider.answer(muted: true, refused: true)
+        #expect(await settle { catalog.muteAnswersHandled == 1 })
+        #expect(said.items.isEmpty, "the previous viewer's mute spoke after the change")
+        #expect(!catalog.isMuted(ConversationID("c1")))
+    }
+
     /// What a completion answered, read after an await.
     @MainActor
     private final class Answers {

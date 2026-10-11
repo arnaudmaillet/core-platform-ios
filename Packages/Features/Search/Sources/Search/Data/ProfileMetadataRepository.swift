@@ -1,3 +1,4 @@
+import AuthInterface
 import CoreContracts
 import CoreModels
 import Foundation
@@ -75,6 +76,9 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
     /// Shared work, so concurrent callers for the same person queue behind one
     /// request instead of racing it.
     private var inFlight: [ProfileID: Task<ProfileRowMetadata, Never>] = [:]
+    /// Bumped on every viewer change, so a read that left for the previous
+    /// viewer and lands after the reset is not filed under the new one.
+    private var generation = 0
 
     public init(
         profileClient: any Profile_V1_ProfileServiceClientInterface,
@@ -117,7 +121,8 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
             )
         }
         inFlight[id] = task
-        Task { await self.finish(id, metadata: await task.value) }
+        let asked = generation
+        Task { await self.finish(id, metadata: await task.value, generation: asked) }
         return task
     }
 
@@ -152,11 +157,26 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
         return (isFollowed, view.targetFollowersCount > 0 ? Int(view.targetFollowersCount) : nil)
     }
 
-    private func finish(_ id: ProfileID, metadata: ProfileRowMetadata) {
+    private func finish(_ id: ProfileID, metadata: ProfileRowMetadata, generation asked: Int) {
+        // Asked for a viewer who has since left: the answer is theirs.
+        guard asked == generation else { return }
         // A failed read is cached as "nothing known" on purpose: retrying it on
         // every re-render would turn one unreachable person into a request per
         // keystroke. The row keeps its initials and says nothing about them.
         resolved[id] = metadata
         inFlight[id] = nil
+    }
+}
+
+extension ProfileMetadataRepository: ViewerScoped {
+    /// `isFollowed` is the VIEWER's edge to each person: once the viewer is
+    /// someone else (another account, a sign-out, a profile switch) none of
+    /// it is true any more, and a row would say "Following" for a person the
+    /// new viewer has never followed (#892). Pictures and counts go with it:
+    /// one read answers all three, so they are re-read together.
+    public func viewerDidChange(_ state: ViewerState) async {
+        generation += 1
+        resolved.removeAll()
+        inFlight.removeAll()
     }
 }

@@ -333,6 +333,23 @@ final class MainTabCoordinator: NSObject, Coordinator {
 
     @objc private func activeProfileChanged() {
         loadAvatar()
+        // ⚠️ A SWITCH IS ANOTHER VIEWER (#892). A sign-out rebuilds what holds
+        // the viewer's own graph (`viewerDidChange(isMember:)`); a switch
+        // between two profiles of one account never reaches that, so the
+        // inbox, For You's rows, the map's people and the bell stayed the
+        // previous profile's. The same rebuilds, minus the bar: the viewer is
+        // still a member.
+        if isMember {
+            container.chatFeature.forgetViewer()
+            // A fresh inbox stack (its search and suggestions too), primed for
+            // the new profile.
+            messagesTab?.show(member: true)
+            forYouTab?.start()
+            for (_, tab) in orderedTabs {
+                (tab as? ExploreTabCoordinator)?.viewerDidChange()
+            }
+            refreshUnreadBadge()
+        }
         // The menu is built on demand from the last `reload`, so refresh the
         // snapshot rather than the menu — there is no menu object to replace.
         Task { [weak self] in

@@ -1,3 +1,4 @@
+import AuthInterface
 import Connect
 import CoreContracts
 import CoreModels
@@ -250,6 +251,11 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         viewerFollowing = nil
     }
 
+    /// Bumped on every viewer change: a read or a follow that left for the
+    /// previous viewer and lands after the reset files nothing under the new
+    /// one.
+    private var viewerGeneration = 0
+
     // MARK: - Pages
 
     public func relationships(
@@ -258,11 +264,14 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         pageToken: String,
         limit: Int32
     ) async throws -> RelationshipPage {
+        // Taken before the viewer is read, so a switch during either read
+        // keeps its answer out of the new viewer's cache.
+        let generation = viewerGeneration
         let viewerID = await viewer.viewerProfileID()
         // The edge page and the viewer's follow set are independent reads; the
         // second is cached, so this only actually races on the first page.
         async let edgesTask = edges(for: profileID, direction: direction, pageToken: pageToken, limit: limit)
-        async let followingTask = resolveViewerFollowing(viewerID: viewerID)
+        async let followingTask = resolveViewerFollowing(viewerID: viewerID, generation: generation)
         let edges = try await edgesTask
         let following = await followingTask
 
@@ -358,6 +367,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
     /// screen's lifetime — the membership test `friendEdges` runs against.
     private func followerSet(for profileID: ProfileID) async throws -> Set<String> {
         if let cached = followerSets[profileID] { return cached }
+        let asked = viewerGeneration
         var ids: Set<String> = []
         var token = ""
         repeat {
@@ -367,7 +377,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
             ids.formUnion(page.ids)
             token = page.nextPageToken
         } while !token.isEmpty && ids.count < Self.followerSetLimit
-        followerSets[profileID] = ids
+        if asked == viewerGeneration { followerSets[profileID] = ids }
         return ids
     }
 
@@ -440,7 +450,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
     /// be read every row simply renders "Follow", which is recoverable (the
     /// server rejects or no-ops a duplicate follow) where failing the whole
     /// list would not be.
-    private func resolveViewerFollowing(viewerID: ProfileID?) async -> Set<String> {
+    private func resolveViewerFollowing(viewerID: ProfileID?, generation asked: Int) async -> Set<String> {
         if let viewerFollowing { return viewerFollowing }
         if followSubscription == nil {
             followSubscription = followEvents?.subscribe { [weak self] change in
@@ -458,7 +468,8 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
             return []
         }
         let following = Set(body.following.map(\.profileID))
-        viewerFollowing = following
+        // Read for a viewer who has since left: theirs, not the new one's.
+        if asked == viewerGeneration { viewerFollowing = following }
         return following
     }
 
@@ -479,6 +490,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
     /// already pending is now the answer `.requested`, and a refusal
     /// (`PERMISSION_DENIED`: they block the viewer) is `.cannotFollow`.
     public func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
+        let generation = viewerGeneration
         guard let viewerID = await viewer.viewerProfileID() else {
             throw RelationshipsError.transport(message: "no viewer profile")
         }
@@ -489,17 +501,17 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         if let error = response.error {
             switch error.code {
             case .alreadyExists:
-                requestedIDs.insert(profileID.rawValue)
+                if generation == viewerGeneration { requestedIDs.insert(profileID.rawValue) }
                 return .requested
             case .permissionDenied, .failedPrecondition:
-                unfollowableIDs.insert(profileID.rawValue)
+                if generation == viewerGeneration { unfollowableIDs.insert(profileID.rawValue) }
                 throw RelationshipsError.cannotFollow
             default:
                 throw RelationshipsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
             }
         }
         if response.message?.requested == true {
-            requestedIDs.insert(profileID.rawValue)
+            if generation == viewerGeneration { requestedIDs.insert(profileID.rawValue) }
             return .requested
         }
         guard response.message?.success == true else {
@@ -581,5 +593,21 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         guard response.message?.success == true else {
             throw RelationshipsError.transport(message: "command rejected")
         }
+    }
+}
+
+extension ProfileRelationshipsRepository: ViewerScoped {
+    /// The sets here are the VIEWER's: whom they follow, whom they asked, who
+    /// refused them. Kept across a viewer change (another account, a
+    /// sign-out, a profile switch), a list would say "Following" or
+    /// "Requested" for the previous viewer's edges (#892). The subjects'
+    /// follower sets go too: a private profile's list is read as one of its
+    /// followers, which the next viewer may not be.
+    public func viewerDidChange(_ state: ViewerState) async {
+        viewerGeneration += 1
+        viewerFollowing = nil
+        requestedIDs.removeAll()
+        unfollowableIDs.removeAll()
+        followerSets.removeAll()
     }
 }

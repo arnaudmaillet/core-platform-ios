@@ -35,6 +35,7 @@ let package = Package(
             name: "NotificationsTests",
             dependencies: [
                 "Notifications",
+                "AuthInterface",
                 "CoreNavigation",
                 "CoreNetworking",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")

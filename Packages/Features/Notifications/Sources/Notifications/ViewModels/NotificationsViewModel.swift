@@ -1,3 +1,4 @@
+import AuthInterface
 import CoreModels
 import CoreNavigation
 import CoreNetworking
@@ -76,6 +77,10 @@ public final class NotificationsViewModel {
     private var isRevealed = false
     /// The server has been told this visit's rows are read.
     private var hasMarkedThisVisit = false
+    /// Where viewer changes are heard — the default center; a test hands its
+    /// own, since posting on the shared one reaches every suite at once.
+    var notificationCenter: NotificationCenter = .default
+    private var viewerObserver: NSObjectProtocol?
 
     public init(
         repository: any NotificationsProviding,
@@ -93,6 +98,36 @@ public final class NotificationsViewModel {
 
     public func viewDidLoad() {
         armRecovery()
+        observeViewer()
+        reload()
+    }
+
+    /// ⚠️ THE LIST IS THE VIEWER'S (#892). The drawer lives as long as the
+    /// shell, so after a profile switch — or a sign-out and a sign-in as
+    /// someone else — it would open on the previous viewer's rows, and keep
+    /// them if the reload failed. A viewer change empties it and loads the new
+    /// viewer's first page.
+    private func observeViewer() {
+        guard viewerObserver == nil else { return }
+        viewerObserver = notificationCenter.addObserver(
+            forName: .viewerDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.viewerDidChange() }
+        }
+    }
+
+    private func viewerDidChange() {
+        load?.cancel()
+        load = nil
+        pageLoad?.cancel()
+        pageLoad = nil
+        items = []
+        nextPageToken = nil
+        pageFailed = false
+        isNewExpanded = false
+        hasMarkedThisVisit = false
+        updatePageFooter()
+        phase = .loading
         reload()
     }
 
