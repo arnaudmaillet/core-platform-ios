@@ -43,8 +43,15 @@ final class MessageRequestCell: UITableViewCell {
     private let nameLabel = UILabel()
     private let previewLabel = EmoteLabel()
     private let timeLabel = UILabel()
-    private let acceptButton = UIButton(type: .system)
-    private let dismissButton = UIButton(type: .system)
+    /// UIKit's system capsule, shared with every person row (#885); its press
+    /// is the configuration's highlight.
+    private let acceptButton = RowActionButton(frame: .zero)
+    private let dismissButton = RowActionButton(frame: .zero)
+
+    /// Accept. Internal for tests.
+    var debugAcceptButton: RowActionButton { acceptButton }
+    /// Decline. Internal for tests.
+    var debugDismissButton: RowActionButton { dismissButton }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -230,16 +237,7 @@ final class MessageRequestCell: UITableViewCell {
     /// than a glyph because accepting a stranger's message is a decision worth
     /// naming.
     private func configureAcceptButton() {
-        var configuration = UIButton.Configuration.filled()
-        configuration.cornerStyle = .capsule
-        configuration.buttonSize = .small
-        configuration.attributedTitle = AttributedString(
-            "Accept",
-            attributes: AttributeContainer([
-                .font: UIFont.appFont(forTextStyle: .subheadline)
-            ])
-        )
-        acceptButton.configuration = configuration
+        acceptButton.setConfiguration(RowActionButton.configuration(title: "Accept", prominence: .prominent), animated: false)
         acceptButton.addAction(UIAction { [weak self] _ in self?.onAccept?() }, for: .primaryActionTriggered)
         acceptButton.setContentHuggingPriority(.required, for: .horizontal)
         acceptButton.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -253,7 +251,7 @@ final class MessageRequestCell: UITableViewCell {
         configuration.cornerStyle = .capsule
         configuration.buttonSize = .small
         configuration.baseForegroundColor = .secondaryLabel
-        dismissButton.configuration = configuration
+        dismissButton.setConfiguration(configuration, animated: false)
         dismissButton.addAction(UIAction { [weak self] _ in self?.onDismiss?() }, for: .primaryActionTriggered)
         dismissButton.setContentHuggingPriority(.required, for: .horizontal)
         dismissButton.setContentCompressionResistancePriority(.required, for: .horizontal)

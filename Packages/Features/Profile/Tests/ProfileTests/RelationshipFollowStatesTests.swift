@@ -266,7 +266,8 @@ struct RelationshipFollowStatesTests {
     /// ⚠️ ONE PRESS PER FOLLOW BUTTON (#866). The header attaches the shared
     /// press to its tray, and the Follow button — a `MorphingButton` — carries
     /// that press already: attached twice, one finger drew two shrinks. The
-    /// rows' Follow buttons are the same button and get the same one press.
+    /// rows' Follow buttons are UIKit's system button now (#885): their press
+    /// is the configuration's highlight, and nothing is added on touch-down.
     @Test func everyFollowButtonHasExactlyOnePress() throws {
         let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
@@ -285,7 +286,8 @@ struct RelationshipFollowStatesTests {
 
         let cell = RelationshipListCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
         cell.configure(with: row(.follow), imagePipeline: nil)
-        #expect(touchDownHandlers(cell.debugActionButton) == 1, "the row's Follow does not have one press")
+        #expect(PressFeedback.attached(to: cell.debugActionButton) == nil, "the row's Follow carries a custom press")
+        #expect(touchDownHandlers(cell.debugActionButton) == 0, "the row's Follow has a press added to UIKit's")
     }
 
     // MARK: - The row's button
@@ -299,8 +301,8 @@ struct RelationshipFollowStatesTests {
     }
 
     /// Every state's title fits on one line in the column the row reserves,
-    /// and a change of state for the same person morphs.
-    @Test func everyStateIsOneLineAndAChangeMorphs() {
+    /// and a change of state for the same person cross-fades.
+    @Test func everyStateIsOneLineAndAChangeCrossFades() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.isHidden = true
         let cell = RelationshipListCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
@@ -316,6 +318,46 @@ struct RelationshipFollowStatesTests {
         cell.configure(with: row(.followBack), imagePipeline: nil)
         cell.layoutIfNeeded()
         cell.configure(with: row(.following), imagePipeline: nil)
-        #expect(cell.debugActionButton.isMorphing, "the same person's change of state did not morph")
+        #expect(cell.debugActionButton.isTransitioning, "the same person's change of state did not cross-fade")
+        #expect(cell.debugActionButton.configuration?.title == "Following")
+    }
+
+    /// Followers / Following / Mutuals rows (#885): each state is the shared
+    /// system capsule — filled while it invites, grey once it states a fact —
+    /// with a label that names the person, and an inert row has no button.
+    @Test func relationshipRowsWearTheSystemButtonInEveryState() {
+        let expected: [(ProfileRelationshipsViewModel.RowAction, String, RowActionButton.Prominence, String)] = [
+            (.follow, "Follow", .prominent, "Follow Ava"),
+            (.followBack, "Follow Back", .prominent, "Follow Ava back"),
+            (.following, "Following", .secondary, "Unfollow Ava"),
+            (.requested, "Requested", .secondary, "Withdraw your request to Ava")
+        ]
+        for (action, title, prominence, label) in expected {
+            let cell = RelationshipListCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
+            cell.configure(with: row(action), imagePipeline: nil)
+            let button = cell.debugActionButton
+            #expect(button.configuration?.title == title)
+            #expect(button.requestedConfiguration == RowActionButton.configuration(title: title, prominence: prominence),
+                    "\(action) is not the \(prominence) system capsule titled \(title)")
+            #expect(button.accessibilityLabel == label)
+            #expect(cell.accessories.count == 2, "\(action) has no button")
+        }
+        let inert = RelationshipListCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
+        inert.configure(with: row(.inert), imagePipeline: nil)
+        #expect(inert.accessories.count == 1, "an inert row offers a button")
+    }
+
+    /// A reused cell showing someone else takes their state at once — only
+    /// the same person's change fades.
+    @Test func aNewPersonOnAReusedRowDoesNotCrossFade() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.isHidden = true
+        let cell = RelationshipListCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
+        window.addSubview(cell)
+        cell.configure(with: row(.follow, id: "ava"), imagePipeline: nil)
+        cell.layoutIfNeeded()
+        cell.configure(with: row(.following, id: "ben"), imagePipeline: nil)
+        #expect(!cell.debugActionButton.isTransitioning, "a different person's state faded in")
+        #expect(cell.debugActionButton.configuration?.title == "Following")
     }
 }
