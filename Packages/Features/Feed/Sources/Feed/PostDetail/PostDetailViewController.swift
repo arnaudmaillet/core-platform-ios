@@ -414,6 +414,7 @@ final class PostDetailViewController: UIViewController {
         viewModel.onPublished = { [weak self] entry in self?.becomePublished(entry) }
         viewModel.onPublishFailed = { [weak self] text in self?.restoreUnpublished(text) }
         viewModel.onCommentFailed = { [weak self] text, refused in self?.restoreUnsent(text, refused: refused) }
+        viewModel.onCommentPosted = { [weak self] id in self?.arrivingCommentID = id }
         viewModel.onReviewFailed = { [weak self] approve in
             let notice = Self.reviewFailureNotice(approve: approve)
             self?.presentNotice(notice.title, notice.message)
@@ -1492,6 +1493,10 @@ final class PostDetailViewController: UIViewController {
         }
         commentsFailed = false
         latestComments = models
+        // Taken HERE, whichever way this render goes: a posted comment's
+        // arrival belongs to the render that brings it, never a later one.
+        let arriving = arrivingCommentID
+        arrivingCommentID = nil
         let previous = streamModels
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         // A row keeps its identity (the comment id) when it is approved or
@@ -1516,7 +1521,39 @@ final class PostDetailViewController: UIViewController {
         // sort re-ranks, and submissions animate as native diffs — moves,
         // insertions, deletions, all UIKit's own.
         applyStream(animated: hasAppliedStream, reconfiguring: reviewChanged)
+        if let arriving { playArrival(ofPostedComment: arriving) }
     }
+
+    /// The viewer's comment that just landed, until its row has arrived.
+    private var arrivingCommentID: String?
+
+    /// The viewer's new comment arrives with the comment row's effect — the
+    /// bounce-in (#920) — rather than appearing on UIKit's insert alone.
+    ///
+    /// ⚠️ PLAYED AFTER THE APPLY, never from the cell registration: the data
+    /// source dequeues cells inside an apply UIKit runs without animation, and
+    /// a `UIView.animate` issued there is swallowed (see `revealLoadedRow`).
+    /// Laying out first gives the inserted row its cell in this same turn.
+    private func playArrival(ofPostedComment id: String) {
+        collectionView.layoutIfNeeded()
+        guard let indexPath = streamDataSource.indexPath(for: .comment(id)),
+              let cell = collectionView.cellForItem(at: indexPath),
+              let row = Self.commentRow(in: cell) else { return }
+        row.playAppear(in: cell.contentView)
+        #if DEBUG
+        debugPlayedArrivals.append(id)
+        #endif
+    }
+
+    /// The comment row a stream cell carries, whichever cell it is.
+    static func commentRow(in cell: UICollectionViewCell) -> CommentRowView? {
+        (cell as? CommentCell)?.row ?? (cell as? ThreadRowCell)?.row
+    }
+
+    #if DEBUG
+    /// The comments whose arrival played, in order. Tests.
+    var debugPlayedArrivals: [String] = []
+    #endif
 
     /// The bones step aside and the loaded comments arrive, one after the
     /// other.
@@ -2565,6 +2602,7 @@ final class PostDetailViewController: UIViewController {
     /// row can hydrate its own avatar behind its monogram, guarded by the
     /// comment id against a recycled row catching someone else's face.
     private func configureCommentRow(_ row: CommentRowView, with model: CommentDisplayModel) {
+        row.variant = .comment
         row.configure(with: model, imagePipeline: imagePipeline)
         row.onAvatarTap = { [weak self] in
             self?.viewModel.didTapCommentAuthor(commentID: model.id)

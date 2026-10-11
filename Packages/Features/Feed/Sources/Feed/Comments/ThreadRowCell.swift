@@ -6,7 +6,10 @@ import UIKit
 /// conversation's messages and a text post's resting comments share.
 ///
 /// The same `CommentRowView` as `CommentCell`, at the same insets, so the
-/// stream reads identically. What differs is what a lift needs:
+/// stream reads identically. The row draws everything a message and a comment
+/// have in common — avatar, name, the time or the loader in its place, the
+/// content — and its `variant` says which it is (#920). What this cell adds is
+/// what a lift needs:
 ///  - the row carries NO menu interaction of its own — the stream's
 ///    `ThreadRowContextMenu` owns the long press, once, for every row;
 ///  - a clear LIFT PLATE stands behind the row, outset by the platter's
@@ -26,13 +29,6 @@ final class ThreadRowCell: UICollectionViewCell {
     let mediaView = ThreadMediaView()
     private let liftPlate = UIView()
     private let quoteView = ThreadQuoteView(indented: false)
-    /// A text message of the viewer's on its way (#719): a small spinner at
-    /// the row's trailing edge; a failed one wears the red mark instead.
-    private let sendingSpinner = UIActivityIndicatorView(style: .medium)
-    private let failedMark = UIImageView(image: UIImage(systemName: "exclamationmark.circle.fill"))
-    /// What the row says of its delivery now; nil for a delivered or someone
-    /// else's message. Internal for tests.
-    private(set) var delivery: ConversationThreadDelivery?
 
     private var selection: SelectableTextOverlay?
 
@@ -48,6 +44,9 @@ final class ThreadRowCell: UICollectionViewCell {
         liftPlate.layer.cornerRadius = Self.liftCornerRadius
         liftPlate.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(liftPlate)
+        // A freshly dequeued row has no frame yet: its delivery animations lay
+        // out the whole cell before they start.
+        row.layoutHost = self
 
         quoteView.isHidden = true
         // On the header line, right of the time (#753, the owner's call
@@ -81,252 +80,90 @@ final class ThreadRowCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        // Back to a comment, with nothing pending — see the row's own.
         row.prepareForReuse()
-        row.setLikeControlHidden(false)
+        accessibilityValue = nil
         endTextSelection()
         setQuote(nil)
         mediaView.configure(nil, delivery: .sent, pipeline: nil)
         mediaView.onTap = nil
         liftPlate.layer.removeAllAnimations()
         liftPlate.backgroundColor = .clear
-        // A rise or a delivery fade in flight does not follow the cell.
+        // An arrival or a departure in flight does not follow the cell.
         contentView.layer.removeAllAnimations()
         row.layer.removeAllAnimations()
         contentView.transform = .identity
         contentView.alpha = 1
-        timeReveal.layer.removeAllAnimations()
-        timeReveal.isHidden = true
-        isBouncingInTime = false
-        // ⚠️ A pending row's cell can come straight back as its delivered
-        // message (the swap is unanimated, #756) while its spinner is still
-        // scaling out: the delivery stays with the row that played it.
-        isScalingOutSpinner = false
-        isBouncingInSpinner = false
-        setDelivery(nil)
     }
 
-    /// Shows (or, with nil, hides) the message this one answers.
-    /// The row's delivery state (#719): a message on its way shows a small
-    /// spinner in its time's place, a failed one a red mark there (tap to
-    /// retry), a delivered one its time. Text rows only — a photo or video
-    /// draws its own (`ThreadMediaView`).
+    // MARK: - Delivery (#719)
+
+    /// What the row says of its delivery now; nil for a delivered or someone
+    /// else's message. Internal for tests.
+    var delivery: ConversationThreadDelivery? {
+        switch row.delivery {
+        case .sending: .sending
+        case .failed: .failed
+        case nil: nil
+        }
+    }
+
+    /// The message's delivery state, drawn by the row in its time's place: a
+    /// spinner while on its way, a red mark when it failed (tap to retry), the
+    /// time once delivered. Text rows only — a photo or video draws its own
+    /// (`ThreadMediaView`). `time`: what the line will say once delivered.
     ///
     /// ⚠️ ALWAYS AT FULL INK (#919, the owner's call 2026-10-11). A pending
     /// message used to be drawn faded until it was sent; the spinner standing
     /// in for the time is now the only sign it is on its way.
-    /// `time`: what the line will say once delivered — its width is held
-    /// while the spinner or the mark stands in it (see `reserveHeaderWidth`).
     func setDelivery(_ delivery: ConversationThreadDelivery?, time: String? = nil) {
-        installDeliveryIndicatorsIfNeeded()
-        let awaiting = delivery == .sending || delivery == .failed
-        reserveHeaderWidth(awaiting ? time.map { (row.headerTextLabel.text ?? "") + $0 } : nil)
-        let wasSending = self.delivery == .sending
-        self.delivery = delivery == .sent ? nil : delivery
-        failedMark.isHidden = delivery != .failed
+        let awaiting: CommentRowView.Delivery? = switch delivery {
+        case .sending: .sending
+        case .failed: .failed
+        case .sent, nil: nil
+        }
+        row.setDelivery(awaiting, time: time)
         accessibilityValue = switch delivery {
         case .sending: "Sending"
         case .failed: "Not sent. Tap to try again."
         default: nil
         }
-        placeDeliveryIndicators()
-        guard delivery == .sending else {
-            sendingSpinner.layer.removeAllAnimations()
-            sendingSpinner.stopAnimating()
-            sendingSpinner.transform = Self.spinnerScale
-            sendingSpinner.alpha = 1
-            return
-        }
-        sendingSpinner.startAnimating()
-        if !wasSending { bounceInSpinner() }
     }
 
-    /// The spinner arrives with a bounce: from nothing, past its size and
-    /// back (#725).
-    private func bounceInSpinner() {
-        isBouncingInSpinner = true
-        sendingSpinner.layer.removeAllAnimations()
-        sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
-        sendingSpinner.alpha = 0
-        UIView.animate(withDuration: 0.5, delay: 0.08, usingSpringWithDamping: 0.5,
-                       initialSpringVelocity: 0.8, options: [.allowUserInteraction]) {
-            self.sendingSpinner.transform = Self.spinnerScale
-            self.sendingSpinner.alpha = 1
-        } completion: { _ in
-            self.isBouncingInSpinner = false
-        }
-    }
-
-    /// Whether the spinner is on its way in. Internal for tests.
-    private(set) var isBouncingInSpinner = false
-
-    static let arrivalDuration: TimeInterval = 0.45
-    static let arrivalRise: CGFloat = 24
-    /// The spinner is drawn at the time's size, not a control's (#725).
-    static let spinnerScale = CGAffineTransform(scaleX: 0.6, y: 0.6)
-    /// Room between the time and the spinner or the mark.
-    static let indicatorGap: CGFloat = 0
-
-    /// The message rises into place from the composer (#719): a short spring
-    /// up and in, landing at full ink. A delivery that comes back
-    /// sooner waits for it to land (`ConversationThreadViewController`).
-    func playArrival() {
-        contentView.transform = CGAffineTransform(translationX: 0, y: Self.arrivalRise)
-        contentView.alpha = 0
-        UIView.animate(withDuration: Self.arrivalDuration, delay: 0, usingSpringWithDamping: 0.78,
-                       initialSpringVelocity: 0.4, options: [.allowUserInteraction]) {
-            self.contentView.transform = .identity
-            self.contentView.alpha = 1
-        }
-    }
-
-    /// Delivered: its spinner — carried over from the pending row it
-    /// replaces — scales out, and the time it stood in for bounces in in its
-    /// place (#725).
-    ///
-    /// `carryingSpinner: false` plays it on the pending row itself, the
-    /// moment the server answers — from wherever its spinner is, mid
-    /// bounce-in included — while its delivered row waits to take its place.
+    /// Delivered: the spinner scales out and the time bounces in in its place
+    /// (#725) — see `CommentRowView.playDelivered`.
     func playDelivered(revealing time: String, carryingSpinner: Bool = true) {
-        installDeliveryIndicatorsIfNeeded()
-        let label = row.headerTextLabel
-        let current = label.text ?? ""
-        let full: String
-        if carryingSpinner {
-            // Configured with its time: the spinner stands in it first.
-            full = current
-            if current.hasSuffix(time) { label.text = String(current.dropLast(time.count)) }
-            sendingSpinner.transform = Self.spinnerScale
-            sendingSpinner.alpha = 1
-            sendingSpinner.startAnimating()
-            placeDeliveryIndicators()
-            layoutIfNeeded()
-        } else {
-            full = current.hasSuffix(time) ? current : current + time
-        }
-        delivery = nil
+        row.playDelivered(revealing: time, carryingSpinner: carryingSpinner)
         accessibilityValue = nil
-        isBouncingInSpinner = false
-        isScalingOutSpinner = true
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
-            self.sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
-            self.sendingSpinner.alpha = 0
-        } completion: { _ in
-            self.isScalingOutSpinner = false
-            guard self.delivery != .sending else { return }
-            self.sendingSpinner.stopAnimating()
-            self.sendingSpinner.transform = Self.spinnerScale
-            self.sendingSpinner.alpha = 1
-        }
-        // The time bounces in where the spinner was, on the same beat as the
-        // spinner leaving; the line takes it back once it has landed.
-        let prefix = String(full.dropLast(time.count))
-        reserveHeaderWidth(full)
-        label.text = prefix
-        timeReveal.font = label.font
-        timeReveal.textColor = label.textColor
-        timeReveal.text = time
-        timeRevealLeading?.constant = ceil(Self.textWidth(prefix, in: label))
-        timeReveal.isHidden = false
-        layoutIfNeeded()
-        timeReveal.layer.removeAllAnimations()
-        timeReveal.transform = CGAffineTransform(scaleX: 0.01, y: 0.01)
-        timeReveal.alpha = 0
-        isBouncingInTime = true
-        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.55,
-                       initialSpringVelocity: 0.8, options: [.allowUserInteraction]) {
-            self.timeReveal.transform = .identity
-            self.timeReveal.alpha = 1
-        } completion: { _ in
-            self.isBouncingInTime = false
-            label.text = full
-            self.reserveHeaderWidth(nil)
-            self.timeReveal.isHidden = true
-        }
     }
 
-    /// Whether the time is on its way in. Internal for tests.
-    private(set) var isBouncingInTime = false
+    /// Internal for tests — the row's.
+    var isBouncingInSpinner: Bool { row.isBouncingInSpinner }
+    var isScalingOutSpinner: Bool { row.isScalingOutSpinner }
+    var isBouncingInTime: Bool { row.isBouncingInTime }
+    var sendingSpinnerView: UIActivityIndicatorView { row.sendingSpinnerView }
+    var debugHeaderWidthFloor: CGFloat { row.debugHeaderWidthFloor }
 
-    /// The time while it bounces in, drawn over its own place in the line.
-    private let timeReveal = UILabel()
-    private var timeRevealLeading: NSLayoutConstraint?
+    // MARK: - Arrival and departure (#920)
 
-    /// ⚠️ THE LINE KEEPS ITS FULL WIDTH WHILE THE TIME IS AWAY (#753). With
-    /// a reply's quote on the header line the label hugs its text, so the
-    /// spinner, the mark and the time's reveal — all drawn at the text's end
-    /// — landed on the quote, and the quote jumped when the time came back.
-    /// Holding the width of the full line keeps the quote where it will be.
-    private lazy var headerWidthFloor: NSLayoutConstraint = {
-        let floor = row.headerTextLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
-        // Over the label's and the quote's compression (749, 700).
-        floor.priority = .defaultHigh
-        floor.isActive = true
-        return floor
-    }()
+    /// How long a message's arrival takes to land — a delivery that comes back
+    /// sooner waits for it (`ConversationThreadViewController`).
+    static let arrivalDuration = CommentRowView.Variant.message.effect.appearDuration
 
-    private func reserveHeaderWidth(_ text: String?) {
-        let width = text.map { ceil(Self.textWidth($0, in: row.headerTextLabel)) } ?? 0
-        guard headerWidthFloor.constant != width else { return }
-        headerWidthFloor.constant = width
+    /// The row arrives with its effect (#920): a message rises in from the
+    /// composer, a comment bounces in.
+    func playArrival() {
+        row.playAppear(in: contentView)
     }
 
-    /// The width the header line holds. Tests.
-    var debugHeaderWidthFloor: CGFloat { headerWidthFloor.constant }
-
-    private static func textWidth(_ text: String, in label: UILabel) -> CGFloat {
-        (text as NSString).size(withAttributes: [.font: label.font as Any]).width
+    /// The row leaves with its effect; the host removes it in `completion`.
+    func playDeparture(completion: @escaping () -> Void) {
+        row.playDisappear(in: contentView, completion: completion)
     }
 
-    /// Whether the spinner is on its way out. Internal for tests.
-    private(set) var isScalingOutSpinner = false
+    // MARK: - Quote
 
-    var sendingSpinnerView: UIActivityIndicatorView { sendingSpinner }
-
-    /// The spinner's and the mark's leading edges, from the time line's.
-    private var spinnerLeading: NSLayoutConstraint?
-    private var markLeading: NSLayoutConstraint?
-
-    /// In the time's place, which the line leaves empty (`You · `) while the
-    /// message is on its way: the line is a stretching label, so the text's
-    /// own width — trailing space included — places them (#725).
-    private func placeDeliveryIndicators() {
-        let label = row.headerTextLabel
-        let textWidth = label.text.map { ($0 as NSString).size(withAttributes: [.font: label.font as Any]).width } ?? 0
-        let drawn = sendingSpinner.intrinsicContentSize.width * Self.spinnerScale.a
-        // The spinner is laid out at its natural size and drawn scaled about
-        // its centre: its frame starts half the difference before what shows.
-        spinnerLeading?.constant = ceil(textWidth) + Self.indicatorGap - (sendingSpinner.intrinsicContentSize.width - drawn) / 2
-        markLeading?.constant = ceil(textWidth) + Self.indicatorGap
-    }
-
-    private var installedDeliveryIndicators = false
-    private func installDeliveryIndicatorsIfNeeded() {
-        guard !installedDeliveryIndicators else { return }
-        installedDeliveryIndicators = true
-        sendingSpinner.hidesWhenStopped = true
-        sendingSpinner.transform = Self.spinnerScale
-        failedMark.tintColor = .systemRed
-        failedMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
-        failedMark.isHidden = true
-        let label = row.headerTextLabel
-        for view in [sendingSpinner, failedMark] as [UIView] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            contentView.addSubview(view)
-            view.centerYAnchor.constraint(equalTo: label.centerYAnchor).isActive = true
-        }
-        spinnerLeading = sendingSpinner.leadingAnchor.constraint(equalTo: label.leadingAnchor)
-        markLeading = failedMark.leadingAnchor.constraint(equalTo: label.leadingAnchor)
-        spinnerLeading?.isActive = true
-        markLeading?.isActive = true
-        timeReveal.translatesAutoresizingMaskIntoConstraints = false
-        timeReveal.isHidden = true
-        timeReveal.isAccessibilityElement = false
-        contentView.addSubview(timeReveal)
-        timeReveal.centerYAnchor.constraint(equalTo: label.centerYAnchor).isActive = true
-        timeRevealLeading = timeReveal.leadingAnchor.constraint(equalTo: label.leadingAnchor)
-        timeRevealLeading?.isActive = true
-    }
-
+    /// Shows (or, with nil, hides) the message this one answers.
     func setQuote(_ quote: (author: String, snippet: String)?) {
         quoteView.isHidden = quote == nil
         if let quote { quoteView.configure(author: quote.author, snippet: quote.snippet) }

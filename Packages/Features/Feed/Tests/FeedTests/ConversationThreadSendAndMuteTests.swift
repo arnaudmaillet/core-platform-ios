@@ -43,7 +43,8 @@ struct ConversationThreadSendAndMuteTests {
         func beginReply(to messageID: String) { replies.append(messageID) }
         func cancelReply() {}
         func forward(_ messageID: String) {}
-        func delete(_ messageID: String) {}
+        private(set) var deleted: [String] = []
+        func delete(_ messageID: String) { deleted.append(messageID) }
         func didTapIdentity() {}
         func togglePinned() {}
         func retry(_ messageID: String) { retried.append(messageID) }
@@ -421,9 +422,11 @@ struct ConversationThreadSendAndMuteTests {
         let headerFrame = header.convert(header.bounds, to: row.contentView)
         let prefixWidth = ("You · " as NSString).size(withAttributes: [.font: header.font as Any]).width
         let timeStart = headerFrame.minX + prefixWidth
-        #expect(abs(spinner.frame.minX - timeStart) < 2, "the spinner is not where the time goes: \(spinner.frame) vs \(timeStart)")
-        #expect(abs(spinner.center.y - headerFrame.midY) < 1, "\(spinner.center) vs \(headerFrame)")
-        #expect(spinner.frame.width < 14, "the spinner is a control's size, not the time's")
+        // The spinner is the ROW's (#920): measured in the same space as the line.
+        let spinnerFrame = try #require(spinner.superview).convert(spinner.frame, to: row.contentView)
+        #expect(abs(spinnerFrame.minX - timeStart) < 2, "the spinner is not where the time goes: \(spinnerFrame) vs \(timeStart)")
+        #expect(abs(spinnerFrame.midY - headerFrame.midY) < 1, "\(spinnerFrame) vs \(headerFrame)")
+        #expect(spinnerFrame.width < 14, "the spinner is a control's size, not the time's")
 
         driver.onPhaseChange?(.content([ConversationThreadMessage(
             id: "t1", senderID: ProfileID("me"), body: "Message p1", sentAt: pending.sentAt, isMine: true, quote: nil
@@ -435,6 +438,42 @@ struct ConversationThreadSendAndMuteTests {
         #expect(await settle { !delivered.isBouncingInTime })
         let time = try #require(delivered.row.headerTextLabel.text)
         #expect(time.hasPrefix("You · ") && time.count > "You · ".count, "the time did not come back: \(time)")
+    }
+
+    // MARK: - Arrival and departure (#920)
+
+    /// A message is the row's MESSAGE variant: no ♥, and the fade-up for its
+    /// arrival and its departure.
+    @Test func aMessageRowIsTheMessageVariant() throws {
+        let (screen, _, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        let row = try #require(cell("Message m1", in: screen))
+        #expect(row.row.variant == .message)
+        #expect(row.row.effect == .fadeUp)
+        let like = try #require(Self.firstView(UIButton.self, in: row.row) { $0.accessibilityLabel == "Like comment" })
+        #expect(like.isHidden, "a message wears a ♥")
+    }
+
+    /// Deleting plays the message's departure — it sinks back the way it rose
+    /// — and the delete lands once the row is gone, not before.
+    @Test func aDeletedMessageLeavesWithItsDepartureThenDeletes() async throws {
+        let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: true, minutes: 1)]))
+        defer { window.isHidden = true }
+        let row = try #require(cell("Message m1", in: screen))
+        screen.deleteWithDeparture("m1")
+        #expect(driver.deleted.isEmpty, "the delete landed before the departure played")
+        let end = ThreadRowEffect.fadeUp.disappearEnd
+        #expect(row.contentView.alpha == end.alpha)
+        #expect(row.contentView.transform == end.transform, "\(row.contentView.transform)")
+        #expect(await settle { driver.deleted == ["m1"] }, "the delete never landed")
+    }
+
+    private static func firstView<T: UIView>(_ type: T.Type, in view: UIView, where match: (T) -> Bool) -> T? {
+        if let typed = view as? T, match(typed) { return typed }
+        for subview in view.subviews {
+            if let found = firstView(type, in: subview, where: match) { return found }
+        }
+        return nil
     }
 
     // MARK: - The correspondent's @handle (#752)

@@ -161,10 +161,52 @@ final class CommentRowView: UIView {
     /// The avatar's picture on show, nil while the monogram shows. Tests.
     var debugAvatarImage: UIImage? { avatarImageView.image }
 
-    /// A conversation's messages carry no ♥: there is nothing to like them
-    /// with on the wire, and a control that does nothing is worse than none.
-    func setLikeControlHidden(_ hidden: Bool) {
-        likeButton.isHidden = hidden
+    // MARK: - Variant and effect (#920)
+
+    /// What the row stands for. ONE row draws a conversation's messages and a
+    /// post's comments alike — avatar, name, time (or the pending loader) and
+    /// content — and what differs between the two is decided here, not by two
+    /// rows kept in step by hand.
+    enum Variant: Equatable, Sendable {
+        /// A chat message: no ♥ (there is nothing to like it with on the wire,
+        /// and a control that does nothing is worse than none); it rises in
+        /// from the composer.
+        case message
+        /// A post's comment, and the caption row: the trailing ♥; it bounces
+        /// in.
+        case comment
+
+        var showsLikeControl: Bool { self == .comment }
+        /// The variant's own arrival and departure.
+        var effect: ThreadRowEffect { self == .message ? .fadeUp : .bounceIn }
+    }
+
+    /// Restated by the host on every configure: a recycled row can change
+    /// surface (a text page's liftable comments use the conversation's cell),
+    /// and `prepareForReuse` puts it back to `.comment`. Setting it also resets
+    /// `effect` to the variant's own.
+    var variant: Variant = .comment {
+        didSet {
+            likeButton.isHidden = !variant.showsLikeControl
+            effect = variant.effect
+        }
+    }
+
+    /// How the row arrives and leaves: a parameter of the row, the variant's
+    /// own by default (`Variant.effect`) — a host may set another after the
+    /// variant.
+    var effect: ThreadRowEffect = Variant.comment.effect
+
+    /// Plays `effect`'s arrival on `container`, the view that carries the row
+    /// on screen (a cell's content view).
+    func playAppear(in container: UIView, completion: (() -> Void)? = nil) {
+        effect.playAppear(on: container, completion: completion)
+    }
+
+    /// Plays `effect`'s departure on `container`; the host removes the row in
+    /// `completion`.
+    func playDisappear(in container: UIView, completion: (() -> Void)? = nil) {
+        effect.playDisappear(on: container, completion: completion)
     }
 
     private var headerRow: UIStackView?
@@ -313,6 +355,8 @@ final class CommentRowView: UIView {
         onBlock = nil
         onReport = nil
         onReview = nil
+        variant = .comment
+        resetDelivery()
     }
 
     static let heldMarker = "Held for review"
@@ -411,6 +455,242 @@ final class CommentRowView: UIView {
             config?.attributedTitle = nil
         }
         likeButton.configuration = config
+    }
+
+    // MARK: - The time, or the loader in its place (#719, #725, #919)
+
+    /// What the time slot says of the row's delivery. Nil is a delivered row,
+    /// or anyone else's: it shows its time.
+    enum Delivery: Equatable, Sendable {
+        /// On its way: a small spinner stands in the time's place. The row is
+        /// at full ink (#919) — the spinner is the only sign.
+        case sending
+        /// Not sent: a red mark stands there instead (the host retries on a
+        /// tap).
+        case failed
+    }
+
+    /// What the row says of its delivery now. Internal for tests.
+    private(set) var delivery: Delivery?
+
+    /// The view laid out before a delivery animation starts, so the spinner and
+    /// the time's reveal leave from where they are drawn. A cell sets itself:
+    /// a freshly dequeued row has no frame of its own yet. Nil lays out the row.
+    weak var layoutHost: UIView?
+
+    private let sendingSpinner = UIActivityIndicatorView(style: .medium)
+    private let failedMark = UIImageView(image: UIImage(systemName: "exclamationmark.circle.fill"))
+
+    /// The spinner is drawn at the time's size, not a control's (#725).
+    static let spinnerScale = CGAffineTransform(scaleX: 0.6, y: 0.6)
+    /// Room between the time and the spinner or the mark.
+    static let indicatorGap: CGFloat = 0
+
+    /// Shows the delivery in the time's place: a spinner while the row is on
+    /// its way, a red mark when it failed, the time once delivered. `time`:
+    /// what the line will say once delivered — its width is held while the
+    /// spinner or the mark stands in it (see `reserveHeaderWidth`). The header
+    /// is configured WITHOUT the time while the row awaits delivery.
+    func setDelivery(_ delivery: Delivery?, time: String? = nil) {
+        // A row that never awaited anything (every comment, every message from
+        // someone else) builds none of the machinery below.
+        guard delivery != nil || installedDeliveryIndicators else { return }
+        installDeliveryIndicatorsIfNeeded()
+        reserveHeaderWidth(delivery != nil ? time.map { (headerLabel.text ?? "") + $0 } : nil)
+        let wasSending = self.delivery == .sending
+        self.delivery = delivery
+        failedMark.isHidden = delivery != .failed
+        placeDeliveryIndicators()
+        guard delivery == .sending else {
+            sendingSpinner.layer.removeAllAnimations()
+            sendingSpinner.stopAnimating()
+            sendingSpinner.transform = Self.spinnerScale
+            sendingSpinner.alpha = 1
+            return
+        }
+        sendingSpinner.startAnimating()
+        if !wasSending { bounceInSpinner() }
+    }
+
+    /// Back to a row with nothing pending: recycling.
+    ///
+    /// ⚠️ A pending row's cell can come straight back as its delivered message
+    /// (the swap is unanimated, #756) while its spinner is still scaling out:
+    /// the delivery stays with the row that played it.
+    private func resetDelivery() {
+        guard installedDeliveryIndicators else { return }
+        timeReveal.layer.removeAllAnimations()
+        timeReveal.isHidden = true
+        isBouncingInTime = false
+        isScalingOutSpinner = false
+        isBouncingInSpinner = false
+        setDelivery(nil)
+    }
+
+    /// The spinner arrives with a bounce: from nothing, past its size and
+    /// back (#725).
+    private func bounceInSpinner() {
+        isBouncingInSpinner = true
+        sendingSpinner.layer.removeAllAnimations()
+        sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
+        sendingSpinner.alpha = 0
+        UIView.animate(withDuration: 0.5, delay: 0.08, usingSpringWithDamping: 0.5,
+                       initialSpringVelocity: 0.8, options: [.allowUserInteraction]) {
+            self.sendingSpinner.transform = Self.spinnerScale
+            self.sendingSpinner.alpha = 1
+        } completion: { _ in
+            self.isBouncingInSpinner = false
+        }
+    }
+
+    /// Whether the spinner is on its way in. Internal for tests.
+    private(set) var isBouncingInSpinner = false
+    /// Whether the spinner is on its way out. Internal for tests.
+    private(set) var isScalingOutSpinner = false
+    /// Whether the time is on its way in. Internal for tests.
+    private(set) var isBouncingInTime = false
+
+    var sendingSpinnerView: UIActivityIndicatorView { sendingSpinner }
+
+    /// Delivered: the spinner — carried over from the pending row this one
+    /// replaces — scales out, and the time it stood in for bounces in in its
+    /// place (#725).
+    ///
+    /// `carryingSpinner: false` plays it on the pending row itself, the
+    /// moment the server answers — from wherever its spinner is, mid
+    /// bounce-in included — while its delivered row waits to take its place.
+    func playDelivered(revealing time: String, carryingSpinner: Bool = true) {
+        installDeliveryIndicatorsIfNeeded()
+        let label = headerLabel
+        let current = label.text ?? ""
+        let full: String
+        if carryingSpinner {
+            // Configured with its time: the spinner stands in it first.
+            full = current
+            if current.hasSuffix(time) { label.text = String(current.dropLast(time.count)) }
+            sendingSpinner.transform = Self.spinnerScale
+            sendingSpinner.alpha = 1
+            sendingSpinner.startAnimating()
+            placeDeliveryIndicators()
+            layoutNow()
+        } else {
+            full = current.hasSuffix(time) ? current : current + time
+        }
+        delivery = nil
+        isBouncingInSpinner = false
+        isScalingOutSpinner = true
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
+            self.sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
+            self.sendingSpinner.alpha = 0
+        } completion: { _ in
+            self.isScalingOutSpinner = false
+            guard self.delivery != .sending else { return }
+            self.sendingSpinner.stopAnimating()
+            self.sendingSpinner.transform = Self.spinnerScale
+            self.sendingSpinner.alpha = 1
+        }
+        // The time bounces in where the spinner was, on the same beat as the
+        // spinner leaving; the line takes it back once it has landed.
+        let prefix = String(full.dropLast(time.count))
+        reserveHeaderWidth(full)
+        label.text = prefix
+        timeReveal.font = label.font
+        timeReveal.textColor = label.textColor
+        timeReveal.text = time
+        timeRevealLeading?.constant = ceil(Self.textWidth(prefix, in: label))
+        timeReveal.isHidden = false
+        layoutNow()
+        timeReveal.layer.removeAllAnimations()
+        timeReveal.transform = CGAffineTransform(scaleX: 0.01, y: 0.01)
+        timeReveal.alpha = 0
+        isBouncingInTime = true
+        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.55,
+                       initialSpringVelocity: 0.8, options: [.allowUserInteraction]) {
+            self.timeReveal.transform = .identity
+            self.timeReveal.alpha = 1
+        } completion: { _ in
+            self.isBouncingInTime = false
+            label.text = full
+            self.reserveHeaderWidth(nil)
+            self.timeReveal.isHidden = true
+        }
+    }
+
+    private func layoutNow() {
+        (layoutHost ?? self).layoutIfNeeded()
+    }
+
+    /// The time while it bounces in, drawn over its own place in the line.
+    private let timeReveal = UILabel()
+    private var timeRevealLeading: NSLayoutConstraint?
+
+    /// ⚠️ THE LINE KEEPS ITS FULL WIDTH WHILE THE TIME IS AWAY (#753). With
+    /// a reply's quote on the header line the label hugs its text, so the
+    /// spinner, the mark and the time's reveal — all drawn at the text's end
+    /// — landed on the quote, and the quote jumped when the time came back.
+    /// Holding the width of the full line keeps the quote where it will be.
+    private lazy var headerWidthFloor: NSLayoutConstraint = {
+        let floor = headerLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 0)
+        // Over the label's and the quote's compression (749, 700).
+        floor.priority = .defaultHigh
+        floor.isActive = true
+        return floor
+    }()
+
+    private func reserveHeaderWidth(_ text: String?) {
+        let width = text.map { ceil(Self.textWidth($0, in: headerLabel)) } ?? 0
+        guard headerWidthFloor.constant != width else { return }
+        headerWidthFloor.constant = width
+    }
+
+    /// The width the header line holds. Tests.
+    var debugHeaderWidthFloor: CGFloat { installedDeliveryIndicators ? headerWidthFloor.constant : 0 }
+
+    private static func textWidth(_ text: String, in label: UILabel) -> CGFloat {
+        (text as NSString).size(withAttributes: [.font: label.font as Any]).width
+    }
+
+    /// The spinner's and the mark's leading edges, from the time line's.
+    private var spinnerLeading: NSLayoutConstraint?
+    private var markLeading: NSLayoutConstraint?
+
+    /// In the time's place, which the line leaves empty (`You · `) while the
+    /// row is on its way: the line is a stretching label, so the text's own
+    /// width — trailing space included — places them (#725).
+    private func placeDeliveryIndicators() {
+        let lineWidth = headerLabel.text.map { Self.textWidth($0, in: headerLabel) } ?? 0
+        let drawn = sendingSpinner.intrinsicContentSize.width * Self.spinnerScale.a
+        // The spinner is laid out at its natural size and drawn scaled about
+        // its centre: its frame starts half the difference before what shows.
+        spinnerLeading?.constant = ceil(lineWidth) + Self.indicatorGap - (sendingSpinner.intrinsicContentSize.width - drawn) / 2
+        markLeading?.constant = ceil(lineWidth) + Self.indicatorGap
+    }
+
+    private var installedDeliveryIndicators = false
+    private func installDeliveryIndicatorsIfNeeded() {
+        guard !installedDeliveryIndicators else { return }
+        installedDeliveryIndicators = true
+        sendingSpinner.hidesWhenStopped = true
+        sendingSpinner.transform = Self.spinnerScale
+        failedMark.tintColor = .systemRed
+        failedMark.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1)
+        failedMark.isHidden = true
+        for view in [sendingSpinner, failedMark] as [UIView] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(view)
+            view.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor).isActive = true
+        }
+        spinnerLeading = sendingSpinner.leadingAnchor.constraint(equalTo: headerLabel.leadingAnchor)
+        markLeading = failedMark.leadingAnchor.constraint(equalTo: headerLabel.leadingAnchor)
+        spinnerLeading?.isActive = true
+        markLeading?.isActive = true
+        timeReveal.translatesAutoresizingMaskIntoConstraints = false
+        timeReveal.isHidden = true
+        timeReveal.isAccessibilityElement = false
+        addSubview(timeReveal)
+        timeReveal.centerYAnchor.constraint(equalTo: headerLabel.centerYAnchor).isActive = true
+        timeRevealLeading = timeReveal.leadingAnchor.constraint(equalTo: headerLabel.leadingAnchor)
+        timeRevealLeading?.isActive = true
     }
 
     @available(*, unavailable)
@@ -650,6 +930,10 @@ final class CommentCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         row.prepareForReuse()
+        // An arrival in flight (#920) does not follow the cell.
+        contentView.layer.removeAllAnimations()
+        contentView.transform = .identity
+        contentView.alpha = 1
     }
 }
 
