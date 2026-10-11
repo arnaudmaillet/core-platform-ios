@@ -170,18 +170,20 @@ final class MapSubFilterSheetViewController: UIViewController {
     ///   - title: the primary this sheet refines ("Friends"/"Following"/"Places").
     ///   - all: every refinement the primary can offer, in repository order.
     ///   - activeSubFilters: which of them the bar shows, in bar order.
+    ///   - maxActive: the row type's cap (`MapSubFilterSections.maxActive(for:)`).
     ///   - onOptionsChanged: called once, on Done, with the committed list.
     static func makeSheet(
         title: String,
         all: [MapSubFilterOption],
         activeSubFilters: [MapSubFilter],
+        maxActive: Int = MapSubFilterSections.defaultMaxActive,
         imagePipeline: ImagePipeline?,
         rowActions: RowActions = .none,
         onOptionsChanged: @escaping ([MapSubFilterOption]) -> Void
     ) -> UINavigationController {
         let list = MapSubFilterSheetViewController(
             title: title, all: all, activeSubFilters: activeSubFilters,
-            imagePipeline: imagePipeline, rowActions: rowActions,
+            maxActive: maxActive, imagePipeline: imagePipeline, rowActions: rowActions,
             onOptionsChanged: onOptionsChanged
         )
         let navigation = UINavigationController(rootViewController: list)
@@ -197,11 +199,14 @@ final class MapSubFilterSheetViewController: UIViewController {
         title: String,
         all: [MapSubFilterOption],
         activeSubFilters: [MapSubFilter],
+        maxActive: Int = MapSubFilterSections.defaultMaxActive,
         imagePipeline: ImagePipeline?,
         rowActions: RowActions,
         onOptionsChanged: @escaping ([MapSubFilterOption]) -> Void
     ) {
-        let sections = MapSubFilterSections(all: all, activeSubFilters: activeSubFilters)
+        let sections = MapSubFilterSections(
+            all: all, activeSubFilters: activeSubFilters, maxActive: maxActive
+        )
         self.sections = sections
         // Baseline from the CONSTRUCTED sections, not the raw argument: the
         // initializer drops ids the catalogue doesn't know, and a baseline
@@ -443,8 +448,9 @@ final class MapSubFilterSheetViewController: UIViewController {
     }
 
     /// A section's title; Active's carries how full the row is, `3 of 5` —
-    /// the cap is a rule the viewer is allowed to see coming. A row opened
-    /// over the default cap reads full (`12 of 12`), never `12 of 6`: see
+    /// the cap is a rule the viewer is allowed to see coming. People rows
+    /// count to 12 and category rows to 6; a row opened over its type's cap
+    /// reads full (`14 of 14`), never `14 of 12`: see
     /// `MapSubFilterSections.maxActive`.
     private func headerContent(for section: Section?) -> SectionTitleView.Content {
         guard section == .active else { return .init(title: section?.title) }

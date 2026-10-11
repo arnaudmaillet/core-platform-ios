@@ -31,13 +31,15 @@ struct MapSubFilterSheetTests {
     /// No image pipeline: avatars would be the one asynchronous thing here.
     private static func makeSheet(
         all: [String] = ["a", "b", "c", "d"],
-        active: [String] = ["a", "b"]
+        active: [String] = ["a", "b"],
+        maxActive: Int = MapSubFilterSections.defaultMaxActive
     ) -> (MapSubFilterSheetViewController, Recorder) {
         let recorder = Recorder()
         let sheet = MapSubFilterSheetViewController(
             title: "Following",
             all: people(all),
             activeSubFilters: active.map(sub),
+            maxActive: maxActive,
             imagePipeline: nil,
             rowActions: .none,
             onOptionsChanged: { recorder.published.append($0.map(\.subFilter)) }
@@ -252,5 +254,18 @@ struct MapSubFilterSheetTests {
         #expect(sheet.hasChanges == false)
         sheet.commitAndDismiss()
         #expect(recorder.published.isEmpty)
+    }
+
+    @Test("A sheet opened on a five-person people row reads five of twelve and takes a sixth and a seventh")
+    func aPeopleRowOpensWithTheRailCap() {
+        let ids = (1...14).map { "p\($0)" }
+        let (sheet, _) = Self.makeSheet(
+            all: ids, active: Array(ids.prefix(5)),
+            maxActive: MapSubFilterSections.maxActive(for: .following)
+        )
+        #expect(sheet.sections.capacityLabel == "5 of 12")
+        #expect(sheet.activate(Self.sub("p6")))
+        #expect(sheet.activate(Self.sub("p7")))
+        #expect(sheet.sections.capacityLabel == "7 of 12")
     }
 }

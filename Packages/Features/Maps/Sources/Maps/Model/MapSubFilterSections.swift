@@ -15,23 +15,37 @@ import Foundation
 /// only rules in this feature that are worth getting exactly right, and they
 /// are far cheaper to test here than through two collection views.
 struct MapSubFilterSections: Equatable {
-    /// How many refinements the horizontal row will carry at once.
+    /// How many refinements a category row (Places) carries at once.
     static let defaultMaxActive = 6
+    /// How many people a people row (Friends, Following) carries at once —
+    /// the size of the rail the favorites repository serves. A viewer who
+    /// trims that rail to 5 must be able to grow it back to 12 in a later
+    /// session; a cap of 6 would make the default rail unrebuildable (#876).
+    static let peopleMaxActive = 12
+
+    /// The cap for `primary`'s row type: people rows get `peopleMaxActive`,
+    /// everything else `defaultMaxActive`.
+    static func maxActive(for primary: MapFilter?) -> Int {
+        switch primary {
+        case .friends, .following: peopleMaxActive
+        default: defaultMaxActive
+        }
+    }
 
     private(set) var active: [MapSubFilterOption]
     private(set) var available: [MapSubFilterOption]
-    /// The effective cap for this editing session: the requested one, or the
-    /// size of the row the sheet was GIVEN when that is larger.
+    /// The effective cap for this editing session: the requested one (the
+    /// row type's, see `maxActive(for:)`), or the size of the row the sheet
+    /// was GIVEN when that is larger.
     ///
-    /// People rows are not capped at `defaultMaxActive` upstream — the
-    /// favorites repository serves rails of up to 12, and a curated row is as
-    /// long as the viewer made it. Clamping to 6 here turned such a row into
-    /// "12 of 6", refused every drag (any reorder leaves 12 in Active) and
-    /// would have forced the viewer to delete people just to rearrange them
-    /// (#867). Silently trimming the row on open would be worse: Done would
-    /// publish a shorter row than the viewer asked for. So the sheet takes the
-    /// row as it found it — "12 of 12", reorderable — and only refuses to grow
-    /// it further. A row at or under the default keeps the default.
+    /// The floor is a guard, not the rule: a row can arrive longer than its
+    /// type's cap (a curated row is as long as the viewer made it). Clamping
+    /// such a row turned it into "12 of 6", refused every drag (any reorder
+    /// leaves 12 in Active) and would have forced the viewer to delete rows
+    /// just to rearrange them (#867). Silently trimming the row on open would
+    /// be worse: Done would publish a shorter row than the viewer asked for.
+    /// So the sheet takes the row as it found it — "N of N", reorderable —
+    /// and only refuses to grow it further.
     let maxActive: Int
 
     var isFull: Bool { active.count >= maxActive }
@@ -53,8 +67,9 @@ struct MapSubFilterSections: Equatable {
         self.maxActive = Swift.max(maxActive, active.count)
     }
 
-    /// The Active header's counter, `3 of 6`. Never reads more active than
-    /// allowed, because `maxActive` is never below what the sheet was given.
+    /// The Active header's counter: `3 of 6` on a category row, `5 of 12` on
+    /// a people row. Never reads more active than allowed, because
+    /// `maxActive` is never below what the sheet was given.
     var capacityLabel: String { "\(active.count) of \(maxActive)" }
 
     /// Promotes an available refinement to the end of the active list — the

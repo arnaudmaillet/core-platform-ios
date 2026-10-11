@@ -141,4 +141,87 @@ struct MapSubFilterSectionsTests {
         let thirteenth = sections.activate(Self.twelve[0])
         #expect(thirteenth == false)
     }
+
+    // MARK: - The cap depends on the row type (#876)
+
+    /// Category options beyond the real six, so the cap, not the size of the
+    /// vocabulary, is what refuses a seventh.
+    private static func categories(_ count: Int) -> [MapSubFilterOption] {
+        (1...count).map {
+            MapSubFilterOption(
+                subFilter: .placeCategory("c\($0)"),
+                content: MapPillButton.Content(
+                    title: nil, symbolName: "mappin", selectedSymbolName: "mappin",
+                    accessibilityLabel: "Category \($0)"
+                ),
+                favorite: nil
+            )
+        }
+    }
+
+    @Test("People primaries cap at twelve and every other primary at six")
+    func theCapFollowsThePrimary() {
+        #expect(MapSubFilterSections.maxActive(for: .following) == 12)
+        #expect(MapSubFilterSections.maxActive(for: .friends) == 12)
+        #expect(MapSubFilterSections.maxActive(for: .pinned) == 6)
+        #expect(MapSubFilterSections.maxActive(for: nil) == 6)
+    }
+
+    @Test("A people row trimmed from twelve to five grows back to twelve in a later session")
+    func aTrimmedPeopleRowCanBeRebuilt() {
+        let cap = MapSubFilterSections.maxActive(for: .following)
+        // First session: the default rail, trimmed to five.
+        var first = MapSubFilterSections(all: Self.crowd, activeSubFilters: Self.twelve, maxActive: cap)
+        for subFilter in Self.twelve.suffix(7) {
+            first.deactivate(subFilter, naturalOrder: Self.crowd.map(\.subFilter))
+        }
+        let committed = first.active.map(\.subFilter)
+        #expect(committed.count == 5)
+
+        // Later session: the sheet only knows the five it is given.
+        var later = MapSubFilterSections(all: Self.crowd, activeSubFilters: committed, maxActive: cap)
+        #expect(later.capacityLabel == "5 of 12")
+        for subFilter in Self.twelve.suffix(7) {
+            let promoted = later.activate(subFilter)
+            #expect(promoted)
+        }
+        #expect(later.capacityLabel == "12 of 12")
+        let thirteenth = later.activate(Self.crowd[12].subFilter)
+        #expect(thirteenth == false)
+    }
+
+    @Test("A category row still caps at six")
+    func aCategoryRowCapsAtSix() {
+        let catalogue = Self.categories(8)
+        var sections = MapSubFilterSections(
+            all: catalogue, activeSubFilters: [catalogue[0].subFilter],
+            maxActive: MapSubFilterSections.maxActive(for: .pinned)
+        )
+        #expect(sections.capacityLabel == "1 of 6")
+        for option in catalogue[1..<6] {
+            let promoted = sections.activate(option.subFilter)
+            #expect(promoted)
+        }
+        let seventh = sections.activate(catalogue[6].subFilter)
+        #expect(seventh == false)
+        #expect(sections.capacityLabel == "6 of 6")
+    }
+
+    @Test("A row given more than its type's cap opens with that count as its cap")
+    func aRowOverItsTypeCapKeepsItsSize() {
+        let crowd = Self.people((1...16).map { "q\($0)" })
+        let fourteen = Array(crowd.prefix(14)).map(\.subFilter)
+        let peopleRow = MapSubFilterSections(
+            all: crowd, activeSubFilters: fourteen,
+            maxActive: MapSubFilterSections.maxActive(for: .friends)
+        )
+        #expect(peopleRow.capacityLabel == "14 of 14")
+
+        let catalogue = Self.categories(9)
+        let categoryRow = MapSubFilterSections(
+            all: catalogue, activeSubFilters: Array(catalogue.prefix(8)).map(\.subFilter),
+            maxActive: MapSubFilterSections.maxActive(for: .pinned)
+        )
+        #expect(categoryRow.capacityLabel == "8 of 8")
+    }
 }
