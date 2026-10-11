@@ -1456,8 +1456,24 @@ final class ForYouGridPage: UIView {
     /// Opens the handoff scope for a tapped tile. Replaces the old
     /// "stop everything except this one" call: the scope also makes the post
     /// invisible to `reconcile`, so nothing can restart or stop it mid-flight.
-    func beginPlaybackHandoff(of postID: PostID) {
-        playback?.beginHandoff(postID)
+    ///
+    /// `parkingReturn`: also park a player on the tile's own clip for a close
+    /// from another post (#923) — only for an opener whose close asks for it
+    /// (`returnFlightSurface`).
+    func beginPlaybackHandoff(of postID: PostID, parkingReturn: Bool = false) {
+        playback?.beginHandoff(postID, parkingReturn: parkingReturn)
+    }
+
+    /// The tile's own clip, resumed from where it was parked at the tap — the
+    /// arriving picture of a close from another post (#923). Nil when nothing
+    /// is parked, and the close lands on the tile's still.
+    func returnFlightSurface(for postID: PostID) -> VideoRenderView? {
+        playback?.makeReturnSurface(for: postID)
+    }
+
+    /// A close that resumed the return player was abandoned.
+    func pauseReturnPlayback(for postID: PostID) {
+        playback?.pauseReturnPlayback(of: postID)
     }
 
     /// Points the handoff scope at the post a dismissal is actually landing on.
@@ -1651,7 +1667,12 @@ final class ForYouGridPage: UIView {
     ///
     /// `ZoomAnimator.holdCard`'s ceiling bounds all of this, so a cover that
     /// never arrives is a brief pause rather than a stuck card.
-    func isLandingPlaybackReady(for postID: PostID) -> Bool {
+    ///
+    /// `expectingVideo: false` is a landing that was handed no clip — a close
+    /// from another post whose return player was evicted (#923). Only the
+    /// still can be waited on then; asking for a clip would hold the card for
+    /// the hold's whole ceiling.
+    func isLandingPlaybackReady(for postID: PostID, expectingVideo: Bool = true) -> Bool {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return true }
         let post = posts[index]
         let cell = collectionView.cellForItem(
@@ -1664,7 +1685,7 @@ final class ForYouGridPage: UIView {
         // moving picture at all. That is worse than having no gate: the hold is
         // released by the very thing it exists to hold across.
         let pageVideoURL = (cell as? PostGridListRowCell)?.currentPageVideoURL ?? post.videoURL
-        if let playback, pageVideoURL != nil,
+        if expectingVideo, let playback, pageVideoURL != nil,
            autoplays(post) || cell?.loadedVideoRenderView != nil {
             return playback.isSurfaceRendering(for: postID)
         }
@@ -1688,15 +1709,17 @@ final class ForYouGridPage: UIView {
     }
 
     /// Installs the flight card's live surface on the landing tile, so it is
-    /// rendering before the card is removed.
-    func adoptLivePlayback(_ view: VideoRenderView, for postID: PostID) {
+    /// rendering before the card is removed. Answers whether the tile took a
+    /// playback.
+    @discardableResult
+    func adoptLivePlayback(_ view: VideoRenderView, for postID: PostID) -> Bool {
         guard let playback,
               let index = posts.firstIndex(where: { $0.id == postID }),
               let url = landingVideoURL(at: index),
               let cell = collectionView.cellForItem(
                   at: indexPath(for: index)
               ) as? any GridPlaybackCell
-        else { return }
+        else { return false }
         // Same rule as the present leg: the surface must land in a VISIBLE
         // hierarchy or the layer stops rendering. The cell is still standing in
         // for the flight card at this point, so reveal it first — the card is
@@ -1714,12 +1737,12 @@ final class ForYouGridPage: UIView {
             // the current frame on attach — and takes the pool loan; the card's
             // is released once it leaves the window. Nothing is re-parented,
             // which is the ~65ms drop `holdCard` was covering.
-            playback.adoptAttachedSurface(
+            return playback.adoptAttachedSurface(
                 for: postID, url: url, cell: cell, drawnBy: view
             )
-            return
         }
         playback.adoptLiveSurface(view, for: postID, url: url, cell: cell)
+        return true
     }
 
     /// The destination never adopted the parked player — a cancelled flight, or

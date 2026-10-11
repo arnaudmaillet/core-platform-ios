@@ -377,6 +377,17 @@ public struct SnapFeedHeroOrigin {
     /// over it until it is (`ZoomTransitionSource.zoomLandingMediaIsReady`).
     /// `nil`: nothing to wait for.
     public let landingMediaIsReady: (() -> Bool)?
+    /// The item's OWN moving picture for a close from ANOTHER post — the
+    /// viewer paged on, and the close comes home to the item that opened the
+    /// feed (#923). A surface showing the item's clip, resumed from where it
+    /// was parked at the tap; the card fades it in over the page it leaves,
+    /// and the landing hands it to `adoptLandingLiveMedia` instead of the
+    /// card's departure surface, which is the other post's. `nil` (or a nil
+    /// answer: nothing parked) lands such a close on the item's still.
+    public let returnLiveMedia: (() -> UIView?)?
+    /// A close that resumed `returnLiveMedia` was abandoned: the post stays
+    /// open, and the item's clip waits, paused, for the next close.
+    public let pauseReturnLiveMedia: (() -> Void)?
     /// The source's FURNITURE, drawn fresh — what sits over the picture at
     /// rest (a card's caption over its foot). The card wears it at the source
     /// end and the flight fades it as the card grows, the way a brick's
@@ -436,6 +447,8 @@ public struct SnapFeedHeroOrigin {
         pagePictureOf: ((PostID, @escaping (UIImage) -> Void) -> UIImage?)? = nil,
         adoptLandingLiveMedia: ((UIView) -> Void)? = nil,
         landingMediaIsReady: (() -> Bool)? = nil,
+        returnLiveMedia: (() -> UIView?)? = nil,
+        pauseReturnLiveMedia: (() -> Void)? = nil,
         restingOverlay: (() -> UIView?)? = nil,
         viewerStake: @escaping () -> Int = { 0 },
         willStageDismissal: @escaping () -> Void = {},
@@ -461,6 +474,8 @@ public struct SnapFeedHeroOrigin {
         self.pagePictureOf = pagePictureOf
         self.adoptLandingLiveMedia = adoptLandingLiveMedia
         self.landingMediaIsReady = landingMediaIsReady
+        self.returnLiveMedia = returnLiveMedia
+        self.pauseReturnLiveMedia = pauseReturnLiveMedia
         self.restingOverlay = restingOverlay
         self.viewerStake = viewerStake
         self.willStageDismissal = willStageDismissal

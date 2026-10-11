@@ -454,7 +454,29 @@ final class PostGridFlightCard: UIView {
     /// still, or — for a face only — the page's live surface (see
     /// `drawsPost`).
     private var hasDepartureOperand: Bool {
-        departureCoverView.image != nil || (!drawsPost && hasAdoptedLiveMedia)
+        departureCoverView.image != nil
+            || ((!drawsPost || departureShowsAnotherPost) && hasAdoptedLiveMedia)
+    }
+
+    /// Whether the page this card leaves from shows ANOTHER post than the one
+    /// it lands on — a close that paged on and comes home to the tile that
+    /// opened the feed (#923).
+    ///
+    /// ⚠️ THE FACE'S RULE, FOR A TILE. A tile flying the page's live video home
+    /// normally flies its own post, so there is nothing to blend. After paging,
+    /// the video is someone else's, and a video page hands in no still: with
+    /// only `departureCoverView` to go on, the card had no departure operand,
+    /// flew the other post's clip all the way into the tile, and the landing
+    /// adopted it. Set, the live surface is a departure operand on its own and
+    /// the tile's picture rises over it.
+    private var departureShowsAnotherPost = false
+
+    /// See `departureShowsAnotherPost`. Set by the source that knows where the
+    /// close lands, before the flight hands the card its live surface.
+    func setDepartureShowsAnotherPost(_ shows: Bool) {
+        departureShowsAnotherPost = shows
+        refreshLandingPane()
+        applyBlend()
     }
 
     /// The landing operand exists only opposite a departure one. Hidden
@@ -570,12 +592,58 @@ final class PostGridFlightCard: UIView {
         view.center = CGPoint(x: size.width / 2, y: size.height / 2)
     }
 
+    /// Whether the card has two pictures to blend: a departure operand and a
+    /// landing one.
+    private var blendsPictures: Bool {
+        hasDepartureOperand && (landingCoverView.image != nil || landingLiveView != nil)
+    }
+
+    // MARK: - The arrival's curve (#923)
+
+    /// The share of the flight the arriving picture takes to come up: whole by
+    /// the time the flight is halfway home.
+    static let arrivalFadeSpan: CGFloat = 0.5
+
+    /// How many straight pieces the rise is drawn with inside an animation.
+    /// Eight is a curve to the eye at a fifth of a second.
+    static let arrivalFadeSteps = 8
+
+    /// The arriving picture's alpha at flight progress `t` (0 the page end, 1
+    /// the tile end): a cubic ease-out over the first `arrivalFadeSpan` of the
+    /// flight, then whole. Fast at first, so the post the viewer is coming home
+    /// to is there almost at once, and slow at the end, so it settles rather
+    /// than snaps.
+    static func arrivalAlpha(at t: CGFloat) -> CGFloat {
+        let x = min(max(t / arrivalFadeSpan, 0), 1)
+        return 1 - pow(1 - x, 3)
+    }
+
+    /// The pane's rise from `start` to `target`, as keyframes over the first
+    /// `arrivalFadeSpan` of the animation this is called inside.
+    ///
+    /// Duration 0 inherits the enclosing block's — the property animator of a
+    /// tap-back, or a released grab's spring — and the alpha holds `target`
+    /// for the rest of it.
+    private func riseInKeyframes(from start: CGFloat, to target: CGFloat) {
+        let steps = Self.arrivalFadeSteps
+        let span = Double(Self.arrivalFadeSpan)
+        UIView.animateKeyframes(withDuration: 0, delay: 0, options: [.calculationModeLinear]) {
+            for step in 1...steps {
+                let fraction = CGFloat(step) / CGFloat(steps)
+                UIView.addKeyframe(
+                    withRelativeStartTime: span * Double(step - 1) / Double(steps),
+                    relativeDuration: span / Double(steps)
+                ) {
+                    self.setBlend(start + (target - start) * Self.arrivalAlpha(at: fraction * Self.arrivalFadeSpan))
+                }
+            }
+        }
+    }
+
     private func applyBlend() {
         // No second operand: back to the resting value, which is the un-blended
         // card exactly as it was.
-        guard hasDepartureOperand,
-              landingCoverView.image != nil || landingLiveView != nil
-        else {
+        guard blendsPictures else {
             departureCoverView.alpha = 1
             landingPane.alpha = 0
             return
@@ -868,8 +936,23 @@ extension PostGridFlightCard: ZoomFlightCard {
     ///
     /// Inert until a departure picture has been handed in, so every flight that
     /// does not need a blend is untouched by this.
+    ///
+    /// ⚠️ THE FLIGHT'S `t` IS NOT THE PANE'S ALPHA (#923). The arriving
+    /// picture comes up on its own curve: fast at first, slower at the end, and
+    /// whole by the time the flight is halfway home (`arrivalAlpha`). Posed
+    /// directly (an interactive pose), the curve is applied to `t`. Posed inside
+    /// the flight's animation block, a plain alpha change would ride the
+    /// flight's own curve for the whole of it, so the rise is written as
+    /// keyframes over the first half instead; keyframes stay inside the
+    /// block's animation, so a flight that is scrubbed or reversed carries the
+    /// fade with it.
     func setZoomContentBlend(_ t: CGFloat) {
-        setBlend(t)
+        let target = Self.arrivalAlpha(at: t)
+        if blendsPictures, target > blend, UIView.inheritedAnimationDuration > 0 {
+            riseInKeyframes(from: blend, to: target)
+        } else {
+            setBlend(target)
+        }
         // Posed from inside the flight's animation block — see the note on the
         // marker card's own `setZoomContentBlend`. A deferred `layoutSubviews`
         // is not an animation, and this is the only hook every pose runs.

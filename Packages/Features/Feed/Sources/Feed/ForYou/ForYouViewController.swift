@@ -1183,7 +1183,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // be covered and its slots are what the feed needs — and the tapped
         // post becomes invisible to reconcile, so nothing can restart or stop
         // it while its player is in flight.
-        page.beginPlaybackHandoff(of: tapped.id)
+        // And park the row's own clip for a close that pages on and comes home
+        // to it (#923, `ForYouGridZoomSource`).
+        page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         // The rows are covered too, and their one player is not the flight's.
         rails.setAutoplayActive(false)
         let feed = snapFeed(for: Array(ids))

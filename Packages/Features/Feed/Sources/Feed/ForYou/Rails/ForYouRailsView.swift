@@ -680,11 +680,26 @@ final class ForYouRailsView: UIView {
     /// Opens the handoff for a card a flight is about to carry: the row's
     /// reconcile must neither restart nor stop its player while it is in the
     /// air.
+    ///
+    /// The card's own clip is parked as well, paused at its playhead, for a
+    /// close that pages on and comes home here (#923, `returnCardSurface`).
     func beginPlaybackHandoff(of id: PostID) {
         landingCard = nil
         playback?.focus(id)
         updateAutoplay()
-        playback?.beginHandoff(id)
+        playback?.beginHandoff(id, parkingReturn: true)
+    }
+
+    /// The card's own clip, resumed from where it was parked at the tap — the
+    /// arriving picture of a close from another post (#923). Nil when nothing
+    /// is parked, and the close lands on the card's still.
+    func returnCardSurface(for id: PostID) -> VideoRenderView? {
+        playback?.makeReturnSurface(for: id)
+    }
+
+    /// A close that resumed the card's return player was abandoned.
+    func pauseReturnPlayback(for id: PostID) {
+        playback?.pauseReturnPlayback(of: id)
     }
 
     func endPlaybackHandoff() {
