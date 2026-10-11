@@ -226,6 +226,55 @@ struct EmoteLabelTests {
         #expect(label.showingEmoteCount == 2)
     }
 
+    /// ⚠️ **SHOWN AGAIN, A LABEL KNOWS NOTHING UNTIL IT IS ASKED** (#922). A
+    /// flight's landing un-hides the cell it took off from in the transaction
+    /// that removes its card; the label drew still glyphs until the monitor's
+    /// next tick. `recheckVisibility()` asks in that same turn, and the very
+    /// next layout pass — the landing's own commit — has it playing.
+    ///
+    /// With its witness: the layout pass alone, before the ask, changes
+    /// nothing — the frozen frame itself.
+    @Test func aRecheckPlaysAShownAgainLabelInTheSameTurn() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        let (label, window) = nestedLabel("🔥🔥", engine: engine, in: container)
+        defer { window.isHidden = true }
+        container.isHidden = true
+        EmoteVisibilityMonitor.shared.tick()
+        // The flight's own frames lay the hidden label out: nothing is left
+        // pending for the landing to pick up.
+        label.layoutIfNeeded()
+        #expect(label.showingEmoteCount == 0)
+
+        container.isHidden = false
+        label.layoutIfNeeded()
+        #expect(label.showingEmoteCount == 0, "witness: un-hiding an ancestor re-asks nothing")
+
+        EmoteLabel.recheckVisibility()
+        label.layoutIfNeeded()
+        #expect(label.showingEmoteCount == 2)
+        #expect(label.coveredMarkIndices == [0, 1], "the still glyphs under the players must go in the same pass")
+    }
+
+    /// The ask is made by something that just changed the screen, so it walks
+    /// a resting app too — and still nothing in the background.
+    @Test func aRecheckWalksARestingAppButNotTheBackground() throws {
+        let engine = try warmEngine(["noto:1f525"])
+        let (label, window) = hostedLabel("🔥", engine: engine)
+        defer { window.isHidden = true }
+        let monitor = EmoteVisibilityMonitor()
+        monitor.isResting = { true }
+        monitor.register(label)
+        defer { monitor.unregister(label) }
+
+        monitor.recheckNow()
+        #expect(monitor.walkedLabelCount == 1, "a resting app was not re-asked")
+
+        monitor.appDidEnterBackground()
+        monitor.recheckNow()
+        #expect(monitor.walkedLabelCount == 1, "a screen nobody can see was walked")
+    }
+
     /// OUT OF A SCROLL VIEW'S BOUNDS (a pager's neighbour page, a row
     /// scrolled away) gives the slots back; scrolling back takes them again.
     @Test func aLabelScrolledOutOfAScrollViewReleasesItsSlots() throws {

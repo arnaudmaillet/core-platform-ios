@@ -336,6 +336,24 @@ open class EmoteLabel: UILabel {
         }
     }
 
+    /// Asks every label in a window, NOW, whether it can be seen — for a
+    /// surface that just showed again a view it had hidden, in the same turn.
+    ///
+    /// ⚠️ **A HIDDEN ANCESTOR COMING BACK TELLS THE LABEL NOTHING.** A flight
+    /// hides the cell it took off from (`setConcealed`, `isHidden`); the
+    /// monitor sees it and the label gives its players back, as it must. At
+    /// the landing the cell is shown again and the flight's card is removed
+    /// in one transaction — but the label only learned it was visible on the
+    /// monitor's next tick, up to a quarter of a second later, and drew its
+    /// still system glyphs until then: the emotes froze on the last frame of
+    /// every close (#922). Called right after un-hiding, the label lays out
+    /// in that same transaction and, from a warm cache, is playing — on the
+    /// shared clock, so on the frame the flight's card was showing — in the
+    /// frame the card leaves.
+    public static func recheckVisibility() {
+        EmoteVisibilityMonitor.shared.recheckNow()
+    }
+
     /// Whether a next-turn re-check is already queued.
     private var recheckQueued = false
 

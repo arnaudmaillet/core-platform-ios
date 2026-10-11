@@ -225,6 +225,16 @@ final class EmoteVisibilityMonitor {
         live.forEach { $0.reevaluateVisibility() }
     }
 
+    /// One pass NOW, out of turn — `EmoteLabel.recheckVisibility()`. Walks a
+    /// resting app too: it is asked for by something that just changed what
+    /// is on screen, which is the one thing a rest assumes did not happen.
+    func recheckNow() {
+        guard !isInBackground else { return }
+        let live = labels.allObjects
+        walkedLabelCount += live.count
+        live.forEach { $0.reevaluateVisibility() }
+    }
+
     func appDidEnterBackground() { isInBackground = true }
 
     /// Back in front: the next tick walks again, and asks afresh.

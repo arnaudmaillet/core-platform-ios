@@ -1,4 +1,5 @@
 import CoreNavigation
+import EmoteKit
 import FeedInterface
 import MediaCore
 import PostGrid
@@ -198,7 +199,12 @@ enum TextRevealInstaller {
                 origin.makeDismissStandIn((feed as? SnapFeedViewController)?.activePostID)
             },
             makePresentStandIn: origin.makePresentStandIn,
-            setSourceConcealed: origin.setConcealed,
+            // Shown again: its emotes play in the frame the stand-in leaves,
+            // not a monitor tick later (`EmoteLabel.recheckVisibility`, #922).
+            setSourceConcealed: { concealed in
+                origin.setConcealed(concealed)
+                if !concealed { EmoteLabel.recheckVisibility() }
+            },
             depthView: origin.depthView,
             presentationDidEnd: origin.presentationDidEnd,
             // Told where the viewer stopped, exactly as the stand-in above
