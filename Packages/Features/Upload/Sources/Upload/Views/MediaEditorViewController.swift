@@ -773,49 +773,17 @@ final class MediaEditorViewController: UIViewController {
     #if DEBUG
     /// Guards `-upload-post` against firing twice: `viewDidAppear` runs again
     /// every time the finalisation screen is popped back off this one.
-    private var hasAutoAdvanced = false
+    /// Internal (not private) only for the +QA hooks.
+    var hasAutoAdvanced = false
 
     /// The same guard for `-upload-category`, which would otherwise reopen the
     /// band on every return from the finalisation screen.
-    private var hasSelectedDebugCategory = false
+    /// Internal (not private) only for the +QA hooks.
+    var hasSelectedDebugCategory = false
 
-    private var hasSeededDebugCuts = false
-
-    /// `-upload-seed-cuts N` cuts the first clip the track opens on into N equal
-    /// pieces, `-upload-seed-reverse` plays them back to front,
-    /// `-upload-seed-transition <raw value>` puts that transition on every cut,
-    /// and `-open-transitions <i>` opens the row on cut `i` — once, through the
-    /// very edit path a person's taps take.
-    ///
-    /// ⚠️ **A SIMULATOR CANNOT SPLIT AT A CHOSEN SECOND BY HAND** — a drag loses
-    /// ten points of slop before the film moves — and a transition is only worth
-    /// checking on cuts that sit where the test says they do.
-    private func seedDebugCuts(id: String, length: Double) {
-        guard !hasSeededDebugCuts,
-              let raw = Self.debugValue(after: "-upload-seed-cuts"),
-              let count = Int(raw), count > 1, length > 0
-        else { return }
-        hasSeededDebugCuts = true
-        let each = length / Double(count)
-        let kind = Self.debugValue(after: "-upload-seed-transition")
-            .flatMap(VideoTransitionKind.init(rawValue:))
-        var pieces = (0..<count).map {
-            MediaSegment(start: Double($0) * each, end: Double($0 + 1) * each)
-        }
-        if ProcessInfo.processInfo.arguments.contains("-upload-seed-reverse") {
-            pieces.reverse()
-        }
-        for index in pieces.indices.dropLast() { pieces[index].transitionOut = kind }
-        let timeline = MediaTimeline(segments: pieces)
-        change(id) { $0.timeline = timeline }
-        timelineTrack.configure(duration: length, timeline: timeline)
-        refreshHistoryItems()
-        refreshPreview()
-        VideoPlaybackTrace.emit("seeded \(count) cuts, transition=\(kind?.rawValue ?? "none")")
-        if let raw = Self.debugValue(after: "-open-transitions"), let seam = Int(raw) {
-            openTransitions(atSeam: seam)
-        }
-    }
+    /// The same guard for `-upload-seed-cuts` — see `seedDebugCuts`.
+    /// Internal (not private) only for the +QA hooks.
+    var hasSeededDebugCuts = false
     #endif
 
     /// Opens the song tools (`MediaEditorSoundtrackMode`), and names the song
@@ -1017,35 +985,7 @@ final class MediaEditorViewController: UIViewController {
         playSettledPage()
         #if DEBUG
         logCanvas("didAppear")
-        // ⚠️ **THE FINALISATION SCREEN HAD NO SCRIPTED WAY IN.** `-upload-edit`
-        // stops at this screen and `debugTapNext()` is internal-to-tests, so the
-        // keyboard and the caption — both reported as broken there — could not be
-        // reached in a running app at all. One flag carries the flow the last
-        // step, after a beat so the push does not race this appearance.
-        if ProcessInfo.processInfo.arguments.contains("-upload-post"), !hasAutoAdvanced {
-            hasAutoAdvanced = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-                self?.goNext()
-            }
-        }
-        // ⚠️ **"Filters" IS THE ONE CATEGORY A TAP CANNOT REACH.** It is fourth in
-        // a strip this toolbar over-subscribes — the sound pill floors at 240pt,
-        // so the strip scrolls its overflow and the fourth pill sits off the
-        // trailing edge. A coordinate tap therefore cannot open the band, and this
-        // repository has already concluded once that a tap is not an instrument.
-        // `-upload-category <i>` is the picker's `-upload-album <i>` idiom, here.
-        //
-        // ⚠️ GUARDED LIKE `-upload-post`, AND FOR THE SAME REASON: `viewDidAppear`
-        // runs again on every pop back from the finalisation screen.
-        if !hasSelectedDebugCategory,
-           let raw = Self.debugValue(after: "-upload-category"),
-           let index = Int(raw), categories.indices.contains(index) {
-            hasSelectedDebugCategory = true
-            categoryBar.select(index)
-            // ⚠️ `select(_:)` ANNOUNCES ONLY ON A CHANGE — picking the index the
-            // strip already rests on sends nothing, and the band would never open.
-            categoryChanged()
-        }
+        runDebugAppearanceHooks()
         #endif
     }
 
@@ -1671,8 +1611,6 @@ final class MediaEditorViewController: UIViewController {
     /// Internal for tests: whether the last real hand-over asked UIKit to
     /// animate it.
     private(set) var debugLastHandoverWasAnimated = false
-    /// Internal for tests: the items the bar is holding, by identity.
-    var debugToolbarItems: [UIBarButtonItem] { toolbarItems ?? [] }
     /// Internal for tests: the toolbar's width at each hand-over, in order.
     /// Every one of them must be greater than zero — see `refreshToolbarItems`.
     private(set) var debugHandoverWidths: [CGFloat] = []
@@ -3895,22 +3833,14 @@ extension MediaEditorViewController {
 
 #if DEBUG
 extension MediaEditorViewController {
-    /// Internal for tests: the canvas's own bounds, to compare a page against.
-    var debugCanvasBounds: CGRect { canvas.bounds }
-
     /// Internal for tests: how many pages the canvas holds.
     var debugPageCount: Int { dataSource.snapshot().numberOfItems }
     /// Internal for tests: what the fill/fit button currently offers.
     /// Internal for tests: what the fill/fit glyph offers — it stands in the
     /// crop tools now, not in the header.
     var debugFitActionName: String? { cropTools.debugFitLabel }
-    /// Internal for tests: the fit chosen for an item, defaulting as the screen does.
-    func debugFit(for id: String) -> ContentFit { edits(for: id).fit }
     /// Internal for tests: the path the fill/fit button takes, without a bar to tap.
     func debugTapFit() { toggleFit() }
-
-    /// Internal for tests: the band itself, to measure where it put things.
-    var debugBand: MediaEditorBandView { band }
 
     /// Internal for tests: the dissolve behind the chrome, to measure where it
     /// begins, how far it reaches, and which side of the band it draws on.
@@ -3924,8 +3854,6 @@ extension MediaEditorViewController {
     /// Internal for tests: which category is open, nil while the strip is
     /// neutral.
     var debugSelectedCategory: String? { selectedCategory }
-    /// Internal for tests: whether the picture runs under the bars.
-    var debugCanvasIgnoresInsets: Bool { canvas.contentInsetAdjustmentBehavior == .never }
     /// Internal for tests: the strip in the bar, to read what it is wearing.
     var debugCategoryBar: IconSelectorBar { categoryBar }
     /// Internal for tests: chooses a category BY NAME, as the strip's `select`
@@ -3946,8 +3874,6 @@ extension MediaEditorViewController {
         }
         categoryBar.debugTap(index)
     }
-    /// Internal for tests: the momentary bar the timeline mode puts opposite it.
-    var debugActionBar: IconActionBar { actionBar }
     /// Internal for tests: the width each strip is being held to, or nil where
     /// the rule is not being applied.
     var debugStripWidths: (leading: CGFloat, trailing: CGFloat)? {
@@ -3995,16 +3921,11 @@ extension MediaEditorViewController {
     var debugPlaybackFlashes: [Bool] { playbackFlash.debugFlashes }
     /// Internal for tests: the path "Next" takes, without a bar to tap.
     func debugTapNext() { goNext() }
-    /// Internal for tests: the trailing item, through ITS OWN action.
-    ///
-    /// ⚠️ **DISPATCHED, NOT COPIED.** Calling `goNext()` or `finishComposing()`
-    /// from here would test this line and not the bar — and WHICH routine the
-    /// trailing item is carrying is the whole subject. `performWithSender`
-    /// runs the `UIAction` the item was built with, which is what a finger on
-    /// it runs.
-    func debugTapTheTrailingItem() {
-        navigationItem.rightBarButtonItems?.first?.primaryAction?.performWithSender(nil, target: nil)
-    }
+    /// Internal for the +QA hooks: what choosing a category does, for an index
+    /// the strip already rests on (`select(_:)` announces only a change).
+    func debugCategoryChanged() { categoryChanged() }
+    /// Internal for the +QA hooks: the `+` on a cut, through its own routine.
+    func debugOpenTransitions(atSeam seam: Int) { openTransitions(atSeam: seam) }
     /// Internal for tests: the scissors, through the routine the bar calls.
     func debugSplitAtTheNeedle() { splitAtTheNeedle() }
     /// Internal for tests: the undo arrow, through the routine it actually calls.
@@ -4013,9 +3934,6 @@ extension MediaEditorViewController {
     /// Internal for tests: the two arrows, to read what they offer.
     var debugUndoItem: UIBarButtonItem { undoItem }
     var debugRedoItem: UIBarButtonItem { redoItem }
-    /// Internal for tests: whether the screen is holding the current page's
-    /// picture — which is the poster the track borrows.
-    var debugHasSourcePicture: Bool { lastSource != nil }
 
     /// Internal for tests: whether the screen is in crop mode.
     var debugIsCropping: Bool { isCropping }
@@ -4023,48 +3941,9 @@ extension MediaEditorViewController {
     var debugCropSurface: MediaCropSurfaceView { cropSurface }
     /// Internal for tests: the tools in the band, to turn the dial without one.
     var debugCropTools: MediaCropToolsView { cropTools }
-    /// Internal for tests: the band seam a mode would use, so a test can put
-    /// something in the band that is not one of this screen's own tenants.
-    func debugShowInBand(_ accessory: UIView?) { showInBand(accessory) }
-    /// Internal for tests: the crop stored for an item, defaulting as the screen does.
-    func debugCrop(for id: String) -> MediaCrop { edits(for: id).crop }
     /// Internal for tests: whether anything at all is stored for an item — the
     /// difference between "chose the default" and "never chose".
     func debugHasEdits(for id: String) -> Bool { session.hasEdits(for: id) }
-    /// Internal for tests: paging the canvas the way a swipe does, settle
-    /// included — the canvas cannot be dragged without a finger.
-    func debugScrollToPage(_ index: Int) {
-        canvas.setContentOffset(
-            CGPoint(x: canvas.bounds.width * CGFloat(index), y: 0), animated: false
-        )
-        // ⚠️ **THE CELL MUST EXIST BEFORE THE SETTLE IS ANNOUNCED.** A real
-        // scroll lays pages out as it goes, so by the time UIKit calls
-        // `scrollViewDidEndDecelerating` the settled page is on screen. Setting
-        // an offset outright skips that, and anything the settle does through
-        // `cellForItem(at:)` — starting the page's video, for one — silently
-        // found nothing and did nothing. The tests read as a dead feature.
-        canvas.layoutIfNeeded()
-        scrollViewDidEndDecelerating(canvas)
-    }
-
-    /// Internal for tests: where the picture sits on screen, in the editor's own
-    /// coordinates — the only thing that can say whether a fitted picture is
-    /// centred between the chrome or hanging behind it.
-    /// Internal for tests: whether the picture of `id` is travelling to a new
-    /// place rather than standing in it — a curve is on its layer.
-    func debugPictureIsMoving(for id: String) -> Bool {
-        guard let index = items.firstIndex(where: { $0.id == id }),
-              let page = canvas.cellForItem(at: IndexPath(item: index, section: 0)) as? MediaEditorPageCell
-        else { return false }
-        return page.debugPictureIsMoving
-    }
-
-    func debugPictureFrame(for id: String) -> CGRect {
-        guard let index = items.firstIndex(where: { $0.id == id }),
-              let page = canvas.cellForItem(at: IndexPath(item: index, section: 0)) as? MediaEditorPageCell
-        else { return .zero }
-        return page.convert(page.debugPictureFrame, to: view)
-    }
 
     /// Internal for tests: the black the crop tools stand on, if it is up at all.
     var debugCropChrome: UIView? { cropChrome.superview == nil ? nil : cropChrome }
@@ -4072,13 +3951,6 @@ extension MediaEditorViewController {
     /// Internal for tests: where the page indicator sits, which is the foot of a
     /// fitted picture's window.
     var debugPageDotsTop: CGFloat { pageDots.frame.minY }
-
-    /// Internal for tests: the size of the picture currently on a page.
-    func debugPageImageSize(for id: String) -> CGSize {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return .zero }
-        let page = canvas.cellForItem(at: IndexPath(item: index, section: 0))
-        return (page as? MediaEditorPageCell)?.debugPictureSize ?? .zero
-    }
 
     /// Internal for tests: the path the crop's own reset takes, without a
     /// control to tap. It is the crop tools' now — the header walks the
@@ -4090,21 +3962,9 @@ extension MediaEditorViewController {
         let items = navigationItem.rightBarButtonItems ?? []
         return items.contains { $0 === undoItem } && items.contains { $0 === redoItem }
     }
-    /// Internal for tests: the order the trailing side spells, edge inwards.
-    var debugTrailingBarItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
-    /// Internal for tests: the order the leading side spells, after the chevron.
-    var debugLeadingBarItems: [UIBarButtonItem] { navigationItem.leftBarButtonItems ?? [] }
 
-    /// Internal for tests: whether the canvas is the thing being looked at.
-    var debugCanvasIsShowing: Bool { !canvas.isHidden }
-    /// Internal for tests: how visible the canvas is, which `isHidden` cannot say.
-    var debugCanvasAlpha: CGFloat { canvas.alpha }
-    /// Internal for tests: whether the canvas can still be paged.
-    var debugCanvasScrolls: Bool { canvas.isScrollEnabled }
     /// Internal for tests: how many of the stack's pans are currently suspended.
     var debugSuspendedPans: Int { suspendedPans.count }
-    /// Internal for tests: whether the sheet has been told it cannot be dismissed.
-    var debugSheetIsPinned: Bool { navigationController?.isModalInPresentation ?? false }
     /// Internal for tests: the path the strip's touch probe takes.
     func debugSetTouchingStrip(_ isTouching: Bool) {
         isTouchingStrip = isTouching
