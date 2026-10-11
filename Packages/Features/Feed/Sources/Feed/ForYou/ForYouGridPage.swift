@@ -1101,7 +1101,7 @@ final class ForYouGridPage: UIView {
             return .init(
                 id: post.id, url: held, cell: cell,
                 mediaFrame: cell.convert(cell.videoMediaRect, to: collectionView),
-                isAdvancing: advancing
+                isPaused: !advancing
             )
         }
         let candidates = ForYouGridAutoplayDriver.candidates(from: tiles, in: viewport)

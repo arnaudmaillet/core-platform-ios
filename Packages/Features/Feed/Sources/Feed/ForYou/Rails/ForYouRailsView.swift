@@ -647,8 +647,8 @@ final class ForYouRailsView: UIView {
         // The band, in the row's CONTENT space: the scroll view's bounds are
         // its content offset, so a card's frame compares directly.
         let viewport = mediaView.convert(band, from: self).intersection(mediaView.bounds)
-        let candidates = mediaView.indexPathsForVisibleItems.compactMap {
-            indexPath -> GridVideoPlaybackCoordinator.Candidate? in
+        let tiles = mediaView.indexPathsForVisibleItems.compactMap {
+            indexPath -> GridAutoplayRanking.Tile? in
             guard let id = mediaSource.itemIdentifier(for: indexPath),
                   id != concealedCard,
                   let post = cards.first(where: { $0.id == id }),
@@ -656,15 +656,14 @@ final class ForYouRailsView: UIView {
                   let cell = mediaView.cellForItem(at: indexPath) as? ForYouFollowingCardCell,
                   hasCover(post, in: cell)
             else { return nil }
-            let frame = cell.frame
-            guard !viewport.isNull, GridPlaybackVisibility.autoplays(frame, in: viewport) else { return nil }
-            // Every card half on screen plays; the ranking only matters when
-            // the budget is short, and then the row is read from its leading
-            // edge, so the card nearest it keeps its player.
-            return .init(id: id, url: url, cell: cell, distanceFromCentre: abs(frame.minX - viewport.minX))
+            return .init(id: id, url: url, cell: cell, mediaFrame: cell.frame, isPaused: false)
         }
+        // Every card half on screen plays (a null band admits none); the
+        // ranking only matters when the budget is short, and then the row is
+        // ranked from its left edge, so the card nearest it keeps its player.
+        let candidates = GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .minXEdge)
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
-        return min(candidates.count, Self.concurrentPlayers)
+        return GridAutoplayRanking.playersHeld(candidateCount: candidates.count, budget: Self.concurrentPlayers)
     }
 
     /// A card may play only once it has a face behind its surface — the
