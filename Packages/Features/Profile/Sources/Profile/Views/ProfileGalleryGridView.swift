@@ -1103,14 +1103,6 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
     }
 
-    /// The card a dismissal carries home, drawn at the ROW's own width so its
-    /// caption wraps and truncates exactly as the row's does.
-    ///
-    /// Without one the close flies the live PAGE, which only works while the
-    /// page still shows, in the same place, what the card shows — and a viewer
-    /// who scrolled the comments has already broken that. Same view For You
-    /// flies, because a viewer opening the same post from either screen is
-    /// looking at one screen and must get one transition.
     /// ⚠️ THE ANY-KIND FLOOR under `textRowFrame`, which refuses a row carrying
     /// media on purpose.
     ///
@@ -1123,8 +1115,27 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         return cell.convert(cell.bounds, to: space)
     }
 
+    /// The card a dismissal carries home, drawn at the ROW's own width so its
+    /// caption wraps and truncates exactly as the row's does — or, for a post
+    /// this page draws as a TILE, the tile.
+    ///
+    /// Without one the close flies the live PAGE, which only works while the
+    /// page still shows, in the same place, what the card shows — and a viewer
+    /// who scrolled the comments has already broken that. Same view For You
+    /// flies, because a viewer opening the same post from either screen is
+    /// looking at one screen and must get one transition.
+    ///
+    /// ⚠️ A TILE IS NOT A ROW, and this used to draw one for it (#888) — For
+    /// You's own fix (`ForYouGridPage.makeDismissStandIn`) that this twin never
+    /// got. Open a Discover tile or pair with a flight, page onto a text post,
+    /// and the close is the card-shaped window; its stand-in came from here, a
+    /// whole post card (author band, picture, comment chip) at the tile's
+    /// width, which the window faded in over the page and then swapped for the
+    /// tile. Filmed as the old default post card appearing mid-close. The
+    /// tile's own twin is what the window lands as now.
     func makeDismissStandIn(for postID: PostID) -> UIView? {
         guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        if drawsAsTile(postID) { return makeTileStandIn(for: post) }
         // The realized row's width when there is one, the list's own otherwise:
         // a row scrolled out still has to produce a card, and the width is a
         // property of the LIST rather than of any particular cell.
@@ -1157,6 +1168,66 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // in the window, so a height that disagrees with the row's puts
             // every line inside it half the difference out.
             height: cell(for: postID)?.bounds.height
+        )
+    }
+
+    /// A tile's twin in its own slot — sized, rounded and worded like the cell
+    /// it lands on (`tileCell`), so the window's last frame IS that cell.
+    ///
+    /// Sized from the layout when the cell is not realized: the slot is where
+    /// the close measures its landing too, and a tile that scrolled out under
+    /// the open post still lands as itself rather than as the live page. Nil
+    /// only when the layout has no rect either.
+    private func makeTileStandIn(for post: GalleryPost) -> UIView? {
+        guard let size = cell(for: post.id)?.bounds.size ?? slotSize(of: post.id),
+              size.width > 0, size.height > 0
+        else { return nil }
+        let showsInfo = tileShowsInfo(post.id)
+        return PostGridTileStandInView(
+            post: post,
+            size: size,
+            cornerRadius: tileCornerRadius(for: post.id),
+            imagePipeline: imagePipeline,
+            // The heart as the tile draws it: only a tile wearing its words
+            // binds the readout (`tileCell`).
+            viewerStake: showsInfo ? staking?.viewerStake(on: post.id) ?? 0 : 0,
+            showsInfo: showsInfo
+        )
+    }
+
+    /// The size the layout gives `postID`'s slot.
+    private func slotSize(of postID: PostID) -> CGSize? {
+        guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
+        return collectionView.layoutAttributesForItem(at: indexPath(for: index))?.size
+    }
+
+    /// Whether `postID`'s tile wears its author and caption — Discover's chunk
+    /// tiles and pairs do, the media mosaic's bricks do not. `tileCell`'s rule.
+    private func tileShowsInfo(_ postID: PostID) -> Bool {
+        style == .discover && drawsAsTile(postID)
+    }
+
+    /// The corner `postID`'s tile is cut at — a pair's is the list card's
+    /// media corner, every other tile the mosaic's. `cell(at:)`'s rule.
+    private func tileCornerRadius(for postID: PostID) -> CGFloat {
+        style == .discover && pairedPostIDs.contains(postID)
+            ? PostGridListRowCell.mediaCornerRadius
+            : ChaoticSliceLayout.harmonisedCornerRadius
+    }
+
+    /// What a card-shaped window closing onto `postID` has to know to land as
+    /// its TILE rather than as a card — the tile's corner and its fill — or nil
+    /// for a post this page draws as a row (#888).
+    ///
+    /// The window's own description defaults to a ROW's: the card's corner, the
+    /// card's white, the page aligned to a caption and the row's author band
+    /// borrowed for the flight. A tile has none of those, which is why For
+    /// You's tiles describe their window apart (`ForYouGridPage.tileWindow`).
+    func tileRevealShape(for postID: PostID) -> ProfileTileRevealShape? {
+        guard drawsAsTile(postID), let post = posts.first(where: { $0.id == postID }) else { return nil }
+        return ProfileTileRevealShape(
+            cornerRadius: tileCornerRadius(for: postID),
+            fill: PostGridTileCell.fillColor(for: post)
         )
     }
 

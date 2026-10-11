@@ -2877,6 +2877,11 @@ extension ProfileViewController {
         // away". The closures below re-ask the transient question for as
         // long as the flight needs it.
         let geometry = galleryPager.heroGeometry(for: post.id)
+        // Whether the post is a TILE here (a Discover chunk's or pair's, every
+        // media mosaic brick) — read at tap with the geometry. A card-shaped
+        // close onto a tile lands as the tile (#888), not as a row: see
+        // `textReveal` below.
+        let tileShape = galleryPager.tileRevealShape(for: post.id)
         // ⚠️ THE CLOSE LANDS ON THE POST THAT OPENED IT, whatever the
         // viewer paged to — the product rule for a ranked list, and the
         // same one the place page's own note states at length.
@@ -2951,7 +2956,12 @@ extension ProfileViewController {
                 // Borrowed by the destination for the flight, so the window
                 // shows the header the card does instead of a blank strip
                 // the card's own header then appears into at the landing.
-                authorBand: galleryPager.textRowAuthorBand(for: post.id),
+                //
+                // ⚠️ NOT FOR A TILE, which has no header to match (#888): the
+                // band answers for any post, and borrowed over a window
+                // closing onto a tile it drew a post card's header into the
+                // flight that the tile then dropped.
+                authorBand: tileShape == nil ? galleryPager.textRowAuthorBand(for: post.id) : nil,
                 // What the CLOSE carries home. Built from the post rather
                 // than read off the page, so a viewer who scrolled the
                 // comments still lands on the card they came from.
@@ -2963,6 +2973,15 @@ extension ProfileViewController {
                 makeDismissStandIn: { [weak galleryPager] _ in
                     galleryPager?.makeDismissStandIn(for: anchorID)
                 },
+                // ⚠️ A TILE'S WINDOW IS THE TILE'S SHAPE (#888), For You's
+                // `ForYouGridPage.tileWindow`: its corner and its fill rather
+                // than the card's, and no caption to align the page to. The
+                // row's defaults landed a Discover tile's close as a white,
+                // card-cornered window holding a whole post card — the old
+                // default card, in the tile's slot, for the length of the
+                // landing. The stand-in above is the tile's twin for the same
+                // reason.
+                alignsPageToSource: tileShape == nil,
                 // ⚠️ THE PAGE TRAVELS — this list never got the transition
                 // every other surface now runs. Under `.clipped` it handed
                 // the destination over DURING the drag, with the TAPPED
@@ -2970,6 +2989,8 @@ extension ProfileViewController {
                 // viewer had paged to. A carrying fit refuses both and
                 // moves the whole hand-over to the release.
                 pageFit: .covering,
+                cornerRadius: tileShape?.cornerRadius,
+                fill: tileShape?.fill ?? PostGridListRowCell.cardFillColor,
                 // The gallery's own concealment, which the media hero
                 // beside this already drives — one mechanism, two kinds of
                 // flight.

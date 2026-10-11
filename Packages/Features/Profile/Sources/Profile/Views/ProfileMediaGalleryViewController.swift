@@ -23,6 +23,16 @@ protocol ProfileHeroSurface: UIView {
     func textRowCaptionTop(for postID: PostID) -> CGFloat
     func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model?
     func makeDismissStandIn(for postID: PostID) -> UIView?
+    /// The tile a card-shaped close lands on, or nil for a row (#888).
+    func tileRevealShape(for postID: PostID) -> ProfileTileRevealShape?
+}
+
+/// How a TILE meets the window closing onto it: its corner and its fill. The
+/// rest of a window's description is a row's — see
+/// `ProfileGalleryGridView.tileRevealShape`.
+struct ProfileTileRevealShape: Equatable {
+    let cornerRadius: CGFloat
+    let fill: UIColor
 }
 
 extension ProfileGalleryPagerView: ProfileHeroSurface {
