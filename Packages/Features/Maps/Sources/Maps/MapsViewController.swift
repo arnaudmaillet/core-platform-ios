@@ -313,33 +313,14 @@ final class MapsViewController: UIViewController {
     /// Logical sub-filter-bar visibility — tracked separately from
     /// `isHidden`, which lags behind during the fade-out.
     private var isSubFilterBarVisible = false
-    /// Session cache of the people rows, prefetched at screen load so a
-    /// primary tap renders its sub-filter row SYNCHRONOUSLY — the row must
-    /// never wait on the social graph. Keyed by `.friends` / `.following`.
-    private var peopleCache: [MapFilter: [MapFavorite]] = [:]
-    /// Everyone a primary COULD offer — the social graph behind it, ignoring
-    /// curation. Kept apart from `peopleCache` since the rails became curated
-    /// lists: the row is what the viewer kept, the catalogue is what the
-    /// sheet offers them to add back, and an empty row must still be able to
-    /// present a full sheet.
-    private var catalogueCache: [MapFilter: [MapFavorite]] = [:]
+    /// The row's session memory — the people caches, the viewer's order and
+    /// deletions per primary, the mutes — and its pure rules
+    /// (`MapSubFilterRowMemory`).
+    private var subFilterMemory = MapSubFilterRowMemory()
     /// What the people row is currently SHOWING — the yardstick a refresh
     /// measures itself against. Nil whenever the row holds something else
     /// (place categories) or nothing at all.
     private var renderedSubFilterRow: MapSubFilterRowState?
-    /// The viewer's manual sub-filter order per primary, set by dragging rows
-    /// in the full-list sheet. Session-scoped: it outlives primary switches
-    /// and background refreshes, not the process.
-    private var subFilterOrder: [MapFilter: [MapSubFilter]] = [:]
-    /// Refinements deleted in the sheet's edit mode, per primary — the social
-    /// graph still returns them, so the row has to remember they're gone.
-    private var subFilterHidden: [MapFilter: Set<MapSubFilter>] = [:]
-    /// Accounts muted from the sheet's swipe action. Session-local, like the
-    /// conversation list's mute: `social_graph.v1` has no mute concept, and
-    /// muting can't filter the map either until `RadarPin` carries an author
-    /// id (the same Phase-2 gate as the filter header). Today it marks the
-    /// row, and nothing more — a deliberately honest half of the feature.
-    private var mutedProfiles: Set<ProfileID> = []
     /// The raw pin model, updated from each diff. Clustering is computed from
     /// this: the map itself never holds raw pins, only the engine's markers, so
     /// the query/diff layer stays a pure model feed with no MapKit coupling.
@@ -729,7 +710,7 @@ final class MapsViewController: UIViewController {
                 case .friends, .following:
                     // ...and only when that rail is the one on screen.
                     guard let primary = self.filterBar.selectedFilter,
-                          Self.railCategory(for: primary) == changed else { return }
+                          MapSubFilterRowMemory.railCategory(for: primary) == changed else { return }
                     self.updateSubFilterBar(for: primary)
                 case nil:
                     // Not one of ours (or a post carrying no category):
@@ -1322,10 +1303,10 @@ final class MapsViewController: UIViewController {
             self?.openConversation(favorite.profileID)
         }
         subFilterBar.isMuted = { [weak self] profileID in
-            self?.mutedProfiles.contains(profileID) ?? false
+            self?.subFilterMemory.isMuted(profileID) ?? false
         }
         subFilterBar.onToggleMute = { [weak self] favorite in
-            self?.mutedProfiles.formSymmetricDifference([favorite.profileID])
+            self?.subFilterMemory.toggleMute(favorite.profileID)
         }
         subFilterBar.onViewDetails = { [weak self] category in
             self?.isolateSubFilter(.placeCategory(category))
@@ -1350,12 +1331,14 @@ final class MapsViewController: UIViewController {
             async let following = repository.following()
             let (friendsList, followingList) = await (friends, following)
             guard let self else { return }
-            self.catalogueCache[.friends] = friendsList
-            self.catalogueCache[.following] = followingList
+            self.subFilterMemory.catalogue[.friends] = friendsList
+            self.subFilterMemory.catalogue[.following] = followingList
             // The rows themselves may be curated subsets; resolve them from
             // the same lists rather than assuming the graph IS the row.
-            self.peopleCache[.friends] = await self.people(for: .friends)
-            self.peopleCache[.following] = await self.people(for: .following)
+            let friendsRow = await self.people(for: .friends)
+            self.subFilterMemory.people[.friends] = friendsRow
+            let followingRow = await self.people(for: .following)
+            self.subFilterMemory.people[.following] = followingRow
         }
     }
 
@@ -1374,7 +1357,7 @@ final class MapsViewController: UIViewController {
             // viewer just LEFT, so an empty target has to clear it rather than
             // inherit it. (It did inherit it: switching to an empty rail left
             // the previous primary's pills up.)
-            applyPeopleRow(peopleCache[primary] ?? [], for: primary)
+            applyPeopleRow(subFilterMemory.people[primary] ?? [], for: primary)
             // A guest follows no one: the row stays empty, nothing is fetched.
             guard isMember() else { return }
             // 2) Refresh behind it (also the cold path pre-prefetch, where
@@ -1386,8 +1369,8 @@ final class MapsViewController: UIViewController {
                     ? await repository.friends()
                     : await repository.following()
                 guard let self, !Task.isCancelled else { return }
-                self.catalogueCache[primary] = catalogue
-                self.peopleCache[primary] = people
+                self.subFilterMemory.catalogue[primary] = catalogue
+                self.subFilterMemory.people[primary] = people
                 guard self.filterBar.selectedFilter == primary else { return }
                 self.applyPeopleRow(people, for: primary)
             }
@@ -1409,7 +1392,7 @@ final class MapsViewController: UIViewController {
     /// `MapSubFilterRowUpdate` for the switch-to-an-empty-primary bug that
     /// distinction exists to prevent.
     private func applyPeopleRow(_ people: [MapFavorite], for primary: MapFilter) {
-        let incoming = makeRowState(primary: primary, people: people)
+        let incoming = subFilterMemory.rowState(primary: primary, people: people)
         let update = MapSubFilterRowUpdate.resolve(rendered: renderedSubFilterRow, incoming: incoming)
         #if DEBUG
         // Which path a row edit took is invisible in a screenshot — a diff and
@@ -1445,7 +1428,7 @@ final class MapsViewController: UIViewController {
     private func showSubFilterRow(
         _ options: [MapSubFilterOption], style: MapSubFilterRowUpdate.Style = .swap
     ) {
-        let options = orderedByPreference(options)
+        let options = subFilterMemory.ordered(options, for: filterBar.selectedFilter)
         currentSubFilterOptions = options
         guard isSubFilterBarVisible else {
             subFilterBar.setOptions(options)
@@ -1490,55 +1473,29 @@ final class MapsViewController: UIViewController {
         // Gated on the CATALOGUE, not on the row: an empty row is exactly when
         // the sheet matters most (the "+" is the only way back), and the only
         // sheet worth refusing is one with nothing in either section.
-        guard !allSubFilterOptions().isEmpty else { return }
+        guard !subFilterMemory.catalogueOptions(for: filterBar.selectedFilter).isEmpty else { return }
         // Only the primaries that HAVE a refinement dimension get a sheet —
         // and the primary's own name is the sheet's title.
-        guard let title = subFilterTitle(for: filterBar.selectedFilter) else { return }
+        guard let title = MapSubFilterRowMemory.title(for: filterBar.selectedFilter) else { return }
         let sheet = MapSubFilterSheetViewController.makeSheet(
             title: title,
             // The sheet shows the whole catalogue split in two: what the bar
             // carries, and everything else this primary could offer.
-            all: allSubFilterOptions(),
+            all: subFilterMemory.catalogueOptions(for: filterBar.selectedFilter),
             activeSubFilters: currentSubFilterOptions.map(\.subFilter),
             imagePipeline: imagePipeline,
             rowActions: MapSubFilterSheetViewController.RowActions(
                 openProfile: { [weak self] favorite in self?.openProfile(favorite) },
                 toggleMute: { [weak self] favorite in
-                    self?.mutedProfiles.formSymmetricDifference([favorite.profileID])
+                    self?.subFilterMemory.toggleMute(favorite.profileID)
                 },
-                isMuted: { [weak self] id in self?.mutedProfiles.contains(id) ?? false }
+                isMuted: { [weak self] id in self?.subFilterMemory.isMuted(id) ?? false }
             ),
             onOptionsChanged: { [weak self] options in
                 self?.adoptSubFilterOptions(options)
             }
         )
         present(sheet, animated: true)
-    }
-
-    /// The primary's display name — the sheet's title, and the test for
-    /// whether a primary has a refinement dimension at all (All and the
-    /// favorite pills answer nil, and get no sheet).
-    private func subFilterTitle(for filter: MapFilter?) -> String? {
-        switch filter {
-        case .friends: "Friends"
-        case .following: "Following"
-        case .pinned: "Places"
-        default: nil
-        }
-    }
-
-    /// Every refinement the current primary can offer, edits ignored — the
-    /// catalogue the sheet splits into Active and Available.
-    private func allSubFilterOptions() -> [MapSubFilterOption] {
-        switch filterBar.selectedFilter {
-        case .friends, .following:
-            guard let primary = filterBar.selectedFilter else { return [] }
-            return MapSubFilterOption.people(catalogueCache[primary] ?? [])
-        case .pinned:
-            return MapSubFilterOption.placeCategories
-        default:
-            return []
-        }
     }
 
     /// The sheet's Profile swipe. Maps stays navigation-agnostic (the tab
@@ -1604,19 +1561,14 @@ final class MapsViewController: UIViewController {
         currentSubFilterOptions = options
 
         if let primary = filterBar.selectedFilter {
-            subFilterOrder[primary] = options.map(\.subFilter)
-            // Hidden is simply "in the catalogue but not in the row" —
-            // recomputed rather than accumulated, so a promotion out of the
-            // Available section un-hides in the same stroke a demotion hides.
-            // Without it the next background refresh would resurrect every
-            // removed row: they are still in the social graph.
-            subFilterHidden[primary] = Set(allSubFilterOptions().map(\.subFilter))
-                .subtracting(surviving)
+            // Its order, and what is in the catalogue but not in the row
+            // (see `MapSubFilterRowMemory.adopt`).
+            subFilterMemory.adopt(options, for: primary)
             // ...and for a PEOPLE row the arrangement is now curation, not a
             // session preference: the same list the profile's star writes.
             // Persisting it here is what makes "+ → add → Done" survive the
             // next launch, and what keeps the two editors from disagreeing.
-            if let category = Self.railCategory(for: primary) {
+            if let category = MapSubFilterRowMemory.railCategory(for: primary) {
                 let ids = options.compactMap(\.favorite?.profileID)
                 pinService.setCuratedList(ids, in: category)
             }
@@ -1644,27 +1596,10 @@ final class MapsViewController: UIViewController {
         // (or at worst a `.diff`), and the removal is the only thing that
         // moves.
         renderedSubFilterRow = filterBar.selectedFilter.flatMap { primary in
-            Self.railCategory(for: primary) == nil
+            MapSubFilterRowMemory.railCategory(for: primary) == nil
                 ? nil // Places: not a people row, so it has no state to compare
-                : makeRowState(primary: primary, people: options.compactMap(\.favorite))
+                : subFilterMemory.rowState(primary: primary, people: options.compactMap(\.favorite))
         }
-    }
-
-    /// Re-applies the viewer's edits to a freshly built option list: deleted
-    /// rows stay gone, known items keep their dragged seats, anything the
-    /// refresh added lands at the end (the sort is written as two passes
-    /// because `sorted(by:)` is not stable — a rank-or-`Int.max` comparator
-    /// would shuffle the newcomers).
-    private func orderedByPreference(_ options: [MapSubFilterOption]) -> [MapSubFilterOption] {
-        guard let primary = filterBar.selectedFilter else { return options }
-        let hidden = subFilterHidden[primary] ?? []
-        let options = hidden.isEmpty ? options : options.filter { !hidden.contains($0.subFilter) }
-        guard let order = subFilterOrder[primary], !order.isEmpty else { return options }
-        let rank = Dictionary(uniqueKeysWithValues: order.enumerated().map { ($1, $0) })
-        let known = options.filter { rank[$0.subFilter] != nil }
-            .sorted { rank[$0.subFilter, default: 0] < rank[$1.subFilter, default: 0] }
-        let newcomers = options.filter { rank[$0.subFilter] == nil }
-        return known + newcomers
     }
 
     /// Pin/unpin a person pill. The rule — including materializing the
@@ -1757,30 +1692,6 @@ final class MapsViewController: UIViewController {
             guard let self, !Task.isCancelled else { return }
             self.currentFavorites = people
             self.filterBar.setFavorites(people)
-        }
-    }
-
-    /// The row's state as the refresh describes it — built in ONE place, so
-    /// what an edit records and what a refresh compares against cannot drift
-    /// into disagreeing.
-    private func makeRowState(primary: MapFilter, people: [MapFavorite]) -> MapSubFilterRowState {
-        MapSubFilterRowState(
-            primary: primary,
-            people: people,
-            hasCatalogue: MapSubFilterOption.rowSurvivesEmpty(
-                catalogue: MapSubFilterOption.people(catalogueCache[primary] ?? [])
-            )
-        )
-    }
-
-    /// The rail a people primary curates. Places have no rail — their
-    /// refinements are a fixed client-side vocabulary, not a list of accounts.
-    /// Internal (not private) only for the +QA hooks.
-    static func railCategory(for primary: MapFilter) -> MapFavoriteCategory? {
-        switch primary {
-        case .friends: .friends
-        case .following: .following
-        default: nil
         }
     }
 
@@ -3730,8 +3641,7 @@ extension MapsViewController: MapViewerRefreshing {
     func viewerDidChange() {
         // A guest who signed up while locked: unlocked at once (#564).
         updateGuestLock(animated: true)
-        catalogueCache.removeAll()
-        peopleCache.removeAll()
+        subFilterMemory.forgetPeople()
         loadFavorites()
         prefetchPeople()
     }

@@ -138,7 +138,7 @@ extension MapsViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
                 guard let self,
                       let primary = filterBar.selectedFilter,
-                      let category = Self.railCategory(for: primary) else { return }
+                      let category = MapSubFilterRowMemory.railCategory(for: primary) else { return }
                 let profile = ProfileID(id)
                 let pinService = pinService
                 Task {
