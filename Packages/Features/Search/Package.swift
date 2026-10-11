@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "Search", targets: ["Search"])
     ],
     dependencies: [
+        .package(path: "../../FeatureInterfaces/AuthInterface"),
         .package(path: "../../FeatureInterfaces/SearchInterface"),
         .package(path: "../../Kit/CoreContracts"),
         .package(path: "../../Kit/CoreModels"),
@@ -21,6 +22,9 @@ let package = Package(
         .target(
             name: "Search",
             dependencies: [
+                // `ViewerScoped`: the person rows' follow state is the
+                // viewer's, and drops on a viewer change (#892).
+                "AuthInterface",
                 "SearchInterface",
                 "CoreContracts",
                 "CoreModels",
@@ -37,6 +41,7 @@ let package = Package(
             name: "SearchTests",
             dependencies: [
                 "Search",
+                "AuthInterface",
                 "CoreNavigation",
                 "CoreNetworking",
                 "CoreStorage",

@@ -504,6 +504,12 @@ private final class TopCommentsCache: @unchecked Sendable {
         defer { lock.unlock() }
         pages[postID] = entries
     }
+
+    func removeAll() {
+        lock.lock()
+        defer { lock.unlock() }
+        pages.removeAll()
+    }
 }
 
 extension CommentsRepository: HeldCommentReviewing {
@@ -531,7 +537,12 @@ extension CommentsRepository: HeldCommentReviewing {
 extension CommentsRepository: ViewerScoped {
     /// The composer's face belongs to whoever was signed in: another account,
     /// a sign-out or a switch drops it until the new viewer resolves.
+    ///
+    /// The prefetched first pages go too (#892): the server filters each one
+    /// for its reader — their blocks, their hidden words, the comments held
+    /// for them — so the next viewer's panel must not open on them.
     public func viewerDidChange(_ state: ViewerState) async {
         viewerMirror.set(nil)
+        topPages.removeAll()
     }
 }

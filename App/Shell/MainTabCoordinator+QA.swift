@@ -1,4 +1,5 @@
 #if DEBUG
+import AuthInterface
 import ChatInterface
 import CoreModels
 import CoreNavigation
@@ -68,6 +69,30 @@ extension MainTabCoordinator {
         // keyboard, headlessly. Pair with `-select-tab` to choose the origin.
         if arguments.contains("-open-search") {
             DispatchQueue.main.async { [weak self] in self?.container.router.route(to: .search) }
+        }
+        // `-switch-profile-after <seconds> <profileID>` switches the active
+        // profile that long after launch, the way the switcher commits one
+        // (the session first, then `.activeProfileDidChange`): the viewer
+        // transition #892 resets the caches on, with no long-press menu to
+        // drive. With `-open-search`, the search screen opens again after the
+        // switch, as the viewer would reopen it.
+        if let index = arguments.firstIndex(of: "-switch-profile-after"), index + 2 < arguments.count,
+           let delay = Double(arguments[index + 1]) {
+            let target = ProfileID(arguments[index + 2])
+            let reopensSearch = arguments.contains("-open-search")
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self else { return }
+                await self.container.viewerSession.setActiveProfile(target)
+                NotificationCenter.default.post(
+                    name: .activeProfileDidChange, object: nil,
+                    userInfo: [ActiveProfileChange.profileIDKey: target]
+                )
+                if reopensSearch {
+                    try? await Task.sleep(for: .seconds(1))
+                    self.container.router.route(to: .search)
+                }
+            }
         }
         // `-open-create <camera|upload|text>` opens one of the "+" menu's
         // destinations on launch through the menu's own code path, minus the

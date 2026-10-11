@@ -194,7 +194,11 @@ final class AppContainer {
     func observeViewerTransitions() {
         guard viewerTransitionsTask == nil else { return }
         let viewer = viewerSession
-        let scoped: [any ViewerScoped] = [feedRepository, commentsRepository]
+        // Every app-lifetime cache holding answers computed FOR the viewer
+        // (#892): their follow state, their requests, their filtered pages.
+        let scoped: [any ViewerScoped] = [
+            feedRepository, commentsRepository, profileRelationshipsRepository, profileMetadataRepository
+        ]
         viewerTransitionsTask = Task {
             for await state in await viewer.transitions() {
                 for cache in scoped {

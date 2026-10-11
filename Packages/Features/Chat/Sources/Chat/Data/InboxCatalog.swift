@@ -255,6 +255,10 @@ final class InboxCatalog {
         hiddenRequestRows = []
         pinned = []
         muted = []
+        // A mute still on its way belongs to the previous viewer: its answer
+        // must neither roll back nor shadow the next viewer's rows.
+        mutesInFlight = []
+        muteGenerations = [:]
         readAheadOfServer = []
         deleted = []
         accepted = []
