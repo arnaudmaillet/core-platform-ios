@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// The emote panel that takes the keyboard's place: every emote in sections,
@@ -18,12 +19,14 @@ import UIKit
 /// back when it is scrolled off, so the panel holds one screen of sheets; a
 /// sheet is baked once per install and read from disk after that.
 ///
-/// ## What plays: only while the grid moves
+/// ## What plays: every tile, for as long as it shows
 ///
-/// At rest every tile is still, on its poster frame. The displayed tiles play
-/// from a drag's start to the end of its glide and stop on the frame they
-/// reached — the strip's rule, shared (`EmoteScrollPlayback`). A jump from
-/// the section bar is not a scroll and plays nothing.
+/// The displayed tiles loop from the moment they show, at rest too (#731),
+/// within the tile slot budget (`EmoteScrollPlayback.playsAtRest`). Their
+/// motion is the keyboard's content, not decoration (#926): idle calm (#650)
+/// does not rest them, and Reduce Motion, Low Power Mode, Power Saving,
+/// Animate Emojis off or overheating still them (`EmoteMotion.keyboardPolicy`).
+/// A change of any of those re-dresses the tiles on screen at once.
 ///
 /// ⚠️ **NO SEARCH FIELD IN THE PANEL.** A text field inside an `inputView`
 /// cannot be typed into: focusing it takes the first responder away from the
@@ -106,6 +109,12 @@ public final class EmotePickerView: UIInputView {
         )
         collectionView.dataSource = self
         collectionView.delegate = self
+        // Selector observers are dropped with the panel: nothing to remove.
+        for name in EmoteMotion.keyboardPolicyNotifications {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(keyboardPolicyMayHaveChanged), name: name, object: nil
+            )
+        }
         collectionView.showsVerticalScrollIndicator = false
         // Off: a prefetched cell is dequeued but not shown, and would start a
         // bake for a tile nobody sees.
@@ -155,6 +164,46 @@ public final class EmotePickerView: UIInputView {
             sectionBar.topAnchor.constraint(equalTo: sectionBarGlass.contentView.topAnchor),
             sectionBar.bottomAnchor.constraint(equalTo: sectionBarGlass.contentView.bottomAnchor)
         ])
+    }
+
+    // MARK: - Motion
+
+    /// The policy the tiles on screen were dressed under, to act only on a
+    /// change.
+    private var dressedPolicy: AnimatedIconView.MotionPolicy?
+
+    /// ⚠️ NONISOLATED: the power-state notification is posted off the main
+    /// thread, and a main-actor selector would trap on the isolation check.
+    @objc nonisolated private func keyboardPolicyMayHaveChanged() {
+        Task { @MainActor [weak self] in self?.redressIfPolicyChanged() }
+    }
+
+    /// Re-dresses the displayed tiles when the keyboard's policy changed: Low
+    /// Power or Reduce Motion turned on stills them now, turned off plays them
+    /// again. Nothing else on screen is touched.
+    func redressIfPolicyChanged() {
+        // Off screen the tiles hold nothing, and dress themselves afresh
+        // when the panel comes back (`EmoteTileView.didMoveToWindow`).
+        guard window != nil else {
+            dressedPolicy = nil
+            return
+        }
+        let policy = EmoteMotion.keyboardPolicy
+        guard policy != dressedPolicy else { return }
+        dressedPolicy = policy
+        for indexPath in collectionView.indexPathsForVisibleItems {
+            guard let cell = collectionView.cellForItem(at: indexPath) as? EmoteTileCell,
+                  indexPath.section < sections.count,
+                  indexPath.item < sections[indexPath.section].emotes.count else { continue }
+            configure(cell, at: indexPath)
+        }
+    }
+
+    private func configure(_ cell: EmoteTileCell, at indexPath: IndexPath) {
+        cell.configure(
+            sections[indexPath.section].emotes[indexPath.item], engine: engine,
+            prefersAnimation: true, playing: playback.dressesPlaying, asContent: true
+        )
     }
 
     // MARK: - Height
@@ -321,10 +370,8 @@ extension EmotePickerView: UICollectionViewDataSource, UICollectionViewDelegate 
         _ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath
     ) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: EmoteTileCell.reuseID, for: indexPath)
-        (cell as? EmoteTileCell)?.configure(
-            sections[indexPath.section].emotes[indexPath.item], engine: engine,
-            prefersAnimation: true, playing: playback.dressesPlaying
-        )
+        if dressedPolicy == nil { dressedPolicy = EmoteMotion.keyboardPolicy }
+        if let cell = cell as? EmoteTileCell { configure(cell, at: indexPath) }
         return cell
     }
 

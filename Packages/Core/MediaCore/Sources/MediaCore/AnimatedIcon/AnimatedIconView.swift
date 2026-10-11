@@ -59,6 +59,22 @@ public final class AnimatedIconView: UIView {
     public static var forcedPolicy: MotionPolicy?
     public static var policy: MotionPolicy { forcedPolicy ?? devicePolicy }
 
+    /// The policy THIS view plays under. Nil, the default: the app's
+    /// (`policy`) — decoration, which Reduce Motion, Power Saving, Low Power
+    /// and idle calm all reach. An owner whose motion is the content itself
+    /// states its own: the emote keyboard keeps playing through idle calm and
+    /// stops under Low Power (#926). Read at install time like the app's, so
+    /// a change re-installs.
+    public var playbackPolicy: MotionPolicy? {
+        didSet {
+            guard playbackPolicy != oldValue, art != nil else { return }
+            reinstall()
+        }
+    }
+
+    /// What this view's install, keys and frame rate follow.
+    private var playingPolicy: MotionPolicy { playbackPolicy ?? Self.policy }
+
     /// Fires when the device changes its answer; the caller re-installs.
     ///
     /// ⚠️ The policy is read at INSTALL time, so this is not optional. Without
@@ -251,7 +267,7 @@ public final class AnimatedIconView: UIView {
     /// keeps its duration, with fewer, longer keys.
     public var remainingLoopTime: TimeInterval? {
         guard let art, art.frameCount > 1, isAnimating, !isPaused else { return nil }
-        let (_, keys, keyDuration) = Self.keying(art)
+        let (_, keys, keyDuration) = keying(art)
         let loop = keyDuration * CFTimeInterval(keys)
         var elapsed = (sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch + clockShift)
             .truncatingRemainder(dividingBy: loop)
@@ -312,7 +328,7 @@ public final class AnimatedIconView: UIView {
         guard let frame = heldFrame, let art else { return }
         heldFrame = nil
         let count = art.frameCount
-        let (step, keys, keyDuration) = Self.keying(art)
+        let (step, keys, keyDuration) = keying(art)
         let rotation = ((phase % count) + count) % count
         let key = ((frame - rotation + count) % count) / step
         let now = sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch
@@ -344,9 +360,9 @@ public final class AnimatedIconView: UIView {
 
     /// How the installed keys divide one loop: every `step`-th rotated frame,
     /// spread evenly (`decimated`, `.discrete`).
-    private static func keying(_ art: AnimatedIconArt) -> (step: Int, keys: Int, keyDuration: CFTimeInterval) {
+    private func keying(_ art: AnimatedIconArt) -> (step: Int, keys: Int, keyDuration: CFTimeInterval) {
         let count = art.frameCount
-        let stride = policy.stride
+        let stride = playingPolicy.stride
         let step = stride > 1 && count > stride ? stride : 1
         let keys = (count + step - 1) / step
         return (step, keys, art.frameDuration * CFTimeInterval(count) / CFTimeInterval(keys))
@@ -361,7 +377,7 @@ public final class AnimatedIconView: UIView {
         let count = art.frameCount
         let rotation = ((phase % count) + count) % count
         guard count > 1, isAnimating else { return rotation }
-        let (step, keys, keyDuration) = Self.keying(art)
+        let (step, keys, keyDuration) = keying(art)
         let loop = keyDuration * CFTimeInterval(keys)
         var elapsed = (sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch + clockShift)
             .truncatingRemainder(dividingBy: loop)
@@ -407,20 +423,20 @@ public final class AnimatedIconView: UIView {
         sheetView.layer.contents = sheet.sheet.cgImage
         let rotation = ((phase % sheet.frameCount) + sheet.frameCount) % sheet.frameCount
 
-        guard sheet.frameCount > 1, Self.policy != .still else {
+        guard sheet.frameCount > 1, playingPolicy != .still else {
             sheetView.layer.contentsRect = sheet.frameRects[rotation]
             return
         }
         let values = Array(sheet.frameRects[rotation...] + sheet.frameRects[..<rotation])
         let animation = CAKeyframeAnimation(keyPath: "contentsRect")
         animation.calculationMode = .discrete
-        animation.values = Self.decimated(values)
+        animation.values = decimated(values)
         animation.duration = sheet.loopDuration
         animation.repeatCount = .infinity
         animation.isRemovedOnCompletion = false
         animation.beginTime = Self.epoch
         animation.timeOffset = clockShift
-        animation.preferredFrameRateRange = Self.rateRange(step: sheet.frameDuration)
+        animation.preferredFrameRateRange = rateRange(step: sheet.frameDuration)
         sheetView.layer.contentsRect = values[0]
         sheetView.layer.add(animation, forKey: Self.sheetKey)
     }
@@ -438,36 +454,36 @@ public final class AnimatedIconView: UIView {
             CATransform3DMakeRotation(track.rotations[0], 0, 0, 1)
         )
         markView.layer.opacity = Float(track.alphas[0])
-        guard track.frameCount > 1, Self.policy != .still else { return }
+        guard track.frameCount > 1, playingPolicy != .still else { return }
 
         if track.movesScale {
             markView.layer.add(
-                Self.animation(track.scales, track: track, keyPath: "transform.scale", shift: clockShift),
+                animation(track.scales, track: track, keyPath: "transform.scale", shift: clockShift),
                 forKey: Self.scaleKey
             )
         }
         if track.movesRotation {
             markView.layer.add(
-                Self.animation(track.rotations, track: track, keyPath: "transform.rotation.z", shift: clockShift),
+                animation(track.rotations, track: track, keyPath: "transform.rotation.z", shift: clockShift),
                 forKey: Self.rotationKey
             )
         }
         if track.movesAlpha {
             markView.layer.add(
-                Self.animation(track.alphas, track: track, keyPath: "opacity", shift: clockShift),
+                animation(track.alphas, track: track, keyPath: "opacity", shift: clockShift),
                 forKey: Self.alphaKey
             )
         }
     }
 
-    private static func animation(
+    private func animation(
         _ channel: [Double], track: AnimatedIconMotionTrack, keyPath: String, shift: CFTimeInterval
     ) -> CAKeyframeAnimation {
         let animation = CAKeyframeAnimation(keyPath: keyPath)
         animation.duration = track.loopDuration
         animation.repeatCount = .infinity
         animation.isRemovedOnCompletion = false
-        animation.beginTime = epoch
+        animation.beginTime = Self.epoch
         animation.timeOffset = shift
         // Discrete, always.
         //
@@ -487,8 +503,8 @@ public final class AnimatedIconView: UIView {
     /// Keeps every `stride`-th value. The loop DURATION is unchanged, so the
     /// icon runs at the same speed with half the change instants — not at half
     /// speed, which is the mistake this exists to avoid.
-    private static func decimated<T>(_ values: [T]) -> [T] {
-        let stride = policy.stride
+    private func decimated<T>(_ values: [T]) -> [T] {
+        let stride = playingPolicy.stride
         guard stride > 1, values.count > stride else { return values }
         return values.enumerated().compactMap { $0.offset % stride == 0 ? $0.element : nil }
     }
@@ -497,8 +513,8 @@ public final class AnimatedIconView: UIView {
     /// panel fall toward its floor on a map nobody is touching, which is the
     /// actual battery win. `minimum == maximum` would forbid precisely the idle
     /// state the low rate exists to reach.
-    private static func rateRange(step: CFTimeInterval) -> CAFrameRateRange {
-        let ceiling = Float(1.0 / (step * Double(policy.stride)))
+    private func rateRange(step: CFTimeInterval) -> CAFrameRateRange {
+        let ceiling = Float(1.0 / (step * Double(playingPolicy.stride)))
         return CAFrameRateRange(minimum: min(8, ceiling), maximum: ceiling, preferred: 0)
     }
 }
