@@ -22,7 +22,6 @@ final class ConversationThreadDriver: ConversationThreadDriving {
     var onPhaseChange: ((ConversationThreadPhase) -> Void)?
     var onPeerChange: ((ConversationThreadPerson) -> Void)?
     var onViewerChange: ((ConversationThreadPerson) -> Void)?
-    var onSendingChange: ((Bool) -> Void)?
     var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)?
     var onActionNotice: ((String, String) -> Void)?
     var onPinnedChange: ((Bool?) -> Void)?
@@ -78,7 +77,6 @@ final class ConversationThreadDriver: ConversationThreadDriving {
         // first frame (the directory warm-start the old screen was built on).
         viewModel.onTitleChange = { [weak self] name in self?.adoptPeer(name: name) }
         viewModel.onPeerChange = { [weak self] id in self?.adoptPeer(id: id) }
-        viewModel.onSendingChange = { [weak self] sending in self?.onSendingChange?(sending) }
         viewModel.onReplyStateChange = { [weak self] draft in
             self?.onReplyStateChange?(draft.map {
                 ConversationThreadReplyDraft(messageID: $0.messageID, author: $0.author, snippet: $0.snippet)

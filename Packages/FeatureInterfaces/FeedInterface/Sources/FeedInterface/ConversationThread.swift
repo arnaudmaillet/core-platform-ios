@@ -155,7 +155,6 @@ public protocol ConversationThreadDriving: AnyObject {
     /// because the two can differ on an account with several profiles — and a
     /// face that is not the sender is a lie about who is speaking.
     var onViewerChange: ((ConversationThreadPerson) -> Void)? { get set }
-    var onSendingChange: ((Bool) -> Void)? { get set }
     var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)? { get set }
     /// A notice to present: `(title, message)`.
     var onActionNotice: ((String, String) -> Void)? { get set }

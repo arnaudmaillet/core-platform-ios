@@ -13,7 +13,6 @@ struct ConversationThreadMediaTests {
         var onPhaseChange: ((ConversationThreadPhase) -> Void)?
         var onPeerChange: ((ConversationThreadPerson) -> Void)?
         var onViewerChange: ((ConversationThreadPerson) -> Void)?
-        var onSendingChange: ((Bool) -> Void)?
         var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)?
         var onActionNotice: ((String, String) -> Void)?
         var onPinnedChange: ((Bool?) -> Void)?

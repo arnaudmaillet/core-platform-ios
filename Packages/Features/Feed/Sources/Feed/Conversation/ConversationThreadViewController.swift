@@ -808,7 +808,6 @@ final class ConversationThreadViewController: UIViewController {
         driver.onPhaseChange = { [weak self] phase in self?.render(phase) }
         driver.onPeerChange = { [weak self] person in self?.adoptPeer(person) }
         driver.onViewerChange = { [weak self] person in self?.adoptViewer(person) }
-        driver.onSendingChange = { [weak self] sending in self?.composeBar.isSending = sending }
         driver.onReplyStateChange = { [weak self] draft in self?.renderReply(draft) }
         driver.onActionNotice = { [weak self] title, message in self?.presentNotice(title, message) }
         driver.onPinnedChange = { [weak self] pinned in self?.renderPinned(pinned) }
