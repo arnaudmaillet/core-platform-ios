@@ -1477,6 +1477,8 @@ final class MapsViewController: UIViewController {
             // carries, and everything else this primary could offer.
             all: subFilterMemory.catalogueOptions(for: filterBar.selectedFilter),
             activeSubFilters: currentSubFilterOptions.map(\.subFilter),
+            // People rows hold a full rail (12); category rows hold 6.
+            maxActive: MapSubFilterSections.maxActive(for: filterBar.selectedFilter),
             imagePipeline: imagePipeline,
             rowActions: MapSubFilterSheetViewController.RowActions(
                 openProfile: { [weak self] favorite in self?.openProfile(favorite) },
