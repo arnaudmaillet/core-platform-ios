@@ -34,6 +34,7 @@
 		5F00000000000000000020B1 /* MapsInterface in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000020C1 /* MapsInterface */; };
 		5F00000000000000000020B2 /* Maps in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000020C2 /* Maps */; };
 		5F00000000000000000030B1 /* EmoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000030C1 /* EmoteKit */; };
+		5F00000000000000000040B1 /* CacheKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000040C1 /* CacheKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -109,6 +110,7 @@
 				5F00000000000000000020B1 /* MapsInterface in Frameworks */,
 				5F00000000000000000020B2 /* Maps in Frameworks */,
 				5F00000000000000000030B1 /* EmoteKit in Frameworks */,
+				5F00000000000000000040B1 /* CacheKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -179,6 +181,7 @@
 				5F00000000000000000020C1 /* MapsInterface */,
 				5F00000000000000000020C2 /* Maps */,
 				5F00000000000000000030C1 /* EmoteKit */,
+				5F00000000000000000040C1 /* CacheKit */,
 			);
 			productName = "core-platform-ios";
 			productReference = 51A1B7722FFBCAB6005918BC /* core-platform-ios.app */;
@@ -259,6 +262,7 @@
 				5F00000000000000000020A1 /* XCLocalSwiftPackageReference "Packages/FeatureInterfaces/MapsInterface" */,
 				5F00000000000000000020A2 /* XCLocalSwiftPackageReference "Packages/Features/Maps" */,
 				5F00000000000000000030A1 /* XCLocalSwiftPackageReference "Packages/Core/EmoteKit" */,
+				5F00000000000000000040A1 /* XCLocalSwiftPackageReference "Packages/Core/CacheKit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51A1B7732FFBCAB6005918BC /* Products */;
@@ -683,6 +687,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Core/EmoteKit;
 		};
+		5F00000000000000000040A1 /* XCLocalSwiftPackageReference "Packages/Core/CacheKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/CacheKit;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -793,6 +801,10 @@
 		5F00000000000000000030C1 /* EmoteKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = EmoteKit;
+		};
+		5F00000000000000000040C1 /* CacheKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = CacheKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
