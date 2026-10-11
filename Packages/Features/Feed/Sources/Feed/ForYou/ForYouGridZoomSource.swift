@@ -90,6 +90,18 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// Held only so the display link outlives this method; it stops itself.
     private var landingRetry: LandingLiveMediaRetry?
 
+    /// Whether this close lands on a post OTHER than the one the viewer is
+    /// closing — a list keeps its order, so paging on and closing comes home
+    /// to the row that was tapped (#923). Set when the return card is built.
+    private var landsOnAnotherPost = false
+    /// The landing row's own moving picture, as the card's arriving operand
+    /// carries it: the row's parked return player, or a surface joined to a
+    /// row that is still playing. What the landing hands the row on such a
+    /// close — never the card's departure surface, which is the PAGE's post.
+    private weak var landingSurface: VideoRenderView?
+    /// Whether the row took `landingSurface`'s playback at the landing.
+    private var didAdoptLanding = false
+
     init(
         page: ForYouGridPage,
         tappedID: PostID,
@@ -228,7 +240,14 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // nothing to blend. On a list the anchor stays put, which is exactly
         // the case that needs this.
         if isStagingDismissal, let settled = activePostID(), settled != anchorID {
+            landsOnAnotherPost = true
             card.setDeparturePicture(settledCover?())
+            // ⚠️ A VIDEO PAGE HAS NO STILL, so `settledCover` is nil there and
+            // the card had nothing to blend against: it flew the page's video
+            // all the way into the row (#923). The departure it flies IS
+            // another post, and saying so lets the row's own picture rise over
+            // it.
+            card.setDepartureShowsAnotherPost(true)
             // ⚠️ AND THE LANDING'S OWN MOVING PICTURE WHERE THERE IS ONE.
             //
             // The still above is the operand's FLOOR, not the operand: for a
@@ -251,10 +270,19 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             // used to land without the landing's picture. The retry still stops
             // the moment the card leaves the tree, so the window is only a
             // ceiling.
+            //
+            // ⚠️ THE ROW'S PARKED RETURN PLAYER FIRST (#923). The row's own
+            // player went with the page at the present and was retired when
+            // the viewer paged on, so joining "what the row is drawing" finds
+            // nothing; the return player parked at the tap is the row's clip,
+            // paused where the viewer left it.
             landingRetry = LandingLiveMediaRetry.arm(
                 card: card, window: Self.landingRetryCeiling
-            ) { [weak page] in
-                page?.landingFlightSurface(for: landingID)
+            ) { [weak self, weak page] in
+                let surface = page?.returnFlightSurface(for: landingID)
+                    ?? page?.landingFlightSurface(for: landingID)
+                if let surface { self?.landingSurface = surface }
+                return surface
             }
         }
         #if DEBUG
@@ -312,7 +340,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// True once the landing tile's own surface is rendering — or when the tile
     /// has no video at all, which is nothing to wait for.
     var zoomLandingMediaIsReady: Bool {
-        page?.isLandingPlaybackReady(for: anchorID) ?? true
+        // A close from another post that handed the row no clip (its return
+        // player was evicted) lands on the row's still: wait for that only.
+        page?.isLandingPlaybackReady(
+            for: anchorID, expectingVideo: !landsOnAnotherPost || didAdoptLanding
+        ) ?? true
     }
 
     /// Lays the landing tile out before the card is unmounted, so the cell's
@@ -322,8 +354,24 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     }
 
     func zoomAdoptLiveMediaView(_ view: UIView) {
+        // ⚠️ ON A CLOSE FROM ANOTHER POST THIS IS THE PAGE'S VIDEO, not the
+        // row's: adopting it put the post the viewer closed into the row the
+        // close came home to (#923). The row takes its own picture instead.
+        if landsOnAnotherPost {
+            adoptLandingSurface()
+            return
+        }
         guard let view = view as? VideoRenderView else { return }
         page?.adoptLivePlayback(view, for: anchorID)
+    }
+
+    /// Hands the row the clip the card's arriving operand was drawing — once,
+    /// from whichever landing hook comes first. A card that flew no departure
+    /// surface never calls `zoomAdoptLiveMediaView`, so the source's reveal
+    /// calls this too.
+    private func adoptLandingSurface() {
+        guard landsOnAnotherPost, !didAdoptLanding, let landingSurface else { return }
+        didAdoptLanding = page?.adoptLivePlayback(landingSurface, for: anchorID) ?? false
     }
 
     func setZoomSourceHidden(_ hidden: Bool) {
@@ -341,6 +389,9 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
             // A caption's emotes play in the frame the card leaves, not a
             // monitor tick later (`EmoteLabel.recheckVisibility`, #922).
             EmoteLabel.recheckVisibility()
+            // A completed close from another post (a reversed one conceals
+            // instead): the row takes its own clip if no earlier hook did.
+            if isStagingDismissal { adoptLandingSurface() }
         }
     }
 
@@ -365,6 +416,12 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         isStagingDismissal = false
         landingRetry?.cancel()
         landingRetry = nil
+        // The post stays open: its row's return player waits, paused, for the
+        // next close (#923).
+        if landsOnAnotherPost { page?.pauseReturnPlayback(for: anchorID) }
+        landsOnAnotherPost = false
+        landingSurface = nil
+        didAdoptLanding = false
         // The scope the staging pointed at the LANDING row exempts that row
         // from the grid's stops, and the retry may have demanded it a player:
         // it kept playing, hidden under the page, until the final close. The
@@ -376,6 +433,10 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     func zoomSourceWillStageDismissal() {
         // From here on, cards belong to return flights — see `makeZoomFlightCard`.
         isStagingDismissal = true
+        // Decided again by the card this staging builds.
+        landsOnAnotherPost = false
+        landingSurface = nil
+        didAdoptLanding = false
         // Pin the grid's inset first, before anything reads a rect from it: the
         // pop animates the safe area, and an unpinned grid keeps drifting under
         // the flight. See `ForYouGridPage.beginHeroFreeze`.

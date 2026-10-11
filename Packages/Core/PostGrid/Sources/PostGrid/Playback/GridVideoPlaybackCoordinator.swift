@@ -514,7 +514,15 @@ public final class GridVideoPlaybackCoordinator {
         handoffID = id
     }
 
-    public func beginHandoff(_ id: PostID) {
+    /// - Parameter parkingReturn: also park a return player on `id`'s clip for
+    ///   a close from another post (`parkReturnPlayback`). Only for a caller
+    ///   whose close asks for it (`makeReturnSurface`); anyone else would hold
+    ///   a decoder for nothing until `endHandoff`.
+    public func beginHandoff(_ id: PostID, parkingReturn: Bool = false) {
+        // A new scope means the previous one is over: its return player can
+        // never be landed on now.
+        releaseReturnPlaybacks()
+        if parkingReturn { parkReturnPlayback(of: id) }
         handoffID = id
         isSurfaceVisible = false
         // The other tiles release their players OFF the tap turn, one per
@@ -599,6 +607,11 @@ public final class GridVideoPlaybackCoordinator {
         handoffID = nil
         isSurfaceVisible = true
         pool.discardParkedPlayback()
+        // The round trip is over. A landing that used its return player has
+        // already claimed it (`adoptAttachedSurface`), so this releases only
+        // one nobody landed on: a close from the same post, a close that went
+        // by the card window, a push reversed mid-air.
+        releaseReturnPlaybacks()
         // NOT swept here. `endHandoff` fires while the flight card can still be
         // in the air — measured on the tap-back path as
         // `card DETACHED by flightSurfaceSweep (frames=11)`, once per cycle,
@@ -844,6 +857,97 @@ public final class GridVideoPlaybackCoordinator {
         #endif
         return view
     }
+
+    // MARK: - Return playback (#923)
+
+    /// Clips this coordinator parked a return player on, by post. Released at
+    /// `endHandoff` (and at the next `beginHandoff`); a landing that used one
+    /// has claimed it from the pool by then, so the release finds nothing.
+    private var returnURLs: [PostID: URL] = [:]
+    /// The park still resolving for each post, so a test can wait for it.
+    private var returnParkTasks: [PostID: Task<Void, Never>] = [:]
+
+    /// ⚠️ THE CLOSE LANDS ON THE TILE THAT OPENED THE FEED, and by then that
+    /// tile's player is gone. At a present the page takes the tile's player
+    /// over (same item, same playhead); when the viewer pages on, the page lets
+    /// it go and the pool retires it, under the tile's surface too. A close
+    /// from another post then had nothing of the tile's own to fly, so it flew
+    /// the PAGE's video into the tile and the landing adopted it: the cell
+    /// ended up playing someone else's post (#923).
+    ///
+    /// So a second player is parked at the tap, on the tile's clip, at the
+    /// tile's playhead, paused. It lives in the pool's return ledger, never
+    /// among its active players, so it takes no slot from the feed's players
+    /// or this grid's budget. The pool keeps at most
+    /// `VideoPlaybackController.returnPlaybackCapacity` of them across the
+    /// app, oldest evicted first; an evicted one simply makes
+    /// `makeReturnSurface` answer nil and the close lands on the tile's still.
+    ///
+    /// Only a tile that is playing at the tap is parked: one that is not has
+    /// no clip on screen to come back to, and its still is the honest landing.
+    private func parkReturnPlayback(of id: PostID) {
+        guard let url = playingURLs[id] else { return }
+        let surface = loans[id].flatMap { $0.watchedClipSurface ?? $0.loadedVideoRenderView }
+        let pool = pool
+        let seconds = surface.flatMap { pool.playheadSeconds(in: $0) } ?? 0
+        returnURLs[id] = url
+        returnParkTasks[id] = Task { @MainActor in
+            await pool.parkReturnPlayback(
+                of: url, scope: id.rawValue, at: seconds, peakBitRate: Self.tileBitRateCap
+            )
+        }
+    }
+
+    /// A surface showing `id`'s return player, resumed from where it was
+    /// parked: the arriving picture for a close from another post. Nil when
+    /// nothing is parked for `id` (never parked, evicted, released), and the
+    /// close then lands on the tile's still.
+    ///
+    /// The surface holds no loan. The landing hands it to
+    /// `adoptAttachedSurface(drawnBy:)`, which claims the player for the tile.
+    public func makeReturnSurface(for id: PostID) -> VideoRenderView? {
+        guard let url = returnURLs[id] else { return nil }
+        releaseFinishedFlightSurfaces()
+        let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "return"
+        view.debugTracksFlight = true
+        #endif
+        // Over the landing's still, never over black: see `makeAttachedSurface`.
+        view.paintsOpaqueGround = false
+        guard pool.attachReturnSurface(view, of: url, scope: id.rawValue) else { return nil }
+        flightSurfaces.add(view)
+        return view
+    }
+
+    /// The close that resumed `id`'s return player was abandoned: the post
+    /// stays open, so the clip waits, paused, for the next close.
+    public func pauseReturnPlayback(of id: PostID) {
+        guard let url = returnURLs[id] else { return }
+        pool.pauseReturnPlayback(of: url, scope: id.rawValue)
+    }
+
+    /// Whether a return player is parked for `id` right now.
+    public func hasReturnPlayback(for id: PostID) -> Bool {
+        guard let url = returnURLs[id] else { return false }
+        return pool.hasReturnPlayback(of: url, scope: id.rawValue)
+    }
+
+    private func releaseReturnPlaybacks() {
+        for (id, url) in returnURLs {
+            returnParkTasks.removeValue(forKey: id)?.cancel()
+            pool.releaseReturnPlayback(of: url, scope: id.rawValue)
+        }
+        returnURLs.removeAll()
+        returnParkTasks.removeAll()
+    }
+
+    #if DEBUG
+    /// Waits for the parks still resolving.
+    func debugAwaitReturnParks() async {
+        for task in returnParkTasks.values { await task.value }
+    }
+    #endif
 
     /// - `flightSurface`: the surface the viewer watched land (the flight
     ///   card's). The loan is taken from the player IT draws, by identity, so

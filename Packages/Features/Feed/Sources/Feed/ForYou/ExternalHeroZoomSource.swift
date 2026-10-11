@@ -66,6 +66,18 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     /// it, and a landed flight must not be revived by a late image.
     private weak var flyingCard: PostGridFlightCard?
 
+    /// Whether this close leaves from ANOTHER post than the item it lands on
+    /// (#923) — resolved at staging, like `departurePicture`.
+    private var landsOnAnotherPost = false
+    /// The item's own clip as the card's arriving operand carries it
+    /// (`SnapFeedHeroOrigin.returnLiveMedia`) — what the landing hands the item
+    /// on such a close, never the card's departure surface.
+    private weak var landingSurface: UIView?
+    /// Whether the landing has handed `landingSurface` over.
+    private var didAdoptLanding = false
+    /// Keeps asking for the item's clip while the card is in the air.
+    private var landingRetry: LandingLiveMediaRetry?
+
     /// Whether the source draws something OTHER than the post — a friend's
     /// face. Asked of both picture fields, because the peek (`pagePicture`)
     /// is nil whenever the cache was cold at the tap, and a face with a cold
@@ -77,6 +89,9 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
 
     func zoomSourceWillStageDismissal() {
         isStagingDismissal = true
+        landsOnAnotherPost = false
+        landingSurface = nil
+        didAdoptLanding = false
         // FIRST, before anything here or in the flight reads a rect: the
         // origin may have to pin a scroll view or bring itself back into view
         // (`SnapFeedHeroOrigin.willStageDismissal`). The flight asks `frame`
@@ -110,6 +125,7 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
             return
         }
         departurePicture = settled.cover
+        landsOnAnotherPost = true
     }
 
     /// A close's departure picture that loaded after staging: kept for any
@@ -173,6 +189,25 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
                 card?.setLateDeparturePicture(late)
             }
         card.setDeparturePicture(picture)
+        // ⚠️ A CLOSE FROM ANOTHER POST LANDS ON THE ITEM'S OWN PICTURE (#923).
+        // A video page has no still, so `picture` is nil there, and the card
+        // used to fly the page's clip into the item and hand it over: the item
+        // ended up playing the post the viewer closed. The departure is now an
+        // operand whatever it is, and the item's own clip, parked at the tap,
+        // rises over it.
+        if isStagingDismissal, landsOnAnotherPost {
+            card.setDepartureShowsAnotherPost(true)
+            if let ask = origin.returnLiveMedia {
+                landingRetry?.cancel()
+                landingRetry = LandingLiveMediaRetry.arm(
+                    card: card, window: ForYouGridZoomSource.landingRetryCeiling
+                ) { [weak self] in
+                    let surface = ask()
+                    if let surface { self?.landingSurface = surface }
+                    return surface
+                }
+            }
+        }
         if let overlay = origin.restingOverlay?() {
             card.installRestingOverlay(overlay)
         }
@@ -221,7 +256,32 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     /// `SnapFeedHeroOrigin.adoptLandingLiveMedia`. A no-op for an origin that
     /// cannot, which is today's landing.
     func zoomAdoptLiveMediaView(_ view: UIView) {
+        // On a close from another post `view` is the PAGE's clip (#923).
+        if landsOnAnotherPost {
+            adoptLandingSurface()
+            return
+        }
         origin.adoptLandingLiveMedia?(view)
+    }
+
+    /// Hands the item its own clip, once, from whichever landing hook runs
+    /// first: a card flying no departure surface never reaches
+    /// `zoomAdoptLiveMediaView`, so the reveal calls this too.
+    private func adoptLandingSurface() {
+        guard landsOnAnotherPost, !didAdoptLanding, let landingSurface else { return }
+        didAdoptLanding = true
+        origin.adoptLandingLiveMedia?(landingSurface)
+    }
+
+    func zoomSourceDidAbandonDismissal() {
+        landingRetry?.cancel()
+        landingRetry = nil
+        // The post stays open: the item's clip waits, paused, for the next
+        // close (#923).
+        if landsOnAnotherPost, landingSurface != nil { origin.pauseReturnLiveMedia?() }
+        landsOnAnotherPost = false
+        landingSurface = nil
+        didAdoptLanding = false
     }
 
     /// The card is held over the landing until the item is drawing.
@@ -234,6 +294,9 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
         // A caption's emotes play in the frame the card leaves, not a monitor
         // tick later (`EmoteLabel.recheckVisibility`, #922).
         if !hidden { EmoteLabel.recheckVisibility() }
+        // A completed close from another post: the item takes its own clip if
+        // no earlier hook did (#923).
+        if !hidden, isStagingDismissal { adoptLandingSurface() }
     }
 
     var zoomPresenterDepthView: UIView? {

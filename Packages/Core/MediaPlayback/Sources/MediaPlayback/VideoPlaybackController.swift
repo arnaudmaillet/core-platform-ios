@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import UIKit
 
 /// Where a loaded arrangement begins, and what it loops.
 public struct VideoLoadLanding: Sendable, Equatable {
@@ -270,7 +271,18 @@ public final class VideoPlaybackController {
         self.poolSize = poolSize
         self.capacity = capacity
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
+        // Return players are a convenience the close can do without (#923):
+        // under memory pressure they go first, and the close lands on a still.
+        memoryWarningObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.releaseAllReturnPlaybacks() }
+        }
     }
+
+    /// Never removed: the block holds this pool weakly, and a pool lives as
+    /// long as the app.
+    private var memoryWarningObserver: NSObjectProtocol?
 
     /// Resolves `mediaURL`, loans a pooled player, binds it to `view`, and
     /// starts looping muted playback. Safe to call repeatedly; a superseding
@@ -817,6 +829,231 @@ public final class VideoPlaybackController {
         // leave behind (they did: this copy of the wind-down predated the
         // pause-anchor purge and would have kept the anchor).
         retire(parked.player)
+    }
+
+    // MARK: - Return playback (#923)
+
+    /// How many return players may be parked at once, across the whole app.
+    ///
+    /// A return player is a second player on a clip that is already playing
+    /// somewhere else, so it is paid for in decoders. Two covers the case that
+    /// matters, a post opened from a tile and a second one opened from inside
+    /// it. A deeper stack evicts the oldest, and that close lands on the
+    /// tile's still instead of its clip.
+    public static let returnPlaybackCapacity = 2
+
+    /// A post's clip, as a return player is keyed: the same asset AND the same
+    /// post, for the reason `playingScope` gives.
+    struct ReturnKey: Hashable {
+        let scope: String
+        let url: URL
+    }
+
+    /// One parked return player.
+    struct ReturnPlayback {
+        let key: ReturnKey
+        let player: AVPlayer
+        /// A surface outside any window that keeps the renderer pulling until
+        /// the parked frame is decoded, so a landing surface joining later is
+        /// primed with it rather than waiting for a decode. Let go once the
+        /// frame is there: an idle renderer must not keep the frame clock
+        /// running.
+        var holder: VideoRenderView?
+    }
+
+    /// Players parked for a CLOSE to come back to: the tile a post was opened
+    /// from, paused on its own clip while the viewer is somewhere else (#923).
+    ///
+    /// ⚠️ NOT IN `activePlayers`, and that is the whole bound. Nothing that
+    /// sizes itself against this pool (the grids' budgets, `capacity`, the
+    /// sound sheet's count of other players) sees them, `play` never joins or
+    /// adopts them, and no URL lookup can return one. They leave this ledger
+    /// three ways: claimed by `transferOwnership` at a landing, released by
+    /// their owner, or evicted (oldest first, beyond
+    /// `returnPlaybackCapacity`, or all at once on a memory warning).
+    private var returnPlaybacks: [ReturnPlayback] = []
+    /// One token per park still resolving, so a release (or a newer park of
+    /// the same clip) that arrives first wins.
+    private var returnParkTokens: [ReturnKey: Int] = [:]
+
+    /// How many return players are parked right now.
+    public var returnPlaybackCount: Int { returnPlaybacks.count }
+
+    /// Whether a return player is parked for `url` under `scope`.
+    public func hasReturnPlayback(of url: URL, scope: String) -> Bool {
+        returnPlaybacks.contains { $0.key == ReturnKey(scope: scope, url: url) }
+    }
+
+    /// Parks a dedicated, paused player on `url` at `seconds`, for a close to
+    /// resume later. Replaces any player already parked for the same clip, and
+    /// evicts the oldest parked player beyond `returnPlaybackCapacity`.
+    ///
+    /// Returns whether a player was parked: false when the asset could not be
+    /// resolved, or when a release or newer park overtook this one.
+    @discardableResult
+    public func parkReturnPlayback(
+        of url: URL, scope: String, at seconds: Double, peakBitRate: Double = 0
+    ) async -> Bool {
+        let key = ReturnKey(scope: scope, url: url)
+        releaseReturnPlayback(of: url, scope: scope)
+        let token = nextGenerationToken()
+        returnParkTokens[key] = token
+        let resolved: URL
+        do {
+            resolved = try await source.playableURL(for: url)
+        } catch {
+            VideoPlaybackTrace.emit("return park resolve FAILED \(url.lastPathComponent): \(error)")
+            if returnParkTokens[key] == token { returnParkTokens[key] = nil }
+            return false
+        }
+        guard returnParkTokens[key] == token else { return false }
+        returnParkTokens[key] = nil
+        let item = AVPlayerItem(url: resolved)
+        item.preferredPeakBitRate = peakBitRate
+        let player = idlePlayers.popLast() ?? AVPlayer()
+        itemCreations += 1
+        installLoop(for: player, item: item)
+        settle(nil, on: item, of: player)
+        player.replaceCurrentItem(with: item)
+        let parkedAt = CMTime(seconds: seconds.isFinite ? max(seconds, 0) : 0, preferredTimescale: 600)
+        if parkedAt.seconds > 0 {
+            player.seek(to: parkedAt, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+        }
+        renderer(for: player)?.setItem(item)
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+        var holder: VideoRenderView?
+        if VideoRenderFlags.usesSampleBufferLayer {
+            let view = VideoRenderView()
+            #if DEBUG
+            view.debugLabel = "return-holder"
+            #endif
+            bind(player, to: view)
+            holder = view
+        }
+        // Play-then-pause, as `prewarm` does and for its reason: a player that
+        // never ran has decoded nothing, so there would be no frame to prime a
+        // landing surface with.
+        player.play()
+        // The anchor is where the clip was PARKED, stated rather than read
+        // back: the seek above may still be in flight.
+        pausedAnchors[ObjectIdentifier(player)] = parkedAt
+        player.pause()
+        returnPlaybacks.append(ReturnPlayback(key: key, player: player, holder: holder))
+        VideoProducerLog.emit("RETURN PARK \(VideoProducerLog.name(player)) \(url.lastPathComponent)"
+            + String(format: " at=%.2fs", seconds))
+        while returnPlaybacks.count > Self.returnPlaybackCapacity {
+            let evicted = returnPlaybacks.removeFirst()
+            VideoProducerLog.emit("RETURN EVICT \(VideoProducerLog.name(evicted.player)) "
+                + evicted.key.url.lastPathComponent)
+            retire(evicted)
+        }
+        if holder != nil { releaseHolderOnceDecoded(player, at: parkedAt) }
+        return true
+    }
+
+    /// Lets the holder go once the PARKED frame exists (not the item's first
+    /// frame, decoded before the seek lands), or after a ceiling.
+    private func releaseHolderOnceDecoded(_ player: AVPlayer, at parkedAt: CMTime) {
+        Task { @MainActor [weak self] in
+            for _ in 0..<Self.returnHolderPolls {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                guard let self else { return }
+                guard let index = returnPlaybacks.firstIndex(where: { $0.player === player }) else {
+                    return
+                }
+                guard let frameTime = renderers[ObjectIdentifier(player)]?.currentFrameTime,
+                      frameTime.isValid, abs(frameTime.seconds - parkedAt.seconds) < 0.5
+                else { continue }
+                returnPlaybacks[index].holder?.detach(reason: "returnHolderDecoded")
+                returnPlaybacks[index].holder = nil
+                return
+            }
+            guard let self,
+                  let index = returnPlaybacks.firstIndex(where: { $0.player === player })
+            else { return }
+            returnPlaybacks[index].holder?.detach(reason: "returnHolderCeiling")
+            returnPlaybacks[index].holder = nil
+        }
+    }
+
+    /// 3 s at 50 ms: a cold item decodes its first frame well inside that.
+    private static let returnHolderPolls = 60
+
+    /// Shows the parked clip in `view` and resumes it from where it was
+    /// parked: the close's arriving picture. `view` joins the player as a
+    /// surface holding no loan; the player stays parked until a landing
+    /// claims it (`transferOwnership(of:drawnBy:to:)`) or its owner releases
+    /// it. Returns false when nothing is parked for this clip (never parked,
+    /// evicted, or released).
+    @discardableResult
+    public func attachReturnSurface(_ view: VideoRenderView, of url: URL, scope: String) -> Bool {
+        let key = ReturnKey(scope: scope, url: url)
+        guard let index = returnPlaybacks.firstIndex(where: { $0.key == key }) else { return false }
+        // Used: it moves to the young end of the eviction order.
+        let entry = returnPlaybacks.remove(at: index)
+        returnPlaybacks.append(entry)
+        // Primed with the parked frame on attach, so it draws at once.
+        bind(entry.player, to: view)
+        // Resumed by hand, NOT through `setPaused(false, in:)`: that door
+        // flushes the surface's pending samples, which here is the very frame
+        // the attach just primed, and the arriving picture would wait a decode
+        // with the tile's poster showing through. The anchor rule is kept.
+        let playerKey = ObjectIdentifier(entry.player)
+        if let anchor = pausedAnchors.removeValue(forKey: playerKey), anchor.isValid {
+            let drift = (entry.player.currentTime() - anchor).seconds
+            if drift.isFinite, abs(drift) > 0.15 {
+                entry.player.seek(to: anchor, toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+        }
+        entry.player.play()
+        VideoProducerLog.emit("RETURN RESUME \(VideoProducerLog.name(entry.player)) -> \(view.debugProducerName)")
+        return true
+    }
+
+    /// Pauses a parked clip again: a close that resumed it was abandoned, and
+    /// the post stays open. The player keeps its place in the ledger.
+    public func pauseReturnPlayback(of url: URL, scope: String) {
+        guard let entry = returnPlaybacks.first(where: { $0.key == ReturnKey(scope: scope, url: url) })
+        else { return }
+        pausedAnchors[ObjectIdentifier(entry.player)] = entry.player.currentTime()
+        entry.player.pause()
+    }
+
+    /// Releases the player parked for this clip, if any, and cancels a park
+    /// still resolving.
+    public func releaseReturnPlayback(of url: URL, scope: String) {
+        let key = ReturnKey(scope: scope, url: url)
+        returnParkTokens[key] = nil
+        guard let index = returnPlaybacks.firstIndex(where: { $0.key == key }) else { return }
+        retire(returnPlaybacks.remove(at: index))
+    }
+
+    /// Releases every return player: a memory warning, or a caller that knows
+    /// none of them can be landed on any more.
+    public func releaseAllReturnPlaybacks() {
+        returnParkTokens.removeAll()
+        let released = returnPlaybacks
+        returnPlaybacks.removeAll()
+        for entry in released { retire(entry) }
+    }
+
+    private func retire(_ entry: ReturnPlayback) {
+        entry.holder?.detach(reason: "returnReleased")
+        // Every surface still joined to it (a card that never landed) is
+        // dropped by the renderer's invalidation inside `retire`.
+        retire(entry.player)
+    }
+
+    /// Takes `player` out of the return ledger for a landing that is about to
+    /// own it. Returns the clip it was parked for, or nil when it is not a
+    /// return player.
+    private func claimReturnPlayback(_ player: AVPlayer) -> ReturnKey? {
+        guard let index = returnPlaybacks.firstIndex(where: { $0.player === player }) else { return nil }
+        let entry = returnPlaybacks.remove(at: index)
+        entry.holder?.detach(reason: "returnClaimed")
+        VideoProducerLog.emit("RETURN CLAIM \(VideoProducerLog.name(player)) \(entry.key.url.lastPathComponent)")
+        return entry.key
     }
 
     /// Re-caps the bit rate of the item already playing in `view`, in bits per
@@ -1726,14 +1963,20 @@ public final class VideoPlaybackController {
     public func transferOwnership(
         of mediaURL: URL, drawnBy surface: VideoRenderView?, to view: VideoRenderView
     ) -> Bool {
+        // ⚠️ A RETURN PLAYER COUNTS, BY IDENTITY ONLY (#923). A close landing
+        // on its own tile from another post flies the tile's parked clip, and
+        // the tile takes THAT player here. The URL fallback below never finds
+        // one: a return player is in no table it reads.
         let watched = surface?.boundPlayer.flatMap { candidate in
-            (activePlayers.values.contains { $0 === candidate } || parked?.player === candidate)
+            (activePlayers.values.contains { $0 === candidate } || parked?.player === candidate
+                || returnPlaybacks.contains { $0.player === candidate })
                 ? candidate : nil
         }
         guard let player = watched ?? activePlayer(playing: mediaURL) else {
             VideoPlaybackTrace.emit("transferOwnership REFUSED \(mediaURL.lastPathComponent)")
             return false
         }
+        let returned = claimReturnPlayback(player)
         VideoPlaybackTrace.emit("transferOwnership \(mediaURL.lastPathComponent)")
         VideoProducerLog.emit("TRANSFER \(VideoProducerLog.name(player)) \(mediaURL.lastPathComponent) -> \(view.debugProducerName) from="
             + (playingURL.first(where: { $0.value == mediaURL }).flatMap { surfaces[$0.key]?.view?.debugProducerName }
@@ -1772,6 +2015,21 @@ public final class VideoPlaybackController {
         // screen. A mismatched park stays put for its own claimant, or for the
         // next discard sweep.
         if parked?.player === player { parked = nil }
+        // ⚠️ A RETURN PLAYER CAN LAND ON A SURFACE THAT STILL OWNS ANOTHER ONE
+        // (#923): a tile whose own loan outlived the page. Overwriting the
+        // entry would leave that player decoding with nobody to stop it, so it
+        // is let go the way `detach` lets one go.
+        if let previous = activePlayers[key], previous !== player {
+            let leavingScope = playingScope[key]
+            let leavingURL = playingURL[key]
+            activePlayers[key] = nil
+            let stillInUse = activePlayers.values.contains { $0 === previous }
+                || parked.map { $0.player === previous } ?? false
+            if !stillInUse {
+                rememberResume(scope: leavingScope, url: leavingURL, player: previous)
+                retire(previous)
+            }
+        }
         // Supersede any in-flight resolution for this view, so a late `play`
         // cannot attach a second item over the one just adopted.
         generation[key] = nextGenerationToken()
@@ -1780,7 +2038,7 @@ public final class VideoPlaybackController {
         playingURL[key] = mediaURL
         // Kept if the new owner already had one — a caller that joined before
         // taking ownership knows its own post — and inherited otherwise.
-        playingScope[key] = playingScope[key] ?? previousScope
+        playingScope[key] = playingScope[key] ?? previousScope ?? returned?.scope
         bind(player, to: view)
         // ⚠️ THROUGH THE PAUSE'S OWN DOOR, not a bare `play()`.
         //

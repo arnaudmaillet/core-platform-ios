@@ -232,6 +232,10 @@ enum ForYouRowOrigins {
             // two (`ForYouRailsView.adoptLandingPlayback`).
             adoptLandingLiveMedia: { [weak rails] view in rails?.adoptLandingPlayback(view, for: id) },
             landingMediaIsReady: { [weak rails] in rails?.isLandingPlaybackReady(for: id) ?? true },
+            // A close from another post comes home to this card with the
+            // card's OWN clip, parked at the tap (#923) — never the page's.
+            returnLiveMedia: { [weak rails] in rails?.returnCardSurface(for: id) },
+            pauseReturnLiveMedia: { [weak rails] in rails?.pauseReturnPlayback(for: id) },
             // Wrapped at the card's own size, and only ever posed after — see
             // `ForYouCardCaptionOverlay`. A media card's: a text card never
             // flies.
