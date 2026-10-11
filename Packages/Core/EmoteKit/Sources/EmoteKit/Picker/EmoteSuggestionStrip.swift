@@ -1,3 +1,4 @@
+import MediaCore
 import UIKit
 
 /// The row of matches for an inline `:query`, floating just above the
@@ -8,6 +9,11 @@ import UIKit
 /// resizes, in one animation — `EmoteKeyboard` moves the frame and calls
 /// `show(_:animated:)` inside the same spring, and the batch updates take
 /// that spring's timing.
+///
+/// Its tiles are keyboard tiles (#958): they loop for as long as they show,
+/// through idle calm, and are still under Reduce Motion, Low Power Mode,
+/// Power Saving, Animate Emojis off or overheating — the panel's gate
+/// (`EmoteMotion.keyboardPolicy`), re-dressed in place when it changes.
 @MainActor
 final class EmoteSuggestionStrip: UIView {
     static let height: CGFloat = 46
@@ -72,10 +78,61 @@ final class EmoteSuggestionStrip: UIView {
         glass.contentView.addSubview(collectionView)
         accessibilityIdentifier = "emote-suggestions"
         isHidden = true
+        // Selector observers are dropped with the strip: nothing to remove.
+        for name in EmoteMotion.keyboardPolicyNotifications {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(keyboardPolicyMayHaveChanged), name: name, object: nil
+            )
+        }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    // MARK: - Motion
+
+    /// The policy the tiles on screen were dressed under, to act only on a
+    /// change.
+    private var dressedPolicy: AnimatedIconView.MotionPolicy?
+
+    /// ⚠️ NONISOLATED: the power-state notification is posted off the main
+    /// thread, and a main-actor selector would trap on the isolation check.
+    @objc nonisolated private func keyboardPolicyMayHaveChanged() {
+        Task { @MainActor [weak self] in self?.redressIfPolicyChanged() }
+    }
+
+    /// Re-dresses the displayed tiles when the keyboard's policy changed —
+    /// the panel's rule (`EmotePickerView.redressIfPolicyChanged`).
+    func redressIfPolicyChanged() {
+        // Off screen the tiles hold nothing, and dress themselves afresh
+        // when the strip comes back (`EmoteTileView.didMoveToWindow`).
+        guard window != nil else {
+            dressedPolicy = nil
+            return
+        }
+        let policy = EmoteMotion.keyboardPolicy
+        guard policy != dressedPolicy else { return }
+        dressedPolicy = policy
+        for path in collectionView.indexPathsForVisibleItems where path.item < suggestions.count {
+            guard let cell = collectionView.cellForItem(at: path) as? EmoteTileCell else { continue }
+            configure(cell, at: path)
+        }
+    }
+
+    /// The first few matches are what the person is spelling out: those may
+    /// bake and animate; the tail plays only what is resident.
+    private func configure(_ cell: EmoteTileCell, at path: IndexPath) {
+        cell.configure(
+            suggestions[path.item], engine: engine, prefersAnimation: path.item < Self.animatedLead, asContent: true
+        )
+    }
+
+    /// The tiles on screen, in order. Internal for tests.
+    var displayedTiles: [EmoteTileView] {
+        collectionView.indexPathsForVisibleItems.sorted().compactMap {
+            (collectionView.cellForItem(at: $0) as? EmoteTileCell)?.tile
+        }
+    }
 
     /// Whether the container is Liquid Glass. Internal for tests.
     var isGlass: Bool { glass.effect is UIGlassEffect }
@@ -116,9 +173,7 @@ final class EmoteSuggestionStrip: UIView {
         // The survivors may have changed rank: the lead that may bake moves.
         let survivors = collectionView.indexPathsForVisibleItems.filter { !inserted.contains($0.item) }
         for path in survivors where path.item < suggestions.count {
-            (collectionView.cellForItem(at: path) as? EmoteTileCell)?.configure(
-                suggestions[path.item], engine: engine, prefersAnimation: path.item < Self.animatedLead
-            )
+            if let cell = collectionView.cellForItem(at: path) as? EmoteTileCell { configure(cell, at: path) }
         }
     }
 }
@@ -150,11 +205,8 @@ extension EmoteSuggestionStrip: UICollectionViewDataSource, UICollectionViewDele
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: EmoteTileCell.reuseID, for: indexPath)
-        // The first few matches are what the person is spelling out: those
-        // may bake and animate; the tail plays only what is resident.
-        (cell as? EmoteTileCell)?.configure(
-            suggestions[indexPath.item], engine: engine, prefersAnimation: indexPath.item < Self.animatedLead
-        )
+        if dressedPolicy == nil { dressedPolicy = EmoteMotion.keyboardPolicy }
+        if let cell = cell as? EmoteTileCell { configure(cell, at: indexPath) }
         return cell
     }
 

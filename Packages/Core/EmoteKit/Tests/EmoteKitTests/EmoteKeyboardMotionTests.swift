@@ -173,4 +173,76 @@ struct EmoteKeyboardMotionTests {
         panel.redressIfPolicyChanged()
         #expect(tiles.allSatisfy { !$0.isShowingArt }, "a panel taken down was dressed again")
     }
+
+    // MARK: - The `:query` strip (#958)
+
+    private func hostedStrip(_ engine: EmoteEngine) throws -> (EmoteSuggestionStrip, UIWindow) {
+        let window = UIWindow(frame: CGRect(origin: .zero, size: CGSize(width: 402, height: 874)))
+        window.isHidden = false
+        let strip = EmoteSuggestionStrip(engine: engine)
+        let matches = Array(engine.catalog.all.filter(\.isUnicodeEmoji).prefix(4))
+        try #require(matches.count == 4)
+        strip.frame = CGRect(x: 16, y: 600, width: EmoteSuggestionStrip.fittingWidth(count: 4),
+                             height: EmoteSuggestionStrip.height)
+        window.addSubview(strip)
+        strip.show(matches)
+        strip.layoutIfNeeded()
+        return (strip, window)
+    }
+
+    /// The strip's tiles are keyboard tiles: a resting app (decoration forced
+    /// still, as idle calm has it) leaves them looping.
+    @Test func theQueryStripPlaysWhileDecorationRests() throws {
+        AnimatedIconView.forcedPolicy = .still
+        EmoteMotion.keyboardConditions = { Conditions(idleCalm: true) }
+        defer {
+            AnimatedIconView.forcedPolicy = nil
+            EmoteMotion.keyboardConditions = { .current }
+        }
+        let (strip, window) = try hostedStrip(warmEngine())
+        defer { window.isHidden = true }
+        let tiles = strip.displayedTiles
+        try #require(tiles.count == 4)
+        #expect(tiles.allSatisfy { $0.isAnimating }, "a resting app stilled the :query strip")
+    }
+
+    /// Each gating condition stills the strip, idle calm or not.
+    @Test(arguments: ["reducesMotion", "lowPower", "animateEmojisOff", "overheated"])
+    func eachConditionStillsTheQueryStrip(_ condition: String) throws {
+        var gated = Conditions(idleCalm: true)
+        switch condition {
+        case "reducesMotion": gated.reducesMotion = true
+        case "lowPower": gated.lowPower = true
+        case "animateEmojisOff": gated.animatesEmotes = false
+        default: gated.overheated = true
+        }
+        let gate = gated
+        EmoteMotion.keyboardConditions = { gate }
+        defer { EmoteMotion.keyboardConditions = { .current } }
+        let (strip, window) = try hostedStrip(warmEngine())
+        defer { window.isHidden = true }
+        let tiles = strip.displayedTiles
+        try #require(tiles.count == 4)
+        #expect(tiles.allSatisfy { !$0.isAnimating }, "\(condition) left the :query strip playing")
+    }
+
+    /// A change while the strip shows re-dresses its tiles in place: Low
+    /// Power on stills them, off plays them again.
+    @Test func theQueryStripFollowsAChangeInPlace() throws {
+        var conditions = Conditions()
+        EmoteMotion.keyboardConditions = { conditions }
+        defer { EmoteMotion.keyboardConditions = { .current } }
+        let (strip, window) = try hostedStrip(warmEngine())
+        defer { window.isHidden = true }
+        try #require(strip.displayedTiles.count == 4)
+        #expect(strip.displayedTiles.allSatisfy { $0.isAnimating })
+
+        conditions.lowPower = true
+        strip.redressIfPolicyChanged()
+        #expect(strip.displayedTiles.allSatisfy { !$0.isAnimating }, "Low Power left the strip playing")
+
+        conditions.lowPower = false
+        strip.redressIfPolicyChanged()
+        #expect(strip.displayedTiles.allSatisfy { $0.isAnimating }, "the strip did not play again")
+    }
 }
