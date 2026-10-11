@@ -12,6 +12,11 @@ import UIKit
 /// What comes back is plain too: the candidates to rank, the number of players
 /// the page may hold, and whether a reconcile may start anything.
 ///
+/// The rules the profile gallery and the For You rails share — admission,
+/// distance, budget, fling gate — are `GridAutoplayRanking`'s (#861); this
+/// holds For You's own numbers and the state only this page keeps (the
+/// throttle, the cover range).
+///
 /// It owns no player and calls nothing. Every call to
 /// `GridVideoPlaybackCoordinator` stays on the page, in the order it always
 /// had, and so does the hero handoff seam; the Power Saving and idle-calm gates
@@ -30,7 +35,7 @@ struct ForYouGridAutoplayDriver {
     /// pages share. Discover counts as a timeline: a chunk on screen is a few
     /// tiles among cards, and its tiles compete on the same distance.
     static func concurrentPlayers(for style: ForYouGridPage.Style) -> Int {
-        style == .grid ? 6 : 5
+        GridAutoplayRanking.concurrentPlayers(isMosaic: style == .grid)
     }
 
     /// What the page may hold when a lead draws on the same pool: what the
@@ -39,22 +44,18 @@ struct ForYouGridAutoplayDriver {
     static func playerBudget(
         for style: ForYouGridPage.Style, poolCapacity: Int, reserve: Int
     ) -> Int {
-        max(0, min(concurrentPlayers(for: style), poolCapacity - reserve))
+        GridAutoplayRanking.playerBudget(
+            concurrentPlayers: concurrentPlayers(for: style), poolCapacity: poolCapacity, reserve: reserve
+        )
     }
 
     // MARK: - Candidates
 
     /// One visible item that holds a clip and has a face — everything the page
-    /// measured about it, before the viewport has had its say.
-    struct Tile {
-        let id: PostID
-        let url: URL
-        let cell: any GridPlaybackCell
-        /// The cell's MEDIA in the collection view's coordinates — each shape
-        /// locates it for itself (`videoMediaRect`).
-        let mediaFrame: CGRect
-        let isAdvancing: Bool
-    }
+    /// measured about it, before the viewport has had its say. Its media frame
+    /// is in the collection view's coordinates; a tile that is not advancing
+    /// (`isAdvancing`) is handed over paused.
+    typealias Tile = GridAutoplayRanking.Tile
 
     /// Held versus ADVANCING. A row keeps its player while the viewer is
     /// on another page of the same collection — the clip is still on
@@ -84,15 +85,7 @@ struct ForYouGridAutoplayDriver {
     static func candidates(
         from tiles: [Tile], in viewport: CGRect
     ) -> [GridVideoPlaybackCoordinator.Candidate] {
-        let centreY = viewport.midY
-        return tiles.compactMap { tile in
-            guard GridPlaybackVisibility.autoplays(tile.mediaFrame, in: viewport) else { return nil }
-            return .init(
-                id: tile.id, url: tile.url, cell: tile.cell,
-                distanceFromCentre: abs(tile.mediaFrame.midY - centreY),
-                isPaused: !tile.isAdvancing
-            )
-        }
+        GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .verticalCentre)
     }
 
     // MARK: - During-scroll reconcile
@@ -102,15 +95,9 @@ struct ForYouGridAutoplayDriver {
     /// that the diff cost stays invisible next to the scroll itself.
     static let scrollReconcileInterval: CFTimeInterval = 1.0 / 30
 
-    /// Points-per-second past which a *new* player is not started.
-    ///
-    /// The reconcile still runs at speed — tiles that leave stop immediately —
-    /// but nothing starts during a hard fling. At 4000 pt/s a brick crosses the
-    /// viewport in about a fifth of a second, so starting it means an item
-    /// allocation and a segment fetch for something already gone. Dragging by
-    /// hand rarely exceeds ~1500 pt/s, so the behaviour the request is about —
-    /// tiles playing while the finger is still moving — sits well inside this.
-    static let maximumStartVelocity: CGFloat = 2200
+    /// Points-per-second past which a *new* player is not started — the shared
+    /// gate's (`GridAutoplayRanking.maximumStartVelocity`, which says why).
+    static let maximumStartVelocity = GridAutoplayRanking.maximumStartVelocity
 
     /// Throttle state for the during-scroll autoplay reconcile.
     private var lastReconcileTime: CFTimeInterval = 0
@@ -127,11 +114,11 @@ struct ForYouGridAutoplayDriver {
         // Velocity from the sampling interval itself; `panGestureRecognizer
         // .velocity` reports zero once the finger lifts, which is exactly the
         // decelerating stretch this needs to measure.
-        let velocity = elapsed > 0 ? abs(offset - lastReconcileOffset) / CGFloat(elapsed) : 0
+        let speed = GridAutoplayRanking.sampledSpeed(from: lastReconcileOffset, to: offset, over: elapsed)
         lastReconcileTime = now
         lastReconcileOffset = offset
 
-        return velocity <= Self.maximumStartVelocity
+        return GridAutoplayRanking.allowsStarts(atVelocity: speed, maximum: Self.maximumStartVelocity)
     }
 
     // MARK: - Warm window

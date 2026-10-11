@@ -27,7 +27,7 @@ struct ForYouGridAutoplayDriverTests {
             id: PostID(id), url: Self.clip,
             cell: PostGridTileCell(frame: CGRect(x: 0, y: 0, width: 130, height: height)),
             mediaFrame: CGRect(x: 0, y: minY, width: 130, height: height),
-            isAdvancing: advancing
+            isPaused: !advancing
         )
     }
 
