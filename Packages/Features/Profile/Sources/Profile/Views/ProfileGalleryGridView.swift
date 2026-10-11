@@ -268,9 +268,14 @@ final class ProfileGalleryGridView: UIView {
         // candidates ranked by distance from the viewport centre, the nearest
         // N kept. Six for a mosaic, five for a timeline — a column fits fewer
         // previews on screen, so the sixth slot would go to a row outside it.
-        // Discover holds tiles and cards both, so it takes the mosaic's six.
+        // Discover holds tiles and cards both, so it takes the mosaic's six
+        // (For You's Discover plays as a timeline — the shared numbers,
+        // `GridAutoplayRanking.concurrentPlayers(isMosaic:)`, leave that call
+        // to each surface).
         playback = videoPlayback.map {
-            GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: style == .list ? 5 : 6)
+            GridVideoPlaybackCoordinator(
+                pool: $0, maxConcurrent: GridAutoplayRanking.concurrentPlayers(isMosaic: style != .list)
+            )
         }
         collectionView = UICollectionView(
             frame: .zero,
@@ -927,11 +932,6 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         collectionView.bounds.inset(by: chromeOcclusion)
     }
 
-    /// Minimum fraction of an item's MEDIA that must be inside the visible
-    /// band before it may play. An item creeping in at the edge is not
-    /// something the viewer is looking at.
-    private static let minimumVisibleFraction: CGFloat = 0.5
-
     /// Reconciles playback against what is on screen now. Cheap and
     /// idempotent; call it whenever the visible set can have changed.
     ///
@@ -939,13 +939,15 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// coordinator: measured against the MEDIA rather than the cell (a row is
     /// mostly caption, so a card half on screen can have no preview showing),
     /// gated on the item having a cover to sit behind the surface, and never
-    /// starting the post a flight is currently carrying.
+    /// starting the post a flight is currently carrying. Admission (at least
+    /// half the media inside the band, `GridPlaybackVisibility`) and the
+    /// distance from the band's vertical centre are the shared ranking's
+    /// (`GridAutoplayRanking`).
     func reconcileAutoplay(allowingStarts: Bool = true) {
         guard let playback else { return }
         let viewport = visibleBand
-        let centreY = viewport.midY
-        let candidates = collectionView.indexPathsForVisibleItems.compactMap {
-            indexPath -> GridVideoPlaybackCoordinator.Candidate? in
+        let tiles = collectionView.indexPathsForVisibleItems.compactMap {
+            indexPath -> GridAutoplayRanking.Tile? in
             let index = flatIndex(for: indexPath)
             guard !showsSkeleton, posts.indices.contains(index) else { return nil }
             let post = posts[index]
@@ -960,18 +962,12 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                   hasCover(for: post, in: cell)
             else { return nil }
 
-            let frame = cell.convert(cell.videoMediaRect, to: collectionView)
-            let visible = frame.intersection(viewport)
-            guard !visible.isNull, frame.height > 0,
-                  (visible.height * visible.width) / (frame.height * frame.width)
-                      >= Self.minimumVisibleFraction
-            else { return nil }
-
             return .init(
                 id: post.id, url: url, cell: cell,
-                distanceFromCentre: abs(frame.midY - centreY)
+                mediaFrame: cell.convert(cell.videoMediaRect, to: collectionView)
             )
         }
+        let candidates = GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .verticalCentre)
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
         #if DEBUG
         // `-grid-playback-log`: why the gate answered what it did. An empty
@@ -1514,9 +1510,12 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
         // Reconciles DURING the scroll, so an item starts as it slides into
         // view rather than after the scroll has stopped. Stops always run;
         // starts are held off above the fling speed, where anything started is
-        // gone before its first frame.
-        reconcileAutoplay(allowingStarts: abs(scrollView.panGestureRecognizer
-            .velocity(in: scrollView).y) <= Self.maximumStartVelocity)
+        // gone before its first frame. The velocity is the pan gesture's, read
+        // on every tick — For You samples offsets instead.
+        reconcileAutoplay(allowingStarts: GridAutoplayRanking.allowsStarts(
+            atVelocity: scrollView.panGestureRecognizer.velocity(in: scrollView).y,
+            maximum: Self.maximumStartVelocity
+        ))
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -1530,8 +1529,9 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
     /// The finger left the glass. Reports how far past the top the page was
     /// when it did, which is what decides whether a refresh was asked for —
     /// the threshold belongs to the indicator, not to this page.
-    /// Above this, a scroll is a fling and nothing new should start.
-    private static let maximumStartVelocity: CGFloat = 2200
+    /// Above this, a scroll is a fling and nothing new should start — the
+    /// shared gate's number (`GridAutoplayRanking.maximumStartVelocity`).
+    private static let maximumStartVelocity = GridAutoplayRanking.maximumStartVelocity
 
     /// ⚠️ THE SNAP IS WRITTEN INTO THE TARGET, not applied after the fact.
     ///
