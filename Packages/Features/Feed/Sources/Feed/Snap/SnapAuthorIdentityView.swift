@@ -23,11 +23,13 @@ import UIKit
 final class SnapAuthorIdentityView: UIView {
     /// What the avatar's badge says about the viewer and the person.
     ///
-    /// Only `.follow` is an ACTION (the "+"). The other two are STATE, drawn so
+    /// Only `.follow` is an ACTION (the "+"). The others are STATE, drawn so
     /// following someone does not simply make the pill forget it — and so a
-    /// friend (a mutual follow) reads apart from a one-way follow. A state
-    /// mark takes no tap of its own: it falls through to the pill, which
-    /// opens the person's profile, where unfollowing lives.
+    /// friend (a mutual follow) reads apart from a one-way follow, and a
+    /// request a private account has not answered reads apart from both. A
+    /// state mark takes no tap of its own: it falls through to the pill,
+    /// which opens the person's profile, where unfollowing and withdrawing a
+    /// request live.
     enum FollowBadge: Equatable, Sendable {
         /// Nothing drawn: the viewer themself, someone blocked, a relation not
         /// known yet, or a host that offers no follow at all.
@@ -38,28 +40,39 @@ final class SnapAuthorIdentityView: UIView {
         case following
         /// Both follow each other.
         case friends
+        /// The viewer asked a private account to follow them, and the request
+        /// is pending (#968).
+        case pending
 
         /// The symbols the owner chose (#925):
         /// - `plus` — the action;
         /// - `checkmark.circle.fill` — the viewer follows them;
         /// - `person.2.fill` — two people: the app already means "Friends" by
         ///   it (the map's Friends filter), and it is the one symbol that says
-        ///   the relation goes BOTH ways.
+        ///   the relation goes BOTH ways;
+        /// - `clock.circle.fill` — waiting on the other person (#968). Not
+        ///   `clock.fill`: that symbol is ONE layer, a white disc with its
+        ///   hands cut out, so on the badge it can only be a white disc with
+        ///   black hands. `clock.circle.fill` is the same clock in two layers,
+        ///   like the check: its circle draws black and its hands white — and
+        ///   the two marks a "+" can turn into share one construction.
         var symbolName: String? {
             switch self {
             case .none: nil
             case .follow: "plus"
             case .following: "checkmark.circle.fill"
             case .friends: "person.2.fill"
+            case .pending: "clock.circle.fill"
             }
         }
 
-        /// Each glyph's size on the badge's disc: the check is a disc of its
-        /// own and nearly fills it (the badge's disc reads as a ring around
-        /// it); the "+" and the two people sit inside it.
+        /// Each glyph's size on the badge's disc: the check and the clock are
+        /// discs of their own, as large as it (drawn black, their marks white:
+        /// `AvatarStatusBadge.glyphImage`); the "+" and the two people sit
+        /// inside it.
         var pointSize: CGFloat {
             switch self {
-            case .following: 13
+            case .following, .pending: 13
             case .friends: 7
             case .none, .follow: 9
             }
@@ -71,6 +84,7 @@ final class SnapAuthorIdentityView: UIView {
             case .follow: "Follow"
             case .following: "Following"
             case .friends: "Friends"
+            case .pending: "Requested"
             }
         }
 
@@ -81,8 +95,9 @@ final class SnapAuthorIdentityView: UIView {
             case .notFollowing, .followedBy: .follow
             case .following: .following
             case .mutual: .friends
-            // A pending request is the profile screen's to withdraw.
-            case .viewer, .blocked, .requested: .none
+            // Drawn, not offered: the profile screen withdraws it.
+            case .requested: .pending
+            case .viewer, .blocked: .none
             }
         }
     }
@@ -538,6 +553,9 @@ final class SnapAuthorIdentityView: UIView {
     /// How many badge changes were drawn through the symbol replace. Tests.
     var badgeReplaceCount: Int { statusBadge.replaceCount }
 
+    /// The badge's disc and glyph images as drawn now. Tests (#968).
+    var drawnBadgeImages: (disc: UIImage?, glyph: UIImage?) { statusBadge.drawnImages }
+
     /// Draws `followBadge` on the avatar. Only the "+" takes touches — a
     /// state mark lets them through to the pill's own tap (the profile),
     /// which is the natural reading of tapping someone's "friends" mark and
@@ -615,7 +633,11 @@ final class SnapAuthorIdentityView: UIView {
 /// semantic ink pair draws vibrant and an inverted badge vanishes in dark mode
 /// (memory `sheet-glass-vibrancy-ink`), and the glass repaints a subview's
 /// `backgroundColor` with its own corner (`glass-paints-background-color`).
-/// So both inks are `.alwaysOriginal` and the disc is drawn by an image.
+/// So both inks are fixed (`.alwaysOriginal`, or a palette) and the disc is
+/// drawn by an image.
+///
+/// BLACK DISC, WHITE GLYPH, in light and dark mode alike (owner, #968): the
+/// badge is one mark whatever the appearance or the photo behind the bar.
 private final class AvatarStatusBadge: UIButton {
     /// The disc's side.
     static let diameter: CGFloat = 16
@@ -686,26 +708,47 @@ private final class AvatarStatusBadge: UIButton {
         accessibilityTraits = badge == .follow ? .button : .staticText
     }
 
-    /// The disc, white — or, for no badge, the same symbol in clear ink, so
+    /// The disc's ink and the glyph's: fixed, never resolved per appearance
+    /// (#968).
+    static let discInk = UIColor.black
+    static let glyphInk = UIColor.white
+
+    /// The disc, black — or, for no badge, the same symbol in clear ink, so
     /// the disc's arrival and departure are symbol replaces too.
     private static func discImage(shown: Bool) -> UIImage {
         let image = UIImage(systemName: "circle.fill")?
             .applyingSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: diameter - 3))
             ?? UIImage()
-        return image.withTintColor(shown ? .white : .clear, renderingMode: .alwaysOriginal)
+        return image.withTintColor(shown ? discInk : .clear, renderingMode: .alwaysOriginal)
     }
 
-    /// The relation's glyph in near-black ink — or, for none, a clear "+".
+    /// The relation's glyph in white ink — or, for none, a clear "+".
     /// Configured first and tinted last: a symbol configuration applied
     /// after the tint can drop it.
+    ///
+    /// ⚠️ The check and the clock are discs of their own, as large as the
+    /// badge's: one white ink would cover the black disc and read as a WHITE
+    /// badge with a black mark. They are drawn with a palette instead — the
+    /// mark white, their own circle black — so they too are a black disc
+    /// with a white glyph. A palette is fixed ink already (no tint reaches
+    /// it), and must NOT be re-marked `.alwaysOriginal`: that drops the
+    /// palette and draws the whole symbol in the view's tint (measured: the
+    /// system blue).
     private static func glyphImage(_ badge: SnapAuthorIdentityView.FollowBadge) -> UIImage {
-        let weight: UIImage.SymbolWeight = badge == .following ? .regular : .bold
+        let ownsDisc = badge == .following || badge == .pending
+        var configuration = UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: ownsDisc ? .regular : .bold)
+        if ownsDisc {
+            configuration = configuration.applying(UIImage.SymbolConfiguration(paletteColors: [glyphInk, discInk]))
+        }
         let image = UIImage(systemName: badge.symbolName ?? "plus")?
-            .applyingSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: weight))
+            .applyingSymbolConfiguration(configuration)
             ?? UIImage()
-        return image.withTintColor(badge == .none ? .clear : UIColor(white: 0.1, alpha: 1),
-                                   renderingMode: .alwaysOriginal)
+        if ownsDisc { return image }
+        return image.withTintColor(badge == .none ? .clear : glyphInk, renderingMode: .alwaysOriginal)
     }
+
+    /// The disc's and the glyph's images as drawn now. Tests.
+    var drawnImages: (disc: UIImage?, glyph: UIImage?) { (disc.image, glyph.image) }
 }
 
 /// The snap feed's navigation-bar controls, built as *custom views* so their

@@ -59,11 +59,30 @@ public protocol ContentReporting: Sendable {
 ///
 /// The write half of the social graph, extracted so a surface that shows an
 /// author — a feed row's "..." menu — can act on the relationship without
-/// importing the Profile feature that owns the read model. One method, because
-/// one method is all any of those surfaces needs; anything richer belongs to
-/// the profile screen.
+/// importing the Profile feature that owns the read model. Anything richer
+/// than a follow belongs to the profile screen.
 public protocol SocialGraphWriting: Sendable {
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws
+    /// Follows `profileID` and says what the graph did: a public profile is
+    /// followed, a private one is only ASKED (#396, backend #655) — which a
+    /// surface drawing the relation (the person pill's badge, #968) has to
+    /// know, since no follow edge exists until the owner approves.
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome
+}
+
+extension SocialGraphWriting {
+    /// A writer that cannot tell a request from a follow says it followed.
+    public func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
+        try await setFollowing(true, for: profileID)
+        return .following
+    }
+}
+
+/// What a follow did: followed, or asked a private profile (#396, backend
+/// #655).
+public enum FollowOutcome: Equatable, Sendable {
+    case following
+    case requested
 }
 
 /// Where the viewer stands with one person, as far as a follow affordance

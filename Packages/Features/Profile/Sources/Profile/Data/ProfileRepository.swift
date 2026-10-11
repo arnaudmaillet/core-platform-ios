@@ -308,7 +308,9 @@ public protocol ProfileSwitching: Sendable {
 /// `dev/BACKEND_GAPS.md` §7.
 // `SocialGraphWriting` is satisfied by `ProfileProviding.setFollowing` — the
 // same method, declared again in CoreModels so a feed row's "..." menu can
-// unfollow without importing this package. `SocialGraphReading` is
+// unfollow without importing this package — and its `follow(_:)` by the
+// request-aware one in FollowRequests.swift, so a feed pill's "+" on a private
+// profile draws the pending request (#968). `SocialGraphReading` is
 // `relationship(for:)` folded to the one question a follow "+" asks.
 public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisibilityManaging, BlockedAccountsManaging, ProfileViewerResolving,
     SocialGraphWriting, SocialGraphReading {
