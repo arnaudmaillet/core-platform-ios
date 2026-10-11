@@ -230,6 +230,12 @@ private struct StubSearchClient: Search_V1_SearchServiceClientInterface {
         ResponseMessage(result: .success(Search_V1_MultiSearchResponse()))
     }
 
+    func listTrendingHashtags(
+        request: Search_V1_ListTrendingHashtagsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Search_V1_ListTrendingHashtagsResponse> {
+        ResponseMessage(result: .success(Search_V1_ListTrendingHashtagsResponse()))
+    }
+
     func recordRecentSearch(
         request: Search_V1_RecordRecentSearchRequest, headers: Connect.Headers
     ) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {

@@ -124,7 +124,16 @@ public nonisolated struct Comment_V1_ListRepliesRequest: Sendable {
 
   public var limit: Int32 = 0
 
+  /// The previous page's `next_token`, from a request with the same `sort`.
   public var pageToken: String = String()
+
+  /// NEWEST by default (#832). POPULARITY ranks the thread's 500 newest
+  /// replies by their likes (ties to the newest), then the older ones newest
+  /// first. Pages resume after the last reply of the previous one, by (likes,
+  /// created_at, comment_id); the ranking is read again per page, so a reply
+  /// whose likes change between pages can show twice or be passed over:
+  /// de-duplicate by comment_id. Engagement unavailable: NEWEST order.
+  public var sort: Comment_V1_ReplySort = .unspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -228,6 +237,10 @@ public nonisolated struct Comment_V1_CommentView: Sendable {
   /// Held for the post owner's review (their temporary interaction limit,
   /// #669): only its author and the post's owner see it.
   public var held: Bool = false
+
+  /// A top-level comment's replies, held ones included (#832). Filled by
+  /// ListTopLevel; 0 elsewhere. A comment's likes: engagement BatchGetLikes.
+  public var replyCount: UInt64 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -471,7 +484,7 @@ nonisolated extension Comment_V1_ListTopLevelRequest: SwiftProtobuf.Message, Swi
 
 nonisolated extension Comment_V1_ListRepliesRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ListRepliesRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}comment_id\0\u{1}limit\0\u{3}page_token\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}comment_id\0\u{1}limit\0\u{3}page_token\0\u{1}sort\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -483,6 +496,7 @@ nonisolated extension Comment_V1_ListRepliesRequest: SwiftProtobuf.Message, Swif
       case 2: try { try decoder.decodeSingularStringField(value: &self.commentID) }()
       case 3: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      case 5: try { try decoder.decodeSingularEnumField(value: &self.sort) }()
       default: break
       }
     }
@@ -501,6 +515,9 @@ nonisolated extension Comment_V1_ListRepliesRequest: SwiftProtobuf.Message, Swif
     if !self.pageToken.isEmpty {
       try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 4)
     }
+    if self.sort != .unspecified {
+      try visitor.visitSingularEnumField(value: self.sort, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -509,6 +526,7 @@ nonisolated extension Comment_V1_ListRepliesRequest: SwiftProtobuf.Message, Swif
     if lhs.commentID != rhs.commentID {return false}
     if lhs.limit != rhs.limit {return false}
     if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.sort != rhs.sort {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -671,7 +689,7 @@ nonisolated extension Comment_V1_GifMetadata: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Comment_V1_CommentView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CommentView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}comment_id\0\u{3}post_id\0\u{3}author_id\0\u{3}parent_id\0\u{1}status\0\u{1}body\0\u{1}gif\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{1}held\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}comment_id\0\u{3}post_id\0\u{3}author_id\0\u{3}parent_id\0\u{1}status\0\u{1}body\0\u{1}gif\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{1}held\0\u{3}reply_count\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -689,6 +707,7 @@ nonisolated extension Comment_V1_CommentView: SwiftProtobuf.Message, SwiftProtob
       case 8: try { try decoder.decodeSingularInt64Field(value: &self.createdAtMs) }()
       case 9: try { try decoder.decodeSingularInt64Field(value: &self.updatedAtMs) }()
       case 10: try { try decoder.decodeSingularBoolField(value: &self.held) }()
+      case 11: try { try decoder.decodeSingularUInt64Field(value: &self.replyCount) }()
       default: break
       }
     }
@@ -729,6 +748,9 @@ nonisolated extension Comment_V1_CommentView: SwiftProtobuf.Message, SwiftProtob
     if self.held != false {
       try visitor.visitSingularBoolField(value: self.held, fieldNumber: 10)
     }
+    if self.replyCount != 0 {
+      try visitor.visitSingularUInt64Field(value: self.replyCount, fieldNumber: 11)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -743,6 +765,7 @@ nonisolated extension Comment_V1_CommentView: SwiftProtobuf.Message, SwiftProtob
     if lhs.createdAtMs != rhs.createdAtMs {return false}
     if lhs.updatedAtMs != rhs.updatedAtMs {return false}
     if lhs.held != rhs.held {return false}
+    if lhs.replyCount != rhs.replyCount {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

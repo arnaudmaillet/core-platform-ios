@@ -40,6 +40,13 @@ public protocol Search_V1_SearchServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `multiSearch`(request: Search_V1_MultiSearchRequest, headers: Connect.Headers) async -> ResponseMessage<Search_V1_MultiSearchResponse>
 
+    /// The hashtags rising now (#831): ranked by recent use (the last day's
+    /// posts weigh three times the rest of the week's), a tag unused this week
+    /// left out however large. Derived every minute from the searchable posts,
+    /// like HashtagHit.post_count. Global; per region later.
+    @available(iOS 13, *)
+    func `listTrendingHashtags`(request: Search_V1_ListTrendingHashtagsRequest, headers: Connect.Headers) async -> ResponseMessage<Search_V1_ListTrendingHashtagsResponse>
+
     /// ── Recent searches (#663) ──────────────────────────────────────────────
     /// A profile's recent searches, kept server-side so every device shows the
     /// same list: the newest 50, none older than 90 days. The app records a
@@ -83,6 +90,11 @@ public final class Search_V1_SearchServiceClient: Search_V1_SearchServiceClientI
     }
 
     @available(iOS 13, *)
+    public func `listTrendingHashtags`(request: Search_V1_ListTrendingHashtagsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Search_V1_ListTrendingHashtagsResponse> {
+        return await self.client.unary(path: "/search.v1.SearchService/ListTrendingHashtags", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `recordRecentSearch`(request: Search_V1_RecordRecentSearchRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Search_V1_RecentSearchesResponse> {
         return await self.client.unary(path: "/search.v1.SearchService/RecordRecentSearch", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -107,6 +119,7 @@ public final class Search_V1_SearchServiceClient: Search_V1_SearchServiceClientI
             public static let search = Connect.MethodSpec(name: "Search", service: "search.v1.SearchService", type: .unary)
             public static let suggest = Connect.MethodSpec(name: "Suggest", service: "search.v1.SearchService", type: .unary)
             public static let multiSearch = Connect.MethodSpec(name: "MultiSearch", service: "search.v1.SearchService", type: .unary)
+            public static let listTrendingHashtags = Connect.MethodSpec(name: "ListTrendingHashtags", service: "search.v1.SearchService", type: .unary)
             public static let recordRecentSearch = Connect.MethodSpec(name: "RecordRecentSearch", service: "search.v1.SearchService", type: .unary)
             public static let listRecentSearches = Connect.MethodSpec(name: "ListRecentSearches", service: "search.v1.SearchService", type: .unary)
             public static let deleteRecentSearch = Connect.MethodSpec(name: "DeleteRecentSearch", service: "search.v1.SearchService", type: .unary)

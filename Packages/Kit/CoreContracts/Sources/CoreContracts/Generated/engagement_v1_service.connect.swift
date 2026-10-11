@@ -41,6 +41,35 @@ public protocol Engagement_V1_EngagementServiceClientInterface: Sendable {
     /// the wallet's stake settlement (#665).
     @available(iOS 13, *)
     func `getLikePositions`(request: Engagement_V1_GetLikePositionsRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_GetLikePositionsResponse>
+
+    /// A profile's Likes tab (#829): the posts it liked, newest posts first.
+    /// The owner always sees it; anyone else only when the owner shows the tab
+    /// and may see the profile (a private profile they don't follow, a block):
+    /// otherwise empty. Hydrate the posts through post, which withholds what
+    /// the reader can't see.
+    @available(iOS 13, *)
+    func `listLikesByProfile`(request: Engagement_V1_ListLikesByProfileRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListLikesByProfileResponse>
+
+    /// Saves a post for one of the caller's profiles (#872), private by
+    /// default. Idempotent: saving a saved post keeps its first save time.
+    @available(iOS 13, *)
+    func `savePost`(request: Engagement_V1_SavePostRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_SavePostResponse>
+
+    /// Unsaves it. Idempotent: unsaving what isn't saved is a no-op.
+    @available(iOS 13, *)
+    func `unsavePost`(request: Engagement_V1_UnsavePostRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_UnsavePostResponse>
+
+    /// A profile's Saved tab (#872): the posts it saved, most recently saved
+    /// first. The owner always sees it; anyone else only when the owner shows
+    /// the tab (hidden by default) and may see the profile, and then only the
+    /// posts whose authors they may see: otherwise empty.
+    @available(iOS 13, *)
+    func `listSavedPosts`(request: Engagement_V1_ListSavedPostsRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListSavedPostsResponse>
+
+    /// What an account saved, with each post's profile, paged. Mesh only
+    /// (never on the edge): the GDPR data export (#872).
+    @available(iOS 13, *)
+    func `listSavedPostsByAccount`(request: Engagement_V1_ListSavedPostsByAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Engagement_V1_ListSavedPostsByAccountResponse>
 }
 
 /// Concrete implementation of `Engagement_V1_EngagementServiceClientInterface`.
@@ -81,6 +110,31 @@ public final class Engagement_V1_EngagementServiceClient: Engagement_V1_Engageme
         return await self.client.unary(path: "/engagement.v1.EngagementService/GetLikePositions", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `listLikesByProfile`(request: Engagement_V1_ListLikesByProfileRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ListLikesByProfileResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/ListLikesByProfile", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `savePost`(request: Engagement_V1_SavePostRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_SavePostResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/SavePost", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `unsavePost`(request: Engagement_V1_UnsavePostRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_UnsavePostResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/UnsavePost", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listSavedPosts`(request: Engagement_V1_ListSavedPostsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ListSavedPostsResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/ListSavedPosts", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listSavedPostsByAccount`(request: Engagement_V1_ListSavedPostsByAccountRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Engagement_V1_ListSavedPostsByAccountResponse> {
+        return await self.client.unary(path: "/engagement.v1.EngagementService/ListSavedPostsByAccount", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let recordView = Connect.MethodSpec(name: "RecordView", service: "engagement.v1.EngagementService", type: .unary)
@@ -89,6 +143,11 @@ public final class Engagement_V1_EngagementServiceClient: Engagement_V1_Engageme
             public static let batchGetLikes = Connect.MethodSpec(name: "BatchGetLikes", service: "engagement.v1.EngagementService", type: .unary)
             public static let listLikesByAccount = Connect.MethodSpec(name: "ListLikesByAccount", service: "engagement.v1.EngagementService", type: .unary)
             public static let getLikePositions = Connect.MethodSpec(name: "GetLikePositions", service: "engagement.v1.EngagementService", type: .unary)
+            public static let listLikesByProfile = Connect.MethodSpec(name: "ListLikesByProfile", service: "engagement.v1.EngagementService", type: .unary)
+            public static let savePost = Connect.MethodSpec(name: "SavePost", service: "engagement.v1.EngagementService", type: .unary)
+            public static let unsavePost = Connect.MethodSpec(name: "UnsavePost", service: "engagement.v1.EngagementService", type: .unary)
+            public static let listSavedPosts = Connect.MethodSpec(name: "ListSavedPosts", service: "engagement.v1.EngagementService", type: .unary)
+            public static let listSavedPostsByAccount = Connect.MethodSpec(name: "ListSavedPostsByAccount", service: "engagement.v1.EngagementService", type: .unary)
         }
     }
 }

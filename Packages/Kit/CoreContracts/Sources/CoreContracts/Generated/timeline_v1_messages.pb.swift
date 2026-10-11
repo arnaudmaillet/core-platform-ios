@@ -207,6 +207,13 @@ public nonisolated struct Timeline_V1_GetDiscoveryFeedRequest: Sendable {
   /// FeedSettings.non_personalized): set, interest tags are ignored.
   public var nonPersonalized: Bool = false
 
+  /// Only the posts whose caption carries this hashtag (#830), with or
+  /// without its `#`, matched as captions are indexed (case-insensitive).
+  /// TRENDING ranks them by the same time-decayed hot score, RECENT newest
+  /// first; another ranking fails FAILED_PRECONDITION. The pool keeps the
+  /// last TIMELINE_DISCOVERY_WINDOW_SECS (3 days): an older tag pages empty.
+  public var hashtag: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -587,7 +594,7 @@ nonisolated extension Timeline_V1_GetAudioFeedResponse: SwiftProtobuf.Message, S
 
 nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GetDiscoveryFeedRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ranking\0\u{1}region\0\u{1}lat\0\u{1}lng\0\u{3}content_level\0\u{3}page_token\0\u{1}limit\0\u{3}profile_id\0\u{3}non_personalized\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}ranking\0\u{1}region\0\u{1}lat\0\u{1}lng\0\u{3}content_level\0\u{3}page_token\0\u{1}limit\0\u{3}profile_id\0\u{3}non_personalized\0\u{1}hashtag\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -604,6 +611,7 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
       case 7: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
       case 8: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
       case 9: try { try decoder.decodeSingularBoolField(value: &self.nonPersonalized) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.hashtag) }()
       default: break
       }
     }
@@ -641,6 +649,9 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
     if self.nonPersonalized != false {
       try visitor.visitSingularBoolField(value: self.nonPersonalized, fieldNumber: 9)
     }
+    if !self.hashtag.isEmpty {
+      try visitor.visitSingularStringField(value: self.hashtag, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -654,6 +665,7 @@ nonisolated extension Timeline_V1_GetDiscoveryFeedRequest: SwiftProtobuf.Message
     if lhs.limit != rhs.limit {return false}
     if lhs.profileID != rhs.profileID {return false}
     if lhs.nonPersonalized != rhs.nonPersonalized {return false}
+    if lhs.hashtag != rhs.hashtag {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

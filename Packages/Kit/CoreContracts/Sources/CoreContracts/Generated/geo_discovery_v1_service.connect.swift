@@ -25,6 +25,13 @@ public protocol GeoDiscovery_V1_GeoDiscoveryServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `getGeoTimeline`(request: GeoDiscovery_V1_GetGeoTimelineRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_GetGeoTimelineResponse>
 
+    /// A place's posts, page by page (#833): the place page of a city or
+    /// country marker, every post the place holds within the map's retention —
+    /// not only the radar's per-tile Top-K. RECENT or POPULAR; the cards come
+    /// with GetGeoTimeline's audience rules applied.
+    @available(iOS 13, *)
+    func `listPlacePosts`(request: GeoDiscovery_V1_ListPlacePostsRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_ListPlacePostsResponse>
+
     /// Country access from location: the device sends the country it derived
     /// from its location (an ISO code, never a coordinate); the server grants it
     /// only when the request's network (GeoIP) is in that country or a
@@ -78,6 +85,11 @@ public final class GeoDiscovery_V1_GeoDiscoveryServiceClient: GeoDiscovery_V1_Ge
     }
 
     @available(iOS 13, *)
+    public func `listPlacePosts`(request: GeoDiscovery_V1_ListPlacePostsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<GeoDiscovery_V1_ListPlacePostsResponse> {
+        return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/ListPlacePosts", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `getCountryAccess`(request: GeoDiscovery_V1_GetCountryAccessRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<GeoDiscovery_V1_GetCountryAccessResponse> {
         return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/GetCountryAccess", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -101,6 +113,7 @@ public final class GeoDiscovery_V1_GeoDiscoveryServiceClient: GeoDiscovery_V1_Ge
         public enum Methods {
             public static let queryTile = Connect.MethodSpec(name: "QueryTile", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let getGeoTimeline = Connect.MethodSpec(name: "GetGeoTimeline", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
+            public static let listPlacePosts = Connect.MethodSpec(name: "ListPlacePosts", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let getCountryAccess = Connect.MethodSpec(name: "GetCountryAccess", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let getCountryStandings = Connect.MethodSpec(name: "GetCountryStandings", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let getCountryUnlocks = Connect.MethodSpec(name: "GetCountryUnlocks", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)

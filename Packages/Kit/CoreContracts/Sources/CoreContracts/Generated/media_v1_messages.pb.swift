@@ -132,8 +132,13 @@ public nonisolated struct Media_V1_IssueUploadTicketRequest: Sendable {
   /// for integrity verification on finalize.
   public var contentSha256: String = String()
 
-  /// Optional caller idempotency key so a retried ticket request returns the same
-  /// asset/ticket rather than reserving a new one.
+  /// Optional caller idempotency key (1–128 printable ASCII characters,
+  /// MED-1008 otherwise), one per upload and reused on every retry of its
+  /// ticket: a repeat from the same owner reserves nothing and answers the
+  /// asset the first ticket reserved — a fresh `ticket` for it while it is
+  /// still PENDING, none (`deduplicated`) once it is past PENDING. The same
+  /// key for another kind, declared type or content fails FAILED_PRECONDITION
+  /// (MED-1007). Deleting or aborting the asset frees its key.
   public var idempotencyKey: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -157,10 +162,10 @@ public nonisolated struct Media_V1_IssueUploadTicketResponse: Sendable {
   /// Clears the value of `ticket`. Subsequent reads from it will return its default value.
   public mutating func clearTicket() {self._ticket = nil}
 
-  /// True when content-addressed dedup matched existing bytes: `asset_id` already
-  /// refers to a READY asset and no upload is needed (the `ticket` is then unset).
-  /// Always false when dedup is disabled (the default — it is gated behind a
-  /// flag). See the blueprint's open-fork B.
+  /// True when no upload is needed (the `ticket` is then unset): content-
+  /// addressed dedup matched a READY asset with these bytes (only when dedup
+  /// is enabled — off by default, the blueprint's open-fork B), or the
+  /// idempotency key's asset is already past PENDING (#876).
   public var deduplicated: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()

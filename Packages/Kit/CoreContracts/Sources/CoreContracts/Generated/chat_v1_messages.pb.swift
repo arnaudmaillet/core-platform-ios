@@ -272,6 +272,14 @@ public nonisolated struct Chat_V1_SendMessageRequest: Sendable {
 
   public var replyTo: String = String()
 
+  /// Optional, client-generated, one per message and reused on every retry
+  /// (8–64 characters: letters, digits, `-`, `_`; CHT-2010 otherwise). A
+  /// repeated key from the same sender in the same conversation, within
+  /// 24 hours, stores nothing and answers the message the first send stored.
+  /// While that first send is still in flight a repeat fails ABORTED
+  /// (CHT-1013): retry it. Empty: no deduplication.
+  public var idempotencyKey: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -282,6 +290,7 @@ public nonisolated struct Chat_V1_SendMessageResponse: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// The stored message; on a repeated idempotency key, the first send's.
   public var messageID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -1300,7 +1309,7 @@ nonisolated extension Chat_V1_RespondToMessageRequestRequest: SwiftProtobuf.Mess
 
 nonisolated extension Chat_V1_SendMessageRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SendMessageRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{3}sender_id\0\u{3}content_type\0\u{1}body\0\u{3}media_ref\0\u{3}reply_to\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{3}sender_id\0\u{3}content_type\0\u{1}body\0\u{3}media_ref\0\u{3}reply_to\0\u{3}idempotency_key\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1314,6 +1323,7 @@ nonisolated extension Chat_V1_SendMessageRequest: SwiftProtobuf.Message, SwiftPr
       case 4: try { try decoder.decodeSingularStringField(value: &self.body) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.mediaRef) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.replyTo) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.idempotencyKey) }()
       default: break
       }
     }
@@ -1338,6 +1348,9 @@ nonisolated extension Chat_V1_SendMessageRequest: SwiftProtobuf.Message, SwiftPr
     if !self.replyTo.isEmpty {
       try visitor.visitSingularStringField(value: self.replyTo, fieldNumber: 6)
     }
+    if !self.idempotencyKey.isEmpty {
+      try visitor.visitSingularStringField(value: self.idempotencyKey, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1348,6 +1361,7 @@ nonisolated extension Chat_V1_SendMessageRequest: SwiftProtobuf.Message, SwiftPr
     if lhs.body != rhs.body {return false}
     if lhs.mediaRef != rhs.mediaRef {return false}
     if lhs.replyTo != rhs.replyTo {return false}
+    if lhs.idempotencyKey != rhs.idempotencyKey {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

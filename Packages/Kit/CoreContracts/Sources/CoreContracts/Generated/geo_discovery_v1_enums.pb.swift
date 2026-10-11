@@ -248,6 +248,103 @@ public nonisolated enum GeoDiscovery_V1_UnlockCountryOutcome: SwiftProtobuf.Enum
 
 }
 
+/// The order of a place page (#833).
+public nonisolated enum GeoDiscovery_V1_PlaceSort: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// RECENT.
+  case unspecified // = 0
+
+  /// Newest first.
+  case recent // = 1
+
+  /// By virality score (the map's popularity), ties to the newest.
+  case popular // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .recent
+    case 2: self = .popular
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .recent: return 1
+    case .popular: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [GeoDiscovery_V1_PlaceSort] = [
+    .unspecified,
+    .recent,
+    .popular,
+  ]
+
+}
+
+/// The size of the place around a point (#833): the H3 cell the map indexes
+/// at that resolution.
+public nonisolated enum GeoDiscovery_V1_PlaceScale: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// CITY.
+  case unspecified // = 0
+
+  /// An R5 cell (~250 km²): a city and its surroundings.
+  case city // = 1
+
+  /// An R7 cell (~5 km²): a district.
+  case district // = 2
+
+  /// An R9 cell (~0.1 km²): a street.
+  case street // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .city
+    case 2: self = .district
+    case 3: self = .street
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .city: return 1
+    case .district: return 2
+    case .street: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [GeoDiscovery_V1_PlaceScale] = [
+    .unspecified,
+    .city,
+    .district,
+    .street,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension GeoDiscovery_V1_ZoomBand: SwiftProtobuf._ProtoNameProviding {
@@ -264,4 +361,12 @@ nonisolated extension GeoDiscovery_V1_CountryAccessOutcome: SwiftProtobuf._Proto
 
 nonisolated extension GeoDiscovery_V1_UnlockCountryOutcome: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNLOCK_COUNTRY_OUTCOME_UNSPECIFIED\0\u{1}UNLOCK_COUNTRY_OUTCOME_UNLOCKED\0\u{1}UNLOCK_COUNTRY_OUTCOME_ALREADY_UNLOCKED\0\u{1}UNLOCK_COUNTRY_OUTCOME_INSUFFICIENT_GEMS\0\u{1}UNLOCK_COUNTRY_OUTCOME_PRICE_CHANGED\0")
+}
+
+nonisolated extension GeoDiscovery_V1_PlaceSort: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PLACE_SORT_UNSPECIFIED\0\u{1}PLACE_SORT_RECENT\0\u{1}PLACE_SORT_POPULAR\0")
+}
+
+nonisolated extension GeoDiscovery_V1_PlaceScale: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PLACE_SCALE_UNSPECIFIED\0\u{1}PLACE_SCALE_CITY\0\u{1}PLACE_SCALE_DISTRICT\0\u{1}PLACE_SCALE_STREET\0")
 }
