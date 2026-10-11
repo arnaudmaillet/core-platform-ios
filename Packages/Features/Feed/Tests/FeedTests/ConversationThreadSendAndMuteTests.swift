@@ -521,6 +521,74 @@ struct ConversationThreadSendAndMuteTests {
         #expect(await settle { graph.follows == [ProfileID("them")] })
     }
 
+    // MARK: - The pill is drawn once (#889)
+
+    private func peerPill(_ screen: ConversationThreadViewController) -> SnapAuthorIdentityView? {
+        screen.toolbarItems?.first?.customView as? SnapAuthorIdentityView
+    }
+
+    /// ⚠️ A LATE RELATION CHANGES THE GLYPH IN PLACE (#889): the read answers
+    /// after the pill is on screen, and the toolbar keeps its items, the
+    /// item its pill — and the whole pill is never blurred out and back in
+    /// for it (it used to be, through the follow tap's swap).
+    @Test func aLateRelationChangesTheGlyphInPlace() async throws {
+        let graph = Graph(.mutual)
+        graph.readDelay = .milliseconds(150)
+        let (screen, _, window) = makeScreen(graph: graph)
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let items = try #require(screen.toolbarItems)
+        let pill = try #require(peerPill(screen))
+        #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
+        #expect(pill.bounds.width > 0)
+        #expect(screen.debugPeerFollowBadge == .none, "the relation was already there")
+
+        #expect(await settle { screen.debugPeerFollowBadge == .friends })
+        #expect(!pill.isRedrawingWholePill, "the whole pill was redrawn for the relation")
+        let after = try #require(screen.toolbarItems)
+        #expect(after.count == items.count)
+        #expect(zip(after, items).allSatisfy { $0 === $1 }, "the toolbar items were rebuilt")
+        #expect(after.first?.customView === pill, "the pill was replaced")
+    }
+
+    /// The follow tap keeps its blur: the "+" turning into the friends mark is
+    /// the viewer's own act, drawn as on a post.
+    @Test func aFollowTapStillTurnsTheGlyphThroughTheBlur() async throws {
+        let graph = Graph(.followedBy)
+        let (screen, _, window) = makeScreen(graph: graph)
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let pill = try #require(peerPill(screen))
+        #expect(await settle { screen.debugPeerFollowBadge == .follow })
+        #expect(await settle { !pill.isRedrawingWholePill })
+        screen.followPeer(ProfileID("them"))
+        #expect(screen.debugPeerFollowBadge == .friends)
+        #expect(pill.isRedrawingWholePill, "the follow tap lost its blur")
+    }
+
+    /// ⚠️ THE SAME PERSON IS DRAWN ONCE (#889): their face and @handle land
+    /// after their name, and change the pill in place; only someone else
+    /// cross-fades the whole pill.
+    @Test func aLateHandleForTheSamePersonChangesThePillInPlace() async throws {
+        let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let pill = try #require(peerPill(screen))
+        #expect(await settle { !pill.isRedrawingWholePill })
+
+        driver.onPeerChange?(ConversationThreadPerson(
+            id: ProfileID("them"), name: "Ava", avatarURL: URL(string: "https://example.test/ava.jpg"),
+            handle: "ava.moreau"
+        ))
+        #expect(!pill.isRedrawingWholePill, "the whole pill cross-faded for its own handle")
+        window.layoutIfNeeded()
+        #expect(screen.debugPeerPillLines == ["Ava", "@ava.moreau"], "\(screen.debugPeerPillLines)")
+        #expect(peerPill(screen) === pill)
+
+        driver.onPeerChange?(ConversationThreadPerson(id: ProfileID("other"), name: "Ben", avatarURL: nil))
+        #expect(pill.isRedrawingWholePill, "someone else was swapped in without the cross-fade")
+    }
+
     /// The rule is the post pill's own: one mapping for both.
     @Test func theRelationMapsAsOnAPost() {
         typealias Badge = SnapAuthorIdentityView.FollowBadge

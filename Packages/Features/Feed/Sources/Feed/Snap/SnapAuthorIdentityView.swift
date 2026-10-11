@@ -424,31 +424,53 @@ final class SnapAuthorIdentityView: UIView {
     }
 
     /// Shows a person who is not a post's author — a conversation's
-    /// correspondent. The same pill and the same cross-
-    /// fade as `setAuthor`; the meta line says whatever the host passes, and
-    /// an empty one simply leaves the name alone on the pill.
+    /// correspondent. The meta line says whatever the host passes, and an
+    /// empty one simply leaves the name alone on the pill.
+    ///
+    /// ⚠️ ONE PERSON IS DRAWN ONCE (#889). The correspondent arrives in
+    /// pieces — the name, then their id, then the face and the @handle from
+    /// one profile read — and a piece that lands for the person already on
+    /// the pill changes in place: the new line is set and the glass glides
+    /// to its width, the face fades in on the avatar alone. Only a
+    /// DIFFERENT person (or the first one over the redaction bars) cross-
+    /// fades the whole pill, as `setAuthor` does.
     func setPerson(id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline) {
         let faceChanged = id != authorID || avatarURL != personAvatarURL
         guard faceChanged || name != nameLabel.text || meta != metaLabel.text else { return }
+        // Someone else than the person drawn: an id that replaces another
+        // id. A first id for the name already drawn is the same person.
+        let personChanged = isRedacted || (authorID != nil && id != authorID)
         renderedModel = nil
         authorID = id
+        let urlChanged = avatarURL != personAvatarURL
         personAvatarURL = avatarURL
         defer { BarItemRemeasure.run(self, duration: 0.22) }
 
-        UIView.transition(with: self, duration: 0.18,
-                          options: [.transitionCrossDissolve, .allowUserInteraction]) {
+        let draw = {
             self.setRedacted(false)
             self.nameLabel.text = name
             self.metaLabel.text = meta
-            if faceChanged { self.showFace(nil) }
+            if personChanged { self.showFace(nil) }
             self.monogramView.setMonogram(MonogramAvatarView.monogram(
                 name: name, handle: Self.handle(fromMeta: meta)
             ))
         }
+        if personChanged {
+            personFades += 1
+            UIView.transition(with: self, duration: 0.18,
+                              options: [.transitionCrossDissolve, .allowUserInteraction],
+                              animations: draw) { _ in self.personFades -= 1 }
+        } else {
+            draw()
+        }
 
-        guard faceChanged else { return }
+        guard personChanged || urlChanged else { return }
         avatarTask?.cancel()
-        guard let url = avatarURL else { return }
+        guard let url = avatarURL else {
+            // The same person, whose picture is gone: the initials again.
+            if !personChanged { showFace(nil) }
+            return
+        }
         avatarTask = Task { [weak self] in
             guard let image = try? await pipeline.image(for: url) else { return }
             guard let self, self.personAvatarURL == url else { return }
@@ -507,8 +529,90 @@ final class SnapAuthorIdentityView: UIView {
     func setFollowBadge(_ badge: FollowBadge, animated: Bool = false) {
         guard badge != followBadge else { return }
         followBadge = badge
-        contentTransition.perform(animated: animated) { self.applyFollowBadge() }
+        // An in-place glyph fade still running gives way (see
+        // `setFollowBadgeInPlace`).
+        badgeFadeGeneration += 1
+        contentTransition.perform(animated: animated) {
+            self.followButton.alpha = 1
+            self.applyFollowBadge()
+        }
     }
+
+    /// The glyph for a value that LANDED — a relation read answering after
+    /// the pill was drawn (#889) — rather than for a tap: the glyph alone
+    /// changes, in its slot, and the glass glides to its new width. The
+    /// name and the face are not touched, so the pill is never blurred out
+    /// and back for it (that blur is `setFollowBadge(_:animated: true)`'s,
+    /// the follow tap's). Off screen, or joining a swap already under way,
+    /// it lands with that swap or at once.
+    func setFollowBadgeInPlace(_ badge: FollowBadge) {
+        guard badge != followBadge else { return }
+        let wasShown = followBadge != .none
+        followBadge = badge
+        badgeFadeGeneration += 1
+        let generation = badgeFadeGeneration
+        guard window != nil, !MotionPreference.reducesMotion else {
+            followButton.alpha = 1
+            contentTransition.perform(animated: false) { self.applyFollowBadge() }
+            return
+        }
+        guard !contentTransition.isRunning else {
+            // A swap already under way (a follow tap's) takes the glyph with
+            // its new content — never cut short for it.
+            contentTransition.afterSwap {
+                self.followButton.alpha = 1
+                self.applyFollowBadge()
+                BarItemRemeasure.run(self, duration: nil)
+            }
+            return
+        }
+        switch (wasShown, badge != .none) {
+        case (false, true):
+            // Into an empty slot: the glass makes room, the glyph fades in
+            // as it does. A fade on the BUTTON, the glyph's container — a
+            // platter flattens a leaf's partial alpha to opaque.
+            followButton.alpha = 0
+            applyFollowBadge()
+            BarItemRemeasure.run(self, duration: Self.badgeFadeDuration)
+            UIView.animate(withDuration: Self.badgeFadeDuration, delay: 0,
+                           options: [.curveEaseOut, .allowUserInteraction]) {
+                self.followButton.alpha = 1
+            }
+        case (true, true):
+            // One glyph for another, in the one slot: no width to change.
+            followButton.alpha = 1
+            UIView.transition(with: followButton, duration: Self.badgeFadeDuration,
+                              options: [.transitionCrossDissolve, .allowUserInteraction]) {
+                self.applyFollowBadge()
+            }
+        case (true, false):
+            // Out: the glyph fades, then its slot closes.
+            UIView.animate(withDuration: Self.badgeFadeDuration, delay: 0,
+                           options: [.curveEaseIn, .allowUserInteraction]) {
+                self.followButton.alpha = 0
+            } completion: { _ in
+                guard generation == self.badgeFadeGeneration else { return }
+                self.followButton.alpha = 1
+                self.applyFollowBadge()
+                BarItemRemeasure.run(self, duration: Self.badgeFadeDuration)
+            }
+        case (false, false):
+            applyFollowBadge()
+        }
+    }
+
+    private static let badgeFadeDuration: TimeInterval = 0.2
+    /// Bumped by every in-place glyph change, so a fade-out superseded by a
+    /// newer glyph does not close the slot under it.
+    private var badgeFadeGeneration = 0
+
+    /// Whether the WHOLE pill is being redrawn through a transition — the
+    /// blur swap, or the person cross-fade. Tests: a late value must never
+    /// show one (#889).
+    var isRedrawingWholePill: Bool { contentTransition.isRunning || personFades > 0 }
+
+    /// The person cross-fades under way (`setPerson`).
+    private var personFades = 0
 
     /// Whether the "+" is on offer.
     var offersFollow: Bool { followBadge == .follow }
