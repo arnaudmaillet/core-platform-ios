@@ -254,6 +254,40 @@ struct RelationshipFollowStatesTests {
         #expect(follow.isMorphing, "Follow → Following did not morph")
     }
 
+    /// The touch-down handlers wired to a control: one per press effect.
+    private func touchDownHandlers(_ control: UIControl) -> Int {
+        var count = 0
+        control.enumerateEventHandlers { _, _, event, _ in
+            if event.contains(.touchDown) { count += 1 }
+        }
+        return count
+    }
+
+    /// ⚠️ ONE PRESS PER FOLLOW BUTTON (#866). The header attaches the shared
+    /// press to its tray, and the Follow button — a `MorphingButton` — carries
+    /// that press already: attached twice, one finger drew two shrinks. The
+    /// rows' Follow buttons are the same button and get the same one press.
+    @Test func everyFollowButtonHasExactlyOnePress() throws {
+        let header = ProfileHeaderView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.isHidden = true
+        defer { header.removeFromSuperview() }
+        window.addSubview(header)
+        header.frame = window.bounds
+        header.configureAction(.follow)
+
+        let follow = try #require(header.debugTrayButtons.first as? MorphingButton)
+        #expect(PressFeedback.attached(to: follow) != nil, "the header's Follow lost its press")
+        #expect(touchDownHandlers(follow) == 1, "the header's Follow carries \(touchDownHandlers(follow)) presses")
+        for button in header.debugTrayButtons.dropFirst() {
+            #expect(touchDownHandlers(button) == 1, "\(button.accessibilityLabel ?? "a tray button") lost its press")
+        }
+
+        let cell = RelationshipListCell(frame: CGRect(x: 0, y: 0, width: 390, height: 64))
+        cell.configure(with: row(.follow), imagePipeline: nil)
+        #expect(touchDownHandlers(cell.debugActionButton) == 1, "the row's Follow does not have one press")
+    }
+
     // MARK: - The row's button
 
     private func row(_ action: ProfileRelationshipsViewModel.RowAction, id: String = "ava")

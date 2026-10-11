@@ -1192,7 +1192,10 @@ final class ProfileHeaderView: UIView {
         // little under the finger like every card control does. Their system
         // highlight is the dim, so only the shrink is added; silent — the
         // action answers.
-        for button in [followButton, messageButton, editButton, qrCodeButton, moreButton] {
+        //
+        // ⚠️ NOT the Follow button: a `MorphingButton` carries this very press
+        // already, and a second one stacked two shrinks on one finger (#866).
+        for button in [messageButton, editButton, qrCodeButton, moreButton] {
             PressFeedback.attach(to: button, sound: nil)
         }
 
