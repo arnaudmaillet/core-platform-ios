@@ -15,9 +15,8 @@ import PostGrid
 /// ⚠️ TILES ARE MEMOIZED PER (FORMAT, SOURCE). A render asks for the same
 /// combination several times (each page's state, the empty-tab fill, the
 /// paging loop's before/after count) and each ask used to re-filter both
-/// corpora. The tiles are a pure function of the corpora and the tokens (the
-/// All frontier reads them), so the memo is dropped whenever either changes
-/// and can never answer for an older state.
+/// corpora. The tiles are a pure function of the corpora, so the memo is
+/// dropped whenever either changes and can never answer for an older state.
 @MainActor
 final class ProfileGalleryStore {
     typealias PageState = ProfileViewModel.GalleryPageState
@@ -41,8 +40,8 @@ final class ProfileGalleryStore {
     private(set) var taggedFailure: NetworkFailure?
     /// Where each corpus's next page starts; nil when it has no more, or
     /// before its first page answered (#634).
-    private(set) var authoredToken: String? { didSet { tileMemo.removeAll() } }
-    private(set) var taggedToken: String? { didSet { tileMemo.removeAll() } }
+    private(set) var authoredToken: String?
+    private(set) var taggedToken: String?
     /// Pages beyond the first are loaded: a revalidation merges its first
     /// page over them rather than cutting the corpus back to one page.
     private(set) var authoredHasLaterPages = false
@@ -185,15 +184,12 @@ final class ProfileGalleryStore {
     // MARK: - Derived
 
     /// The tokens the active source reads through: authored for Posts and
-    /// Reposts, tagged for Tagged, both for All.
+    /// Reposts, tagged for Tagged.
     func tokensToFollow(
         _ source: GalleryFilter.Source? = nil
     ) -> (authored: String?, tagged: String?) {
         let source = source ?? pageSource
-        return (
-            source == .tagged ? nil : authoredToken,
-            source == .all || source == .tagged ? taggedToken : nil
-        )
+        return source == .tagged ? (nil, taggedToken) : (authoredToken, nil)
     }
 
     /// Whether `source` has every page it will get.
@@ -202,13 +198,6 @@ final class ProfileGalleryStore {
     }
 
     /// The tiles a tab shows under the active source.
-    ///
-    /// ⚠️ ALL STOPS AT THE FRONTIER. It merges two corpora that page on their
-    /// own; a post older than what one of them has reached may still be
-    /// followed by newer ones from it, and showing it now would have the next
-    /// page land ABOVE tiles already on screen. So All shows only down to the
-    /// later of the unfinished corpora's oldest posts — where both are known
-    /// — and every page from then on only adds below.
     func tiles(
         _ format: GalleryFilter.Format, source: GalleryFilter.Source? = nil
     ) -> [GalleryPost] {
@@ -217,30 +206,19 @@ final class ProfileGalleryStore {
         if let memo = tileMemo[key] { return memo }
         tileComputations += 1
         let filter = GalleryFilter(format: format, source: source)
-        var tiles = filter.tiles(authored: authored ?? [], tagged: tagged ?? [])
-        if source == .all, let frontier = allFrontier {
-            tiles = tiles.filter { $0.publishedAtMS >= frontier }
-        }
+        let tiles = filter.tiles(authored: authored ?? [], tagged: tagged ?? [])
         tileMemo[key] = tiles
         return tiles
     }
 
-    /// The later of the unfinished corpora's oldest loaded posts; nil when
-    /// neither has more to load.
-    private var allFrontier: Int64? {
-        [(authoredToken, authored), (taggedToken, tagged)]
-            .compactMap { token, cache in token == nil ? nil : cache?.map(\.publishedAtMS).min() }
-            .max()
-    }
-
-    /// One page's state. Which fetches a source depends on: All needs both,
-    /// Tagged its own, Posts/Reposts the authored one. A page is
-    /// loading/failed only when a fetch it actually reads is.
+    /// One page's state. Which fetch a source depends on: Tagged its own,
+    /// Posts/Reposts the authored one. A page is loading/failed only when the
+    /// fetch it actually reads is.
     func page(
         _ format: GalleryFilter.Format, _ source: GalleryFilter.Source, emptyMessage: String? = nil
     ) -> PageState {
-        let readsAuthored = source != .tagged
-        let readsTagged = source == .all || source == .tagged
+        let readsTagged = source == .tagged
+        let readsAuthored = !readsTagged
         if (readsAuthored && authoredFailed) || (readsTagged && taggedFailed) {
             let failure = Self.likelierCause(
                 readsAuthored && authoredFailed ? authoredFailure : nil,
@@ -320,16 +298,13 @@ final class ProfileGalleryStore {
         return firstPage + shown.filter { !fresh.contains($0.id) && $0.publishedAtMS < oldest }
     }
 
-    /// Names the empty combination so the blank page reads as an answer.
+    /// Names the empty combination so the blank page reads as an answer: it
+    /// is the source that this knows and the tab cannot — "no media in
+    /// reposts" explains why the page is narrower than the profile.
     ///
-    /// ⚠️ Empty means "nothing to add", not "nothing to say". Unfiltered, this
-    /// page is empty because the profile has nothing of that kind — which the
-    /// TAB already says better than a generated sentence can, with a glyph and
-    /// a headline. It is the FILTER that this knows and the tab cannot: "no
-    /// media in reposts" explains why the page is narrower than the profile,
-    /// and that is worth overriding the tab's own line for.
+    /// Every page reads one source since #772, so the merged All the stored
+    /// filter can still hold never reaches here; it reads as Posts.
     nonisolated static func emptyMessage(for filter: GalleryFilter) -> String {
-        guard filter.source != .all else { return "" }
         // Posts (#631) is every kind, so the source alone names what is
         // missing: "No reposts yet", not "No activity in reposts yet".
         if filter.format == .activity {
@@ -345,8 +320,7 @@ final class ProfileGalleryStore {
         case .short: "short posts"
         }
         let source = switch filter.source {
-        case .all: ""
-        case .posts: " in posts"
+        case .all, .posts: " in posts"
         case .reposts: " in reposts"
         case .tagged: " in tagged posts"
         }
