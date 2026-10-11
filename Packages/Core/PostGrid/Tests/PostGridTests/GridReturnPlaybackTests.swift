@@ -122,6 +122,43 @@ struct GridReturnPlaybackTests {
         #expect(!grid.hasReturnPlayback(for: tapped.id))
     }
 
+    /// ⚠️ A SURFACE TORN DOWN WITH A POST STILL OPEN (a tab or a session
+    /// rebuilt under it) never reaches `endHandoff`. Its parked player must not
+    /// stay loaded in the shared pool until somebody else's park evicts it.
+    @Test func aCoordinatorTornDownWithAPostOpenReleasesItsReturnPlayer() async {
+        let pool = makePool()
+        let tapped = candidate(0)
+        var grid: GridVideoPlaybackCoordinator? = await openedGrid(on: pool, tapped: tapped)
+        weak var released = grid
+        #expect(pool.returnPlaybackCount == 1)
+
+        grid = nil
+        #expect(released == nil, "precondition: nothing else keeps the coordinator alive")
+        #expect(pool.returnPlaybackCount == 0, "the torn-down grid left its player in the pool")
+    }
+
+    /// And a park still resolving when its grid goes away is given back as it
+    /// lands, rather than parked for nobody.
+    @Test func aParkThatLandsAfterItsGridIsGoneIsGivenBack() async {
+        let pool = makePool()
+        let tapped = candidate(0)
+        var grid: GridVideoPlaybackCoordinator? = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        grid?.setSurfaceVisible(true)
+        grid?.update(candidates: [tapped])
+        await grid?.debugAwaitStarts()
+        let before = pool.itemCreations
+        grid?.beginHandoff(tapped.id, parkingReturn: true)
+        grid = nil
+        // The park's own task outlives the grid; let it land. It has run once
+        // it created its item.
+        for _ in 0..<400 where pool.itemCreations == before {
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        await Task.yield()
+        #expect(pool.itemCreations == before + 1, "the park never ran, so this proved nothing")
+        #expect(pool.returnPlaybackCount == 0, "a park landed for a grid that no longer exists")
+    }
+
     /// An abandoned close pauses the clip and keeps it for the next one.
     @Test func anAbandonedCloseKeepsTheClipForTheNextOne() async throws {
         let pool = makePool()

@@ -1018,6 +1018,10 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// Tab frontmost and this page active, or not. Mirrors the pager's gate on
     /// For You: only the page being read may hold pool slots.
     func setAutoplayActive(_ active: Bool) {
+        // Back from a post opened here: the round trip's scope ends, and with
+        // it any return player the close did not land (#951). After the
+        // landing, which runs before the screen appears.
+        if active, playback?.isHandingOff == true { playback?.endHandoff() }
         playback?.setSurfaceVisible(active)
         guard active else { return }
         // Same reason as the reload above: this can arrive with content
@@ -1058,6 +1062,71 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
             // is For You's Following card, which takes off and lands on the
             // list card's curve (`.listMedia`) — its own corner.
             isTile: cell is PostGridTileCell && !pairedPostIDs.contains(postID)
+        )
+    }
+
+    // MARK: - Return playback (#951)
+
+    /// A post is opening from this page: its tile's clip is parked, paused at
+    /// its playhead, for a close that pages on and comes home here
+    /// (`GridVideoPlaybackCoordinator.beginHandoff(_:parkingReturn:)`).
+    ///
+    /// ⚠️ AND EVERY TILE STOPS NOW, the tapped one included. The scope just
+    /// opened makes the surface invisible, so the screen's
+    /// `setAutoplayActive(false)` that follows finds nothing to change: the
+    /// others would only be let go one hop at a time (the scope's stagger,
+    /// made for a flight that carries the tapped tile's player — the
+    /// profile's carries its still), and the tapped one never, decoding behind
+    /// the feed for the whole trip. The park has read the playhead already.
+    func beginReturnHandoff(of postID: PostID) {
+        guard let playback else { return }
+        playback.beginHandoff(postID, parkingReturn: true)
+        playback.stopAll()
+    }
+
+    /// The open never happened (the feed refused it): the scope closes at once
+    /// and the screen, still the viewer's, plays again — nothing else would
+    /// end it, since the screen never disappears.
+    func endReturnHandoff() {
+        guard let playback, playback.isHandingOff else { return }
+        playback.endHandoff()
+        reconcileAutoplay()
+    }
+
+    #if DEBUG
+    /// Whether a post's round trip is open on this page.
+    var debugIsHandingOff: Bool { playback?.isHandingOff ?? false }
+    #endif
+
+    /// The tile's own clip, resumed from where it was parked — the arriving
+    /// picture of a close from another post. Nil when nothing is parked.
+    func returnFlightSurface(for postID: PostID) -> VideoRenderView? {
+        playback?.makeReturnSurface(for: postID)
+    }
+
+    /// A close that resumed the return player was abandoned.
+    func pauseReturnPlayback(for postID: PostID) {
+        playback?.pauseReturnPlayback(of: postID)
+    }
+
+    /// The close's landing: the tile takes the return player `view` draws.
+    /// The source has revealed the tile already.
+    @discardableResult
+    func landReturnPlayback(_ view: UIView, for postID: PostID) -> Bool {
+        guard let view = view as? VideoRenderView, let playback,
+              let tile = cell(for: postID) as? any GridPlaybackCell
+        else { return false }
+        return playback.landReturnPlayback(view, for: postID, cell: tile)
+    }
+
+    /// The landing's hold: the tile's clip once it took the return player,
+    /// its still otherwise.
+    func isReturnLandingReady(for postID: PostID) -> Bool {
+        guard let playback else { return true }
+        return playback.isReturnLandingReady(
+            for: postID,
+            cell: cell(for: postID) as? any GridPlaybackCell,
+            hasThumbnail: posts.first { $0.id == postID }?.thumbnailURL != nil
         )
     }
 

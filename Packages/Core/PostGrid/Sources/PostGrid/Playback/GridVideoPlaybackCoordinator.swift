@@ -253,6 +253,7 @@ public final class GridVideoPlaybackCoordinator {
     public init(pool: VideoPlaybackController, maxConcurrent: Int = 6) {
         self.pool = pool
         self.maxConcurrent = maxConcurrent
+        returnRelease = ReturnPlaybackRelease(pool: pool)
     }
 
     /// Reconciles playback against the currently visible video tiles. Stops
@@ -863,7 +864,20 @@ public final class GridVideoPlaybackCoordinator {
     /// Clips this coordinator parked a return player on, by post. Released at
     /// `endHandoff` (and at the next `beginHandoff`); a landing that used one
     /// has claimed it from the pool by then, so the release finds nothing.
-    private var returnURLs: [PostID: URL] = [:]
+    ///
+    /// ⚠️ HELD BY `returnRelease`, which gives them back if this coordinator
+    /// goes away with a post still open (a tab or a session rebuilt under it):
+    /// `endHandoff` never runs then, and without it up to two paused players
+    /// would stay loaded in the shared pool until a later park or a memory
+    /// warning evicted them.
+    private var returnURLs: [PostID: URL] {
+        get { returnRelease.parked }
+        set { returnRelease.parked = newValue }
+    }
+    private let returnRelease: ReturnPlaybackRelease
+    /// Whose parks these are, in the pool's ledger — see
+    /// `VideoPlaybackController.ReturnKey`.
+    private var returnOwner: ObjectIdentifier { returnRelease.owner }
     /// The park still resolving for each post, so a test can wait for it.
     private var returnParkTasks: [PostID: Task<Void, Never>] = [:]
 
@@ -891,10 +905,16 @@ public final class GridVideoPlaybackCoordinator {
         let pool = pool
         let seconds = surface.flatMap { pool.playheadSeconds(in: $0) } ?? 0
         returnURLs[id] = url
-        returnParkTasks[id] = Task { @MainActor in
-            await pool.parkReturnPlayback(
-                of: url, scope: id.rawValue, at: seconds, peakBitRate: Self.tileBitRateCap
+        let owner = returnOwner
+        returnParkTasks[id] = Task { @MainActor [weak self] in
+            let parked = await pool.parkReturnPlayback(
+                of: url, scope: id.rawValue, owner: owner, at: seconds, peakBitRate: Self.tileBitRateCap
             )
+            // A park that lands for nobody — this coordinator gone, or its
+            // scope released before the park could even begin — is given
+            // straight back rather than left for an eviction.
+            guard parked, self?.returnURLs[id] != url else { return }
+            pool.releaseReturnPlayback(of: url, scope: id.rawValue, owner: owner)
         }
     }
 
@@ -915,7 +935,7 @@ public final class GridVideoPlaybackCoordinator {
         #endif
         // Over the landing's still, never over black: see `makeAttachedSurface`.
         view.paintsOpaqueGround = false
-        guard pool.attachReturnSurface(view, of: url, scope: id.rawValue) else { return nil }
+        guard pool.attachReturnSurface(view, of: url, scope: id.rawValue, owner: returnOwner) else { return nil }
         flightSurfaces.add(view)
         return view
     }
@@ -924,22 +944,63 @@ public final class GridVideoPlaybackCoordinator {
     /// stays open, so the clip waits, paused, for the next close.
     public func pauseReturnPlayback(of id: PostID) {
         guard let url = returnURLs[id] else { return }
-        pool.pauseReturnPlayback(of: url, scope: id.rawValue)
+        pool.pauseReturnPlayback(of: url, scope: id.rawValue, owner: returnOwner)
     }
 
     /// Whether a return player is parked for `id` right now.
     public func hasReturnPlayback(for id: PostID) -> Bool {
         guard let url = returnURLs[id] else { return false }
-        return pool.hasReturnPlayback(of: url, scope: id.rawValue)
+        return pool.hasReturnPlayback(of: url, scope: id.rawValue, owner: returnOwner)
+    }
+
+    /// The post whose landing took its return player, until the scope ends —
+    /// the one landing that waits on its clip rather than on its still.
+    public private(set) var returnLandedID: PostID?
+
+    /// A close from another post landing on `id`'s tile: the tile takes the
+    /// return player `view` is drawing, on its own surface and with the loan
+    /// (#951). The surfaces outside For You's list call this rather than
+    /// `adoptAttachedSurface` because they hold no URL of their own for the
+    /// landing; the parked clip's is the one. False when nothing of `id`'s
+    /// was parked, or the player could not be claimed.
+    ///
+    /// The caller reveals the tile first: a surface in a concealed cell is
+    /// never reported as drawing, and the landing would be held for nothing.
+    @discardableResult
+    public func landReturnPlayback(
+        _ view: VideoRenderView, for id: PostID, cell: any GridPlaybackCell
+    ) -> Bool {
+        guard let url = returnURLs[id],
+              adoptAttachedSurface(for: id, url: url, cell: cell, drawnBy: view)
+        else { return false }
+        returnLandedID = id
+        return true
+    }
+
+    /// Whether `id`'s tile shows what a close from another post needs before
+    /// the card goes: its clip, when the landing took the return player; its
+    /// still, when it did not (nothing parked, or evicted). The flight's hold
+    /// has a ceiling, so a still that never loads costs a pause, not a stuck
+    /// card.
+    ///
+    /// - Parameter hasThumbnail: whether the post has a still to wait for at
+    ///   all. A tile with none is ready as it is.
+    public func isReturnLandingReady(
+        for id: PostID, cell: (any GridPlaybackCell)?, hasThumbnail: Bool
+    ) -> Bool {
+        if returnLandedID == id { return isSurfaceRendering(for: id) }
+        guard let cell, hasThumbnail else { return true }
+        return cell.renderedCover != nil
     }
 
     private func releaseReturnPlaybacks() {
         for (id, url) in returnURLs {
             returnParkTasks.removeValue(forKey: id)?.cancel()
-            pool.releaseReturnPlayback(of: url, scope: id.rawValue)
+            pool.releaseReturnPlayback(of: url, scope: id.rawValue, owner: returnOwner)
         }
         returnURLs.removeAll()
         returnParkTasks.removeAll()
+        returnLandedID = nil
     }
 
     #if DEBUG
@@ -1413,4 +1474,41 @@ public final class GridVideoPlaybackCoordinator {
         for task in tasks { await task.value }
     }
     #endif
+}
+
+/// Gives a coordinator's parked return players back when the coordinator
+/// itself goes away (#951) — the one teardown `endHandoff` never sees.
+///
+/// A separate object because a deinit is not main-actor isolated, and the
+/// coordinator's own state is: this one holds only what the release needs (the
+/// pool, which is main-actor and therefore sendable, and the parked clips), and
+/// hops to the main actor to use them. On the main thread, which is where a
+/// screen is torn down, the release runs before the deinit returns.
+final class ReturnPlaybackRelease: @unchecked Sendable {
+    private let pool: VideoPlaybackController
+    /// Mutated on the main actor only, by the coordinator that owns this.
+    var parked: [PostID: URL] = [:]
+    /// The parks' owner in the pool's ledger: this object, which lives exactly
+    /// as long as its coordinator — and, unlike the coordinator, can be named
+    /// from the coordinator's initialiser.
+    var owner: ObjectIdentifier { ObjectIdentifier(self) }
+
+    init(pool: VideoPlaybackController) {
+        self.pool = pool
+    }
+
+    deinit {
+        let parked = parked
+        guard !parked.isEmpty else { return }
+        let pool = pool
+        let owner = owner
+        let release: @MainActor @Sendable () -> Void = {
+            for (id, url) in parked { pool.releaseReturnPlayback(of: url, scope: id.rawValue, owner: owner) }
+        }
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { release() }
+        } else {
+            Task { @MainActor in release() }
+        }
+    }
 }

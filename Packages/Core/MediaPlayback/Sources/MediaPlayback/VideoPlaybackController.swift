@@ -843,10 +843,16 @@ public final class VideoPlaybackController {
     public static let returnPlaybackCapacity = 2
 
     /// A post's clip, as a return player is keyed: the same asset AND the same
-    /// post, for the reason `playingScope` gives.
+    /// post, for the reason `playingScope` gives — and the same OWNER (#951).
+    ///
+    /// ⚠️ TWO SURFACES CAN PARK ONE POST. A Following card opens a video, the
+    /// sound sheet opened from it shows the same post as a tile, and that tile
+    /// opens it again: keyed by post alone, the second park replaced the
+    /// first, and either close could resume — or release — the other's player.
     struct ReturnKey: Hashable {
         let scope: String
         let url: URL
+        let owner: ObjectIdentifier?
     }
 
     /// One parked return player.
@@ -880,8 +886,8 @@ public final class VideoPlaybackController {
     public var returnPlaybackCount: Int { returnPlaybacks.count }
 
     /// Whether a return player is parked for `url` under `scope`.
-    public func hasReturnPlayback(of url: URL, scope: String) -> Bool {
-        returnPlaybacks.contains { $0.key == ReturnKey(scope: scope, url: url) }
+    public func hasReturnPlayback(of url: URL, scope: String, owner: ObjectIdentifier? = nil) -> Bool {
+        returnPlaybacks.contains { $0.key == ReturnKey(scope: scope, url: url, owner: owner) }
     }
 
     /// Parks a dedicated, paused player on `url` at `seconds`, for a close to
@@ -892,10 +898,11 @@ public final class VideoPlaybackController {
     /// resolved, or when a release or newer park overtook this one.
     @discardableResult
     public func parkReturnPlayback(
-        of url: URL, scope: String, at seconds: Double, peakBitRate: Double = 0
+        of url: URL, scope: String, owner: ObjectIdentifier? = nil,
+        at seconds: Double, peakBitRate: Double = 0
     ) async -> Bool {
-        let key = ReturnKey(scope: scope, url: url)
-        releaseReturnPlayback(of: url, scope: scope)
+        let key = ReturnKey(scope: scope, url: url, owner: owner)
+        releaseReturnPlayback(of: url, scope: scope, owner: owner)
         let token = nextGenerationToken()
         returnParkTokens[key] = token
         let resolved: URL
@@ -987,8 +994,10 @@ public final class VideoPlaybackController {
     /// it. Returns false when nothing is parked for this clip (never parked,
     /// evicted, or released).
     @discardableResult
-    public func attachReturnSurface(_ view: VideoRenderView, of url: URL, scope: String) -> Bool {
-        let key = ReturnKey(scope: scope, url: url)
+    public func attachReturnSurface(
+        _ view: VideoRenderView, of url: URL, scope: String, owner: ObjectIdentifier? = nil
+    ) -> Bool {
+        let key = ReturnKey(scope: scope, url: url, owner: owner)
         guard let index = returnPlaybacks.firstIndex(where: { $0.key == key }) else { return false }
         // Used: it moves to the young end of the eviction order.
         let entry = returnPlaybacks.remove(at: index)
@@ -1013,8 +1022,9 @@ public final class VideoPlaybackController {
 
     /// Pauses a parked clip again: a close that resumed it was abandoned, and
     /// the post stays open. The player keeps its place in the ledger.
-    public func pauseReturnPlayback(of url: URL, scope: String) {
-        guard let entry = returnPlaybacks.first(where: { $0.key == ReturnKey(scope: scope, url: url) })
+    public func pauseReturnPlayback(of url: URL, scope: String, owner: ObjectIdentifier? = nil) {
+        let key = ReturnKey(scope: scope, url: url, owner: owner)
+        guard let entry = returnPlaybacks.first(where: { $0.key == key })
         else { return }
         pausedAnchors[ObjectIdentifier(entry.player)] = entry.player.currentTime()
         entry.player.pause()
@@ -1022,8 +1032,8 @@ public final class VideoPlaybackController {
 
     /// Releases the player parked for this clip, if any, and cancels a park
     /// still resolving.
-    public func releaseReturnPlayback(of url: URL, scope: String) {
-        let key = ReturnKey(scope: scope, url: url)
+    public func releaseReturnPlayback(of url: URL, scope: String, owner: ObjectIdentifier? = nil) {
+        let key = ReturnKey(scope: scope, url: url, owner: owner)
         returnParkTokens[key] = nil
         guard let index = returnPlaybacks.firstIndex(where: { $0.key == key }) else { return }
         retire(returnPlaybacks.remove(at: index))

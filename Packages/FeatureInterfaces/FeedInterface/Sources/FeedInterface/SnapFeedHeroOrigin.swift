@@ -388,6 +388,16 @@ public struct SnapFeedHeroOrigin {
     /// A close that resumed `returnLiveMedia` was abandoned: the post stays
     /// open, and the item's clip waits, paused, for the next close.
     public let pauseReturnLiveMedia: (() -> Void)?
+    /// Hands the item the clip `returnLiveMedia` gave the card, at the landing
+    /// of a close from another post (#951) — kept apart from
+    /// `adoptLandingLiveMedia` so a surface can take its own clip back without
+    /// also starting to adopt the page's playback on SAME-post closes, which it
+    /// has never done. `nil` falls back to `adoptLandingLiveMedia`.
+    public let adoptReturnLiveMedia: ((UIView) -> Void)?
+    /// Whether the item a close from another post lands on is drawing what it
+    /// should yet: its clip once `adoptReturnLiveMedia` took one, its still
+    /// otherwise. `nil` falls back to `landingMediaIsReady`.
+    public let returnLandingIsReady: (() -> Bool)?
     /// The source's FURNITURE, drawn fresh — what sits over the picture at
     /// rest (a card's caption over its foot). The card wears it at the source
     /// end and the flight fades it as the card grows, the way a brick's
@@ -449,6 +459,8 @@ public struct SnapFeedHeroOrigin {
         landingMediaIsReady: (() -> Bool)? = nil,
         returnLiveMedia: (() -> UIView?)? = nil,
         pauseReturnLiveMedia: (() -> Void)? = nil,
+        adoptReturnLiveMedia: ((UIView) -> Void)? = nil,
+        returnLandingIsReady: (() -> Bool)? = nil,
         restingOverlay: (() -> UIView?)? = nil,
         viewerStake: @escaping () -> Int = { 0 },
         willStageDismissal: @escaping () -> Void = {},
@@ -476,6 +488,8 @@ public struct SnapFeedHeroOrigin {
         self.landingMediaIsReady = landingMediaIsReady
         self.returnLiveMedia = returnLiveMedia
         self.pauseReturnLiveMedia = pauseReturnLiveMedia
+        self.adoptReturnLiveMedia = adoptReturnLiveMedia
+        self.returnLandingIsReady = returnLandingIsReady
         self.restingOverlay = restingOverlay
         self.viewerStake = viewerStake
         self.willStageDismissal = willStageDismissal

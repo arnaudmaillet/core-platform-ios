@@ -1927,6 +1927,10 @@ final class PlaceProfileViewController: UIViewController {
         // direction. Two enums with the same cases on purpose: one is this
         // feature's, the other crosses the interface.
         let flightStyle: SnapFeedHeroStyle = appearance?.style == .listMedia ? .listMedia : .tile
+        // The tapped tile's player is the flight's from here, and its own
+        // clip is parked for a close that pages on and comes home (#951).
+        // Closed by `viewDidAppear`'s `endPlaybackHandoff`.
+        grid.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         let origin = SnapFeedHeroOrigin(
             post: tapped,
             stream: stream,
@@ -1961,7 +1965,13 @@ final class PlaceProfileViewController: UIViewController {
             // already false for it — which used to mean the platform's plain
             // slide, on the one surface in the app where a text post did not
             // get the window every other list gives it. This is that window.
-            textReveal: textRowReveal(for: tapped, in: grid)
+            textReveal: textRowReveal(for: tapped, in: grid),
+            // A close from another post comes home with the tile's OWN clip,
+            // parked at the tap (#951) — never the page's.
+            returnLiveMedia: { [weak grid] in grid?.returnFlightSurface(for: tapped.id) },
+            pauseReturnLiveMedia: { [weak grid] in grid?.pauseReturnPlayback(for: tapped.id) },
+            adoptReturnLiveMedia: { [weak grid] view in grid?.landReturnPlayback(view, for: tapped.id) },
+            returnLandingIsReady: { [weak grid] in grid?.isReturnLandingReady(for: tapped.id) ?? true }
         )
         // Remembered for the CLOSE. A flight opened from this page has a tile
         // to go home to, which is exactly what tells that close apart from the
@@ -2622,6 +2632,11 @@ extension PlaceProfileViewController {
     func debugSelectTab(_ tab: Tab) {
         loadViewIfNeeded()
         adoptTab(tab)
+    }
+    /// Taps Discover's tile `index` through the page's selection path, the
+    /// one a finger reaches. False while it is not loaded yet.
+    func debugOpenDiscoverTile(at index: Int) -> Bool {
+        page.debugSelectItem(at: index)
     }
     /// `-maps-place-tab`'s argument: a tab's name, or its position.
     static func debugTabIndex(_ argument: String) -> Int? {

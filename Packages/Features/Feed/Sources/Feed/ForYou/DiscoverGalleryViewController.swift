@@ -216,7 +216,7 @@ final class DiscoverGalleryViewController: UIViewController {
         let appearance = page.heroAppearance(for: tapped.id)
         // The tapped tile's player is the flight's from here: the grid's own
         // reconcile must neither restart nor stop it while it is in the air.
-        page.beginPlaybackHandoff(of: tapped.id)
+        page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         #if DEBUG
         PushedListJumpTrace.mark("gallery open", page: page, host: view)
         #endif
@@ -255,6 +255,12 @@ final class DiscoverGalleryViewController: UIViewController {
                     if !committed { page?.clearRevealConcealment() }
                 }
             ),
+            // A close from another post comes home with the tile's OWN clip,
+            // parked at the tap (#951) — never the page's.
+            returnLiveMedia: { [weak page] in page?.returnFlightSurface(for: tapped.id) },
+            pauseReturnLiveMedia: { [weak page] in page?.pauseReturnPlayback(for: tapped.id) },
+            adoptReturnLiveMedia: { [weak page] view in page?.landReturnPlayback(view, for: tapped.id) },
+            returnLandingIsReady: { [weak page] in page?.isReturnLandingReady(for: tapped.id) ?? true },
             // A large tile's words (`PostTileInfo`), worn by the card
             // at the tile's end and faded as it grows — the Following row's
             // arrangement. Nil for a tile that wears none.

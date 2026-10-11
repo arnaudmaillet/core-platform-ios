@@ -391,7 +391,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         let hero = page.hero(for: tapped.id, in: view)
         let appearance = page.heroAppearance(for: tapped.id)
 
-        page.beginPlaybackHandoff(of: tapped.id)
+        page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
 
         let origin = SnapFeedHeroOrigin(
             post: tapped,
@@ -408,6 +408,12 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             opensComments: false,
             depthView: { [weak page] in page },
             textReveal: textReveal(for: tapped),
+            // A close from another post comes home with the tile's OWN clip,
+            // parked at the tap (#951) — never the page's.
+            returnLiveMedia: { [weak page] in page?.returnFlightSurface(for: tapped.id) },
+            pauseReturnLiveMedia: { [weak page] in page?.pauseReturnPlayback(for: tapped.id) },
+            adoptReturnLiveMedia: { [weak page] view in page?.landReturnPlayback(view, for: tapped.id) },
+            returnLandingIsReady: { [weak page] in page?.isReturnLandingReady(for: tapped.id) ?? true },
             // A paired card's or a large tile's words, worn by the card at the
             // tile's end (#910) — the gallery's and the profile's arrangement.
             restingOverlay: { [weak page] in page?.restingOverlay(for: tapped.id) },
