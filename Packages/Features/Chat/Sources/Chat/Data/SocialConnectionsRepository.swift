@@ -37,14 +37,40 @@ public struct SuggestedAccount: Equatable, Sendable, Identifiable {
     }
 }
 
+/// One page of suggestions, best first (#644).
+public struct SuggestionsPage: Equatable, Sendable {
+    public let accounts: [SuggestedAccount]
+    /// Where the next page starts; nil on the last page.
+    ///
+    /// ⚠️ **FOLLOW THE TOKEN, NEVER THE COUNT.** The server filters each page
+    /// after reading it, so a page can come back short — even empty — and
+    /// still carry a token: more follow.
+    public let nextPageToken: String?
+
+    public init(accounts: [SuggestedAccount], nextPageToken: String?) {
+        self.accounts = accounts
+        self.nextPageToken = nextPageToken
+    }
+}
+
 /// What the Suggestions surface consumes. Kept separate from the source so a
 /// stub can stand in for the social graph.
 public protocol SuggestionsProviding: Sendable {
-    /// The `limit` best suggestions, best first. The same graph answers the
-    /// same order, so a longer list starts with the shorter one.
+    /// The `limit` best suggestions, best first: the first page.
     func suggestions(limit: Int) async throws -> [SuggestedAccount]
+    /// A page of at most `limit` suggestions: the first when `pageToken` is
+    /// nil, otherwise the one that token starts (#644).
+    func suggestions(limit: Int, after pageToken: String?) async throws -> SuggestionsPage
     func follow(_ profileID: ProfileID) async throws
     func unfollow(_ profileID: ProfileID) async throws
+}
+
+extension SuggestionsProviding {
+    /// Providers that don't page: the first page is everything.
+    public func suggestions(limit: Int, after pageToken: String?) async throws -> SuggestionsPage {
+        guard pageToken == nil else { return SuggestionsPage(accounts: [], nextPageToken: nil) }
+        return SuggestionsPage(accounts: try await suggestions(limit: limit), nextPageToken: nil)
+    }
 }
 
 public enum SuggestionsError: Error, Equatable, Sendable {
@@ -104,6 +130,9 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
     /// app (a profile's button, a feed's "+") — see `FollowGraphEvents`.
     private let followEvents: FollowGraphEvents?
     private var profileCache: [ProfileID: Profile_V1_ProfileView] = [:]
+    /// Who followed the viewer when the first page of suggestions was read —
+    /// reused by the pages after it.
+    private var viewerFollowers: (viewer: ProfileID, ids: Set<ProfileID>)?
 
     /// `pageSize` carries no default: a default argument on an actor
     /// initializer can't be evaluated from the main-actor-isolated composition
@@ -125,26 +154,45 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
     // MARK: - SuggestionsProviding
 
     public func suggestions(limit: Int) async throws -> [SuggestedAccount] {
+        try await suggestions(limit: limit, after: nil).accounts
+    }
+
+    /// One `SuggestProfiles` page (#644, backend #834), its rows hydrated.
+    ///
+    /// ⚠️ A page can come back short, even empty, WITH a token: the server
+    /// filters what it examined (private, hidden, opted out), and a row
+    /// whose profile did not resolve is dropped here too. The token, not the
+    /// count, says whether more follow. A profile can also show on two pages
+    /// when its ranking moved between them: the caller de-duplicates by id
+    /// across pages; this de-duplicates within one.
+    public func suggestions(limit: Int, after pageToken: String?) async throws -> SuggestionsPage {
         let viewerID = try await viewer.viewerProfileID()
         var request = SocialGraph_V1_SuggestProfilesRequest()
         request.profileID = viewerID.rawValue
         request.limit = Int32(min(max(limit, 1), Self.suggestionLimit))
+        request.pageToken = pageToken ?? ""
         async let suggestedTask = socialGraphClient.suggestProfiles(request: request, headers: [:])
-        // Who already follows the viewer: one read, so a suggestion that
-        // does can say so — the strongest reason the graph has.
-        async let followersTask = try? followers(of: viewerID)
-        let suggested: [SocialGraph_V1_SuggestedProfile]
+        // Who already follows the viewer, so a suggestion that does can say
+        // so — the strongest reason the graph has. Read with the first page
+        // and reused by the pages after it: one read per paging run.
+        let held = pageToken == nil ? nil : viewerFollowers.flatMap { $0.viewer == viewerID ? $0.ids : nil }
+        async let followersTask = held == nil ? (try? followers(of: viewerID)) : nil
+        let body: SocialGraph_V1_SuggestProfilesResponse
         switch await suggestedTask.result {
-        case .success(let body): suggested = body.profiles
+        case .success(let answer): body = answer
         case .failure(let error): throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
-        let followers = await followersTask ?? []
+        let fetched = await followersTask
+        if let fetched { viewerFollowers = (viewerID, fetched) }
+        let followers = held ?? fetched ?? []
 
-        let ids = suggested.map { ProfileID($0.profileID) }
-        await hydrateProfiles(for: ids)
-        return suggested.compactMap { candidate in
+        var seen: Set<String> = []
+        let suggested = body.profiles.filter { seen.insert($0.profileID).inserted }
+        await hydrateProfiles(for: suggested.map { ProfileID($0.profileID) })
+        let accounts = suggested.compactMap { candidate in
             makeSuggestion(from: candidate, followsViewer: followers.contains(ProfileID(candidate.profileID)))
         }
+        return SuggestionsPage(accounts: accounts, nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
     }
 
     public func follow(_ profileID: ProfileID) async throws {

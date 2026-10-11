@@ -8,7 +8,7 @@ import UIKit
 /// inline follow and a dismiss.
 ///
 /// Loads lazily — a viewer who never swipes this far never pays for the
-/// suggestions behind it — and asks for the rest of the list at its end.
+/// suggestions behind it — and asks for the next page at its end.
 final class SuggestionsViewController: UIViewController {
     fileprivate enum Section { case main }
 
@@ -27,6 +27,9 @@ final class SuggestionsViewController: UIViewController {
     }()
     private let skeletonView = ConversationListSkeletonView()
     private let statusView = InboxStatusView()
+    /// The inbox's paging spinner, under the last row while another page is
+    /// there to load (#644, as #593).
+    private let pagingFooter = PagingSpinnerFooterView()
 
     private var dataSource: UITableViewDiffableDataSource<Section, ProfileID>!
     private var modelsByID: [ProfileID: SuggestionDisplayModel] = [:]
@@ -130,7 +133,11 @@ final class SuggestionsViewController: UIViewController {
             // its animation after the next transition.
             dataSource.apply(snapshot, animatingDifferences: hasRenderedContent && view.window != nil)
             hasRenderedContent = true
+            // The list moved under the spinner (or the ask failed): it waits
+            // for the end to come back in reach before it turns again.
+            updatePagingFooter()
             revealContent()
+            if viewModel.canPageOnItsOwn { askIfTheEndIsInView() }
         case .empty:
             skeletonView.isHidden = true
             tableView.isHidden = true
@@ -149,6 +156,28 @@ final class SuggestionsViewController: UIViewController {
             )
             statusView.isHidden = false
         }
+    }
+
+    /// ⚠️ **ROWS ALREADY ON SCREEN NEVER ASK AGAIN.** `willDisplay` fires
+    /// once per row coming into view, so a list whose every row fits — after
+    /// a walk of empty pages, or a failed ask — would sit under its footer
+    /// for good. Asked after each render (when the list may page on its own)
+    /// and when the viewer's scroll comes to rest.
+    private func askIfTheEndIsInView() {
+        guard viewModel.hasMore else { return }
+        tableView.layoutIfNeeded()
+        let nearEnd = Set(dataSource.snapshot().itemIdentifiers.suffix(InboxPaging.nearEndRowCount))
+        let shown = (tableView.indexPathsForVisibleRows ?? []).compactMap { dataSource.itemIdentifier(for: $0) }
+        guard shown.contains(where: nearEnd.contains) else { return }
+        pagingFooter.setSpinning(true)
+        viewModel.loadMore()
+    }
+
+    /// The spinner hangs under the last row only while there is more to load.
+    private func updatePagingFooter() {
+        pagingFooter.setSpinning(false)
+        let footer: UIView? = viewModel.hasMore ? pagingFooter : nil
+        if tableView.tableFooterView !== footer { tableView.tableFooterView = footer }
     }
 
     private func revealContent() {
@@ -186,12 +215,23 @@ extension SuggestionsViewController: UITableViewDelegate {
         return spacer
     }
 
-    /// A row near the end asks for the rest of the list (#644).
+    /// A row near the end asks for the next page (#644), early enough that
+    /// it usually lands before the end does.
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        guard let id = dataSource.itemIdentifier(for: indexPath),
+        guard viewModel.hasMore, let id = dataSource.itemIdentifier(for: indexPath),
               dataSource.snapshot().itemIdentifiers.suffix(InboxPaging.nearEndRowCount).contains(id)
         else { return }
+        pagingFooter.setSpinning(true)
         viewModel.loadMore()
+    }
+
+    /// The viewer's own approach to the end: asks even after a failed ask.
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        askIfTheEndIsInView()
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { askIfTheEndIsInView() }
     }
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {

@@ -121,8 +121,10 @@ public final class MockSocialGraphService: @unchecked Sendable {
             return .success(view)
         }
         bff.register(path: "/social_graph.v1.SocialGraphService/SuggestProfiles") { [self] (request: SocialGraph_V1_SuggestProfilesRequest) in
+            let page = suggestions(for: subject(request.profileID), limit: request.limit, after: request.pageToken)
             var response = SocialGraph_V1_SuggestProfilesResponse()
-            response.profiles = suggestions(for: subject(request.profileID), limit: request.limit)
+            response.profiles = page.profiles
+            response.nextPageToken = page.nextPageToken
             return .success(response)
         }
         bff.register(path: "/social_graph.v1.SocialGraphService/Follow") { [self] (request: SocialGraph_V1_FollowRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
@@ -515,35 +517,51 @@ public final class MockSocialGraphService: @unchecked Sendable {
         }
     }
 
-    /// `SuggestProfiles` as the fleet answers it (backend #661): the profiles
-    /// the profiles `profileID` follows follow, ranked by how many of them do,
-    /// ties on id; without oneself, those already followed, a block either
-    /// way, private profiles, and anyone with "appear in suggestions" off. At
-    /// most 50; 0 means 20.
-    private func suggestions(for profileID: String, limit: Int32) -> [SocialGraph_V1_SuggestedProfile] {
+    /// `SuggestProfiles` as the fleet answers it (backend #661, paged since
+    /// #834): the profiles the profiles `profileID` follows follow, ranked by
+    /// how many of them do, ties on id; without oneself and those already
+    /// followed. At most 50 per page; 0 means 20.
+    ///
+    /// ⚠️ **A PAGE EXAMINES `limit` CANDIDATES, THEN FILTERS THEM** — a block
+    /// either way, private profiles, anyone with "appear in suggestions" off
+    /// — as the fleet does, so a page can come back short or EMPTY and still
+    /// carry a token. The token is the last candidate examined, as
+    /// "mutuals:profile_id"; the next page resumes strictly after it in the
+    /// ranking, which is recomputed per page, so a profile whose count moved
+    /// meanwhile can show twice. Empty on the last page.
+    private func suggestions(
+        for profileID: String, limit: Int32, after pageToken: String
+    ) -> (profiles: [SocialGraph_V1_SuggestedProfile], nextPageToken: String) {
         let size = limit == 0 ? 20 : Int(min(max(limit, 1), 50))
         let followed = following(of: profileID)
         var counts: [String: UInt32] = [:]
         for source in followed {
             for candidate in following(of: source) { counts[candidate, default: 0] += 1 }
         }
-        return counts
+        let ranked = counts
+            .filter { candidate, _ in candidate != profileID && !followed.contains(candidate) }
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+        var start = 0
+        if let separator = pageToken.firstIndex(of: ":"), let mutuals = UInt32(pageToken[..<separator]) {
+            let lastID = String(pageToken[pageToken.index(after: separator)...])
+            start = ranked.firstIndex { $0.value < mutuals || ($0.value == mutuals && $0.key > lastID) } ?? ranked.count
+        }
+        let examined = ranked[start..<min(start + size, ranked.count)]
+        let profiles = examined
             .filter { candidate, _ in
-                candidate != profileID
-                    && !followed.contains(candidate)
-                    && !isBlocking(actorID: profileID, targetID: candidate)
+                !isBlocking(actorID: profileID, targetID: candidate)
                     && !isBlocking(actorID: candidate, targetID: profileID)
                     && !isPrivate(candidate)
                     && isSuggestible(candidate)
             }
-            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
-            .prefix(size)
             .map { candidate, mutuals in
                 var suggestion = SocialGraph_V1_SuggestedProfile()
                 suggestion.profileID = candidate
                 suggestion.mutualCount = mutuals
                 return suggestion
             }
+        let next = examined.last.map { "\($0.value):\($0.key)" } ?? ""
+        return (profiles, start + size < ranked.count ? next : "")
     }
 
     /// Who follows `profileID`, inverted from the same follow graph — the
