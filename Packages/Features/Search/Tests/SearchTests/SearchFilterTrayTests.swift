@@ -62,7 +62,7 @@ struct SearchFilterTrayTests {
         let viewModel: SearchViewModel
         let box: SortBox
 
-        init() {
+        init(in tabs: UITabBarController? = nil) {
             box = SortBox()
             viewModel = SearchViewModel(
                 repository: StubProvider(box: box),
@@ -81,7 +81,12 @@ struct SearchFilterTrayTests {
             // helper that went through the screen would read nil for the
             // results it was asked about.
             navigation = UINavigationController(rootViewController: screen)
-            window.rootViewController = navigation
+            if let tabs {
+                tabs.viewControllers = [navigation]
+                window.rootViewController = tabs
+            } else {
+                window.rootViewController = navigation
+            }
             window.makeKeyAndVisible()
             screen.loadViewIfNeeded()
             window.layoutIfNeeded()
@@ -101,13 +106,9 @@ struct SearchFilterTrayTests {
             navigation.topViewController as? SearchResultsViewController
         }
 
-        /// ⚠️ THE FILTER IS IN NEITHER THE TOOLBAR NOR THE BAND. A toolbar and
-        /// an accessory both claim the bottom of the screen and UIKit
-        /// coordinates neither, and one accessory is one capsule — so the
-        /// filter is a tray in the SCREEN'S OWN VIEW, pinned above its safe
-        /// area, which the band is already excluded from. Found by walking,
-        /// because none of those places has an index to read.
-        var bandHost: SelectorAccessoryHost? { results?.selectorAccessory?.hostView }
+        /// The selector's toolbar item (#881) — the pushed profile's
+        /// `SelectorToolbarItem`.
+        var selectorItem: UIBarButtonItem? { results?.selectorToolbar?.item }
 
         /// ⚠️ IT IS A LEADING BAR ITEM NOW — a plain system one, so there is no
         /// custom view to walk to. It sits beside the chevron, which is what
@@ -115,6 +116,12 @@ struct SearchFilterTrayTests {
         var item: UIBarButtonItem? {
             results?.navigationItem.leftBarButtonItems?
                 .first { $0.accessibilityLabel == "Filters" }
+        }
+
+        /// The labels of every accessibility element under `view`, in order.
+        static func accessibilityLabels(in view: UIView) -> [String] {
+            if view.isAccessibilityElement { return [view.accessibilityLabel ?? ""] }
+            return view.subviews.flatMap(accessibilityLabels(in:))
         }
 
         static func filterButton(in view: UIView) -> UIButton? {
@@ -541,7 +548,10 @@ struct SearchFilterTrayTests {
     /// became a glyph. A toolbar has no item groups and no overflow control, so
     /// the selector cannot fail that way there, and the bar is left holding a
     /// back button and one trailing item.
-    @Test func theSelectorIsInTheBandAndTheQueryIsInTheBar() async {
+    ///
+    /// ⚠️ **A LEADING TOOLBAR ITEM, NOT THE TAB BAR'S ACCESSORY (#881)** — the
+    /// pushed profile's arrangement, through the same `SelectorToolbarItem`.
+    @Test func theSelectorLeadsTheToolbarAndTheQueryIsInTheBar() async {
         let host = Host()
         await host.showResults("haddad")
         let results = try? #require(host.results)
@@ -549,22 +559,52 @@ struct SearchFilterTrayTests {
         // The query is a trailing bar item with a real field in it...
         #expect(results?.navigationItem.rightBarButtonItems?
             .compactMap { $0.customView as? UITextField }.count == 1)
-        // ...the navigation bar's leading group is empty, so the back button is
-        // the back button and there is nothing to supplement...
+        // ...the navigation bar's leading group holds the filter alone...
         #expect(results?.navigationItem.leftBarButtonItems?.count == 1,
                 "the filter, and only the filter")
         #expect(results?.navigationItem.hidesBackButton == false)
-        // ...the band at the foot carries the selector and NOTHING else, since
-        // one accessory is one capsule...
-        #expect(results?.toolbarItems?.isEmpty != false,
-                "a toolbar and an accessory both claim the bottom and neither yields")
-        let band = try? #require(host.bandHost)
-        #expect(band?.subviews.compactMap { $0 as? PagedTabBar }.count == 1)
-        #expect((band.map { Host.filterButton(in: $0) } ?? nil) == nil,
-                "a filter inside the band could not have a capsule of its own")
-        // ...and NOTHING floats over the screen either: the filter went to the
-        // navigation bar, so there is no second thing at the foot at all.
+        // ...and the selector LEADS the bottom toolbar, the strip itself,
+        // dressed for a bar item's platter at its own width, with nothing
+        // after it but the space that holds it to the leading corner.
+        let items = results?.toolbarItems ?? []
+        #expect(items.count == 2)
+        #expect(items.first === host.selectorItem, "the strip does not lead the toolbar")
+        let strip = items.first?.customView as? PagedTabBar
+        #expect(strip != nil, "no selector in the toolbar")
+        #expect(strip?.hosting == .platter)
+        #expect(strip?.fillsWidth == false)
+        // The same segments VoiceOver reads, one per tab.
+        let labels = strip.map(Host.accessibilityLabels(in:)) ?? []
+        #expect(labels == ["Posts", "Users"], "the segments VoiceOver reads: \(labels)")
+        // ...shown, on a screen with the tab bar under it hidden...
+        #expect(host.navigation.isToolbarHidden == false, "the toolbar never came up")
+        // ...and NOTHING floats over the screen either.
         #expect(results?.view.subviews.contains { $0 is InlineFilterTrayView } != true)
+    }
+
+    /// ⚠️ NO ACCESSORY, AND NOTHING LEFT BEHIND (#881). The band was the tab bar
+    /// controller's — no per-screen scope — so the results screen must not
+    /// install one at all; and the toolbar it shows is the STACK's, so a screen
+    /// pushed over it with no items of its own (a refine, a profile with one
+    /// tab) must not inherit an empty bar. Back on top, it comes back.
+    @Test func noAccessoryWhileUpAndNoToolbarLeftBehind() async {
+        let tabs = UITabBarController()
+        let host = Host(in: tabs)
+        await host.showResults("haddad")
+        for _ in 0..<40 { await Task.yield() }
+        #expect(host.results?.viewIfLoaded?.window != nil)
+        #expect(tabs.bottomAccessory == nil, "a tab accessory under the results")
+        #expect(host.navigation.isToolbarHidden == false)
+
+        host.navigation.pushViewController(UIViewController(), animated: false)
+        host.window.layoutIfNeeded()
+        #expect(tabs.bottomAccessory == nil)
+        #expect(host.navigation.isToolbarHidden, "the results' toolbar outlived the screen")
+
+        host.navigation.popViewController(animated: false)
+        host.window.layoutIfNeeded()
+        #expect(host.navigation.isToolbarHidden == false, "the selector did not come back")
+        #expect(tabs.bottomAccessory == nil)
     }
 
     /// ⚠️ REAL BAR ITEMS, NOT A COMPOSITE TITLE VIEW. A title view is one view

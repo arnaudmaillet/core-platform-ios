@@ -97,8 +97,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// bottom-leading toolbar item instead (`selectorItem`).
     private(set) var selectorAccessory: SelectorAccessory?
     /// The strip as a toolbar item at the bottom leading corner, on a pushed
-    /// profile (#728). Internal for tests.
-    private(set) var selectorItem: UIBarButtonItem?
+    /// profile (#728) — `SelectorToolbarItem`, the search results' too (#881).
+    private var selectorToolbar: SelectorToolbarItem?
+    /// The strip's toolbar item. Internal for tests.
+    var selectorItem: UIBarButtonItem? { selectorToolbar?.item }
     /// The gallery's format selector — the SAME `PagedTabBar` For You and
     /// Messages wear, so a viewer meets one selector in three places rather
     /// than three selectors doing one job.
@@ -525,9 +527,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                                        alongside: transitionCoordinator)
         }
         // A pushed profile's strip rides the stack's toolbar (#728).
-        if selectorItem != nil {
-            navigationController?.setToolbarHidden(false, animated: animated)
-        }
+        selectorToolbar?.show(for: self, animated: animated)
 
         // ⚠️ **The dock is not optional on a tab ROOT.** Whatever hid it — a post
         // that flew out of this grid, a flight caught and reversed, a pop this
@@ -605,9 +605,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         // The toolbar is the stack's: put away unless the screen taking over
         // brings items of its own (the relations screen, the feed).
-        if selectorItem != nil, navigationController?.topViewController?.toolbarItems?.isEmpty ?? true {
-            navigationController?.setToolbarHidden(true, animated: animated)
-        }
+        selectorToolbar?.hide(leaving: self, animated: animated)
         setStackGesturesEnabled(true)
         // Stops as this screen is covered — including by the post it just
         // opened, whose own player is what should be heard.
@@ -2291,11 +2289,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             // `SelectorAccessoryHost`, which is where the reasons for both live.
             selectorAccessory = SelectorAccessory(strip: selectorBar)
         case .navigationToolbar:
-            selectorBar.hosting = .platter
-            selectorBar.fillsWidth = false
-            let item = UIBarButtonItem(customView: selectorBar)
-            selectorItem = item
-            toolbarItems = [item, .flexibleSpace()]
+            let toolbar = SelectorToolbarItem(strip: selectorBar)
+            selectorToolbar = toolbar
+            toolbarItems = toolbar.toolbarItems
         }
     }
 
@@ -2305,8 +2301,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             accessory.remove(from: tabBarController, alongside: nil)
             selectorAccessory = nil
         }
-        if selectorItem != nil {
-            selectorItem = nil
+        if selectorToolbar != nil {
+            selectorToolbar = nil
             toolbarItems = []
             if navigationController?.topViewController === self {
                 navigationController?.setToolbarHidden(true, animated: true)
@@ -2346,8 +2342,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             selectorAccessory?.install(into: tabBarController,
                                        minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
                                        alongside: nil)
-            if selectorItem != nil, navigationController?.topViewController === self {
-                navigationController?.setToolbarHidden(false, animated: true)
+            if navigationController?.topViewController === self {
+                selectorToolbar?.show(for: self, animated: true)
             }
         } else {
             removeSelectors()
