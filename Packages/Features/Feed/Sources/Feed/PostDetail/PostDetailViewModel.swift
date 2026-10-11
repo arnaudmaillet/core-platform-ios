@@ -76,6 +76,9 @@ public final class PostDetailViewModel {
     /// A comment the server didn't take: its text, and whether it was
     /// refused by the author's setting (rather than failed).
     var onCommentFailed: ((_ text: String, _ refused: Bool) -> Void)?
+    /// The viewer's comment landed: its id, said just BEFORE the stream that
+    /// holds it is emitted — so the host can play the row's arrival (#920).
+    var onCommentPosted: ((_ commentID: String) -> Void)?
     /// Approving or declining a held comment failed; the comment stays held.
     var onReviewFailed: ((_ approve: Bool) -> Void)?
 
@@ -367,7 +370,9 @@ public final class PostDetailViewModel {
                     body, to: postID, parentID: parentID, commentID: commentID
                 )
                 self.unsent = nil
-                self.insertSubmitted(entry)
+                // Only a row that is NEW arrives: a replay answered with a
+                // comment already on screen (#795) is not one.
+                if self.insertSubmitted(entry) { self.onCommentPosted?(entry.id) }
                 self.emitComments()
                 self.setComposing(false)
             } catch {
@@ -441,25 +446,28 @@ public final class PostDetailViewModel {
         loadComments(showing: comments)
     }
 
-    private func insertSubmitted(_ entry: CommentEntry) {
+    /// Returns whether the comment is new to the stream.
+    @discardableResult
+    private func insertSubmitted(_ entry: CommentEntry) -> Bool {
         // ⚠️ A REPLAY CAN ANSWER WITH A COMMENT ALREADY ON SCREEN (#795): the
         // write landed, a reload brought it in, and the resend's answer is
         // that same comment. Inserted again, the stream holds one id twice —
         // and a diffable snapshot traps on a duplicate identifier.
         if let index = comments.firstIndex(where: { $0.id == entry.id }) {
             comments[index] = entry
-            return
+            return false
         }
         guard let parentID = entry.parentID,
               let parentIndex = comments.firstIndex(where: { $0.id == parentID }) else {
             comments.insert(entry, at: 0)
-            return
+            return true
         }
         var insertAt = parentIndex + 1
         while insertAt < comments.count, comments[insertAt].parentID == parentID {
             insertAt += 1
         }
         comments.insert(entry, at: insertAt)
+        return true
     }
 
     /// A comment row's avatar tapped — route to that author's profile,

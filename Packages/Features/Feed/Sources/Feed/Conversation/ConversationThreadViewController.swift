@@ -1018,7 +1018,7 @@ final class ConversationThreadViewController: UIViewController {
             ),
             imagePipeline: imagePipeline
         )
-        cell.row.setLikeControlHidden(true)
+        cell.row.variant = .message
         cell.row.onAvatarTap = message.isMine ? nil : { [weak self] in self?.driver.didTapIdentity() }
         // A row tap answers it — the post's grammar. Nothing to answer in a peek.
         // While the keyboard is up, the tap retires it instead (see
@@ -1179,7 +1179,7 @@ final class ConversationThreadViewController: UIViewController {
             guard let self, self.presentedViewController == nil else { return }
             let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
             sheet.addAction(UIAlertAction(title: "Delete Message", style: .destructive) { [weak self] _ in
-                self?.driver.delete(messageID)
+                self?.deleteWithDeparture(messageID)
             })
             sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
             sheet.popoverPresentationController?.sourceView = self.view
@@ -1188,6 +1188,23 @@ final class ConversationThreadViewController: UIViewController {
             )
             self.present(sheet, animated: true)
         }
+    }
+
+    /// The row leaves with its departure (#920) — a message sinks back the way
+    /// it rose — and the delete lands once it is gone. A row not on screen has
+    /// nothing to play: it is deleted at once.
+    ///
+    /// Deleting a message is local and cannot fail (the transcript hides it),
+    /// so the row is never left invisible on a delete that did not happen; and
+    /// a recycled cell is put back at full ink by `prepareForReuse`. Internal
+    /// for tests.
+    func deleteWithDeparture(_ messageID: String) {
+        guard let indexPath = dataSource.indexPath(for: .message(messageID)),
+              let cell = collectionView.cellForItem(at: indexPath) as? ThreadRowCell else {
+            driver.delete(messageID)
+            return
+        }
+        cell.playDeparture { [weak self] in self?.driver.delete(messageID) }
     }
 
     // MARK: - Scrolling

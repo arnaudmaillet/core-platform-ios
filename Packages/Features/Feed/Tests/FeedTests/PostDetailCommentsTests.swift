@@ -187,6 +187,13 @@ struct PostDetailCommentsTests {
         let viewModel = makeViewModel(provider)
         var lastComments: PostDetailViewModel.CommentsState?
         viewModel.onCommentsChange = { lastComments = $0 }
+        // The new row is announced BEFORE the stream that holds it (#920).
+        var posted: [(id: String, alreadyShown: Bool)] = []
+        viewModel.onCommentPosted = { id in
+            var shown = false
+            if case .loaded(let models) = lastComments { shown = models.contains { $0.id == id } }
+            posted.append((id, shown))
+        }
         viewModel.viewDidLoad()
         await settle {
             if case .loaded = lastComments { return true } else { return false }
@@ -198,6 +205,8 @@ struct PostDetailCommentsTests {
             return false
         }
 
+        #expect(posted.map(\.id) == ["new"])
+        #expect(posted.first?.alreadyShown == false, "announced after the stream that holds it")
         #expect(await provider.addedBodies == ["my thoughts"]) // trimmed
         guard case .loaded(let models) = lastComments else {
             Issue.record("expected loaded")
@@ -292,6 +301,8 @@ struct PostDetailCommentsTests {
         viewModel.onCommentsChange = { lastComments = $0 }
         var composing = false
         viewModel.onComposingChange = { composing = $0 }
+        var posted: [String] = []
+        viewModel.onCommentPosted = { posted.append($0) }
         viewModel.viewDidLoad()
         await settle { if case .loaded = lastComments { true } else { false } }
 
@@ -311,6 +322,8 @@ struct PostDetailCommentsTests {
         }
         #expect(models.map(\.id) == provider.storedIDs, "the answer was inserted beside its own row")
         #expect(Set(models.map(\.id)).count == models.count, "duplicate ids in the snapshot")
+        // Already on screen: no arrival to play (#920).
+        #expect(posted.isEmpty, "a row already shown was announced as new: \(posted)")
     }
 
     /// ⚠️ A FAILED COMMENT THAT A REFRESH SHOWS LANDED HAS SPENT ITS ID

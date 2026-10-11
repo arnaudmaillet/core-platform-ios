@@ -16,7 +16,7 @@ struct ThreadQuoteLineTests {
 
     private func makeCell(quote: (author: String, snippet: String)?) -> ThreadRowCell {
         let cell = ThreadRowCell(frame: CGRect(x: 0, y: 0, width: 358, height: 120))
-        cell.row.setLikeControlHidden(true)
+        cell.row.variant = .message
         cell.row.headerTextLabel.text = "You · 9:11 PM"
         cell.setQuote(quote)
         cell.layoutIfNeeded()
@@ -55,7 +55,7 @@ struct ThreadQuoteLineTests {
     /// stays once the time is back, not under the spinner.
     @Test func aPendingReplysSpinnerStaysClearOfItsQuote() throws {
         let cell = ThreadRowCell(frame: CGRect(x: 0, y: 0, width: 358, height: 120))
-        cell.row.setLikeControlHidden(true)
+        cell.row.variant = .message
         cell.row.headerTextLabel.text = "You · "
         cell.setQuote(("Ava Moreau", "Saw it. The thread screen rebuild is next, right?"))
         cell.setDelivery(.sending, time: "9:11 PM")
@@ -64,7 +64,7 @@ struct ThreadQuoteLineTests {
         let quoteFrame = quote.convert(quote.bounds, to: cell)
         let spinner = cell.sendingSpinnerView.convert(cell.sendingSpinnerView.bounds, to: cell)
         // The spinner is laid out at its natural size and drawn scaled.
-        let drawnMaxX = spinner.midX + spinner.width * ThreadRowCell.spinnerScale.a / 2
+        let drawnMaxX = spinner.midX + spinner.width * CommentRowView.spinnerScale.a / 2
         #expect(quoteFrame.minX >= drawnMaxX, "the spinner sits on the quote: \(drawnMaxX) > \(quoteFrame.minX)")
         let full = ("You · 9:11 PM" as NSString).size(withAttributes: [.font: cell.row.headerTextLabel.font as Any]).width
         #expect(cell.row.headerTextLabel.frame.width >= ceil(full) - 0.5, "the line does not hold the time's place")
