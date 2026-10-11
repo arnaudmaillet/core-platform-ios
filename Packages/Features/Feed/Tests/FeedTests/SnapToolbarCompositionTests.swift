@@ -13,7 +13,7 @@ import UIKit
 /// is pinned rather than left to whoever edits the builder next.
 ///
 /// ```
-///  [author pill] ——————————————— [⇄ 🔖] [⋯]
+///  [author pill] ——————————————— [🔖 ⇄] [⋯]
 ///                                         ├ Share
 ///                                         ├ Not interested
 ///                                         └ Report            (destructive)
@@ -68,12 +68,22 @@ struct SnapToolbarCompositionTests {
 
     // MARK: - The bar
 
-    /// ⚠️ REPOST AND SAVE, in that order, and nothing else beside the ⋯.
-    /// Share moved into the menu.
-    @Test func theTrailingRunIsRepostSaveAndTheMenu() {
+    /// ⚠️ SAVE AND REPOST, in that order (#865), and nothing else beside the
+    /// ⋯. Share moved into the menu.
+    @Test func theTrailingRunIsSaveRepostAndTheMenu() {
         let buttons = toolbarButtons(feed())
-        #expect(labels(buttons) == ["Repost", "Save", "More actions"],
-                "the trailing run is not [repost, save, ⋯]: \(labels(buttons))")
+        #expect(labels(buttons) == ["Save", "Repost", "More actions"],
+                "the trailing run is not [save, repost, ⋯]: \(labels(buttons))")
+    }
+
+    /// The capsule's ARRANGED order is the visual order and the order
+    /// VoiceOver walks: save on the leading side, repost on the trailing one
+    /// (#865) — the order the text post composer's footer draws too.
+    @Test func saveLeadsRepostInsideTheCapsule() throws {
+        let items = try #require(feed().toolbarItems)
+        let capsule = try #require(items.dropFirst(2).first?.customView as? UIStackView)
+        let order = capsule.arrangedSubviews.compactMap(\.accessibilityLabel)
+        #expect(order == ["Save", "Repost"], "the capsule reads \(order)")
     }
 
     /// The author pill keeps the leading end, with the dynamic space between,
@@ -101,7 +111,7 @@ struct SnapToolbarCompositionTests {
     @Test func theMenuStandsInItsOwnPlatter() throws {
         let items = try #require(feed().toolbarItems)
         let actions = try #require(items.dropFirst(2).first?.customView as? UIStackView)
-        #expect(actions.arrangedSubviews.count == 2, "the capsule is not [repost, save]")
+        #expect(actions.arrangedSubviews.count == 2, "the capsule is not [save, repost]")
         #expect(items.dropFirst(3).first?.customView == nil, "no separator before the ⋯")
         let more = try #require(items.last?.customView as? UIButton)
         #expect(more.accessibilityLabel == "More actions")

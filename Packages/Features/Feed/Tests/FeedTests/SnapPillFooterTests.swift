@@ -11,7 +11,7 @@ import UIKit
 ///  NAV      [‹] ……………………………… [points]
 ///  PAGE     … [♥]
 ///             [◉ sound]      tap: mute · hold: the sound sheet · 🔇 badge
-///  TOOLBAR  [author pill] ……… [⇄ 🔖] [⋯]   ⋯: Share · Not interested · Report
+///  TOOLBAR  [author pill] ……… [🔖 ⇄] [⋯]   ⋯: Share · Not interested · Report
 /// ```
 @MainActor
 struct SnapPillFooterTests {
@@ -49,7 +49,7 @@ struct SnapPillFooterTests {
 
     // MARK: - The bars
 
-    /// `[author pill] … [⇄ 🔖] [⋯]`, and no pill in the nav bar.
+    /// `[author pill] … [🔖 ⇄] [⋯]`, and no pill in the nav bar.
     @Test func thePillLeadsTheToolbarAndLeavesTheNavBar() throws {
         do {
             let feed = feed()
@@ -58,7 +58,7 @@ struct SnapPillFooterTests {
             #expect(items.first?.customView is SnapAuthorIdentityView)
             #expect(items[1].customView == nil, "a dynamic space after the pill")
             let actions = (items[2].customView?.subviews ?? []).compactMap { ($0 as? UIButton)?.accessibilityLabel }
-            #expect(actions == ["Repost", "Save"], "the capsule is not [repost, save]: \(actions)")
+            #expect(actions == ["Save", "Repost"], "the capsule is not [save, repost]: \(actions)")
             #expect((items.last?.customView as? UIButton)?.accessibilityLabel == "More actions")
             #expect(!items.contains { $0.customView is SnapMediaAttributionView }, "the audio capsule stayed")
 

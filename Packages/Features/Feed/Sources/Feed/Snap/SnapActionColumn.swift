@@ -11,7 +11,7 @@ import UIKit
 ///   caption…                 │1.2K│       ———————————————————— │1.2K│
 ///   ━━━ progress ━━━         ╰─╯                               ╰─╯
 ///                            [◉]          [◉][field…    ☺ 〰/↑][◉]
-///   [author pill] … [⇄ 🔖] [⋯]            [author pill] … [⇄ 🔖] [⋯]
+///   [author pill] … [🔖 ⇄] [⋯]            [author pill] … [🔖 ⇄] [⋯]
 /// ```
 ///
 /// - Media layout: the like PILL (`SnapRailBoostButton`, #669), from the
