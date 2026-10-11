@@ -414,7 +414,7 @@ final class MediaEditorViewController: UIViewController {
     /// piece, the row is open on, and the row would be left pointing at
     /// nothing.
     func refreshHistoryItems() {
-        guard let id = currentItemID, transitionFocus == nil, !segmentFilterMode.isOpen,
+        guard let id = currentItemID, rowFocus.transition == nil, !segmentFilterMode.isOpen,
               !isTypingText
         else {
             undoItem.isEnabled = false
@@ -2332,7 +2332,7 @@ final class MediaEditorViewController: UIViewController {
     /// nothing else; `onChange` is the channel that writes to `edits`, and it
     /// fires on release only.
     private func scrubbed(to moment: MediaTimelining.Moment) {
-        guard transitionFocus == nil, let surface = playingSurface, let subject = previewSubject,
+        guard rowFocus.transition == nil, let surface = playingSurface, let subject = previewSubject,
               subject.id == currentItemID
         else { return }
         if timelineTrack.isHoldingAnEdge {
@@ -2682,24 +2682,9 @@ final class MediaEditorViewController: UIViewController {
 
     // MARK: - Choosing a cut's transition
 
-    /// The cut whose transition is being chosen: the one after piece `seam` of
-    /// clip `id`.
-    ///
-    /// ⚠️ **POSITIONAL, AND SAFE ONLY BECAUSE NOTHING ELSE EDITS WHILE IT IS
-    /// SET.** The track takes no gesture while collapsed, the cut and rate
-    /// actions and the reset arrow are disabled, and every way off the clip
-    /// closes the row first.
-    private struct TransitionFocus: Equatable {
-        let id: String
-        var seam: Int
-    }
-
-    private var transitionFocus: TransitionFocus?
-
-    /// Whether the author had stopped the clip when the row opened. The row
-    /// plays the stretch around the cut whatever it was; closing it puts the
-    /// author's choice back — unless they toggled playback meanwhile (nil).
-    private var pausedBeforeTransitions: Bool?
+    /// Which row the timeline has open, on which clip, and the author's pause
+    /// it borrowed — see `MediaTimelineRowFocus`.
+    private var rowFocus = MediaTimelineRowFocus()
 
     /// The stretch to loop and the transition inside it, for the focused cut of
     /// `timeline` — nil when no row is open on this clip.
@@ -2709,11 +2694,11 @@ final class MediaEditorViewController: UIViewController {
     private func rehearsal(
         in timeline: MediaTimeline, fileSeconds: Double
     ) -> (range: ClosedRange<Double>, window: ClosedRange<Double>)? {
-        guard let focus = transitionFocus, focus.id == currentItemID, focus.id == playingID else {
+        guard let seam = rowFocus.rehearsedSeam(current: currentItemID, playing: playingID) else {
             return nil
         }
         return MediaTimelining.rehearsal(
-            atSeam: focus.seam, in: timeline, withinSource: fileSeconds,
+            atSeam: seam, in: timeline, withinSource: fileSeconds,
             lead: timelineTrack.rehearsalLead
         )
     }
@@ -2730,7 +2715,7 @@ final class MediaEditorViewController: UIViewController {
     /// out against it, and the declared one can be wrong (`realLength`).
     private func openTransitions(atSeam seam: Int) {
         // ⚠️ NEVER OVER A PIECE'S FILTER ROW — the two share the line.
-        guard pieceFocus == nil, isTimelineShowing, let id = currentItemID, trackSeconds > 0,
+        guard rowFocus.piece == nil, isTimelineShowing, let id = currentItemID, trackSeconds > 0,
               fileLengths[id] == trackSeconds, !timelineTrack.isHoldingAnEdge
         else { return }
         let timeline = edits(for: id).timeline
@@ -2739,10 +2724,9 @@ final class MediaEditorViewController: UIViewController {
         let rehearsal = MediaTimelining.rehearsal(
             atSeam: seam, in: timeline, withinSource: trackSeconds, lead: timelineTrack.rehearsalLead
         )
-        if var focus = transitionFocus {
+        if rowFocus.transition != nil {
             // Already open: only the cut changes.
-            focus.seam = seam
-            transitionFocus = focus
+            rowFocus.transition?.seam = seam
             timelineTools.openTransitions(
                 atSeam: seam, chosen: pieces[seam].transitionOut,
                 seconds: MediaTimelining.transitionSeconds(atSeam: seam, in: timeline, withinSource: trackSeconds),
@@ -2760,9 +2744,8 @@ final class MediaEditorViewController: UIViewController {
             longest: MediaTimelining.longestTransition(atSeam: seam, in: timeline, withinSource: trackSeconds),
             rehearsal: rehearsal?.range, window: rehearsal?.window, animated: true
         ) else { return }
-        transitionFocus = TransitionFocus(id: id, seam: seam)
-        pausedBeforeTransitions = pausedByAuthor
-        pausedByAuthor = false
+        rowFocus.transition = MediaTimelineRowFocus.Transition(id: id, seam: seam)
+        rowFocus.borrowThePause()
         // A load on its way picks the stretch up as it lands.
         if !previewPending { landOnTheFocus() }
         refreshTrackActions()
@@ -2775,7 +2758,7 @@ final class MediaEditorViewController: UIViewController {
     /// so the preview gets a new item that lands on the stretch; choosing what
     /// the cut already carries changes nothing and simply plays it again.
     private func chooseTransition(_ kind: VideoTransitionKind?) {
-        guard let focus = transitionFocus, focus.id == currentItemID, trackSeconds > 0 else { return }
+        guard let focus = rowFocus.transition, focus.id == currentItemID, trackSeconds > 0 else { return }
         let before = edits(for: focus.id).timeline
         let after = MediaTimelining.settingTransition(
             kind, atSeam: focus.seam, in: before, withinSource: trackSeconds
@@ -2786,7 +2769,7 @@ final class MediaEditorViewController: UIViewController {
         timelineTrack.configure(duration: trackSeconds, timeline: after)
         assert(timelineTrack.arrangement == after, "the collapsed track refused the choice")
         showTheFocusedTransition(in: after)
-        pausedByAuthor = false
+        rowFocus.rehearse()
         refreshHistoryItems()
         if !refreshPreview() { landOnTheFocus() }
     }
@@ -2798,7 +2781,7 @@ final class MediaEditorViewController: UIViewController {
     /// to, so it is a step the arrows can take back, and a new item the preview
     /// lands on the stretch (charter F29b).
     private func chooseTransitionDuration(_ seconds: Double) {
-        guard let focus = transitionFocus, focus.id == currentItemID, trackSeconds > 0 else { return }
+        guard let focus = rowFocus.transition, focus.id == currentItemID, trackSeconds > 0 else { return }
         let before = edits(for: focus.id).timeline
         let after = MediaTimelining.settingTransitionDuration(
             seconds, atSeam: focus.seam, in: before, withinSource: trackSeconds
@@ -2806,7 +2789,7 @@ final class MediaEditorViewController: UIViewController {
         if after != before { change(focus.id) { $0.timeline = after } }
         timelineTrack.configure(duration: trackSeconds, timeline: after)
         showTheFocusedTransition(in: after)
-        pausedByAuthor = false
+        rowFocus.rehearse()
         refreshHistoryItems()
         if !refreshPreview() { landOnTheFocus() }
     }
@@ -2814,7 +2797,7 @@ final class MediaEditorViewController: UIViewController {
     /// States what the focused cut carries in `timeline` — its kind, its
     /// length and the longest it could have — and the stretch that shows it.
     private func showTheFocusedTransition(in timeline: MediaTimeline) {
-        guard let focus = transitionFocus else { return }
+        guard let focus = rowFocus.transition else { return }
         let rehearsal = MediaTimelining.rehearsal(
             atSeam: focus.seam, in: timeline, withinSource: trackSeconds, lead: timelineTrack.rehearsalLead
         )
@@ -2828,7 +2811,7 @@ final class MediaEditorViewController: UIViewController {
 
     /// Loops the focused stretch on the item that is playing, from its start.
     private func landOnTheFocus() {
-        guard let focusID = transitionFocus?.id ?? pieceFocus?.id, focusID == currentItemID,
+        guard let focusID = rowFocus.focusedID, focusID == currentItemID,
               let surface = playingSurface, let subject = previewSubject,
               subject.id == focusID, !subject.aiming, !previewPending,
               let range = activeLoop(in: subject.timeline, fileSeconds: subject.fileSeconds)
@@ -2850,16 +2833,14 @@ final class MediaEditorViewController: UIViewController {
     /// calls this; the two rows are one surface as far as leaving is concerned.
     private func closeTransitions(animated: Bool) {
         closeSegmentFilters(animated: animated)
-        guard transitionFocus != nil || timelineTools.editingSeam != nil else { return }
-        transitionFocus = nil
+        guard rowFocus.transition != nil || timelineTools.editingSeam != nil else { return }
+        rowFocus.transition = nil
         if previewSubject?.loop != nil {
             previewSubject?.loop = nil
             if let surface = playingSurface { preview.setLoopRange(nil, in: surface) }
         }
         timelineTools.closeTransitions(animated: animated)
-        let paused = pausedBeforeTransitions ?? pausedByAuthor
-        pausedBeforeTransitions = nil
-        pausedByAuthor = paused
+        let paused = rowFocus.giveBackThePause()
         if let surface = playingSurface { preview.setPaused(paused, in: surface) }
         timelineTrack.showPaused(paused)
         refreshTrackActions()
@@ -2868,20 +2849,8 @@ final class MediaEditorViewController: UIViewController {
 
     // MARK: - Choosing a piece's filter
 
-    /// The piece whose filter is being chosen: piece `piece` of clip `id`.
-    ///
-    /// ⚠️ **RECORDED BEFORE THE TRACK COLLAPSES** — collapsing puts the held
-    /// piece down, and the piece is what the row is open on. Positional, and
-    /// safe for the reason `TransitionFocus` is.
-    private struct PieceFocus: Equatable {
-        let id: String
-        var piece: Int
-    }
-
-    private var pieceFocus: PieceFocus?
-
     /// Whether the filter row is open on a piece of this clip.
-    var segmentFilterIsOpen: Bool { pieceFocus != nil }
+    var segmentFilterIsOpen: Bool { rowFocus.piece != nil }
 
     /// ⚠️ **ONLY WHILE A PIECE IS HELD** — asked for in those words: *"qui sera
     /// active que lorsqu'un segment sera sélectionné dans la timeline"*. While
@@ -2890,20 +2859,20 @@ final class MediaEditorViewController: UIViewController {
         guard isTimelineShowing, let id = currentItemID, trackSeconds > 0,
               fileLengths[id] == trackSeconds, !timelineTrack.isHoldingAnEdge
         else { return false }
-        return pieceFocus != nil || timelineTrack.selectedPiece != nil
+        return rowFocus.piece != nil || timelineTrack.selectedPiece != nil
     }
 
     /// What the preview loops while the filter row is open on this clip.
     func segmentFilterRehearsal(in timeline: MediaTimeline, fileSeconds: Double) -> ClosedRange<Double>? {
-        guard let focus = pieceFocus, focus.id == currentItemID, focus.id == playingID else { return nil }
-        return MediaTimelining.rehearsal(ofPiece: focus.piece, in: timeline, withinSource: fileSeconds)
+        guard let piece = rowFocus.rehearsedPiece(current: currentItemID, playing: playingID) else { return nil }
+        return MediaTimelining.rehearsal(ofPiece: piece, in: timeline, withinSource: fileSeconds)
     }
 
     /// The filter action was tapped: open the row on the held piece — or, when
     /// it is already open, put it away.
     func toggleSegmentFilters() {
-        guard pieceFocus == nil else { return closeSegmentFilters(animated: true) }
-        guard transitionFocus == nil, segmentFilterActionEnabled, let id = currentItemID,
+        guard rowFocus.piece == nil else { return closeSegmentFilters(animated: true) }
+        guard rowFocus.transition == nil, segmentFilterActionEnabled, let id = currentItemID,
               let piece = timelineTrack.selectedPiece
         else { return }
         let timeline = edits(for: id).timeline
@@ -2911,16 +2880,15 @@ final class MediaEditorViewController: UIViewController {
         guard pieces.indices.contains(piece) else { return }
         if timelineTools.isOfferingSpeeds { toggleTheRateChips() }
         let range = MediaTimelining.rehearsal(ofPiece: piece, in: timeline, withinSource: trackSeconds)
-        pieceFocus = PieceFocus(id: id, piece: piece)
+        rowFocus.piece = MediaTimelineRowFocus.Piece(id: id, piece: piece)
         guard timelineTools.openSegmentFilters(
             forPiece: piece, chosen: pieces[piece].filter, rehearsal: range, animated: true
         ) else {
-            pieceFocus = nil
+            rowFocus.piece = nil
             return
         }
         actionBar.setActive(TrackAction.filter.rawValue)
-        pausedBeforeTransitions = pausedByAuthor
-        pausedByAuthor = false
+        rowFocus.borrowThePause()
         dressSegmentFilterCards(id: id, piece: pieces[piece])
         if !previewPending { landOnTheFocus() }
         refreshTrackActions()
@@ -2929,7 +2897,7 @@ final class MediaEditorViewController: UIViewController {
 
     /// A look was chosen for the focused piece — `nil` takes it away.
     private func chooseSegmentFilter(_ filter: MediaFilter?) {
-        guard let focus = pieceFocus, focus.id == currentItemID, trackSeconds > 0 else { return }
+        guard let focus = rowFocus.piece, focus.id == currentItemID, trackSeconds > 0 else { return }
         let before = edits(for: focus.id).timeline
         let after = MediaTimelining.settingFilter(
             filter, atPiece: focus.piece, in: before, withinSource: trackSeconds
@@ -2937,15 +2905,15 @@ final class MediaEditorViewController: UIViewController {
         if after != before { change(focus.id) { $0.timeline = after } }
         timelineTrack.configure(duration: trackSeconds, timeline: after)
         timelineTools.showSegmentFilter(filter)
-        pausedByAuthor = false
+        rowFocus.rehearse()
         refreshHistoryItems()
         if !refreshPreview() { landOnTheFocus() }
     }
 
     /// Puts the filter row away, as `closeTransitions` puts its own.
     private func closeSegmentFilters(animated: Bool) {
-        guard pieceFocus != nil || timelineTools.editingPiece != nil else { return }
-        pieceFocus = nil
+        guard rowFocus.piece != nil || timelineTools.editingPiece != nil else { return }
+        rowFocus.piece = nil
         pictureRequests += 1
         if previewSubject?.loop != nil {
             previewSubject?.loop = nil
@@ -2953,9 +2921,7 @@ final class MediaEditorViewController: UIViewController {
         }
         timelineTools.closeSegmentFilters(animated: animated)
         actionBar.setActive(nil)
-        let paused = pausedBeforeTransitions ?? pausedByAuthor
-        pausedBeforeTransitions = nil
-        pausedByAuthor = paused
+        let paused = rowFocus.giveBackThePause()
         if let surface = playingSurface { preview.setPaused(paused, in: surface) }
         timelineTrack.showPaused(paused)
         refreshTrackActions()
@@ -3010,7 +2976,7 @@ final class MediaEditorViewController: UIViewController {
                     return UIImage(cgImage: cg, scale: frame.scale, orientation: frame.imageOrientation)
                 }
             }.value
-            guard pictureRequests == request, pieceFocus?.id == id else { return }
+            guard pictureRequests == request, rowFocus.piece?.id == id else { return }
             for (choice, picture) in zip(choices, pictures) {
                 row.setPicture(picture, for: choice)
             }
@@ -3136,11 +3102,11 @@ final class MediaEditorViewController: UIViewController {
         // ⚠️ **A CUT OR A RATE WHILE A ROW IS OPEN WOULD MOVE THE CUT, OR THE
         // PIECE, IT IS OPEN ON.** Both wait for it to close — the transitions
         // row and the piece's filter row alike.
-        let focused = transitionFocus != nil || segmentFilterMode.isOpen
+        let focused = rowFocus.transition != nil || segmentFilterMode.isOpen
         // ⚠️ **THE PIECE FILTER'S OWN RULE IS ITS MODE'S** (a piece held, the
         // file's real length known); the transitions row still shuts it.
         actionBar.setEnabled(
-            transitionFocus == nil && segmentFilterMode.actionEnabled, at: TrackAction.filter.rawValue
+            rowFocus.transition == nil && segmentFilterMode.actionEnabled, at: TrackAction.filter.rawValue
         )
         // ⚠️ **THE SAME RULE AS THE FILTER BESIDE IT: A PIECE MUST BE HELD** —
         // see `targetPiece`. And the chips close with the selection they spoke
@@ -3163,13 +3129,9 @@ final class MediaEditorViewController: UIViewController {
         }
     }
 
-    /// ⚠️ **WHETHER THE AUTHOR STOPPED THE CLIP, AS OPPOSED TO THE TRACK.**
-    /// Scrubbing stops playback and lets it go again, and without this the
-    /// release would restart a clip the author had deliberately paused — their
-    /// decision undone by a gesture that was only meant to move the film.
-    /// `VideoTrimmerControl`'s example carries the same flag under the name
-    /// `wasPlaying`, for the same moment.
-    private var pausedByAuthor = false
+    /// Whether the author stopped the clip — see
+    /// `MediaTimelineRowFocus.pausedByAuthor`.
+    private var pausedByAuthor: Bool { rowFocus.pausedByAuthor }
 
     /// ⚠️ **A TAP ON THE PICTURE IS THE PLAY BUTTON EVERY VIDEO SURFACE HAS.**
     /// The ruler's glyph is the explicit control; this is the one nobody has to
@@ -3217,10 +3179,8 @@ final class MediaEditorViewController: UIViewController {
     private func togglePreviewPlayback() {
         guard let surface = playingSurface else { return }
         let paused = preview.isPaused(in: surface) ?? true
-        pausedByAuthor = !paused
-        // ⚠️ **A TOGGLE DURING THE ROW WINS.** Closing it puts back the pause the
-        // author had before it opened — unless they have said something since.
-        if transitionFocus != nil { pausedBeforeTransitions = nil }
+        // ⚠️ **A TOGGLE DURING THE ROW WINS** — see `authorChose(paused:)`.
+        rowFocus.authorChose(paused: !paused)
         preview.setPaused(!paused, in: surface)
         timelineTrack.showPaused(!paused)
     }
@@ -4025,7 +3985,7 @@ extension MediaEditorViewController {
     /// Internal for tests: the arrangement the screen believes the preview plays.
     var debugPreviewTimeline: MediaTimeline? { previewSubject?.timeline }
     /// Internal for tests: the cut whose transition is being chosen.
-    var debugTransitionSeam: Int? { transitionFocus?.seam }
+    var debugTransitionSeam: Int? { rowFocus.transition?.seam }
     /// Internal for tests: the stretch the screen believes the item loops.
     var debugPreviewLoop: ClosedRange<Double>? { previewSubject?.loop }
     /// Internal for tests: a tap on the picture, through the routine the
