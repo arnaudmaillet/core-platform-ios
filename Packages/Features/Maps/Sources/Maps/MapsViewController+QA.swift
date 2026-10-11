@@ -351,7 +351,6 @@ extension MapsViewController {
 }
 
 /// Weak-target beat for `-maps-trace-chrome` — see `installChromeTrace`.
-/// Weak-target beat for `-maps-trace-chrome` — see `installChromeTrace`.
 private final class MapsChromeTraceProxy {
     private weak var target: MapsViewController?
     init(target: MapsViewController) { self.target = target }
