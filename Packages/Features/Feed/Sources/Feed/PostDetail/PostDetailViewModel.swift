@@ -199,10 +199,16 @@ public final class PostDetailViewModel {
     private func show(_ identity: ViewerIdentity) {
         guard identity != shownIdentity else { return }
         let couldReview = isViewerPostOwner
+        let before = shownIdentity?.profileID
         shownIdentity = identity
         onViewerIdentityChange?(identity)
         // Who may review held comments follows the viewer.
-        if isViewerPostOwner != couldReview, comments.contains(where: \.isHeld) { emitComments() }
+        let reviewChanged = isViewerPostOwner != couldReview && comments.contains(where: \.isHeld)
+        // And so does whose threads lead the stream (#921).
+        let ownChanged = before != identity.profileID && comments.contains {
+            Self.isOwnThread($0, viewer: before) || Self.isOwnThread($0, viewer: identity.profileID)
+        }
+        if showsAnswer, reviewChanged || ownChanged { emitComments() }
     }
 
     /// The viewer is the post's author — the one who reviews its held comments.
@@ -749,12 +755,26 @@ public final class PostDetailViewModel {
 
     private func emitComments() {
         let now = now()
-        let ordered = Self.sortedForDisplay(comments, order: commentSort, liked: likedComments, pageStarts: pageStarts)
+        let viewer = shownIdentity?.profileID
+        let ordered = Self.sortedForDisplay(
+            comments, order: commentSort, liked: likedComments, pageStarts: pageStarts, viewer: viewer
+        )
         let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
         showsAnswer = true
         onCommentsChange?(.loaded(ordered.map {
-            CommentDisplayModel(entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id))
+            CommentDisplayModel(
+                entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id),
+                isOwnThread: Self.isOwnThread($0, viewer: viewer)
+            )
         }))
+    }
+
+    /// A thread the viewer started (#921): a top-level comment by the face the
+    /// composer is wearing. Its replies stay with it; the viewer's replies to
+    /// someone else's thread stay in THAT thread, where they make sense.
+    nonisolated static func isOwnThread(_ entry: CommentEntry, viewer: ProfileID?) -> Bool {
+        guard let viewer else { return false }
+        return entry.parentID == nil && entry.authorID == viewer
     }
 
     // MARK: - Held comments
@@ -829,41 +849,64 @@ public final class PostDetailViewModel {
     /// `pageStarts`: the first thread of each page loaded after the first.
     /// Threads are ranked within their page, never across: a page landing
     /// at the bottom must not lift a thread above rows already on screen.
+    ///
+    /// `viewer`: the threads THEY started lead the stream, right under the
+    /// caption, in their own chronology (newest first) and untouched by the
+    /// sort (#921) — the sort orders everyone else's. Nil leaves the stream as
+    /// it was.
     static func sortedForDisplay(
         _ entries: [CommentEntry],
         order: CommentSortOrder,
         liked: Set<String>,
-        pageStarts: Set<String> = []
+        pageStarts: Set<String> = [],
+        viewer: ProfileID? = nil
     ) -> [CommentEntry] {
-        guard order == .trending else { return entries }
-        var threads: [(parent: CommentEntry, replies: [CommentEntry])] = []
+        typealias Thread = (parent: CommentEntry, replies: [CommentEntry])
+        let hasOwn = entries.contains { isOwnThread($0, viewer: viewer) }
+        guard order == .trending || hasOwn else { return entries }
+        // Replies before any parent (a page that starts mid-thread) have no
+        // thread to ride with: they keep their place at the head of the rest.
+        var orphans: [CommentEntry] = []
+        var threads: [Thread] = []
         for entry in entries {
             if entry.parentID == nil {
                 threads.append((entry, []))
             } else if !threads.isEmpty {
                 threads[threads.count - 1].replies.append(entry)
+            } else if order == .recent {
+                orphans.append(entry)
             }
         }
-        func score(_ thread: (parent: CommentEntry, replies: [CommentEntry])) -> Int {
+        let own = threads.filter { isOwnThread($0.parent, viewer: viewer) }
+        func score(_ thread: Thread) -> Int {
             thread.replies.count
                 + (liked.contains(thread.parent.id) ? 1 : 0)
                 + thread.replies.filter { liked.contains($0.id) }.count
         }
-        var pages: [[(parent: CommentEntry, replies: [CommentEntry])]] = []
+        // Pages of everyone else's threads. A page whose first thread was the
+        // viewer's still starts a page — at the next thread that stays.
+        var pages: [[Thread]] = []
+        var startsPage = true
         for thread in threads {
-            if pages.isEmpty || pageStarts.contains(thread.parent.id) { pages.append([]) }
+            if pageStarts.contains(thread.parent.id) { startsPage = true }
+            guard !isOwnThread(thread.parent, viewer: viewer) else { continue }
+            if startsPage || pages.isEmpty { pages.append([]) }
+            startsPage = false
             pages[pages.count - 1].append(thread)
         }
-        return pages.flatMap { page in
-            page
-                .enumerated()
-                .sorted { lhs, rhs in
-                    let l = score(lhs.element)
-                    let r = score(rhs.element)
-                    return l == r ? lhs.offset < rhs.offset : l > r
-                }
-                .flatMap { [$0.element.parent] + $0.element.replies }
+        let others: [CommentEntry] = pages.flatMap { page -> [CommentEntry] in
+            let ranked: [Thread] = order == .trending
+                ? page.enumerated()
+                    .sorted { lhs, rhs in
+                        let l = score(lhs.element)
+                        let r = score(rhs.element)
+                        return l == r ? lhs.offset < rhs.offset : l > r
+                    }
+                    .map(\.element)
+                : page
+            return ranked.flatMap { [$0.parent] + $0.replies }
         }
+        return own.flatMap { [$0.parent] + $0.replies } + orphans + others
     }
 
     private func setComposing(_ composing: Bool) {
