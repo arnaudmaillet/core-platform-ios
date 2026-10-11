@@ -1471,6 +1471,8 @@ final class PostDetailViewController: UIViewController {
         case .loaded(let loaded):
             models = loaded
         case .failed(let message):
+            // Whatever a landing was scrolling for is gone with the stream.
+            _ = takePendingLanding()
             // The empty row, in its failed words (`emptyPageCopy`): the stream
             // has nothing, and the reason is a failure, not an empty post.
             commentsFailed = true
@@ -1486,16 +1488,21 @@ final class PostDetailViewController: UIViewController {
             // row goes back to bones, so the answer arrives the way a first
             // load's does (`revealLoadedComments`).
             guard commentsFailed else { return }
+            _ = takePendingLanding()
             commentsFailed = false
             commentsLoaded = false
             applyStream(animated: hasAppliedStream)
             return
         }
+        // A posted comment whose landing was still scrolling: THIS render
+        // applies the stream, its own included (#921). Taken only by a render
+        // that applies — an ignored `.loading` must not drop it.
+        let interruptedLanding = takePendingLanding()
         commentsFailed = false
         latestComments = models
         // Taken HERE, whichever way this render goes: a posted comment's
         // arrival belongs to the render that brings it, never a later one.
-        let arriving = arrivingCommentID
+        let arriving = arrivingCommentID ?? interruptedLanding?.id
         arrivingCommentID = nil
         let previous = streamModels
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -1505,7 +1512,7 @@ final class PostDetailViewController: UIViewController {
             guard let old = previous[model.id],
                   old.isHeld != model.isHeld || old.canReview != model.canReview else { return nil }
             return .comment(model.id)
-        }
+        } + (interruptedLanding?.reconfiguring ?? [])
         // Bones were on screen and real rows are about to take their place.
         let replacesBones = !commentsLoaded && hasAppliedStream && !models.isEmpty
         commentsLoaded = true
@@ -1520,8 +1527,118 @@ final class PostDetailViewController: UIViewController {
         // The first apply lands cold (nothing to animate FROM); reloads,
         // sort re-ranks, and submissions animate as native diffs — moves,
         // insertions, deletions, all UIKit's own.
-        applyStream(animated: hasAppliedStream, reconfiguring: reviewChanged)
-        if let arriving { playArrival(ofPostedComment: arriving) }
+        guard let arriving, hasAppliedStream else {
+            applyStream(animated: hasAppliedStream, reconfiguring: reviewChanged)
+            return
+        }
+        landPostedComment(arriving, reconfiguring: reviewChanged)
+    }
+
+    // MARK: - Landing the viewer's comment (#921)
+
+    /// The longest a landing waits for its scroll to say it ended: UIKit's
+    /// animated scroll takes about 0.3 s, and it says nothing when a drag
+    /// interrupts it.
+    static let landingScrollTimeout: TimeInterval = 0.6
+    /// The room a landing slot needs on screen to count as visible: about one
+    /// short comment row.
+    static let landingRowAllowance: CGFloat = 72
+
+    /// A posted comment whose stream is waiting for the list to get there.
+    private var pendingLanding: (id: String, reconfiguring: [StreamItem], target: CGPoint)?
+    /// Bumped by every landing, so a scroll that was overtaken lands nothing.
+    private var landingGeneration = 0
+
+    /// The viewer's comment lands WHERE THEY CAN SEE IT (#921): the list first
+    /// goes to its slot, then the comment arrives there with its effect — it
+    /// is never inserted off screen. A slot already on screen skips the scroll.
+    private func landPostedComment(_ id: String, reconfiguring: [StreamItem]) {
+        guard let target = landingOffset(for: id) else {
+            insertPostedComment(id, reconfiguring: reconfiguring)
+            return
+        }
+        #if DEBUG
+        debugLandingEvents.append("scroll:\(id)")
+        #endif
+        landingGeneration += 1
+        let generation = landingGeneration
+        pendingLanding = (id, reconfiguring, target)
+        // ⚠️ A REAL SCROLL, not a bounds animation. Animating the offset in a
+        // `UIView.animate` block lays out only the destination's cells: the
+        // rows in between never exist, and the list showed EMPTY frames on the
+        // way up (filmed 2026-10-11). The scroll's end is the landing's cue
+        // (`scrollViewDidEndScrollingAnimation`); a timeout covers the scroll
+        // a drag interrupts, which ends without saying so.
+        guard !MotionPreference.reducesMotion else {
+            collectionView.setContentOffset(target, animated: false)
+            finishLanding(generation)
+            return
+        }
+        collectionView.setContentOffset(target, animated: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.landingScrollTimeout) { [weak self] in
+            self?.finishLanding(generation)
+        }
+    }
+
+    /// The list got there (or gave up): the comment lands. Only the landing
+    /// still in flight, and only once.
+    private func finishLanding(_ generation: Int) {
+        guard landingGeneration == generation, let pending = takePendingLanding() else { return }
+        // ⚠️ THE TIMEOUT IS NOT PROOF OF ARRIVAL: a starved main thread can
+        // still be mid-scroll when it fires, and inserting then would land the
+        // comment off screen — the one thing this exists to prevent. Short of
+        // the slot, the list gets there now; a finger on it keeps the say.
+        if abs(collectionView.contentOffset.y - pending.target.y) > 0.5, !collectionView.isDragging {
+            collectionView.setContentOffset(pending.target, animated: false)
+        }
+        collectionView.layoutIfNeeded()
+        insertPostedComment(pending.id, reconfiguring: pending.reconfiguring)
+    }
+
+    /// Ends a landing in flight and hands it back — nil when none was. Its
+    /// scroll's completion then lands nothing.
+    private func takePendingLanding() -> (id: String, reconfiguring: [StreamItem], target: CGPoint)? {
+        guard let pending = pendingLanding else { return nil }
+        pendingLanding = nil
+        landingGeneration += 1
+        return pending
+    }
+
+    private func insertPostedComment(_ id: String, reconfiguring: [StreamItem]) {
+        #if DEBUG
+        debugLandingEvents.append("insert:\(id)")
+        #endif
+        applyStream(animated: true, reconfiguring: reconfiguring)
+        playArrival(ofPostedComment: id)
+    }
+
+    /// Where the list must go for `id`'s slot to be on screen, or nil when it
+    /// already is (or cannot be told). The slot is the bottom of the row the
+    /// comment will follow in the NEW stream — a row already on screen's data,
+    /// so its place is known before the comment exists. The list goes so the
+    /// slot sits a third of the way down what is visible.
+    private func landingOffset(for id: String) -> CGPoint? {
+        let items = streamSections().flatMap(\.items)
+        guard let index = items.firstIndex(of: .comment(id)) else { return nil }
+        let slotY: CGFloat
+        if index == 0 {
+            slotY = 0
+        } else {
+            guard let path = streamDataSource.indexPath(for: items[index - 1]),
+                  let anchor = collectionView.layoutAttributesForItem(at: path) else { return nil }
+            slotY = anchor.frame.maxY
+        }
+        let insets = collectionView.adjustedContentInset
+        let offset = collectionView.contentOffset.y
+        let visibleTop = offset + insets.top
+        let visibleBottom = offset + collectionView.bounds.height - insets.bottom
+        if slotY >= visibleTop - 0.5, slotY + Self.landingRowAllowance <= visibleBottom { return nil }
+        let minY = -insets.top
+        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + insets.bottom)
+        let wanted = slotY - insets.top - (visibleBottom - visibleTop) / 3
+        let y = min(max(wanted, minY), maxY)
+        guard abs(y - offset) > 0.5 else { return nil }
+        return CGPoint(x: collectionView.contentOffset.x, y: y)
     }
 
     /// The viewer's comment that just landed, until its row has arrived.
@@ -1542,6 +1659,7 @@ final class PostDetailViewController: UIViewController {
         row.playAppear(in: cell.contentView)
         #if DEBUG
         debugPlayedArrivals.append(id)
+        debugLandingEvents.append("arrive:\(id)")
         #endif
     }
 
@@ -1553,6 +1671,9 @@ final class PostDetailViewController: UIViewController {
     #if DEBUG
     /// The comments whose arrival played, in order. Tests.
     var debugPlayedArrivals: [String] = []
+    /// A posted comment's landing, step by step (#921): `scroll:`, `insert:`,
+    /// `arrive:`. Tests.
+    var debugLandingEvents: [String] = []
     #endif
 
     /// The bones step aside and the loaded comments arrive, one after the
@@ -1889,7 +2010,13 @@ final class PostDetailViewController: UIViewController {
         var indexByDay: [Date: Int] = [:]
         var current = 0
         for item in items {
-            if case .comment(let id) = item, let model = streamModels[id], model.parentID == nil,
+            if case .comment(let id) = item, let model = streamModels[id], model.isOwnThread {
+                // The viewer's own threads (#921) ride with the caption, in
+                // `.main`, above every day — they lead the stream, and a
+                // day's pill must not gather everyone else's comments of
+                // that day up under them.
+                current = 0
+            } else if case .comment(let id) = item, let model = streamModels[id], model.parentID == nil,
                let createdAt = model.createdAt {
                 let day = calendar.startOfDay(for: createdAt)
                 if let existing = indexByDay[day] {
@@ -2786,6 +2913,12 @@ extension PostDetailViewController: UICollectionViewDelegate {
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         disarmPullDismiss(scrollView)
+    }
+
+    /// A posted comment's landing scroll arrived (#921).
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard pendingLanding != nil else { return }
+        finishLanding(landingGeneration)
     }
 
     /// Ends the armed window, settling the transition at rest first so a

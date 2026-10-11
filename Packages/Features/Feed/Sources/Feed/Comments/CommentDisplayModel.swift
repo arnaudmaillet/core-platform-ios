@@ -36,8 +36,11 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     public let isHeld: Bool
     /// The viewer owns the post and may approve or decline this held comment.
     public let canReview: Bool
+    /// A thread the viewer started (#921): it rides in the viewer's own
+    /// section, right under the caption, whatever the sort.
+    public let isOwnThread: Bool
 
-    public init(entry: CommentEntry, now: Date = Date(), canReview: Bool = false) {
+    public init(entry: CommentEntry, now: Date = Date(), canReview: Bool = false, isOwnThread: Bool = false) {
         id = entry.id
         authorID = entry.authorID
         authorName = entry.authorName
@@ -49,6 +52,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         createdAt = entry.createdAt
         isHeld = entry.isHeld
         self.canReview = entry.isHeld && canReview
+        self.isOwnThread = isOwnThread
     }
 
     /// A row that is not a comment: a conversation's message, drawn in the
@@ -74,6 +78,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         self.createdAt = createdAt
         isHeld = false
         canReview = false
+        isOwnThread = false
         monogram = MonogramAvatarView.monogram(name: authorName, handle: "")
     }
 }
