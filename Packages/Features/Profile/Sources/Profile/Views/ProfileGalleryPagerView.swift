@@ -330,6 +330,11 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].tileRevealShape(for: postID)
     }
 
+    func restingOverlay(for postID: PostID) -> UIView? {
+        guard pages.indices.contains(activeIndex) else { return nil }
+        return pages[activeIndex].restingOverlay(for: postID)
+    }
+
     /// The any-kind floor under `textRowFrame` — see the grid's own note.
     func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
         guard pages.indices.contains(activeIndex) else { return nil }

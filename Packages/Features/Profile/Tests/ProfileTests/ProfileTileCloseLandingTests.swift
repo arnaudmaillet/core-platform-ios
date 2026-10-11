@@ -21,6 +21,9 @@ import UIKit
 /// The arrival cell decides: a tile lands as its twin
 /// (`PostGridTileStandInView`) on the tile's corner and fill, a row as the
 /// card it always was.
+///
+/// And a MEDIA close onto a worded tile carries the tile's words (#910), so
+/// they are on the landed frame rather than following it.
 @MainActor
 struct ProfileTileCloseLandingTests {
     private struct SilentFetcher: ImageFetching {
@@ -120,7 +123,7 @@ struct ProfileTileCloseLandingTests {
     /// size, on the tile's corner and fill, with no author band borrowed and
     /// no caption to align to.
     @Test func aPairsCloseLandsAsItsTileNotAsAPostCard() throws {
-        let page = page(.discover, posts: corpus())
+        let page = self.page(.discover, posts: corpus())
         let pair = try #require(page.debugSegments.first { $0.isPairs }?.posts.first)
         try realize(pair.id, on: page)
         let slot = try #require(page.rowFrame(for: pair.id, in: page))
@@ -139,7 +142,7 @@ struct ProfileTileCloseLandingTests {
 
     /// A chunk's tile, the same rule at the mosaic's corner.
     @Test func aChunkTilesCloseLandsAsItsTile() throws {
-        let page = page(.discover, posts: corpus())
+        let page = self.page(.discover, posts: corpus())
         let tile = try #require(page.debugSegments.first { $0.chunk != nil }?.posts.first)
         try realize(tile.id, on: page)
         let slot = try #require(page.rowFrame(for: tile.id, in: page))
@@ -157,7 +160,7 @@ struct ProfileTileCloseLandingTests {
     /// The media gallery's bricks ("View all") are tiles too.
     @Test func aMediaGalleryBricksCloseLandsAsItsTile() throws {
         let photos = (0..<12).map { post($0, .photo) }
-        let page = page(.grid, posts: photos)
+        let page = self.page(.grid, posts: photos)
         try realize(photos[3].id, on: page)
 
         let reveal = try #require(try origin(opening: photos[3], from: page).textReveal)
@@ -171,7 +174,7 @@ struct ProfileTileCloseLandingTests {
     /// row-shaped stand-in, the card's corner and white, the page aligned to
     /// its caption, the band borrowed.
     @Test func aTextRowStillLandsAsItsCard() throws {
-        let page = page(.discover, posts: corpus())
+        let page = self.page(.discover, posts: corpus())
         let text = try #require(page.debugSegments.first { $0.chunk == nil && !$0.isPairs }?
             .posts.first { $0.kind == .text })
         try realize(text.id, on: page)
@@ -184,5 +187,63 @@ struct ProfileTileCloseLandingTests {
         #expect(reveal.fill == PostGridListRowCell.cardFillColor)
         let band = try #require(page.textRowAuthorBand(for: text.id), "the row draws no band to borrow")
         #expect(reveal.authorBand == band)
+    }
+
+    // MARK: - The words a media close carries home (#910)
+
+    /// The cell `id` is drawn in — a tile, for every caller below.
+    private func tileCell(_ id: PostID, on page: ProfileGalleryGridView) throws -> PostGridTileCell {
+        let path = try #require(page.debugIndexPath(for: id))
+        return try #require(page.collectionView.cellForItem(at: path) as? PostGridTileCell)
+    }
+
+    /// The bug itself: a media close onto a Discover pair landed as the bare
+    /// picture, its author, likes and caption appearing only once the tile was
+    /// back — the profile's origin wore no overlay, For You's does. The origin
+    /// now hands the flight the pair's words, at the slot's size, with the
+    /// heart closing the author line as on the tile.
+    @Test func aPairsOriginCarriesItsWords() throws {
+        let page = self.page(.discover, posts: corpus())
+        let pair = try #require(page.debugSegments.first { $0.isPairs }?.posts.first)
+        try realize(pair.id, on: page)
+        let slot = try #require(page.rowFrame(for: pair.id, in: page))
+        #expect(try tileCell(pair.id, on: page).debugInfoOverlay != nil, "the pair wears no words to carry")
+
+        let origin = try self.origin(opening: pair, from: page)
+
+        let restingOverlay = try #require(origin.restingOverlay, "the origin carries no overlay: the close lands bare")
+        let overlay = try #require(restingOverlay() as? PostCardCaptionOverlay, "the pair's words are not carried")
+        #expect(overlay.bounds.size == slot.size, "the words are not wrapped at the tile's size")
+        #expect(overlay.likeReadout != nil, "the carried words lost the heart that closes the tile's author line")
+    }
+
+    /// A chunk's tile carries its words when it wears any, and nothing when it
+    /// is too small to — whatever the tile under the landing draws.
+    @Test func aChunkTilesOriginCarriesWhatTheTileWears() throws {
+        let page = self.page(.discover, posts: corpus())
+        let tiles = try #require(page.debugSegments.first { $0.chunk != nil }?.posts)
+        var sawWorded = false
+        for tile in tiles {
+            try realize(tile.id, on: page)
+            let wears = try tileCell(tile.id, on: page).debugInfoOverlay != nil
+            sawWorded = sawWorded || wears
+            let carried = try origin(opening: tile, from: page).restingOverlay?()
+            #expect((carried is PostCardCaptionOverlay) == wears, "tile \(tile.id.rawValue): carries \(carried != nil), wears \(wears)")
+        }
+        #expect(sawWorded, "no chunk tile large enough to wear words: the test proves nothing")
+    }
+
+    /// ⚠️ NOTHING IS ADDED where the tile wears no words: the media gallery's
+    /// bricks fly their corner count as before, and a row has no overlay.
+    @Test func bricksAndRowsCarryNoWords() throws {
+        let photos = (0..<12).map { post($0, .photo) }
+        let grid = page(.grid, posts: photos)
+        try realize(photos[3].id, on: grid)
+        #expect(try origin(opening: photos[3], from: grid).restingOverlay?() == nil)
+
+        let discover = page(.discover, posts: corpus())
+        let row = try #require(discover.debugSegments.first { $0.chunk == nil && !$0.isPairs }?.posts.first)
+        try realize(row.id, on: discover)
+        #expect(try origin(opening: row, from: discover).restingOverlay?() == nil)
     }
 }
