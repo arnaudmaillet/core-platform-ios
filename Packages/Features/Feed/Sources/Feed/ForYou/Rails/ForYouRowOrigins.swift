@@ -177,12 +177,22 @@ enum ForYouRowOrigins {
     /// A Following card: the row's posts from it on, flown out of the card — a
     /// list row's media flight (`.listMedia`, the card's own corner), wearing
     /// the card's caption as furniture that fades as it grows.
+    ///
+    /// `thawsOnLanding` is For You's arrangement: the page is pinned only for
+    /// the close, and handed back as it lands. A PUSHED host (the hashtag
+    /// page's lead row, #924) passes false: it pins from the tap
+    /// (`ForYouGridPage.openHoldingStill`) and hands the inset back in its own
+    /// `viewDidAppear`, because both landings here can come while that screen
+    /// is still under the depth recede — a grab reveals its source before the
+    /// recede is reset — and a thaw then re-bases the list on the scaled
+    /// frame's inset: the page dropped 22pt as the card landed.
     static func card(
         _ tapped: GalleryPost,
         stream: [GalleryPost],
         rails: ForYouRailsView,
         page: ForYouGridPage,
         host: UIView,
+        thawsOnLanding: Bool = true,
         closeStaged: @escaping () -> Void = {}
     ) -> SnapFeedHeroOrigin {
         let id = tapped.id
@@ -201,7 +211,7 @@ enum ForYouRowOrigins {
             isOnScreen: { [weak rails] in rails?.isCardOnScreen(id) ?? false },
             setConcealed: { [weak rails, weak page] concealed in
                 rails?.setCardConcealed(concealed, for: id)
-                if !concealed { page?.endHeroFreeze() }
+                if !concealed, thawsOnLanding { page?.endHeroFreeze() }
             },
             // The card takes off PLAYING, joining its own surface.
             donateLiveMedia: { [weak rails] in rails?.liveCardSurface(for: id) },
@@ -209,8 +219,14 @@ enum ForYouRowOrigins {
             // EVERY card — see the note on this type. A text card is the
             // list's own card, and opens and closes as the list's do.
             textReveal: hasMedia
-                ? cardReveal(for: tapped, cover: cover, rails: rails, page: page, closeStaged: closeStaged)
-                : textCardReveal(for: tapped, rails: rails, page: page, closeStaged: closeStaged),
+                ? cardReveal(
+                    for: tapped, cover: cover, rails: rails, page: page,
+                    thawsOnLanding: thawsOnLanding, closeStaged: closeStaged
+                )
+                : textCardReveal(
+                    for: tapped, rails: rails, page: page,
+                    thawsOnLanding: thawsOnLanding, closeStaged: closeStaged
+                ),
             // A close hands the page's playback to the card before the flight
             // card goes, and waits for it to draw — no thumbnail between the
             // two (`ForYouRailsView.adoptLandingPlayback`).
@@ -242,6 +258,7 @@ enum ForYouRowOrigins {
         cover: UIImage?,
         rails: ForYouRailsView,
         page: ForYouGridPage,
+        thawsOnLanding: Bool = true,
         closeStaged: @escaping () -> Void = {}
     ) -> TextRevealOrigin {
         let id = post.id
@@ -278,7 +295,8 @@ enum ForYouRowOrigins {
             willStageDismissal: { [weak rails, weak page] _ in
                 stageClose(page: page, then: closeStaged) { rails?.bringCardIntoView(id) }
             },
-            dismissalDidEnd: { [weak page] _ in page?.endHeroFreeze() }
+            // See `card`'s `thawsOnLanding`.
+            dismissalDidEnd: { [weak page] _ in if thawsOnLanding { page?.endHeroFreeze() } }
         )
     }
 
@@ -299,6 +317,7 @@ enum ForYouRowOrigins {
         for post: GalleryPost,
         rails: ForYouRailsView,
         page: ForYouGridPage,
+        thawsOnLanding: Bool = true,
         closeStaged: @escaping () -> Void = {}
     ) -> TextRevealOrigin {
         let id = post.id
@@ -324,7 +343,8 @@ enum ForYouRowOrigins {
             willStageDismissal: { [weak rails, weak page] _ in
                 stageClose(page: page, then: closeStaged) { rails?.bringCardIntoView(id) }
             },
-            dismissalDidEnd: { [weak page] _ in page?.endHeroFreeze() }
+            // See `card`'s `thawsOnLanding`.
+            dismissalDidEnd: { [weak page] _ in if thawsOnLanding { page?.endHeroFreeze() } }
         )
     }
 
