@@ -17,8 +17,8 @@ import CoreNavigation
 ///
 /// # The chrome, top and bottom
 ///
-///     navigation bar   [back] ………… [credit][query field]
-///     bottom toolbar   [selector] ………………………… [filter tray]
+///     navigation bar   [back][filter] ………… [credit][query field]
+///     bottom toolbar   [selector] …………………………………
 ///
 /// ⚠️ REAL BAR ITEMS, AND THE COMPOSITE THEY REPLACE IS WHY. The header was one
 /// `UIStackView` in `navigationItem.titleView` holding both controls, which
@@ -599,67 +599,26 @@ final class SearchResultsViewController: UIViewController {
 
     // MARK: - Toolbar
 
-    /// The band at the foot of the screen: the format selector, and the filter
-    /// riding its trailing edge inside the same glass.
+    /// The format selector, as the LEADING item of the bottom toolbar (#881)
+    /// — the pushed profile's arrangement, through the same
+    /// `SelectorToolbarItem`, rather than the tab bar's bottom accessory it
+    /// used to ride.
     ///
-    /// ⚠️ **AN ACCESSORY, ON A SCREEN WITH NO TAB BAR UNDER IT.** This screen
-    /// sets `hidesBottomBarWhenPushed`, which made it the one place the
-    /// question could be asked — and the answer is yes. `UITabAccessory.h`
-    /// defines `.regular` as "above the bottom tab bar when it is visible; or,
-    /// at the bottom of the UITabBarController's view", and that is what it
-    /// does. Measured here: `env=.regular`, container 360x48 at y=805 of an
-    /// 874pt window, laid out exactly as it is on a tab root.
+    /// ⚠️ **`toolbarItems` IS PER VIEW CONTROLLER**, so the strip cannot leak
+    /// onto another screen the way a `UITabAccessory` — the tab bar
+    /// controller's, with no per-screen scope — had to be kept from doing by
+    /// an install/remove bracket around every appearance. What the stack
+    /// shares is the toolbar's visibility: shown on the way in, put away on
+    /// the way out unless the screen taking over brings items of its own (a
+    /// post's feed, which adopts the bar — `SnapFeedViewController
+    /// .successorUsesToolbar` hands it back intact when that post is popped).
     ///
-    /// ⚠️ **AND THE TOOLBAR HAD TO GO, NOT MOVE OVER.** A toolbar and an
-    /// accessory both claim the bottom of the screen and UIKit coordinates
-    /// neither — the accessory belongs to the `UITabBarController` and the
-    /// toolbar to a `UINavigationController` descendant, and the two headers do
-    /// not mention each other. Filmed: the toolbar's filter glyph drawn
-    /// UNDERNEATH the band, half-hidden by its trailing edge. This screen
-    /// therefore presents no toolbar items at all — which also gives
-    /// `SnapFeedViewController.successorUsesToolbar` the right answer when a
-    /// post pushed from here is popped back.
-    ///
-    /// ⚠️ **AND THE FILTER IS NOT IN THE BAND EITHER, BECAUSE ONE ACCESSORY IS
-    /// ONE CAPSULE.** `_UITabAccessoryContainer` draws its glass around the
-    /// WHOLE content view whatever is inside it — measured twice: an accessory
-    /// built with a nil content view still draws its bubble around nothing, and
-    /// a strip given its own glass came back as a pill inside a pill. So a
-    /// filter sharing the band cannot have a capsule of its own, and side by
-    /// side is not available either: UIKit fixes the band at 360pt centred in a
-    /// 402pt window, leaving 21pt at each edge.
-    ///
-    /// What IS available is the arrangement the profile tab root already uses,
-    /// and for the same reason: a tray in the SCREEN'S OWN VIEW, pinned above
-    /// its `safeAreaLayoutGuide.bottom`. The safe area already accounts for the
-    /// band — measured, `safeAreaInsets.bottom = 69` in an 874pt window with the
-    /// band's top edge at exactly 805 — so the tray clears it for free, with no
-    /// arithmetic and nothing to keep in step. Two separate glass capsules, the
-    /// selector's and the filter's, and neither drawn over the other.
+    /// The filter stays where it is, a leading item of the NAVIGATION bar
+    /// (`configureHeader`, which runs first).
     private func configureToolbar() {
-
-        // ⚠️ **NO WIDTH CAP HERE, AND A TOOLBAR IS WHY.** The cap that used to
-        // exist did so because a UINavigationBar sweeps a leading group it
-        // cannot fit into a `•••`; a toolbar has no item groups and no overflow
-        // control, so that failure is not available to it. The app already hosts a wide
-        // custom view in this same shared toolbar with no arithmetic at all —
-        // the chat composer's sticker strip — and that is the precedent
-        // followed here.
-        //
-        // ⚠️ BARE, THOUGH — and the HOST says so. `SelectorAccessoryHost` sets
-        // the strip's `hosting` to `.container`, because the accessory's glass
-        // is drawn around the content view and a bar carrying its own backdrop
-        // would draw a lens inside a lens. Stating it here as well was an
-        // opinion the host overwrote.
-
-        // ⚠️ `toolbarItems` IS PER VIEW CONTROLLER even though the toolbar is
-        // the navigation controller's, so the selector cannot leak onto another
-        // screen. What IS shared is the toolbar's visibility, which is why this
-        // screen still shows it on the way in and hides it on the way out.
-        selectorAccessory = SelectorAccessory(strip: tabBar)
-
-        // Nothing to place at the foot: the band is the selector alone, and the
-        // filter is a leading bar item (`configureHeader`, which runs first).
+        let toolbar = SelectorToolbarItem(strip: tabBar)
+        selectorToolbar = toolbar
+        toolbarItems = toolbar.toolbarItems
 
         // ⚠️ THE STRIP WINS THE TOUCH IT IS UNDER. Docked at the foot of the
         // screen the selector sits over a pager of scrolling grids, and a drag
@@ -804,16 +763,8 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // `minimizesOnScroll: false` — there is no tab bar under this screen to
-        // minimize, and arming a shell-wide behaviour from a screen that cannot
-        // use it is how every other tab inherits a collapsing bar.
-        installBottomChromeWhenAppearing(
-            handsOver: tabBarController?.bottomAccessory != nil
-        ) { [weak self] in
-            guard let self else { return }
-            selectorAccessory?.install(into: tabBarController,
-                                       alongside: transitionCoordinator)
-        }
+        // The strip rides the stack's toolbar (#881).
+        selectorToolbar?.show(for: self, animated: animated)
         // ⚠️ RE-SUBSCRIBED EVERY TIME, and this is not belt and braces.
         // `SearchViewModel`'s callbacks are single-assignment slots, and a
         // refine screen pushed over this one takes `onPhaseChange` in its own
@@ -840,7 +791,6 @@ final class SearchResultsViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        selectorAccessory?.install(into: tabBarController)
         #if DEBUG
         // `-search-refine-cycle`: ask for the refine screen on a timer, so the
         // bar transition in BOTH directions can be filmed.
@@ -851,9 +801,6 @@ final class SearchResultsViewController: UIViewController {
                 self?.onEditQuery?()
             }
         }
-        #endif
-        #if DEBUG
-        reportAccessorySpike()
         #endif
         // ⚠️ HERE, NOT `viewWillAppear`. The window is what
         // `updatePlayback` reads, and a screen arriving has none until it has
@@ -867,7 +814,7 @@ final class SearchResultsViewController: UIViewController {
         // ⚠️ NOTHING OF OURS OUTLIVES THIS SCREEN'S TURN ON TOP. A suspended
         // pan is stack-wide state; carrying one into a pushed screen's
         // dismissal is how a gesture that should pop one level pops two.
-        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
+        selectorToolbar?.hide(leaving: self, animated: animated)
         setPageScrollEnabled(true)
         Self.traceNavigation(
             "results willDisappear movingFromParent=\(isMovingFromParent) "
@@ -879,11 +826,9 @@ final class SearchResultsViewController: UIViewController {
         postsPage.setPlaybackActive(false)
     }
 
-    /// Internal, not private, so the tests can assert what is IN the band.
-    /// The arrangement moved out of `toolbarItems` — which a test could read —
-    /// into a content view UIKit owns, and a rule nothing can see is a rule
-    /// that quietly stops being true.
-    private(set) var selectorAccessory: SelectorAccessory?
+    /// The selector's toolbar item. Internal, not private, so the tests can
+    /// assert where the strip is installed.
+    private(set) var selectorToolbar: SelectorToolbarItem?
 
     #if DEBUG
     private var hasDrivenRefineCycle = false
@@ -907,27 +852,6 @@ final class SearchResultsViewController: UIViewController {
         item.accessibilityLabel = "Filters"
         return item
     }()
-
-    #if DEBUG
-    /// What the spike actually produced, in numbers — whether the accessory was
-    /// accepted at all, where UIKit put it, and whether the tab bar it is
-    /// nominally attached to is even on screen.
-    private func reportAccessorySpike() {
-        let host = selectorAccessory?.hostView
-        let container = host?.superview
-        let bar = tabBarController?.tabBar
-        print("[search-accessory] hosted=\(host?.window != nil)"
-            + " accessorySet=\(tabBarController?.bottomAccessory != nil)"
-            + " env=\(host.map { String(describing: $0.traitCollection.tabAccessoryEnvironment) } ?? "nil")"
-            + String(format: " container=%.0fx%.0f at %.0f,%.0f",
-                     container?.bounds.width ?? -1, container?.bounds.height ?? -1,
-                     container.map { $0.convert($0.bounds, to: nil).minX } ?? -1,
-                     container.map { $0.convert($0.bounds, to: nil).minY } ?? -1)
-            + " tabBarHidden=\(tabBarController?.isTabBarHidden ?? false)"
-            + String(format: " barY=%.0f", bar.map { $0.convert($0.bounds, to: nil).minY } ?? -1)
-            + String(format: " windowH=%.0f", view.window?.bounds.height ?? -1))
-    }
-    #endif
 
     private func presentFilters() {
         let isMember = MemberGates.gate(from: self)?.isMember ?? true
