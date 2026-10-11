@@ -316,7 +316,11 @@ struct ConversationThreadSendAndMuteTests {
 
     // MARK: - No flicker (#725)
 
-    private func settle(attempts: Int = 400, _ condition: () -> Bool) async -> Bool {
+    /// A look budget, not a deadline: every wait here is positive and returns
+    /// the moment its condition holds, so the budget only matters on a starved
+    /// runner, where each 5 ms look stretches and a 400-look budget (2 s on
+    /// paper) ran out before a delayed read landed (#966).
+    private func settle(attempts: Int = 6_000, _ condition: () -> Bool) async -> Bool {
         for _ in 0..<attempts {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(5))
@@ -555,7 +559,7 @@ struct ConversationThreadSendAndMuteTests {
         screen.followPeer(ProfileID("them"))
         #expect(screen.debugPeerFollowBadge == .following, "no optimistic follow")
         #expect(await settle { screen.debugPeerFollowBadge == .follow }, "the refusal stuck")
-        #expect(Self.firstToast(in: screen.view)?.style == .failure, "the refused follow was silent")
+        #expect(await settle { Self.firstToast(in: screen.view)?.style == .failure }, "the refused follow was silent")
     }
 
     /// The pill draws the relation as a vertical post's author pill does —
