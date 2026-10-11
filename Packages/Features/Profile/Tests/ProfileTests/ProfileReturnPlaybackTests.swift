@@ -141,6 +141,9 @@ struct ProfileReturnPlaybackTests {
         // the clip it landed.
         page.setAutoplayActive(true)
         #expect(pool.hasPlayer(in: tile))
+        // ⚠️ That appearance ran in the landing's own turn (#963): the hold,
+        // asked after it, still waits for the clip, not for the still.
+        #expect(!page.isReturnLandingReady(for: tapped.id), "the hold settled on the still")
     }
 
     /// Nothing parked: the close lands on the still, and the hold waits for it

@@ -132,8 +132,12 @@ struct ReturnPlayersEverywhereTests {
         let tile = try #require((page.debugCell(for: tapped) as? any GridPlaybackCell)?.loadedVideoRenderView)
         #expect(pool.hasPlayer(in: tile))
 
+        // ⚠️ `viewDidAppear` ends the scope in the landing's own turn (#963):
+        // the hold, asked after it, still waits for the clip — the still is
+        // up, and settling on it let the card go before the clip drew.
         page.endPlaybackHandoff()
         #expect(pool.hasPlayer(in: tile), "the scope's end took the landed clip away")
+        #expect(!page.isReturnLandingReady(for: tapped), "the hold settled on the still")
     }
 
     /// Nothing parked (evicted, or never playing): no surface, nothing landed,
