@@ -166,9 +166,11 @@ struct SnapBarPillWidthsTests {
                              ("more", more)] as [(String, UIView)] {
             #expect(view.window != nil, "\(width)pt: the \(name) item was folded away")
         }
-        let fixed = try #require(pill.fixedWidth)
-        #expect(abs(pill.bounds.width - fixed) < 1, "\(width)pt: the bar drew the pill \(pill.bounds.width), not \(fixed)")
-        #expect(fixed >= 80, "\(width)pt: a pill of \(fixed) shows no name at all")
+        // The pill hugs its content under the toolbar's cap (#925): a name
+        // this long fills the cap, and the bar draws it at exactly that.
+        let cap = pill.widthCap
+        #expect(abs(pill.bounds.width - cap) < 1, "\(width)pt: the bar drew the pill \(pill.bounds.width), not its cap \(cap)")
+        #expect(cap >= 80, "\(width)pt: a pill of \(cap) shows no name at all")
     }
 }
 

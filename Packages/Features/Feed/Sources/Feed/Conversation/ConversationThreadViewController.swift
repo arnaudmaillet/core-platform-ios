@@ -1495,10 +1495,12 @@ extension ConversationThreadViewController {
         }
     }
 
-    /// - Parameter tapped: the viewer's own follow (or its refusal), which
-    ///   turns the "+" through the pill's blur, as on a post. Anything else
-    ///   is a value that LANDED — a read answering, a new peer — and changes
-    ///   the glyph in place (#889).
+    /// Either way the badge's symbol is replaced and nothing else moves
+    /// (#925), as on a post.
+    ///
+    /// - Parameter tapped: the viewer's own follow (or its refusal), drawn at
+    ///   once. Anything else is a value that LANDED — a read answering, a new
+    ///   peer — and waits out a push or pop under way (#889).
     private func setPeerRelation(_ relation: FollowRelation?, tapped: Bool = false) {
         peerRelation = relation
         if tapped {
@@ -1513,11 +1515,10 @@ extension ConversationThreadViewController {
         relation.map(SnapAuthorIdentityView.FollowBadge.init) ?? .none
     }
 
-    /// Draws `peerRelation` on the pill, in place — once the push or pop
-    /// under way has landed (#889): a bar item resized in the middle of a
-    /// navigation transition is folded into it and lands without its
-    /// animation (memory `bar-items-during-push-trap`). Off screen, or with
-    /// no transition, at once.
+    /// Draws `peerRelation` on the pill's badge — once the push or pop under
+    /// way has landed (#889): the transition is UIKit's alone (owner,
+    /// 2026-10-11), and a change drawn inside it is a change nobody sees.
+    /// Off screen, or with no transition, at once.
     private func drawLandedRelation() {
         guard !landedRelationScheduled else { return }
         if view.window != nil, let coordinator = transitionCoordinator {
@@ -1527,14 +1528,16 @@ extension ConversationThreadViewController {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.landedRelationScheduled = false
-                    self.peerPill.setFollowBadgeInPlace(Self.badge(for: self.peerRelation))
+                    self.peerPill.setFollowBadge(
+                        Self.badge(for: self.peerRelation), animated: self.view.window != nil
+                    )
                 }
             }
             if scheduled { return }
             // The coordinator took nothing: never leave the flag stuck.
             landedRelationScheduled = false
         }
-        peerPill.setFollowBadgeInPlace(Self.badge(for: peerRelation))
+        peerPill.setFollowBadge(Self.badge(for: peerRelation), animated: view.window != nil)
     }
 
     /// The "+": follows the correspondent, optimistically, as the feed's
@@ -1572,6 +1575,6 @@ extension ConversationThreadViewController {
         }
     }
 
-    /// The pill's relation glyph. Tests.
+    /// The pill's relation badge. Tests.
     var debugPeerFollowBadge: SnapAuthorIdentityView.FollowBadge { peerPill.followBadge }
 }

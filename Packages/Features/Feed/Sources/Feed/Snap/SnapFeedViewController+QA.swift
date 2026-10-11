@@ -67,8 +67,9 @@ extension SnapFeedViewController {
         guard ProcessInfo.processInfo.arguments.contains("-pill-probe") else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak pill] in
             guard let pill, pill.window != nil else { return }
-            let fixed = (pill as? SnapAuthorIdentityView)?.fixedWidth
-                ?? (pill as? SnapMediaAttributionView)?.fixedWidth ?? -1
+            // The author pill hugs its content (#925): its own fitted width.
+            let fixed = (pill as? SnapMediaAttributionView)?.fixedWidth
+                ?? pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
             let drawn = pill.bounds.width
             let wrapper = pill.superview?.bounds.width ?? -1
             let drifted = abs(drawn - fixed) > 1 || abs(wrapper - drawn) > 1

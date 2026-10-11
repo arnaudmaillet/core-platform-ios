@@ -1425,12 +1425,12 @@ struct SnapCommentsPresentationTests {
         // THE PILL NEVER CHANGES WHAT IT IS. It used to drop the handle line
         // and the follow button for the engagement, which made it a visibly
         // different component in the two states. It pays the bar's width
-        // budget in WIDTH now: same two lines, same follow button, same
-        // platter — the name truncates earlier, exactly as a long name
-        // already does at rest.
-        view.setWidthBudget(160)
+        // budget in WIDTH now: same two lines, same badge, same platter —
+        // the name truncates earlier, exactly as a long name already does
+        // at rest.
+        view.setWidthBudget(110)
         let budgeted = settledWidth()
-        #expect(budgeted <= 160)
+        #expect(budgeted <= 110)
         #expect(budgeted < resting)
 
         // And it comes back whole.
