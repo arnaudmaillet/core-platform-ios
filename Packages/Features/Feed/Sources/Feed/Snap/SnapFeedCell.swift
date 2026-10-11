@@ -95,8 +95,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         guard let videoPlayback, let surface = audibleSurface else { return false }
         return videoPlayback.isAdvancing(in: surface)
     }
-    /// Paused by `setCoveredBySheet`, and owed a resume by it.
-    private var isSheetPaused = false
     /// "Don't Cover People" (#484): segments this page's clip while it owns
     /// the screen, and masks the band where people are.
     private let personOcclusion = PersonOcclusionDriver()
@@ -506,7 +504,18 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
         #endif
     }
-    private var videoPlayback: VideoPlaybackController?
+    /// The pool this page plays through. Stored on `playback`, which drives
+    /// the viewer's pauses, the playhead and the scrub through the same one.
+    private var videoPlayback: VideoPlaybackController? {
+        get { playback.pool }
+        set { playback.pool = newValue }
+    }
+    /// The viewer's hand on the clip and the playhead fed to the media bar —
+    /// see `SnapCellPlayback`. Always on the watched surface, asked each time.
+    private lazy var playback = SnapCellPlayback(
+        surface: { [weak self] in self?.mediaCard.renderView },
+        isActive: { [weak self] in self?.isActive ?? false }
+    )
     private var imageTasks: [Task<Void, Never>] = []
     private var isActive = false
 
@@ -693,30 +702,29 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
             self.refreshMediaLoader()
             self.onMediaPageChanged?(page)
         }
+        // The playback's outputs land on the chrome, and the chrome's scrub
+        // lands on the playback: the bar and the clip meet here.
+        playback.onPlayhead = { [weak self] fraction, seconds in
+            self?.chrome.setMediaPlayhead(fraction, seconds: seconds)
+        }
+        playback.onScrubPreviewLoading = { [weak self] loading in
+            self?.chrome.setScrubPreviewLoading(loading)
+        }
+        playback.onScrubPreviewPicture = { [weak self] image in
+            self?.chrome.setScrubPreviewPicture(image)
+        }
+        #if DEBUG
+        playback.debugCurrentPage = { [weak self] in self?.mediaCard.currentPage ?? 0 }
+        #endif
         chrome.onScrubPreviewRequested = { [weak self] fraction in
-            self?.updateScrubPreview(fraction)
+            self?.playback.updateScrubPreview(fraction)
         }
+        // Exact, drag or tap — see `SnapCellPlayback.seek(toFraction:)`.
         chrome.onMediaSeekRequested = { [weak self] fraction in
-            guard let self, let videoPlayback else { return }
-            // ⚠️ EXACT, drag or tap. The quarter-second tolerance this used to
-            // take let the player answer with whichever frame it had nearest —
-            // usually a keyframe — so the picture jumped between keyframes
-            // while the thumb moved smoothly: "it skips a lot of frames". The
-            // controller's chase keeps ONE seek in flight and goes to the
-            // latest position when it lands, so exact seeks never queue up
-            // behind the finger; they just land as fast as the decoder can.
-            // Measured in the PR (`-scrub-log`).
-            videoPlayback.seek(toFraction: fraction, in: mediaCard.renderView,
-                               toleranceSeconds: Self.scrubSeekTolerance)
-            #if DEBUG
-            scrubTrace?.requests += 1
-            #endif
-            // The bar draws the finger itself while it drags (see
-            // `SnapMediaPageBarView.heldPlayhead`); the fed playhead takes over
-            // once the player has caught up.
+            self?.playback.seek(toFraction: fraction)
         }
-        chrome.onMediaScrubBegan = { [weak self] in self?.beginPlayheadScrub() }
-        chrome.onMediaScrubEnded = { [weak self] fraction in self?.endPlayheadScrub(at: fraction) }
+        chrome.onMediaScrubBegan = { [weak self] in self?.playback.beginScrub() }
+        chrome.onMediaScrubEnded = { [weak self] fraction in self?.playback.endScrub(at: fraction) }
         chrome.onMediaPageRequested = { [weak self] page in
             guard let self else { return }
             // ⚠️ A NEIGHBOUR IS A PAGE TURN; ANYTHING FURTHER IS A JUMP.
@@ -1983,32 +1991,19 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     // MARK: - The wait
 
-    /// How long a page may be missing its media before it says so.
-    ///
-    /// ⚠️ NOT ZERO, and the number is the whole design. A cached picture lands
-    /// within a frame or two of `configure`, so a spinner shown the instant a
-    /// page has nothing would flash on almost every page change — motion that
-    /// means "waiting" appearing where there was no wait is worse than the
-    /// silence it replaces. A quarter of a second is long enough that anything
-    /// still missing is a real fetch, and short enough that a real fetch is
-    /// announced before the viewer wonders.
-    private static let mediaLoaderGrace: TimeInterval = {
+    /// Whether the page is announcing a wait — see `SnapMediaWait`, which
+    /// asks `hasItsOwnMedia` and drives the card's loader.
+    private lazy var mediaWait: SnapMediaWait = {
+        let wait = SnapMediaWait(
+            hasItsOwnMedia: { [weak self] in self?.hasItsOwnMedia ?? true },
+            isShowingLoader: { [weak self] in self?.mediaCard.isShowingLoader ?? false },
+            setLoading: { [weak self] loading in self?.mediaCard.setLoading(loading) }
+        )
         #if DEBUG
-        // `-media-wait-grace <ms>`: shortens (or removes) the delay, so the
-        // state can be filmed. It is otherwise close to unreachable in the
-        // simulator — the transition hands a page the picture it flew in with,
-        // and the warm window has the neighbours ready — which is the system
-        // working, and also why "I could not see it" is not evidence that it
-        // does not work.
-        let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-media-wait-grace"),
-           position + 1 < arguments.count, let milliseconds = Double(arguments[position + 1]) {
-            return milliseconds / 1000
-        }
+        wait.debugSubject = { [weak self] in self?.mediaURL?.lastPathComponent ?? "nil" }
         #endif
-        return 0.25
+        return wait
     }()
-    private var mediaLoaderTimer: Timer?
 
     /// Whether the media area has the post's OWN picture on it.
     ///
@@ -2029,48 +2024,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         }
     }
 
-    /// Re-decides whether the page is announcing a wait.
-    ///
-    /// Called from every place the answer can change — the bind, the image
-    /// landing, the first decoded frame, a carousel page turn — rather than
-    /// polled: this is a fact the media surfaces already know, and asking them
-    /// on a timer would be inventing a signal that exists.
+    /// Re-decides whether the page is announcing a wait — called from every
+    /// place the answer can change (`SnapMediaWait.refresh`).
     private func refreshMediaLoader() {
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
-            print(String(format: "[media-wait] %.3f decide own=%@ armed=%@ showing=%@ url=%@",
-                         CACurrentMediaTime(), hasItsOwnMedia ? "Y" : "n",
-                         mediaLoaderTimer == nil ? "n" : "Y",
-                         mediaCard.isShowingLoader ? "Y" : "n",
-                         mediaURL?.lastPathComponent ?? "nil"))
-        }
-        #endif
-        guard !hasItsOwnMedia else {
-            mediaLoaderTimer?.invalidate()
-            mediaLoaderTimer = nil
-            mediaCard.setLoading(false)
-            return
-        }
-        guard mediaLoaderTimer == nil, !mediaCard.isShowingLoader else { return }
-        let timer = Timer.scheduledTimer(
-            withTimeInterval: Self.mediaLoaderGrace, repeats: false
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.mediaLoaderTimer = nil
-                // Asked AGAIN at the end of the grace, never assumed: the whole
-                // point of waiting is that the answer may have changed.
-                self.mediaCard.setLoading(!self.hasItsOwnMedia)
-            }
-        }
-        mediaLoaderTimer = timer
+        mediaWait.refresh()
     }
 
     /// Drops the wait entirely — the recycle path.
     private func cancelMediaLoader() {
-        mediaLoaderTimer?.invalidate()
-        mediaLoaderTimer = nil
-        mediaCard.setLoading(false)
+        mediaWait.cancel()
     }
 
     #if DEBUG
@@ -2092,9 +2054,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Runs the grace out now, so a spec does not have to sleep for it.
     func debugElapseMediaLoaderGrace() {
-        mediaLoaderTimer?.invalidate()
-        mediaLoaderTimer = nil
-        mediaCard.setLoading(!hasItsOwnMedia)
+        mediaWait.debugElapseGrace()
     }
 
     /// Delivers a picture the way the pipeline would, so a spec can watch the
@@ -2667,13 +2627,6 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// the way to play/pause never trips it.
     static let holdToPauseDuration: TimeInterval = 0.2
 
-    /// Whether a hold is what stopped playback, so its end knows to resume.
-    ///
-    /// ⚠️ Recorded rather than assumed. A clip the viewer had ALREADY paused by
-    /// tapping must not start playing because a later hold ended on it — the
-    /// release undoes the hold, and nothing else.
-    private var isHeldPaused = false
-
     @objc private func handleMediaHold(_ recognizer: UILongPressGestureRecognizer) {
         switch recognizer.state {
         case .began:
@@ -2692,12 +2645,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// means "bring the media back").
     func beginMediaHold(at point: CGPoint) {
         guard !isCommentsEngaged, playbackTapRegionContains(point) else { return }
-        guard playsVideo, let videoPlayback else { return }
-        // Only a clip that is actually running can be held. Holding a paused
-        // one and letting go would otherwise start it.
-        guard videoPlayback.isAdvancing(in: mediaCard.renderView) else { return }
-        isHeldPaused = videoPlayback.setPaused(true, in: mediaCard.renderView)
-        traceViewerPlayback("hold", paused: isHeldPaused)
+        guard playsVideo else { return }
+        playback.beginHold()
     }
 
     /// Pauses the clip while a sheet covers it — the sound sheet's preview
@@ -2705,33 +2654,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// alone) — and resumes it after, but only if it was running when
     /// covered: a clip the viewer had paused stays paused.
     func setCoveredBySheet(_ covered: Bool) {
-        guard let videoPlayback, let surface = audibleSurface else { return }
-        if covered {
-            guard !isSheetPaused, videoPlayback.isAdvancing(in: surface) else { return }
-            isSheetPaused = videoPlayback.setPaused(true, in: surface)
-        } else if isSheetPaused {
-            isSheetPaused = false
-            videoPlayback.setPaused(false, in: surface)
-        }
+        guard videoPlayback != nil, let surface = audibleSurface else { return }
+        playback.setCovered(covered, on: surface)
     }
 
     func endMediaHold() {
-        guard isHeldPaused, let videoPlayback else { return }
-        isHeldPaused = false
-        videoPlayback.setPaused(false, in: mediaCard.renderView)
-        traceViewerPlayback("release", paused: false)
+        playback.endHold()
     }
 
-    /// Keeps the page strip's clip bar fed while there is one to feed.
-    ///
-    /// ⚠️ A DISPLAY LINK, and only while it is earning its place: the page is
-    /// active, its collection's current page carries a clip, and the strip is
-    /// therefore drawn as that clip's bar. A playhead has no notification to
-    /// hang off — it advances because time passes — so something has to ask,
-    /// and asking on the screen's own beat is the cheapest honest answer.
-    ///
-    /// The pool answers for the WATCHED surface, so this works on a page that
-    /// joined its clip from a grid tile, which is every post opened from a card.
+    /// Keeps the page strip's clip bar fed while there is one to feed: the
+    /// page is active and the clip under the viewer is a video. The feed
+    /// itself (a display link) is `SnapCellPlayback.startPlayheadFeed`.
     private func updatePlayheadFeed() {
         let wanted = isActive && playsVideo
         defer { refreshPersonOcclusion() }
@@ -2742,189 +2675,15 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // The same question, the same answer: the page on screen, watching a
         // clip. The card narrows it to a single fitted-blurred one.
         mediaCard.setLiveBackdropActive(true)
-        publishPlayhead()
-        guard playheadLink == nil else { return }
-        let link = CADisplayLink(target: self, selector: #selector(publishPlayhead))
-        // Thirty is smooth for a bar this size and half the work of sixty; the
-        // range lets the system drop it further when the display does.
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 10, maximum: 30, preferred: 30)
-        link.add(to: .main, forMode: .common)
-        playheadLink = link
+        playback.startPlayheadFeed()
     }
 
-    /// ⚠️ `CADisplayLink` RETAINS ITS TARGET. A cell that stopped feeding the
-    /// strip without invalidating would go on ticking inside a reuse pool for
-    /// the life of the app, holding itself alive — so every exit from the
-    /// feeding state comes through here.
+    /// Every exit from the feeding state comes through here — see
+    /// `SnapCellPlayback.stopPlayheadFeed` for why that matters.
     private func stopPlayheadFeed() {
-        playheadLink?.invalidate()
-        playheadLink = nil
-        chrome.setMediaPlayhead(nil)
+        playback.stopPlayheadFeed()
         mediaCard.setLiveBackdropActive(false)
     }
-
-    private var playheadLink: CADisplayLink?
-
-    @objc private func publishPlayhead() {
-        let head = videoPlayback?.playhead(in: mediaCard.renderView)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-media-log") {
-            // ⚠️ ONCE A SECOND, not thirty times: a trace that costs more than
-            // the thing it watches changes what it is watching. The fraction
-            // and the length together, because a nil here has two causes — no
-            // player at all, and a length not known yet — and only the second
-            // is normal.
-            let now = CACurrentMediaTime()
-            if now - lastPlayheadTrace > 1 {
-                lastPlayheadTrace = now
-                print(String(format: "[page-play] %.3f playhead=%@ seconds=%@ page=%d",
-                             now,
-                             head.map { String(format: "%.3f", $0.fraction) } ?? "nil",
-                             head.map { String(format: "%.1f", $0.seconds) } ?? "nil",
-                             mediaCard.currentPage))
-            }
-        }
-        #endif
-        chrome.setMediaPlayhead(head?.fraction, seconds: head?.seconds ?? 0)
-    }
-
-    /// Fetches the frame the scrub card is pointing at, at a rate a decoder can
-    /// actually keep.
-    ///
-    /// ⚠️ ONE IN FLIGHT, PLUS THE LATEST ASKED FOR. A thumb asks sixty times a
-    /// second and a frame takes longer than that to decode, so requests issued
-    /// per event would queue behind each other and the card would show where
-    /// the thumb WAS, further behind with every point of travel. One request at
-    /// a time, and when it lands, the most recent position is fetched if it has
-    /// moved — which converges on the thumb instead of trailing it.
-    private func updateScrubPreview(_ fraction: Double?) {
-        guard let fraction else {
-            wantedPreviewFraction = nil
-            chrome.setScrubPreviewLoading(false)
-            return
-        }
-        wantedPreviewFraction = fraction
-        guard !isFetchingPreview else { return }
-        fetchScrubPreview()
-    }
-
-    private func fetchScrubPreview() {
-        guard let fraction = wantedPreviewFraction, let videoPlayback else { return }
-        isFetchingPreview = true
-        chrome.setScrubPreviewLoading(true)
-        let surface = mediaCard.renderView
-        Task { [weak self] in
-            let image = await videoPlayback.previewFrame(
-                atFraction: fraction, in: surface,
-                maximumWidth: SnapScrubPreviewView.frameSize.width
-            )
-            guard let self else { return }
-            isFetchingPreview = false
-            // The gesture may have ended while this was decoding; the card is
-            // already gone and its picture must not come back.
-            guard let wanted = wantedPreviewFraction else { return }
-            // ⚠️ A FAILED DECODE CHANGES NOTHING ON SCREEN. The card keeps the
-            // last frame it had — the thumb has moved a little, not somewhere
-            // else — and only says it is waiting while there is genuinely
-            // nothing to show.
-            if let image { chrome.setScrubPreviewPicture(image) }
-            if abs(wanted - fraction) > 0.001 {
-                fetchScrubPreview()
-            } else {
-                chrome.setScrubPreviewLoading(false)
-            }
-        }
-    }
-
-    private var wantedPreviewFraction: Double?
-    private var isFetchingPreview = false
-
-    // MARK: - Scrubbing the playhead
-
-    /// How far from the asked-for moment a scrub's seek may land. Zero: frame
-    /// accurate — see `onMediaSeekRequested` for why a tolerant seek is what
-    /// made the picture jump. `-scrub-tolerance <seconds>` overrides it in a
-    /// debug build, for the A/B.
-    static let scrubSeekTolerance: Double = {
-        #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
-        if let position = arguments.firstIndex(of: "-scrub-tolerance"),
-           position + 1 < arguments.count, let seconds = Double(arguments[position + 1]) {
-            return seconds
-        }
-        #endif
-        return 0
-    }()
-
-    /// Whether the clip was running when a drag took its playhead, so the
-    /// release knows to start it again — and leaves a clip the viewer had
-    /// paused, paused.
-    private var resumesAfterScrub = false
-
-    /// ⚠️ THE CLIP STOPS UNDER THE THUMB. Left running, it advanced between
-    /// seeks and every landing was followed by a few frames of playback the
-    /// finger never asked for — the picture shuffling forward and back while
-    /// the thumb moved one way.
-    private func beginPlayheadScrub() {
-        guard let videoPlayback else { return }
-        let view = mediaCard.renderView
-        resumesAfterScrub = videoPlayback.isPaused(in: view) == false
-        videoPlayback.setPaused(true, in: view)
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-scrub-log") {
-            scrubTrace = ScrubTrace(start: CACurrentMediaTime(),
-                                    landedAtStart: videoPlayback.debugSeeksLanded,
-                                    cancelledAtStart: videoPlayback.debugSeeksCancelled)
-        }
-        #endif
-    }
-
-    /// Lands exactly where the thumb let go, and only THEN starts the clip
-    /// again — see `VideoPlaybackController.whenSeeksSettle` for what resuming
-    /// under a seek still in flight looked like.
-    private func endPlayheadScrub(at fraction: Double?) {
-        guard let videoPlayback else { return }
-        let view = mediaCard.renderView
-        if let fraction {
-            videoPlayback.seek(toFraction: fraction, in: view, toleranceSeconds: 0)
-        }
-        let resumes = resumesAfterScrub
-        resumesAfterScrub = false
-        #if DEBUG
-        let trace = scrubTrace
-        scrubTrace = nil
-        #endif
-        videoPlayback.whenSeeksSettle(in: view) { [weak self] in
-            guard let self else { return }
-            #if DEBUG
-            if let trace {
-                let seconds = CACurrentMediaTime() - trace.start
-                let landed = videoPlayback.debugSeeksLanded - trace.landedAtStart
-                print(String(format: "[scrub] %.3f %.2fs requests=%d landed=%d (%.1f/s) cancelled=%d "
-                             + "tolerance=%.3fs head=%@",
-                             CACurrentMediaTime(), seconds, trace.requests, landed,
-                             Double(landed) / max(seconds, 0.001),
-                             videoPlayback.debugSeeksCancelled - trace.cancelledAtStart,
-                             Self.scrubSeekTolerance,
-                             videoPlayback.playhead(in: view).map { String(format: "%.4f", $0.fraction) } ?? "nil"))
-            }
-            #endif
-            // A page that stopped being watched mid-scrub stays stopped.
-            guard resumes, self.isActive, self.mediaCard.renderView === view else { return }
-            videoPlayback.setPaused(false, in: view)
-        }
-    }
-
-    #if DEBUG
-    /// `-scrub-log`: what one drag asked of the player and what it got.
-    private struct ScrubTrace {
-        let start: CFTimeInterval
-        let landedAtStart: Int
-        let cancelledAtStart: Int
-        var requests = 0
-    }
-    private var scrubTrace: ScrubTrace?
-    #endif
 
     // MARK: - Paging and chrome, for the transitions
 
@@ -3023,34 +2782,11 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         return (mediaCard.currentFraming, mediaCard.currentFramingAspect, mediaCard.currentBackdrop)
     }
 
-    #if DEBUG
-    private var lastPlayheadTrace: CFTimeInterval = 0
-    #endif
-
     /// Toggles the active video's playback and reflects it in the pause glyph.
     /// No-op for image/text cells (no player).
     func togglePlayback() {
-        guard playsVideo, let videoPlayback else { return }
-        let paused = videoPlayback.togglePlayback(in: mediaCard.renderView)
-        traceViewerPlayback("tap", paused: paused)
+        guard playsVideo, let paused = playback.toggle() else { return }
         setPauseGlyphVisible(paused)
-    }
-
-    /// What the finger did to the clip, for the leg no unit test can reach: a
-    /// suite has no decoder, so "the player was told to stop" is all it can
-    /// assert. `-media-log` says whether a player ANSWERED — the silent no-op
-    /// this gesture spent a release doing is `answered=N`, and it looks
-    /// identical from every other angle.
-    private func traceViewerPlayback(_ action: String, paused: Bool) {
-        #if DEBUG
-        guard ProcessInfo.processInfo.arguments.contains("-media-log") else { return }
-        // A player that took the instruction now reads the OPPOSITE of the
-        // state it was moved out of; one that never heard it reads unchanged.
-        let advancing = videoPlayback?.isAdvancing(in: mediaCard.renderView) ?? false
-        print(String(format: "[page-play] %.3f %@ paused=%@ answered=%@ page=%d",
-                     CACurrentMediaTime(), action, paused ? "Y" : "N",
-                     advancing == paused ? "N" : "Y", mediaCard.currentPage))
-        #endif
     }
 
     /// Puts the stopped mark on the picture in front of the viewer, or takes it
@@ -3347,7 +3083,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // picture belonging to a different post.
         mediaCard.clearPausedMarks()
         pauseGlyphSuppressedByEngagement = false
-        resumesAfterScrub = false
+        playback.reset()
         stopPlayheadFeed()
         // ⚠️ A held chrome must never ride a recycled cell. A flight that is
         // cancelled, or a dismissal that ends the page instead of landing it,
