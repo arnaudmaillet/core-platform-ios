@@ -266,13 +266,10 @@ final class MapsViewController: UIViewController {
     private var instantTap: (annotation: ObjectIdentifier, at: CFTimeInterval)?
 
     private weak var offerSheet: CountryUnlockSheetViewController?
-    /// Where the map was before the offer flew it to its country.
-    private var offerCamera: MKMapCamera?
-    /// Whether closing the offer flies the map back to `offerCamera`.
-    private var offerReturns = true
-    /// The open offer's close has already flown the map back — a cancelled
-    /// close then frames the country again.
-    private var offerFlewBack = false
+    /// The open offer's camera bookkeeping — where the map was before it,
+    /// whether closing flies back there, whether a cancelled close reframes
+    /// (`MapCountryOfferState`).
+    private var offerState = MapCountryOfferState()
     /// The filter-pill carousel floating above the tab bar. The map's first
     /// bottom overlay: pinned to the safe area (the map itself is full-bleed
     /// and draws under the floating tab bar).
@@ -931,7 +928,7 @@ final class MapsViewController: UIViewController {
             return
         }
         guard let countryAccess, presentedViewController == nil else { return }
-        if offerCamera == nil { offerCamera = mapView.camera.copy() as? MKMapCamera }
+        offerState.opening(from: { mapView.camera.copy() as? MKMapCamera })
         countryLayer.select(country.code)
         let sheet = CountryUnlockSheetViewController(country: country, access: countryAccess)
         // Wrapped BEFORE its view loads: the measure counts its toolbar.
@@ -983,7 +980,7 @@ final class MapsViewController: UIViewController {
         // Already on its way down (and the map already on its way back): a
         // tap or a pan now is the user's, not a second close.
         guard let offerSheet, !offerSheet.isLeaving else { return }
-        offerReturns = returning
+        offerState.closeRequested(returning: returning)
         #if DEBUG
         OfferLog.note("close requested returning=\(returning)")
         #endif
@@ -1001,24 +998,23 @@ final class MapsViewController: UIViewController {
     private func offerClosing(_ country: CountryAtlas.Country) {
         guard !(countryAccess?.isUnlocked(country.code) ?? false) else { return }
         countryLayer.select(nil)
+        let home = offerState.closing()
         #if DEBUG
-        OfferLog.note("closing: flying back=\(offerReturns && offerCamera != nil)")
+        OfferLog.note("closing: flying back=\(home != nil)")
         #endif
-        guard offerReturns, let offerCamera else { return }
-        offerFlewBack = true
-        mapView.setCamera(offerCamera, animated: true)
+        guard let home else { return }
+        mapView.setCamera(home, animated: true)
     }
 
     /// A close went out and the sheet came back up (`OfferCloseFlight`):
     /// the country lifts again, framed above it if the map had left.
     private func offerCloseCancelled(_ country: CountryAtlas.Country, sheet: CountryUnlockSheetViewController) {
+        let reframes = offerState.closeCancelled()
         #if DEBUG
-        OfferLog.note("close cancelled: reframing=\(offerFlewBack)")
+        OfferLog.note("close cancelled: reframing=\(reframes)")
         #endif
         countryLayer.select(country.code)
-        if offerFlewBack { frame(country, bottomInset: offerBottomInset(sheet)) }
-        offerFlewBack = false
-        offerReturns = true
+        if reframes { frame(country, bottomInset: offerBottomInset(sheet)) }
     }
 
     /// The offer is gone. Whatever the map does about it began at
@@ -1026,9 +1022,7 @@ final class MapsViewController: UIViewController {
     /// had a moment on screen.
     private func offerDidClose(_ country: CountryAtlas.Country) {
         offerSheet = nil
-        offerCamera = nil
-        offerReturns = true
-        offerFlewBack = false
+        offerState.closed()
         guard countryAccess?.isUnlocked(country.code) ?? false else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             guard self?.countryLayer.selectedCode == country.code else { return }
