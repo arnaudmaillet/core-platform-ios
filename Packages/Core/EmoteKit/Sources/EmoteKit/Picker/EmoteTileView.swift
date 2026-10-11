@@ -54,6 +54,11 @@ public final class EmoteTileView: UIView {
     private var artMoves = false
     /// Whether the owner wants the art moving. See "Playing or still".
     public private(set) var isPlaying = true
+    /// Whether this tile's motion is content rather than decoration: the
+    /// emote keyboard's (#926). It then follows `EmoteMotion.keyboardPolicy`
+    /// — playing through idle calm, still under Low Power — instead of the
+    /// app's decorative policy. Read at `configure`.
+    var playsAsContent = false
 
     /// Poster frames by the art's own image (by identity, held weakly):
     /// worked out once per art, forgotten with it, and never answered for
@@ -104,7 +109,9 @@ public final class EmoteTileView: UIView {
         glyphLabel.isHidden = false
         accessibilityLabel = emote.name
 
-        let policy = EmoteMotion.policy
+        let policy = playsAsContent ? EmoteMotion.keyboardPolicy : EmoteMotion.policy
+        // The player follows the same answer; nil leaves it the app's.
+        player.playbackPolicy = playsAsContent ? policy : nil
         let motion: EmoteEngine.Motion = policy == .still ? .still : .loop
         if motion == .still && emote.isUnicodeEmoji { return }
         if let art = engine.cachedArt(for: emote, pixelSide: Self.pixelSide, motion: motion) {
@@ -344,7 +351,10 @@ final class EmoteTileCell: UICollectionViewCell {
         }
     }
 
-    func configure(_ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool, playing: Bool = true) {
+    func configure(
+        _ emote: Emote, engine: EmoteEngine, prefersAnimation: Bool, playing: Bool = true, asContent: Bool = false
+    ) {
+        tile.playsAsContent = asContent
         tile.configure(emote, engine: engine, prefersAnimation: prefersAnimation, playing: playing)
         accessibilityLabel = emote.code.map { "\(emote.name), \($0)" } ?? emote.name
     }
