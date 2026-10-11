@@ -58,8 +58,6 @@ public final class ConversationViewModel {
     /// and the URL it now lives at (a video's still's), for the image cache —
     /// so a reopened thread draws it without a fetch (#681).
     public var onDidUploadMedia: ((UIImage, URL) -> Void)?
-    /// True while a message is being sent (disables the send control).
-    public var onSendingChange: ((Bool) -> Void)?
     /// Fires once the peer's name resolves; best-effort (no title on failure).
     /// The header's name changed. Carries the peer id alongside it so the
     /// host can fetch a face — a DM resolves its correspondent at the same
@@ -115,7 +113,10 @@ public final class ConversationViewModel {
     /// The monitor whose recoveries reload this store — the shared one; a
     /// test hands its own (the shared one is process-wide).
     var connectivity: ConnectivityMonitor = .shared
-    private var isSending = false
+    /// The text sends, chained: each waits for the one before it, so texts
+    /// typed back to back land in the order sent while the composer stays
+    /// free for the next one (#886).
+    private var textSends: Task<Void, Never>?
     private var load: Task<Void, Never>?
     /// The DM correspondent, once known — the header identity's destination.
     private var peerProfileID: ProfileID?
@@ -294,25 +295,27 @@ public final class ConversationViewModel {
     /// ⚠️ OPTIMISTIC SINCE #719: the message is drawn at once as a pending
     /// one, on its way (`delivery == .sending`), and turns into the delivered
     /// message — or into a failed one with a retry (`retry`) — rather than
-    /// appearing only once the server has answered.
+    /// appearing only once the server has answered. The pending bubble is
+    /// the send's only "on its way": nothing holds the composer, so the
+    /// next text can follow at once and queues behind this one (#886).
     public func send(_ text: String) {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty, !isSending else { return }
+        guard !body.isEmpty else { return }
         let replyTo = replyingToID
         cancelReply()
         pendingCount += 1
         let pendingID = "pending-\(pendingCount)"
         pendingSends.append(PendingSend(id: pendingID, payload: .text(body), replyTo: replyTo, createdAt: Date()))
         emit()
-        setSending(true)
-        Task { [weak self] in
+        let previous = textSends
+        textSends = Task { [weak self] in
+            await previous?.value
             guard let self else { return }
             if self.senderID.rawValue.isEmpty, let me = try? await self.repository.viewerProfileID() {
                 self.senderID = me
                 self.emit()
             }
             await self.deliver(pendingID)
-            self.setSending(false)
         }
     }
 
@@ -651,10 +654,5 @@ public final class ConversationViewModel {
             }
         }
         phase = .content(models + pending)
-    }
-
-    private func setSending(_ sending: Bool) {
-        isSending = sending
-        onSendingChange?(sending)
     }
 }

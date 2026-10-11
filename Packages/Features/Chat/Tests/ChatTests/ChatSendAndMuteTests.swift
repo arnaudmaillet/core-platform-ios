@@ -37,8 +37,6 @@ struct ChatSendAndMuteTests {
         let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
         var phases: [ConversationViewModel.Phase] = []
         viewModel.onPhaseChange = { phases.append($0) }
-        var sending: [Bool] = []
-        viewModel.onSendingChange = { sending.append($0) }
         viewModel.viewDidLoad()
         #expect(await settle { if case .content = phases.last { true } else { false } })
 
@@ -48,7 +46,6 @@ struct ChatSendAndMuteTests {
         #expect(bubble.body == "hello")
         #expect(bubble.isMine)
         #expect(bubble.delivery == .sending)
-        #expect(sending.last == true, "the send button does not spin")
 
         #expect(await settle {
             if case .content(let models) = phases.last { models.last?.delivery == .sent } else { false }
@@ -56,10 +53,33 @@ struct ChatSendAndMuteTests {
         guard case .content(let delivered) = phases.last else { return }
         #expect(delivered.filter { $0.body == "hello" }.count == 1, "the pending row outlived its delivery")
         #expect(delivered.last?.id == "t1")
-        // Waited for, not read: the send marks the conversation read after
-        // the delivered message lands, and the button stops spinning after
-        // that await.
-        #expect(await settle { sending.last == false }, "the send button kept spinning")
+    }
+
+    /// ⚠️ NOTHING HOLDS THE COMPOSER (#886): the pending bubble is the
+    /// send's only "on its way", so a second text typed while the first is
+    /// still out is taken at once — drawn pending beside it, not dropped —
+    /// and the two reach the server one after the other, in the order sent.
+    @Test func aSecondTextIsTakenWhileTheFirstIsOnItsWay() async throws {
+        let provider = TextStubProvider(failures: 0)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        viewModel.send("one")
+        viewModel.send("two")
+        guard case .content(let pending) = phases.last else { Issue.record("no content"); return }
+        #expect(pending.map(\.body) == ["one", "two"], "the second text was dropped while the first was out")
+        #expect(pending.allSatisfy { $0.delivery == .sending })
+
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.count == 2 && models.allSatisfy { $0.delivery == .sent } } else { false }
+        }, "the texts were never both delivered")
+        guard case .content(let delivered) = phases.last else { return }
+        #expect(delivered.map(\.body) == ["one", "two"])
+        #expect(await provider.sentBodies == ["one", "two"])
+        #expect(await provider.maxInFlight == 1, "the second text raced the first to the server")
     }
 
     /// A failed text stays, says so, and is sent again by a retry.
@@ -387,6 +407,9 @@ private actor TextStubProvider: ChatProviding {
     /// The idempotency key each text send carried, in order (#795).
     private(set) var sentKeys: [String] = []
     private(set) var mutes: [MuteCall] = []
+    private var inFlight = 0
+    /// The most text sends the server was handed at once.
+    private(set) var maxInFlight = 0
 
     init(failures: Int, refusesMute: Bool = false, mutedOnServer: Set<String> = []) {
         self.failures = failures
@@ -412,6 +435,9 @@ private actor TextStubProvider: ChatProviding {
     ) async throws -> ChatMessage {
         sentBodies.append(body)
         sentKeys.append(idempotencyKey)
+        inFlight += 1
+        maxInFlight = max(maxInFlight, inFlight)
+        defer { inFlight -= 1 }
         try await Task.sleep(for: .milliseconds(20))
         if failures > 0 {
             failures -= 1

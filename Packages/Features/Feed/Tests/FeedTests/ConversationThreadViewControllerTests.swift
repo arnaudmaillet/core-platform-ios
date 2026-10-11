@@ -15,7 +15,6 @@ struct ConversationThreadViewControllerTests {
         var onPhaseChange: ((ConversationThreadPhase) -> Void)?
         var onPeerChange: ((ConversationThreadPerson) -> Void)?
         var onViewerChange: ((ConversationThreadPerson) -> Void)?
-        var onSendingChange: ((Bool) -> Void)?
         var onReplyStateChange: ((ConversationThreadReplyDraft?) -> Void)?
         var onActionNotice: ((String, String) -> Void)?
         var onPinnedChange: ((Bool?) -> Void)?
@@ -580,6 +579,28 @@ struct ConversationThreadViewControllerTests {
         bar.setKeyboardOpen(false)
         action.sendActions(for: .primaryActionTriggered)
         #expect(driver.sent == ["Sent with the keyboard down"])
+    }
+
+    /// ⚠️ NO SPINNER IN THE FIELD (#886): the sent message's own bubble says
+    /// it is on its way, so the composer is ready for the next one the
+    /// moment a text leaves — emptied, wearing the waveform, never busy.
+    @Test func theComposerIsReadyTheMomentATextLeaves() throws {
+        let (screen, driver, _, _) = makeScreen()
+        let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
+        let action = bar.debugFieldActionButton
+
+        bar.draftText = "One"
+        action.sendActions(for: .primaryActionTriggered)
+        #expect(bar.draftText.isEmpty)
+        #expect(bar.isSending == false, "the composer waits on the send")
+        #expect(action.configuration?.showsActivityIndicator == false, "a spinner in the field")
+        #expect(bar.debugFieldActionSymbol == CommentsInputBar.waveformSymbol)
+        #expect(action.isEnabled)
+
+        bar.draftText = "Two"
+        #expect(action.configuration?.showsActivityIndicator == false)
+        action.sendActions(for: .primaryActionTriggered)
+        #expect(driver.sent == ["One", "Two"], "the next text was held back")
     }
 
     /// The footer: [peer pill] … [⋯] (#671, the layout since #680) — no
