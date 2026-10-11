@@ -84,14 +84,15 @@ struct MediaTimelineRowFocus: Equatable {
 
     /// The author stopped or started the clip.
     ///
-    /// ⚠️ **A TOGGLE DURING THE TRANSITIONS ROW WINS.** Closing it puts back the
+    /// ⚠️ **A TOGGLE DURING EITHER ROW WINS.** Closing a row puts back the
     /// pause the author had before it opened — unless they have said something
-    /// since. Only that row: a toggle while a piece's filter row is open keeps
-    /// the borrowed pause, which is what the screen did before this type
-    /// existed, kept as it was by a refactor that changes no behaviour.
+    /// since. The filter row used to be left out (only the transitions row
+    /// cleared the borrow), so a clip paused during a piece's filter row
+    /// started playing again the moment the row closed, against the author's
+    /// own choice (#869).
     mutating func authorChose(paused: Bool) {
         pausedByAuthor = paused
-        if transition != nil { pausedBeforeRow = nil }
+        if transition != nil || piece != nil { pausedBeforeRow = nil }
     }
 
     /// A row has closed: the pause it borrowed becomes the author's again, or
