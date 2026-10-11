@@ -143,6 +143,17 @@ struct ForYouGridAutoplayDriverTests {
         #expect(driver.scrollTick(offset: 5, at: 10 + ForYouGridAutoplayDriver.scrollReconcileInterval / 2) == nil)
     }
 
+    /// The window is closed at its end: a tick exactly one interval after the
+    /// last sample reconciles, one a hair earlier does not. A fresh driver's
+    /// last sample is at time zero.
+    @Test func aTickExactlyOneIntervalLaterReconcilesAndOneJustShortDoesNot() {
+        let interval = ForYouGridAutoplayDriver.scrollReconcileInterval
+        var early = ForYouGridAutoplayDriver()
+        #expect(early.scrollTick(offset: 0, at: interval.nextDown) == nil)
+        var onTime = ForYouGridAutoplayDriver()
+        #expect(onTime.scrollTick(offset: 0, at: interval) != nil)
+    }
+
     @Test func aTickPastTheIntervalReconcilesAgain() {
         var driver = ForYouGridAutoplayDriver()
         _ = driver.scrollTick(offset: 0, at: 10)

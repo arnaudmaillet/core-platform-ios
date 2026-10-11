@@ -113,8 +113,7 @@ final class ForYouGridPage: UIView {
     /// it spends a request per card it will never show for longer than a
     /// glance; the same argument that stops a player being ATTACHED above
     /// `ForYouGridAutoplayDriver.maximumStartVelocity` stops the warm above
-    /// it, and the two can never
-    /// drift apart because they are one decision.
+    /// it, and the two can never drift apart because they are one decision.
     var onWarmRequested: (([GalleryPost]) -> Void)?
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
