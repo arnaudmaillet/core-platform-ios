@@ -268,11 +268,43 @@ public nonisolated struct Profile_V1_ProfileView: @unchecked Sendable {
   /// Clears the value of `businessInfo`. Subsequent reads from it will return its default value.
   public mutating func clearBusinessInfo() {_uniqueStorage()._businessInfo = nil}
 
+  /// Everyone: which of the profile's tabs its owner shows (#829), so a
+  /// visitor's app leaves a hidden tab out.
+  public var visibleTabs: Profile_V1_VisibleTabs {
+    get {_storage._visibleTabs ?? Profile_V1_VisibleTabs()}
+    set {_uniqueStorage()._visibleTabs = newValue}
+  }
+  /// Returns true if `visibleTabs` has been explicitly set.
+  public var hasVisibleTabs: Bool {_storage._visibleTabs != nil}
+  /// Clears the value of `visibleTabs`. Subsequent reads from it will return its default value.
+  public mutating func clearVisibleTabs() {_uniqueStorage()._visibleTabs = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// Which of a profile's tabs others see (#829). post serves the Reposts and
+/// Places tabs (ListPostsByProfile `tab`) and engagement the Likes tab, each
+/// empty for anyone but the owner when hidden; Saved has no server list yet.
+public nonisolated struct Profile_V1_VisibleTabs: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var likes: Bool = false
+
+  public var saved: Bool = false
+
+  public var reposts: Bool = false
+
+  public var places: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct Profile_V1_ProfileSummaryView: Sendable {
@@ -896,8 +928,10 @@ public nonisolated struct Profile_V1_SetCommentFiltersRequest: Sendable {
 
 /// How far back others see the profile's posts and which tabs they see (#664).
 /// Older posts are hidden from everyone but the owner, never deleted. Saved is
-/// private by default. Only the window is enforced today (post); no likes,
-/// saved, reposts or places tab is served yet.
+/// private by default. post enforces the window and serves the Reposts and
+/// Places tabs, engagement the Likes tab (#829): a hidden tab is empty for
+/// anyone but the owner. Saved has no server list yet. Visitors read the flags
+/// as ProfileView.visible_tabs.
 public nonisolated struct Profile_V1_TabSettings: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -1294,7 +1328,7 @@ nonisolated extension Profile_V1_ProfileLinkProto: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ProfileView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}account_id\0\u{1}handle\0\u{3}display_name\0\u{1}bio\0\u{3}avatar_url\0\u{3}banner_url\0\u{3}website_url\0\u{3}custom_links\0\u{3}profile_kind\0\u{1}visibility\0\u{1}verified\0\u{3}verification_kind\0\u{1}locale\0\u{1}timezone\0\u{1}status\0\u{3}masking_reason\0\u{3}masked_at\0\u{3}created_at\0\u{3}updated_at\0\u{1}version\0\u{3}interaction_settings\0\u{3}location_settings\0\u{3}discovery_settings\0\u{3}comment_filters\0\u{3}tab_settings\0\u{3}feed_settings\0\u{3}business_info\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}account_id\0\u{1}handle\0\u{3}display_name\0\u{1}bio\0\u{3}avatar_url\0\u{3}banner_url\0\u{3}website_url\0\u{3}custom_links\0\u{3}profile_kind\0\u{1}visibility\0\u{1}verified\0\u{3}verification_kind\0\u{1}locale\0\u{1}timezone\0\u{1}status\0\u{3}masking_reason\0\u{3}masked_at\0\u{3}created_at\0\u{3}updated_at\0\u{1}version\0\u{3}interaction_settings\0\u{3}location_settings\0\u{3}discovery_settings\0\u{3}comment_filters\0\u{3}tab_settings\0\u{3}feed_settings\0\u{3}business_info\0\u{3}visible_tabs\0")
 
   fileprivate class _StorageClass {
     var _profileID: String = String()
@@ -1325,6 +1359,7 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
     var _tabSettings: Profile_V1_TabSettings? = nil
     var _feedSettings: Profile_V1_FeedSettings? = nil
     var _businessInfo: Profile_V1_BusinessInfo? = nil
+    var _visibleTabs: Profile_V1_VisibleTabs? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -1363,6 +1398,7 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
       _tabSettings = source._tabSettings
       _feedSettings = source._feedSettings
       _businessInfo = source._businessInfo
+      _visibleTabs = source._visibleTabs
     }
   }
 
@@ -1409,6 +1445,7 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
         case 26: try { try decoder.decodeSingularMessageField(value: &_storage._tabSettings) }()
         case 27: try { try decoder.decodeSingularMessageField(value: &_storage._feedSettings) }()
         case 28: try { try decoder.decodeSingularMessageField(value: &_storage._businessInfo) }()
+        case 29: try { try decoder.decodeSingularMessageField(value: &_storage._visibleTabs) }()
         default: break
         }
       }
@@ -1505,6 +1542,9 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
       try { if let v = _storage._businessInfo {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 28)
       } }()
+      try { if let v = _storage._visibleTabs {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -1542,10 +1582,56 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
         if _storage._tabSettings != rhs_storage._tabSettings {return false}
         if _storage._feedSettings != rhs_storage._feedSettings {return false}
         if _storage._businessInfo != rhs_storage._businessInfo {return false}
+        if _storage._visibleTabs != rhs_storage._visibleTabs {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_VisibleTabs: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".VisibleTabs"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}likes\0\u{1}saved\0\u{1}reposts\0\u{1}places\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.likes) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.saved) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.reposts) }()
+      case 4: try { try decoder.decodeSingularBoolField(value: &self.places) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.likes != false {
+      try visitor.visitSingularBoolField(value: self.likes, fieldNumber: 1)
+    }
+    if self.saved != false {
+      try visitor.visitSingularBoolField(value: self.saved, fieldNumber: 2)
+    }
+    if self.reposts != false {
+      try visitor.visitSingularBoolField(value: self.reposts, fieldNumber: 3)
+    }
+    if self.places != false {
+      try visitor.visitSingularBoolField(value: self.places, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_VisibleTabs, rhs: Profile_V1_VisibleTabs) -> Bool {
+    if lhs.likes != rhs.likes {return false}
+    if lhs.saved != rhs.saved {return false}
+    if lhs.reposts != rhs.reposts {return false}
+    if lhs.places != rhs.places {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

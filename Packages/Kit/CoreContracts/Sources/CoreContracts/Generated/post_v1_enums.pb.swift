@@ -196,6 +196,52 @@ public nonisolated enum Post_V1_AudioKind: SwiftProtobuf.Enum, Swift.CaseIterabl
 
 }
 
+/// Which of a profile's post tabs to list (#829).
+public nonisolated enum Post_V1_ProfilePostsTab: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Every post.
+  case unspecified // = 0
+
+  /// Reposts: posts with a parent. Empty for anyone but the owner (and the
+  /// mesh) when the owner hides the tab.
+  case reposts // = 1
+
+  /// Posts with a place. Same rule.
+  case places // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .reposts
+    case 2: self = .places
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .reposts: return 1
+    case .places: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Post_V1_ProfilePostsTab] = [
+    .unspecified,
+    .reposts,
+    .places,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Post_V1_PostKind: SwiftProtobuf._ProtoNameProviding {
@@ -212,4 +258,8 @@ nonisolated extension Post_V1_ModerationRestriction: SwiftProtobuf._ProtoNamePro
 
 nonisolated extension Post_V1_AudioKind: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0AUDIO_KIND_UNSPECIFIED\0\u{1}AUDIO_KIND_ORIGINAL_SOUND\0\u{1}AUDIO_KIND_REUSED\0")
+}
+
+nonisolated extension Post_V1_ProfilePostsTab: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PROFILE_POSTS_TAB_UNSPECIFIED\0\u{1}PROFILE_POSTS_TAB_REPOSTS\0\u{1}PROFILE_POSTS_TAB_PLACES\0")
 }

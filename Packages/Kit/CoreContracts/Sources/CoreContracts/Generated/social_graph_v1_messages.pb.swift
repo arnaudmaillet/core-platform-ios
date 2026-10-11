@@ -793,6 +793,16 @@ public nonisolated struct SocialGraph_V1_SuggestProfilesRequest: Sendable {
   /// At most 50; 0 means 20.
   public var limit: Int32 = 0
 
+  /// The previous response's `next_page_token`; empty for the first page
+  /// (#834). Each page resumes strictly after the last profile the previous
+  /// one examined, by (mutual_count, profile_id): while the ranking holds, a
+  /// profile is neither shown twice nor skipped. The ranking is recomputed
+  /// per page, so a profile whose mutual count drops between pages can show
+  /// again: de-duplicate by profile_id. A page may come back short (even
+  /// empty) with a token when most candidates are filtered out: keep paging
+  /// until the token is empty.
+  public var pageToken: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -819,6 +829,9 @@ public nonisolated struct SocialGraph_V1_SuggestProfilesResponse: Sendable {
   // methods supported on all messages.
 
   public var profiles: [SocialGraph_V1_SuggestedProfile] = []
+
+  /// Empty on the last page.
+  public var nextPageToken: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -2464,7 +2477,7 @@ nonisolated extension SocialGraph_V1_ListRestrictedAmongResponse: SwiftProtobuf.
 
 nonisolated extension SocialGraph_V1_SuggestProfilesRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SuggestProfilesRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}limit\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}limit\0\u{3}page_token\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2474,6 +2487,7 @@ nonisolated extension SocialGraph_V1_SuggestProfilesRequest: SwiftProtobuf.Messa
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
       default: break
       }
     }
@@ -2486,12 +2500,16 @@ nonisolated extension SocialGraph_V1_SuggestProfilesRequest: SwiftProtobuf.Messa
     if self.limit != 0 {
       try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 2)
     }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SocialGraph_V1_SuggestProfilesRequest, rhs: SocialGraph_V1_SuggestProfilesRequest) -> Bool {
     if lhs.profileID != rhs.profileID {return false}
     if lhs.limit != rhs.limit {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2534,7 +2552,7 @@ nonisolated extension SocialGraph_V1_SuggestedProfile: SwiftProtobuf.Message, Sw
 
 nonisolated extension SocialGraph_V1_SuggestProfilesResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SuggestProfilesResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}profiles\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}profiles\0\u{3}next_page_token\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2543,6 +2561,7 @@ nonisolated extension SocialGraph_V1_SuggestProfilesResponse: SwiftProtobuf.Mess
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeRepeatedMessageField(value: &self.profiles) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
       default: break
       }
     }
@@ -2552,11 +2571,15 @@ nonisolated extension SocialGraph_V1_SuggestProfilesResponse: SwiftProtobuf.Mess
     if !self.profiles.isEmpty {
       try visitor.visitRepeatedMessageField(value: self.profiles, fieldNumber: 1)
     }
+    if !self.nextPageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: SocialGraph_V1_SuggestProfilesResponse, rhs: SocialGraph_V1_SuggestProfilesResponse) -> Bool {
     if lhs.profiles != rhs.profiles {return false}
+    if lhs.nextPageToken != rhs.nextPageToken {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

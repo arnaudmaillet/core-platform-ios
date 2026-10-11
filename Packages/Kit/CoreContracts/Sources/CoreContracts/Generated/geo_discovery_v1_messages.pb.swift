@@ -110,7 +110,7 @@ public nonisolated struct GeoDiscovery_V1_MapPostCard: Sendable {
   /// Defaults to AUTHOR_TIER_UNSPECIFIED (= Standard) for ungated legacy cards.
   public var authorTier: GeoDiscovery_V1_AuthorTier = .unspecified
 
-  /// Post caption, denormalized from post.published. Served only on the Focus
+  /// Post caption, denormalized from PostPublished. Served only on the Focus
   /// path (GetGeoTimeline) — never on the Radar pan path. Empty when absent.
   public var caption: String = String()
 
@@ -191,6 +191,110 @@ public nonisolated struct GeoDiscovery_V1_GetGeoTimelineResponse: Sendable {
   /// Cards for the post_ids that resolved, in arbitrary order. Unresolved ids
   /// (expired / never indexed) are simply absent.
   public var cards: [GeoDiscovery_V1_MapPostCard] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// A point and the size of the place around it.
+public nonisolated struct GeoDiscovery_V1_PlacePoint: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// WGS-84 [-90, 90]
+  public var lat: Double = 0
+
+  /// WGS-84 [-180, 180]
+  public var lng: Double = 0
+
+  public var scale: GeoDiscovery_V1_PlaceScale = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct GeoDiscovery_V1_ListPlacePostsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var place: GeoDiscovery_V1_ListPlacePostsRequest.OneOf_Place? = nil
+
+  /// A raw H3 cell index (uint64 cast to int64) at resolution 5, 7 or 9,
+  /// as `MapPostCard.h3_index_r7` carries one. Another resolution:
+  /// GEO-1002.
+  public var h3Cell: Int64 {
+    get {
+      if case .h3Cell(let v)? = place {return v}
+      return 0
+    }
+    set {place = .h3Cell(newValue)}
+  }
+
+  /// An ISO 3166-1 alpha-2 country code, as the country ladder names it.
+  public var countryCode: String {
+    get {
+      if case .countryCode(let v)? = place {return v}
+      return String()
+    }
+    set {place = .countryCode(newValue)}
+  }
+
+  /// The cell around a point (a city marker's centre).
+  public var point: GeoDiscovery_V1_PlacePoint {
+    get {
+      if case .point(let v)? = place {return v}
+      return GeoDiscovery_V1_PlacePoint()
+    }
+    set {place = .point(newValue)}
+  }
+
+  /// RECENT by default. POPULAR ranks the place's 200 newest posts by
+  /// virality, then carries on with the older ones newest first.
+  public var sort: GeoDiscovery_V1_PlaceSort = .unspecified
+
+  /// At most 50; 0 means 20.
+  public var limit: Int32 = 0
+
+  /// The previous response's `next_page_token`, with the same place and sort.
+  public var pageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Place: Equatable, Sendable {
+    /// A raw H3 cell index (uint64 cast to int64) at resolution 5, 7 or 9,
+    /// as `MapPostCard.h3_index_r7` carries one. Another resolution:
+    /// GEO-1002.
+    case h3Cell(Int64)
+    /// An ISO 3166-1 alpha-2 country code, as the country ladder names it.
+    case countryCode(String)
+    /// The cell around a point (a city marker's centre).
+    case point(GeoDiscovery_V1_PlacePoint)
+
+  }
+
+  public init() {}
+}
+
+public nonisolated struct GeoDiscovery_V1_ListPlacePostsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// In the requested order, as the reader may see them (the same rules as
+  /// GetGeoTimeline: a guest's country, a member's countries, ghosts and
+  /// city-level authors, the reader's audience). A page can come back short
+  /// with a token: keep paging until the token is empty.
+  public var cards: [GeoDiscovery_V1_MapPostCard] = []
+
+  /// Empty on the last page. Pages resume after the last post of the
+  /// previous one, so new posts never shift a RECENT listing; a POPULAR
+  /// page reads the ranking again, so a post whose score moves between
+  /// pages can show twice or be passed over: de-duplicate by post_id.
+  public var nextPageToken: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -659,6 +763,170 @@ nonisolated extension GeoDiscovery_V1_GetGeoTimelineResponse: SwiftProtobuf.Mess
 
   public static func ==(lhs: GeoDiscovery_V1_GetGeoTimelineResponse, rhs: GeoDiscovery_V1_GetGeoTimelineResponse) -> Bool {
     if lhs.cards != rhs.cards {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GeoDiscovery_V1_PlacePoint: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PlacePoint"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}lat\0\u{1}lng\0\u{1}scale\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularDoubleField(value: &self.lat) }()
+      case 2: try { try decoder.decodeSingularDoubleField(value: &self.lng) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.scale) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.lat.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.lat, fieldNumber: 1)
+    }
+    if self.lng.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.lng, fieldNumber: 2)
+    }
+    if self.scale != .unspecified {
+      try visitor.visitSingularEnumField(value: self.scale, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GeoDiscovery_V1_PlacePoint, rhs: GeoDiscovery_V1_PlacePoint) -> Bool {
+    if lhs.lat != rhs.lat {return false}
+    if lhs.lng != rhs.lng {return false}
+    if lhs.scale != rhs.scale {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GeoDiscovery_V1_ListPlacePostsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListPlacePostsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}h3_cell\0\u{3}country_code\0\u{1}point\0\u{1}sort\0\u{1}limit\0\u{3}page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: Int64?
+        try decoder.decodeSingularInt64Field(value: &v)
+        if let v = v {
+          if self.place != nil {try decoder.handleConflictingOneOf()}
+          self.place = .h3Cell(v)
+        }
+      }()
+      case 2: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.place != nil {try decoder.handleConflictingOneOf()}
+          self.place = .countryCode(v)
+        }
+      }()
+      case 3: try {
+        var v: GeoDiscovery_V1_PlacePoint?
+        var hadOneofValue = false
+        if let current = self.place {
+          hadOneofValue = true
+          if case .point(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.place = .point(v)
+        }
+      }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.sort) }()
+      case 5: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.place {
+    case .h3Cell?: try {
+      guard case .h3Cell(let v)? = self.place else { preconditionFailure() }
+      try visitor.visitSingularInt64Field(value: v, fieldNumber: 1)
+    }()
+    case .countryCode?: try {
+      guard case .countryCode(let v)? = self.place else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    }()
+    case .point?: try {
+      guard case .point(let v)? = self.place else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    }()
+    case nil: break
+    }
+    if self.sort != .unspecified {
+      try visitor.visitSingularEnumField(value: self.sort, fieldNumber: 4)
+    }
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 5)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 6)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GeoDiscovery_V1_ListPlacePostsRequest, rhs: GeoDiscovery_V1_ListPlacePostsRequest) -> Bool {
+    if lhs.place != rhs.place {return false}
+    if lhs.sort != rhs.sort {return false}
+    if lhs.limit != rhs.limit {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension GeoDiscovery_V1_ListPlacePostsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListPlacePostsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}cards\0\u{3}next_page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.cards) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.cards.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.cards, fieldNumber: 1)
+    }
+    if !self.nextPageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: GeoDiscovery_V1_ListPlacePostsResponse, rhs: GeoDiscovery_V1_ListPlacePostsResponse) -> Bool {
+    if lhs.cards != rhs.cards {return false}
+    if lhs.nextPageToken != rhs.nextPageToken {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

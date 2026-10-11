@@ -60,8 +60,58 @@ public nonisolated enum Comment_V1_CommentStatus: SwiftProtobuf.Enum, Swift.Case
 
 }
 
+/// The order of a thread's replies (#832).
+public nonisolated enum Comment_V1_ReplySort: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// NEWEST.
+  case unspecified // = 0
+
+  /// Newest first.
+  case newest // = 1
+
+  /// Most liked first (likes are wallet stakes, counted by engagement);
+  /// ties go to the newest.
+  case popularity // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .newest
+    case 2: self = .popularity
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .newest: return 1
+    case .popularity: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Comment_V1_ReplySort] = [
+    .unspecified,
+    .newest,
+    .popularity,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Comment_V1_CommentStatus: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COMMENT_STATUS_UNSPECIFIED\0\u{1}COMMENT_STATUS_PUBLISHED\0\u{1}COMMENT_STATUS_DELETED\0")
+}
+
+nonisolated extension Comment_V1_ReplySort: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0REPLY_SORT_UNSPECIFIED\0\u{1}REPLY_SORT_NEWEST\0\u{1}REPLY_SORT_POPULARITY\0")
 }

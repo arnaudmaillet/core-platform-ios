@@ -143,8 +143,35 @@ public nonisolated struct Search_V1_HashtagHit: Sendable {
   public var tag: String = String()
 
   /// Coarse, periodically-refreshed post count for ranking/display — NOT a
-  /// real-time counter.
+  /// real-time counter: the searchable posts carrying the tag, refreshed
+  /// every minute (#831); deleting or hiding a post lowers it.
   public var postCount: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Search_V1_ListTrendingHashtagsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// At most 50; 0 means 20.
+  public var limit: Int32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Search_V1_ListTrendingHashtagsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Most rising first.
+  public var hashtags: [Search_V1_HashtagHit] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -589,6 +616,66 @@ nonisolated extension Search_V1_HashtagHit: SwiftProtobuf.Message, SwiftProtobuf
   public static func ==(lhs: Search_V1_HashtagHit, rhs: Search_V1_HashtagHit) -> Bool {
     if lhs.tag != rhs.tag {return false}
     if lhs.postCount != rhs.postCount {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Search_V1_ListTrendingHashtagsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListTrendingHashtagsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}limit\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.limit != 0 {
+      try visitor.visitSingularInt32Field(value: self.limit, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Search_V1_ListTrendingHashtagsRequest, rhs: Search_V1_ListTrendingHashtagsRequest) -> Bool {
+    if lhs.limit != rhs.limit {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Search_V1_ListTrendingHashtagsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListTrendingHashtagsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}hashtags\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.hashtags) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.hashtags.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.hashtags, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Search_V1_ListTrendingHashtagsResponse, rhs: Search_V1_ListTrendingHashtagsResponse) -> Bool {
+    if lhs.hashtags != rhs.hashtags {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

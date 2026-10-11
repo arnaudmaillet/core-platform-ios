@@ -35,7 +35,7 @@ public nonisolated struct Post_V1_AudioReference: Sendable {
 }
 
 /// Client-supplied post location (WGS-84 decimal degrees). Optional on a post.
-/// Denormalized onto post.published so geo-discovery can spatially index the post.
+/// Denormalized onto PostPublished so geo-discovery can spatially index the post.
 public nonisolated struct Post_V1_GeoPoint: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -297,6 +297,11 @@ public nonisolated struct Post_V1_PostSummary: Sendable {
 
   public var moderation: Post_V1_ModerationRestriction = .unspecified
 
+  /// A repost (it has a parent), and whether it carries a place (#829).
+  public var isRepost: Bool = false
+
+  public var hasPlace_p: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -371,6 +376,14 @@ public nonisolated struct Post_V1_CreatePostRequest: Sendable {
   /// Clears the value of `allowSoundReuse`. Subsequent reads from it will return its default value.
   public mutating func clearAllowSoundReuse() {self._allowSoundReuse = nil}
 
+  /// Optional, client-generated, one per post and reused on every retry
+  /// (8–64 characters: letters, digits, `-`, `_`; PST-9006 otherwise). A
+  /// repeated key from the same profile, within 24 hours, creates nothing and
+  /// answers the post the first call created. While that first call is still
+  /// in flight a repeat fails ABORTED (PST-1010): retry it. Empty: no
+  /// deduplication.
+  public var idempotencyKey: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -386,6 +399,7 @@ public nonisolated struct Post_V1_CreatePostResponse: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  /// The created post; on a repeated idempotency key, the first call's.
   public var postID: String = String()
 
   public var profileID: String = String()
@@ -518,6 +532,9 @@ public nonisolated struct Post_V1_ListPostsByProfileRequest: Sendable {
   public var limit: Int32 = 0
 
   public var pageToken: String = String()
+
+  /// Unspecified: every post (#829).
+  public var tab: Post_V1_ProfilePostsTab = .unspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1034,7 +1051,7 @@ nonisolated extension Post_V1_BatchGetLikeVisibilityResponse: SwiftProtobuf.Mess
 
 nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PostSummary"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}kind\0\u{1}status\0\u{3}created_at_ms\0\u{1}moderation\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}kind\0\u{1}status\0\u{3}created_at_ms\0\u{1}moderation\0\u{3}is_repost\0\u{3}has_place\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1047,6 +1064,8 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
       case 3: try { try decoder.decodeSingularEnumField(value: &self.status) }()
       case 4: try { try decoder.decodeSingularInt64Field(value: &self.createdAtMs) }()
       case 5: try { try decoder.decodeSingularEnumField(value: &self.moderation) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.isRepost) }()
+      case 7: try { try decoder.decodeSingularBoolField(value: &self.hasPlace_p) }()
       default: break
       }
     }
@@ -1068,6 +1087,12 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
     if self.moderation != .unspecified {
       try visitor.visitSingularEnumField(value: self.moderation, fieldNumber: 5)
     }
+    if self.isRepost != false {
+      try visitor.visitSingularBoolField(value: self.isRepost, fieldNumber: 6)
+    }
+    if self.hasPlace_p != false {
+      try visitor.visitSingularBoolField(value: self.hasPlace_p, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1077,6 +1102,8 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs.status != rhs.status {return false}
     if lhs.createdAtMs != rhs.createdAtMs {return false}
     if lhs.moderation != rhs.moderation {return false}
+    if lhs.isRepost != rhs.isRepost {return false}
+    if lhs.hasPlace_p != rhs.hasPlace_p {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1119,7 +1146,7 @@ nonisolated extension Post_V1_CommandResponse: SwiftProtobuf.Message, SwiftProto
 
 nonisolated extension Post_V1_CreatePostRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CreatePostRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}kind\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}audio_ref\0\u{1}location\0\u{3}allow_remix\0\u{3}allow_sound_reuse\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}kind\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}audio_ref\0\u{1}location\0\u{3}allow_remix\0\u{3}allow_sound_reuse\0\u{3}idempotency_key\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1137,6 +1164,7 @@ nonisolated extension Post_V1_CreatePostRequest: SwiftProtobuf.Message, SwiftPro
       case 8: try { try decoder.decodeSingularMessageField(value: &self._location) }()
       case 9: try { try decoder.decodeSingularBoolField(value: &self._allowRemix) }()
       case 10: try { try decoder.decodeSingularBoolField(value: &self._allowSoundReuse) }()
+      case 11: try { try decoder.decodeSingularStringField(value: &self.idempotencyKey) }()
       default: break
       }
     }
@@ -1177,6 +1205,9 @@ nonisolated extension Post_V1_CreatePostRequest: SwiftProtobuf.Message, SwiftPro
     try { if let v = self._allowSoundReuse {
       try visitor.visitSingularBoolField(value: v, fieldNumber: 10)
     } }()
+    if !self.idempotencyKey.isEmpty {
+      try visitor.visitSingularStringField(value: self.idempotencyKey, fieldNumber: 11)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1191,6 +1222,7 @@ nonisolated extension Post_V1_CreatePostRequest: SwiftProtobuf.Message, SwiftPro
     if lhs._location != rhs._location {return false}
     if lhs._allowRemix != rhs._allowRemix {return false}
     if lhs._allowSoundReuse != rhs._allowSoundReuse {return false}
+    if lhs.idempotencyKey != rhs.idempotencyKey {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1493,7 +1525,7 @@ nonisolated extension Post_V1_GetPostRequest: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Post_V1_ListPostsByProfileRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ListPostsByProfileRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}limit\0\u{3}page_token\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}limit\0\u{3}page_token\0\u{1}tab\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1504,6 +1536,7 @@ nonisolated extension Post_V1_ListPostsByProfileRequest: SwiftProtobuf.Message, 
       case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
       case 2: try { try decoder.decodeSingularInt32Field(value: &self.limit) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.tab) }()
       default: break
       }
     }
@@ -1519,6 +1552,9 @@ nonisolated extension Post_V1_ListPostsByProfileRequest: SwiftProtobuf.Message, 
     if !self.pageToken.isEmpty {
       try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 3)
     }
+    if self.tab != .unspecified {
+      try visitor.visitSingularEnumField(value: self.tab, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1526,6 +1562,7 @@ nonisolated extension Post_V1_ListPostsByProfileRequest: SwiftProtobuf.Message, 
     if lhs.profileID != rhs.profileID {return false}
     if lhs.limit != rhs.limit {return false}
     if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.tab != rhs.tab {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
