@@ -1,5 +1,6 @@
 import Connect
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// Fake of chat.v1.ChatService over the shared dataset. Seeds four direct
@@ -154,6 +155,11 @@ public final class MockChatService: @unchecked Sendable {
                 ?? store.members(of: request.conversationID).first { $0 != request.senderID }
             if let recipient, !mayMessage(request.senderID, recipient) {
                 return .failure(ConnectError(code: .permissionDenied, message: "CHT-1011: this account doesn't take messages"))
+            }
+            // The key's shape, as chat.v1 checks it (#795): 8–64 of
+            // letters, digits, `-`, `_`; empty is no deduplication.
+            if !request.idempotencyKey.isEmpty, !IdempotencyKey.isValid(request.idempotencyKey) {
+                return .failure(ConnectError(code: .invalidArgument, message: "CHT-2010: invalid idempotency_key"))
             }
             let existing = store.messages(
                 for: request.conversationID, seed: seedHistory(for: request.conversationID)
@@ -455,6 +461,10 @@ public final class MockChatService: @unchecked Sendable {
     private final class Store: @unchecked Sendable {
         private let lock = NSLock()
         private var sent: [String: [Chat_V1_MessageView]] = [:]
+        /// "sender|conversation|key" → the message that key first stored.
+        private var keyed: [String: (messageID: String, atMs: Int64)] = [:]
+        /// How long a key names its first message (chat.v1: 24 hours).
+        static let keyWindowMs: Int64 = 24 * 60 * 60 * 1000
         private var createdCount = 0
         /// conversationID → memberID → last read message id.
         private var readCursors: [String: [String: String]] = [:]
@@ -518,8 +528,20 @@ public final class MockChatService: @unchecked Sendable {
         /// the message it is answering. Sending something and watching it land
         /// second-from-last is a bug in any inbox; a mock that produces it is a
         /// mock that teaches the wrong thing.
+        ///
+        /// ⚠️ **A REPEATED KEY IS THE FIRST MESSAGE, NOT A SECOND (#795).** As
+        /// chat.v1 does: the same `idempotency_key` from the same sender in
+        /// the same conversation within 24 hours stores nothing and answers
+        /// the id the first send stored — what a retry after a lost answer
+        /// relies on. (The fleet's ABORTED while the first is still in flight
+        /// has no window here: a mock call is answered whole.)
         func append(_ request: Chat_V1_SendMessageRequest, after newest: Int64) -> String {
             lock.withLock {
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                let scope = "\(request.senderID)|\(request.conversationID)|\(request.idempotencyKey)"
+                if !request.idempotencyKey.isEmpty, let first = keyed[scope], nowMs - first.atMs < Self.keyWindowMs {
+                    return first.messageID
+                }
                 let id = "\(request.conversationID)-sent-\(sent[request.conversationID]?.count ?? 0)"
                 var view = Chat_V1_MessageView()
                 view.messageID = id
@@ -530,8 +552,9 @@ public final class MockChatService: @unchecked Sendable {
                 view.contentType = request.contentType
                 view.mediaRef = request.mediaRef
                 view.replyTo = request.replyTo
-                view.createdAtMs = max(Int64(Date().timeIntervalSince1970 * 1000), newest + 1)
+                view.createdAtMs = max(nowMs, newest + 1)
                 sent[request.conversationID, default: []].append(view)
+                if !request.idempotencyKey.isEmpty { keyed[scope] = (id, nowMs) }
                 return id
             }
         }

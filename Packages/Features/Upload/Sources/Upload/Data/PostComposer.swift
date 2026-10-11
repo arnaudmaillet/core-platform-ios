@@ -132,8 +132,10 @@ public enum ComposeError: Error, Equatable, Sendable {
     /// CreatePost or PublishPost went out and its answer never came back: a
     /// timeout, or a connection lost mid-request (#794).
     ///
-    /// ⚠️ THE POST MAY EXIST. Neither call carries an idempotency key (#795),
-    /// so the author must not be told to try again; only to look first.
+    /// ⚠️ THE POST MAY EXIST, so the author is told to look first, not to
+    /// try again. CreatePost now carries the screen's key (#795), so a retry
+    /// of the same post from the same screen is answered with the post that
+    /// exists; but PublishPost has none and keys live in memory only.
     /// Apart from `transport`, whose failures never reached the server.
     case unconfirmed(String, failure: NetworkFailure? = nil)
 }
@@ -181,9 +183,27 @@ public protocol PostComposing: Sendable {
     /// its first, silently. The contract was never the limit; this signature was.
     @discardableResult
     func publish(media: [ComposeMedia], caption: String, as author: AuthorSummary?) async throws -> FeedEntry
+
+    /// `publish(media:caption:as:)` under the screen's `idempotencyKey` for
+    /// this post (#795): minted once per publish intent and handed back by
+    /// every retry of the same post — a new one when its content changes —
+    /// so a CreatePost whose answer was lost is answered with the post it
+    /// created instead of creating a second.
+    @discardableResult
+    func publish(
+        media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry
 }
 
 public extension PostComposing {
+    /// Composers with no key to send (fakes): the publish as it was.
+    @discardableResult
+    func publish(
+        media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry {
+        try await publish(media: media, caption: caption, as: author)
+    }
+
     /// One item, or none — what the text-post path and every caller before the
     /// carousel says. Kept so widening the requirement churned nothing.
     @discardableResult
@@ -221,6 +241,9 @@ public actor PostComposer: PostComposing {
     private let posterFrame: @Sendable (ExportedVideo) async -> UIImage?
     private let uploader: MediaAssetUploader
     private let now: @Sendable () -> Date
+    /// The waits before a keyed CreatePost asks again while its first call
+    /// is still in flight on the server (ABORTED, PST-1010).
+    private let inFlightRetryDelays: [Duration]
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "compose")
 
     /// The signed-in account and every profile it holds — the set a post may be
@@ -247,8 +270,10 @@ public actor PostComposer: PostComposing {
         },
         resolveMaxAttempts: Int = 6,
         resolvePollSeconds: Double = 1,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        inFlightRetryDelays: [Duration] = IdempotencyKey.inFlightRetryDelays
     ) {
+        self.inFlightRetryDelays = inFlightRetryDelays
         self.postClient = postClient
         self.profileClient = profileClient
         self.authSession = authSession
@@ -270,8 +295,16 @@ public actor PostComposer: PostComposing {
         self.now = now
     }
 
+    /// Keyless: no deduplication. The compose screens always send a key.
     @discardableResult
     public func publish(media: [ComposeMedia], caption: String, as author: AuthorSummary?) async throws -> FeedEntry {
+        try await publish(media: media, caption: caption, as: author, idempotencyKey: "")
+    }
+
+    @discardableResult
+    public func publish(
+        media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String
+    ) async throws -> FeedEntry {
         let trimmedCaption = caption.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !media.isEmpty || !trimmedCaption.isEmpty else {
             throw ComposeError.emptyPost
@@ -313,7 +346,8 @@ public actor PostComposer: PostComposing {
             profileID: viewer.author.id,
             caption: trimmedCaption,
             attachments: attachmentInputs,
-            hasMedia: !serverAttachments.isEmpty
+            hasMedia: !serverAttachments.isEmpty,
+            idempotencyKey: idempotencyKey
         )
         try await publishDraft(postID: postID, profileID: viewer.author.id)
 
@@ -473,32 +507,65 @@ public actor PostComposer: PostComposing {
         }
     }
 
-    /// ⚠️ **NOT IDEMPOTENT, AND THE CLIENT CANNOT MAKE IT SO (#795).**
-    /// `CreatePostRequest` carries no idempotency key and the server mints the
-    /// post id, so a retry after a lost CreatePost/PublishPost answer creates
-    /// a second post. The uploads above are keyed and replay; this step waits
-    /// on a contract field.
-    private func createDraft(profileID: ProfileID, caption: String, attachments: [Post_V1_MediaAttachmentInput], hasMedia: Bool) async throws -> PostID {
+    /// ⚠️ **UNDER THE SCREEN'S KEY, SO A RETRY IS THE SAME POST (#795).**
+    /// The server mints the post id; without `idempotency_key` a retry after
+    /// a lost CreatePost answer created a second post. With it, a repeat from
+    /// the same profile within 24 hours is answered with the post the first
+    /// call created. (PublishPost carries no key; see `publishDraft` for a
+    /// repeat of it.)
+    ///
+    /// ⚠️ **THIS ABORTED IS "NOT YET", NOT "NO".** While the first call is
+    /// still in flight a repeat fails ABORTED (PST-1010,
+    /// `IdempotencyKey.isInFlight`; any other ABORTED fails): it waits and asks again
+    /// under the same key (`inFlightRetryDelays`), and only after the last
+    /// wait fails like any other.
+    private func createDraft(
+        profileID: ProfileID, caption: String, attachments: [Post_V1_MediaAttachmentInput], hasMedia: Bool,
+        idempotencyKey: String
+    ) async throws -> PostID {
         var request = Post_V1_CreatePostRequest()
         request.profileID = profileID.rawValue
         request.kind = hasMedia ? .carousel : .textOnly
         request.caption = caption
         request.attachments = attachments
+        request.idempotencyKey = IdempotencyKey.wire(idempotencyKey)
 
-        let response = await postClient.createPost(request: request, headers: [:])
-        if (response.error?.message ?? "").contains("PST-1009") { throw ComposeError.mentionRefused }
-        let body = try unwrapWrite(
-            response.message, errorMessage: response.error?.message, exception: response.error?.exception,
-            failure: response.error.flatMap { NetworkFailure.of($0) }
-        )
-        return PostID(body.postID)
+        var waits = inFlightRetryDelays[...]
+        while true {
+            let response = await postClient.createPost(request: request, headers: [:])
+            if IdempotencyKey.isInFlight(response.error, code: "PST-1010"), !request.idempotencyKey.isEmpty,
+               let wait = waits.popFirst() {
+                // A publish cancelled while it waits is a publish that failed,
+                // in the feature's words.
+                do { try await Task.sleep(for: wait) } catch {
+                    throw ComposeError.transport("cancelled", failure: .cancelled)
+                }
+                continue
+            }
+            if (response.error?.message ?? "").contains("PST-1009") { throw ComposeError.mentionRefused }
+            let body = try unwrapWrite(
+                response.message, errorMessage: response.error?.message, exception: response.error?.exception,
+                failure: response.error.flatMap { NetworkFailure.of($0) }
+            )
+            return PostID(body.postID)
+        }
     }
 
+    /// ⚠️ **"ALREADY PUBLISHED" IS A SUCCESS (#795).** PublishPost carries no
+    /// key: after a lost PublishPost answer, the retry's CreatePost replays
+    /// the same draft — now published — and post.v1 refuses to publish it
+    /// again, ALREADY_EXISTS "post … is already published" (PST-1002). That
+    /// refusal says the post is up, which is all the author asked for.
+    /// ("Already deleted" is ALREADY_EXISTS too, and stays a failure.)
     private func publishDraft(postID: PostID, profileID: ProfileID) async throws {
         var request = Post_V1_PublishPostRequest()
         request.postID = postID.rawValue
         request.profileID = profileID.rawValue
         let response = await postClient.publishPost(request: request, headers: [:])
+        if let error = response.error, error.code == .alreadyExists,
+           let message = error.message, message.contains("PST-1002") || message.contains("already published") {
+            return
+        }
         _ = try unwrapWrite(
             response.message, errorMessage: response.error?.message, exception: response.error?.exception,
             failure: response.error.flatMap { NetworkFailure.of($0) }

@@ -1,5 +1,6 @@
 import Connect
 import CoreContracts
+import CoreNetworking
 import Foundation
 
 /// Mutable store of client-authored posts, shared between the authoring mock
@@ -56,28 +57,62 @@ public final class MockPostStore: @unchecked Sendable {
     private let lock = NSLock()
     private var drafts: [String: DraftRecord] = [:]
     private var publishedNewestFirst: [String] = []
+    /// "profile|key" → the post that key first created, and when (#795).
+    private var keyed: [String: (postID: String, atMS: Int64)] = [:]
+    /// How long a key names its first post (post.v1: 24 hours).
+    static let keyWindowMS: Int64 = 24 * 60 * 60 * 1000
 
     public init() {}
 
-    func create(profileID: String, caption: String, media: (url: String, width: Int, height: Int)?) -> String {
-        let postID = "post-authored-\(UUID().uuidString.prefix(8))"
-        lock.withLock {
-            drafts[postID] = DraftRecord(
-                postID: postID, profileID: profileID, caption: caption,
-                media: media, createdAtMS: Int64(Date().timeIntervalSince1970 * 1000), published: false
-            )
-        }
-        return postID
+    /// Every post created this session, published or not — what a test
+    /// counts to see that a replayed CreatePost made nothing new.
+    public var createdCount: Int {
+        lock.withLock { drafts.count }
     }
 
-    func publish(postID: String) -> Bool {
+    /// ⚠️ **A REPEATED KEY IS THE FIRST POST, NOT A SECOND (#795).** As
+    /// post.v1 does: the same `idempotency_key` from the same profile within
+    /// 24 hours creates nothing and answers the post the first call created.
+    /// Empty: no deduplication. (The fleet's ABORTED while the first is still
+    /// in flight has no window here: a mock call is answered whole.)
+    func create(
+        profileID: String, caption: String, media: (url: String, width: Int, height: Int)?,
+        idempotencyKey: String = ""
+    ) -> String {
         lock.withLock {
-            guard drafts[postID] != nil else { return false }
-            drafts[postID]?.published = true
-            publishedNewestFirst.removeAll { $0 == postID }
-            publishedNewestFirst.insert(postID, at: 0)
-            return true
+            let nowMS = Int64(Date().timeIntervalSince1970 * 1000)
+            let scope = profileID + "|" + idempotencyKey
+            if !idempotencyKey.isEmpty, let first = keyed[scope], nowMS - first.atMS < Self.keyWindowMS {
+                return first.postID
+            }
+            let postID = "post-authored-\(UUID().uuidString.prefix(8))"
+            drafts[postID] = DraftRecord(
+                postID: postID, profileID: profileID, caption: caption,
+                media: media, createdAtMS: nowMS, published: false
+            )
+            if !idempotencyKey.isEmpty { keyed[scope] = (postID, nowMS) }
+            return postID
         }
+    }
+
+    enum PublishOutcome { case published, notFound, alreadyPublished }
+
+    /// A draft becomes published — once: post.v1 refuses to publish a post
+    /// that already is (PST-1002), as a repeated PublishPost finds it.
+    func publish(postID: String) -> PublishOutcome {
+        lock.withLock {
+            guard let draft = drafts[postID] else { return .notFound }
+            guard !draft.published else { return .alreadyPublished }
+            drafts[postID]?.published = true
+            publishedNewestFirst.insert(postID, at: 0)
+            return .published
+        }
+    }
+
+    /// How many authored posts are published — what a test counts to see
+    /// that a replayed publish showed the post once.
+    public var publishedCount: Int {
+        lock.withLock { publishedNewestFirst.count }
     }
 
     func record(for postID: String) -> DraftRecord? {
@@ -124,9 +159,16 @@ public final class MockPostAuthoringService: @unchecked Sendable {
         if let refused = Self.mentionedHandles(in: request.caption).first(where: { !mayMention(request.profileID, $0) }) {
             return .failure(ConnectError(code: .permissionDenied, message: "PST-1009: @\(refused) doesn't allow mentions from you"))
         }
+        // The key's shape, as post.v1 checks it (#795).
+        if !request.idempotencyKey.isEmpty, !IdempotencyKey.isValid(request.idempotencyKey) {
+            return .failure(ConnectError(code: .invalidArgument, message: "PST-9006: invalid idempotency_key"))
+        }
         let attachment = request.attachments.first
         let media = attachment.map { (url: $0.cdnURL, width: Int($0.width), height: Int($0.height)) }
-        let postID = store.create(profileID: request.profileID, caption: request.caption, media: media)
+        let postID = store.create(
+            profileID: request.profileID, caption: request.caption, media: media,
+            idempotencyKey: request.idempotencyKey
+        )
 
         var response = Post_V1_CreatePostResponse()
         response.postID = postID
@@ -149,8 +191,15 @@ public final class MockPostAuthoringService: @unchecked Sendable {
     }
 
     private func publishPost(_ request: Post_V1_PublishPostRequest) -> Result<Post_V1_CommandResponse, ConnectError> {
-        guard store.publish(postID: request.postID) else {
+        switch store.publish(postID: request.postID) {
+        case .published: break
+        case .notFound:
             return .failure(ConnectError(code: .notFound, message: "draft \(request.postID) not found"))
+        case .alreadyPublished:
+            // As the fleet answers it: a 409 that isn't retryable.
+            return .failure(ConnectError(
+                code: .alreadyExists, message: "PST-1002: post \(request.postID) is already published"
+            ))
         }
         var response = Post_V1_CommandResponse()
         response.success = true

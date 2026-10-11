@@ -181,6 +181,12 @@ final class NewPostViewController: UIViewController {
     /// reused for a picture the author has since changed — a replay would
     /// answer with the OLD asset.
     private var uploadKeys: [MediaLibraryItem.ID: String] = [:]
+    /// post.v1 CreatePost's idempotency key for this screen's post (#795),
+    /// with the same lifetime as `uploadKeys`: a retry of the same post
+    /// hands back the key its failed attempt used, so a CreatePost whose
+    /// answer was lost is answered with the post it created. Keyed by what
+    /// is posted — an edited caption is another post, under another key.
+    private let postKey = PublishIntentKey()
 
     #if DEBUG
     private var hasRunTheDebugScript = false
@@ -1275,7 +1281,11 @@ final class NewPostViewController: UIViewController {
                     let baked = edited.applied(to: image, artwork: stills)
                     media.append(.image(PickedImage(baked, uploadKey: uploadKey(for: item.id))))
                 }
-                let entry = try await composer.publish(media: media, caption: caption, as: nil)
+                let entry = try await composer.publish(
+                    media: media, caption: caption, as: nil,
+                    idempotencyKey: postKey.key(for: Self.postContent(caption: caption, media: media))
+                )
+                postKey.settle()
                 onPublished(entry)
                 // ⚠️ **AFTER THE POST IS UP, NEVER INSTEAD OF IT.** A copy that
                 // cannot be kept costs the author the copy, not the post — so it
@@ -1307,6 +1317,25 @@ final class NewPostViewController: UIViewController {
     /// window, and not in a sheet on its way out.
     private var isShown: Bool {
         viewIfLoaded?.window != nil && navigationController?.isBeingDismissed != true
+    }
+
+    /// What a publish sends, as far as its CreatePost key is concerned (see
+    /// `postKey`): the caption as published, and each piece of media that
+    /// actually goes, by its upload key, in carousel order.
+    ///
+    /// ⚠️ **WHAT IS SENT, NOT WHAT WAS CHOSEN.** A photo the library could
+    /// not read is skipped, so two attempts at the same chosen items can send
+    /// different carousels — and under one key the second would be answered
+    /// with the first's post. The upload key names a picture with its edits
+    /// (fixed for this screen's life); the title and settings are not sent.
+    static func postContent(caption: String, media: [ComposeMedia]) -> String {
+        let pieces = media.map { piece in
+            switch piece {
+            case .image(let picked): picked.uploadKey
+            case .video(let picked): picked.uploadKey
+            }
+        }
+        return ([caption.trimmingCharacters(in: .whitespacesAndNewlines)] + pieces).joined(separator: "\u{1F}")
     }
 
     /// The item's upload key: the one an earlier attempt used, or a new one

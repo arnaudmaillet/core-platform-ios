@@ -91,6 +91,39 @@ struct ChatSendAndMuteTests {
         #expect(await provider.sentBodies == ["hello", "hello"])
     }
 
+    /// ⚠️ ONE KEY PER BUBBLE, NOT PER ATTEMPT (#795): the retry of a failed
+    /// text goes under the key its first send carried — a valid chat.v1 key —
+    /// and the next message under a new one.
+    @Test func aRetriedTextReusesItsKeyAndTheNextTextHasItsOwn() async throws {
+        let provider = TextStubProvider(failures: 1)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        viewModel.send("hello")
+        guard case .content(let pending) = phases.last, let bubble = pending.last else {
+            Issue.record("no pending bubble"); return
+        }
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .failed } else { false }
+        })
+        viewModel.retry(bubble.id)
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .sent } else { false }
+        })
+        // The send button is free again once the delivered message is read.
+        #expect(await settleAsync { await provider.sentKeys.count == 2 })
+        viewModel.send("again")
+        #expect(await settleAsync { await provider.sentKeys.count == 3 })
+
+        let keys = await provider.sentKeys
+        #expect(keys[0] == keys[1], "the retry minted a new key")
+        #expect(IdempotencyKey.isValid(keys[0]))
+        #expect(keys[2] != keys[0], "another message reused a key")
+    }
+
     /// The driver hands the screen the delivery of a text, as it does a photo's.
     @Test func theDriverForwardsATextsDelivery() async {
         let provider = TextStubProvider(failures: 0)
@@ -351,6 +384,8 @@ private actor TextStubProvider: ChatProviding {
     private let mutedOnServer: Set<String>
     private var count = 0
     private(set) var sentBodies: [String] = []
+    /// The idempotency key each text send carried, in order (#795).
+    private(set) var sentKeys: [String] = []
     private(set) var mutes: [MuteCall] = []
 
     init(failures: Int, refusesMute: Bool = false, mutedOnServer: Set<String> = []) {
@@ -370,7 +405,13 @@ private actor TextStubProvider: ChatProviding {
     }
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] { [] }
     func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
+        try await send(body, to: conversationID, replyingTo: replyToID, idempotencyKey: "")
+    }
+    func send(
+        _ body: String, to conversationID: ConversationID, replyingTo replyToID: String?, idempotencyKey: String
+    ) async throws -> ChatMessage {
         sentBodies.append(body)
+        sentKeys.append(idempotencyKey)
         try await Task.sleep(for: .milliseconds(20))
         if failures > 0 {
             failures -= 1

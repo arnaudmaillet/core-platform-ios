@@ -83,10 +83,15 @@ struct TextPostComposePageTests {
         var calls: [Call] { lock.withLock { recorded } }
         /// How long the round trip takes — a post "on its way".
         var delay: Duration = .zero
+        /// Whether the publish fails, as one whose answer never came.
+        var fails = false
+
+        struct Failed: Error {}
 
         func publishTextPost(_ text: String, as author: AuthorSummary?) async throws -> FeedEntry {
             lock.withLock { recorded.append(Call(text: text, author: author)) }
             if delay > .zero { try await Task.sleep(for: delay) }
+            if fails { throw Failed() }
             let by = author ?? AuthorSummary(id: ProfileID("prof-first"), handle: "first", displayName: "First", avatarURL: nil)
             return FeedEntry(
                 post: Post(id: PostID("post-new"), authorID: by.id, caption: text, attachments: [], publishedAt: Date()),
@@ -516,6 +521,24 @@ struct TextPostComposePageTests {
         page.drafts.delete(draft.id)
 
         #expect(page.navigation.isModalInPresentation)
+    }
+
+    /// ⚠️ A PUBLISH CANNOT FAIL WITHOUT THE AUTHOR BEING TOLD (#795): the
+    /// post that did not go is said, comes back as writing, and the sheet
+    /// guards it against a swipe — nothing is published, nothing is lost.
+    @Test func aFailedPublishIsSaidAndHandsTheTextBackUnderTheSwipeGuard() async throws {
+        let page = try await openPage()
+        page.publisher.fails = true
+
+        page.panel.debugSend("Did not go")
+        try await settle { page.publisher.calls.count == 1 && page.panel.composerText == "Did not go" }
+
+        #expect(page.panel.composerText == "Did not go", "the text did not come back")
+        #expect(!page.panel.isPublishing)
+        #expect(!page.composer.debugIsPublished)
+        let notice = page.panel.presentedViewController as? UIAlertController
+        #expect(notice?.title == "Couldn't Publish", "the failure was not said")
+        #expect(page.navigation.isModalInPresentation, "a swipe would lose the text that came back")
     }
 
     /// A post on its way holds the sheet, and no other draft can be opened

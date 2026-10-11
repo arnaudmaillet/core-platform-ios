@@ -229,6 +229,13 @@ public protocol ChatProviding: ViewerIdentityProviding {
     /// Sends `body`, optionally as a threaded reply to `replyToID` (chat.v1
     /// `reply_to`). Returns the created, viewer-owned message.
     func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage
+    /// `send(_:to:replyingTo:)` under the BUBBLE's `idempotencyKey` (#795):
+    /// minted once when the message is sent and passed again by every retry
+    /// of it, so a message whose answer was lost is answered with the one
+    /// already stored instead of being stored twice.
+    func send(
+        _ body: String, to conversationID: ConversationID, replyingTo replyToID: String?, idempotencyKey: String
+    ) async throws -> ChatMessage
     /// Uploads `media` (media.v1), then sends it as a MEDIA message with
     /// `caption` as its body (#681). Returns the created, viewer-owned
     /// message. `ChatError.mediaUpload` when the upload failed.
@@ -236,7 +243,8 @@ public protocol ChatProviding: ViewerIdentityProviding {
     /// `idempotencyKey` is the BUBBLE's (#795): minted once when the message
     /// is sent and passed again by every retry of it, so the upload of a
     /// message whose answer was lost replays instead of storing the picture
-    /// twice.
+    /// twice — and the send after it is answered with the message already
+    /// stored.
     func send(
         media: ChatMediaUpload, caption: String, to conversationID: ConversationID, replyingTo replyToID: String?,
         idempotencyKey: String
@@ -281,6 +289,13 @@ extension ChatProviding {
         try await loadConversations().first { $0.id == id }
     }
 
+    /// Providers with no key to send (fakes): the send as it was.
+    public func send(
+        _ body: String, to conversationID: ConversationID, replyingTo replyToID: String?, idempotencyKey: String
+    ) async throws -> ChatMessage {
+        try await send(body, to: conversationID, replyingTo: replyToID)
+    }
+
     /// Non-reply convenience — the common case reads `send(body, to:)`.
     public func send(_ body: String, to conversationID: ConversationID) async throws -> ChatMessage {
         try await send(body, to: conversationID, replyingTo: nil)
@@ -315,6 +330,9 @@ public actor ChatRepository: ChatProviding {
     /// Uploads a message's photo or video (#681); nil sends no media.
     private let mediaUploader: MediaAssetUploader?
     private let encoder: MediaEncoder
+    /// The waits before a keyed send asks again while its first attempt is
+    /// still in flight on the server (ABORTED, CHT-1013).
+    private let inFlightRetryDelays: [Duration]
 
     public init(
         chatClient: any Chat_V1_ChatServiceClientInterface,
@@ -324,9 +342,11 @@ public actor ChatRepository: ChatProviding {
         mediaUploader: MediaAssetUploader? = nil,
         encoder: MediaEncoder = MediaEncoder(),
         pageSize: Int32 = 50,
-        inboxPageSize: Int32 = 20
+        inboxPageSize: Int32 = 20,
+        inFlightRetryDelays: [Duration] = IdempotencyKey.inFlightRetryDelays
     ) {
         self.mediaUploader = mediaUploader
+        self.inFlightRetryDelays = inFlightRetryDelays
         self.encoder = encoder
         self.chatClient = chatClient
         self.profileClient = profileClient
@@ -520,10 +540,18 @@ public actor ChatRepository: ChatProviding {
         }
     }
 
+    /// Keyless: no deduplication. The thread always sends with a key.
     public func send(_ body: String, to conversationID: ConversationID, replyingTo replyToID: String?) async throws -> ChatMessage {
+        try await send(body, to: conversationID, replyingTo: replyToID, idempotencyKey: "")
+    }
+
+    public func send(
+        _ body: String, to conversationID: ConversationID, replyingTo replyToID: String?, idempotencyKey: String
+    ) async throws -> ChatMessage {
         let viewer = try await resolveViewerProfileID(forWrite: "send")
         return try await sendMessage(
-            body: body, media: nil, as: viewer, to: conversationID, replyingTo: replyToID
+            body: body, media: nil, as: viewer, to: conversationID, replyingTo: replyToID,
+            idempotencyKey: idempotencyKey
         )
     }
 
@@ -548,7 +576,8 @@ public actor ChatRepository: ChatProviding {
             throw ChatError.mediaUpload(message: String(describing: error), failure: NetworkFailure.of(error))
         }
         return try await sendMessage(
-            body: caption, media: media, as: viewer, to: conversationID, replyingTo: replyToID
+            body: caption, media: media, as: viewer, to: conversationID, replyingTo: replyToID,
+            idempotencyKey: idempotencyKey
         )
     }
 
@@ -591,14 +620,23 @@ public actor ChatRepository: ChatProviding {
     /// chat.v1 `SendMessage`: TEXT with `body`, or MEDIA with the reference
     /// (`ChatMediaRef`) and `body` as its caption.
     ///
-    /// ⚠️ **THIS STEP IS NOT IDEMPOTENT, AND THE CLIENT CANNOT MAKE IT SO
-    /// (#795).** `SendMessageRequest` has no client message id or idempotency
-    /// key and the server mints `message_id`, so a retry after a lost answer
-    /// sends the message twice. A media message's UPLOAD replays under the
-    /// bubble's key; the send itself waits on a contract field.
+    /// ⚠️ **UNDER THE BUBBLE'S KEY, SO A RETRY IS THE SAME MESSAGE (#795).**
+    /// The server mints `message_id`; without `idempotency_key` a retry after
+    /// a lost answer stored the message twice. With it, a repeat within 24
+    /// hours is answered with the message the first send stored. The key goes
+    /// out as `IdempotencyKey.wire` shapes it, so one bubble is one key
+    /// whatever its caller minted.
+    ///
+    /// ⚠️ **THIS ABORTED IS "NOT YET", NOT "NO".** While the first send is
+    /// still in flight on the server, a repeat fails ABORTED (CHT-1013,
+    /// `IdempotencyKey.isInFlight`; any other ABORTED fails). That send
+    /// may well land, so the repeat waits and asks again under the same key
+    /// (`inFlightRetryDelays`); only after the last wait does it fail like
+    /// any other — and the bubble's own retry goes under the same key again.
     private func sendMessage(
         body: String, media: ChatMedia?, as viewer: ProfileID,
-        to conversationID: ConversationID, replyingTo replyToID: String?
+        to conversationID: ConversationID, replyingTo replyToID: String?,
+        idempotencyKey: String
     ) async throws -> ChatMessage {
         var request = Chat_V1_SendMessageRequest()
         request.conversationID = conversationID.rawValue
@@ -607,21 +645,34 @@ public actor ChatRepository: ChatProviding {
         request.body = body
         if let media { request.mediaRef = ChatMediaRef.encode(media) }
         if let replyToID { request.replyTo = replyToID }
-        let response = await chatClient.sendMessage(request: request, headers: [:])
-        switch response.result {
-        case .success(let created):
-            return ChatMessage(
-                id: created.messageID,
-                senderID: viewer,
-                body: body,
-                createdAt: Date(),
-                isMine: true,
-                replyToID: replyToID,
-                media: media
-            )
-        case .failure(let error):
-            if (error.message ?? "").contains("CHT-1011") { throw ChatError.messagesRefused }
-            throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        request.idempotencyKey = IdempotencyKey.wire(idempotencyKey)
+        var waits = inFlightRetryDelays[...]
+        while true {
+            let response = await chatClient.sendMessage(request: request, headers: [:])
+            switch response.result {
+            case .success(let created):
+                return ChatMessage(
+                    id: created.messageID,
+                    senderID: viewer,
+                    body: body,
+                    createdAt: Date(),
+                    isMine: true,
+                    replyToID: replyToID,
+                    media: media
+                )
+            case .failure(let error):
+                if IdempotencyKey.isInFlight(error, code: "CHT-1013"), !request.idempotencyKey.isEmpty,
+                   let wait = waits.popFirst() {
+                    // A send cancelled while it waits is a send that failed —
+                    // in the feature's words, so the bubble offers its retry.
+                    do { try await Task.sleep(for: wait) } catch {
+                        throw ChatError.transport(message: "cancelled", failure: .cancelled)
+                    }
+                    continue
+                }
+                if (error.message ?? "").contains("CHT-1011") { throw ChatError.messagesRefused }
+                throw ChatError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            }
         }
     }
 
