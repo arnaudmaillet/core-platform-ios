@@ -3,12 +3,8 @@ import CoreModels
 import CoreNetworking
 import Foundation
 
-/// What a Follow tap did: followed, or asked a private profile (#396,
-/// backend #655).
-public enum FollowOutcome: Equatable, Sendable {
-    case following
-    case requested
-}
+// `FollowOutcome` lives in CoreModels: `SocialGraphWriting.follow(_:)` says
+// it too, so the feed's person pill can draw a pending request (#968).
 
 /// The requester's half of follow requests: following a private profile asks,
 /// and the request can be withdrawn while it's pending.

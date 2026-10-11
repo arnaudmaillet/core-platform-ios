@@ -96,6 +96,11 @@ final class SnapAuthorFollowStore {
     /// already follows the viewer — and comes back if the graph refuses,
     /// after which `onRefused` runs.
     ///
+    /// A PRIVATE author is asked, not followed (#968): the graph says so, and
+    /// the followed mark becomes the pending one. The pill cannot know
+    /// beforehand — the relation read carries no privacy — so the optimistic
+    /// mark is the followed one, as for everyone.
+    ///
     /// Returns whether a follow was sent: nothing is for an author the pill
     /// does not offer "+" for, or while one is already in flight.
     @discardableResult
@@ -105,12 +110,16 @@ final class SnapAuthorFollowStore {
         followsInFlight.insert(author)
         setRelation(before.settingFollow(true), for: author)
         Task { [weak self] in
-            let accepted = (try? await writer.setFollowing(true, for: author)) != nil
+            let outcome = try? await writer.follow(author)
             guard let self else { return }
             self.followsInFlight.remove(author)
-            guard !accepted else { return }
-            self.setRelation(before, for: author)
-            onRefused()
+            switch outcome {
+            case .following: return
+            case .requested: self.setRelation(.requested, for: author)
+            case nil:
+                self.setRelation(before, for: author)
+                onRefused()
+            }
         }
         return true
     }

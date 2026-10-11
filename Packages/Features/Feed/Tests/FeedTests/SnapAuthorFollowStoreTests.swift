@@ -38,6 +38,7 @@ struct SnapAuthorFollowStoreTests {
         (.mutual, .friends),
         (.viewer, .none),
         (.blocked, .none),
+        (.requested, .pending),
     ])
     func eachRelationDrawsItsBadge(_ relation: FollowRelation, _ badge: SnapAuthorIdentityView.FollowBadge) {
         let store = Self.store(GatedGraph())
@@ -131,6 +132,26 @@ struct SnapAuthorFollowStoreTests {
         await Self.settle { store.followsInFlight.isEmpty }
         #expect(store.relationsByAuthor[ava] == .following)
         #expect(changed == [ava], "an accepted follow changes nothing more")
+    }
+
+    /// A private author is ASKED (#968): once the graph says so, the followed
+    /// mark becomes the pending one, and the "+" is not offered again.
+    @Test func aFollowOnAPrivateAuthorEndsPending() async {
+        let graph = GatedGraph()
+        graph.outcome = .requested
+        let store = Self.store(graph)
+        store.setRelation(.notFollowing, for: ava)
+        var refused = false
+        store.follow(ava, onRefused: { refused = true })
+        #expect(store.badge(for: ava) == .following, "optimistic: the privacy is not known before")
+
+        await Self.settle { graph.pendingFollows == 1 }
+        graph.answerFollow(accepting: true)
+        await Self.settle { store.followsInFlight.isEmpty }
+        #expect(store.relationsByAuthor[ava] == .requested)
+        #expect(store.badge(for: ava) == .pending)
+        #expect(!store.offersFollow(to: ava))
+        #expect(!refused, "a request is not a refusal")
     }
 
     @Test func followingAFollowerMakesAFriend() async {
@@ -248,6 +269,8 @@ private final class GatedGraph: SocialGraphReading, SocialGraphWriting {
     private var followGates: [CheckedContinuation<Void, any Error>] = []
     private(set) var lookups: [ProfileID] = []
     private(set) var follows: [ProfileID] = []
+    /// What an accepted follow did: `.requested` is a private author (#968).
+    var outcome: FollowOutcome = .following
 
     var pendingLookups: Int { lookupGates.count }
     var pendingFollows: Int { followGates.count }
@@ -262,6 +285,11 @@ private final class GatedGraph: SocialGraphReading, SocialGraphWriting {
         try await withCheckedThrowingContinuation { (gate: CheckedContinuation<Void, any Error>) in
             followGates.append(gate)
         }
+    }
+
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
+        try await setFollowing(true, for: profileID)
+        return outcome
     }
 
     func answerLookup(_ relation: FollowRelation) {

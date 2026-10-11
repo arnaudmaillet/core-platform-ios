@@ -514,6 +514,14 @@ struct ConversationThreadSendAndMuteTests {
             if refuses { throw CancellationError() }
             if following { follows.append(profileID) }
         }
+        /// A private correspondent: a follow only asks (#968).
+        var asks = false
+        func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
+            try await setFollowing(true, for: profileID)
+            guard asks else { return .following }
+            relation = .requested
+            return .requested
+        }
     }
 
     private func makeScreen(graph: Graph) -> (ConversationThreadViewController, Driver, UIWindow) {
@@ -636,6 +644,41 @@ struct ConversationThreadSendAndMuteTests {
         #expect(after.first?.customView === pill)
     }
 
+    /// ⚠️ A FOLLOW ON A PRIVATE CORRESPONDENT ENDS ON THE PENDING MARK, BY
+    /// SYMBOL REPLACES ONLY (#968): the "+" becomes the optimistic check, and
+    /// the check the clock once the graph says it only asked. A later read
+    /// saying the request is gone (refused or withdrawn) puts the "+" back by
+    /// one more replace. The pill is never blurred, the toolbar never rebuilt.
+    @Test func aFollowOnAPrivatePeerEndsOnThePendingMarkByReplaces() async throws {
+        let graph = Graph(.notFollowing)
+        graph.asks = true
+        let (screen, _, window) = makeScreen(graph: graph)
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        let pill = try #require(peerPill(screen))
+        #expect(await settle { screen.debugPeerFollowBadge == .follow })
+        #expect(await settle { !pill.isRedrawingWholePill })
+        #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
+        let items = try #require(screen.toolbarItems)
+        let replaces = pill.badgeReplaceCount
+
+        screen.followPeer(ProfileID("them"))
+        #expect(await settle { screen.debugPeerFollowBadge == .pending })
+        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
+        #expect(pill.badgeReplaceCount == replaces + 2, "plus → pending was not drawn by symbol replaces alone")
+        #expect(!pill.isRedrawingWholePill, "the request blurred the whole pill")
+
+        graph.relation = .notFollowing
+        screen.resolvePeerRelation(refresh: true)
+        #expect(await settle { screen.debugPeerFollowBadge == .follow })
+        #expect(pill.drawnBadgeSymbol == "plus")
+        #expect(pill.badgeReplaceCount == replaces + 3, "pending → plus was not one symbol replace")
+        #expect(!pill.isRedrawingWholePill, "pending → plus blurred the whole pill")
+        let after = try #require(screen.toolbarItems)
+        #expect(zip(after, items).allSatisfy { $0 === $1 } && after.count == items.count,
+                "the toolbar items were rebuilt")
+    }
+
     /// ⚠️ THE SAME PERSON IS DRAWN ONCE (#889): their face and @handle land
     /// after their name, and change the pill in place; only someone else
     /// cross-fades the whole pill.
@@ -667,6 +710,6 @@ struct ConversationThreadSendAndMuteTests {
         #expect(Badge(.mutual) == .friends)
         #expect(Badge(.viewer) == .none)
         #expect(Badge(.blocked) == .none)
-        #expect(Badge(.requested) == .none)
+        #expect(Badge(.requested) == .pending)
     }
 }

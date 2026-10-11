@@ -1574,10 +1574,13 @@ extension ConversationThreadViewController {
         // Named now: the peer can change before the graph answers.
         let name = peer.handle.map { "@" + $0 } ?? (peer.name.isEmpty ? nil : peer.name)
         Task { [weak self] in
-            let accepted = (try? await socialGraph.setFollowing(true, for: id)) != nil
+            let outcome = try? await socialGraph.follow(id)
             guard let self else { return }
             self.followInFlight = false
-            if !accepted {
+            // A private correspondent was asked, not followed (#968): the
+            // followed mark becomes the pending one.
+            if outcome == .requested, self.peer.id == id { self.setPeerRelation(.requested, tapped: true) }
+            if outcome == nil {
                 if self.peer.id == id { self.setPeerRelation(before, tapped: true) }
                 // Said either way (#802): a "+" that comes back without a
                 // word reads as a glitch. Over the composer, as the mute's is.
