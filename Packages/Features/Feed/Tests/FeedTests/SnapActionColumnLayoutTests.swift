@@ -514,6 +514,117 @@ struct SnapActionColumnLayoutTests {
         #expect(abs(bar.occupiedMinY - (bar.frame.minY + field.frame.minY)) < 0.5)
     }
 
+    /// ⚠️ THE `:query` STRIP RIDES THE INPUT ROW (#960). Laid out in the bar
+    /// — from the avatar's leading edge, never past the field's trailing one,
+    /// 8pt above the field — it walks up with the keyboard and widens with
+    /// the field as the row clears the column, frame by frame, and comes home
+    /// with it. It floated in the window, placed once per query, and stayed
+    /// where the field had been.
+    @Test func theEmoteStripRidesTheFieldThroughTheKeyboardsRise() throws {
+        let (bar, host) = hostedColumnBar(railFace: .repost)
+        let field = try #require(Self.fieldView(in: bar))
+        let textView = try #require(Self.firstView(UITextView.self, in: field))
+        let keyboard = Self.fakeKeyboard(in: host, for: bar, top: host.bounds.height + 80)
+        Self.relayout(host, bar)
+
+        // The text view is off-window here, so the strip answers without the
+        // keyboard's focus.
+        bar.draftText = "nice :fi"
+        NotificationCenter.default.post(name: UITextView.textDidChangeNotification, object: textView)
+        let strip = try #require(Self.emoteStrip(in: bar), "no emote strip in the bar")
+        #expect(!strip.isHidden, "`:fi` showed no strip")
+        Self.relayout(host, bar)
+
+        let avatarMinX = bar.subviews.compactMap { $0 as? UIVisualEffectView }.map(\.frame.minX).min() ?? 0
+        func expectOnField(_ stage: String) -> CGRect {
+            #expect(abs(strip.frame.maxY - (field.frame.minY - 8)) < 0.5,
+                    "\(stage): strip bottom \(strip.frame.maxY), field top \(field.frame.minY)")
+            #expect(abs(strip.frame.minX - avatarMinX) < 0.5, "\(stage): strip leading \(strip.frame.minX)")
+            #expect(strip.frame.maxX <= field.frame.maxX + 0.5,
+                    "\(stage): strip runs past the field: \(strip.frame.maxX) vs \(field.frame.maxX)")
+            return strip.frame
+        }
+
+        let rest = expectOnField("rest")
+        #expect(abs(rest.maxX - field.frame.maxX) < 0.5, "`:fi`'s many matches do not fill the resting row")
+        let restBar = bar.frame
+        let clearance = restBar.height - columnTop(bar)
+        var stages: [(strip: CGFloat, row: CGFloat)] = []
+        for fraction in [0.25, 0.5, 0.75, 1, 2] as [CGFloat] {
+            keyboard.constant = restBar.maxY - clearance * fraction + Spacing.sm
+            Self.relayout(host, bar)
+            let frame = expectOnField("lift \(fraction)")
+            #expect(frame.minY < rest.minY - clearance * min(fraction, 1) + 0.5,
+                    "the strip stayed behind at \(fraction)")
+            stages.append((frame.width, field.frame.maxX - avatarMinX))
+        }
+        // The strip spans the row while its matches overflow it, so it widens
+        // exactly as the field does, up to its matches' width.
+        let widest = stages.map(\.strip).max() ?? 0
+        for (index, stage) in stages.enumerated() {
+            #expect(abs(stage.strip - min(stage.row, widest)) < 0.5,
+                    "stage \(index): strip \(stage.strip) over a row of \(stage.row)")
+        }
+        #expect(widest > rest.width + 20, "the strip did not widen: \(stages) from \(rest.width)")
+
+        // In the keyboard's own animation: the strip's move and widening are
+        // animations with the field's timing, not a jump after it.
+        keyboard.constant = host.bounds.height + 80
+        Self.relayout(host, bar)
+        UIView.animate(withDuration: 0.33) {
+            keyboard.constant = restBar.maxY - clearance + Spacing.sm
+            Self.relayout(host, bar)
+        }
+        func duration(_ prefix: String, _ view: UIView) -> CFTimeInterval? {
+            (view.layer.animationKeys() ?? []).compactMap { view.layer.animation(forKey: $0) as? CABasicAnimation }
+                .first { $0.keyPath?.hasPrefix(prefix) == true }?.duration
+        }
+        let fieldMove = try #require(duration("position", field), "the field did not animate")
+        #expect(duration("position", strip) == fieldMove, "the strip did not rise in the field's animation")
+        #expect(duration("bounds", strip) == duration("bounds", field),
+                "the strip did not widen in the field's animation")
+        #expect(abs(fieldMove - 0.33) < 0.001)
+        [bar, field, strip].forEach { $0.layer.removeAllAnimations() }
+
+        keyboard.constant = host.bounds.height + 80
+        Self.relayout(host, bar)
+        #expect(expectOnField("home") == rest, "the strip did not come home with the field")
+        #expect(!bar.hasAmbiguousLayout)
+    }
+
+    /// The column's top (the stake's), as `applyRise` reads it.
+    private func columnTop(_ bar: CommentsInputBar) -> CGFloat {
+        let stake = Self.button(bar, "Boost post")
+        return (stake.flatMap { $0.isHidden ? nil : $0 } ?? bar.debugRailButton).frame.minY
+    }
+
+    /// The `:query` strip riding the bar, found by its identifier.
+    static func emoteStrip(in view: UIView) -> UIView? {
+        if view.accessibilityIdentifier == "emote-suggestions" { return view }
+        for subview in view.subviews {
+            if let match = emoteStrip(in: subview) { return match }
+        }
+        return nil
+    }
+
+    /// The strip's touches are the bar's, risen above its bounds or not.
+    @Test func theEmoteStripTakesItsTouchesAboveTheBar() throws {
+        let (bar, host) = hostedColumnBar(railFace: .repost)
+        let field = try #require(Self.fieldView(in: bar))
+        let textView = try #require(Self.firstView(UITextView.self, in: field))
+        let keyboard = Self.fakeKeyboard(in: host, for: bar, top: host.bounds.height + 80)
+        keyboard.constant = bar.frame.minY - 120
+        Self.relayout(host, bar)
+        bar.draftText = "nice :fi"
+        NotificationCenter.default.post(name: UITextView.textDidChangeNotification, object: textView)
+        let strip = try #require(Self.emoteStrip(in: bar))
+        Self.relayout(host, bar)
+        #expect(strip.frame.maxY < 0, "the strip did not rise above the bar")
+        let tile = CGPoint(x: strip.frame.minX + 30, y: strip.frame.midY)
+        #expect(bar.point(inside: tile, with: nil), "a tile above the bar is not the bar's touch")
+        #expect(bar.hitTest(tile, with: nil)?.isDescendant(of: strip) == true, "the tap does not reach the strip")
+    }
+
     /// ⚠️ THE CONTRACT, KEYBOARD UP. On the engaged panel the column's
     /// bubbles stand on the media layout's like pill and sound bubble with a
     /// keyboard up exactly as at rest — equal frames, in window coordinates —

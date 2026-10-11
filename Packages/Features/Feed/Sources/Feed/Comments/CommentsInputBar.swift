@@ -441,10 +441,6 @@ final class CommentsInputBar: UIView {
         // short of it, and the toggle holds the last line's station as the
         // field grows (bottom-anchored, like the round controls around it).
         let emoteToggle = emotes.toggleButton
-        // The `:query` strip floats above the WHOLE bar at rest, not the
-        // field: over the field it would lie across the stake bubble. Over a
-        // risen field it follows the field (`applyRise`).
-        emotes.suggestionAnchor = self
         emoteToggle.tintColor = .secondaryLabel
         textView.translatesAutoresizingMaskIntoConstraints = false
         emoteToggle.translatesAutoresizingMaskIntoConstraints = false
@@ -685,6 +681,20 @@ final class CommentsInputBar: UIView {
             stakeHug,
         ]
         NSLayoutConstraint.activate(stakeStationConstraints)
+        // The `:query` and `@`/`#` strips RIDE THE INPUT ROW (#960): laid out
+        // in the bar, from the avatar's leading edge to the field's trailing
+        // one, a fixed 8pt above the field. They floated in the window, placed once
+        // per query: the keyboard lifted the field away from them, and the
+        // field widened under a strip that kept its width. On the bar's own
+        // layout they move in the same pass as the field — the keyboard's
+        // rise, an interactive dismissal frame by frame, the widening as the
+        // column is cleared (`applyRise`), a line growing the field. Each
+        // joins the bar the first time it shows, in front of the bar's other
+        // subviews.
+        emotes.embedSuggestions(
+            in: self, leading: avatarBubble.leadingAnchor,
+            trailing: field.trailingAnchor, bottom: field.topAnchor
+        )
         // The disc is NEVER empty. Before an identity resolves the bar shows
         // the unknown-viewer placeholder, not a blank circle — the same
         // "monogram is the rendered state" rule the comment rows follow,
@@ -720,7 +730,10 @@ final class CommentsInputBar: UIView {
     ///
     /// The input row is the bar's WHEREVER it is: risen with the keyboard it
     /// stands above the bar's own bounds, and its touches are still the bar's.
+    ///
+    /// So are the emote and completion strips riding over it (#960).
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if emotes.suggestionsContain(point, in: self) { return true }
         if point.y >= field.frame.minY, point.y <= field.frame.maxY,
            point.x >= bounds.minX, point.x <= bounds.maxX {
             return true
@@ -847,8 +860,6 @@ final class CommentsInputBar: UIView {
         }
         #endif
         riseProgress = progress
-        // The `:query` strip over the field once nothing stands beside it.
-        emotes.suggestionAnchor = progress > 0 ? field : self
         let inset = Self.fieldTrailingInset(progress: progress)
         guard abs(fieldTrailing.constant + inset) > 0.01 else { return false }
         fieldTrailing.constant = -inset
