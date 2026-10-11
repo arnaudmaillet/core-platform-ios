@@ -545,15 +545,18 @@ struct ConversationThreadSendAndMuteTests {
 
         #expect(await settle { screen.debugPeerFollowBadge == .friends })
         #expect(!pill.isRedrawingWholePill, "the whole pill was redrawn for the relation")
+        #expect(pill.drawnBadgeSymbol == "person.2.fill")
+        #expect(pill.badgeReplaceCount == 1, "the late relation did not land as a symbol replace")
         let after = try #require(screen.toolbarItems)
         #expect(after.count == items.count)
         #expect(zip(after, items).allSatisfy { $0 === $1 }, "the toolbar items were rebuilt")
         #expect(after.first?.customView === pill, "the pill was replaced")
     }
 
-    /// The follow tap keeps its blur: the "+" turning into the friends mark is
-    /// the viewer's own act, drawn as on a post.
-    @Test func aFollowTapStillTurnsTheGlyphThroughTheBlur() async throws {
+    /// ⚠️ THE FOLLOW TAP IS A SYMBOL REPLACE TOO (#925): the "+" on the
+    /// avatar turns into the friends mark through SF Symbols' replace, in the
+    /// same item, and the pill is never blurred for it (it used to be).
+    @Test func aFollowTapReplacesTheSymbolWithoutTheBlur() async throws {
         let graph = Graph(.followedBy)
         let (screen, _, window) = makeScreen(graph: graph)
         defer { window.isHidden = true }
@@ -561,9 +564,20 @@ struct ConversationThreadSendAndMuteTests {
         let pill = try #require(peerPill(screen))
         #expect(await settle { screen.debugPeerFollowBadge == .follow })
         #expect(await settle { !pill.isRedrawingWholePill })
+        #expect(pill.drawnBadgeSymbol == "plus")
+        let items = try #require(screen.toolbarItems)
+        let replaces = pill.badgeReplaceCount
+
         screen.followPeer(ProfileID("them"))
+
         #expect(screen.debugPeerFollowBadge == .friends)
-        #expect(pill.isRedrawingWholePill, "the follow tap lost its blur")
+        #expect(pill.drawnBadgeSymbol == "person.2.fill")
+        #expect(pill.badgeReplaceCount == replaces + 1, "the badge changed without its symbol replace")
+        #expect(!pill.isRedrawingWholePill, "the follow tap blurred the whole pill")
+        let after = try #require(screen.toolbarItems)
+        #expect(zip(after, items).allSatisfy { $0 === $1 } && after.count == items.count,
+                "the toolbar items were rebuilt")
+        #expect(after.first?.customView === pill)
     }
 
     /// ⚠️ THE SAME PERSON IS DRAWN ONCE (#889): their face and @handle land
@@ -596,5 +610,7 @@ struct ConversationThreadSendAndMuteTests {
         #expect(Badge(.following) == .following)
         #expect(Badge(.mutual) == .friends)
         #expect(Badge(.viewer) == .none)
+        #expect(Badge(.blocked) == .none)
+        #expect(Badge(.requested) == .none)
     }
 }

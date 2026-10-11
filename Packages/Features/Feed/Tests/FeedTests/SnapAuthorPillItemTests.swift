@@ -99,23 +99,28 @@ struct SnapAuthorPillItemTests {
         #expect(SnapAuthorIdentityView.pillMetaLine(fromMeta: "") == "")
     }
 
-    /// Across authors the pill keeps what the host configured: its taps still
-    /// route, and its width is the one the BAR's arithmetic set — the same for
-    /// a two-letter name and a sentence (asked 2026-09-30: the glass must not
-    /// change size between posts).
-    @Test func thePillKeepsItsWiringAndItsWidthAcrossAuthors() throws {
+    /// ⚠️ THE PILL TAKES ITS OWN WIDTH, CAPPED BY THE TOOLBAR (#925). Across
+    /// authors it keeps what the host configured — its taps still route —
+    /// and it is as wide as its face and its two lines: a short name gets a
+    /// short pill, and a long one stops at the room the toolbar's trailing
+    /// run leaves (`SnapBarPillWidths.toolbarAuthor`), truncating inside it.
+    @Test func thePillHugsItsAuthorUnderTheToolbarsCap() throws {
         let (nav, feed) = Self.feed()
         // A real width to share out, as the screen's first layout pass has.
         nav.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         nav.view.layoutIfNeeded()
         let pill = try #require(Self.authorItem(feed)?.customView as? SnapAuthorIdentityView)
-        let fixed = try #require(pill.fixedWidth, "the feed installed a pill that hugs its text")
+        let cap = SnapBarPillWidths.resolve(
+            navBarWidth: 402, toolbarWidth: 402, walletWidth: nil, sort: nil
+        ).toolbarAuthor
+        #expect(abs(pill.widthCap - cap) < 0.5, "the cap is \(pill.widthCap), the toolbar leaves \(cap)")
         func fitted() -> CGFloat {
             pill.setNeedsLayout()
             pill.layoutIfNeeded()
             return pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
         }
 
+        var widths: [String: CGFloat] = [:]
         for (id, name, meta) in [
             ("prof-1", "Al", "@al · 2h"),
             ("prof-2", "Grace Hopper With A Very Long Name Indeed", "@grace.hopper.the.admiral · 1d"),
@@ -123,31 +128,49 @@ struct SnapAuthorPillItemTests {
         ] {
             feed.showAuthor(Self.model(id: "p-\(id)", author: name, authorID: id, meta: meta))
             #expect(Self.authorItem(feed)?.customView === pill)
-            #expect(abs(fitted() - fixed) < 0.5, "\(name): the pill took its text's width")
-            #expect(pill.fixedWidth == fixed)
+            widths[id] = fitted()
         }
+        let short = try #require(widths["prof-1"])
+        let long = try #require(widths["prof-2"])
+        let medium = try #require(widths["prof-3"])
+        #expect(abs(long - cap) < 0.5, "a long name's pill is \(long), not the cap \(cap)")
+        #expect(short < medium && medium < long, "the pill did not take its author's width: \(widths)")
+        #expect(short < 100, "a two-letter name kept a wide pill: \(short)")
         #expect(pill.onAuthorTapped != nil)
         #expect(pill.onFollowTapped != nil)
     }
 
-    /// The follow glyphs share ONE slot, so a relation that changes (the "+"
-    /// tapped into the followed mark) moves nothing in the pill.
-    @Test func everyFollowBadgeIsDrawnInOneSlot() throws {
+    /// ⚠️ THE BADGE IS ON THE AVATAR, NOT AT THE TRAILING END (#925): no
+    /// relation moves the pill's width, and the badge sits over the face's
+    /// bottom-right corner, a little outside it.
+    @Test func theBadgeRidesTheAvatarAndNeverMovesTheWidth() throws {
         let pill = SnapAuthorIdentityView()
-        pill.setFixedWidth(200)
         pill.setAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"),
                        pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: false)
         var widths: [CGFloat] = []
-        for badge in [SnapAuthorIdentityView.FollowBadge.follow, .following, .friends] {
+        for badge in [SnapAuthorIdentityView.FollowBadge.none, .follow, .following, .friends] {
             pill.setFollowBadge(badge)
             pill.setNeedsLayout()
             pill.layoutIfNeeded()
-            widths.append(try #require(Self.firstButton(in: pill)).bounds.width)
+            widths.append(pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width)
         }
-        #expect(
-            widths.allSatisfy { abs($0 - SnapAuthorIdentityView.followBadgeSlotWidth) < 0.5 },
-            "\(widths) vs slot \(SnapAuthorIdentityView.followBadgeSlotWidth)"
-        )
+        #expect(widths.allSatisfy { abs($0 - widths[0]) < 0.5 }, "the badge moved the pill's width: \(widths)")
+
+        pill.frame.size = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        pill.layoutIfNeeded()
+        let badge = try #require(Self.firstButton(in: pill))
+        let avatar = try #require(Self.firstView(of: MonogramAvatarView.self, in: pill))
+        let badgeFrame = badge.convert(badge.bounds, to: pill)
+        let face = avatar.convert(avatar.bounds, to: pill)
+        #expect(badgeFrame.maxX > face.maxX && badgeFrame.midX < face.maxX,
+                "not on the face's right edge: \(badgeFrame) vs \(face)")
+        #expect(badgeFrame.maxY > face.maxY && badgeFrame.midY < face.maxY,
+                "not on the face's bottom edge: \(badgeFrame) vs \(face)")
+        let labels = Self.shownLabels(in: pill).map { $0.convert($0.bounds, to: pill) }
+        #expect(!labels.isEmpty)
+        #expect(labels.allSatisfy { $0.maxX <= pill.bounds.maxX + 0.5 }, "a label runs past the pill")
+        #expect(badgeFrame.maxX <= (labels.map(\.minX).min() ?? .infinity),
+                "the badge runs into the name: \(badgeFrame) vs \(labels)")
     }
 
     private static func firstButton(in view: UIView) -> UIButton? {
@@ -155,6 +178,21 @@ struct SnapAuthorPillItemTests {
             if let found = sub as? UIButton ?? firstButton(in: sub) { return found }
         }
         return nil
+    }
+
+    private static func firstView<T: UIView>(of type: T.Type, in view: UIView) -> T? {
+        for sub in view.subviews {
+            if let found = sub as? T ?? firstView(of: type, in: sub) { return found }
+        }
+        return nil
+    }
+
+    private static func shownLabels(in view: UIView) -> [UILabel] {
+        view.subviews.flatMap { sub -> [UILabel] in
+            if let label = sub as? UILabel { return label.isHidden ? [] : [label] }
+            // The face's own initials are not the pill's lines.
+            return sub.isHidden || sub is MonogramAvatarView ? [] : shownLabels(in: sub)
+        }
     }
 
     /// The pill is the toolbar's (#671): with a media post's thread open the

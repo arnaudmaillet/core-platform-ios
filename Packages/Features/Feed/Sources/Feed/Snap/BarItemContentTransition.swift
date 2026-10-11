@@ -35,15 +35,14 @@ import UIKit
 /// and a container's group opacity survives the platter. Filmed at 60fps on
 /// iOS 27 (iPhone 18 Pro, light and dark, both bars, the follow badge): the
 /// old content visibly blurs out over ~7 frames, the glass holds its shape,
-/// and the new content sharpens over ~8. In the snap feed the glass does not
-/// even change width — both pills are FIXED there (`SnapBarPillWidths`) — so
-/// the width path below (`remeasure`) serves only the hosts whose pill still
-/// hugs its content.
+/// and the new content sharpens over ~8. A pill that hugs its content (the
+/// person pill, everywhere since #925) takes its new width through
+/// `remeasure` while only the stills show; a FIXED pill (the snap feed's
+/// audio capsule, `SnapBarPillWidths`) does not even change width.
 ///
 /// TWO DRIVERS, ONE MECHANISM.
 /// - The CLOCK (`perform`): the timeline above, 0.12s out and 0.2s in — a
-///   follow tap turning the "+" into the followed mark, a page reached
-///   without a scroll (a jump, a landing).
+///   page reached without a scroll (a jump, a landing), a new person.
 /// - The SCROLL (`setScrubBlur`, asked 2026-09-30): the snap feed's paging
 ///   sets the blur amount frame by frame (`BarPillScrub`: rising from 30%,
 ///   full at the midpoint, gone at 70%) and the content swaps under the full
@@ -339,9 +338,10 @@ final class BarItemContentTransition {
             let underBlur = scrollBlur > 0 || scrubBlur > 0
             changes.forEach { $0() }
             scrubSwapped = true
-            // The scroll drives only fixed-width pills (the snap feed's), so
-            // this does nothing there; a hugging host lands its width at once.
-            remeasure?(nil)
+            // A hugging pill (the author's, #925) glides to its new width
+            // under the full blur, as the timed swap does; a fixed one has
+            // nothing to do.
+            remeasure?(underBlur ? Self.fadeInDuration / 2 : nil)
             if underBlur {
                 swapAt = now()
                 startTicking()

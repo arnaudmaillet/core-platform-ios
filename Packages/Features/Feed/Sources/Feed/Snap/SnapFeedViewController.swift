@@ -1558,8 +1558,9 @@ final class SnapFeedViewController: UIViewController {
             }
             pill.setMaxWidth(bar - used - gap)
         }
-        // The toolbar's leading slot (#671): the room the audio capsule had.
-        authorIdentityView.setFixedWidth(widths.toolbarAuthor)
+        // The toolbar's leading slot (#671): the room the audio capsule had —
+        // the CAP, since #925: the pill takes its own width under it.
+        authorIdentityView.setWidthBudget(widths.toolbarAuthor)
     }
 
     /// The widths `applyBarPillWidths` last gave the pills.
@@ -1769,8 +1770,9 @@ final class SnapFeedViewController: UIViewController {
 
     /// Puts `model`'s author in the bar — IN PLACE: same item, same pill, and
     /// the pill blurs its old content out and the new in
-    /// (`SnapAuthorIdentityView.setAuthor`). The badge is set first so a new
-    /// author and their relation land in ONE swap.
+    /// (`SnapAuthorIdentityView.setAuthor`). The badge is set AFTER, so a new
+    /// author and their relation land in ONE swap — and a badge change for
+    /// the same author is its symbol replace alone (#925).
     ///
     /// Paging between two posts by the same person moves only the post's age.
     ///
@@ -1778,8 +1780,8 @@ final class SnapFeedViewController: UIViewController {
     /// populated feed.
     func showAuthor(_ model: FeedItemDisplayModel) {
         let animated = canAnimateBarItems
-        authorIdentityView.setFollowBadge(followStore.badge(for: model.authorID), animated: animated)
         authorIdentityView.setAuthor(model, pipeline: imagePipeline, animated: animated)
+        authorIdentityView.setFollowBadge(followStore.badge(for: model.authorID), animated: animated)
     }
 
     /// Whether a bar-item change may animate now: on screen, and not inside a
@@ -1837,7 +1839,8 @@ final class SnapFeedViewController: UIViewController {
             guard let self, self.view.window != nil else { return }
             self.reinstallAuthorItem()
             // A follow relation that arrived during the flight was left for
-            // this moment (`followRelationDidChange`): it blurs in now.
+            // this moment (`followRelationDidChange`): its symbol replaces
+            // the badge's now.
             let author = self.authorIdentityView.shownAuthor?.authorID
             self.authorIdentityView.setFollowBadge(
                 self.followStore.badge(for: author), animated: self.canAnimateBarItems
@@ -1847,8 +1850,9 @@ final class SnapFeedViewController: UIViewController {
 
     // MARK: - Follow
 
-    /// Re-draws the pill's badge when its author's relation changed, through
-    /// the pill's own blur. During a presentation the landing install is armed
+    /// Re-draws the pill's badge when its author's relation changed — its
+    /// symbol replaced, nothing else (#925). During a presentation the
+    /// landing install is armed
     /// and will read the new answer — the badge changes once the screen has
     /// landed, where it can be seen to change.
     private func followRelationDidChange(for author: ProfileID) {
@@ -1861,7 +1865,7 @@ final class SnapFeedViewController: UIViewController {
     /// The pill's "+": follows the author, OPTIMISTICALLY — the profile's
     /// Follow button's rule (`ProfileViewModel.toggleFollow`). The "+" turns
     /// at once into the followed mark — the FRIENDS mark for someone who
-    /// already follows the viewer — through the pill's own blur, and comes
+    /// already follows the viewer — through the badge's symbol replace, and comes
     /// back if the graph refuses (`SnapAuthorFollowStore.follow`).
     ///
     /// Internal for tests.
