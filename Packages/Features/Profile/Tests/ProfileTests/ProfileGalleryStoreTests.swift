@@ -44,7 +44,6 @@ struct ProfileGalleryStoreTests {
         #expect(store.tiles(.activity, source: .posts).map(\.id.rawValue) == ["p1", "t1"])
         #expect(store.tiles(.activity, source: .reposts).map(\.id.rawValue) == ["r1"])
         #expect(store.tiles(.activity, source: .tagged).map(\.id.rawValue) == ["g1"])
-        #expect(store.tiles(.activity, source: .all).map(\.id.rawValue) == ["p1", "g1", "r1", "t1"])
         #expect(store.tiles(.media, source: .posts).map(\.id.rawValue) == ["p1"])
         #expect(store.tiles(.short, source: .posts).map(\.id.rawValue) == ["t1"])
     }
@@ -123,14 +122,6 @@ struct ProfileGalleryStoreTests {
         #expect(store.authoredToken == nil)
     }
 
-    @Test func allStopsAtTheFrontierOfAnUnfinishedCorpus() {
-        let store = loadedStore(
-            authored: page([post("a", at: 30), post("b", at: 10)]),
-            tagged: page([post("g", at: 20)], next: "g2")
-        )
-        #expect(store.tiles(.activity, source: .all).map(\.id.rawValue) == ["a", "g"])
-    }
-
     // MARK: Failures
 
     @Test func aFailedFirstPageFailsOnlyThePagesThatReadIt() {
@@ -142,7 +133,8 @@ struct ProfileGalleryStoreTests {
         let snapshot = store.snapshot(isOwnProfile: false)
         #expect(snapshot.activity == .content([post("a", at: 1)]))
         #expect(snapshot.tagged == .failed(message: FailureCopy.offline))
-        #expect(store.page(.activity, .all) == .failed(message: FailureCopy.offline))
+        #expect(store.page(.media, .tagged) == .failed(message: FailureCopy.offline))
+        #expect(store.page(.media, .reposts) == .empty(message: "No media in reposts yet."))
     }
 
     @Test func aFirstPageFailureNotFromTheNetworkOffersThePull() {
@@ -165,7 +157,6 @@ struct ProfileGalleryStoreTests {
 
     @Test func offlineOutranksATimeoutWhenBothCorporaFail() {
         let store = loadedStore(authored: page([], next: "a2"), tagged: page([], next: "g2"))
-        store.pageSource = .all
         store.applyNextPages(tokens: ("a2", "g2"), authored: .failure(timedOut), tagged: .failure(offline))
         #expect(store.moreFailure == .offline)
         #expect(ProfileGalleryStore.likelierCause(.timeout, .server(code: "x")) == .timeout)
@@ -185,7 +176,8 @@ struct ProfileGalleryStoreTests {
         store.reset()
         #expect(store.pageSource == .posts)
         #expect(store.authored == nil && store.tagged == nil)
-        #expect(store.tokensToFollow(.all) == (nil, nil))
+        #expect(store.tokensToFollow(.posts) == (nil, nil))
+        #expect(store.tokensToFollow(.tagged) == (nil, nil))
         #expect(store.page(.activity, .posts) == .loading)
     }
 

@@ -152,17 +152,6 @@ struct GalleryFilterTests {
             for: GalleryFilter(format: .short, source: .tagged)
         ) == "No short posts in tagged posts yet.")
     }
-
-    /// ⚠️ And an UNFILTERED one says nothing, deliberately. The page is empty
-    /// because the profile has nothing of that kind, which the tab's own empty
-    /// state already says with a glyph and a headline — a generated sentence
-    /// underneath it would be the same fact twice, in worse words.
-    @Test(arguments: [GalleryFilter.Format.activity, .media, .short])
-    func anUnfilteredPageLeavesTheTabToSpeak(format: GalleryFilter.Format) {
-        #expect(ProfileGalleryStore.emptyMessage(
-            for: GalleryFilter(format: format, source: .all)
-        ).isEmpty)
-    }
 }
 
 // MARK: - Metadata formatting (pure)
