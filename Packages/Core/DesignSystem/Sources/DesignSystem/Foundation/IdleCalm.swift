@@ -11,11 +11,13 @@ import UIKit
 /// 2026-10-07).
 ///
 /// ⚠️ **DECORATION ONLY, NOT CONTENT.** What rests: the wallet badge's breath,
-/// animated emotes and map icons, grid tiles playing on their own, the record
-/// turning under a song. What does NOT: the feed's own clip, the backdrop that
-/// follows it, its song, its comment band, the sound bubble's record, which
-/// says the post is playing aloud (#683) — someone watching a post without
-/// touching it is the whole point of a feed. Read through
+/// animated emotes and map icons, the record turning under a song. What does
+/// NOT: the feed's own clip, the backdrop that follows it, its song, its
+/// comment band, the sound bubble's record, which says the post is playing
+/// aloud (#683) — someone watching a post without touching it is the whole
+/// point of a feed. Nor does ANY VIDEO PLAYER: the grids' tiles, the rails'
+/// cards and the galleries rested here too until #882, and a video stopping
+/// on its own read as a fault, not as calm. Read through
 /// `MotionPreference.stillsDecoration`, never this alone.
 ///
 /// Set by the app shell, which watches every touch (`IdleCalmMonitor`).
