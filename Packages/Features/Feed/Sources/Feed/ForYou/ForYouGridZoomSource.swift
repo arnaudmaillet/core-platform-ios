@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import EmoteKit
 import MediaPlayback
 import PostGrid
 import UIKit
@@ -337,6 +338,9 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // hand the grid's inset back so it tracks the safe area again.
         if !hidden {
             page?.endHeroFreeze()
+            // A caption's emotes play in the frame the card leaves, not a
+            // monitor tick later (`EmoteLabel.recheckVisibility`, #922).
+            EmoteLabel.recheckVisibility()
         }
     }
 

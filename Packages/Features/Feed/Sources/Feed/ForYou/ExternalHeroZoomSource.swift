@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNavigation
+import EmoteKit
 import FeedInterface
 import PostGrid
 import UIKit
@@ -230,6 +231,9 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
 
     func setZoomSourceHidden(_ hidden: Bool) {
         origin.setConcealed(hidden)
+        // A caption's emotes play in the frame the card leaves, not a monitor
+        // tick later (`EmoteLabel.recheckVisibility`, #922).
+        if !hidden { EmoteLabel.recheckVisibility() }
     }
 
     var zoomPresenterDepthView: UIView? {
