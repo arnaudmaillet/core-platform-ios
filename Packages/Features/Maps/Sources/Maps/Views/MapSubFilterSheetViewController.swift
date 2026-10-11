@@ -443,10 +443,12 @@ final class MapSubFilterSheetViewController: UIViewController {
     }
 
     /// A section's title; Active's carries how full the row is, `3 of 5` —
-    /// the cap is a rule the viewer is allowed to see coming.
+    /// the cap is a rule the viewer is allowed to see coming. A row opened
+    /// over the default cap reads full (`12 of 12`), never `12 of 6`: see
+    /// `MapSubFilterSections.maxActive`.
     private func headerContent(for section: Section?) -> SectionTitleView.Content {
         guard section == .active else { return .init(title: section?.title) }
-        return .init(title: Section.active.title, count: "\(sections.active.count) of \(sections.maxActive)")
+        return .init(title: Section.active.title, count: sections.capacityLabel)
     }
 
     private func reloadHeaders() {
