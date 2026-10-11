@@ -964,7 +964,8 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
 
             return .init(
                 id: post.id, url: url, cell: cell,
-                mediaFrame: cell.convert(cell.videoMediaRect, to: collectionView)
+                mediaFrame: cell.convert(cell.videoMediaRect, to: collectionView),
+                isPaused: false
             )
         }
         let candidates = GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .verticalCentre)
@@ -994,9 +995,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
                 guard post.hasPlayableVideo else { continue }
                 let cell = collectionView.cellForItem(at: indexPath) as? any GridPlaybackCell
                 let frame = cell.map { $0.convert($0.videoMediaRect, to: collectionView) } ?? .zero
-                let overlap = frame.intersection(viewport)
-                let fraction = frame.height > 0 && !overlap.isNull
-                    ? (overlap.height * overlap.width) / (frame.height * frame.width) : 0
+                let fraction = GridPlaybackVisibility.visibleFraction(of: frame, in: viewport)
                 print("[profile-autoplay]   \(post.id.rawValue) shape=\(post.shape) "
                       + "playsHere=\(drawsAsTile(post.id) ? post.autoplaysInGrid : post.hasPlayableVideo) "
                       + "cover=\(cell?.renderedCover == nil ? "NIL" : "set") "

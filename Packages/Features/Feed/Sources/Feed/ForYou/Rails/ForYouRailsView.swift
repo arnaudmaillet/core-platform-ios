@@ -656,12 +656,12 @@ final class ForYouRailsView: UIView {
                   let cell = mediaView.cellForItem(at: indexPath) as? ForYouFollowingCardCell,
                   hasCover(post, in: cell)
             else { return nil }
-            return .init(id: id, url: url, cell: cell, mediaFrame: cell.frame)
+            return .init(id: id, url: url, cell: cell, mediaFrame: cell.frame, isPaused: false)
         }
         // Every card half on screen plays (a null band admits none); the
         // ranking only matters when the budget is short, and then the row is
-        // read from its leading edge, so the card nearest it keeps its player.
-        let candidates = GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .leadingEdge)
+        // ranked from its left edge, so the card nearest it keeps its player.
+        let candidates = GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .minXEdge)
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
         return GridAutoplayRanking.playersHeld(candidateCount: candidates.count, budget: Self.concurrentPlayers)
     }

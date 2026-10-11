@@ -14,8 +14,8 @@ import UIKit
 /// genuinely differs between them is passed in, never decided here:
 ///
 /// - the REFERENCE a distance is measured from — the vertical centre for a
-///   grid that scrolls up and down, the leading edge for a row read from its
-///   start;
+///   grid that scrolls up and down, the left edge for a row ranked left to
+///   right;
 /// - the budget NUMBERS — the shape's player count, the pool's capacity and
 ///   what a lead beside the surface already holds;
 /// - the VELOCITY SOURCE — sampled from offsets on For You (the pan gesture
@@ -35,10 +35,11 @@ public enum GridAutoplayRanking {
         /// The viewport's vertical centre to the media's: a vertical grid,
         /// where the item the eye rests on is the one in the middle.
         case verticalCentre
-        /// The viewport's leading edge to the media's: a horizontal row, read
-        /// from its start, so the card nearest that edge keeps its player when
-        /// the budget is short.
-        case leadingEdge
+        /// The viewport's left edge (`minX`) to the media's: a horizontal row,
+        /// ranked left to right as the rails always were, so the card nearest
+        /// that edge keeps its player when the budget is short. The LEFT edge
+        /// in every layout direction, right-to-left included.
+        case minXEdge
     }
 
     /// How far `media` is from `reference` in `viewport`, in points, never
@@ -48,7 +49,7 @@ public enum GridAutoplayRanking {
     ) -> CGFloat {
         switch reference {
         case .verticalCentre: abs(media.midY - viewport.midY)
-        case .leadingEdge: abs(media.minX - viewport.minX)
+        case .minXEdge: abs(media.minX - viewport.minX)
         }
     }
 
@@ -64,12 +65,12 @@ public enum GridAutoplayRanking {
         /// locates it for itself (`videoMediaRect`).
         public let mediaFrame: CGRect
         /// Held but not advancing (see `GridVideoPlaybackCoordinator
-        /// .Candidate.isPaused`).
+        /// .Candidate.isPaused`). Required, so no surface can forget it.
         public let isPaused: Bool
 
         public init(
             id: PostID, url: URL, cell: any GridPlaybackCell,
-            mediaFrame: CGRect, isPaused: Bool = false
+            mediaFrame: CGRect, isPaused: Bool
         ) {
             self.id = id
             self.url = url
@@ -123,7 +124,7 @@ public enum GridAutoplayRanking {
     /// nearest `budget` of `candidateCount` — what a lead reports as the
     /// reserve the surface beside it subtracts.
     public static func playersHeld(candidateCount: Int, budget: Int) -> Int {
-        max(0, min(candidateCount, budget))
+        min(candidateCount, budget)
     }
 
     // MARK: - Fling gate

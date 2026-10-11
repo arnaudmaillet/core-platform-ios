@@ -32,8 +32,10 @@ public final class GridVideoPlaybackCoordinator {
         public let id: PostID
         public let url: URL
         public let cell: any GridPlaybackCell
-        /// Distance from the viewport's vertical centre, in points. Lower wins;
-        /// the caller measures it because only it knows the scroll geometry.
+        /// Distance from the surface's reference, in points: the viewport's
+        /// vertical centre on a grid, its left edge on the rails
+        /// (`GridAutoplayRanking.Reference`). Lower wins; the caller measures
+        /// it because only it knows the scroll geometry.
         public let distanceFromCentre: CGFloat
         /// Held, but not advancing.
         ///

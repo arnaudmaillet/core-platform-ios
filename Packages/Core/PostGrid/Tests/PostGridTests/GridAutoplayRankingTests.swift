@@ -52,19 +52,19 @@ struct GridAutoplayRankingTests {
         #expect(GridAutoplayRanking.distance(of: right, in: Self.column, from: .verticalCentre) == 0)
     }
 
-    @Test func aHorizontalRowMeasuresFromTheViewportsLeadingEdgeToTheMediasLeadingEdge() {
+    @Test func aHorizontalRowMeasuresFromTheViewportsLeftEdgeToTheMediasLeftEdge() {
         let media = CGRect(x: 360, y: 0, width: 150, height: 200)
-        #expect(GridAutoplayRanking.distance(of: media, in: Self.row, from: .leadingEdge) == 160)
+        #expect(GridAutoplayRanking.distance(of: media, in: Self.row, from: .minXEdge) == 160)
     }
 
-    @Test func aCardStartingJustBeforeTheLeadingEdgeIsStillCloseToIt() {
+    @Test func aCardStartingJustLeftOfTheLeftEdgeIsStillCloseToIt() {
         let media = CGRect(x: 170, y: 0, width: 150, height: 200)
-        #expect(GridAutoplayRanking.distance(of: media, in: Self.row, from: .leadingEdge) == 30)
+        #expect(GridAutoplayRanking.distance(of: media, in: Self.row, from: .minXEdge) == 30)
     }
 
     @Test func aHorizontalDistanceIgnoresWhereTheMediaSitsDown() {
         let media = CGRect(x: 200, y: 500, width: 150, height: 200)
-        #expect(GridAutoplayRanking.distance(of: media, in: Self.row, from: .leadingEdge) == 0)
+        #expect(GridAutoplayRanking.distance(of: media, in: Self.row, from: .minXEdge) == 0)
     }
 
     // MARK: - Candidates
@@ -88,14 +88,14 @@ struct GridAutoplayRankingTests {
     @Test func aCardLessThanHalfInsideARowIsNotAdmitted() {
         // 60 of 150pt inside, past the trailing edge at x 590.
         let candidates = GridAutoplayRanking.candidates(
-            from: [card("peeking", minX: 530)], in: Self.row, reference: .leadingEdge
+            from: [card("peeking", minX: 530)], in: Self.row, reference: .minXEdge
         )
         #expect(candidates.isEmpty)
     }
 
     @Test func aNullViewportAdmitsNothing() {
         let candidates = GridAutoplayRanking.candidates(
-            from: [card("any", minX: 200)], in: .null, reference: .leadingEdge
+            from: [card("any", minX: 200)], in: .null, reference: .minXEdge
         )
         #expect(candidates.isEmpty)
     }
@@ -108,10 +108,10 @@ struct GridAutoplayRankingTests {
         #expect(candidates.map(\.distanceFromCentre) == [0, 130, 130])
     }
 
-    @Test func aRowRanksItsCandidatesByDistanceFromTheLeadingEdge() {
+    @Test func aRowRanksItsCandidatesByDistanceFromTheLeftEdge() {
         let candidates = GridAutoplayRanking.candidates(
             from: [card("first", minX: 200), card("second", minX: 360)],
-            in: Self.row, reference: .leadingEdge
+            in: Self.row, reference: .minXEdge
         )
         #expect(candidates.map(\.distanceFromCentre) == [0, 160])
     }
@@ -124,7 +124,7 @@ struct GridAutoplayRankingTests {
         #expect(candidates.map(\.id) == [PostID("b"), PostID("a")])
     }
 
-    @Test func aPausedTileIsHandedOverPausedAndAnUnmarkedOneIsNot() {
+    @Test func aPausedTileIsHandedOverPausedAndAnAdvancingOneIsNot() {
         let candidates = GridAutoplayRanking.candidates(
             from: [brick("peeking", minY: 250, paused: true), brick("watched", minY: 120)],
             in: Self.column, reference: .verticalCentre
