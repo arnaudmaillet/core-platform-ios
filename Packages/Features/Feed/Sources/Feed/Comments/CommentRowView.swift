@@ -423,12 +423,16 @@ final class CommentRowView: UIView {
         shownAvatarURL = url
         avatarImageView.image = nil
         guard let url, let pipeline else { return }
-        if let cached = pipeline.cachedImage(for: url) {
+        // Decoded at the avatar's own size (it follows Dynamic Type), not at
+        // 1200 px (#894).
+        let side = Self.avatarSize(for: traitCollection)
+        let size = ImageBucket(fitting: CGSize(width: side, height: side), scale: traitCollection.displayScale)
+        if let cached = pipeline.cachedImage(for: url, size: size) {
             avatarImageView.image = cached
             return
         }
         avatarTask = Task { [weak self] in
-            let image = try? await pipeline.image(for: url)
+            let image = try? await pipeline.image(for: url, size: size)
             guard let self, let image, !Task.isCancelled, self.representedID == id else { return }
             self.avatarImageView.image = image
         }

@@ -280,7 +280,7 @@ private final class FaceView: UIView {
         monogram.isCovered = false
         guard let url = face.avatarURL, let imagePipeline else { return }
         task = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let image = try? await imagePipeline.image(for: url, size: .avatar) else { return }
             guard let self, !Task.isCancelled, self.avatarURL == url else { return }
             UIView.transition(
                 with: self.picture, duration: 0.2,

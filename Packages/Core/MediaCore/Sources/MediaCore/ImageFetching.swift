@@ -1,3 +1,4 @@
+import CacheKit
 import Foundation
 import UIKit
 
@@ -5,6 +6,30 @@ import UIKit
 /// decoding; fetchers only produce encoded bytes.
 public protocol ImageFetching: Sendable {
     func fetchImageData(for url: URL) async throws -> Data
+    /// The bytes for `url`, and whether they are the real image. `context`
+    /// is the pipeline's fill: its priority, and its changes, for a fetcher
+    /// that can pass them on (`URLSessionTask.priority`). The default calls
+    /// `fetchImageData(for:)` and calls the bytes real.
+    func fetchImage(for url: URL, context: CacheFillContext?) async throws -> ImageFetchResult
+}
+
+extension ImageFetching {
+    public func fetchImage(for url: URL, context: CacheFillContext?) async throws -> ImageFetchResult {
+        ImageFetchResult(data: try await fetchImageData(for: url), isCacheable: true)
+    }
+}
+
+/// What a fetcher hands the pipeline.
+public struct ImageFetchResult: Sendable {
+    public let data: Data
+    /// `false` for a stand-in (a placeholder a fetcher fell back to): the
+    /// pipeline shows it but never stores it under the real image's key.
+    public let isCacheable: Bool
+
+    public init(data: Data, isCacheable: Bool) {
+        self.data = data
+        self.isCacheable = isCacheable
+    }
 }
 
 /// Production fetcher: plain URLSession GET against the CDN.
@@ -14,6 +39,18 @@ public protocol ImageFetching: Sendable {
 /// to a reachable one, and the original host is sent as the `Host` header in
 /// case the object store validates it.
 public struct URLSessionImageFetcher: ImageFetching {
+    /// The images' own session (#894): no `URLCache` (the pipeline's disk
+    /// cache replaces it, so no image is stored twice), and a cap on
+    /// connections per host so a long prefetch never starves what is on
+    /// screen. Priorities travel per task (`CacheFillPriority`).
+    public static let imageSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.httpMaximumConnectionsPerHost = 6
+        return URLSession(configuration: configuration)
+    }()
+
     private let session: URLSession
     private let hostRewrite: HostRewrite?
     private let timeout: TimeInterval?
@@ -26,7 +63,7 @@ public struct URLSessionImageFetcher: ImageFetching {
     /// each, and the whole feed reads as "media doesn't load".
     public init(
         hostRewrite: HostRewrite? = nil,
-        session: URLSession = .shared,
+        session: URLSession = URLSessionImageFetcher.imageSession,
         timeout: TimeInterval? = nil
     ) {
         self.session = session
@@ -35,6 +72,14 @@ public struct URLSessionImageFetcher: ImageFetching {
     }
 
     public func fetchImageData(for url: URL) async throws -> Data {
+        try await fetch(url, context: nil)
+    }
+
+    public func fetchImage(for url: URL, context: CacheFillContext?) async throws -> ImageFetchResult {
+        ImageFetchResult(data: try await fetch(url, context: context), isCacheable: true)
+    }
+
+    private func fetch(_ url: URL, context: CacheFillContext?) async throws -> Data {
         var request = URLRequest(url: url)
         if let timeout {
             request.timeoutInterval = timeout
@@ -45,7 +90,7 @@ public struct URLSessionImageFetcher: ImageFetching {
                 request.setValue(hostHeader, forHTTPHeaderField: "Host")
             }
         }
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request, delegate: context.map(TaskPriorityFollower.init))
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
         }
@@ -84,19 +129,34 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
     /// preview, whose frame zero is that clip's own opening. Nothing in this
     /// file can know that; a closure can be handed it.
     private let preferred: (@Sendable (URL) async -> Data?)?
+    /// The URLs only `preferred` can answer truly. When it misses one of
+    /// them (a deadline, a sheet that did not load), whatever answers instead
+    /// is a stand-in: shown, never stored under the URL (#894), so a disk
+    /// cache cannot keep the wrong poster across launches.
+    private let preferredClaims: (@Sendable (URL) -> Bool)?
 
     public init(
         remote: any ImageFetching = URLSessionImageFetcher(timeout: 8),
         placeholder: any ImageFetching = PlaceholderImageFetcher(),
-        preferred: (@Sendable (URL) async -> Data?)? = nil
+        preferred: (@Sendable (URL) async -> Data?)? = nil,
+        preferredClaims: (@Sendable (URL) -> Bool)? = nil
     ) {
         self.remote = remote
         self.placeholder = placeholder
         self.preferred = preferred
+        self.preferredClaims = preferredClaims
     }
 
     public func fetchImageData(for url: URL) async throws -> Data {
-        if let preferred, let data = await preferred(url) { return data }
+        try await fetchImage(for: url, context: nil).data
+    }
+
+    public func fetchImage(for url: URL, context: CacheFillContext?) async throws -> ImageFetchResult {
+        var missedClaim = false
+        if let preferred {
+            if let data = await preferred(url) { return ImageFetchResult(data: data, isCacheable: true) }
+            missedClaim = preferredClaims?(url) ?? false
+        }
         let scheme = url.scheme?.lowercased()
         let isRemote = scheme == "http" || scheme == "https"
         let fetcher = isRemote ? remote : placeholder
@@ -114,12 +174,14 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
         if let delay = Self.debugMediaDelay { try? await Task.sleep(nanoseconds: delay) }
         #endif
         do {
-            return try await fetcher.fetchImageData(for: url)
-        } catch where isRemote {
+            let fetched = try await fetcher.fetchImage(for: url, context: context)
+            return missedClaim ? ImageFetchResult(data: fetched.data, isCacheable: false) : fetched
+        } catch where isRemote && !Self.isCancellation(error) {
             // The fallback half of the init's rule: a dead fixture host
             // degrades to the post's synthesized color instead of a blank.
-            // The pipeline caches what we return — right for an outage that
-            // outlives any one request; a relaunch retries the real asset.
+            // Marked as a stand-in: the pipeline shows it for a short while
+            // and never stores it under the real URL, so the real asset is
+            // asked for again (#894).
             #if DEBUG
             // Logged HERE because the fallback makes the failure invisible
             // downstream: the cell receives bytes and `-media-audit`'s
@@ -129,8 +191,13 @@ public struct SchemeRoutingImageFetcher: ImageFetching {
                 print("[fixtures] remote image FAILED, placeholder served: \(url.absoluteString)")
             }
             #endif
-            return try await placeholder.fetchImageData(for: url)
+            return ImageFetchResult(data: try await placeholder.fetchImageData(for: url), isCacheable: false)
         }
+    }
+
+    /// A fill nobody wants any more is cancelled: no stand-in for it.
+    private static func isCancellation(_ error: any Error) -> Bool {
+        error is CancellationError || (error as? URLError)?.code == .cancelled
     }
 
     #if DEBUG
@@ -194,5 +261,22 @@ public struct PlaceholderImageFetcher: ImageFetching {
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325
         for byte in path.utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
         return CGFloat(hash % 360) / 360
+    }
+}
+
+/// Sets a download's `URLSessionTask.priority` from its fill, and follows the
+/// fill's changes while it runs (a prefetched image scrolled on screen).
+private final class TaskPriorityFollower: NSObject, URLSessionTaskDelegate, Sendable {
+    private let context: CacheFillContext
+
+    init(_ context: CacheFillContext) {
+        self.context = context
+    }
+
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+        task.priority = context.priority.urlSessionTaskPriority
+        context.onPriorityChange { [weak task] priority in
+            task?.priority = priority.urlSessionTaskPriority
+        }
     }
 }

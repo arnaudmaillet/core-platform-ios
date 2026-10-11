@@ -330,6 +330,14 @@ final class AppContainer {
         // and flag palette the kits announced, now and later, join the
         // coordinator as its longest-kept class.
         UIAssetCaches.shared.attach(to: cacheCoordinator)
+        // Every disk store opens (index read, files reconciled) off the main
+        // thread, before the first screen asks. The UI assets store is a lazy
+        // static: touched here first, a main-thread reader meanwhile waits for
+        // this open instead of doing its own.
+        DispatchQueue.global(qos: .utility).async { _ = UIAssetCaches.disk }
+        // Builds the image pipeline now, which opens its disk stores on a
+        // utility task (#894).
+        _ = imagePipeline
     }
 
     private var cacheSignalsStarted = false
@@ -348,13 +356,26 @@ final class AppContainer {
             // assets, and each has to reach the right fetcher.
             SchemeRoutingImageFetcher(
                 placeholder: PlaceholderImageFetcher(bundledPhoto: { MockPhotoCatalog.shared.fileURL(forPhoto: $0) }),
-                preferred: Self.bakedPreviewPoster
+                preferred: Self.bakedPreviewPoster,
+                preferredClaims: Self.claimsBakedPoster
             )
         case .localFleet:
             URLSessionImageFetcher(hostRewrite: HostRewrite(from: "minio:9000", to: "localhost:9000"))
         }
-        return ImagePipeline(fetcher: fetcher)
+        return ImagePipeline(fetcher: fetcher, disk: Self.imageDisk, coordinator: cacheCoordinator)
     }()
+
+    /// The images' disk cache (#894). DEBUG `-slow-media` turns it off: that
+    /// flag exists to film the states that only show while a picture is
+    /// missing, and a disk hit would skip its delay after the first launch.
+    /// `-image-disk-off` turns it off on its own.
+    private static var imageDisk: ImageDiskLocation? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("-slow-media") || arguments.contains("-image-disk-off") { return nil }
+        #endif
+        return .caches
+    }
 
     /// Snap-feed video playback. Mock mode synthesizes deterministic clips for
     /// `mock://video/…` URLs; fleet mode passes delivery URLs straight to the
@@ -414,6 +435,14 @@ final class AppContainer {
     /// fetcher already keeps, that a fixture convenience must never be the
     /// reason nothing shows. A miss returns nil and the surface falls to its
     /// next rung, which is black.
+    /// The poster URLs only `bakedPreviewPoster` answers truly: a miss there
+    /// (its 8 s deadline, a sheet that did not load) is a stand-in the image
+    /// disk cache must not keep across launches.
+    private nonisolated static func claimsBakedPoster(_ url: URL) -> Bool {
+        let text = url.absoluteString
+        return MockMediaFixtures.frameZeroSource(of: text) != nil || text.hasPrefix(MockMediaFixtures.previewPosterScheme)
+    }
+
     private nonisolated static func frameZero(ofClipAt source: String) async -> Data? {
         guard let url = URL(string: source) else { return nil }
         let work = Task.detached(priority: .utility) { () -> Data? in

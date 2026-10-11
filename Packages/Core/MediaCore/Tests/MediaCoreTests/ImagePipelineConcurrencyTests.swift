@@ -51,7 +51,7 @@ private final class PrefetchingView: UIView {
 @MainActor
 struct ImagePipelineConcurrencyTests {
     @Test func mainThreadPrefetchAndCancelRaceNothingAndEveryKeptPrefetchLands() async throws {
-        let pipeline = ImagePipeline(fetcher: InstantFetcher(), countLimit: 100_000)
+        let pipeline = ImagePipeline(fetcher: InstantFetcher(), memoryLimit: 1 << 30)
         let view = PrefetchingView(pipeline: pipeline)
 
         var kept: [URL] = []
@@ -71,39 +71,68 @@ struct ImagePipelineConcurrencyTests {
         // still retiring entries from it — without starting any new task, which
         // would hand the sanitizer a happens-before edge and hide the race.
         let stray = URL(string: "mock://race/stray")!
-        let deadline = ContinuousClock.now + .seconds(20)
-        while ContinuousClock.now < deadline, !kept.allSatisfy(view.isCached) {
+        let landed = await settle {
             for _ in 0..<2_000 { view.drop([stray]) }
-            try await Task.sleep(for: .milliseconds(1))
+            return kept.allSatisfy(view.isCached)
         }
-        #expect(kept.allSatisfy(view.isCached))
-        while ContinuousClock.now < deadline, pipeline.pendingPrefetchCount > 0 {
-            try await Task.sleep(for: .milliseconds(5))
+        #expect(landed, "every kept prefetch lands")
+        #expect(await settle { pipeline.pendingPrefetchCount == 0 }, "and none is left pending")
+    }
+
+    /// A look budget, not a wall-clock deadline: every wait here is positive
+    /// and stops as soon as its condition holds, so the budget only matters on
+    /// a starved runner, where each look stretches (#966, #980). It answers,
+    /// so a timeout fails at the wait. The 2,400 kept decodes ran past the
+    /// old 20-second deadline on a starved CI lane.
+    private static let looks = 12_000
+
+    private func settle(_ condition: () async -> Bool) async -> Bool {
+        for _ in 0..<Self.looks {
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(5))
         }
-        #expect(pipeline.pendingPrefetchCount == 0)
+        return await condition()
     }
 
     /// A scroll that passes a tile and comes back cancels its prefetch and asks
-    /// again while the first fetch is still out: the second ask rides the same
-    /// fetch, and both leave the table empty once it lands.
+    /// again while the first fetch is still out. A visible load waits on the
+    /// same image, so the cancel leaves the fetch running for it (#894: a
+    /// shared fill is cancelled only when nobody wants it), the second ask
+    /// rides that fetch, and both leave the table empty once it lands.
     @Test func aPrefetchCancelledAndAskedAgainSharesOneFetch() async throws {
         let fetcher = GatedFetcher()
         let pipeline = ImagePipeline(fetcher: fetcher)
         let url = URL(string: "mock://race/successor")!
 
+        // The visible load first, so it is surely waiting before the cancel.
+        let visible = Task { try await pipeline.image(for: url) }
+        #expect(await settle { await fetcher.fetchCount == 1 })
         pipeline.prefetch([url])
         pipeline.cancelPrefetch([url])
         pipeline.prefetch([url])
         #expect(pipeline.pendingPrefetchCount == 1)
 
         await fetcher.open()
-        let deadline = ContinuousClock.now + .seconds(10)
-        while ContinuousClock.now < deadline, pipeline.pendingPrefetchCount > 0 {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(pipeline.pendingPrefetchCount == 0)
+        #expect(await settle { pipeline.pendingPrefetchCount == 0 })
         #expect(pipeline.cachedImage(for: url) != nil)
         #expect(await fetcher.fetchCount == 1)
+        _ = try await visible.value
+    }
+
+    /// A prefetch nobody else waits for is cancelled with it (#894), and a
+    /// later ask starts again.
+    @Test func aCancelledPrefetchNobodyElseWantsStopsItsFetch() async throws {
+        let fetcher = GatedFetcher()
+        let pipeline = ImagePipeline(fetcher: fetcher)
+        let url = URL(string: "mock://race/abandoned")!
+
+        pipeline.prefetch([url])
+        #expect(await settle { await fetcher.fetchCount == 1 })
+        pipeline.cancelPrefetch([url])
+
+        #expect(pipeline.pendingPrefetchCount == 0)
+        #expect(pipeline.inFlightCount == 0)
+        await fetcher.open()
     }
 }
 
