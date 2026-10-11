@@ -2004,8 +2004,8 @@ final class SnapFeedViewController: UIViewController {
     }
 
     /// The native bottom toolbar's content, left to right: the attribution
-    /// bubble, the system flexible spacer, the share bubble (bookmark +
-    /// share in ONE capsule), a fixed gap, the more bubble. Three *isolated*
+    /// bubble, the system flexible spacer, the actions bubble (bookmark +
+    /// repost in ONE capsule), a fixed gap, the more bubble. Three *isolated*
     /// glass bubbles by construction — every item is a custom view, and
     /// custom views never join a shared item background — each on the 36pt
     /// bar-bubble invariant the top bar's controls already follow.
@@ -2022,16 +2022,19 @@ final class SnapFeedViewController: UIViewController {
             self.toggleBookmark(for: model.id)
         }, for: .primaryActionTriggered)
 
-        // REPOST takes the share's place in the capsule — [⇄ 🔖] — and SHARE
-        // moved into ⋯ (#671, `moreMenuActions`). ⚠️ Repost has no action yet,
-        // and is drawn anyway — the same posture the gallery card's band takes
+        // REPOST takes the share's place in the capsule and SHARE moved into
+        // ⋯ (#671, `moreMenuActions`). SAVE LEADS, then repost — [🔖 ⇄]
+        // (#865): the order the text post composer's footer already drew
+        // (`SnapFooterToolbar`), and the order VoiceOver reads.
+        //
+        // ⚠️ Repost has no action yet, and is drawn anyway — the same posture the gallery card's band takes
         // for the same glyph, and for the same reason: `CreatePost` carries
         // `parent_id` on the wire and `GalleryPost.isRepost` already reads it,
         // but `PostComposer` takes no parent, so there is no client path that
         // publishes one. Pressing it does nothing today.
         let repost = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
         repost.accessibilityLabel = "Repost"
-        let actions = UIStackView(arrangedSubviews: [repost, bookmarkButton])
+        let actions = UIStackView(arrangedSubviews: [bookmarkButton, repost])
         actions.axis = .horizontal
 
         let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
@@ -2048,7 +2051,7 @@ final class SnapFeedViewController: UIViewController {
 
         // ONE item set, for every state (#671):
         //
-        //   [author pill] … [⇄ 🔖] [⋯]
+        //   [author pill] … [🔖 ⇄] [⋯]
         //
         // The author pill leads, in the slot the audio capsule had; the sound
         // lives on the page (`SnapSoundBubbleButton`). TWO bubbles on the

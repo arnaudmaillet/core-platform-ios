@@ -1154,7 +1154,7 @@ struct SnapCommentsPresentationTests {
     @Test func theToolbarsTrailingRunIsTwoPlatters() {
         let (_, feed) = Self.chromeHost()
         let items = feed.toolbarItems ?? []
-        // [author pill][flexible space][⇄ 🔖][fixed space][⋯]
+        // [author pill][flexible space][🔖 ⇄][fixed space][⋯]
         //
         // It was one platter holding all three for a while, to save a glass
         // host on the hero flight's push. The arms were then measured and the
