@@ -170,11 +170,10 @@ final class ShareTargetsView: UIView {
         avatar.isUserInteractionEnabled = false
 
         let monogram = UILabel()
-        // ⚠️ Deliberately NOT `MonogramAvatarView.monogram` (#811): this quick
-        // row's disc carries ONE letter at a 22pt weight, where two initials
-        // would have to shrink to fit. The share card above it uses the
-        // canonical two-letter rule.
-        monogram.text = target.displayName.first.map { String($0).uppercased() } ?? "?"
+        // ONE letter (#811): this quick row's disc carries it at a 22pt
+        // weight, where two initials would have to shrink to fit. The share
+        // card above it reads the same rule with two.
+        monogram.text = MonogramAvatarView.monogram(name: target.displayName, handle: "", maxLetters: 1)
         monogram.font = .systemFont(ofSize: 22, weight: .semibold)
         monogram.textColor = .secondaryLabel
         monogram.textAlignment = .center

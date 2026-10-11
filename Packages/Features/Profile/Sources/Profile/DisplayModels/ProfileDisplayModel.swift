@@ -97,9 +97,3 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         PostGridCount.abbreviate(value)
     }
 }
-
-private extension Character {
-    static func uppercased(_ character: Character) -> String {
-        character.uppercased()
-    }
-}

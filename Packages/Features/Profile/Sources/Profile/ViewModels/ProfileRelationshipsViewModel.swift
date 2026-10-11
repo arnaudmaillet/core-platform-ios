@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import CoreNetworking
+import DesignSystem
 import Foundation
 
 /// Drives the follower / following screen: one state machine per direction,
@@ -567,25 +568,17 @@ public final class ProfileRelationshipsViewModel {
         return subject.isSelf && list == .followers ? .followBack : .follow
     }
 
-    /// Initials for the identity disc: first letters of the display name's
-    /// first two words, falling back to the handle.
-    ///
-    /// ⚠️ Deliberately NOT `MonogramAvatarView.monogram` (#811): a handle
-    /// here also splits on "." and "_", so "lena_klein" reads "LK" (pinned by
-    /// `monogramTakesTwoInitialsFromWhicheverNameExists`). What it does share
-    /// with the canonical rule is that a handle's "@" is never an initial.
+    /// Initials for the identity disc: the app's one rule (#811), with "."
+    /// and "_" also breaking words so the handle "lena_klein" reads "LK"
+    /// (pinned by `monogramTakesTwoInitialsFromWhicheverNameExists`).
     private static func monogram(for relation: ProfileRelation) -> String {
-        let source = relation.displayName.isEmpty
-            ? relation.handle.trimmingCharacters(in: CharacterSet(charactersIn: "@ "))
-            : relation.displayName
-        let initials = source
-            .split(whereSeparator: { $0 == " " || $0 == "." || $0 == "_" })
-            .prefix(2)
-            .compactMap(\.first)
-        return initials.isEmpty
-            ? String(source.prefix(1)).uppercased()
-            : String(initials).uppercased()
+        MonogramAvatarView.monogram(
+            name: relation.displayName, handle: relation.handle, splittingOn: handleSeparators
+        )
     }
+
+    /// Built once: the rule runs for every row of a list.
+    private static let handleSeparators: Set<Character> = [".", "_"]
 
     // MARK: - Copy
 

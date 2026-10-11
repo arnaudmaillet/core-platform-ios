@@ -143,12 +143,25 @@ public final class MonogramAvatarView: UIView {
     /// stores `displayName ?? handle` as its name, so "@grace" can arrive as a
     /// NAME and must read "G" like the same person's Suggestion row. A name
     /// that is nothing but sigils falls back to the handle.
-    nonisolated public static func monogram(name: String, handle: String) -> String {
+    ///
+    /// Two surfaces read the rule with a twist, stated here rather than in a
+    /// private copy of their own (#811). The defaults are the rule above.
+    /// - `separators`: characters that also break words, besides the space,
+    ///   in whichever of the two is read. The followers/following lists pass
+    ///   "." and "_" so the handle "lena_klein" reads "LK".
+    /// - `maxLetters`: how many initials at most (never fewer than one). The
+    ///   share sheet's quick targets pass 1: their disc holds one 22pt letter.
+    nonisolated public static func monogram(
+        name: String,
+        handle: String,
+        splittingOn separators: Set<Character> = [],
+        maxLetters: Int = 2
+    ) -> String {
         let trimmed = name.trimmingCharacters(in: sigilAndSpace)
         let source = trimmed.isEmpty ? handle.trimmingCharacters(in: sigilAndSpace) : trimmed
         let initials = source
-            .split(separator: " ")
-            .prefix(2)
+            .split(whereSeparator: { $0 == " " || separators.contains($0) })
+            .prefix(max(maxLetters, 1))
             .compactMap { $0.first.map { String($0).uppercased() } }
         return initials.isEmpty ? "?" : initials.joined()
     }
