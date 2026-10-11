@@ -584,7 +584,18 @@ public final class ProfileViewModel {
         if case .profile(let id) = source, let cached = cache?.profile(for: id) {
             profile = cached
             phase = .content(ProfileDisplayModel(profile: cached))
-            loadGallery(for: cached, reset: true)
+            // ⚠️ AND THE GRID OPENS ON ITS LAST PAGES (#887). It used to
+            // reset here, so a profile revisited seconds later showed its
+            // posts as bones every time. The pages the last visit loaded
+            // render on this frame; the first pages fetched now revalidate
+            // them in place (merged over the later pages), and a revalidation
+            // that agrees publishes nothing. A first visit has none: bones.
+            if let pages = cache?.gallery(for: id) {
+                galleryStore.restore(pages)
+                loadGallery(for: cached, reset: false)
+            } else {
+                loadGallery(for: cached, reset: true)
+            }
             galleryWasSeeded = true
         }
         // The relationship is seeded the same way, and for the same reason:
@@ -868,6 +879,9 @@ public final class ProfileViewModel {
                 self.isFollowing = false
                 self.followButton = .follow
                 self.rememberRelationship()
+                // A block hides their posts both ways: no revisit opens on
+                // them (#887).
+                self.cache?.removeGallery(for: profile.id)
                 self.onActionResult?(.blocked(handle: "@" + profile.handle, profileCount: count))
                 self.onDismissRequested?()
             } catch {
@@ -892,6 +906,7 @@ public final class ProfileViewModel {
                 try await self.repository.setBlocked(false, for: profile.id)
                 self.isBlocked = false
                 self.rememberRelationship()
+                self.cache?.removeGallery(for: profile.id)
                 self.onActionResult?(.unblocked(handle: "@" + profile.handle))
             } catch {
                 self.onActionResult?(.failed(message: "Couldn't unblock this profile."))
@@ -1049,6 +1064,8 @@ public final class ProfileViewModel {
                 try await trash.deletePost(postID, author: profile.id)
                 guard let self else { return }
                 self.galleryStore.removeAuthoredPost(postID)
+                // The next visit must not open on the deleted post.
+                self.rememberGallery(of: profile.id)
                 self.renderGallery()
                 self.onActionResult?(.postDeleted)
             } catch {
@@ -1156,6 +1173,7 @@ public final class ProfileViewModel {
                 authored: authored, authoredFailure: authoredFailure,
                 tagged: tagged, taggedFailure: taggedFailure
             )
+            self.rememberGallery(of: profile.id)
             self.galleryLoad = nil
             self.renderGallery()
         }
@@ -1235,6 +1253,7 @@ public final class ProfileViewModel {
             // owns the grid now, and the slot with it.
             guard !Task.isCancelled, self.profile?.id == profile.id else { return }
             let failed = galleryStore.applyNextPages(tokens: tokens, authored: authored, tagged: tagged)
+            rememberGallery(of: profile.id)
             // The tab on screen gained tiles: they come on screen and ask
             // again. It gained none (Short over a run of photos): no tile will
             // ask, so the next page is asked now — within a bound.
@@ -1258,6 +1277,15 @@ public final class ProfileViewModel {
         } catch {
             return .failure(error)
         }
+    }
+
+    /// Keeps the pages loaded so far beside the cached profile, for the next
+    /// visit's first frame (#887). Every change to the corpora calls it, so
+    /// the cache never holds a post this screen has already let go of.
+    private func rememberGallery(of id: ProfileID) {
+        // A page landing after a block is not kept: the block dropped it.
+        guard let cache, !isBlocked, let corpora = galleryStore.corpora else { return }
+        cache.store(corpora, for: id)
     }
 
     /// Recomputes the snapshot — Posts, Reposts, Tagged, the media of the page
