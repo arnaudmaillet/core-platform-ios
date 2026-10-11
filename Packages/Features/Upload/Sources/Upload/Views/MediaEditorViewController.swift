@@ -421,50 +421,32 @@ final class MediaEditorViewController: UIViewController {
             redoItem.isEnabled = false
             return
         }
-        undoItem.isEnabled = history.canUndo(id)
-        redoItem.isEnabled = history.canRedo(id)
+        undoItem.isEnabled = session.canUndo(id)
+        redoItem.isEnabled = session.canRedo(id)
     }
 
-    /// One step back through this page's own changes.
-    ///
-    /// ⚠️ **THE WHOLE EDIT, NOT THE MODE'S PART OF IT.** The arrow that stood
-    /// here used to undo "what this mode owns", so a step back meant something
-    /// different depending on which tools happened to be open. A step is a
-    /// change the author made; going back to it puts the page exactly where it
-    /// was, whichever band they were in at the time.
+    /// One step back through this page's own changes — see
+    /// `MediaEditSession.undo(_:)`.
     private func stepBack() {
-        guard let id = currentItemID, let restored = history.undo(id, from: edits(for: id)) else { return }
-        restore(restored, on: id)
+        guard let id = currentItemID, let kind = session.undo(id) else { return }
+        showRestored(kind, on: id)
     }
 
     private func stepForward() {
-        guard let id = currentItemID, let restored = history.redo(id, from: edits(for: id)) else { return }
-        restore(restored, on: id)
+        guard let id = currentItemID, let kind = session.redo(id) else { return }
+        showRestored(kind, on: id)
     }
 
-    /// Puts a state back on the page and tells everything that draws it.
+    /// Tells everything that draws the page that the session put a state back
+    /// on it.
     ///
     /// ⚠️ **THE SCREEN REDRAWS, THE CLIP IS REBUILT, AND EVERY MODE RE-READS.**
     /// A restored state can differ from the one on screen in any field at all —
-    /// a look, a cut, an overlay, a song — so this cannot announce one kind of
-    /// change; `.film` is the widest one the screen has, and `editsWereRestored`
-    /// is how a mode that is showing its own controls learns to state them
-    /// again.
-    private func restore(_ restored: MediaEdits, on id: String) {
-        // ⚠️ **A RESTORED LOOK GOES LIVE; ANYTHING ELSE REBUILDS THE ITEM.**
-        // Rebuilding for a look would work and would be wrong twice over: the
-        // clip stutters where it does not have to, and the live path
-        // (`setLiveLook`) stops being exercised by the arrows at all. What
-        // decides is whether ANY field other than the look moved — written as a
-        // comparison rather than a list, so a field added to `MediaEdits`
-        // tomorrow lands on the safe side by itself.
-        let showing = edits(for: id)
-        var asIfOnlyTheLookMoved = showing
-        asIfOnlyTheLookMoved.filter = restored.filter
-        asIfOnlyTheLookMoved.adjustments = restored.adjustments
-        asIfOnlyTheLookMoved.effect = restored.effect
-        edits[id] = restored.isUntouched ? nil : restored
-        editsDidChange(id, asIfOnlyTheLookMoved == restored ? .look : .film)
+    /// a look, a cut, an overlay, a song — so `kind` is the look or the widest
+    /// change the screen has, and `editsWereRestored` is how a mode that is
+    /// showing its own controls learns to state them again.
+    private func showRestored(_ kind: MediaEditKind, on id: String) {
+        editsDidChange(id, kind)
         refreshTimelineTrackIfShowing()
         for mode in modes { mode.editsWereRestored(for: id) }
         if isCropping { showCropPicture(for: id) }
@@ -479,27 +461,12 @@ final class MediaEditorViewController: UIViewController {
         cropTools.adopt(angle: 0, ratio: .free)
     }
 
-    /// What the author has decided about each picture: how it is laid, the look
-    /// it wears, and what is kept of it.
-    ///
-    /// ⚠️ **PER ITEM, NOT PER SCREEN.** Every one of those is a decision about
-    /// ONE picture: a portrait shot and a landscape one in the same carousel want
-    /// opposite answers, and a single screen-wide value would make choosing for
-    /// one of them undo the choice for the other.
-    ///
-    /// ⚠️ **CARRIED TO THE PUBLISH PATH, AND BAKED THERE.** `onNext` hands this
-    /// on, and the finalisation screen applies the crop and the look to the
-    /// FULL-RESOLUTION picture it uploads — not to the preview. What is chosen
-    /// here is therefore in the post, which is why nothing may quietly drop it.
-    ///
-    /// ⚠️ **AND ONLY WHAT WAS ACTUALLY CHOSEN IS IN HERE.** Reading with
-    /// `edits[id, default: .untouched]` would write an entry for every page that
-    /// merely scrolled past, and "nothing was changed, so nothing is carried"
-    /// would stop being true — `nextHandsOnWhatWasChosenInTheOrderItWasChosen`
-    /// pins it. Read through `edits(for:)`, write through `change(_:_:)`.
-    private var edits: [String: MediaEdits] = [:]
+    /// What the author has decided about each picture, and the steps the two
+    /// arrows walk — see `MediaEditSession`. ⚠️ **CARRIED TO THE PUBLISH PATH**
+    /// by `onNext`, so nothing may quietly drop it.
+    private let session: MediaEditSession
 
-    func edits(for id: String) -> MediaEdits { edits[id] ?? .untouched }
+    func edits(for id: String) -> MediaEdits { session.edits(for: id) }
 
     /// The canvas-sized picture the library last answered with, undressed and
     /// uncut.
@@ -645,47 +612,13 @@ final class MediaEditorViewController: UIViewController {
         }
     }
 
-    /// ⚠️ AN ENTRY THAT SAYS NOTHING IS WORSE THAN NO ENTRY: it makes "was this
-    /// picture edited?" answerable two ways. Undoing every change removes the
-    /// entry rather than storing a neutral one.
-    /// ⚠️ **`settling: false` IS A CHANGE STILL UNDER A FINGER.** A ruler
-    /// dragged across the screen writes sixty values a second; each one is a
-    /// change, and none of them is a STEP. The mode that owns the finger is the
-    /// only thing that knows, so it says — everything else settles by default.
+    /// Writes an edit through the session — see `MediaEditSession.change` for
+    /// the rules — and re-lights the arrows once it is a step.
     func change(_ id: String, settling: Bool = true, _ mutate: (inout MediaEdits) -> Void) {
-        let before = edits[id] ?? .untouched
-        var value = before
-        mutate(&value)
-        edits[id] = value.isUntouched ? nil : value
-        guard settling else {
-            // ⚠️ **THE STATE THE FINGER LANDED ON, KEPT UNTIL IT LIFTS.** Only
-            // the FIRST sample of a drag holds it; every later one would file
-            // the value the sample before it wrote, and the step the author
-            // gets back would be one frame of their own gesture.
-            if pendingBefore?.id != id { pendingBefore = (id, before) }
-            return
-        }
-        // ⚠️ **AND A LIFT THAT WRITES THE VALUE ALREADY ON THE PAGE IS STILL
-        // THE END OF A STEP.** A ruler's last sample and its settle carry the
-        // same number, so recording from `before` here would compare the value
-        // to itself, find no change, and file nothing — a drag across the whole
-        // screen, and a back arrow that never lit.
-        let opening = pendingBefore?.id == id ? (pendingBefore?.state ?? before) : before
-        pendingBefore = nil
-        history.record(opening, changingTo: value, for: id)
+        session.change(id, settling: settling, mutate)
+        guard settling else { return }
         refreshHistoryItems()
     }
-
-    /// What the two arrows in the header walk — see `MediaEditHistory`.
-    private var history = MediaEditHistory<MediaEdits>()
-
-    /// Where the drag under the finger began, filed by the first sample.
-    ///
-    /// ⚠️ **ONE SLOT, BECAUSE THERE IS ONE FINGER.** A second page cannot be
-    /// dragged while this one is, and a page that changes under a held finger
-    /// is not a thing this screen can do — so an id that does not match is a
-    /// drag that ended without a lift, and the slot is simply taken over.
-    private var pendingBefore: (id: String, state: MediaEdits)?
 
     // MARK: - Modes
 
@@ -935,16 +868,9 @@ final class MediaEditorViewController: UIViewController {
     ) {
         self.items = items
         self.itemsByID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        // ⚠️ **WHAT THE MEDIA ARRIVE WEARING, NOT A STEP.** The camera hands its
-        // captures over with the look and the shape the author chose while
-        // shooting; those are where the editing STARTS, so they are not in the
-        // history — a step back from the first change the author makes here
-        // lands on them, never behind them. Only edits that say something are
-        // kept, for `edits`'s own reason: an entry that says nothing is worse
-        // than none.
-        self.edits = initialEdits.filter { id, edit in
-            !edit.isUntouched && items.contains { $0.id == id }
-        }
+        // What the media arrive wearing is where the editing starts, not a step
+        // — see `MediaEditSession.init`.
+        self.session = MediaEditSession(initial: initialEdits, ids: items.map(\.id))
         self.library = library
         self.preview = preview
         self.soundtracks = soundtracks
@@ -1015,7 +941,7 @@ final class MediaEditorViewController: UIViewController {
         // simulator before it was seen here.
         //
         // ⚠️ **AND AFTER THE CANVAS, NOT IN `configureBars`.** The answer is
-        // `history.canUndo(currentItemID)`, and `currentItemID` reads the
+        // `session.canUndo(currentItemID)`, and `currentItemID` reads the
         // canvas's own offset: asked from the bars, which are stated first, it
         // traps on a canvas that does not exist yet.
         refreshHistoryItems()
@@ -2628,7 +2554,7 @@ final class MediaEditorViewController: UIViewController {
     }
 
     private func goNext() {
-        navigationController?.pushViewController(onNext(items, edits), animated: true)
+        navigationController?.pushViewController(onNext(items, session.edits), animated: true)
     }
 
     // MARK: - Cropping
@@ -3815,7 +3741,7 @@ extension MediaEditorViewController: UICollectionViewDelegate {
         showTheFitGlyph()
         let settled = currentItemID
         // ⚠️ **THE ARROWS BELONG TO THE PAGE IN FRONT, SO A SWIPE RE-DECIDES
-        // THEM.** They are lit from `history.canUndo(currentItemID)`, and
+        // THEM.** They are lit from `session.canUndo(currentItemID)`, and
         // nothing else here reads the history — so without this line the author
         // swipes to an untouched photograph and finds a live back arrow
         // offering them the PREVIOUS page's last change.
@@ -4144,7 +4070,7 @@ extension MediaEditorViewController {
     func debugCrop(for id: String) -> MediaCrop { edits(for: id).crop }
     /// Internal for tests: whether anything at all is stored for an item — the
     /// difference between "chose the default" and "never chose".
-    func debugHasEdits(for id: String) -> Bool { edits[id] != nil }
+    func debugHasEdits(for id: String) -> Bool { session.hasEdits(for: id) }
     /// Internal for tests: paging the canvas the way a swipe does, settle
     /// included — the canvas cannot be dragged without a finger.
     func debugScrollToPage(_ index: Int) {
