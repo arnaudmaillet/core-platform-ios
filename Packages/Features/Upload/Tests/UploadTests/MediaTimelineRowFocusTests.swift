@@ -64,6 +64,38 @@ struct MediaTimelineRowFocusTests {
         #expect(focus.pausedByAuthor)
     }
 
+    /// ⚠️ **A TOGGLE DURING THE FILTER ROW WINS TOO** (#869). A pause made
+    /// while a piece's filter row is open must survive the row closing.
+    @Test func aToggleDuringThePieceRowWinsOverTheBorrowedPause() {
+        var focus = MediaTimelineRowFocus()
+        focus.piece = .init(id: "clip", piece: 1)
+        focus.borrowThePause()
+
+        focus.authorChose(paused: true)
+        focus.piece = nil
+
+        let givenBack = focus.giveBackThePause()
+        #expect(givenBack, "closing the filter row undid the author's pause")
+        #expect(focus.pausedByAuthor)
+    }
+
+    /// The other way round: the author had stopped the clip, the row played
+    /// it, and the author started it again — closing must not stop it.
+    @Test func aPlayDuringThePieceRowWinsOverTheBorrowedPause() {
+        var focus = MediaTimelineRowFocus()
+        focus.authorChose(paused: true)
+        focus.piece = .init(id: "clip", piece: 0)
+        focus.borrowThePause()
+
+        focus.authorChose(paused: true)
+        focus.authorChose(paused: false)
+        focus.piece = nil
+
+        let givenBack = focus.giveBackThePause()
+        #expect(!givenBack, "closing the filter row stopped a clip the author had started")
+        #expect(!focus.pausedByAuthor)
+    }
+
     @Test func closingWithNothingBorrowedKeepsTheAuthorsOwnPause() {
         var focus = MediaTimelineRowFocus()
         focus.authorChose(paused: true)

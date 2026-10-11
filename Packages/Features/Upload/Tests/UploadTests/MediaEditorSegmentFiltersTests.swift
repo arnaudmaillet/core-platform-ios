@@ -348,6 +348,26 @@ struct MediaEditorSegmentFiltersTests {
         #expect(screen.editor.debugActionBar.activeItem == nil, "the action stayed lit")
     }
 
+    /// ⚠️ **A TOGGLE DURING THE ROW WINS** — the transitions row's rule, and
+    /// this row's too (#869): a pause made while the row is open survives it
+    /// closing.
+    @Test func aPauseDuringTheRowSurvivesClosingIt() async throws {
+        let (screen, tools) = try await cutClip()
+        tools.track.select(1)
+        screen.editor.debugActionBar.debugTap(Action.filter.rawValue)
+        try #require(tools.segmentFilters.isOpen)
+        #expect(screen.preview.pauses.last == false, "guard: the piece does not play")
+
+        screen.editor.debugTapMedia()
+        #expect(screen.preview.pauses.last == true, "guard: the toggle did not stop the clip")
+
+        tools.segmentFilters.debugTapClose()
+        screen.window.layoutIfNeeded()
+
+        #expect(screen.preview.pauses.last == true, "closing the row undid the author's pause")
+        #expect(tools.track.debugShowsPause == false, "the glyph says the clip plays")
+    }
+
     @Test func theActionClosesTheRowItOpened() async throws {
         let (screen, tools) = try await cutClip()
         tools.track.select(1)
