@@ -141,18 +141,19 @@ public final class ConversationViewModel {
         let payload: Payload
         let replyTo: String?
         let createdAt: Date
+        /// The message's idempotency key (#795): chat.v1 `SendMessage`'s,
+        /// and a photo's or video's media.v1 upload's too.
+        ///
+        /// ⚠️ **MINTED WITH THE BUBBLE, NOT WITH THE ATTEMPT.** `retry` sends
+        /// the same bubble again, key included, so a message whose first
+        /// answer was lost is answered with the one the server already
+        /// stored — and its upload replays — instead of landing twice.
+        let key: String = IdempotencyKey.mint()
         var failed = false
 
         enum Payload {
-            /// The picture or clip, and the media.v1 idempotency key its
-            /// upload goes under (#795).
-            ///
-            /// ⚠️ **MINTED WITH THE BUBBLE, NOT WITH THE ATTEMPT.** `retry`
-            /// sends the same payload again, key included, so a message whose
-            /// first answer was lost replays its upload instead of storing
-            /// the picture a second time. (Text has no key: chat.v1
-            /// `SendMessage` carries none — see `ChatRepository.sendMessage`.)
-            case media(ChatMediaUpload, uploadKey: String)
+            /// The picture or clip.
+            case media(ChatMediaUpload)
             case text(String)
         }
 
@@ -329,7 +330,7 @@ public final class ConversationViewModel {
             let id = "pending-\(pendingCount)"
             ids.append(id)
             pendingSends.append(PendingSend(
-                id: id, payload: .media(upload, uploadKey: UUID().uuidString),
+                id: id, payload: .media(upload),
                 replyTo: index == 0 ? replyTo : nil, createdAt: Date()
             ))
         }
@@ -369,10 +370,12 @@ public final class ConversationViewModel {
             let message: ChatMessage
             switch pending.payload {
             case .text(let body):
-                message = try await repository.send(body, to: id, replyingTo: pending.replyTo)
-            case .media(let upload, let uploadKey):
                 message = try await repository.send(
-                    media: upload, caption: "", to: id, replyingTo: pending.replyTo, idempotencyKey: uploadKey
+                    body, to: id, replyingTo: pending.replyTo, idempotencyKey: pending.key
+                )
+            case .media(let upload):
+                message = try await repository.send(
+                    media: upload, caption: "", to: id, replyingTo: pending.replyTo, idempotencyKey: pending.key
                 )
                 if let preview = upload.preview {
                     localPreviews[message.id] = preview
@@ -382,7 +385,11 @@ public final class ConversationViewModel {
                 }
             }
             pendingSends.removeAll { $0.id == pendingID }
-            messages.append(message)
+            // ⚠️ A REPLAY CAN ANSWER A MESSAGE ALREADY ON SCREEN (#795): the
+            // first send landed, its answer was lost, a reload drew it — and
+            // the retry under the same key is answered with that same id. A
+            // second row with it would crash the diffable snapshot.
+            if !messages.contains(where: { $0.id == message.id }) { messages.append(message) }
             emit()
             onDidSendMessage?(id, message)
             await markRead(id, upTo: message.id)
@@ -634,7 +641,7 @@ public final class ConversationViewModel {
         let models = shown.map { MessageDisplayModel(message: $0, preview: previews[$0.id]) }
         let pending = pendingSends.map { send -> MessageDisplayModel in
             switch send.payload {
-            case .media(let upload, _):
+            case .media(let upload):
                 MessageDisplayModel(pending: send.id, upload: upload, sender: senderID, sentAt: send.createdAt, failed: send.failed)
             case .text(let body):
                 MessageDisplayModel(

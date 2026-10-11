@@ -2,6 +2,7 @@
 // URL that merely looks like one.
 import AVFoundation
 import CoreModels
+import CoreNetworking
 import DesignSystem
 // `PlaceholderVideoFetcher` — the feed's mock video source, which synthesises
 // the real H.264 bytes the publish path then opens for real.
@@ -178,8 +179,13 @@ struct NewPostTests {
         func albums() async -> [MediaLibraryAlbum] { [] }
         func items(in album: MediaLibraryAlbum.ID) async -> [MediaLibraryItem] { [] }
 
+        /// Ids the PUBLISH loop cannot read once (a large ask answers nil,
+        /// then the id reads again) — a photo skipped by one attempt only.
+        var unreadableOnce: Set<String> = []
+
         func thumbnail(for item: MediaLibraryItem.ID, size: CGSize) async -> UIImage? {
             requests.append((item, size))
+            if size.width >= 1000, unreadableOnce.remove(item) != nil { return nil }
             guard answersTwoColours else {
                 return UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { context in
                     UIColor.red.setFill()
@@ -257,6 +263,8 @@ struct NewPostTests {
             /// other way.
             let kinds: [String]
             let videos: [PickedVideo]
+            /// The CreatePost key the screen handed over (#795).
+            let postKey: String
         }
 
         private(set) var calls: [Call] = []
@@ -267,6 +275,12 @@ struct NewPostTests {
 
         func publish(
             media: [ComposeMedia], caption: String, as author: AuthorSummary?
+        ) async throws -> FeedEntry {
+            try await publish(media: media, caption: caption, as: author, idempotencyKey: "")
+        }
+
+        func publish(
+            media: [ComposeMedia], caption: String, as author: AuthorSummary?, idempotencyKey: String
         ) async throws -> FeedEntry {
             let pictures: [PickedImage] = media.compactMap {
                 if case .image(let picked) = $0 { return picked }
@@ -282,7 +296,7 @@ struct NewPostTests {
             }
             calls.append(Call(
                 mediaCount: media.count, caption: caption,
-                images: pictures, kinds: kinds, videos: clips
+                images: pictures, kinds: kinds, videos: clips, postKey: idempotencyKey
             ))
             if failures > 0 {
                 failures -= 1
@@ -531,6 +545,60 @@ struct NewPostTests {
         #expect(first.count == 2)
         #expect(retry == first, "the retry uploaded under new keys")
         #expect(Set(first).count == 2, "two pictures shared one key")
+    }
+
+    /// Publishes twice through a composer that fails the first, the caption
+    /// typed as `retyped` (when given) between the two; the two calls.
+    private func publishTwice(
+        _ count: Int = 1, retyping retyped: String? = nil, unreadableOnce: Set<String> = []
+    ) async throws -> [RecordingComposer.Call] {
+        let screen = open(Self.items(count), composer: RecordingComposer(failures: 1))
+        screen.library.unreadableOnce = unreadableOnce
+        let postButton = try #require(screen.post.navigationItem.rightBarButtonItems?.first)
+        screen.post.debugType(caption: "First words")
+
+        screen.post.debugTapPost()
+        try await settle(until: { postButton.isEnabled == false })
+        try await settle(until: { postButton.isEnabled })
+        if let retyped { screen.post.debugType(caption: retyped) }
+        screen.post.debugTapPost()
+        var calls: [RecordingComposer.Call] = []
+        for _ in 0..<3000 where calls.count < 2 {
+            calls = await screen.composer.calls
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(calls.count == 2, "publishes: \(calls.count)")
+        return calls
+    }
+
+    /// ⚠️ **A RETRIED POST GOES UNDER THE CREATEPOST KEY IT FIRST WENT OUT
+    /// WITH (#795)** — a valid post.v1 key — so a CreatePost whose answer was
+    /// lost is answered with the post it made instead of making a second.
+    @Test func aRetriedPostReusesItsPostKey() async throws {
+        let calls = try await publishTwice()
+
+        #expect(IdempotencyKey.isValid(calls[0].postKey))
+        #expect(calls[1].postKey == calls[0].postKey, "the retry went under a new key")
+    }
+
+    /// The other half: an edited caption is another post, under another key
+    /// — the old one would be answered with the OLD post.
+    @Test func anEditedCaptionIsANewPostKey() async throws {
+        let calls = try await publishTwice(retyping: "Other words")
+
+        #expect(calls[1].caption == "Other words")
+        #expect(calls[1].postKey != calls[0].postKey, "an edited post reused the key of the old one")
+    }
+
+    /// ⚠️ THE KEY FOLLOWS WHAT IS SENT, NOT WHAT WAS CHOSEN: a photo the
+    /// library could not read on the first attempt is skipped there and sent
+    /// by the retry — another carousel, so another post, so another key.
+    @Test func aRetrySendingOtherMediaIsANewPostKey() async throws {
+        let calls = try await publishTwice(2, unreadableOnce: ["photo-1"])
+
+        try #require(calls[0].mediaCount == 1 && calls[1].mediaCount == 2, "guard: the first attempt skipped a photo")
+        #expect(calls[1].images.first?.uploadKey == calls[0].images.first?.uploadKey)
+        #expect(calls[1].postKey != calls[0].postKey, "two carousels went under one key")
     }
 
     /// ⚠️ **THE CROP MUST REACH THE UPLOAD TOO, AND NOTHING ASSERTED THAT UNTIL
