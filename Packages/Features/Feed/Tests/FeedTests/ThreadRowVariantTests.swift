@@ -127,7 +127,7 @@ struct ThreadRowVariantTests {
         ThreadRowEffect.bounceIn.playDisappear(on: view) { done = true }
         #expect(!done)
         #expect(view.alpha == 0)
-        for _ in 0..<400 where !done { try? await Task.sleep(for: .milliseconds(5)) }
+        for _ in 0..<Self.looks where !done { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(done, "the departure never called back")
     }
 
@@ -166,6 +166,11 @@ struct ThreadRowVariantTests {
         #expect(row.sendingSpinnerView.superview == nil)
         #expect(row.debugHeaderWidthFloor == 0)
     }
+
+    /// A look budget, not a deadline: every wait in this file is positive and
+    /// stops as soon as its condition holds, so the budget only matters on a
+    /// starved runner, where each look stretches (#974).
+    private static let looks = 6_000
 
     // MARK: - On the post (#920)
 
@@ -221,20 +226,23 @@ struct ThreadRowVariantTests {
         window.isHidden = false
         defer { window.isHidden = true }
         let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view) { _ in true })
-        for _ in 0..<500 where stream.visibleCells.compactMap(PostDetailViewController.commentRow(in:)).count < 3 {
+        for _ in 0..<Self.looks where stream.visibleCells.compactMap(PostDetailViewController.commentRow(in:)).count < 3 {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(stream.visibleCells.compactMap(PostDetailViewController.commentRow(in:)).count >= 3)
         #expect(controller.debugPlayedArrivals.isEmpty, "a loaded comment played the posted comment's arrival")
 
         viewModel.submitComment("Mine")
-        for _ in 0..<500 where controller.debugPlayedArrivals.isEmpty {
+        func postedCell() -> UICollectionViewCell? {
+            stream.visibleCells.first { PostDetailViewController.commentRow(in: $0)?.bodyTextLabel.text == "Mine" }
+        }
+        // The arrival plays once the list has scrolled to the comment's slot
+        // (#921); the cell is waited for too, not read in the same turn (#974).
+        for _ in 0..<Self.looks where controller.debugPlayedArrivals.isEmpty || postedCell() == nil {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(controller.debugPlayedArrivals.count == 1, "the posted comment did not arrive with its effect")
-        let posted = try #require(stream.visibleCells.first {
-            PostDetailViewController.commentRow(in: $0)?.bodyTextLabel.text == "Mine"
-        })
+        let posted = try #require(postedCell())
         let row = try #require(PostDetailViewController.commentRow(in: posted))
         #expect(row.variant == .comment)
         #expect(row.effect == .bounceIn)
