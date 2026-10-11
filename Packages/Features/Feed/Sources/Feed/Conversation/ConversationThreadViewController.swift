@@ -130,6 +130,8 @@ final class ConversationThreadViewController: UIViewController {
     private var peerRelation: FollowRelation?
     /// Whom `peerRelation` was asked for, so a peer is asked once.
     private var relationAskedFor: ProfileID?
+    /// A landed relation waiting for the navigation transition to end.
+    private var landedRelationScheduled = false
     private var followInFlight = false
     /// Bumped by every ask and every follow: an answer from before either
     /// is stale — a read sent before a follow undid the follow (#752).
@@ -1493,11 +1495,46 @@ extension ConversationThreadViewController {
         }
     }
 
-    private func setPeerRelation(_ relation: FollowRelation?) {
+    /// - Parameter tapped: the viewer's own follow (or its refusal), which
+    ///   turns the "+" through the pill's blur, as on a post. Anything else
+    ///   is a value that LANDED — a read answering, a new peer — and changes
+    ///   the glyph in place (#889).
+    private func setPeerRelation(_ relation: FollowRelation?, tapped: Bool = false) {
         peerRelation = relation
-        let badge = relation.map(SnapAuthorIdentityView.FollowBadge.init) ?? .none
-        peerPill.setFollowBadge(badge, animated: view.window != nil)
+        if tapped {
+            peerPill.setFollowBadge(Self.badge(for: relation), animated: view.window != nil)
+        } else {
+            drawLandedRelation()
+        }
         fitTrailingRun()
+    }
+
+    private static func badge(for relation: FollowRelation?) -> SnapAuthorIdentityView.FollowBadge {
+        relation.map(SnapAuthorIdentityView.FollowBadge.init) ?? .none
+    }
+
+    /// Draws `peerRelation` on the pill, in place — once the push or pop
+    /// under way has landed (#889): a bar item resized in the middle of a
+    /// navigation transition is folded into it and lands without its
+    /// animation (memory `bar-items-during-push-trap`). Off screen, or with
+    /// no transition, at once.
+    private func drawLandedRelation() {
+        guard !landedRelationScheduled else { return }
+        if view.window != nil, let coordinator = transitionCoordinator {
+            landedRelationScheduled = true
+            let scheduled = coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+                // One turn later: the bar settles its landing first.
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.landedRelationScheduled = false
+                    self.peerPill.setFollowBadgeInPlace(Self.badge(for: self.peerRelation))
+                }
+            }
+            if scheduled { return }
+            // The coordinator took nothing: never leave the flag stuck.
+            landedRelationScheduled = false
+        }
+        peerPill.setFollowBadgeInPlace(Self.badge(for: peerRelation))
     }
 
     /// The "+": follows the correspondent, optimistically, as the feed's
@@ -1513,7 +1550,7 @@ extension ConversationThreadViewController {
               SnapAuthorIdentityView.FollowBadge(before) == .follow else { return }
         followInFlight = true
         relationGeneration += 1
-        setPeerRelation(before.settingFollow(true))
+        setPeerRelation(before.settingFollow(true), tapped: true)
         // Named now: the peer can change before the graph answers.
         let name = peer.handle.map { "@" + $0 } ?? (peer.name.isEmpty ? nil : peer.name)
         Task { [weak self] in
@@ -1521,7 +1558,7 @@ extension ConversationThreadViewController {
             guard let self else { return }
             self.followInFlight = false
             if !accepted {
-                if self.peer.id == id { self.setPeerRelation(before) }
+                if self.peer.id == id { self.setPeerRelation(before, tapped: true) }
                 // Said either way (#802): a "+" that comes back without a
                 // word reads as a glitch. Over the composer, as the mute's is.
                 Feedback.failure(
