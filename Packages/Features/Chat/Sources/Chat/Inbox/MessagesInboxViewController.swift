@@ -469,7 +469,15 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// whatever it is given at every width — a leading custom view collapses into
     /// a `•••` on narrow bars once anything shares the row with it, which is the
     /// whole reason the selector has that group to itself.
-    private let searchField = TracedSearchTextField()
+    /// Internal (not private) so tests can read what it says.
+    let searchField = TracedSearchTextField()
+
+    /// What the empty field says it searches (#918). It names the two things
+    /// the search actually finds — conversations and requests matched on the
+    /// correspondent's name or handle, and people from the directory — and
+    /// deliberately not "messages": message TEXT is not searched (only the
+    /// last message of each thread is in memory; see `InboxSearchViewModel`).
+    static let searchPlaceholder = "Search people and chats"
 
     /// The selector's item, kept so the bar can be put back exactly as it was.
     /// ⚠️ INSTALLED ON APPEAR, REMOVED ON DISAPPEAR, and that bracket is the
@@ -490,7 +498,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
 
     private func configureSearchAffordance() {
         searchItem.accessibilityLabel = "Search"
-        searchField.placeholder = "Search..."
+        searchField.placeholder = Self.searchPlaceholder
         searchField.autocapitalizationType = .none
         searchField.autocorrectionType = .no
         searchField.returnKeyType = .search
