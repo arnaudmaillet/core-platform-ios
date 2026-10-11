@@ -304,6 +304,33 @@ struct GridVideoPlaybackCoordinatorTests {
         #expect(coordinator.playingIDs.isEmpty)
     }
 
+    /// ⚠️ A START STOPPED BEFORE ITS TASK RAN BINDS NOTHING (#884). Above, the
+    /// loans go; here, the POOL: the start's task had not called `play` when
+    /// the stop came, so the stop found nothing to detach — and the task, run
+    /// later, bound a player no loan knew about. Found by the sound sheet's
+    /// suite: a reconcile the app-wide gate turned down landed between the
+    /// sheet's start and its task, and six players outlived the sheet.
+    ///
+    /// Watched for a while rather than once: the leak lands only after the
+    /// stub source resolves, and an early look reads zero either way.
+    @Test func aStartStoppedBeforeItsTaskRanBindsNoPlayer() async {
+        let pool = makePool()
+        let coordinator = makeVisibleCoordinator(pool: pool, maxConcurrent: 3)
+        let candidates = [makeCandidate(0, distance: 0), makeCandidate(1, distance: 10)]
+        coordinator.update(candidates: candidates)
+        #expect(coordinator.playingIDs.count == 2, "guard: started")
+        // The same turn: neither start's task has run.
+        coordinator.setSurfaceVisible(false)
+
+        var leaked = 0
+        for _ in 0..<200 {
+            try? await Task.sleep(for: .milliseconds(5))
+            leaked = pool.activePlayerCount
+            if leaked > 0 { break }
+        }
+        #expect(leaked == 0, "a stopped start bound \(leaked) player(s) after its stop")
+    }
+
     /// The tapped tile is exempt: its player is the one the hero flight carries,
     /// and stopping it mid-flight is exactly the restart the handoff prevents.
     @Test func hidingTheSurfaceKeepsTheFlightsTile() {

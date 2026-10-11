@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -40,6 +41,12 @@ import UIKit
 /// to know.
 ///
 /// The same cell in the rows, the grid and a pushed section's gallery.
+///
+/// A VIDEO plays on it, muted, the way a gallery brick's does (#884): a
+/// `GridPlaybackCell` like `PostGridTileCell` — the poster below, a surface
+/// built on first use above it that reveals on its first frame, the marks
+/// and the count above both, and the player handed back on reuse. Its
+/// screen decides what plays (`SoundSheetAutoplay`).
 final class SoundSheetTileCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private let originalBadge = TileBadge(text: "Original", symbol: "music.note")
@@ -228,6 +235,12 @@ final class SoundSheetTileCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         contentView.alpha = 1
+        // Whoever loaned a player takes it back before the cell shows
+        // another post — a kept loan would play this post under the next one.
+        onReuse?()
+        onReuse = nil
+        onCoverLoaded = nil
+        endVideoPreview()
         loading?.cancel()
         imageView.image = nil
         postID = nil
@@ -364,6 +377,9 @@ final class SoundSheetTileCell: UICollectionViewCell {
         setNeedsLayout()
     }
 
+    /// The post the tile shows — what a test reads.
+    var shownPostID: PostID? { postID }
+
     /// How far the marks stand off the foot now — what a test reads.
     var debugFootLift: CGFloat { -badgesBottom.constant - Self.badgeInset }
 
@@ -452,11 +468,83 @@ final class SoundSheetTileCell: UICollectionViewCell {
         loading = Task { [weak self] in
             let image = try? await pipeline.image(for: url)
             guard let self, self.postID == id else { return }
-            if let image { self.imageView.image = image }
+            if let image {
+                self.imageView.image = image
+                self.loadedVideoRenderView?.setPoster(image)
+                // The autoplay waits on the poster: asked again now.
+                self.onCoverLoaded?()
+            }
             if loaded { self.dropBone(animated: true) }
         }
     }
+
+    // MARK: - GridPlaybackCell
+
+    var onCoverLoaded: (() -> Void)?
+    var onReuse: (() -> Void)?
+    private(set) var loadedVideoRenderView: VideoRenderView?
+
+    var renderedCover: UIImage? { imageView.image }
+    /// The tile IS its media, edge to edge.
+    var videoMediaRect: CGRect { bounds }
+    var isRenderingCurrentMedia: Bool { loadedVideoRenderView != nil }
+
+    func applyCover(_ image: UIImage) {
+        guard imageView.image == nil else { return }
+        imageView.image = image
+        loadedVideoRenderView?.setPoster(image)
+    }
+
+    func makeVideoRenderViewIfNeeded() -> VideoRenderView {
+        if let loadedVideoRenderView { return loadedVideoRenderView }
+        let view = VideoRenderView()
+        #if DEBUG
+        view.debugLabel = "sound-tile"
+        #endif
+        view.isHidden = true
+        view.isUserInteractionEnabled = false
+        view.frame = contentView.bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        // Right above the poster, under the marks and the count: they read
+        // over a moving picture exactly as over a still.
+        contentView.insertSubview(view, aboveSubview: imageView)
+        loadedVideoRenderView = view
+        return view
+    }
+
+    func adoptVideoRenderView(_ view: VideoRenderView) {
+        if let existing = loadedVideoRenderView, existing !== view {
+            existing.detachForReplacement()
+            existing.removeFromSuperview()
+        }
+        view.transform = .identity
+        view.frame = contentView.bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.isHidden = false
+        contentView.insertSubview(view, aboveSubview: imageView)
+        loadedVideoRenderView = view
+    }
+
+    func donateVideoRenderView() -> VideoRenderView? {
+        guard let view = loadedVideoRenderView else { return nil }
+        loadedVideoRenderView = nil
+        view.removeFromSuperview()
+        return view
+    }
+
+    func beginVideoPreview() {
+        let view = makeVideoRenderViewIfNeeded()
+        view.setPoster(imageView.image)
+        // The poster keeps the tile until there is a frame to replace it.
+        view.revealOnFirstFrame()
+    }
+
+    func endVideoPreview() {
+        loadedVideoRenderView?.hideCrossFading()
+    }
 }
+
+extension SoundSheetTileCell: GridPlaybackCell {}
 
 /// A tile's mark: white caption2 on a dark capsule, readable over any poster
 /// in either appearance — a thumbnail is its own ground, not the sheet's.

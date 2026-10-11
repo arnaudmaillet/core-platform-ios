@@ -5,6 +5,7 @@ import CoreStorage
 import DesignSystem
 import FeedInterface
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -161,10 +162,15 @@ final class SoundSheetViewController: UIViewController {
         /// The post's likes, drawn at the tile's foot — nil draws none (a
         /// placeholder, or a post that carries no count).
         let likeCount: Int64?
+        /// The clip the tile plays on its own, muted, like every grid's
+        /// (`SoundSheetAutoplay`, #884) — nil for a photograph, words or a
+        /// placeholder.
+        let videoURL: URL?
 
         init(
             postID: PostID, thumbnailURL: URL?, caption: String?, isCurrent: Bool,
-            isOriginal: Bool = false, isLoaded: Bool = true, likeCount: Int64? = nil
+            isOriginal: Bool = false, isLoaded: Bool = true, likeCount: Int64? = nil,
+            videoURL: URL? = nil
         ) {
             self.postID = postID
             self.thumbnailURL = thumbnailURL
@@ -173,6 +179,7 @@ final class SoundSheetViewController: UIViewController {
             self.isOriginal = isOriginal
             self.isLoaded = isLoaded
             self.likeCount = likeCount
+            self.videoURL = videoURL
         }
     }
 
@@ -254,6 +261,10 @@ final class SoundSheetViewController: UIViewController {
     private var tileByID: [PostID: Tile]
     private let imagePipeline: ImagePipeline
     private let savedSounds: SavedSoundStore
+    /// The app's one player pool, which a pushed section plays on too.
+    private let videoPlayback: VideoPlaybackController?
+    /// The video tiles playing on their own (#884); nil without a pool.
+    private(set) var autoplay: SoundSheetAutoplay?
 
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -312,7 +323,8 @@ final class SoundSheetViewController: UIViewController {
         sections: [SoundSheetSection],
         tiles: [Tile],
         imagePipeline: ImagePipeline,
-        savedSounds: SavedSoundStore = SavedSoundStore()
+        savedSounds: SavedSoundStore = SavedSoundStore(),
+        videoPlayback: VideoPlaybackController? = nil
     ) {
         self.sound = sound
         self.authorHandle = authorHandle
@@ -322,6 +334,8 @@ final class SoundSheetViewController: UIViewController {
         self.tileByID = Dictionary(tiles.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
         self.imagePipeline = imagePipeline
         self.savedSounds = savedSounds
+        self.videoPlayback = videoPlayback
+        autoplay = videoPlayback.map { SoundSheetAutoplay(pool: $0, imagePipeline: imagePipeline) }
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -430,7 +444,11 @@ final class SoundSheetViewController: UIViewController {
         configureDataSource()
         reveal.attach(to: view)
         reveal.measure = { [weak self] in self?.measuredReveal() }
-        reveal.onChange = { [weak self] progress in self?.traceReveal(progress) }
+        reveal.onChange = { [weak self] progress in
+            self?.traceReveal(progress)
+            // What is faint does not play: the line moving changes what may.
+            self?.scheduleAutoplay()
+        }
         // A text size change moves the header and so the fold: an input.
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) {
             (controller: SoundSheetViewController, _: UITraitCollection) in
@@ -483,6 +501,9 @@ final class SoundSheetViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         reveal.wake()
+        // Up, or back from a pushed section: the tiles are the viewer's
+        // again — unless a feed opened from one still covers them.
+        if !isShowingFeed { setAutoplayActive(true) }
         #if DEBUG
         debugOpenTileIfRequested()
         #endif
@@ -521,6 +542,10 @@ final class SoundSheetViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // Going, or a section pushed over it: every tile gives its player
+        // back now, on the way out — none is left bound to a sheet nobody
+        // sees (#884).
+        setAutoplayActive(false)
         guard isSheetBeingDismissed else { return }
         stopPreview()
         tearDownPreview()
@@ -691,7 +716,7 @@ final class SoundSheetViewController: UIViewController {
                 return Self.soundSection(height: metrics?.headerHeight ?? 112, bottom: gap)
             case .posts(let kind):
                 let section = kind.isRow
-                    ? Self.rowSection(environment, bottom: gap)
+                    ? Self.rowSection(environment, bottom: gap) { [weak self] in self?.scheduleAutoplay() }
                     : Self.gridSection(environment, bottom: Self.contentBottom)
                 section.boundarySupplementaryItems = [NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: .init(
@@ -719,9 +744,10 @@ final class SoundSheetViewController: UIViewController {
 
     /// A horizontal row of 3:4 tiles, one gutter apart, three and a peek
     /// across; it snaps to a tile's leading edge. `bottom` — the section gap —
-    /// before the "Recent" title.
+    /// before the "Recent" title. `onScroll` hears the row move sideways —
+    /// its own scroll view, which never reaches the collection's delegate.
     private static func rowSection(
-        _ environment: NSCollectionLayoutEnvironment, bottom: CGFloat
+        _ environment: NSCollectionLayoutEnvironment, bottom: CGFloat, onScroll: @escaping () -> Void
     ) -> NSCollectionLayoutSection {
         let width = environment.container.effectiveContentSize.width
         let size = NSCollectionLayoutSize(
@@ -734,6 +760,8 @@ final class SoundSheetViewController: UIViewController {
         section.orthogonalScrollingBehavior = .continuousGroupLeadingBoundary
         section.interGroupSpacing = gutter
         section.contentInsets = .init(top: 0, leading: gutter, bottom: bottom, trailing: gutter)
+        // Called from inside a layout pass: the listener defers its work.
+        section.visibleItemsInvalidationHandler = { _, _, _ in onScroll() }
         return section
     }
 
@@ -782,6 +810,8 @@ final class SoundSheetViewController: UIViewController {
             [weak self] cell, _, id in
             guard let tile = self?.tileByID[id] else { return }
             cell.configure(tile, pipeline: pipeline)
+            // A tile plays once its poster is up: its arrival asks again.
+            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
         }
         let soundRegistration = UICollectionView.CellRegistration<SoundSheetHeaderCell, Item> {
             [weak self] cell, _, _ in
@@ -865,6 +895,8 @@ final class SoundSheetViewController: UIViewController {
             let ids = newSections.first { $0.kind == gallery.kind }?.all.filter { tileByID[$0] != nil } ?? []
             gallery.update(ids: ids, reconfiguring: Array(changed))
         }
+        // Placeholders filled in can be clips now.
+        scheduleAutoplay()
     }
 
     private func configure(_ header: SoundSheetHeaderView) {
@@ -1350,7 +1382,8 @@ final class SoundSheetViewController: UIViewController {
             kind: kind,
             ids: section.all.filter { tileByID[$0] != nil },
             tile: { [weak self] id in self?.tileByID[id] },
-            imagePipeline: imagePipeline
+            imagePipeline: imagePipeline,
+            videoPlayback: videoPlayback
         )
         gallery.toolbarItems = makeToolbarItems(primary: false)
         gallery.onSelect = { [weak self, weak gallery] id in
@@ -1459,9 +1492,15 @@ final class SoundSheetViewController: UIViewController {
         stopPreview()
         isShowingFeed = true
         refreshCover()
+        // The feed covers the tiles for the trip — its host is presented
+        // over full screen, so no screen hears it disappear: told here. The
+        // tapped tile is concealed, and its card flies its poster.
+        setAutoplayActive(false)
+        pushedGallery?.setAutoplayActive(false)
         OverSheetFeedHost.present(over: presenter, onFinished: { [weak self] in
             self?.isShowingFeed = false
             self?.refreshCover()
+            self?.resumeTilesAfterFeed()
         }) { host in
             #if DEBUG
             Self.debugFeedHost = host
@@ -1470,6 +1509,63 @@ final class SoundSheetViewController: UIViewController {
         }
         return true
     }
+
+    /// Back from a feed opened from a tile: the screen the viewer is on
+    /// plays its tiles again.
+    private func resumeTilesAfterFeed() {
+        // The NAVIGATION controller's window: a pushed section takes this
+        // screen's view out of it.
+        guard let navigation = navigationController, navigation.view.window != nil else { return }
+        if navigation.topViewController === self {
+            setAutoplayActive(true)
+        } else if let gallery = pushedGallery, navigation.topViewController === gallery {
+            gallery.setAutoplayActive(true)
+        }
+    }
+
+    // MARK: - Autoplay
+
+    /// The tiles are (or are no longer) the viewer's: on screen and not
+    /// covered. Inactive, every one gives its player back at once.
+    private func setAutoplayActive(_ active: Bool) {
+        guard let autoplay else { return }
+        autoplay.setActive(active)
+        guard active else { return }
+        // An unrealised cell is not a candidate: laid out first.
+        collectionView.layoutIfNeeded()
+        reconcileAutoplay()
+    }
+
+    /// Reconciles the tiles' players against what is on screen now: the
+    /// visible tiles that can be touched (`isRevealed` — what is faint does
+    /// not play either), ranked and budgeted by `SoundSheetAutoplay`.
+    func reconcileAutoplay(allowingStarts: Bool = true) {
+        guard let autoplay, dataSource != nil else { return }
+        let items = collectionView.indexPathsForVisibleItems.compactMap { path -> SoundSheetAutoplay.Item? in
+            guard case .tile(let id, let kind) = dataSource.itemIdentifier(for: path),
+                  isRevealed(kind, item: path.item),
+                  let tile = tileByID[id],
+                  let cell = collectionView.cellForItem(at: path) as? SoundSheetTileCell
+            else { return nil }
+            return .init(tile: tile, cell: cell)
+        }
+        autoplay.reconcile(items, in: collectionView, allowingStarts: allowingStarts)
+    }
+
+    /// A reconcile at the end of this turn, once however often it is asked
+    /// — for what calls from inside a layout pass (a row's sideways scroll)
+    /// or on every frame (the reveal following the sheet's height).
+    private func scheduleAutoplay() {
+        guard autoplay != nil, !isAutoplayScheduled else { return }
+        isAutoplayScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            isAutoplayScheduled = false
+            reconcileAutoplay()
+        }
+    }
+
+    private var isAutoplayScheduled = false
 
     /// The tile, described for the shared flight (`presentSnapFeedHero`): its
     /// hero, and the window it opens through (a text post) or closes through
@@ -1716,9 +1812,28 @@ extension SoundSheetViewController: UICollectionViewDelegate {
             trace("scrolled: offset \(scrollView.contentOffset.y) fullest \(isAtFullestDetent)")
         }
         #endif
+        // Tiles start as they slide in and stop as they leave; nothing starts
+        // during a hard fling (`GridAutoplayRanking.allowsStarts`).
+        reconcileAutoplay(allowingStarts: GridAutoplayRanking.allowsStarts(
+            atVelocity: scrollView.panGestureRecognizer.velocity(in: scrollView).y
+        ))
         // The line follows the Popular row as the posts scroll.
         guard reveal.progress < 1 else { return }
         updateRevealLine()
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        guard scrollView === collectionView else { return }
+        reconcileAutoplay()
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        // A tile that left gives its player back now — the pool is shared.
+        autoplay?.stop(cell)
     }
 }
 

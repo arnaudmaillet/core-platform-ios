@@ -4504,7 +4504,9 @@ final class SnapFeedViewController: UIViewController {
             fallbackArtworkURL: inputs.fallbackArtworkURL,
             sections: content.sections,
             tiles: content.tiles,
-            imagePipeline: imagePipeline
+            imagePipeline: imagePipeline,
+            // The tiles play on the app's one pool, beside this page (#884).
+            videoPlayback: videoPlayback
         )
         // Only a sound the device HOLDS can go under a new clip.
         if inputs.offersUseSound, let useSound {
@@ -4556,15 +4558,19 @@ final class SnapFeedViewController: UIViewController {
         current: PostID, original: PostID?, rankings: PostSoundRankings, droppingUnknown: Bool = false
     ) -> (sections: [SoundSheetSection], tiles: [SoundSheetViewController.Tile]) {
         let galleryPost = galleryPost
-        typealias Known = (thumbnailURL: URL?, caption: String?, isMedia: Bool, likes: Int64?)
+        typealias Known = (thumbnailURL: URL?, caption: String?, isMedia: Bool, likes: Int64?, video: URL?)
         let known: (PostID) -> Known? = { [modelsByID] id in
             if let model = modelsByID[id] {
-                return (model.thumbnailURL, model.caption, model.mediaURL != nil, model.visibleLikeCount)
+                return (
+                    model.thumbnailURL, model.caption, model.mediaURL != nil, model.visibleLikeCount,
+                    model.mediaKind == .video ? model.mediaURL : nil
+                )
             }
             if let post = galleryPost?(id) {
                 return (
                     post.thumbnailURL, post.caption.isEmpty ? nil : post.caption,
-                    post.kind != .text, post.reactionCount
+                    post.kind != .text, post.reactionCount,
+                    post.hasPlayableVideo ? post.videoURL : nil
                 )
             }
             return nil
@@ -4582,7 +4588,7 @@ final class SnapFeedViewController: UIViewController {
             return SoundSheetViewController.Tile(
                 postID: id, thumbnailURL: post?.thumbnailURL, caption: post?.caption,
                 isCurrent: id == current, isOriginal: id == dealt.original, isLoaded: post != nil,
-                likeCount: post?.likes
+                likeCount: post?.likes, videoURL: post?.video
             )
         }
         return (dealt.sections, tiles)
