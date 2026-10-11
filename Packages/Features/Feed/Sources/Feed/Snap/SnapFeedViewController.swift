@@ -2723,6 +2723,9 @@ final class SnapFeedViewController: UIViewController {
             guard detail != nil || commentsContentVC != nil else { return }
         }
         commentsEngagedID = id
+        // ⚠️ THE WARM'S CEILING WAS TURNED OFF AT THE SETTLE (#969): parked
+        // with no engagement, it is not the page's engagement yet. It is now.
+        syncComposerKeyboardCeilings(activeID: activePostID)
         // TOTAL DEAD-END for vertical scrolling: the pager is disabled for
         // the engagement's whole lifetime. This is the structural answer
         // to UIKit's nested-scroll chaining — outer and inner scroll pans
@@ -3140,7 +3143,30 @@ final class SnapFeedViewController: UIViewController {
         restingLockApplied = false
         // Its day was not heard while it was a preview.
         syncCommentsDay()
+        // Nor was its keyboard: a preview's ceiling is off, and a promotion
+        // that comes after the settle (the page being left lets go of the
+        // slot when its last pixel goes) has no reconcile behind it (#969).
+        syncComposerKeyboardCeilings(activeID: activePostID)
         return true
+    }
+
+    /// The composer's keyboard ceiling (`setComposerTracksKeyboard`) on every
+    /// panel the feed holds: ON for the engagement of the page being read, off
+    /// for everything else — a preview, a warm parked with no engagement, an
+    /// engagement on a page that is not the settled one.
+    ///
+    /// ⚠️ CALLED WHEREVER THE ENGAGEMENT CHANGES HANDS, not only at the settle
+    /// (#969). The reconcile turns a media page's parked warm OFF (it holds
+    /// the slot with no engagement behind it), and the tap that then engages
+    /// that very panel settles nothing: the composer stayed put under the
+    /// keyboard on every show until the viewer next changed page. The first
+    /// engagement after a swipe was the broken one; a tap that outran the
+    /// warm, or a reopen (a fresh warm), rose — which is why it was
+    /// "sometimes".
+    private func syncComposerKeyboardCeilings(activeID: PostID?) {
+        let engagedIsRead = commentsEngagedID != nil && commentsEngagedID == activeID
+        (commentsContentVC as? PostDetailViewController)?.setComposerTracksKeyboard(engagedIsRead)
+        (previewRestingVC as? PostDetailViewController)?.setComposerTracksKeyboard(false)
     }
 
     private func discardRestingPreview() {
@@ -3524,9 +3550,7 @@ final class SnapFeedViewController: UIViewController {
         // and kept the ceiling — which is why it went wrong "sometimes".
         // Derived from the settled page, like everything else here, it cannot
         // depend on which route the panel took.
-        (commentsContentVC as? PostDetailViewController)?
-            .setComposerTracksKeyboard(commentsEngagedID == activeID)
-        (previewRestingVC as? PostDetailViewController)?.setComposerTracksKeyboard(false)
+        syncComposerKeyboardCeilings(activeID: activeID)
         // And so does the bar's day (#757): a swipe that settled, or one
         // that went back home, shows the day of the panel now engaged.
         syncCommentsDay()
