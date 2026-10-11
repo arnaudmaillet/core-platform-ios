@@ -888,9 +888,9 @@ public final class GridVideoPlaybackCoordinator {
     private func parkReturnPlayback(of id: PostID) {
         guard let url = playingURLs[id] else { return }
         let surface = loans[id].flatMap { $0.watchedClipSurface ?? $0.loadedVideoRenderView }
+        let pool = pool
         let seconds = surface.flatMap { pool.playheadSeconds(in: $0) } ?? 0
         returnURLs[id] = url
-        let pool = pool
         returnParkTasks[id] = Task { @MainActor in
             await pool.parkReturnPlayback(
                 of: url, scope: id.rawValue, at: seconds, peakBitRate: Self.tileBitRateCap
