@@ -296,7 +296,12 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                               let viewer = repository as? any ProfileViewerResolving else { return nil }
                                         return {
                                             RecentlyDeletedViewController(
-                                                viewModel: RecentlyDeletedViewModel(trash: trash, viewer: viewer),
+                                                viewModel: RecentlyDeletedViewModel(
+                                                    trash: trash, viewer: viewer,
+                                                    // A restored post is back in the author's gallery: a
+                                                    // revisit must not open on the pages without it (#887).
+                                                    onRestored: { [cache] author in cache.removeGallery(for: author) }
+                                                ),
                                                 imagePipeline: imagePipeline
                                             )
                                         }

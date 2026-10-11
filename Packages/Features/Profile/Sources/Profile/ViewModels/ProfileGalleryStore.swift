@@ -68,6 +68,46 @@ final class ProfileGalleryStore {
     /// Internal for tests: how many times the corpora were actually filtered.
     private(set) var tileComputations = 0
 
+    // MARK: - Revisits
+
+    /// One corpus as far as it is loaded: its posts and where its paging
+    /// stands. What `ProfileCache` keeps between visits (#887).
+    struct Corpus: Equatable {
+        var posts: [GalleryPost]
+        var nextToken: String?
+        var hasLaterPages: Bool
+    }
+
+    /// Both corpora, each nil when it has not loaded: what a revisit opens on.
+    /// Never a failure or a loading state — those belong to the visit that
+    /// had them, and the revisit revalidates anyway.
+    struct Corpora: Equatable {
+        var authored: Corpus?
+        var tagged: Corpus?
+    }
+
+    /// The loaded corpora, or nil when neither has loaded.
+    var corpora: Corpora? {
+        let loaded = Corpora(
+            authored: authored.map { Corpus(posts: $0, nextToken: authoredToken, hasLaterPages: authoredHasLaterPages) },
+            tagged: tagged.map { Corpus(posts: $0, nextToken: taggedToken, hasLaterPages: taggedHasLaterPages) }
+        )
+        return loaded.authored == nil && loaded.tagged == nil ? nil : loaded
+    }
+
+    /// Opens on corpora a previous visit loaded (#887): the grid renders them
+    /// at once, and the first pages fetched next revalidate them in place —
+    /// merged over the later pages when there are some.
+    func restore(_ corpora: Corpora) {
+        reset()
+        authored = corpora.authored?.posts
+        authoredToken = corpora.authored?.nextToken
+        authoredHasLaterPages = corpora.authored?.hasLaterPages ?? false
+        tagged = corpora.tagged?.posts
+        taggedToken = corpora.tagged?.nextToken
+        taggedHasLaterPages = corpora.tagged?.hasLaterPages ?? false
+    }
+
     // MARK: - Mutations
 
     /// Forgets both corpora — another profile, or a load that starts over.

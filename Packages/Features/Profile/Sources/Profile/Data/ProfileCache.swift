@@ -31,6 +31,9 @@ public final class ProfileCache {
     private struct Entry {
         var profile: UserProfile?
         var relationship: ProfileRelationship?
+        /// The posts gallery as far as it was loaded (#887): a revisit opens
+        /// its grid on them instead of on skeletons, then revalidates.
+        var gallery: ProfileGalleryStore.Corpora?
     }
     private var entries: [ProfileID: Entry] = [:]
     /// Ids in least-recently-used order.
@@ -42,9 +45,11 @@ public final class ProfileCache {
     /// viewer is someone else, none of it is true any more.
     private var viewerObserver: NSObjectProtocol?
 
-    public init(limit: Int = 16) {
+    /// `center` is where viewer changes are heard: the default one; a test
+    /// hands its own, since posting on the shared one reaches every suite.
+    public init(limit: Int = 16, center: NotificationCenter = .default) {
         self.limit = limit
-        viewerObserver = NotificationCenter.default.addObserver(
+        viewerObserver = center.addObserver(
             forName: .viewerDidChange, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.removeAll() }
@@ -76,8 +81,56 @@ public final class ProfileCache {
     }
 
     public func store(_ relationship: ProfileRelationship, for id: ProfileID) {
+        dropGalleryIfHidden(by: relationship, for: id)
         entries[id, default: Entry()].relationship = relationship
         touch(id)
+    }
+
+    /// The gallery pages last loaded for `id`, as far as they went — what a
+    /// revisit renders at frame 0 (#887). Stale-while-revalidate like the
+    /// profile: the screen fetches the first pages again and merges them in.
+    func gallery(for id: ProfileID) -> ProfileGalleryStore.Corpora? {
+        entries[id]?.gallery
+    }
+
+    /// Keeps the gallery a screen holds. A corpus the screen has not loaded
+    /// (a failed fetch) keeps the one already cached: the next visit still
+    /// has something true-ish to open on, and revalidates it.
+    func store(_ gallery: ProfileGalleryStore.Corpora, for id: ProfileID) {
+        let kept = entries[id]?.gallery
+        entries[id, default: Entry()].gallery = ProfileGalleryStore.Corpora(
+            authored: gallery.authored ?? kept?.authored,
+            tagged: gallery.tagged ?? kept?.tagged
+        )
+        touch(id)
+    }
+
+    /// Forgets `id`'s gallery: what it showed may no longer be what the viewer
+    /// may see.
+    func removeGallery(for id: ProfileID) {
+        entries[id]?.gallery = nil
+    }
+
+    /// ⚠️ A FOLLOW OR A BLOCK CAN CHANGE WHAT THE GALLERY SHOWS. A private
+    /// profile's posts are its followers' alone, and a block hides them both
+    /// ways: kept across either change, a revisit would open on posts the
+    /// viewer can no longer see, or on an empty grid for ones they now can.
+    /// A public profile's gallery is the same whoever follows it.
+    private func dropGalleryIfHidden(by relationship: ProfileRelationship, for id: ProfileID) {
+        guard let old = entries[id]?.relationship, entries[id]?.gallery != nil else { return }
+        let isPublic = entries[id]?.profile.map { !$0.visibility.isPrivate } ?? false
+        let (wasFollowing, wasBlocked) = Self.edges(of: old)
+        let (following, blocked) = Self.edges(of: relationship)
+        if blocked != wasBlocked || (!isPublic && following != wasFollowing) {
+            entries[id]?.gallery = nil
+        }
+    }
+
+    private static func edges(of relationship: ProfileRelationship) -> (following: Bool, blocked: Bool) {
+        switch relationship {
+        case .me, .requested, .cannotFollow: (false, false)
+        case .other(let following, _, let blocked): (following, blocked)
+        }
     }
 
     /// Hears the app's follow channel, once. A follow accepted on a card or
@@ -95,11 +148,13 @@ public final class ProfileCache {
               wasFollowing != change.isFollowing else { return }
         // Mutual implies following: an unfollow ends it. A follow cannot say
         // whether they follow back, so it keeps what was known.
-        entries[change.profileID]?.relationship = .other(
+        let relationship = ProfileRelationship.other(
             isFollowing: change.isFollowing,
             isMutual: change.isFollowing && isMutual,
             isBlocked: isBlocked
         )
+        dropGalleryIfHidden(by: relationship, for: change.profileID)
+        entries[change.profileID]?.relationship = relationship
     }
 
     private func touch(_ id: ProfileID) {
