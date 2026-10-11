@@ -92,6 +92,17 @@ struct InboxHeaderAccessoryTests {
         #expect(trailing.last === balance, "the balance took the corner from search")
     }
 
+    /// The search field names its scope (#918) — what the search really finds:
+    /// people from the directory and chats (conversations and requests) matched
+    /// by name or handle. Not "messages": message text is not searched.
+    /// Pinned as a literal so a revert to a bare "Search..." fails here.
+    @Test func theSearchFieldSaysWhatItSearches() {
+        let screen = inbox()
+        screen.loadViewIfNeeded()
+
+        #expect(screen.searchField.placeholder == "Search people and chats")
+    }
+
     /// A fresh balance item (the badge re-mints one whenever its width moves)
     /// replaces the old one rather than joining it.
     @Test func replacingTheBalanceLeavesOneOfIt() throws {
