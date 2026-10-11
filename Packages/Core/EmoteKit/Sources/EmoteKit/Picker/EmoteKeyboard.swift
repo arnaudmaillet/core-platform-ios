@@ -21,8 +21,10 @@ import UIKit
 ///   `:code:` or a whole emoji at once. The panel leaves when editing ends, so
 ///   the next focus opens the keyboard.
 /// - **Search** is typing: `:` and two letters in the composer shows matching
-///   emotes on a strip floating just above the field (`EmoteSuggestionStrip`),
-///   house codes first; a tap replaces the `:query` with the emote. The panel's magnifier
+///   emotes on a strip just above the field (`EmoteSuggestionStrip`) —
+///   floating in the window, or riding in the composer that embeds it
+///   (`embedSuggestions(in:leading:trailing:bottom:)`) — house codes first;
+///   a tap replaces the `:query` with the emote. The panel's magnifier
 ///   switches to the keyboard and types the `:` for you.
 /// - Every pick lands in `EmoteRecents`.
 /// - **`@` and `#` complete too** (#524): a person's handle or a tag, from
@@ -68,7 +70,18 @@ public final class EmoteKeyboard: NSObject {
     /// way (a layout guide in one, a show-time notification in another), so
     /// the strip covered the feed's composer outright. Floating in the window
     /// above the field touches no one's layout.
+    ///
+    /// Floating, the strip is placed once per query and stays put: a field
+    /// that then rides the keyboard up, or widens, leaves it behind. A
+    /// composer that moves does better to lay the strips out in itself
+    /// (`embedSuggestions(in:leading:trailing:bottom:)`, #960).
     public weak var suggestionAnchor: UIView?
+    /// The composer the strips ride in (`embedSuggestions(in:…)`), nil while
+    /// they float in the window above `suggestionAnchor`.
+    private weak var suggestionContainer: UIView?
+    /// The `:query` strip's width while it rides a composer: its matches'
+    /// (`fittingWidth`), below the composer's trailing edge, which wins.
+    private var embeddedStripWidth: NSLayoutConstraint?
     /// Rides inside the text view and reports when it leaves its window.
     /// `nonisolated(unsafe)` for the same `deinit` as the strips.
     ///
@@ -191,11 +204,13 @@ public final class EmoteKeyboard: NSObject {
     /// removed from its screen. The strips stayed behind in the window,
     /// over whatever came next. They go at once: there is no field left for
     /// them to shrink back into.
+    ///
+    /// Strips riding a composer stay in it, hidden: they left with it.
     private func fieldLeftWindow() {
         stripGeneration += 1
         strip.layer.removeAllAnimations()
         strip.transform = .identity
-        strip.removeFromSuperview()
+        if suggestionContainer == nil { strip.removeFromSuperview() }
         strip.show([])
         hideCompletions()
     }
@@ -333,6 +348,11 @@ public final class EmoteKeyboard: NSObject {
         let animates = !UIAccessibility.isReduceMotionEnabled
         stripGeneration += 1
         let generation = stripGeneration
+        if let container = suggestionContainer {
+            showEmbedded(emotes, in: container, isShowing: isShowing,
+                         animates: animates && container.window != nil, generation: generation)
+            return
+        }
         guard !emotes.isEmpty, let anchor = suggestionAnchor ?? textView, let window = anchor.window else {
             // Off-window (no field on screen): the matches are kept, nothing floats.
             if !emotes.isEmpty {
@@ -401,12 +421,172 @@ public final class EmoteKeyboard: NSObject {
     /// the field.
     private static let stripCollapsed = CGAffineTransform(translationX: 0, y: 8).scaledBy(x: 0.92, y: 0.92)
 
+    /// The gap between a strip and the field under it.
+    static let stripGap: CGFloat = 8
+    /// The widest a strip grows, wherever it is.
+    static let stripMaxWidth: CGFloat = 520
+
+    /// Lays the strips out INSIDE the composer (#960), on its own layout: from
+    /// `leading`, never past `trailing`, their bottom `stripGap` above
+    /// `bottom` — the field's edges. They then move and widen in whatever
+    /// pass moves the field: a keyboard's rise, an interactive dismissal one
+    /// frame at a time, the field widening as side items give way, a line
+    /// growing it — on that pass's own curve, with nothing to keep in step.
+    ///
+    /// ⚠️ **THEY DRAW IN THE CONTAINER, SO THEY TAKE ITS TOUCHES.** A strip
+    /// stands over the field, often outside the container's bounds: a
+    /// container that narrows `point(inside:with:)` to its own controls has
+    /// to let `suggestionsContain(_:in:)` through, or a tile cannot be hit.
+    ///
+    /// The strips stop floating in the window (`suggestionAnchor` is no
+    /// longer read). Each goes into the container the first time it shows,
+    /// not before: a composer nobody types `:` in holds no strip.
+    public func embedSuggestions(
+        in container: UIView,
+        leading: NSLayoutXAxisAnchor,
+        trailing: NSLayoutXAxisAnchor,
+        bottom: NSLayoutYAxisAnchor
+    ) {
+        stripGeneration += 1
+        for overlay in [strip, completionStrip] as [UIView] {
+            overlay.layer.removeAllAnimations()
+            overlay.transform = .identity
+            overlay.alpha = 1
+            overlay.removeFromSuperview()
+        }
+        strip.show([])
+        completionStrip.show([])
+        suggestionContainer = container
+        embeddedEdges = EmbeddedEdges(leading: leading, trailing: trailing, bottom: bottom)
+    }
+
+    /// Where the strips ride in the composer: the field's edges.
+    private struct EmbeddedEdges {
+        let leading: NSLayoutXAxisAnchor
+        let trailing: NSLayoutXAxisAnchor
+        let bottom: NSLayoutYAxisAnchor
+    }
+
+    private var embeddedEdges: EmbeddedEdges?
+
+    /// Puts `overlay` in `container` on the field's edges, once: from
+    /// `leading`, never past `trailing`, `stripGap` above `bottom`. The emote
+    /// strip is as wide as its matches (`embeddedStripWidth`), the completion
+    /// strip as wide as it may be; each yields to `trailing`, and scrolls.
+    private func seat(_ overlay: UIView, in container: UIView) {
+        guard overlay.superview !== container, let edges = embeddedEdges else { return }
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(overlay)
+        let width = overlay.widthAnchor.constraint(equalToConstant: Self.stripMaxWidth)
+        width.priority = .defaultHigh
+        if overlay === strip { embeddedStripWidth = width }
+        NSLayoutConstraint.activate([
+            width,
+            overlay.leadingAnchor.constraint(equalTo: edges.leading),
+            overlay.trailingAnchor.constraint(lessThanOrEqualTo: edges.trailing),
+            overlay.bottomAnchor.constraint(equalTo: edges.bottom, constant: -Self.stripGap),
+            overlay.heightAnchor.constraint(equalToConstant: EmoteSuggestionStrip.height),
+            overlay.widthAnchor.constraint(lessThanOrEqualToConstant: Self.stripMaxWidth),
+        ])
+    }
+
+    /// Whether `point`, in `view`'s coordinates, lands on a strip showing in
+    /// the composer (`embedSuggestions(in:…)`). For the container's
+    /// `point(inside:with:)`.
+    public func suggestionsContain(_ point: CGPoint, in view: UIView) -> Bool {
+        guard suggestionContainer != nil else { return false }
+        return [strip, completionStrip].contains { (overlay: UIView) in
+            guard overlay.superview != nil, !overlay.isHidden, overlay.alpha > 0.01 else { return false }
+            return overlay.bounds.contains(overlay.convert(point, from: view))
+        }
+    }
+
+    /// `showSuggestions` for a strip riding the composer: the same arrival,
+    /// resize and departure, but the frame is the composer's layout — only
+    /// the width (its matches) is set here, the edges and the gap above the
+    /// field are constraints.
+    ///
+    /// ⚠️ **THE STRIP IS NEVER TAKEN OUT.** Once seated, it stays in the
+    /// composer with its constraints, hidden between queries, so the next
+    /// arrival is already in place.
+    private func showEmbedded(
+        _ emotes: [Emote], in container: UIView, isShowing: Bool, animates: Bool, generation: Int
+    ) {
+        guard !emotes.isEmpty else {
+            guard isShowing, animates else {
+                strip.layer.removeAllAnimations()
+                strip.transform = .identity
+                strip.show([])
+                return
+            }
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseIn]) {
+                self.strip.alpha = 0
+                self.strip.transform = Self.stripCollapsed
+            } completion: { _ in
+                guard self.stripGeneration == generation else { return }
+                self.strip.transform = .identity
+                self.strip.show([])
+            }
+            return
+        }
+        let width = EmoteSuggestionStrip.fittingWidth(count: emotes.count)
+        seat(strip, in: container)
+        container.bringSubviewToFront(strip)
+        guard isShowing else {
+            strip.layer.removeAllAnimations()
+            strip.transform = .identity
+            embeddedStripWidth?.constant = width
+            strip.show(emotes)
+            // Placed at once, where it arrives: a later pass inside someone
+            // else's animation would slide it in from where it last stood.
+            UIView.performWithoutAnimation {
+                container.layoutIfNeeded()
+                strip.layoutIfNeeded()
+            }
+            guard animates else {
+                strip.alpha = 1
+                return
+            }
+            strip.alpha = 0
+            strip.transform = Self.stripCollapsed
+            UIView.animate(withDuration: Self.suggestionSpring, delay: 0, usingSpringWithDamping: 0.82,
+                           initialSpringVelocity: 0, options: [.allowUserInteraction]) {
+                self.strip.alpha = 1
+                self.strip.transform = .identity
+            }
+            return
+        }
+        // Only a departure in flight is cut short. The strip's other
+        // animations may be the field's own move — a keyboard still rising —
+        // which it has to finish with the field.
+        if strip.alpha < 1 || strip.transform != .identity {
+            strip.layer.removeAllAnimations()
+            strip.alpha = 1
+            strip.transform = .identity
+        }
+        guard animates else {
+            embeddedStripWidth?.constant = width
+            strip.show(emotes)
+            container.setNeedsLayout()
+            return
+        }
+        // ONE spring for the capsule and its tiles, as when floating.
+        UIView.animate(withDuration: Self.suggestionSpring, delay: 0, usingSpringWithDamping: 0.86,
+                       initialSpringVelocity: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.embeddedStripWidth?.constant = width
+            self.strip.show(emotes, animated: true)
+            container.layoutIfNeeded()
+            self.strip.layoutIfNeeded()
+        }
+    }
+
     /// Just above the anchor, starting at its leading edge, as wide as
     /// `count` matches (capped to the window, then scrolling).
     private func suggestionFrame(count: Int, anchor: UIView, in window: UIWindow) -> CGRect {
         let field = anchor.convert(anchor.bounds, to: window)
-        let inset: CGFloat = 8
-        let width = min(EmoteSuggestionStrip.fittingWidth(count: count), window.bounds.width - inset * 2, 520)
+        let inset = Self.stripGap
+        let width = min(EmoteSuggestionStrip.fittingWidth(count: count), window.bounds.width - inset * 2,
+                        Self.stripMaxWidth)
         let x = min(max(field.minX, inset), window.bounds.width - inset - width)
         return CGRect(
             x: x, y: field.minY - EmoteSuggestionStrip.height - inset,
@@ -417,14 +597,21 @@ public final class EmoteKeyboard: NSObject {
     /// Puts `overlay` just above the anchor, in the anchor's window, or takes
     /// it away.
     private func place(_ overlay: UIView, showing: Bool) {
+        // Riding the composer: its layout places it, `show` hides it.
+        if let container = suggestionContainer {
+            guard showing else { return }
+            seat(overlay, in: container)
+            container.bringSubviewToFront(overlay)
+            return
+        }
         guard showing, let anchor = suggestionAnchor ?? textView, let window = anchor.window else {
             overlay.removeFromSuperview()
             return
         }
         if overlay.superview !== window { window.addSubview(overlay) }
         let field = anchor.convert(anchor.bounds, to: window)
-        let inset: CGFloat = 8
-        let width = min(window.bounds.width - inset * 2, 520)
+        let inset = Self.stripGap
+        let width = min(window.bounds.width - inset * 2, Self.stripMaxWidth)
         overlay.frame = CGRect(
             x: (window.bounds.width - width) / 2,
             y: field.minY - EmoteSuggestionStrip.height - inset,
