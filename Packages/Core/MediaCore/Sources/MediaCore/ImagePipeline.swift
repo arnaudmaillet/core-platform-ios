@@ -450,6 +450,38 @@ public final class ImagePipeline: Sendable {
     /// Fills in flight (decodes and downloads), for tests and the audit.
     var inFlightCount: Int { decodes.inFlightCount + bytes.inFlightCount }
 
+    /// Waits for `url`'s prefetch in flight to land, and returns whether it
+    /// is where `window` puts it (decoded at `size`, or on disk), for tests.
+    ///
+    /// ⚠️ A prefetch runs at utility QoS: on a loaded runner it can start and
+    /// finish long after any look budget a test polls it with (#1049). This
+    /// joins its fill at the prefetch's own priority instead (P1 decode, P2
+    /// download), which raises nothing and counts no arrival, and returns
+    /// when the fill ends, however late. It never starts work of its own:
+    /// with nothing in flight it only reports what is already there.
+    func prefetchLanded(_ url: URL, size: ImageBucket = .full, window: ImagePrefetchWindow) async -> Bool {
+        let key = ImageKey(url: url, bucket: size)
+        switch window {
+        case .display:
+            if decodes.isInFlight(key) {
+                // Only runs if the decode ended between the check and the join.
+                _ = try? await decodes.value(for: key, priority: .next) { [self] _ in
+                    guard isDecoded(key) else { throw CancellationError() }
+                    return UIImage()
+                }
+            }
+            return isDecoded(key)
+        case .preload:
+            if bytes.isInFlight(key.media) {
+                _ = try? await bytes.value(for: key.media, priority: .speculative) { [self] _ in
+                    guard isOnDisk(key) else { throw CancellationError() }
+                    return ImageFetchResult(data: Data(), isCacheable: false)
+                }
+            }
+            return isOnDisk(key)
+        }
+    }
+
     // MARK: - Internals
 
     private func cache(for bucket: ImageBucket) -> MemoryCache<ImageKey, UIImage> {
