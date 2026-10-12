@@ -72,14 +72,25 @@ struct EmoteMainThreadBlockingTests {
         #expect(second != nil, "the bake after it did not run")
     }
 
-    /// VISIBILITY (#1011): when a commit outlasts `longestWait`, the main
-    /// thread goes on and the path is counted (`cappedWaits`, logged once in
-    /// DEBUG). The next parked commit runs as usual.
+    /// VISIBILITY (#1011, #1037): a main thread that wakes during a commit
+    /// waits for it at most `longestWait`; past that it goes on, and the path
+    /// is counted (`cappedWaits`, logged once in DEBUG) and the hold timed
+    /// (`holds`). The body wakes the main thread itself, so the main thread is
+    /// sure to wake mid-commit. The next commit runs as usual.
     @Test func aCommitOutlastingTheMainThreadsWaitIsCounted() async throws {
         let bakeQueue = EmoteBakeQueue()
         let parks = bakeQueue.parks
-        await bakeQueue.run { EmoteMainPark.whileParked { Thread.sleep(forTimeInterval: 0.5) } }
-        #expect(parks.cappedWaits == 1, "a commit outlasted the main thread's wait uncounted")
+        await bakeQueue.run {
+            EmoteMainPark.whileParked {
+                CFRunLoopWakeUp(CFRunLoopGetMain())
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
+        // At least once: after its cap the main thread goes on, and it may
+        // wake again before the half second is out and wait anew.
+        #expect(parks.cappedWaits >= 1, "a commit outlasted the main thread's wait uncounted")
+        #expect(parks.holds.count >= parks.cappedWaits, "the main thread's wait went untimed")
+        #expect(parks.holds.longest >= .milliseconds(200), "the main thread's wait was timed at \(parks.holds.longest), short of its 250 ms cap")
         await bakeQueue.run { EmoteMainPark.whileParked {} }
         #expect(parks.commits == 2)
     }
