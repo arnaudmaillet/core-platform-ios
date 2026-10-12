@@ -265,7 +265,7 @@ final class AppContainer {
         return response.error?.code == .notFound ? .missing : .unavailable
     }
 
-    /// The profile a QR code or `wynn.cn/s/<token>` link opens
+    /// The profile a QR code or `core-platform.click/s/<token>` link opens
     /// (`profile.v1.ResolveShareToken`, #412). `.missing` covers a reset
     /// token and an owner who switched links off: the server tells them apart
     /// from no one.
@@ -1335,8 +1335,8 @@ final class AppContainer {
                 makeSheet: { [unowned self] in self.makeWalletSheet() }
             )
         },
-        // A tapped `@handle`, a `wynn.cn/@handle` link (#524), a scanned QR
-        // code and a `wynn.cn/s/<token>` link (#412).
+        // A tapped `@handle`, a `core-platform.click/@handle` link (#524), a scanned QR
+        // code and a `core-platform.click/s/<token>` link (#412).
         lookupProfile: { [weak self] reference in await self?.profileID(for: reference) ?? .unavailable }
     )
 

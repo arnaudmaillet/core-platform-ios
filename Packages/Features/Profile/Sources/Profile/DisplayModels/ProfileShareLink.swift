@@ -1,3 +1,4 @@
+import CoreNavigation
 import Foundation
 
 /// The public web address of a profile.
@@ -9,15 +10,16 @@ import Foundation
 /// returning a canonical link, this becomes a passthrough and every caller
 /// keeps working.
 ///
-/// The host is the single thing to change when the public web domain is
-/// settled — it is not read from `AppEnvironment`, which knows only about BFF
-/// endpoints (a share link must be the *public* address regardless of which
-/// backend the build talks to; a link to `mock.bff.local` would be worse than
-/// useless in someone else's Messages thread).
+/// The host is `AppRoute.webHost`, the one place the public web domain is set
+/// (the universal-link parser reads the same constant). It is not read from
+/// `AppEnvironment`, which knows only about BFF endpoints (a share link must
+/// be the *public* address regardless of which backend the build talks to; a
+/// link to `mock.bff.local` would be worse than useless in someone else's
+/// Messages thread).
 enum ProfileShareLink {
-    static let host = "wynn.cn"
+    static let host = AppRoute.webHost
 
-    /// `https://wynn.cn/@handle`. Percent-encodes the handle defensively —
+    /// `https://<webHost>/@handle`. Percent-encodes the handle defensively —
     /// handles are validated server-side, but a share link is user-visible
     /// output and must never be a malformed URL.
     static func url(handle: String) -> URL {
@@ -28,7 +30,7 @@ enum ProfileShareLink {
         return components.url ?? URL(string: "https://\(host)")!
     }
 
-    /// `https://wynn.cn/s/<token>` (#412): the owner's QR code and shared
+    /// `https://<webHost>/s/<token>` (#412): the owner's QR code and shared
     /// link. It opens the profile only while the owner keeps "QR Code and
     /// Shared Links" on, and stops working once they reset it.
     static func url(shareToken token: String) -> URL {

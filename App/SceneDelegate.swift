@@ -76,7 +76,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         appCoordinator = coordinator
         coordinator.start()
         // Launched by a link (#524): a `wynn:` URL, or a universal link on
-        // `wynn.cn`. The coordinator holds it until the shell is up.
+        // `core-platform.click`. The coordinator holds it until the shell is up.
         if let url = connectionOptions.urlContexts.first?.url {
             coordinator.open(url)
         } else if let url = connectionOptions.userActivities
@@ -100,7 +100,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         appCoordinator?.open(url)
     }
 
-    /// A universal link on `wynn.cn` opened while the app runs.
+    /// A universal link on `core-platform.click` opened while the app runs.
     func scene(_ scene: UIScene, continue userActivity: NSUserActivity) {
         guard userActivity.activityType == NSUserActivityTypeBrowsingWeb,
               let url = userActivity.webpageURL else { return }

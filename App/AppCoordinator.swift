@@ -52,7 +52,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         self.container = container
     }
 
-    /// Opens a link into the app — a universal link on `wynn.cn` or the
+    /// Opens a link into the app — a universal link on `core-platform.click` or the
     /// `wynn:` scheme (#524). False for one the app does not know. A link
     /// that arrives before the shell exists waits for it.
     @discardableResult

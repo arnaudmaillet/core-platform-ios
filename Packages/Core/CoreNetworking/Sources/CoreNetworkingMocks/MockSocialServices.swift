@@ -42,7 +42,7 @@ public final class MockSocialServices: @unchecked Sendable {
     /// ask. prof-1 holds `seededShareToken`, so a link that opens someone
     /// else's profile can be tried without setup.
     private var shareTokens: [String: String] = ["prof-1": MockSocialServices.seededShareToken]
-    /// prof-1's share token: `wynn.cn/s/<this>` opens its profile.
+    /// prof-1's share token: `core-platform.click/s/<this>` opens its profile.
     public static let seededShareToken = "mockShareToken-prof1_A"
     /// `SetInteractionSettings` writes, by profile (backend #714). prof-13 —
     /// public, and not followed by the viewer — takes comments from its

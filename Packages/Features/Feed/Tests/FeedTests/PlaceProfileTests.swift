@@ -529,7 +529,11 @@ struct PlaceProfileTests {
     @Test func theTrayHoldsPinThenTheQRCodeEachWithItsSeam() throws {
         let profile = PlaceProfileViewController(
             postIDs: [], placeName: "Paris • City Cluster",
-            identity: PlaceIdentity(flag: nil, subtitle: "France", shareURL: URL(string: "https://wynn.cn/place/city:paris")),
+            identity: PlaceIdentity(
+                flag: nil,
+                subtitle: "France",
+                shareURL: URL(string: "https://core-platform.click/place/city:paris")
+            ),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }),

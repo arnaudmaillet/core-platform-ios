@@ -243,7 +243,7 @@ final class RouteResolver: Router {
             }
 
         case .profileHandle(let handle):
-            // A tapped `@handle` or a `wynn.cn/@handle` link (#524). ⚠️ PUSHED
+            // A tapped `@handle` or a `core-platform.click/@handle` link (#524). ⚠️ PUSHED
             // AT ONCE (#800): the profile resolves the handle behind its
             // skeleton, then loads like an author's. The lookup used to run
             // here first, with nothing on screen for the whole round trip. A
@@ -255,7 +255,7 @@ final class RouteResolver: Router {
             routeToReference(.handle(handle), for: route, using: navigator)
 
         case .profileShareToken(let token):
-            // A scanned QR code or a `wynn.cn/s/<token>` link (#412): pushed at
+            // A scanned QR code or a `core-platform.click/s/<token>` link (#412): pushed at
             // once and resolved by the screen, like a handle. A token the owner
             // reset, or links they switched off, read as no one.
             routeToReference(.shareToken(token), for: route, using: navigator)
