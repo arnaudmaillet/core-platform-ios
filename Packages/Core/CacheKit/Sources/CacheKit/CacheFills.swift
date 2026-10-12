@@ -26,7 +26,8 @@ public enum CacheFillPriority: Int, Sendable, Comparable, CaseIterable {
         }
     }
 
-    /// The `TaskPriority` a fill starts with.
+    /// The `TaskPriority` a fill runs at: the one it starts with, and the
+    /// one its running task is escalated to when it is raised (#1052).
     public var taskPriority: TaskPriority {
         switch self {
         case .speculative, .next: .utility
@@ -226,6 +227,12 @@ public final class CacheFillInterest: Sendable {
 /// at the highest priority still wanted and is cancelled only when no owner
 /// (and no awaiting `value(for:)` call) is left.
 ///
+/// ⚠️ A running fill raised to a higher `taskPriority` (a P1/P2 prefetch that
+/// a P0 load joins, or whose interest goes `.visible`) has its task
+/// ESCALATED to it (#1052): without that, the image the viewer now waits
+/// for kept decoding at utility QoS, behind every other prefetch. Lowering
+/// never de-escalates a running task.
+///
 /// P2 (`.speculative`) fills wait for a slot of the `CacheFillSlots` the
 /// `CacheCoordinator` shares between every `CacheFills`: at most 2 at once
 /// app-wide by default, fewer under Low Power / Low Data / thermal pressure,
@@ -288,9 +295,23 @@ public final class CacheFills<Key: Hashable & Sendable, Value: Sendable>: Sendab
     /// counts as an interest while it waits; cancelling the calling task drops
     /// it (and the fill, if nobody else wants it) and throws
     /// `CancellationError`.
-    public func value(for key: Key, priority: CacheFillPriority = .visible, fill: @escaping Fill) async throws -> Value {
+    ///
+    /// - Parameter parent: the context of a fill this call is part of (an
+    ///   image's decode waiting on its download). The interest then follows
+    ///   it, never below `priority`: a decode raised to `.visible` raises its
+    ///   download too, task and network priority included (#1052).
+    public func value(
+        for key: Key, priority: CacheFillPriority = .visible, following parent: CacheFillContext? = nil,
+        fill: @escaping Fill
+    ) async throws -> Value {
         let id = takeInterestID()
         state.withLock { _ = $0.pending.insert(id) }
+        // Registered before the join reads the parent, so no change is
+        // missed; one that lands before the join finds no interest yet and
+        // is caught up just after it.
+        parent?.onPriorityChange { [weak self] raised in
+            self?.reprioritize(key, interest: id, to: max(priority, raised))
+        }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Value, any Error>) in
                 let effects = state.withLock { state -> [Effect] in
@@ -298,9 +319,11 @@ public final class CacheFills<Key: Hashable & Sendable, Value: Sendable>: Sendab
                         // Cancelled before it could join.
                         return [.resume([continuation], .failure(CancellationError()))]
                     }
-                    return state.join(key, interest: id, priority: priority, fill: fill, waiter: continuation, owner: nil, fills: self)
+                    let wanted = max(priority, parent?.priority ?? priority)
+                    return state.join(key, interest: id, priority: wanted, fill: fill, waiter: continuation, owner: nil, fills: self)
                 }
                 run(effects)
+                if let parent { reprioritize(key, interest: id, to: max(priority, parent.priority)) }
             }
         } onCancel: {
             drop(key, interest: id)
@@ -397,6 +420,8 @@ public final class CacheFills<Key: Hashable & Sendable, Value: Sendable>: Sendab
                 context.update(priority)
             case .forget(let owner, let ids):
                 owner.forget(ids)
+            case .escalate(let task, let priority):
+                task.escalatePriority(to: priority)
             }
         }
     }
@@ -406,6 +431,9 @@ public final class CacheFills<Key: Hashable & Sendable, Value: Sendable>: Sendab
         case finishSlot(UInt64)
         case notify(CacheFillContext, CacheFillPriority)
         case forget(CacheOwner, [UInt64])
+        /// Before the matching `notify`, so a fill that reacts to its raise
+        /// already runs at the new priority.
+        case escalate(Task<Void, Never>, TaskPriority)
     }
 
     fileprivate struct OwnerLink {
@@ -499,7 +527,11 @@ public final class CacheFills<Key: Hashable & Sendable, Value: Sendable>: Sendab
             guard var job = jobs[key] else { return [] }
             let after = job.effectivePriority
             guard after != before else { return [] }
-            var effects: [Effect] = [.notify(job.context, after)]
+            var effects: [Effect] = []
+            if let task = job.task, after.taskPriority > before.taskPriority {
+                effects.append(.escalate(task, after.taskPriority))
+            }
+            effects.append(.notify(job.context, after))
             if job.task == nil {
                 if !after.needsSlot, let fills {
                     // Promoted out of P2 while queued: start now, leave the queue.

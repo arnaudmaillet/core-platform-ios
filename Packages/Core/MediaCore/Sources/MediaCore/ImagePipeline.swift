@@ -559,14 +559,14 @@ public final class ImagePipeline: Sendable {
     /// The bytes for `key` through the shared download of its media: every
     /// bucket of one media waits for the same fetch.
     ///
-    /// Joined at the decode's priority when it starts, and never below P1: a
-    /// P2 decode (a hidden list's) already holds a speculative slot, and two
-    /// of them each waiting for a download slot would hold the allowance
-    /// forever. A decode raised later (a prefetched cell scrolled on screen)
-    /// does not raise a download already running; only its network priority
-    /// hint differs.
+    /// Joined at the decode's priority, and never below P1: a P2 decode (a
+    /// hidden list's) already holds a speculative slot, and two of them each
+    /// waiting for a download slot would hold the allowance forever. The
+    /// download follows the decode: a prefetched cell scrolled on screen (a
+    /// P0 join, or its interest raised to `.visible`) raises the download
+    /// already running too, its task and its network priority hint (#1052).
     private func download(_ url: URL, key: ImageKey, context: CacheFillContext) async throws -> ImageFetchResult {
-        try await bytes.value(for: key.media, priority: max(context.priority, .next)) { [self] byteContext in
+        try await bytes.value(for: key.media, priority: .next, following: context) { [self] byteContext in
             try await byteFill(url, key: key, context: byteContext)
         }
     }
