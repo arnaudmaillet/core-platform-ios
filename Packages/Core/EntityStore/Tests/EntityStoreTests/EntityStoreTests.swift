@@ -258,6 +258,24 @@ struct EntityStoreTests {
         withExtendedLifetime((feed, tile)) {}
     }
 
+    /// Settings → Recently Deleted brings it back: the next page carrying
+    /// it is let in again.
+    @Test func aRestoredPostComesBackWithTheNextPage() {
+        let store = EntityStore()
+        store.upsert([entry("p1", likes: 10)])
+        store.deletePost(PostID("p1"))
+
+        store.restorePost(PostID("p1"))
+
+        #expect(!store.isDeleted(PostID("p1")))
+        #expect(store.post(PostID("p1")) == nil, "nothing is put back until a list loads it")
+        store.upsert([entry("p1", likes: 11)])
+        #expect(store.post(PostID("p1"))?.likeCount == 11)
+        // Deleted again: one tombstone, as before.
+        store.deletePost(PostID("p1"))
+        #expect(store.isDeleted(PostID("p1")))
+    }
+
     @Test func anEditKeepsTheCounters() {
         let store = EntityStore()
         store.upsert([entry("p1", likes: 10)])

@@ -165,7 +165,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 router: router,
                 cache: cache,
                 followEvents: followEvents,
-                shareLinks: repository as? any ShareLinkManaging
+                shareLinks: repository as? any ShareLinkManaging,
+                postDeleted: onPostDeleted
             ),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
@@ -310,7 +311,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                     trash: trash, viewer: viewer,
                                                     // A restored post is back in the author's gallery: a
                                                     // revisit must not open on the pages without it (#887).
-                                                    onRestored: { [cache] author in cache.removeGallery(for: author) }
+                                                    onRestored: { [cache] author in cache.removeGallery(for: author) },
+                                                    onPostRestored: onPostRestored
                                                 ),
                                                 imagePipeline: imagePipeline
                                             )
@@ -412,6 +414,12 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// the followers lists keep agreeing with a follow made anywhere else.
     /// Nil leaves each screen with the answer it loaded.
     public var followEvents: FollowGraphEvents?
+    /// A post of the viewer's own the server deleted here, and one restored
+    /// from Recently Deleted (#896): the composition root writes them to the
+    /// app's `EntityStore`, so the feeds and For You drop the post — and let
+    /// it in again. Nil: only this profile's gallery knows.
+    public var onPostDeleted: (@MainActor (PostID) -> Void)?
+    public var onPostRestored: (@MainActor (PostID) -> Void)?
     /// The active profile's interest tags (timeline #662), for What You See.
     /// Nil leaves the Your Interests section out.
     public var interestTags: (any InterestTagsManaging)?
@@ -476,7 +484,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 router: router,
                 cache: cache,
                 followEvents: followEvents,
-                lookup: lookup
+                lookup: lookup,
+                // A routed profile can be the viewer's own (a link to it).
+                postDeleted: onPostDeleted
             ),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,

@@ -1,5 +1,6 @@
 import CoreModels
 import CoreNetworking
+import EntityStore
 import Foundation
 import PostGrid
 
@@ -242,6 +243,12 @@ public final class ForYouViewModel {
     /// Keeps the answers live: a follow or an unfollow ACCEPTED anywhere in
     /// the app lands here (`FollowGraphEvents`, #300).
     private var followSubscription: FollowGraphSubscription?
+    /// The app's posts (#896): a post deleted anywhere — the author's
+    /// profile — leaves both corpora, and no later page, refresh or restored
+    /// corpus brings it back for the session. Nil: only what the server
+    /// serves decides.
+    private let entities: EntityStore?
+    private var entityObservation: EntityObservation?
 
     public init(
         repository: any ForYouProviding,
@@ -249,17 +256,22 @@ public final class ForYouViewModel {
         seenStore: ForYouSeenPostsStore = ForYouSeenPostsStore(),
         contextStore: ContentContextStore? = nil,
         followRelations: (any SocialGraphReading)? = nil,
-        followEvents: FollowGraphEvents? = nil
+        followEvents: FollowGraphEvents? = nil,
+        entities: EntityStore? = nil
     ) {
         self.repository = repository
         self.unreadStore = unreadStore
         self.seenStore = seenStore
         self.contextStore = contextStore
         self.followRelations = followRelations
+        self.entities = entities
         if let contextStore { context = contextStore.context }
         // Weak: the channel holds the handler, the handler must not hold this.
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.apply(change)
+        }
+        entityObservation = entities?.observePosts { [weak self] change in
+            self?.dropDeleted(change)
         }
     }
 
@@ -277,10 +289,10 @@ public final class ForYouViewModel {
         // Provisional: every author is asked again with the first load, and
         // the answers take over (`relation(of:)`).
         cachedRelations = cached.relations
-        corpus = source.ordering(cached.following.posts)
+        corpus = source.ordering(withoutDeleted(cached.following.posts))
         nextPageToken = cached.following.nextPageToken
         hasDiscovery = cached.discovery != nil
-        discovery = cached.discovery.map { Self.unique($0.posts) }
+        discovery = cached.discovery.map { Self.unique(withoutDeleted($0.posts)) }
         discoveryToken = cached.discovery?.nextPageToken
         isShowingCachedCorpus = true
         publish()
@@ -371,6 +383,31 @@ public final class ForYouViewModel {
     /// a composition without the channel.
     public func removeAuthor(_ authorID: ProfileID) {
         apply(FollowChange(profileID: authorID, isFollowing: false))
+    }
+
+    /// A post deleted anywhere leaves Discover and the rows at once — a
+    /// re-derivation, so the pages are told first (`onCorpusReset`).
+    private func dropDeleted(_ change: EntityChange<PostID>) {
+        // `.everything` is a viewer change wiping the viewer's facts: nothing
+        // was deleted.
+        guard let entities, case .some(let ids) = change else { return }
+        let deleted = ids.filter(entities.isDeleted)
+        guard !deleted.isEmpty else { return }
+        let shown = (corpus ?? []).contains { deleted.contains($0.id) }
+            || (discovery ?? []).contains { deleted.contains($0.id) }
+        guard shown else { return }
+        corpus?.removeAll { deleted.contains($0.id) }
+        discovery?.removeAll { deleted.contains($0.id) }
+        onCorpusReset?()
+        publish()
+    }
+
+    /// `posts` without the ones deleted this session (`dropDeleted`): a page
+    /// fetched before the delete, or the device's copy of one, still carries
+    /// them.
+    private func withoutDeleted(_ posts: [GalleryPost]) -> [GalleryPost] {
+        guard let entities else { return posts }
+        return posts.filter { !entities.isDeleted($0.id) }
     }
 
     // MARK: - Who is who
@@ -606,7 +643,7 @@ public final class ForYouViewModel {
             // `Dictionary(uniqueKeysWithValues:)` from a tapped tile's slice)
             // took the whole app down when a duplicate reached it.
             let existing = Set((corpus ?? []).map(\.id))
-            let fresh = page.posts.filter { !existing.contains($0.id) }
+            let fresh = withoutDeleted(page.posts).filter { !existing.contains($0.id) }
             #if DEBUG
             if fresh.count != page.posts.count,
                ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
@@ -646,7 +683,7 @@ public final class ForYouViewModel {
             }
             guard let page = try? await repository.discoveryPage(after: token), !Task.isCancelled else { return }
             let existing = Set((discovery ?? []).map(\.id))
-            discovery = (discovery ?? []) + Self.unique(page.posts).filter { !existing.contains($0.id) }
+            discovery = (discovery ?? []) + Self.unique(withoutDeleted(page.posts)).filter { !existing.contains($0.id) }
             discoveryToken = page.nextPageToken
             publish()
             onLoadSettled?()
@@ -729,9 +766,9 @@ public final class ForYouViewModel {
                 // author it is about to move.
                 await resolveRelations(for: page.posts)
                 guard !Task.isCancelled else { return }
-                corpus = source.ordering(page.posts)
+                corpus = source.ordering(withoutDeleted(page.posts))
                 hasDiscovery = discover != nil
-                discovery = discover.map { Self.unique($0.posts) }
+                discovery = discover.map { Self.unique(withoutDeleted($0.posts)) }
                 discoveryToken = discover?.nextPageToken
                 failure = nil
                 isShowingCachedCorpus = false

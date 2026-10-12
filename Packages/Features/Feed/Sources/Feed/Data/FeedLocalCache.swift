@@ -145,6 +145,61 @@ public final class FeedLocalCache: Sendable {
         var tier: CacheTier { self == .recent ? .recent : .speculative }
     }
 
+    // MARK: - Entities (#896)
+
+    /// A post as the device holds it, outside any list: what a cold start
+    /// rebuilds the `EntityStore` from.
+    public struct StoredPost: Sendable, Equatable {
+        /// The post, its author, and its like count: the `counter.v1`
+        /// read's when one is stored — what For You's cards draw — else the
+        /// timeline's.
+        public let entry: FeedEntry
+        public let commentCount: Int64?
+    }
+
+    /// The stored posts, most recently used first, at most `limit`: each with
+    /// its author and a like count. A post missing either is left out — a
+    /// count of 0 standing in for an unknown one would be drawn. Read without
+    /// counting as a use (`LocalStore.entities(ofType:limit:)`).
+    public func storedPosts(limit: Int) -> [StoredPost] {
+        let posts = store.entities(ofType: EntityType.post, limit: limit).compactMap(Self.post(from:))
+        guard !posts.isEmpty else { return [] }
+        var keys: [LocalEntityKey] = []
+        keys.reserveCapacity(posts.count * 3)
+        for post in posts {
+            keys.append(LocalEntityKey(type: EntityType.author, id: post.authorID.rawValue))
+            keys.append(LocalEntityKey(type: EntityType.likes, id: post.id.rawValue))
+            keys.append(LocalEntityKey(type: EntityType.counters, id: post.id.rawValue))
+        }
+        let found = store.entities(keys, countsAsUse: false)
+        return posts.compactMap { post in
+            let id = post.id.rawValue
+            guard let author = found[LocalEntityKey(type: EntityType.author, id: post.authorID.rawValue)]
+                .flatMap(Self.author(from:)) else { return nil }
+            let read = found[LocalEntityKey(type: EntityType.counters, id: id)].flatMap(Self.counters(from:))
+            let timeline = found[LocalEntityKey(type: EntityType.likes, id: id)].flatMap(Self.counters(from:))
+            guard let likes = read?.likes ?? timeline?.likes else { return nil }
+            return StoredPost(
+                entry: FeedEntry(post: post, author: author, likeCount: likes),
+                commentCount: read?.comments
+            )
+        }
+    }
+
+    /// Forgets posts the server no longer serves (a delete): every stored
+    /// list skips them from now on, the next cold start's included.
+    public func forgetPosts(_ ids: Set<PostID>) {
+        guard !ids.isEmpty else { return }
+        let keys = ids.flatMap { id in
+            [EntityType.post, EntityType.likes, EntityType.counters].map { LocalEntityKey(type: $0, id: id.rawValue) }
+        }
+        do {
+            try store.removeEntities(keys)
+        } catch {
+            logger.error("feed cache forget failed: \(String(describing: error), privacy: .public)")
+        }
+    }
+
     // MARK: - Relations
 
     /// Where the viewer stood with each of `authors` when last asked.

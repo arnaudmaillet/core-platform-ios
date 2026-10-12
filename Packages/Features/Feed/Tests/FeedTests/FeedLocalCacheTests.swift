@@ -4,6 +4,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreNetworkingMocks
+import EntityStore
 import Foundation
 import LocalStore
 import PostGrid
@@ -407,6 +408,129 @@ final class ForYouColdStartTests {
         let frameZero = try #require(relaunch.snapshots().first)
         #expect(discoverIDs(frameZero.friends) == ["f1"])
         #expect(discoverIDs(frameZero.following) == ["f2"])
+    }
+}
+
+// MARK: - The EntityStore's device half
+
+/// The app's posts are rebuilt from the device at a cold start, so the lists
+/// restored from it share one entity per post; a delete reaches the device
+/// too (#896).
+@MainActor
+final class EntityDeviceBackingTests {
+    private let folder = StoreFolder()
+    private let viewer = ViewerBox()
+
+    private func makeCache() throws -> FeedLocalCache {
+        let box = viewer
+        return FeedLocalCache(store: try LocalStore(directory: folder.url, viewer: { box.viewer }))
+    }
+
+    /// The last session: For You's Discover with its `counter.v1` read, and
+    /// the Following feed with the timeline's counts, one post in both.
+    private func storeLastSession() throws {
+        let cache = try makeCache()
+        let writer = viewer.viewer
+        cache.storeFirstPage(
+            [cachedEntry("shared", likes: 3), cachedEntry("d1", author: "author-2", likes: 8)],
+            counters: [PostID("shared"): PostCounters(likes: 7, comments: 2)],
+            nextCursor: nil, in: .forYouDiscover, as: writer
+        )
+        cache.storeFirstPage([cachedEntry("f1", likes: 4)], nextCursor: nil, in: .following, as: writer)
+    }
+
+    @Test func aColdStartRebuildsThePostsFromTheDevice() throws {
+        try storeLastSession()
+        // A cold start: a new store on the same file, an empty memory.
+        let entities = EntityStore()
+        let backing = EntityDeviceBacking(entities: entities, cache: try makeCache())
+
+        backing.restore()
+
+        let shared = try #require(entities.post(PostID("shared")))
+        #expect(shared.post?.caption == "caption shared")
+        #expect(shared.likeCount == 7, "the counter read's count, the one For You's cards drew")
+        #expect(shared.commentCount == 2)
+        #expect(entities.post(PostID("d1"))?.likeCount == 8, "else the timeline's")
+        #expect(entities.post(PostID("f1"))?.likeCount == 4)
+        #expect(entities.profile(ProfileID("author-2"))?.summary?.handle == "h-author-2")
+    }
+
+    /// A list restored afterwards — the Following feed's cached first page,
+    /// For You's tiles — fills nothing the rebuild already knows: every list
+    /// draws the one entity.
+    @Test func aListRestoredFromTheDeviceDrawsTheSameEntity() throws {
+        try storeLastSession()
+        let entities = EntityStore()
+        EntityDeviceBacking(entities: entities, cache: try makeCache()).restore()
+
+        // A feed opens on the stored page, whose entry carries the
+        // timeline's count (3), as a copy — the way `FeedViewModel` seeds a
+        // cached page.
+        let stored = try #require(try makeCache().firstPage(of: .forYouDiscover))
+        #expect(stored.entries.first?.likeCount == 3)
+        entities.upsert(stored.entries, counts: .ifUnknown)
+
+        #expect(entities.post(PostID("shared"))?.likeCount == 7)
+    }
+
+    /// The device's copy is older than anything this session read or did.
+    @Test func aRebuildNeverReplacesAFresherCount() throws {
+        try storeLastSession()
+        let entities = EntityStore()
+        entities.upsert([cachedEntry("shared", likes: 12)])
+        entities.addLikes(1, to: PostID("shared"))
+
+        EntityDeviceBacking(entities: entities, cache: try makeCache()).restore()
+
+        #expect(entities.post(PostID("shared"))?.likeCount == 13)
+    }
+
+    /// Deleted this session: the device's copy does not bring it back.
+    @Test func aDeletedPostIsNotRebuilt() throws {
+        try storeLastSession()
+        let entities = EntityStore()
+        entities.deletePost(PostID("d1"))
+
+        EntityDeviceBacking(entities: entities, cache: try makeCache()).restore()
+
+        #expect(entities.post(PostID("d1")) == nil)
+        #expect(entities.post(PostID("shared")) != nil)
+    }
+
+    /// A delete reaches the device's lists: the next cold start opens on them
+    /// without the post, and rebuilds nothing of it.
+    @Test func aDeleteLeavesTheDeviceLists() throws {
+        try storeLastSession()
+        let entities = EntityStore()
+        let backing = EntityDeviceBacking(entities: entities, cache: try makeCache())
+
+        entities.deletePost(PostID("shared"))
+        backing.waitForPendingWrites()
+
+        let relaunched = try makeCache()
+        #expect(relaunched.firstPage(of: .forYouDiscover)?.entries.map(\.post.id.rawValue) == ["d1"])
+        let nextLaunch = EntityStore()
+        EntityDeviceBacking(entities: nextLaunch, cache: relaunched).restore()
+        #expect(nextLaunch.post(PostID("shared")) == nil)
+        #expect(nextLaunch.post(PostID("d1")) != nil)
+    }
+
+    /// The viewer's facts are not rebuilt (they stay viewer-scoped), and
+    /// someone else's device rows rebuild nothing at all.
+    @Test func onlyTheViewersOwnContentIsRebuiltAndNoFacts() throws {
+        try storeLastSession()
+        let cache = try makeCache()
+        cache.storeRelations([ProfileID("author-1"): .following], as: viewer.viewer)
+
+        let entities = EntityStore()
+        EntityDeviceBacking(entities: entities, cache: cache).restore()
+        #expect(entities.relation(to: ProfileID("author-1")) == nil)
+
+        viewer.viewer = .member(account: "acct-2", profile: "prof-9")
+        let someoneElse = EntityStore()
+        EntityDeviceBacking(entities: someoneElse, cache: try makeCache()).restore()
+        #expect(someoneElse.post(PostID("shared")) == nil)
     }
 }
 

@@ -404,8 +404,30 @@ public final class LocalStore: ManagedCache {
         return list
     }
 
+    /// The stored entities of `type`, most recently used first, at most
+    /// `limit` (expired ones left out): what a memory tier rebuilds itself
+    /// from at a cold start (the EntityStore, #896). Not a use — a rebuild
+    /// reads everything, and would otherwise make every row recent.
+    public func entities(ofType type: String, limit: Int) -> [LocalEntity] {
+        guard limit > 0, admitsRead() else { return [] }
+        let now = clock.now
+        return (try? pool.read { db in
+            try Row.fetchAll(
+                db.cachedStatement(sql: """
+                    SELECT type, id, payload, format, fetched_at, expires_at FROM entity
+                    WHERE type = ? AND expires_at > ?
+                    ORDER BY accessed_at DESC LIMIT ?
+                    """),
+                arguments: [type, now.timeIntervalSince1970, limit]
+            ).map(Self.entity(from:))
+        }) ?? []
+    }
+
     /// The stored entities among `keys` (missing and expired ones left out).
-    public func entities(_ keys: [LocalEntityKey]) -> [LocalEntityKey: LocalEntity] {
+    ///
+    /// - Parameter countsAsUse: false for a rebuild (`entities(ofType:limit:)`):
+    ///   the rows found keep their place in the LRU.
+    public func entities(_ keys: [LocalEntityKey], countsAsUse: Bool = true) -> [LocalEntityKey: LocalEntity] {
         guard !keys.isEmpty, admitsRead() else { return [:] }
         let now = clock.now
         let found: [LocalEntityKey: LocalEntity] = (try? pool.read { db in
@@ -434,7 +456,7 @@ public final class LocalStore: ManagedCache {
             $0.statistics.hits += found.count
             $0.statistics.misses += Set(keys).count - found.count
         }
-        if !found.isEmpty {
+        if countsAsUse, !found.isEmpty {
             let touched = Array(found.keys)
             pool.asyncWriteWithoutTransaction { db in
                 guard let statement = try? db.cachedStatement(sql: "UPDATE entity SET accessed_at = ? WHERE type = ? AND id = ?") else { return }

@@ -20,6 +20,8 @@ private actor RevisitGallery: ProfileGalleryProviding, PostTrashManaging {
     init(authored: [String?: GalleryPage]) { self.authored = authored }
 
     func setAuthored(_ page: GalleryPage, for token: String?) { authored[token] = page }
+    private var refusesDeletes = false
+    func refuseDeletes() { refusesDeletes = true }
     var firstPageAsks: Int { authoredAsks.filter { $0 == nil }.count }
 
     func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
@@ -33,7 +35,9 @@ private actor RevisitGallery: ProfileGalleryProviding, PostTrashManaging {
     func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost] { [] }
     func posts(ids: [String]) async throws -> [GalleryPost] { [] }
 
-    func deletePost(_ postID: PostID, author: ProfileID) async throws {}
+    func deletePost(_ postID: PostID, author: ProfileID) async throws {
+        if refusesDeletes { throw ProfileError.transport(message: "refused") }
+    }
     func recentlyDeleted(for author: ProfileID) async throws -> [DeletedPost] { [] }
     func restorePost(_ postID: PostID, author: ProfileID) async throws {}
 }
@@ -94,9 +98,12 @@ struct ProfileGalleryRevisitTests {
     private let id = ProfileID("prof-1")
 
     private func visit(
-        _ gallery: RevisitGallery, cache: ProfileCache, profiles: RevisitProfiles = RevisitProfiles()
+        _ gallery: RevisitGallery, cache: ProfileCache, profiles: RevisitProfiles = RevisitProfiles(),
+        postDeleted: (@MainActor (PostID) -> Void)? = nil
     ) -> (ProfileViewModel, Shown) {
-        let viewModel = ProfileViewModel(repository: profiles, gallery: gallery, source: .profile(id), cache: cache)
+        let viewModel = ProfileViewModel(
+            repository: profiles, gallery: gallery, source: .profile(id), cache: cache, postDeleted: postDeleted
+        )
         let shown = Shown()
         viewModel.onGalleryChange = { shown.snapshots.append($0) }
         viewModel.viewDidLoad()
@@ -250,6 +257,53 @@ struct ProfileGalleryRevisitTests {
 
         #expect(await settle { ids(shown.snapshots.last?.activity) == ["b"] })
         #expect(cache.gallery(for: id)?.authored?.posts.map(\.id.rawValue) == ["b"])
+    }
+
+    /// The delete reaches every other screen through the app (#896): the
+    /// feeds and For You drop the post once the server has it.
+    @Test func aDeleteTheServerAcceptedIsToldToTheApp() async throws {
+        var told: [PostID] = []
+        let (viewModel, shown) = visit(
+            twoPages(), cache: ProfileCache(), profiles: RevisitProfiles(relationship: .me),
+            postDeleted: { told.append($0) }
+        )
+        try #require(await settle { ids(shown.snapshots.last?.activity) == ["a", "b"] && viewModel.isRelationshipSettled })
+
+        viewModel.deletePost(PostID("a"))
+
+        #expect(await settle { told == [PostID("a")] })
+        #expect(await settle { ids(shown.snapshots.last?.activity) == ["b"] })
+    }
+
+    /// Not optimistic: a refused delete tells no one, and the post stays.
+    @Test func aRefusedDeleteIsToldToNoOne() async throws {
+        var told: [PostID] = []
+        var results: [ProfileViewModel.ActionResult] = []
+        let gallery = twoPages()
+        await gallery.refuseDeletes()
+        let (viewModel, shown) = visit(
+            gallery, cache: ProfileCache(), profiles: RevisitProfiles(relationship: .me),
+            postDeleted: { told.append($0) }
+        )
+        viewModel.onActionResult = { results.append($0) }
+        try #require(await settle { ids(shown.snapshots.last?.activity) == ["a", "b"] && viewModel.isRelationshipSettled })
+
+        viewModel.deletePost(PostID("a"))
+
+        #expect(await settle { !results.isEmpty })
+        #expect(told.isEmpty)
+        #expect(ids(shown.snapshots.last?.activity) == ["a", "b"])
+    }
+
+    /// Restored from Recently Deleted: the app lets the post back in (#896).
+    @Test func aRestoredPostIsToldToTheApp() async throws {
+        var told: [PostID] = []
+        let viewModel = RecentlyDeletedViewModel(
+            trash: twoPages(), viewer: RestoreViewer(id: ProfileID("prof-1")),
+            onPostRestored: { told.append($0) }
+        )
+        try await viewModel.restore(DeletedPost(post: post("a", at: 1), deletedAt: Date()))
+        #expect(told == [PostID("a")])
     }
 
     @Test func aRestoredPostDropsTheAuthorsGallery() async throws {

@@ -383,10 +383,12 @@ public final class ProfileViewModel {
         cache: ProfileCache? = nil,
         followEvents: FollowGraphEvents? = nil,
         shareLinks: (any ShareLinkManaging)? = nil,
-        lookup: ProfileLookingUp? = nil
+        lookup: ProfileLookingUp? = nil,
+        postDeleted: (@MainActor (PostID) -> Void)? = nil
     ) {
         self.repository = repository
         self.lookup = lookup
+        self.postDeleted = postDeleted
         if case .lookup(let reference) = source { self.reference = reference } else { self.reference = nil }
         self.shareLinks = shareLinks
         self.mapPinning = mapPinning
@@ -1060,6 +1062,10 @@ public final class ProfileViewModel {
     /// Whether the viewer's own posts can be deleted here (#408).
     public var canDeletePosts: Bool { gallery is any PostTrashManaging }
 
+    /// A delete the server accepted, told to the app (#896): its
+    /// `EntityStore` drops the post from every feed and from For You.
+    private let postDeleted: (@MainActor (PostID) -> Void)?
+
     /// Deletes one of the viewer's own posts. Not optimistic: the tile leaves
     /// once the server has the tombstone, so a refused delete never shows a
     /// post gone and back. It can be restored for 30 days from Settings →
@@ -1070,6 +1076,9 @@ public final class ProfileViewModel {
             do {
                 try await trash.deletePost(postID, author: profile.id)
                 guard let self else { return }
+                // Every other screen first: the feeds and For You drop it
+                // in the same turn as this gallery.
+                self.postDeleted?(postID)
                 self.galleryStore.removeAuthoredPost(postID)
                 // The next visit must not open on the deleted post.
                 self.rememberGallery(of: profile.id)

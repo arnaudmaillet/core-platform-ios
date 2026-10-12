@@ -188,6 +188,50 @@ final class LocalStoreListTests {
         #expect(store.statistics.expirations >= 1)
     }
 
+    // MARK: - A rebuild (#896)
+
+    /// What the EntityStore rebuilds itself from at a cold start: one type,
+    /// most recently used first, bounded, expired rows left out, and never
+    /// for another viewer.
+    @Test func aRebuildReadsOneTypeMostRecentlyUsedFirst() throws {
+        let store = try open()
+        try store.write([post("old")], as: alice)
+        clock.advance(by: 10)
+        try store.replaceList("forYou", with: page(["p1", "p2"], author: "a1", cursor: nil), as: alice)
+        clock.advance(by: 10)
+        try store.write([LocalEntityWrite(key: postKey("short"), payload: Data("s".utf8), lifetime: 5)], as: alice)
+        clock.advance(by: 6)
+
+        let posts = store.entities(ofType: "post", limit: 10)
+        #expect(Set(posts.prefix(2).map(\.key.id)) == ["p1", "p2"], "the list page, written last")
+        #expect(Set(posts.map(\.key.id)) == ["p1", "p2", "old"], "posts only, the expired one left out")
+        #expect(posts.last?.key.id == "old", "least recently used last")
+        #expect(store.entities(ofType: "post", limit: 1).count == 1)
+        #expect(store.entities(ofType: "profile", limit: 10).map(\.key.id) == ["a1"])
+
+        viewer.viewer = bob
+        #expect(store.entities(ofType: "post", limit: 10).isEmpty, "another viewer rebuilds nothing")
+    }
+
+    /// A rebuild reads every row; counting that as a use would make every row
+    /// recent, and the budget would no longer know what was.
+    @Test func aRebuildIsNotAUse() throws {
+        let store = try open()
+        try store.write([post("p1")], as: alice)
+        clock.advance(by: 10)
+        try store.write([post("p2")], as: alice)
+        clock.advance(by: 10)
+
+        _ = store.entities(ofType: "post", limit: 10)
+        _ = store.entities([postKey("p1")], countsAsUse: false)
+        store.waitForPendingWrites()
+
+        #expect(store.entities(ofType: "post", limit: 10).map(\.key.id) == ["p2", "p1"])
+        _ = store.entities([postKey("p1")])
+        store.waitForPendingWrites()
+        #expect(store.entities(ofType: "post", limit: 10).map(\.key.id) == ["p1", "p2"], "a plain read is a use")
+    }
+
     @Test func aReadEntityKeepsItsFetchDate() throws {
         let store = try open()
         let fetched = clock.now
