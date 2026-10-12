@@ -126,6 +126,62 @@ struct VideoLookaheadTests {
         #expect(await eventually { harness.fetcher.cancelledCount == 2 })
     }
 
+    // MARK: - The feed's images (#970)
+
+    /// What the feed's image requests saw: the owners they were asked under,
+    /// and the interests they returned.
+    private final class ImageLog {
+        var owners: [ObjectIdentifier] = []
+        var interests: [String: CacheFillInterest] = [:]
+    }
+
+    /// ⚠️ +2/+3's PICTURES RIDE THE VIDEO'S P2. The feed hands them over as
+    /// speculative requests: they wait for the same 20 s rule as the head
+    /// ranges, are asked under the same page owner, and a swipe cancels them
+    /// with the heads.
+    @Test func theFeedsImagePreloadsShareTheGateTheOwnerAndTheSwipe() async throws {
+        let harness = try makeHarness()
+        let fills = CacheFills<String, Int>(slots: CacheFillSlots(limit: 4))
+        let log = ImageLog()
+        func images(after page: Int) -> [String: VideoLookahead.SpeculativeRequest] {
+            let key = "image:\(page + 2)"
+            return [key: { owner in
+                log.owners.append(ObjectIdentifier(owner))
+                let interest = fills.request(key, priority: .speculative, owner: owner) { _ in
+                    try await Task.sleep(for: .seconds(60))
+                    return 0
+                }
+                log.interests[key] = interest
+                return interest
+            }]
+        }
+        harness.recorder.status = VideoBufferStatus(bufferedAhead: 5, duration: 60, isComplete: false)
+        harness.lookahead.update(
+            page: "post-0", playing: item(0), ahead: [item(1), item(2), item(3)], behind: nil,
+            speculative: images(after: 0)
+        )
+        #expect(harness.lookahead.requestedSpeculative.isEmpty, "waits for the 20 s rule, as the heads do")
+
+        harness.recorder.status = Self.buffered
+        harness.clock.tick()
+        #expect(harness.lookahead.requestedSpeculative == ["image:2"])
+        #expect(log.owners == [ObjectIdentifier(harness.lookahead.pageOwner)], "under the page's owner")
+        #expect(log.interests["image:2"]?.isActive == true)
+
+        harness.lookahead.update(
+            page: "post-1", playing: item(1), ahead: [item(2), item(3), item(4)], behind: item(0),
+            speculative: images(after: 1)
+        )
+        #expect(log.interests["image:2"]?.isActive == false, "a swipe cancels the pictures with the heads")
+        #expect(!fills.isInFlight("image:2"))
+        #expect(harness.lookahead.requestedSpeculative == ["image:3"], "and plans the new page's")
+        harness.recorder.policy = .reduced
+        harness.clock.tick()
+        #expect(harness.lookahead.requestedSpeculative.isEmpty, "no P2 pictures where the policy plans no head range")
+        #expect(!fills.isInFlight("image:3"))
+        harness.lookahead.stop()
+    }
+
     // MARK: - The 20 s start rule
 
     /// ⚠️ P2 WAITS FOR THE PLAYING VIDEO. Nothing is preloaded until the

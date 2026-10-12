@@ -20,21 +20,35 @@ private struct InstantFetcher: ImageFetching {
 
 /// The app's callers, reproduced in their exact shape: a UIKit subclass —
 /// main-actor by INFERENCE, like `ForYouGridPage` — calling the pipeline's
-/// synchronous API from the main thread (the grids' old `prefetch(_:)`,
-/// the lookaheads' `prefetch`, every cover gate's `cachedImage`).
+/// synchronous API from the main thread (a list's `ImageLookahead`, #970,
+/// and every cover gate's `cachedImage`).
 private final class PrefetchingView: UIView {
     let pipeline: ImagePipeline
+    let lookahead: ImageLookahead
+    /// The list's display window: what it has asked for and not dropped.
+    private var wanted: [ImageRequest] = []
 
     init(pipeline: ImagePipeline) {
         self.pipeline = pipeline
+        lookahead = ImageLookahead(pipeline: pipeline, name: "race")
         super.init(frame: .zero)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func warm(_ urls: [URL]) { pipeline.prefetch(urls) }
-    func drop(_ urls: [URL]) { pipeline.cancelPrefetch(urls) }
+    func warm(_ urls: [URL]) {
+        let known = Set(wanted)
+        wanted += urls.map { ImageRequest(url: $0) }.filter { !known.contains($0) }
+        lookahead.update(display: wanted, preload: [])
+    }
+
+    func drop(_ urls: [URL]) {
+        let dropped = Set(urls.map { ImageRequest(url: $0) })
+        wanted.removeAll { dropped.contains($0) }
+        lookahead.update(display: wanted, preload: [])
+    }
+
     func isCached(_ url: URL) -> Bool { pipeline.cachedImage(for: url) != nil }
 }
 
@@ -76,7 +90,7 @@ struct ImagePipelineConcurrencyTests {
             return kept.allSatisfy(view.isCached)
         }
         #expect(landed, "every kept prefetch lands")
-        #expect(await settle { pipeline.pendingPrefetchCount == 0 }, "and none is left pending")
+        #expect(await settle { view.lookahead.activeInterestCount == 0 }, "and none is left pending")
     }
 
     /// A look budget, not a wall-clock deadline: every wait here is positive
@@ -102,18 +116,19 @@ struct ImagePipelineConcurrencyTests {
     @Test func aPrefetchCancelledAndAskedAgainSharesOneFetch() async throws {
         let fetcher = GatedFetcher()
         let pipeline = ImagePipeline(fetcher: fetcher)
+        let view = PrefetchingView(pipeline: pipeline)
         let url = URL(string: "mock://race/successor")!
 
         // The visible load first, so it is surely waiting before the cancel.
         let visible = Task { try await pipeline.image(for: url) }
         #expect(await settle { await fetcher.fetchCount == 1 })
-        pipeline.prefetch([url])
-        pipeline.cancelPrefetch([url])
-        pipeline.prefetch([url])
-        #expect(pipeline.pendingPrefetchCount == 1)
+        view.warm([url])
+        view.drop([url])
+        view.warm([url])
+        #expect(view.lookahead.activeInterestCount == 1)
 
         await fetcher.open()
-        #expect(await settle { pipeline.pendingPrefetchCount == 0 })
+        #expect(await settle { view.lookahead.activeInterestCount == 0 })
         #expect(pipeline.cachedImage(for: url) != nil)
         #expect(await fetcher.fetchCount == 1)
         _ = try await visible.value
@@ -124,13 +139,14 @@ struct ImagePipelineConcurrencyTests {
     @Test func aCancelledPrefetchNobodyElseWantsStopsItsFetch() async throws {
         let fetcher = GatedFetcher()
         let pipeline = ImagePipeline(fetcher: fetcher)
+        let view = PrefetchingView(pipeline: pipeline)
         let url = URL(string: "mock://race/abandoned")!
 
-        pipeline.prefetch([url])
+        view.warm([url])
         #expect(await settle { await fetcher.fetchCount == 1 })
-        pipeline.cancelPrefetch([url])
+        view.drop([url])
 
-        #expect(pipeline.pendingPrefetchCount == 0)
+        #expect(view.lookahead.activeInterestCount == 0)
         #expect(pipeline.inFlightCount == 0)
         await fetcher.open()
     }

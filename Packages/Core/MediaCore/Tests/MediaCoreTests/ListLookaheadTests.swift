@@ -277,6 +277,32 @@ struct ListLookaheadWindowTests {
         grid.setOnScreen(false)
     }
 
+    /// ⚠️ THE POLICY'S `off` IS P0 ONLY (#898): in the background (or
+    /// offline, or at a critical thermal state) no list plans anything and
+    /// the pipeline refuses every prefetch, the vertical feed's included.
+    @Test func inTheBackgroundNothingIsPrefetched() async {
+        let coordinator = CacheCoordinator(device: CacheDevice(physicalMemory: { 4 << 30 }, availableDiskCapacity: { nil }))
+        let fetcher = HeldFetcher(held: false)
+        let pipeline = ImagePipeline(fetcher: fetcher, disk: .folder(folder.url), coordinator: coordinator)
+        coordinator.updateConditions { $0.isInBackground = true }
+        let list = StubList(axis: .vertical)
+        let grid = lookahead(list, pipeline: pipeline, kind: .grid)
+
+        grid.scrollViewDidScroll()
+
+        #expect(grid.planned.display.isEmpty && grid.planned.preload.isEmpty)
+        let feed = CacheOwner("snap-feed")
+        #expect(pipeline.prefetch(image(1).url, window: .display, owner: feed) == nil)
+        #expect(pipeline.prefetch(image(2).url, window: .preload, owner: feed) == nil)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(fetcher.fetchCount == 0)
+
+        coordinator.updateConditions { $0.isInBackground = false }
+        #expect(await eventually { !grid.planned.display.isEmpty }, "back in the foreground: planned afresh")
+        #expect(await eventually { fetcher.fetchCount > 0 })
+        grid.setOnScreen(false)
+    }
+
     @Test func aFlingDownloadsTheDisplayWindowWithoutDecodingUntilItSlows() {
         let time = ManualTime()
         let pipeline = ImagePipeline(fetcher: HeldFetcher(), disk: .folder(folder.url))
@@ -364,5 +390,33 @@ struct LookaheadPagingTests {
         #expect(grid.isFlinging)
         #expect(grid.wantsNextPage, "2200 pt left, but a fling asks three screens ahead")
         grid.setOnScreen(false)
+    }
+}
+
+// MARK: - The vertical feed (#970)
+
+struct VerticalLookaheadPlanTests {
+    /// Page `i` shows `image(i)`; page 4 is a text post (no picture).
+    private let pages: [[ImageRequest]] = (0..<8).map { $0 == 4 ? [] : [image($0)] }
+
+    @Test func plusOneAndTwoAreDecodedAndPlusThreeGoesToDisk() {
+        let plan = VerticalLookaheadPlan.images(around: 0, pages: pages, depth: 3)
+        #expect(Set(plan.display) == images([0, 1, 2]), "the page, +1 and +2 decoded")
+        #expect(plan.preload == [image(3)], "+3 to disk only")
+        let behind = VerticalLookaheadPlan.images(around: 2, pages: pages, depth: 3)
+        #expect(Set(behind.display) == images([1, 2, 3]), "−1 kept; +2 is a text post: data only")
+        #expect(behind.preload == [image(5)])
+    }
+
+    @Test func depthFollowsThePolicy() {
+        #expect(VerticalLookaheadPlan.images(around: 4, pages: pages, depth: 3).preload == [image(7)])
+        let cellular = VerticalLookaheadPlan.images(around: 0, pages: pages, depth: 2)
+        #expect(Set(cellular.display) == images([0, 1, 2]) && cellular.preload.isEmpty, "cellular: +1 and +2 decoded, nothing on disk")
+        let reduced = VerticalLookaheadPlan.images(around: 0, pages: pages, depth: 1)
+        #expect(Set(reduced.display) == images([0, 1]) && reduced.preload.isEmpty, "Low Data / Low Power: +1 only")
+        let off = VerticalLookaheadPlan.images(around: 2, pages: pages, depth: 0)
+        #expect(off.display.isEmpty && off.preload.isEmpty, "off (background, offline): nothing, the page is its cell's own load")
+        let outside = VerticalLookaheadPlan.images(around: 9, pages: pages, depth: 3)
+        #expect(outside.display.isEmpty && outside.preload.isEmpty, "no page there: nothing")
     }
 }

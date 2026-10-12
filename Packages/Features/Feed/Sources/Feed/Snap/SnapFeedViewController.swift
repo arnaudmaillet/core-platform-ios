@@ -4091,7 +4091,15 @@ final class SnapFeedViewController: UIViewController {
         // Off screen, nothing is planned ahead: the warmed and kept players go
         // back and every head preload is cancelled. The next activation plans
         // again (`warmSettledWindow`).
-        if !(isOnScreen && isForeground) { videoLookahead?.stop() }
+        if !(isOnScreen && isForeground) {
+            videoLookahead?.stop()
+            // The stay's pictures too: what only this feed wanted is cancelled.
+            imageLookahead?.revoke()
+            imageLookahead = nil
+        } else if let pending = pendingImagePlan {
+            // Shown: the plan a settle made off screen starts this stay.
+            applyImagePlan(pending)
+        }
         apply(lifecycle.setVisible(isOnScreen && isForeground))
         refreshAudibleSurface()
         setCoverSpinWatch(isOnScreen && isForeground)
@@ -4908,22 +4916,14 @@ final class SnapFeedViewController: UIViewController {
         return collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? SnapCellLifecycle
     }
 
-    /// Everything a page needs that is NOT its player: the cover to decode and
-    /// the comment stream to fetch.
+    /// Everything a page needs that is NOT its player or its pictures: the
+    /// comment stream to fetch. The pictures are the settle's image lookahead
+    /// (`warmImages`, #970).
     ///
-    /// Both are cheap and both are what a viewer notices missing — a page that
-    /// snaps in and then fills itself in reads as a stutter even when no frame
-    /// was dropped.
+    /// Cheap, and what a viewer notices missing — a page that snaps in and
+    /// then fills itself in reads as a stutter even when no frame was dropped.
     func warmContent(at items: [Int]) {
         let ids = items.compactMap { orderedIDs.indices.contains($0) ? orderedIDs[$0] : nil }
-        // ⚠️ THE POSTER TOO. A media page falls back on its poster whenever it
-        // is not decoding — before its first frame and after its last — so an
-        // uncached poster is a black page until an async hop lands it
-        // (measured ~350ms of black on arrival, ~150ms with it warmed).
-        let urls = ids.compactMap { modelsByID[$0] }
-            .flatMap { [$0.avatarURL, $0.mediaURL, $0.thumbnailURL] }
-            .compactMap(\.self)
-        imagePipeline.prefetch(urls)
         // Loaded before the page scrolls in, so its band enters the viewport
         // already streaming (subtitles still wait for settle — their gate is
         // activation, not content).
@@ -4952,7 +4952,7 @@ final class SnapFeedViewController: UIViewController {
     /// disk once the playing clip has buffered enough, and keeps −1's player
     /// (`VideoLookahead`). A pool without a byte cache (tests) only prerolls
     /// the neighbours, as before.
-    private func warmVideo(around active: Int) {
+    private func warmVideo(around active: Int, speculative: [String: VideoLookahead.SpeculativeRequest] = [:]) {
         guard let videoLookahead else {
             warmPlayers(at: SnapWarmWindow.players(around: active, count: orderedIDs.count))
             return
@@ -4965,8 +4965,70 @@ final class SnapFeedViewController: UIViewController {
             ahead: window.ahead.map(lookaheadItem(at:)),
             behind: window.behind.flatMap(lookaheadItem(at:)),
             // Data saver on cellular: nothing loads ahead of the viewer (#409).
-            allowsPreload: MediaPlaybackPolicy.preloads
+            allowsPreload: MediaPlaybackPolicy.preloads,
+            // +2/+3's pictures, to disk: under the video's page owner and
+            // gate, cancelled with its head ranges on a swipe (#970).
+            speculative: speculative
         )
+    }
+
+    /// The pictures around the settled page (#970, `VerticalLookaheadPlan`):
+    /// the page, −1, +1 and +2 decoded at screen size under this stay's owner
+    /// (P1); +3 returned as a speculative request for the video lookahead to
+    /// start once the playing clip has buffered enough, bytes to disk only
+    /// (P2). Depth follows the coordinator's policy. A text page has no
+    /// picture to fetch: it is data only.
+    ///
+    /// The owner is made on the feed's first visibility, never by a settle
+    /// that lands off screen (data arriving under a covering screen): that
+    /// plan waits in `pendingImagePlan` and is applied when the feed shows.
+    ///
+    /// ⚠️ THE POSTER IS THE PICTURE of a video page: it falls back on it
+    /// whenever it is not decoding — before its first frame and after its
+    /// last — so an uncached poster is a black page until an async hop lands
+    /// it (measured ~350ms of black on arrival, ~150ms with it warmed).
+    private func warmImages(around active: Int) -> [String: VideoLookahead.SpeculativeRequest] {
+        let depth = imagePipeline.prefetchPolicy.videoPreloadDepth
+        let reach = (active - 1)...(active + max(depth, 1))
+        let pages: [[ImageRequest]] = orderedIDs.indices.map { reach.contains($0) ? lookaheadImages(at: $0) : [] }
+        let plan = VerticalLookaheadPlan.images(around: active, pages: pages, depth: depth)
+        applyImagePlan(plan.display)
+        let pipeline = imagePipeline
+        var speculative: [String: VideoLookahead.SpeculativeRequest] = [:]
+        for request in plan.preload {
+            speculative["image:\(request.url.absoluteString)"] = { owner in
+                pipeline.prefetch(request.url, size: request.size, window: .preload, owner: owner)
+            }
+        }
+        return speculative
+    }
+
+    /// What a page's cell asks the pipeline for: a photo page's photo, a
+    /// video page's poster, and the author's face; nothing for a text page.
+    private func lookaheadImages(at index: Int) -> [ImageRequest] {
+        guard orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]] else { return [] }
+        let picture: URL? = model.mediaKind == .video ? model.thumbnailURL : model.mediaURL
+        guard let picture else { return [] }
+        return [picture, model.avatarURL].compactMap(\.self).map { ImageRequest(url: $0) }
+    }
+
+    /// The decoded pictures' lookahead for this stay on screen; dropped (its
+    /// owner revoked) when the feed leaves it.
+    private var imageLookahead: ImageLookahead?
+    /// The last plan made while the feed was off screen, for its next stay.
+    private var pendingImagePlan: [ImageRequest]?
+
+    /// Decodes `display` under this stay's owner, made here on first
+    /// visibility; off screen, the plan only waits for the next stay.
+    private func applyImagePlan(_ display: [ImageRequest]) {
+        guard isOnScreen && isForeground else {
+            pendingImagePlan = display
+            return
+        }
+        pendingImagePlan = nil
+        let lookahead = imageLookahead ?? ImageLookahead(pipeline: imagePipeline, name: "snap-feed.images")
+        imageLookahead = lookahead
+        lookahead.update(display: display, preload: [])
     }
 
     /// A single-video page's clip, under the post it plays for — the scope
@@ -4997,7 +5059,7 @@ final class SnapFeedViewController: UIViewController {
         let count = orderedIDs.count
         let content = SnapWarmWindow.content(around: active, count: count)
         warmContent(at: content)
-        warmVideo(around: active)
+        warmVideo(around: active, speculative: warmImages(around: active))
         // ⚠️ AND THE NEXT TEXT PAGE'S INTERFACE, which is the one page whose
         // content is a whole view controller rather than an image. Only the
         // page immediately ahead: it is one view controller's memory, and the
@@ -5017,12 +5079,6 @@ final class SnapFeedViewController: UIViewController {
     private(set) var debugLastWarmedWindow: [Int] = []
     #endif
 
-    private func prefetchURLs(for indexPaths: [IndexPath]) -> [URL] {
-        indexPaths.compactMap { orderedIDs.indices.contains($0.item) ? modelsByID[orderedIDs[$0.item]] : nil }
-            // The poster as well — see `warmContent`.
-            .flatMap { [$0.avatarURL, $0.mediaURL, $0.thumbnailURL] }
-            .compactMap(\.self)
-    }
 }
 
 // MARK: - Delegates
@@ -6690,10 +6746,6 @@ extension SnapFeedViewController: UICollectionViewDataSourcePrefetching {
         warmPlayers(at: indexPaths.map(\.item))
     }
 
-    func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
-        let urls = prefetchURLs(for: indexPaths)
-        imagePipeline.cancelPrefetch(urls)
-    }
 }
 
 #if DEBUG

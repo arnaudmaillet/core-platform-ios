@@ -113,7 +113,7 @@ public enum ImageDiskLocation: Sendable {
 ///
 /// ⚠️ A lock, NOT an `actor`, and the synchronous API is the reason. Every
 /// cover gate in the app reads `cachedImage(for:)` synchronously while it
-/// configures a cell, and the grids call `prefetch(_:)` straight from layout.
+/// configures a cell, and the lists' lookaheads prefetch straight from layout.
 /// While this was an actor those calls compiled with only a WARNING
 /// (`#ActorIsolatedCall` — in a UIKit subclass, whose main-actor isolation is
 /// inferred, not declared) and ran on the main thread WITHOUT entering the
@@ -164,8 +164,6 @@ public final class ImagePipeline: Sendable {
         /// Bumped by every wipe of signed media, so a fill that started before
         /// it never stores what it fetched for the previous viewer.
         var signedGeneration = 0
-        /// `prefetch(_:)`'s interests, by URL.
-        var legacyPrefetches: [URL: CacheFillInterest] = [:]
     }
 
     private enum Negative {
@@ -189,7 +187,6 @@ public final class ImagePipeline: Sendable {
     private let signedDisk: SignedImageDisk?
     private let decodes: CacheFills<ImageKey, UIImage>
     private let bytes: CacheFills<String, ImageFetchResult>
-    private let legacyOwner = CacheOwner("ImagePipeline.prefetch")
     /// Where the pipeline reports its network bytes and, in DEBUG, what each
     /// image found on arrival (`-cache-audit`, #900).
     private let coordinator: CacheCoordinator?
@@ -368,11 +365,16 @@ public final class ImagePipeline: Sendable {
     /// without decoding (P2, waits for a speculative slot). Coalesced with
     /// every other request for the same image.
     ///
+    /// Under the policy's `off` level (a critical thermal state, offline, the
+    /// app in the background) nothing is prefetched at all (#898): P0 only.
+    ///
     /// - Returns: the interest to raise, lower or release; `nil` when the
     ///   image is already where the window wants it (decoded in memory, or on
-    ///   disk for a preload). A revoked owner gets an inactive interest.
+    ///   disk for a preload), or when the policy allows no prefetch. A revoked
+    ///   owner gets an inactive interest.
     @discardableResult
     public func prefetch(_ url: URL, size: ImageBucket = .full, window: ImagePrefetchWindow, owner: CacheOwner) -> CacheFillInterest? {
+        guard prefetchPolicy.level > .off else { return nil }
         let key = ImageKey(url: url, bucket: size)
         if isDecoded(key) { return nil }
         switch window {
@@ -385,53 +387,6 @@ public final class ImagePipeline: Sendable {
             return bytes.request(key.media, priority: .speculative, owner: owner) { [self] context in
                 try await byteFill(url, key: key, context: context)
             }
-        }
-    }
-
-    /// Decodes `urls` at full size ahead of display. The grids' existing
-    /// prefetch, kept for the lists #970 has not moved to `ImageLookahead`
-    /// yet, with its old behaviour: it runs at the visible priority and its
-    /// images are stored as seen (`recent`), since the grids prefetch what
-    /// they are about to show (For You's autoplay covers) and a speculative
-    /// entry could be pushed out by the 20% cap before the cell reads it.
-    ///
-    /// The callers prefetch the next items (the snap feed's neighbours, the
-    /// covers around the visible tiles), what the policy's `reduced` level
-    /// still allows; under `off` (a critical thermal state, offline, the app
-    /// in the background) nothing is prefetched at all (#898).
-    public func prefetch(_ urls: [URL]) {
-        guard prefetchPolicy.level > .off else { return }
-        for url in urls {
-            let pending = state.withLock { $0.legacyPrefetches[url] }
-            if let pending, pending.isActive { continue }
-            let key = ImageKey(url: url, bucket: .full)
-            if isDecoded(key) { continue }
-            let interest = decodes.request(key, priority: .visible, owner: legacyOwner) { [self] context in
-                try await decodeFill(url, key: key, context: context)
-            }
-            state.withLock { state in
-                // Finished ones are swept now and then: the grids ask for
-                // thousands of covers over a session.
-                if state.legacyPrefetches.count >= 256 {
-                    state.legacyPrefetches = state.legacyPrefetches.filter { $0.value.isActive }
-                }
-                state.legacyPrefetches[url] = interest
-            }
-        }
-    }
-
-    /// Drops `prefetch(_:)`'s interest in `urls`: the shared fill is cancelled
-    /// if nobody else waits for it.
-    public func cancelPrefetch(_ urls: [URL]) {
-        let dropped = state.withLock { state in urls.compactMap { state.legacyPrefetches.removeValue(forKey: $0) } }
-        for interest in dropped { interest.release() }
-    }
-
-    /// Prefetches asked for and not yet finished or cancelled.
-    var pendingPrefetchCount: Int {
-        state.withLock { state in
-            state.legacyPrefetches = state.legacyPrefetches.filter { $0.value.isActive }
-            return state.legacyPrefetches.count
         }
     }
 

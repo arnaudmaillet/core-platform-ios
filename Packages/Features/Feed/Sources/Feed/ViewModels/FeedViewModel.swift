@@ -6,6 +6,7 @@ import CoreRealtime
 import CoreStorage
 import EntityStore
 import Foundation
+import MediaCore
 
 /// The slice of the realtime client the feed consumes; a seam for tests.
 public protocol FeedRealtimeSubscribing: Sendable {
@@ -467,8 +468,12 @@ public final class FeedViewModel {
         startPagingIfNearEnd(index)
     }
 
+    /// The next page at 5 posts left or fewer (`LookaheadPaging`, #970), one
+    /// page in flight; the repository writes it to the LocalStore with its
+    /// cursor (#893), and a post re-served by it is dropped by id.
     private func startPagingIfNearEnd(_ index: Int) {
-        guard nextPageToken != nil, pagingLoad == nil, index >= items.count - 5 else { return }
+        guard nextPageToken != nil, pagingLoad == nil,
+              LookaheadPaging.wantsNextPage(index: index, count: items.count) else { return }
         pagingLoad = Task { await loadNextPage() }
     }
 
