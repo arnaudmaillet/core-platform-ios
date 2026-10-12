@@ -114,6 +114,9 @@ struct EntityStoreTests {
         #expect(store.profile(ProfileID("a1"))?.summary?.handle == "a1")
         #expect(postCalls == 1, "a screen drawing the saved glyph re-draws")
         #expect(profileChanges == [.everything])
+        // `-cache-audit` (#900) reads the wipe through the wrapper.
+        let relations = coordinator.usage().lines.first { $0.namespace.name == "entities.relations" }
+        #expect(relations?.statistics.removals[.viewerChanged] == 1)
         withExtendedLifetime((post, profiles)) {}
     }
 

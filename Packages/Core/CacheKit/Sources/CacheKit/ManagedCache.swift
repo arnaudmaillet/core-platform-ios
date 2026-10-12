@@ -25,11 +25,24 @@ public protocol ManagedCache: AnyObject, Sendable {
     /// Persists anything held only in memory (a disk index). Called when the
     /// app goes to the background.
     func flush()
+
+    /// Lookup and eviction counters (`-cache-audit`, #900). Zero by default.
+    var statistics: CacheStatistics { get }
+    /// The coordinator's calls, with the signal behind them, so the cache can
+    /// count its evictions per reason. By default they drop the reason and
+    /// call `setLimits(_:)`, `trim(_:)` and `removeAll()`.
+    func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason)
+    func trim(_ depth: TrimDepth, reason: CacheEvictionReason)
+    func removeAll(reason: CacheEvictionReason)
 }
 
 extension ManagedCache {
     public var medium: CacheMedium { budget.medium }
     public func flush() {}
+    public var statistics: CacheStatistics { CacheStatistics() }
+    public func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason) { setLimits(limits) }
+    public func trim(_ depth: TrimDepth, reason: CacheEvictionReason) { trim(depth) }
+    public func removeAll(reason: CacheEvictionReason) { removeAll() }
 }
 
 /// The time CacheKit reads for last access and expiry. Injected, so a test

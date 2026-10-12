@@ -344,9 +344,18 @@ final class AppContainer {
         // Builds the image pipeline now, which opens its disk stores on a
         // utility task (#894).
         _ = imagePipeline
+        #if DEBUG
+        // `-cache-audit`: every namespace's bytes, hits, evictions per reason
+        // and speculative fates, and the lookahead's counters, every 10 s and
+        // after each trim (#900, `dev/CACHE_AUDIT.md`).
+        cacheAudit = CacheAudit.startIfRequested(cacheCoordinator)
+        #endif
     }
 
     private var cacheSignalsStarted = false
+    #if DEBUG
+    private var cacheAudit: CacheAudit?
+    #endif
 
     /// One post and one profile per id, read by every screen (#896): a like,
     /// a follow, a save or a delete made on one reaches all of them. Its

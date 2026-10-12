@@ -173,7 +173,106 @@ public struct CacheUsage: Sendable, Equatable {
     }
 }
 
+/// Why entries left a cache, for the `-cache-audit` instrument (#900). The
+/// coordinator names the signal behind each trim, limit and wipe it applies
+/// (`ManagedCache.trim(_:reason:)` and its siblings); a cache counts what each
+/// one removed.
+public enum CacheEvictionReason: String, Sendable, CaseIterable {
+    /// Over the byte or speculative limit: an insert, a lease ending, a
+    /// registration or a new Settings limit.
+    case budget
+    case memoryWarning
+    case memoryCritical
+    case background
+    /// Disk budgets shrunk for low free space.
+    case lowDisk
+    /// The wipe of a logout or an account or profile switch.
+    case viewerChanged
+    /// Settings → Storage → Clear.
+    case clear
+    /// Past its expiry (the 24 h of a speculative entry, an absolute expiry,
+    /// an idle lifetime), on a read or a sweep.
+    case expiry
+    /// A `trim(_:)` called without a reason (a consumer's own, a test).
+    case trim
+    /// A `removeAll()` called without a reason.
+    case wipe
+
+    /// A wipe, not an eviction: counted in neither `evictions` nor a waste.
+    public var isWipe: Bool {
+        switch self {
+        case .viewerChanged, .clear, .wipe: true
+        default: false
+        }
+    }
+}
+
+/// What became of a cache's `speculative` entries (prefetched, never shown):
+/// the waste ratio of #970's lookahead.
+///
+/// Every speculative entry is counted once when it is stored, then once when
+/// it leaves the tier: `used` (a read, a lease or a store at a higher tier
+/// promoted it), `wasted` (evicted or expired unused) or `discarded` (wiped,
+/// removed by its key, or replaced by another speculative store). So
+/// `storedBytes == usedBytes + wastedBytes + discardedBytes` plus the
+/// speculative bytes the cache holds now.
+public struct CacheSpeculativeStatistics: Sendable, Equatable {
+    public var stored = 0
+    public var storedBytes = 0
+    public var used = 0
+    public var usedBytes = 0
+    public var wasted = 0
+    public var wastedBytes = 0
+    public var discarded = 0
+    public var discardedBytes = 0
+
+    public init() {}
+
+    /// Wasted bytes over the speculative bytes whose fate is known (used or
+    /// wasted). `nil` before any.
+    public var wasteRatio: Double? {
+        let decided = usedBytes + wastedBytes
+        return decided > 0 ? Double(wastedBytes) / Double(decided) : nil
+    }
+
+    public mutating func recordStored(bytes: Int) {
+        stored += 1
+        storedBytes += bytes
+    }
+
+    public mutating func recordUsed(bytes: Int) {
+        used += 1
+        usedBytes += bytes
+    }
+
+    public mutating func recordWasted(bytes: Int) {
+        wasted += 1
+        wastedBytes += bytes
+    }
+
+    public mutating func recordDiscarded(bytes: Int) {
+        discarded += 1
+        discardedBytes += bytes
+    }
+
+    public static func + (lhs: CacheSpeculativeStatistics, rhs: CacheSpeculativeStatistics) -> CacheSpeculativeStatistics {
+        var sum = lhs
+        sum.stored += rhs.stored
+        sum.storedBytes += rhs.storedBytes
+        sum.used += rhs.used
+        sum.usedBytes += rhs.usedBytes
+        sum.wasted += rhs.wasted
+        sum.wastedBytes += rhs.wastedBytes
+        sum.discarded += rhs.discarded
+        sum.discardedBytes += rhs.discardedBytes
+        return sum
+    }
+}
+
 /// Lookup and eviction counters, for the `-cache-audit` instrument (#900).
+///
+/// Kept in Release too: a few integer additions under the lock the cache
+/// already holds, and what Settings or a test reads.
 public struct CacheStatistics: Sendable, Equatable {
     public var hits = 0
     public var misses = 0
@@ -181,6 +280,44 @@ public struct CacheStatistics: Sendable, Equatable {
     public var evictions = 0
     /// Entries dropped because they expired.
     public var expirations = 0
+    /// Entries removed per reason: evictions, expirations and wipes.
+    public var removals: [CacheEvictionReason: Int] = [:]
+    /// Bytes removed per reason.
+    public var removedBytes: [CacheEvictionReason: Int] = [:]
+    public var speculative = CacheSpeculativeStatistics()
 
     public init() {}
+
+    /// Hits over lookups, `nil` before any.
+    public var hitRate: Double? {
+        let lookups = hits + misses
+        return lookups > 0 ? Double(hits) / Double(lookups) : nil
+    }
+
+    /// Counts `count` entries (`bytes` in all) removed for `reason`: an
+    /// expiry also counts in `expirations`, an eviction in `evictions`, a wipe
+    /// in neither. For a cache whose removals are not one entry at a time
+    /// (the LocalStore's rows, the video cache's ranges).
+    public mutating func recordRemoval(_ reason: CacheEvictionReason, count: Int = 1, bytes: Int = 0) {
+        guard count > 0 else { return }
+        removals[reason, default: 0] += count
+        removedBytes[reason, default: 0] += max(0, bytes)
+        if reason == .expiry {
+            expirations += count
+        } else if !reason.isWipe {
+            evictions += count
+        }
+    }
+
+    /// Counts one entry removed for `reason`, and, if it was an unleased
+    /// speculative entry, its fate: wasted unless the removal is a wipe.
+    mutating func recordRemoval(_ reason: CacheEvictionReason, bytes: Int, wasSpeculative: Bool) {
+        recordRemoval(reason, count: 1, bytes: bytes)
+        guard wasSpeculative else { return }
+        if reason.isWipe {
+            speculative.recordDiscarded(bytes: bytes)
+        } else {
+            speculative.recordWasted(bytes: bytes)
+        }
+    }
 }

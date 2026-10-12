@@ -281,7 +281,7 @@ public final class LocalStore: ManagedCache {
         guard let outcome else { return false }
         state.withLock {
             $0.owner = outcome.owner
-            $0.statistics.evictions += outcome.evicted
+            $0.statistics.recordRemoval(.budget, count: outcome.evicted)
         }
         if outcome.evicted > 0 { compactLater() }
         return outcome.kept
@@ -642,6 +642,11 @@ public final class LocalStore: ManagedCache {
     /// New limits take effect for every write from now on; the eviction they
     /// call for runs on the writer's queue.
     public func setLimits(_ limits: CacheLimits) {
+        setLimits(limits, reason: .budget)
+    }
+
+    /// `reason` (the coordinator's signal) is what the evictions count under.
+    public func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason) {
         state.withLock { $0.limits = limits }
         let now = clock.now
         pool.asyncWriteWithoutTransaction { [weak self] db in
@@ -652,7 +657,7 @@ public final class LocalStore: ManagedCache {
                     evicted = try enforce(db, limits: limits, now: now, protecting: nil, ceiling: .retained).evicted
                     return .commit
                 }
-                state.withLock { $0.statistics.evictions += evicted }
+                state.withLock { $0.statistics.recordRemoval(reason, count: evicted) }
                 if evicted > 0 { try compact(db, truncatingLog: false) }
             } catch {
                 logger.error("local store budget failed: \(String(describing: error), privacy: .public)")
@@ -661,6 +666,10 @@ public final class LocalStore: ManagedCache {
     }
 
     public func trim(_ depth: TrimDepth) {
+        trim(depth, reason: .trim)
+    }
+
+    public func trim(_ depth: TrimDepth, reason: CacheEvictionReason) {
         let now = clock.now
         pool.asyncWriteWithoutTransaction { [weak self] db in
             guard let self else { return }
@@ -671,8 +680,8 @@ public final class LocalStore: ManagedCache {
                     return .commit
                 }
                 state.withLock {
-                    $0.statistics.expirations += counts.expired
-                    $0.statistics.evictions += counts.evicted
+                    $0.statistics.recordRemoval(.expiry, count: counts.expired)
+                    $0.statistics.recordRemoval(reason, count: counts.evicted)
                 }
                 if counts.expired + counts.evicted > 0 { try compact(db, truncatingLog: false) }
             } catch {
