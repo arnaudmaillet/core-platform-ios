@@ -136,6 +136,12 @@ public final class VideoLookahead {
 
     public typealias Apply = @MainActor (_ next: VideoLookaheadItem?, _ previous: VideoLookaheadItem?, _ warmNext: Bool) -> Void
 
+    /// Speculative work of another kind the feed plans for the pages ahead
+    /// (#970: the +2/+3 images, to disk): asked under this lookahead's page
+    /// owner once its P2 gate opens, and cancelled with the head ranges on a
+    /// swipe. Returns the interest, or nil when there is nothing to fetch.
+    public typealias SpeculativeRequest = @MainActor (CacheOwner) -> CacheFillInterest?
+
     private let cache: VideoByteCache
     private let name: String
     private let policy: @MainActor () -> PrefetchPolicy
@@ -159,6 +165,10 @@ public final class VideoLookahead {
     /// Head preloads asked for on this page: an interest, or nil when there
     /// was nothing to fetch (already on disk, not cacheable).
     private var heads: [VideoLookaheadItem: CacheFillInterest?] = [:]
+    /// The feed's other speculative work for this page, by its key, and what
+    /// was asked of it.
+    private var speculative: [String: SpeculativeRequest] = [:]
+    private var extras: [String: CacheFillInterest?] = [:]
     private var resolving: Set<VideoLookaheadItem> = []
     private var reportedUnderBuffered = false
     private var isTicking = false
@@ -214,9 +224,12 @@ public final class VideoLookahead {
     ///   - ahead: the pages after it, +1 first; nil for a page with no clip.
     ///   - behind: the page before it (−1), if it is a video.
     ///   - allowsPreload: false under the feed's data saver: nothing ahead.
+    ///   - speculative: the feed's other P2 work for this page, by key
+    ///     (`SpeculativeRequest`), under the same gate and owner.
     public func update(
         page: String, playing: VideoLookaheadItem?, ahead: [VideoLookaheadItem?],
-        behind: VideoLookaheadItem?, allowsPreload: Bool = true
+        behind: VideoLookaheadItem?, allowsPreload: Bool = true,
+        speculative: [String: SpeculativeRequest] = [:]
     ) {
         if page != self.page {
             // A swipe: every P2 of the page left is cancelled (BytePlus), so
@@ -224,6 +237,7 @@ public final class VideoLookahead {
             owner.revoke()
             owner = CacheOwner(name)
             heads.removeAll()
+            extras.removeAll()
             resolving.removeAll()
             speculativeOpen = false
             notReadySince = nil
@@ -236,6 +250,7 @@ public final class VideoLookahead {
         self.ahead = ahead
         self.behind = behind
         self.allowsPreload = allowsPreload
+        self.speculative = speculative
         evaluate()
         startTicking()
     }
@@ -245,6 +260,8 @@ public final class VideoLookahead {
         owner.revoke()
         owner = CacheOwner(name)
         heads.removeAll()
+        extras.removeAll()
+        speculative = [:]
         resolving.removeAll()
         page = nil
         playing = nil
@@ -262,6 +279,12 @@ public final class VideoLookahead {
     var requestedHeads: Set<VideoLookaheadItem> { Set(heads.keys).union(resolving) }
 
     var activeHeadInterests: Int { heads.values.compactMap { $0 }.filter(\.isActive).count }
+
+    /// The keys of the feed's speculative work asked for on this page.
+    var requestedSpeculative: Set<String> { Set(extras.keys) }
+
+    /// The page's owner: what a swipe revokes.
+    var pageOwner: CacheOwner { owner }
 
     // MARK: - Planning
 
@@ -315,6 +338,13 @@ public final class VideoLookahead {
             heads[item] = nil
         }
         resolving = resolving.filter { wanted.contains($0) }
+        // The feed's own P2 (images) follows the policy too: none where the
+        // policy plans no head range.
+        let wantedExtras = depth >= 2 ? speculative : [:]
+        for (key, interest) in extras where wantedExtras[key] == nil {
+            interest?.release()
+            extras[key] = nil
+        }
         if !speculativeOpen {
             speculativeOpen = playing == nil || state == .failed
                 || status.map(VideoLookaheadGate.allowsSpeculative) ?? false
@@ -323,6 +353,9 @@ public final class VideoLookahead {
         guard speculativeOpen else { return }
         for item in wanted where heads[item] == nil && !resolving.contains(item) {
             requestHead(item)
+        }
+        for (key, request) in wantedExtras where extras[key] == nil {
+            extras[key] = .some(request(owner))
         }
     }
 

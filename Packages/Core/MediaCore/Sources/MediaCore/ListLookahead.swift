@@ -120,6 +120,55 @@ public enum LookaheadPlanner {
     }
 }
 
+/// The vertical full-screen feed's image plan around the page it settled
+/// on (#970), by item rather than by screen:
+///
+/// - the current page (P0, its cell's own load), −1 (kept: a swipe back is
+///   instant), +1 and +2 (P1): decoded at screen size, `display`;
+/// - +3 … +`depth`: bytes to disk only, no decode (P2), `preload`. The feed
+///   hands these to its `VideoLookahead`, so they share its page owner, its
+///   start gate (the playing video buffered enough) and its cancellation on
+///   a swipe.
+///
+/// ⚠️ +2 IS DECODED, a deviation from #970's table (+2/+3 disk-only) decided
+/// by the coordinator on a measurement: with +1 alone, the cell UIKit
+/// prefetches for the next page is configured at the settle, the moment its
+/// decode starts, so it joined the decode in flight instead of finding it
+/// ready (22% ready against develop's 45%, which decoded two ahead). A
+/// pager's display window is the next two pages; pictures are cheap next to
+/// video, which keeps its own +2/+3 head-range rule.
+///
+/// `depth` is the policy's `videoPreloadDepth`: Wi-Fi 3 (+1, +2 decoded, +3
+/// on disk), cellular 2 (+1, +2 decoded), Low Data / Low Power 1 (+1 only),
+/// off 0 (a critical thermal state, offline, the background: nothing, the
+/// current page is its cell's own load). A text post carries no image: its
+/// page is data only.
+public enum VerticalLookaheadPlan {
+    /// Pages ahead decoded at screen size, when the policy reaches that far.
+    public static let decodedAhead = 2
+
+    public static func images(
+        around active: Int, pages: [[ImageRequest]], depth: Int
+    ) -> (display: [ImageRequest], preload: [ImageRequest]) {
+        guard depth > 0, pages.indices.contains(active) else { return ([], []) }
+        func page(_ index: Int) -> [ImageRequest] { pages.indices.contains(index) ? pages[index] : [] }
+        var display: [ImageRequest] = page(active)
+        if depth >= 1 { display += page(active + 1) + page(active - 1) }
+        if depth >= 2 {
+            for index in 2...max(2, min(depth, decodedAhead)) { display += page(active + index) }
+        }
+        var seen = Set(display)
+        var preload: [ImageRequest] = []
+        if depth > decodedAhead {
+            for index in (active + decodedAhead + 1)...(active + depth) {
+                for request in page(index) where seen.insert(request).inserted { preload.append(request) }
+            }
+        }
+        var unique = Set<ImageRequest>()
+        return (display.filter { unique.insert($0).inserted }, preload)
+    }
+}
+
 /// One list's lookahead on screen (#970): a collection view's windows turned
 /// into an `ImageLookahead`'s interests, plus its next-page trigger.
 ///
@@ -307,8 +356,11 @@ public final class ScrollLookahead {
 
     /// The windows the list plans with now.
     public var windows: (display: LookaheadWindow, preload: LookaheadWindow) {
-        if !isInParentWindow || droppedForMemory { return (.none, .none) }
-        return LookaheadWindow.windows(for: pipeline.prefetchPolicy, isHidden: isHidden)
+        // `off` (critical thermal, offline, the background, #898) is P0 only:
+        // nothing planned, so the plan starts afresh once the policy lifts.
+        let policy = pipeline.prefetchPolicy
+        if !isInParentWindow || droppedForMemory || policy.level == .off { return (.none, .none) }
+        return LookaheadWindow.windows(for: policy, isHidden: isHidden)
     }
 
     // MARK: - Planning

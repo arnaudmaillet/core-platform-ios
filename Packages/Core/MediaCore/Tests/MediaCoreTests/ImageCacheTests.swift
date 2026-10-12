@@ -706,8 +706,7 @@ struct ImageReleasePathTests {
         #expect(!pipeline.isDecoded(late), "but memory keeps nothing new")
         #expect(pipeline.decodedUsage.bytes == 0)
         let prefetched = try #require(URL(string: "mock://photo/release-32"))
-        pipeline.prefetch([prefetched])
-        #expect(pipeline.pendingPrefetchCount == 0)
+        #expect(pipeline.prefetch(prefetched, window: .display, owner: CacheOwner("feed")) == nil)
         #expect(fetcher.fetchCount(for: prefetched) == 0, "no prefetch in the background")
 
         coordinator.handle(.willEnterForeground)
@@ -715,20 +714,21 @@ struct ImageReleasePathTests {
         #expect(pipeline.isDecoded(late), "the foreground keeps what it shows again")
     }
 
-    /// The grids' and the snap feed's prefetch of the next items: still run
-    /// under `reduced` (Low Power, Low Data Mode: the next item is allowed),
-    /// never under `off` (a critical thermal state, offline).
+    /// The lists' prefetch of the next items (the display window, P1): still
+    /// run under `reduced` (Low Power, Low Data Mode: the next item is
+    /// allowed), never under `off` (a critical thermal state, offline).
     @Test func theNextItemsPrefetchStopsWhenThePolicyIsOff() async throws {
         let coordinator = CacheCoordinator(device: device(), conditions: CacheConditions(isLowPowerModeEnabled: true))
         let fetcher = ScriptedFetcher()
         let pipeline = ImagePipeline(fetcher: fetcher, coordinator: coordinator)
+        let owner = CacheOwner("feed")
         let next = try #require(URL(string: "mock://photo/release-40"))
-        pipeline.prefetch([next])
+        pipeline.prefetch(next, window: .display, owner: owner)
         #expect(await eventually { pipeline.isDecoded(next) }, "Low Power keeps the next item")
 
         coordinator.handle(.thermalState(.critical))
         let ahead = try #require(URL(string: "mock://photo/release-41"))
-        pipeline.prefetch([ahead])
+        #expect(pipeline.prefetch(ahead, window: .display, owner: owner) == nil)
         try await Task.sleep(for: .milliseconds(50))
         #expect(fetcher.fetchCount(for: ahead) == 0, "a critical thermal state prefetches nothing")
     }
