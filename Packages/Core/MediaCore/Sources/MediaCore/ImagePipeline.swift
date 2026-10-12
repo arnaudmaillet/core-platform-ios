@@ -437,9 +437,9 @@ public final class ImagePipeline: Sendable {
 
     // MARK: - Lookahead signals (#970)
 
-    /// The coordinator's prefetch policy (Low Data, Low Power, thermal state,
-    /// network), `.full` for a pipeline no coordinator manages. A list's
-    /// lookahead sizes its windows from it.
+    /// The coordinator's prefetch policy (Low Data Mode, Low Power, thermal
+    /// state, the network, the background), `.full` for a pipeline no
+    /// coordinator manages. A list's lookahead sizes its windows from it.
     public var prefetchPolicy: PrefetchPolicy { coordinator?.prefetchPolicy ?? .full }
 
     /// Calls `handler` after every change of the coordinator's conditions, on
@@ -463,11 +463,6 @@ public final class ImagePipeline: Sendable {
     }
 
     // MARK: - Introspection
-
-    /// The coordinator's prefetch policy (Low Data Mode, Low Power, thermal
-    /// state, the network, the background); `.full` without a coordinator.
-    /// What a list sizes its prefetch by.
-    public var prefetchPolicy: PrefetchPolicy { coordinator?.prefetchPolicy ?? .full }
 
     /// Whether `url` is decoded at `size` or larger, without counting a use.
     public func isDecoded(_ url: URL, size: ImageBucket = .full) -> Bool {
