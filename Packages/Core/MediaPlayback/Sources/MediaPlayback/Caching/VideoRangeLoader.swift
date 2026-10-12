@@ -117,7 +117,6 @@ final class VideoRangeLoader: @unchecked Sendable {
 
     let remote: URL
     let mediaKey: String
-    let store: DiskStore
     let queue: DispatchQueue
     let mode: Mode
     let chunkSize: Int64
@@ -128,6 +127,12 @@ final class VideoRangeLoader: @unchecked Sendable {
     /// prefetch counters (#900): `nextVideoFirstRange` in `-cache-audit`.
     private let onFirstRange: (@Sendable (Bool) -> Void)?
     private(set) var priority: Float
+    private let storeProvider: @Sendable () -> DiskStore?
+    /// The store, resolved at the first use on `queue` (#1018): the cache
+    /// opens its stores on this queue, ahead of any request. `nil` when they
+    /// could not open: the loader then streams, keeping only what it holds in
+    /// memory.
+    private lazy var store: DiskStore? = storeProvider()
 
     private final class Pending {
         let id: ObjectIdentifier
@@ -191,14 +196,15 @@ final class VideoRangeLoader: @unchecked Sendable {
     private var idleCheckScheduled = false
 
     init(
-        remote: URL, store: DiskStore, fetcher: any VideoRangeFetching, queue: DispatchQueue, mode: Mode,
+        remote: URL, store: @escaping @Sendable () -> DiskStore?, fetcher: any VideoRangeFetching,
+        queue: DispatchQueue, mode: Mode,
         priority: Float, statistics: VideoCacheStatistics, chunkSize: Int64 = VideoByteCache.chunkSize,
         cancelGrace: TimeInterval = VideoRangeLoader.defaultCancelGrace,
         onFirstRange: (@Sendable (Bool) -> Void)? = nil
     ) {
         self.remote = remote
         mediaKey = CacheKey.media(remote)
-        self.store = store
+        storeProvider = store
         self.fetcher = fetcher
         self.queue = queue
         self.mode = mode
@@ -219,7 +225,7 @@ final class VideoRangeLoader: @unchecked Sendable {
         let entry = Pending(id: id, request: request)
         if mode == .playback, !reportedFirstRange, entry.range?.offset == 0 {
             reportedFirstRange = true
-            let hit = store.contains(VideoCacheKeys.chunk(mediaKey, 0))
+            let hit = store?.contains(VideoCacheKeys.chunk(mediaKey, 0)) ?? false
             statistics.update { hit ? ($0.firstRangeHits += 1) : ($0.firstRangeMisses += 1) }
             onFirstRange?(hit)
             let verdict: String = hit ? "HIT" : "MISS"
@@ -325,7 +331,7 @@ final class VideoRangeLoader: @unchecked Sendable {
         if let recent = recentChunks.last(where: { $0.index == chunk }) { return recent.data }
         if let buffer = buffers[chunk] { return buffer }
         let key = VideoCacheKeys.chunk(mediaKey, chunk)
-        if store.contains(key), let data = store.data(for: key) {
+        if let store, store.contains(key), let data = store.data(for: key) {
             if Int64(data.count) == chunkLength(chunk, total: total) {
                 adoptStored(key, isHead: chunk == 0)
                 remember(chunk, data)
@@ -335,7 +341,7 @@ final class VideoRangeLoader: @unchecked Sendable {
             store.removeValue(for: key)
         }
         let partial = VideoCacheKeys.partial(mediaKey, chunk)
-        if store.contains(partial), let data = store.data(for: partial),
+        if let store, store.contains(partial), let data = store.data(for: partial),
            !data.isEmpty, Int64(data.count) < chunkLength(chunk, total: total) {
             buffers[chunk] = data
             return data
@@ -348,8 +354,8 @@ final class VideoRangeLoader: @unchecked Sendable {
     private func isHeld(_ chunk: Int) -> Bool {
         recentChunks.contains { $0.index == chunk }
             || buffers[chunk] != nil
-            || store.contains(VideoCacheKeys.chunk(mediaKey, chunk))
-            || store.contains(VideoCacheKeys.partial(mediaKey, chunk))
+            || store?.contains(VideoCacheKeys.chunk(mediaKey, chunk)) == true
+            || store?.contains(VideoCacheKeys.partial(mediaKey, chunk)) == true
     }
 
     private func isClaimed(_ chunk: Int) -> Bool {
@@ -439,7 +445,7 @@ final class VideoRangeLoader: @unchecked Sendable {
             // The file changed under its URL: what the cache says about it is
             // stale (its chunks are size-checked on read), and the next
             // player learns it again.
-            store.removeValue(for: VideoCacheKeys.info(mediaKey))
+            store?.removeValue(for: VideoCacheKeys.info(mediaKey))
             fail(fetch, VideoRangeFetchFailure(VideoRangeFetchError.truncated))
             return
         }
@@ -544,10 +550,10 @@ final class VideoRangeLoader: @unchecked Sendable {
     private func commit(_ chunk: Int, _ data: Data) {
         remember(chunk, data)
         let key = VideoCacheKeys.chunk(mediaKey, chunk)
-        let written = (try? store.write(data, for: key, tier: tier(forChunk: chunk))) ?? false
+        let written = (try? store?.write(data, for: key, tier: tier(forChunk: chunk))) ?? false
         if written { leaseIfPlaying(key) }
         let partial = VideoCacheKeys.partial(mediaKey, chunk)
-        if store.contains(partial) { store.removeValue(for: partial) }
+        if store?.contains(partial) == true { store?.removeValue(for: partial) }
     }
 
     private func persistPartial(_ chunk: Int) {
@@ -555,20 +561,20 @@ final class VideoRangeLoader: @unchecked Sendable {
               Int64(buffer.count) < chunkLength(chunk, total: info.length)
         else { return }
         let key = VideoCacheKeys.partial(mediaKey, chunk)
-        _ = try? store.write(buffer, for: key, tier: tier(forChunk: chunk))
+        _ = try? store?.write(buffer, for: key, tier: tier(forChunk: chunk))
     }
 
     private func storeInfo(_ info: VideoContentInfo) {
         guard let data = try? JSONEncoder().encode(info) else { return }
         let key = VideoCacheKeys.info(mediaKey)
-        let written = (try? store.write(data, for: key, tier: tier(forChunk: 0))) ?? false
+        let written = (try? store?.write(data, for: key, tier: tier(forChunk: 0))) ?? false
         if written { leaseIfPlaying(key) }
     }
 
     private func loadStoredInfoIfNeeded() {
         guard info == nil else { return }
         let key = VideoCacheKeys.info(mediaKey)
-        guard store.contains(key), let data = store.data(for: key),
+        guard let store, store.contains(key), let data = store.data(for: key),
               let stored = try? JSONDecoder().decode(VideoContentInfo.self, from: data)
         else { return }
         info = stored
@@ -578,7 +584,7 @@ final class VideoRangeLoader: @unchecked Sendable {
     /// A player reading a stored entry pins it, and a head it plays ranks as
     /// a played head from now on, whoever wrote it.
     private func adoptStored(_ key: String, isHead: Bool) {
-        guard mode == .playback else { return }
+        guard mode == .playback, let store else { return }
         if isHead, store.tier(of: key) != .retained { store.setTier(.retained, for: key) }
         if leases[key] == nil || leases[key]?.isReleased == true { leaseIfPlaying(key) }
     }
@@ -586,7 +592,7 @@ final class VideoRangeLoader: @unchecked Sendable {
     private func leaseIfPlaying(_ key: String) {
         guard mode == .playback else { return }
         leases[key]?.release()
-        leases[key] = store.lease(key)
+        leases[key] = store?.lease(key)
     }
 
     private func remember(_ chunk: Int, _ data: Data) {

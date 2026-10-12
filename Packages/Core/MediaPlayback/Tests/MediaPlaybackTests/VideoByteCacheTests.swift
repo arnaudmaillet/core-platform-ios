@@ -16,7 +16,7 @@ struct VideoByteCacheTests {
     private let url = URL(string: "https://media.example.test/v/clip.mp4")!
 
     private func makeCache(_ fetcher: FakeRangeFetcher, chunkSize: Int64 = 1000, coordinator: CacheCoordinator? = nil) throws -> VideoByteCache {
-        try VideoByteCache(
+        VideoByteCache(
             coordinator: coordinator, root: folder.url, fetcher: fetcher, chunkSize: chunkSize, cancelGrace: 0
         )
     }
@@ -309,8 +309,9 @@ struct VideoByteCacheTests {
         let cache = try makeCache(fetcher, coordinator: coordinator)
         #expect(CacheKey.isSigned(signed))
         #expect(!CacheKey.isSigned(url))
-        #expect(coordinator.registeredCaches.contains { $0 === cache.publicStore })
-        #expect(coordinator.registeredCaches.contains { $0 === cache.signedStore })
+        let registered = coordinator.registeredCaches.map(\.namespace)
+        #expect(registered.contains(VideoByteCache.publicNamespace))
+        #expect(registered.contains(VideoByteCache.signedNamespace))
 
         let owner = CacheOwner("logout")
         cache.preloadHead(of: url, owner: owner)

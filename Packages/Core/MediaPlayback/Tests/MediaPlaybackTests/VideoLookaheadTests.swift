@@ -42,7 +42,7 @@ struct VideoLookaheadTests {
         for index in 0..<8 { fetcher.serve(videoBytes(3000), at: remote(index)) }
         let coordinator = CacheCoordinator(device: CacheDevice(physicalMemory: { 4 << 30 }, availableDiskCapacity: { nil }))
         let slots = CacheFillSlots(limit: limit)
-        let cache = try VideoByteCache(
+        let cache = VideoByteCache(
             coordinator: coordinator, root: folder.url, fetcher: fetcher, slots: slots, chunkSize: 1000, cancelGrace: 0
         )
         let recorder = Recorder()

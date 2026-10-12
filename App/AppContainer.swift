@@ -543,17 +543,10 @@ final class AppContainer {
     /// head preloads. Its two namespaces (public and signed) join
     /// `cacheCoordinator` in the `.video` pool (500 MB in Automatic); the
     /// signed one is wiped on every viewer change. Shared by both playback
-    /// pools: one store per namespace per process. Nil only when its folder
-    /// cannot be opened: players then stream as they did before.
-    private lazy var videoByteCache: VideoByteCache? = {
-        do {
-            return try VideoByteCache(coordinator: cacheCoordinator)
-        } catch {
-            Logger(subsystem: "cn.wynn.core-platform-ios", category: "video-cache")
-                .error("video cache unavailable: \(String(describing: error), privacy: .public)")
-            return nil
-        }
-    }()
+    /// pools: one store per namespace per process. Its stores open on the
+    /// cache's own queue, never here on main (#1018); if they cannot open,
+    /// players stream as they did before.
+    private lazy var videoByteCache: VideoByteCache = VideoByteCache(coordinator: cacheCoordinator)
 
     private func makeVideoSource() -> any VideoSource {
         switch environment {
