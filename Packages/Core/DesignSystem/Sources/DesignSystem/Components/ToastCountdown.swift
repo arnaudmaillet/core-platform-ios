@@ -17,6 +17,8 @@ final class ToastCountdown {
         case voiceOverFocus
         /// The scene is not active (backgrounded, app switcher, a call).
         case sceneInactive
+        /// Its stack is spread out: the viewer is reading it.
+        case spread
     }
 
     /// What is left, in seconds.
