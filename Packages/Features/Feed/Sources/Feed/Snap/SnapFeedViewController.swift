@@ -4679,6 +4679,10 @@ final class SnapFeedViewController: UIViewController {
         // In one frame, not dissolved like the bars: the variants differ by
         // one half-opacity layer over 62pt.
         statusBarBlur?.lendStyle(style, from: self)
+        if let band = BottomEdgeBlurView.installed(in: navigationController) {
+            band.lendStyle(style, from: self)
+            styledBottomEdgeBlur = band
+        }
         guard let nav = navigationController else {
             overrideUserInterfaceStyle = style
             return
@@ -4772,6 +4776,8 @@ final class SnapFeedViewController: UIViewController {
         navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
         overrideUserInterfaceStyle = .unspecified
         statusBarBlur?.returnStyle(from: self)
+        styledBottomEdgeBlur?.returnStyle(from: self)
+        styledBottomEdgeBlur = nil
     }
 
     /// The window's status-band blur, which wears the settled page's style
@@ -4780,6 +4786,12 @@ final class SnapFeedViewController: UIViewController {
     private var statusBarBlur: StatusBarBlurView? {
         StatusBarBlurView.installed(in: viewIfLoaded?.window ?? navigationController?.viewIfLoaded?.window)
     }
+
+    /// The stack's bottom blur (#1002) this feed lent its style to, so the
+    /// release hands it back even once the feed is off the stack (the
+    /// departing-flight release runs with `navigationController` nil). See
+    /// `BottomEdgeBlurView`.
+    private weak var styledBottomEdgeBlur: BottomEdgeBlurView?
 
     /// The settled page's model — what the toolbar's share/more act on.
     private var activeModel: FeedItemDisplayModel? {

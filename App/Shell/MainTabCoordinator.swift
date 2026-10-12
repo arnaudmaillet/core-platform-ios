@@ -266,6 +266,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }
         profileMenuOverlay.isContextMenuInteractionEnabled = isMember
         popGestureEnablers = orderedTabs.map { NativePopGestureEnabler(taking: $0.1.navigationController) }
+        // The blur at the foot of the screen, mirroring the status band's:
+        // one per stack, over its screens and under its bars and the tab bar
+        // (#1002) — see `BottomEdgeBlurView`.
+        for (_, tab) in orderedTabs { BottomEdgeBlurView.install(in: tab.navigationController) }
         applyBar(animated: false)
         tabBarController.delegate = self
         // The stake menu's way to the cartridge pack, from any screen.

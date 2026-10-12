@@ -8,13 +8,15 @@ import UIKit
 ///
 /// Every frame (cheap facts only), printed on change:
 ///
-///     [sbb] +5310ms top=ForYouViewController moving band=on front=Y h=62 style=light own=1 offscreen=0 ax=hidden touch=off
+///     [sbb] +5310ms top=ForYouViewController moving band=on front=Y h=62 style=light own=1 offscreen=0 ax=hidden touch=off bottom=62 bottomStyle=light
 ///
 /// `band=on` = installed and not hidden; `front=Y` = no window sibling draws
 /// over it (`zPosition`); `h` = the height its edge effect covers; `own` = the
 /// filtered backdrop layers inside the band (1 in light, 2 in dark);
 /// `offscreen` = its `HeroScrollFrameProbe.Census` count; `ax` / `touch` =
-/// whether VoiceOver or a touch could ever land on it. A frame with
+/// whether VoiceOver or a touch could ever land on it; `bottom` = how far
+/// above the window's foot the on-screen `BottomEdgeBlurView` blurs (#1002 —
+/// the same as `h`), `bottomStyle` its style. A frame with
 /// `band=off` or `front=N` while a transition runs is the flash the window
 /// install exists to prevent.
 ///
@@ -88,9 +90,31 @@ final class StatusBarBlurAudit {
         } else {
             line += " band=none"
         }
+        // The bottom band (#1002) of the stack on screen: the extent of its
+        // filtered backdrops, measured up from the window's foot.
+        let bottoms = Self.bottomBands(in: window)
+        if bottoms.isEmpty {
+            line += " bottom=none"
+        } else {
+            let heights = bottoms.map { band -> Int in
+                // The effect's own layers: the `BackdropView` beside it is
+                // UIKit's capture source (taller, never drawn as a blur).
+                let layers = Self.backdrops(in: band.layer, window: window)
+                    .filter { !$0.filters.isEmpty && $0.owner.hasSuffix("ScrollEdgeEffectView") }
+                guard let top = layers.map(\.frame.minY).min() else { return 0 }
+                return Int((window.bounds.maxY - top).rounded())
+            }
+            line += " bottom=\(heights.map(String.init).joined(separator: ","))"
+                + " bottomStyle=\(bottoms[0].traitCollection.userInterfaceStyle == .dark ? "dark" : "light")"
+        }
         if line != lastFrame {
             lastFrame = line
             Self.log("[sbb] +\(Int((CACurrentMediaTime() - start) * 1000))ms \(line)")
+            for band in bottoms {
+                for backdrop in Self.backdrops(in: band.layer, window: window) where !backdrop.filters.isEmpty {
+                    Self.log("[sbb]   bottom \(backdrop.owner) y=\(Int(backdrop.frame.minY)) h=\(Int(backdrop.frame.height)) \(backdrop.filters)")
+                }
+            }
         }
         // The whole-window walk only once the stack has landed on a new top.
         guard !moving, top != lastStack else { return }
@@ -181,6 +205,20 @@ final class StatusBarBlurAudit {
             }
         }
         return (controller.map { String(describing: type(of: $0)) } ?? "?", moving)
+    }
+
+    /// Every bottom band in the window that is on screen.
+    private static func bottomBands(in window: UIWindow) -> [BottomEdgeBlurView] {
+        var found: [BottomEdgeBlurView] = []
+        func visit(_ view: UIView) {
+            if let band = view as? BottomEdgeBlurView {
+                if !band.isHidden { found.append(band) }
+                return
+            }
+            view.subviews.forEach(visit)
+        }
+        visit(window)
+        return found
     }
 
     private struct Backdrop {
