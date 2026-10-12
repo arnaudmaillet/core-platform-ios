@@ -214,12 +214,13 @@ public final class StatusBarBlurView: UIView {
     }
 }
 
-/// An empty scroll view that only exists to draw its top edge effect.
+/// An empty scroll view that only exists to draw one edge effect: the top one
+/// here, the bottom one in `BottomEdgeBlurView`.
 ///
 /// ⚠️ `scrollsToTop = false` is load-bearing: when more than one on-screen
 /// scroll view answers the status-bar tap, NONE of them scrolls, and the
 /// screen's real list would lose tap-to-top.
-private final class InertEdgeScrollView: UIScrollView {
+final class InertEdgeScrollView: UIScrollView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isScrollEnabled = false
