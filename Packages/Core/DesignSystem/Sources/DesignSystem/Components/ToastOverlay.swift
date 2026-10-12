@@ -97,7 +97,7 @@ final class ToastOverlay {
         self.appWindow = appWindow
         window.windowLevel = .normal + 1
         window.backgroundColor = .clear
-        let root = UIViewController()
+        let root = ToastOverlayRootController(appWindow: appWindow)
         root.view.backgroundColor = .clear
         // No safe area of its own to stand toasts on: the band's frame is the
         // placement, so its edges are where the toasts go.
@@ -125,8 +125,10 @@ final class ToastOverlay {
     /// bottom toast stands on.
     func present(
         _ message: String,
+        detail: String? = nil,
         symbol: String?,
         style: ToastView.Style,
+        action: ToastView.Action? = nil,
         position: ToastPosition,
         from host: UIViewController?,
         above floor: UIView?,
@@ -143,7 +145,7 @@ final class ToastOverlay {
         window.isHidden = false
         window.layoutIfNeeded()
         let toast = ToastView.present(
-            message, symbol: symbol, style: style, position: position, in: container,
+            message, detail: detail, symbol: symbol, style: style, action: action, position: position, in: container,
             edge: position.isTop ? container.topAnchor : container.bottomAnchor
         )
         toast.onRemoved = { [weak self] in self?.hideIfEmpty() }
@@ -312,11 +314,49 @@ final class ToastOverlay {
     }
 }
 
-/// The overlay's window: it takes a touch only on a toast.
+/// The overlay's window: it takes a touch only on a toast, and never becomes
+/// the key window.
+///
+/// ⚠️ NEVER KEY. A window that takes a touch becomes key by default: a tap on
+/// a toast's Retry made the overlay key, the app's window stopped being it,
+/// and the toast that Retry fired went to `Feedback`'s in-screen fallback
+/// (`ToastOverlay.overlay(for:)` serves the key window only) — and the
+/// keyboard's first responder lives in the key window too.
 final class ToastOverlayWindow: UIWindow {
+    override var canBecomeKey: Bool { false }
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         let hit = super.hitTest(point, with: event)
         guard let hit, hit !== self, hit !== rootViewController?.view else { return nil }
         return hit
+    }
+}
+
+/// The overlay window's root: it never votes on what the app's own window
+/// decides — the interface orientations and the status bar — and hands every
+/// question back to the app window's root.
+private final class ToastOverlayRootController: UIViewController {
+    private weak var appWindow: UIWindow?
+
+    init(appWindow: UIWindow) {
+        self.appWindow = appWindow
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private var appRoot: UIViewController? { appWindow?.rootViewController }
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        appRoot?.supportedInterfaceOrientations ?? super.supportedInterfaceOrientations
+    }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        appRoot?.preferredStatusBarStyle ?? super.preferredStatusBarStyle
+    }
+
+    override var prefersStatusBarHidden: Bool {
+        appRoot?.prefersStatusBarHidden ?? super.prefersStatusBarHidden
     }
 }

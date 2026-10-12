@@ -33,8 +33,17 @@ public enum Feedback {
         /// Neither: a neutral notice ("Hidden from this feed"). No haptic —
         /// nothing succeeded or failed, so the hand has nothing to learn.
         case info
+        /// It happened with a catch the viewer should know (#954): an orange
+        /// glyph and a warning haptic.
+        case warning
 
-        var style: ToastView.Style { self == .failure ? .failure : .confirmation }
+        var style: ToastView.Style {
+            switch self {
+            case .success, .info: .confirmation
+            case .failure: .failure
+            case .warning: .warning
+            }
+        }
 
         /// The notification haptic the toast arrives with, if any.
         public var haptic: UINotificationFeedbackGenerator.FeedbackType? {
@@ -42,6 +51,7 @@ public enum Feedback {
             case .success: .success
             case .failure: .error
             case .info: nil
+            case .warning: .warning
             }
         }
 
@@ -51,6 +61,7 @@ public enum Feedback {
             case .success: "checkmark.circle.fill"
             case .failure: "exclamationmark.triangle.fill"
             case .info: "info.circle.fill"
+            case .warning: "exclamationmark.circle.fill"
             }
         }
     }
@@ -58,6 +69,7 @@ public enum Feedback {
     /// The action happened: a confirmation toast and a success haptic.
     ///
     /// - Parameters:
+    ///   - detail: an optional second line (#954).
     ///   - source: the screen the action was taken on. The toast goes to the
     ///     topmost presented screen over it, or to `source` itself when
     ///     nothing covers it (see `host(for:)`).
@@ -66,39 +78,62 @@ public enum Feedback {
     ///     lands on `source` itself: on a sheet above it, the floor belongs to
     ///     a screen that is no longer in view.
     ///   - position: one of six places (#954); the bottom centre by default.
+    ///   - action: one trailing action ("Retry", "View"); the toast leaves
+    ///     once it has run.
     @discardableResult
     public static func success(
         _ message: String,
+        detail: String? = nil,
         symbol: String? = Kind.success.defaultSymbol,
         from source: UIViewController,
         above floor: UIView? = nil,
-        at position: ToastPosition = .bottom
+        at position: ToastPosition = .bottom,
+        action: ToastView.Action? = nil
     ) -> ToastView {
-        show(.success, message, symbol: symbol, from: source, above: floor, at: position)
+        show(.success, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
     }
 
     /// The action did not happen: a failure-style toast and an error haptic.
+    /// It stays until closed, acted on or replaced (#954).
     @discardableResult
     public static func failure(
         _ message: String,
+        detail: String? = nil,
         symbol: String? = Kind.failure.defaultSymbol,
         from source: UIViewController,
         above floor: UIView? = nil,
-        at position: ToastPosition = .bottom
+        at position: ToastPosition = .bottom,
+        action: ToastView.Action? = nil
     ) -> ToastView {
-        show(.failure, message, symbol: symbol, from: source, above: floor, at: position)
+        show(.failure, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
+    }
+
+    /// It happened, with a catch: a warning-style toast and a warning haptic.
+    @discardableResult
+    public static func warning(
+        _ message: String,
+        detail: String? = nil,
+        symbol: String? = Kind.warning.defaultSymbol,
+        from source: UIViewController,
+        above floor: UIView? = nil,
+        at position: ToastPosition = .bottom,
+        action: ToastView.Action? = nil
+    ) -> ToastView {
+        show(.warning, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
     }
 
     /// A neutral notice: a confirmation-style toast, no haptic.
     @discardableResult
     public static func info(
         _ message: String,
+        detail: String? = nil,
         symbol: String? = Kind.info.defaultSymbol,
         from source: UIViewController,
         above floor: UIView? = nil,
-        at position: ToastPosition = .bottom
+        at position: ToastPosition = .bottom,
+        action: ToastView.Action? = nil
     ) -> ToastView {
-        show(.info, message, symbol: symbol, from: source, above: floor, at: position)
+        show(.info, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
     }
 
     /// A state that shows on the control itself — a bookmark filling — was
@@ -130,10 +165,12 @@ public enum Feedback {
     private static func show(
         _ kind: Kind,
         _ message: String,
+        detail: String?,
         symbol: String?,
         from source: UIViewController,
         above floor: UIView?,
-        at position: ToastPosition
+        at position: ToastPosition,
+        action: ToastView.Action?
     ) -> ToastView {
         let host = host(for: source)
         let floor = host === source && floor?.window != nil ? floor : nil
@@ -141,7 +178,7 @@ public enum Feedback {
         if let window = host.viewIfLoaded?.window, let overlay = ToastOverlay.overlay(for: window) {
             // The scene's overlay (#954): the toast outlives the screen.
             toast = overlay.present(
-                message, symbol: symbol, style: kind.style, position: position,
+                message, detail: detail, symbol: symbol, style: kind.style, action: action, position: position,
                 from: host, above: floor,
                 keyboardTopY: keyboardTopY(of: host, in: window),
                 interfaceStyle: pinnedStyle(of: host)
@@ -149,7 +186,8 @@ public enum Feedback {
         } else {
             // No scene to draw over (a package test host): in the screen.
             toast = ToastView.present(
-                message, symbol: symbol, style: kind.style, position: position, in: host.view,
+                message, detail: detail, symbol: symbol, style: kind.style, action: action,
+                position: position, in: host.view,
                 edge: position.isTop ? nil : floor?.topAnchor
             )
         }
