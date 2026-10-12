@@ -302,6 +302,19 @@ public final class VideoPlaybackController {
         return AVPlayerItem(asset: byteCache.asset(for: playableURL, priority: priority))
     }
 
+    /// An item for a song or a sound preview (#895): a progressive file over
+    /// HTTP(S), MP3, M4A or a clip played for its sound, reads through the
+    /// byte cache exactly as a clip does (same namespaces, same tiers, pinned
+    /// while it plays), so a sound heard twice is fetched once. A local file,
+    /// or a pool with no cache, opens the URL directly.
+    ///
+    /// The same namespaces on purpose: a post's original sound IS its clip
+    /// (`SnapSoundState.sound(for:playingClip:)`), and a preview of it reads
+    /// the chunks the clip's playback already wrote instead of a second copy.
+    public func soundItem(for url: URL) -> AVPlayerItem {
+        makeItem(for: url, priority: .visible)
+    }
+
     /// Never removed: the block holds this pool weakly, and a pool lives as
     /// long as the app.
     private var memoryWarningObserver: NSObjectProtocol?
@@ -915,12 +928,114 @@ public final class VideoPlaybackController {
     struct ReturnPlayback {
         let key: ReturnKey
         let player: AVPlayer
+        /// Where the clip was parked: the frame its still is taken at.
+        let parkedAt: CMTime
         /// A surface outside any window that keeps the renderer pulling until
         /// the parked frame is decoded, so a landing surface joining later is
         /// primed with it rather than waiting for a decode. Let go once the
         /// frame is there: an idle renderer must not keep the frame clock
         /// running.
         var holder: VideoRenderView?
+        /// The byte cache's hold on the clip's ranges around the parked
+        /// playhead (#895): a budget cut while the post is open cannot drop
+        /// what the close will read. Released with the entry.
+        var pin: VideoRangePin?
+    }
+
+    /// The frame a park showed, and where in the clip it is (#895, the #923
+    /// follow-up).
+    public struct ReturnStill {
+        public let image: UIImage
+        public let seconds: Double
+    }
+
+    /// How many parked frames are kept: twice the players, so the frame of a
+    /// player a deeper stack evicted is still there for its close.
+    public static let returnStillCapacity = 4
+    /// The longest side of a kept frame, in pixels: a tile's picture, not the
+    /// clip's.
+    nonisolated static let returnStillMaxPixels: CGFloat = 720
+
+    /// The frame each park showed, oldest first, outliving its player.
+    ///
+    /// ⚠️ KEPT THROUGH EVICTION AND MEMORY PRESSURE, which are the very cases
+    /// it exists for: a close whose player went (a stack deeper than
+    /// `returnPlaybackCapacity`, a memory warning) shows this frame at once
+    /// instead of the tile's thumbnail (`GridVideoPlaybackCoordinator`). A few
+    /// tile-sized pictures, capped by `returnStillCapacity`. Dropped when a
+    /// landing claims the player (the clip itself is drawing) or the same
+    /// clip is parked again.
+    private var returnStills: [(key: ReturnKey, still: ReturnStill)] = []
+    /// The park each frame capture belongs to: a capture that finishes after
+    /// a claim or a newer park of the clip is dropped.
+    private var returnStillTokens: [ReturnKey: Int] = [:]
+
+    /// The frame parked for `url` under `scope`, if one was captured and is
+    /// still kept.
+    public func returnStill(of url: URL, scope: String, owner: ObjectIdentifier? = nil) -> ReturnStill? {
+        let key = ReturnKey(scope: scope, url: url, owner: owner)
+        return returnStills.last { $0.key == key }?.still
+    }
+
+    private func keepReturnStill(_ still: ReturnStill, for key: ReturnKey, token: Int) {
+        guard returnStillTokens[key] == token else { return }
+        returnStillTokens[key] = nil
+        returnStills.removeAll { $0.key == key }
+        returnStills.append((key, still))
+        while returnStills.count > Self.returnStillCapacity { returnStills.removeFirst() }
+        VideoProducerLog.emit("RETURN STILL \(key.url.lastPathComponent)"
+            + String(format: " at=%.2fs", still.seconds))
+    }
+
+    private func dropReturnStill(for key: ReturnKey) {
+        returnStillTokens[key] = nil
+        returnStills.removeAll { $0.key == key }
+    }
+
+    /// Captures the parked frame of `player`: the renderer's own buffer when
+    /// it holds the parked frame (free, and exactly what was drawn), else one
+    /// image from the asset at the parked time (no renderer under
+    /// `-avplayer-render`, or a decode that missed the holder's ceiling).
+    private func captureReturnStill(of player: AVPlayer, for key: ReturnKey, at parkedAt: CMTime) {
+        guard let token = returnStillTokens[key] else { return }
+        if let renderer = renderers[ObjectIdentifier(player)], let frameTime = renderer.currentFrameTime,
+           frameTime.isValid, abs(frameTime.seconds - parkedAt.seconds) < 0.5,
+           let buffer = renderer.currentFrameBuffer,
+           let image = VideoStillCapture.image(from: buffer, maxPixels: Self.returnStillMaxPixels) {
+            keepReturnStill(ReturnStill(image: image, seconds: frameTime.seconds), for: key, token: token)
+            return
+        }
+        guard let asset = player.currentItem?.asset else {
+            returnStillTokens[key] = nil
+            return
+        }
+        // As DRAWN: the sample-buffer path does not apply the track's
+        // transform (`VideoRenderView.currentFrameBuffer`), a player layer does.
+        let upright = !VideoRenderFlags.usesSampleBufferLayer
+        let source = ReturnStillSource(asset: asset)
+        Task { @MainActor [weak self] in
+            guard let frame = await Self.frame(of: source, at: parkedAt, upright: upright) else {
+                // Nothing to show for this park: its token goes, not kept for good.
+                if self?.returnStillTokens[key] == token { self?.returnStillTokens[key] = nil }
+                return
+            }
+            let still = ReturnStill(image: UIImage(cgImage: frame.image), seconds: frame.seconds)
+            self?.keepReturnStill(still, for: key, token: token)
+        }
+    }
+
+    /// One frame of `asset` at `time`, at a kept frame's size, off the main
+    /// actor (the cached asset reads through the byte cache's queue).
+    private nonisolated static func frame(
+        of source: ReturnStillSource, at time: CMTime, upright: Bool
+    ) async -> (image: CGImage, seconds: Double)? {
+        let generator = AVAssetImageGenerator(asset: source.asset)
+        generator.appliesPreferredTrackTransform = upright
+        generator.maximumSize = CGSize(width: returnStillMaxPixels, height: returnStillMaxPixels)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        guard let generated = try? await generator.image(at: time) else { return nil }
+        return (generated.image, generated.actualTime.seconds)
     }
 
     /// Players parked for a CLOSE to come back to: the tile a post was opened
@@ -950,17 +1065,27 @@ public final class VideoPlaybackController {
     /// resume later. Replaces any player already parked for the same clip, and
     /// evicts the oldest parked player beyond `returnPlaybackCapacity`.
     ///
+    /// With a byte cache (#895), the clip's cached ranges around `seconds`
+    /// are pinned while it is parked (`VideoByteCache.pinRanges`), and the
+    /// parked frame is kept past the player (`returnStill(of:scope:owner:)`).
+    ///
+    /// - Parameter duration: the clip's length, to place `seconds` in the
+    ///   file for the pin. Nil reads it from a player of this pool already
+    ///   playing the clip (the tile's, at the tap).
+    ///
     /// Returns whether a player was parked: false when the asset could not be
     /// resolved, or when a release or newer park overtook this one.
     @discardableResult
     public func parkReturnPlayback(
         of url: URL, scope: String, owner: ObjectIdentifier? = nil,
-        at seconds: Double, peakBitRate: Double = 0
+        at seconds: Double, duration: Double? = nil, peakBitRate: Double = 0
     ) async -> Bool {
         let key = ReturnKey(scope: scope, url: url, owner: owner)
         releaseReturnPlayback(of: url, scope: scope, owner: owner)
         let token = nextGenerationToken()
         returnParkTokens[key] = token
+        // Read now, while the tile's player is certainly still running.
+        let length = duration ?? playingDuration(of: url, scope: scope)
         let resolved: URL
         do {
             resolved = try await source.playableURL(for: url)
@@ -1002,17 +1127,35 @@ public final class VideoPlaybackController {
         // back: the seek above may still be in flight.
         pausedAnchors[ObjectIdentifier(player)] = parkedAt
         player.pause()
-        returnPlaybacks.append(ReturnPlayback(key: key, player: player, holder: holder))
+        let fraction: Double? = length.flatMap { $0 > 0 && $0.isFinite ? parkedAt.seconds / $0 : nil }
+        let pin = byteCache?.pinRanges(of: resolved, near: fraction)
+        returnPlaybacks.append(ReturnPlayback(key: key, player: player, parkedAt: parkedAt, holder: holder, pin: pin))
+        returnStillTokens[key] = token
         VideoProducerLog.emit("RETURN PARK \(VideoProducerLog.name(player)) \(url.lastPathComponent)"
             + String(format: " at=%.2fs", seconds))
         while returnPlaybacks.count > Self.returnPlaybackCapacity {
             let evicted = returnPlaybacks.removeFirst()
             VideoProducerLog.emit("RETURN EVICT \(VideoProducerLog.name(evicted.player)) "
                 + evicted.key.url.lastPathComponent)
-            retire(evicted)
+            retireKeepingStill(evicted)
         }
-        if holder != nil { releaseHolderOnceDecoded(player, at: parkedAt) }
+        if holder != nil {
+            releaseHolderOnceDecoded(player, at: parkedAt)
+        } else {
+            // No renderer to wait for (`-avplayer-render`): from the asset.
+            captureReturnStill(of: player, for: key, at: parkedAt)
+        }
         return true
+    }
+
+    /// The length of the clip a surface of this pool is playing for `url`
+    /// under `scope`, if any is and its item knows it.
+    private func playingDuration(of url: URL, scope: String) -> Double? {
+        for (key, player) in activePlayers where playingURL[key] == url && playingScope[key] == scope {
+            guard let seconds = player.currentItem?.duration.seconds, seconds.isFinite, seconds > 0 else { continue }
+            return seconds
+        }
+        return nil
     }
 
     /// Lets the holder go once the PARKED frame exists (not the item's first
@@ -1043,6 +1186,8 @@ public final class VideoPlaybackController {
         if let index = returnPlaybacks.firstIndex(where: { $0.player === player }) {
             returnPlaybacks[index].holder?.detach(reason: decoded ? "returnHolderDecoded" : "returnHolderCeiling")
             returnPlaybacks[index].holder = nil
+            let entry = returnPlaybacks[index]
+            captureReturnStill(of: player, for: entry.key, at: entry.parkedAt)
         } else if let index = lookaheadPlaybacks.firstIndex(where: { $0.player === player }) {
             lookaheadPlaybacks[index].holder?.detach(reason: decoded ? "lookaheadHolderDecoded" : "lookaheadHolderCeiling")
             lookaheadPlaybacks[index].holder = nil
@@ -1100,6 +1245,8 @@ public final class VideoPlaybackController {
     public func releaseReturnPlayback(of url: URL, scope: String, owner: ObjectIdentifier? = nil) {
         let key = ReturnKey(scope: scope, url: url, owner: owner)
         returnParkTokens[key] = nil
+        // Its owner is done with it: no close will ask for its frame either.
+        dropReturnStill(for: key)
         guard let index = returnPlaybacks.firstIndex(where: { $0.key == key }) else { return }
         retire(returnPlaybacks.remove(at: index))
     }
@@ -1110,7 +1257,9 @@ public final class VideoPlaybackController {
         returnParkTokens.removeAll()
         let released = returnPlaybacks
         returnPlaybacks.removeAll()
-        for entry in released { retire(entry) }
+        // Their frames stay: under memory pressure a close lands on the parked
+        // frame instead of its clip (#895).
+        for entry in released { retireKeepingStill(entry) }
     }
 
     /// Memory pressure or the background (#898, the device cache's memory
@@ -1127,7 +1276,16 @@ public final class VideoPlaybackController {
         idlePlayers.removeAll()
     }
 
+    /// Retires a player whose close may still come: its frame is captured
+    /// first if it was not yet (a renderer's buffer, or the item's asset,
+    /// both gone after `retire`).
+    private func retireKeepingStill(_ entry: ReturnPlayback) {
+        captureReturnStill(of: entry.player, for: entry.key, at: entry.parkedAt)
+        retire(entry)
+    }
+
     private func retire(_ entry: ReturnPlayback) {
+        entry.pin?.release()
         entry.holder?.detach(reason: "returnReleased")
         // Every surface still joined to it (a card that never landed) is
         // dropped by the renderer's invalidation inside `retire`.
@@ -1141,6 +1299,10 @@ public final class VideoPlaybackController {
         guard let index = returnPlaybacks.firstIndex(where: { $0.player === player }) else { return nil }
         let entry = returnPlaybacks.remove(at: index)
         entry.holder?.detach(reason: "returnClaimed")
+        // An ordinary loan from here on: its loader pins what it reads, and
+        // the clip itself is drawing, so its frame is not needed either.
+        entry.pin?.release()
+        dropReturnStill(for: entry.key)
         VideoProducerLog.emit("RETURN CLAIM \(VideoProducerLog.name(player)) \(entry.key.url.lastPathComponent)")
         return entry.key
     }
@@ -1896,6 +2058,13 @@ public final class VideoPlaybackController {
         guard let item = watchedPlayer(in: view)?.currentItem else { return nil }
         let seconds = item.currentTime().seconds
         return seconds.isFinite ? seconds : nil
+    }
+
+    /// The length of the clip in `view`, in seconds, once its item knows it.
+    public func durationSeconds(in view: VideoRenderView) -> Double? {
+        guard let seconds = watchedPlayer(in: view)?.currentItem?.duration.seconds,
+              seconds.isFinite, seconds > 0 else { return nil }
+        return seconds
     }
 
     /// Shows the FILE as shot in `view`, at once, in place of whatever it is
@@ -2759,6 +2928,25 @@ public final class VideoPlaybackController {
 
     var idlePlayerCount: Int { idlePlayers.count }
 
+    /// The byte-cache pin a parked return player holds, for the tests.
+    func debugReturnPin(of url: URL, scope: String, owner: ObjectIdentifier? = nil) -> VideoRangePin? {
+        returnPlaybacks.first { $0.key == ReturnKey(scope: scope, url: url, owner: owner) }?.pin
+    }
+
+    /// A parked frame, kept as a capture would keep it: the grid's tests have
+    /// no clip to decode one from.
+    public func debugKeepReturnStill(_ image: UIImage, at seconds: Double, of url: URL, scope: String, owner: ObjectIdentifier? = nil) {
+        let key = ReturnKey(scope: scope, url: url, owner: owner)
+        returnStills.removeAll { $0.key == key }
+        returnStills.append((key, ReturnStill(image: image, seconds: seconds)))
+    }
+
+    /// The start position filed for the next fresh player of `url` under
+    /// `scope` (`prepareStart`), without spending it.
+    public func debugFiledStart(of url: URL, scope: String) -> Double? {
+        resumeTimes[ResumeKey(scope: scope, url: url)]?.seconds
+    }
+
     /// `-sound-log`'s census: every player bound or parked, whether it is
     /// muted and moving, and which surfaces own it — one line each.
     ///
@@ -2856,4 +3044,11 @@ public final class VideoPlaybackController {
         watchedPlayer(in: view).flatMap { renderers[ObjectIdentifier($0)] }
     }
     #endif
+}
+
+/// The asset a parked frame is read from, handed off the main actor.
+/// `@unchecked`: an asset's loading API is thread-safe, and the read only
+/// loads from it.
+private struct ReturnStillSource: @unchecked Sendable {
+    let asset: AVAsset
 }

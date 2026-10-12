@@ -524,6 +524,7 @@ public final class GridVideoPlaybackCoordinator {
         // never be landed on now, and its landing has long settled (#963).
         releaseReturnPlaybacks()
         returnLandedID = nil
+        returnStillSurface = nil
         if parkingReturn { parkReturnPlayback(of: id) }
         handoffID = id
         isSurfaceVisible = false
@@ -905,11 +906,13 @@ public final class GridVideoPlaybackCoordinator {
         let surface = loans[id].flatMap { $0.watchedClipSurface ?? $0.loadedVideoRenderView }
         let pool = pool
         let seconds = surface.flatMap { pool.playheadSeconds(in: $0) } ?? 0
+        let duration = surface.flatMap { pool.durationSeconds(in: $0) }
         returnURLs[id] = url
         let owner = returnOwner
         returnParkTasks[id] = Task { @MainActor [weak self] in
             let parked = await pool.parkReturnPlayback(
-                of: url, scope: id.rawValue, owner: owner, at: seconds, peakBitRate: Self.tileBitRateCap
+                of: url, scope: id.rawValue, owner: owner, at: seconds, duration: duration,
+                peakBitRate: Self.tileBitRateCap
             )
             // A park that lands for nobody — this coordinator gone, or its
             // scope released before the park could even begin — is given
@@ -920,12 +923,18 @@ public final class GridVideoPlaybackCoordinator {
     }
 
     /// A surface showing `id`'s return player, resumed from where it was
-    /// parked: the arriving picture for a close from another post. Nil when
-    /// nothing is parked for `id` (never parked, evicted, released), and the
+    /// parked: the arriving picture for a close from another post.
+    ///
+    /// When the player went (a deeper stack evicted it, a memory warning
+    /// released it), the surface shows the frame it was parked on instead
+    /// (#895, `VideoPlaybackController.returnStill`): the card fades in the
+    /// tile's exact picture at once, rather than holding for the tile's
+    /// thumbnail. Nil when neither is there (never parked, released), and the
     /// close then lands on the tile's still.
     ///
     /// The surface holds no loan. The landing hands it to
-    /// `adoptAttachedSurface(drawnBy:)`, which claims the player for the tile.
+    /// `adoptAttachedSurface(drawnBy:)`, which claims the player for the tile,
+    /// or (a frame) to `landReturnPlayback`, which makes it the tile's cover.
     public func makeReturnSurface(for id: PostID) -> VideoRenderView? {
         guard let url = returnURLs[id] else { return nil }
         releaseFinishedFlightSurfaces()
@@ -936,10 +945,35 @@ public final class GridVideoPlaybackCoordinator {
         #endif
         // Over the landing's still, never over black: see `makeAttachedSurface`.
         view.paintsOpaqueGround = false
-        guard pool.attachReturnSurface(view, of: url, scope: id.rawValue, owner: returnOwner) else { return nil }
-        flightSurfaces.add(view)
+        if pool.attachReturnSurface(view, of: url, scope: id.rawValue, owner: returnOwner) {
+            flightSurfaces.add(view)
+            return view
+        }
+        guard let still = pool.returnStill(of: url, scope: id.rawValue, owner: returnOwner) else { return nil }
+        #if DEBUG
+        view.debugLabel = "return-still"
+        #endif
+        // No player: the poster is the whole picture, and it draws at once.
+        view.setPoster(still.image)
+        returnStillSurface = ReturnStillSurface(id: id, url: url, view: view, seconds: still.seconds)
         return view
     }
+
+    /// The parked frame `makeReturnSurface` last handed out, until its landing
+    /// (or the next scope).
+    private struct ReturnStillSurface {
+        let id: PostID
+        let url: URL
+        weak var view: VideoRenderView?
+        let seconds: Double
+    }
+
+    private var returnStillSurface: ReturnStillSurface?
+
+    /// The post whose landing took its parked FRAME (#895): its tile shows
+    /// that frame as its cover, so the hold has nothing to wait for. Kept past
+    /// the scope for the reason `returnLandedID` is.
+    public private(set) var returnStillLandedID: PostID?
 
     /// The close that resumed `id`'s return player was abandoned: the post
     /// stays open, so the clip waits, paused, for the next close.
@@ -981,6 +1015,9 @@ public final class GridVideoPlaybackCoordinator {
     public func landReturnPlayback(
         _ view: VideoRenderView, for id: PostID, cell: any GridPlaybackCell
     ) -> Bool {
+        if let still = returnStillSurface, still.id == id, still.view === view {
+            return landReturnStill(still, from: view, cell: cell)
+        }
         guard let url = returnURLs[id],
               adoptAttachedSurface(for: id, url: url, cell: cell, drawnBy: view)
         else { return false }
@@ -999,6 +1036,11 @@ public final class GridVideoPlaybackCoordinator {
     public func isReturnLandingReady(
         for id: PostID, cell: (any GridPlaybackCell)?, hasThumbnail: Bool
     ) -> Bool {
+        if returnStillLandedID == id {
+            // The tile wears the parked frame already: nothing to wait for.
+            returnStillLandedID = nil
+            return true
+        }
         if returnLandedID == id {
             guard isSurfaceRendering(for: id) else { return false }
             // The hold has what it waited for: the landing is settled.
@@ -1007,6 +1049,20 @@ public final class GridVideoPlaybackCoordinator {
         }
         guard let cell, hasThumbnail else { return true }
         return cell.renderedCover != nil
+    }
+
+    /// A close landing on its parked frame: the tile takes it as its cover,
+    /// and its next fresh player starts at that frame (`prepareStart`), so the
+    /// picture the card brought home is the one the tile goes on from.
+    private func landReturnStill(
+        _ still: ReturnStillSurface, from view: VideoRenderView, cell: any GridPlaybackCell
+    ) -> Bool {
+        returnStillSurface = nil
+        guard let image = view.currentStill else { return false }
+        cell.showReturnStill(image)
+        pool.prepareStart(of: still.url, scope: still.id.rawValue, at: still.seconds)
+        returnStillLandedID = still.id
+        return true
     }
 
     private func releaseReturnPlaybacks() {
@@ -1023,6 +1079,9 @@ public final class GridVideoPlaybackCoordinator {
     func debugAwaitReturnParks() async {
         for task in returnParkTasks.values { await task.value }
     }
+
+    /// Whose parks these are in the pool's ledger.
+    var debugReturnOwner: ObjectIdentifier { returnOwner }
     #endif
 
     /// - `flightSurface`: the surface the viewer watched land (the flight
