@@ -84,6 +84,9 @@ public protocol ForYouProviding: Sendable {
     /// Keeps where the viewer stands with these authors, so the next cold
     /// start splits the rows as this one did.
     func rememberRelations(_ relations: [ProfileID: FollowRelation]) async
+    /// The viewer was shown `id` (#970): a page fetched ahead that carries
+    /// it is promoted on the device (`FeedLocalCache.didShow`).
+    nonisolated func didShow(_ id: PostID)
 }
 
 public extension ForYouProviding {
@@ -91,6 +94,7 @@ public extension ForYouProviding {
     func discoveryPage(after token: String) async throws -> ForYouPage? { nil }
     func cachedPages() -> ForYouCachedPages? { nil }
     func rememberRelations(_ relations: [ProfileID: FollowRelation]) async {}
+    nonisolated func didShow(_ id: PostID) {}
 }
 
 /// For You's corpora as the last session left them on the device.
@@ -117,7 +121,7 @@ public struct ForYouCachedPages: Sendable, Equatable {
 /// When discovery gets its own endpoint this is the type that changes, and
 /// nothing above it has to.
 public actor ForYouRepository: ForYouProviding {
-    private let feed: any FeedProviding
+    private nonisolated let feed: any FeedProviding
     /// Reads the numbers the timeline does not carry — see `counters(for:)`.
     /// Optional so a composition root without one still gets a working grid,
     /// with its counters hidden, which is what every card did before this.
@@ -161,7 +165,11 @@ public actor ForYouRepository: ForYouProviding {
             return stored
         }
         let pageCounters = await counters(for: page)
-        localCache?.storeNextPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .forYouDiscover, as: writer)
+        // Fetched ahead of the viewer (`LookaheadPaging`, #970).
+        localCache?.storeNextPage(
+            page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .forYouDiscover,
+            as: writer, tier: .speculative
+        )
         return Self.decorate(Self.map(page), with: pageCounters)
     }
 
@@ -183,7 +191,10 @@ public actor ForYouRepository: ForYouProviding {
             return stored
         }
         let pageCounters = await counters(for: page)
-        localCache?.storeNextPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .forYouFollowing, as: writer)
+        localCache?.storeNextPage(
+            page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .forYouFollowing,
+            as: writer, tier: .speculative
+        )
         return Self.decorate(Self.map(page), with: pageCounters)
     }
 
@@ -228,6 +239,13 @@ public actor ForYouRepository: ForYouProviding {
 
     public func rememberRelations(_ relations: [ProfileID: FollowRelation]) async {
         localCache?.storeRelations(relations, as: localCache?.viewer)
+    }
+
+    /// Both corpora's prefetched pages, and the timeline's own list
+    /// (`feed` writes the following timeline's pages too).
+    public nonisolated func didShow(_ id: PostID) {
+        localCache?.didShow(id)
+        feed.didShow(id)
     }
 
     /// A page's `counter.v1` projections, applied by `decorate`.

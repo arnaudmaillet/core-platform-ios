@@ -88,6 +88,10 @@ final class ForYouPostListViewController: UIViewController {
 
     /// The page scrolled near its end: the host fetches the next page.
     var onNearEnd: (() -> Void)?
+    /// See `ForYouGridPage.onWillDisplayPost`.
+    var onWillDisplayPost: ((PostID) -> Void)? {
+        didSet { page.onWillDisplayPost = onWillDisplayPost }
+    }
     /// Pull to refresh.
     var onRefresh: (() -> Void)?
     /// A row's author was tapped.

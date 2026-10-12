@@ -104,7 +104,8 @@ extension LocalStore {
         let fits = try totalBytes(db) <= limits.bytes && speculativeBytes(db) <= limits.speculativeBytes
         guard !fits else { return (evicted, fits) }
         if let written {
-            try deletePages(of: written.list, from: written.index, in: db)
+            // Never kept: what it counted as stored leaves as discarded.
+            try deletePages(of: written.list, from: written.index, in: db, prefetchedFate: .discarded)
             return (evicted + 1, false)
         }
         if let writtenTranscript {
@@ -137,7 +138,7 @@ extension LocalStore {
     }
 
     /// The bytes of the entities page `p` alone holds, as SQL.
-    private static let exclusiveEntityBytesSQL = """
+    static let exclusiveEntityBytesSQL = """
         IFNULL((SELECT SUM(e.size) FROM list_item i
                 JOIN entity e ON e.type = i.entity_type AND e.id = i.entity_id
                 WHERE i.list_key = p.list_key AND i.page_index = p.page_index AND e.tier = 0
@@ -189,7 +190,8 @@ extension LocalStore {
         case .entity(let key):
             try db.execute(sql: "DELETE FROM entity WHERE type = ? AND id = ?", arguments: [key.type, key.id])
         case .page(let list, let index):
-            try deletePages(of: list, from: index, in: db)
+            // Evicted: a prefetched page among them was never read.
+            try deletePages(of: list, from: index, in: db, prefetchedFate: .wasted)
         case .transcript(let key):
             try deleteTranscript(key, in: db)
         }
@@ -201,8 +203,10 @@ extension LocalStore {
     }
 
     /// Deletes pages `index...` of `list` (the whole list from 0) and the
-    /// entities only they held.
-    func deletePages(of list: String, from index: Int, in db: Database) throws {
+    /// entities only they held. The prefetched pages among them, never read,
+    /// are counted as `prefetchedFate` (#970's waste ratio).
+    func deletePages(of list: String, from index: Int, in db: Database, prefetchedFate: PrefetchedFate) throws {
+        recordPrefetched(prefetchedFate, try prefetchedPageBytes(of: list, from: index, in: db))
         let arguments: StatementArguments = ["list": list, "index": index]
         try db.execute(sql: """
             DELETE FROM entity
@@ -218,6 +222,65 @@ extension LocalStore {
         } else {
             try db.execute(sql: "DELETE FROM list_page WHERE list_key = :list AND page_index >= :index", arguments: arguments)
         }
+    }
+
+    // MARK: - Prefetched pages (#970)
+
+    /// What became of a prefetched page: the four fates of
+    /// `CacheSpeculativeStatistics`.
+    enum PrefetchedFate {
+        case stored
+        /// Read, or shown (`markShown`): promoted to `recent`.
+        case used
+        /// Evicted or expired unread.
+        case wasted
+        /// Replaced by a refresh, removed, wiped, or never kept.
+        case discarded
+    }
+
+    /// Each prefetched page's bytes, by the measure the speculative cap
+    /// uses: its own cost and the entities only it holds. Of `list`'s pages
+    /// `index...last`, or of every list.
+    func prefetchedPageBytes(
+        of list: String? = nil, from index: Int = 0, through last: Int = .max, in db: Database
+    ) throws -> [Int] {
+        let cost: String = "\(Self.pageCostSQL("p")) + \(Self.exclusiveEntityBytesSQL)"
+        guard let list else {
+            return try Int.fetchAll(db, sql: "SELECT \(cost) FROM list_page p WHERE p.tier = 0")
+        }
+        return try Int.fetchAll(db, sql: """
+            SELECT \(cost) FROM list_page p
+            WHERE p.list_key = ? AND p.page_index >= ? AND p.page_index <= ? AND p.tier = 0
+            """, arguments: [list, index, last])
+    }
+
+    /// Counts `pages` (their bytes) under `fate`.
+    func recordPrefetched(_ fate: PrefetchedFate, _ pages: [Int]) {
+        guard !pages.isEmpty else { return }
+        state.withLock { state in
+            for bytes in pages {
+                switch fate {
+                case .stored: state.statistics.speculative.recordStored(bytes: bytes)
+                case .used: state.statistics.speculative.recordUsed(bytes: bytes)
+                case .wasted: state.statistics.speculative.recordWasted(bytes: bytes)
+                case .discarded: state.statistics.speculative.recordDiscarded(bytes: bytes)
+                }
+            }
+        }
+    }
+
+    /// Promotes `list`'s prefetched pages up to `last` to `recent`, counting
+    /// them as used. Every page up to it, not that one alone: a page never
+    /// outranks the one before it (`appendPage`), so eviction keeps taking a
+    /// list from its tail.
+    func promotePrefetchedPages(of list: String, through last: Int, in db: Database) throws {
+        let promoted = try prefetchedPageBytes(of: list, through: last, in: db)
+        guard !promoted.isEmpty else { return }
+        try db.execute(
+            sql: "UPDATE list_page SET tier = ? WHERE list_key = ? AND tier = ? AND page_index <= ?",
+            arguments: [CacheTier.recent.storedRank, list, CacheTier.speculative.storedRank, last]
+        )
+        recordPrefetched(.used, promoted)
     }
 
     // MARK: - Trims
@@ -246,6 +309,7 @@ extension LocalStore {
         case .belowRetained:
             evicted = try evict(try victims(db, maximumTier: .recent), in: db)
         case .allButPinned:
+            recordPrefetched(.wasted, try prefetchedPageBytes(in: db))
             evicted = try Int.fetchOne(db, sql: """
                 SELECT (SELECT COUNT(*) FROM entity) + (SELECT COUNT(*) FROM list_page) + (SELECT COUNT(*) FROM transcript)
                 """) ?? 0
@@ -274,7 +338,7 @@ extension LocalStore {
     private func sweepExpired(_ db: Database, now: Date) throws -> Int {
         let lists = try String.fetchAll(db, sql: "SELECT key FROM list WHERE expires_at <= ?", arguments: [now.timeIntervalSince1970])
         for list in lists {
-            try deletePages(of: list, from: 0, in: db)
+            try deletePages(of: list, from: 0, in: db, prefetchedFate: .wasted)
         }
         try db.execute(sql: "DELETE FROM entity WHERE expires_at <= ?", arguments: [now.timeIntervalSince1970])
         let entities = db.changesCount

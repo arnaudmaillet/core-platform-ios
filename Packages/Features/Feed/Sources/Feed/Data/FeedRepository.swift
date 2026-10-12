@@ -45,6 +45,8 @@ public protocol FeedProviding: Sendable {
     /// turn the feed is built in, so anything awaited lands mid-flight and
     /// rebuilds the nav chrome inside the animation (the measured "flash").
     nonisolated func peekPost(_ id: PostID) -> FeedEntry?
+    /// The viewer was shown `id` (#970): see `FeedLocalCache.didShow`.
+    nonisolated func didShow(_ id: PostID)
     /// Holds a post the client already has in full, so it is never fetched
     /// back.
     ///
@@ -62,6 +64,11 @@ public protocol FeedProviding: Sendable {
 }
 
 public extension FeedProviding {
+    /// The viewer was shown `id`: a page fetched ahead that carries it is
+    /// promoted on the device (#970). Nothing for a provider with no device
+    /// cache.
+    nonisolated func didShow(_ id: PostID) {}
+
     /// Most providers have no synchronous cache; a miss just means the
     /// caller falls back to the async path it already has.
     nonisolated func peekPost(_ id: PostID) -> FeedEntry? { nil }
@@ -117,7 +124,7 @@ public actor FeedRepository: FeedProviding {
     private let authSession: any AuthSessionProviding
     /// The following timeline's pages on the device (#893): the first page a
     /// cold start opens on, the pages after it, and the cursor to go on.
-    private let localCache: FeedLocalCache?
+    private nonisolated let localCache: FeedLocalCache?
     private let pageSize: Int32
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "feed")
 
@@ -193,8 +200,16 @@ public actor FeedRepository: FeedProviding {
             guard let stored = localCache?.page(after: token, in: .following) else { throw error }
             return FeedPage(entries: stored.entries, nextPageToken: stored.nextCursor, isCold: false)
         }
-        localCache?.storeNextPage(page.entries, nextCursor: page.nextPageToken, after: token, in: .following, as: writer)
+        // Fetched ahead of the viewer (`LookaheadPaging`, #970): speculative
+        // until one of its posts is shown.
+        localCache?.storeNextPage(
+            page.entries, nextCursor: page.nextPageToken, after: token, in: .following, as: writer, tier: .speculative
+        )
         return page
+    }
+
+    public nonisolated func didShow(_ id: PostID) {
+        localCache?.didShow(id)
     }
 
     /// Cache-first, single-flight hydration of one post. A warm id returns from

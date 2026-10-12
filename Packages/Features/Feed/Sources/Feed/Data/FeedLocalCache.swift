@@ -6,6 +6,7 @@ import Foundation
 import LocalStore
 import OSLog
 import SwiftProtobuf
+import Synchronization
 
 /// The feed lists the device keeps (#893): each tab's last pages, in the
 /// LocalStore, so it opens on them at cold start and then revalidates.
@@ -58,6 +59,9 @@ public final class FeedLocalCache: Sendable {
 
     public let store: LocalStore
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "feed-cache")
+    /// The posts of each list's prefetched pages not shown yet, page by page
+    /// in list order (#970): what `didShow` promotes.
+    private let prefetched = Mutex<[String: [Set<PostID>]]>([:])
 
     public init(store: LocalStore) {
         self.store = store
@@ -109,6 +113,8 @@ public final class FeedLocalCache: Sendable {
         _ entries: [FeedEntry], counters: [PostID: PostCounters] = [:], nextCursor: String?,
         in key: ListKey, as viewer: LocalStoreViewer?
     ) {
+        // A new first page: the pages fetched ahead after the old one are gone.
+        prefetched.withLock { $0[key.rawValue] = nil }
         do {
             try store.replaceList(
                 key.rawValue, with: Self.page(entries, counters: counters, nextCursor: nextCursor, tier: .retained),
@@ -120,16 +126,21 @@ public final class FeedLocalCache: Sendable {
     }
 
     /// Appends the page fetched with `cursor`. `tier` is `recent` for a page
-    /// the viewer scrolled to; a lookahead's pages (#970) are `speculative`.
+    /// the viewer scrolled to; a lookahead's pages (#970) are `speculative`
+    /// until one of their posts is shown (`didShow`).
     public func storeNextPage(
         _ entries: [FeedEntry], counters: [PostID: PostCounters] = [:], nextCursor: String?,
         after cursor: String, in key: ListKey, as viewer: LocalStoreViewer?, tier: CacheTierForPage = .recent
     ) {
         do {
-            try store.appendPage(
+            let stored = try store.appendPage(
                 Self.page(entries, counters: counters, nextCursor: nextCursor, tier: tier.tier),
                 to: key.rawValue, after: cursor, as: viewer
             )
+            if stored, tier == .speculative {
+                let posts = Set(entries.map(\.post.id))
+                prefetched.withLock { $0[key.rawValue, default: []].append(posts) }
+            }
         } catch {
             logger.error("feed cache write failed: \(String(describing: error), privacy: .public)")
         }
@@ -143,6 +154,27 @@ public final class FeedLocalCache: Sendable {
         case speculative
 
         var tier: CacheTier { self == .recent ? .recent : .speculative }
+    }
+
+    /// The viewer was shown `post` (a cell about to display it): a list
+    /// page fetched ahead that carries it, and every prefetched page before
+    /// it, become `recent` (`LocalStore.markShown`), so they leave the
+    /// speculative cap and count as used, not wasted (#970).
+    ///
+    /// Cheap on main: a lookup among the pages not shown yet, and the
+    /// promotion runs on the store's writer queue.
+    public func didShow(_ post: PostID) {
+        let lists: [String] = prefetched.withLock { pending in
+            var shown: [String] = []
+            for (list, pages) in pending {
+                guard let index = pages.firstIndex(where: { $0.contains(post) }) else { continue }
+                shown.append(list)
+                pending[list] = Array(pages.dropFirst(index + 1))
+            }
+            return shown
+        }
+        let entry = LocalEntityKey(type: EntityType.post, id: post.rawValue)
+        for list in lists { store.markShown(entry, in: list) }
     }
 
     // MARK: - Entities (#896)

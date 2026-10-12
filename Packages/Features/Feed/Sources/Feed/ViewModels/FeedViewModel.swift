@@ -463,6 +463,8 @@ public final class FeedViewModel {
     public func willDisplayItem(at index: Int) {
         if items.indices.contains(index) {
             ensureCommentStreams(for: items[index].id)
+            // Its page was fetched ahead; this is its first display (#970).
+            repository.didShow(items[index].id)
         }
         lastDisplayedIndex = index
         startPagingIfNearEnd(index)
