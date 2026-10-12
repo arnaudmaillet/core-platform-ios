@@ -160,7 +160,7 @@ struct SoundtrackCompositionTests {
     /// exporter's own preset, and the song is heard in ONE track.
     @Test func aSoundtrackOverridesPassthrough() async throws {
         let file = try await ColourClipWriter.clip()
-        let exported = try await VideoExporter().export(VideoExportPlan(
+        let exported = try await VideoExporter().exportAnswering(VideoExportPlan(
             sourceURL: file,
             segments: [VideoExportSegment(start: 0, end: 1), VideoExportSegment(start: 2, end: 4)],
             preset: AVAssetExportPresetPassthrough,

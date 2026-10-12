@@ -347,7 +347,7 @@ struct CrossTransitionTests {
         #expect(abs(duration.seconds - played) < 0.001, "the arrangement lasts \(duration.seconds)s, not \(played)s")
 
         let file = try await ColourClipWriter.clip()
-        let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+        let exported = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: file, segments: segments))
         defer { try? FileManager.default.removeItem(at: exported.fileURL) }
         let asset = AVURLAsset(url: exported.fileURL)
         let pictures = try #require(try await asset.loadTracks(withMediaType: .video).first)
@@ -377,7 +377,9 @@ struct CrossTransitionTests {
             let played = 2.0 - VideoTransitionKind.standardSeconds
             let exported: ExportedVideo
             do {
-                exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+                // An attempt the machine refuses is tried again (#1012); a
+                // kind whose compositor fails every request still fails here.
+                exported = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: file, segments: segments))
             } catch {
                 Issue.record("\(kind) did not export: \(error)")
                 continue

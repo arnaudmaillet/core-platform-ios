@@ -44,7 +44,7 @@ struct CompositorFinishTests {
     }
 
     private func exported(_ plan: VideoExportPlan) async throws -> ExportedVideo {
-        try await VideoExporter().export(plan)
+        try await VideoExporter().exportAnswering(plan)
     }
 
     private func pixel(
