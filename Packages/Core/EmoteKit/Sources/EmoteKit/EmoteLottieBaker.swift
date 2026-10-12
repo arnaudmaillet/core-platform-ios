@@ -275,13 +275,29 @@ enum EmoteMainPark {
     /// nested inside a commit of its own, holding what the bake's needs).
     static let longestWait = DispatchTimeInterval.milliseconds(250)
 
+    /// How long the bake thread waits for the main thread to park before it
+    /// asks again (#1011): the observer is withdrawn, added anew and the main
+    /// thread woken. A main thread busy or in a private run-loop mode for
+    /// longer only delays the commit; the bake thread never waits on one
+    /// request for good, and every bake after it still runs.
+    static let retryInterval = DispatchTimeInterval.milliseconds(500)
+
     private static let parked = Atomic<Int>(0)
     private static let waiting = Atomic<Int>(0)
+    private static let retried = Atomic<Int>(0)
+    private static let capped = Atomic<Int>(0)
+    private static let cappedLogged = Atomic<Bool>(false)
 
     /// Commits made while the main thread was parked — a test seam.
     static var parkedCommits: Int { parked.load(ordering: .relaxed) }
     /// Threads waiting for the main thread to park — a test seam.
     static var waitingCommits: Int { waiting.load(ordering: .relaxed) }
+    /// Requests withdrawn after `retryInterval` and made again — a test seam.
+    static var retries: Int { retried.load(ordering: .relaxed) }
+    /// Times the main thread stopped waiting after `longestWait` while a
+    /// commit was still running: the one path on which a bake's commit can
+    /// meet the main thread's layout again (#1011). Logged once in DEBUG.
+    static var cappedWaits: Int { capped.load(ordering: .relaxed) }
 
     /// Commits the calling thread's transaction: at once on the main thread,
     /// and off it once the main thread is parked.
@@ -293,6 +309,16 @@ enum EmoteMainPark {
         whileParked { CATransaction.commit() }
     }
 
+    /// One request to park the main thread, shared by the observer and the
+    /// thread that made it. Its state decides, once, which of them wins a
+    /// race between the observer firing and the request being withdrawn.
+    private final class Request: Sendable {
+        static let pending = 0, parked = 1, withdrawn = 2
+        let state = Atomic<Int>(Request.pending)
+        let arrived = DispatchSemaphore(value: 0)
+        let released = DispatchSemaphore(value: 0)
+    }
+
     /// Runs `body` on the calling (background) thread while the main thread
     /// is parked. Blocks the caller until the main thread gets there.
     ///
@@ -301,31 +327,64 @@ enum EmoteMainPark {
     /// every busier thread while the main thread stands still. The calling
     /// thread is raised to user-interactive for the wait and the commit, then
     /// put back (a plain thread, not a GCD worker, so its QoS is its own).
+    ///
+    /// ⚠️ **A REQUEST IS WITHDRAWN ONLY IF THE MAIN THREAD HAS NOT TAKEN
+    /// IT.** The observer and the timed-out caller race; each claims the
+    /// request with one compare-and-swap. A main thread that claimed it first
+    /// is parked (or about to be), so the caller commits; one that comes too
+    /// late finds it withdrawn and goes on at once.
     static func whileParked(_ body: () -> Void) {
         dispatchPrecondition(condition: .notOnQueue(.main))
         let previous = qos_class_self()
         pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
         defer { pthread_set_qos_class_self_np(previous, 0) }
-        let arrived = DispatchSemaphore(value: 0)
-        let released = DispatchSemaphore(value: 0)
-        let observer = CFRunLoopObserverCreateWithHandler(
-            kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, false, 2_000_100
-        ) { _, _ in
-            arrived.signal()
-            if released.wait(timeout: .now() + longestWait) == .timedOut {
-                #if DEBUG
-                print("[emote] the main thread waited \(longestWait) for a bake's commit, and went on")
-                #endif
-            }
-        }
         waiting.add(1, ordering: .relaxed)
-        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
-        CFRunLoopWakeUp(CFRunLoopGetMain())
-        arrived.wait()
+        var request = Request()
+        while !park(request) {
+            retried.add(1, ordering: .relaxed)
+            request = Request()
+        }
         waiting.subtract(1, ordering: .relaxed)
         body()
         parked.add(1, ordering: .relaxed)
-        released.signal()
+        request.released.signal()
+    }
+
+    /// Asks the main thread to park for `request`. True once it is parked;
+    /// false when `retryInterval` passed first and the request was withdrawn.
+    private static func park(_ request: Request) -> Bool {
+        let observer = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, false, 2_000_100
+        ) { _, _ in
+            guard request.state.compareExchange(
+                expected: Request.pending, desired: Request.parked, ordering: .acquiringAndReleasing
+            ).exchanged else { return }
+            request.arrived.signal()
+            if request.released.wait(timeout: .now() + longestWait) == .timedOut {
+                noteCappedWait()
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+        if request.arrived.wait(timeout: .now() + retryInterval) == .success { return true }
+        if request.state.compareExchange(
+            expected: Request.pending, desired: Request.withdrawn, ordering: .acquiringAndReleasing
+        ).exchanged {
+            CFRunLoopObserverInvalidate(observer)
+            return false
+        }
+        // The main thread claimed it as the wait ran out: it is parking.
+        request.arrived.wait()
+        return true
+    }
+
+    private static func noteCappedWait() {
+        capped.add(1, ordering: .relaxed)
+        #if DEBUG
+        if !cappedLogged.exchange(true, ordering: .relaxed) {
+            print("[emote] the main thread waited its 250 ms cap for a bake's commit and went on; counted in EmoteMainPark.cappedWaits (logged once)")
+        }
+        #endif
     }
 }
 
