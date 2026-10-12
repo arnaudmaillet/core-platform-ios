@@ -503,12 +503,33 @@ struct ConversationThreadSendAndMuteTests {
         var refuses = false
         /// How long a read takes — a read still out when a follow lands.
         var readDelay: Duration = .zero
+        /// Holds every read until `releaseReads()`: a test that must see the
+        /// screen at rest BEFORE the relation lands asks for it on demand,
+        /// rather than racing a wall-clock delay (#996).
+        var holdsReads = false
+        private var heldReads: [CheckedContinuation<Void, Never>] = []
+        private let heldLock = NSLock()
         private(set) var follows: [ProfileID] = []
         init(_ relation: FollowRelation) { self.relation = relation }
         func followRelation(to profileID: ProfileID) async throws -> FollowRelation {
             let answer = relation
+            if holdsReads {
+                await withCheckedContinuation { continuation in
+                    heldLock.withLock { heldReads.append(continuation) }
+                }
+            }
             if readDelay > .zero { try? await Task.sleep(for: readDelay) }
             return answer
+        }
+        /// Whether a read is waiting on `releaseReads()`.
+        var hasHeldRead: Bool { heldLock.withLock { !heldReads.isEmpty } }
+        func releaseReads() {
+            holdsReads = false
+            let released = heldLock.withLock {
+                defer { heldReads = [] }
+                return heldReads
+            }
+            released.forEach { $0.resume() }
         }
         func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
             if refuses { throw CancellationError() }
@@ -597,7 +618,7 @@ struct ConversationThreadSendAndMuteTests {
     /// for it (it used to be, through the follow tap's swap).
     @Test func aLateRelationChangesTheGlyphInPlace() async throws {
         let graph = Graph(.mutual)
-        graph.readDelay = .milliseconds(150)
+        graph.holdsReads = true
         let (screen, _, window) = makeScreen(graph: graph)
         defer { window.isHidden = true }
         window.layoutIfNeeded()
@@ -607,6 +628,13 @@ struct ConversationThreadSendAndMuteTests {
         #expect(pill.bounds.width > 0)
         #expect(screen.debugPeerFollowBadge == .none, "the relation was already there")
 
+        // ⚠️ AT REST FIRST (#996). The screen's first appearance can redraw
+        // the whole pill on its own (the person landing); on a starved runner
+        // that redraw was still running when a timed read answered, and the
+        // flag below could not tell it from one the relation caused. The read
+        // is held until the pill is still, then released.
+        #expect(await settle { graph.hasHeldRead && !pill.isRedrawingWholePill })
+        graph.releaseReads()
         #expect(await settle { screen.debugPeerFollowBadge == .friends })
         #expect(!pill.isRedrawingWholePill, "the whole pill was redrawn for the relation")
         #expect(pill.drawnBadgeSymbol == "person.2.fill")
