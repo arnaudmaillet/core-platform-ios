@@ -90,9 +90,14 @@ struct BottomEdgeBlurViewTests {
         window.layoutIfNeeded()
         #expect(!band.isUserInteractionEnabled)
         #expect(!band.pocket.isUserInteractionEnabled)
-        // A touch in the band's 62pt lands on the screen under it.
-        let hit = stack.view.hitTest(CGPoint(x: 200, y: 850), with: nil)
-        #expect(hit.map { $0.isDescendant(of: band) } == false)
+        // A touch in the band's 62pt never lands on it — the band answers no
+        // hit test, and the stack's view hands the touch to what is under it
+        // (or to nothing: a window never made visible may not have put the
+        // screen in yet, which is what CI's host does).
+        let point = CGPoint(x: band.bounds.midX, y: band.bounds.maxY - 5)
+        #expect(band.hitTest(point, with: nil) == nil)
+        let hit = stack.view.hitTest(band.convert(point, to: stack.view), with: nil)
+        #expect(hit.map { $0.isDescendant(of: band) } != true)
     }
 
     // MARK: The inert scroll view and the pocket
