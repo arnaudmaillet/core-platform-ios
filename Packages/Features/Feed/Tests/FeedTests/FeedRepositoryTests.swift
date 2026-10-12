@@ -51,7 +51,7 @@ struct FeedRepositoryTests {
             likeStaking: WalletLikeStaking(walletClient: Wallet_V1_WalletServiceClient(client: client), viewer: viewer),
             authSession: session,
             viewer: viewer,
-            snapshotStore: nil
+            localCache: nil
         )
         return (repository, bff)
     }

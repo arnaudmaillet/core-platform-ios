@@ -222,6 +222,11 @@ public final class ForYouViewModel {
     /// lands and never moved again. See `ForYouSessionWatermark`.
     private var sessionWatermark: ForYouSessionWatermark?
     private var failure: String?
+    /// The corpora on screen are the LAST SESSION's, restored from the device
+    /// (#893) and not yet confirmed by the network: a failed first load keeps
+    /// them without a word (the offline indicator says why), and a recovery
+    /// loads again.
+    private var isShowingCachedCorpus = false
     private var nextPageToken: String?
     private var load: Task<Void, Never>?
     private var pageLoad: Task<Void, Never>?
@@ -260,7 +265,25 @@ public final class ForYouViewModel {
 
     public func viewDidLoad() {
         armRecovery()
+        restoreCachedCorpus()
         loadFirstPage(reset: false)
+    }
+
+    /// Opens on what the last session loaded, before any await, so the first
+    /// frame is content rather than skeletons (#893). The first load that
+    /// follows revalidates it in place.
+    private func restoreCachedCorpus() {
+        guard corpus == nil, failure == nil, let cached = repository.cachedPages() else { return }
+        // Provisional: every author is asked again with the first load, and
+        // the answers take over (`relation(of:)`).
+        cachedRelations = cached.relations
+        corpus = source.ordering(cached.following.posts)
+        nextPageToken = cached.following.nextPageToken
+        hasDiscovery = cached.discovery != nil
+        discovery = cached.discovery.map { Self.unique($0.posts) }
+        discoveryToken = cached.discovery?.nextPageToken
+        isShowingCachedCorpus = true
+        publish()
     }
 
     /// Reloads after an outage (#793): what failed while the network was gone
@@ -272,9 +295,10 @@ public final class ForYouViewModel {
     }
 
     private func recoverFromOutage() {
-        // Only a corpus that never arrived, or a failure: `refresh` drops a
-        // loaded one.
-        guard corpus == nil || failure != nil else { return }
+        // Only a corpus that never arrived, a failure, or the last session's
+        // corpus the network has not confirmed yet: `refresh` drops a loaded
+        // one.
+        guard corpus == nil || failure != nil || isShowingCachedCorpus else { return }
         loadFirstPage(reset: false)
     }
 
@@ -379,6 +403,14 @@ public final class ForYouViewModel {
     /// Where the viewer stands with each author seen so far. Filled by
     /// `resolveRelations` as pages land, kept live by `FollowGraphEvents`.
     private var relations: [ProfileID: FollowRelation] = [:]
+    /// The answers the last session stored (#893): what splits a restored
+    /// corpus's rows in its first frame, until `relations` answers.
+    private var cachedRelations: [ProfileID: FollowRelation] = [:]
+
+    /// The fresh answer, else the last session's.
+    private func relation(of author: ProfileID) -> FollowRelation? {
+        relations[author] ?? cachedRelations[author]
+    }
 
     /// Whether `author` is someone the viewer follows — what offers
     /// Unfollow on a card. A known answer decides; an unanswered author is
@@ -387,8 +419,8 @@ public final class ForYouViewModel {
     /// stranger would be a lie.
     public func isFollowed(_ author: ProfileID?) -> Bool {
         guard let author else { return false }
-        if let relation = relations[author] {
-            return Circle.of(relation) == .friend || Circle.of(relation) == .following
+        if let known = relation(of: author) {
+            return Circle.of(known) == .friend || Circle.of(known) == .following
         }
         guard hasDiscovery else { return true }
         return corpus?.contains { $0.authorID == author } == true
@@ -396,7 +428,7 @@ public final class ForYouViewModel {
 
     func circle(of author: ProfileID?) -> Circle {
         guard let author else { return .following }
-        return Circle.of(relations[author])
+        return Circle.of(relation(of: author))
     }
 
     /// A follow or unfollow ACCEPTED anywhere in the app. The author's posts
@@ -407,12 +439,14 @@ public final class ForYouViewModel {
     /// pages are told first (`onCorpusReset`), exactly as a lens change tells
     /// them.
     private func apply(_ change: FollowChange) {
-        let previous = relations[change.profileID]
+        let previous = relation(of: change.profileID)
         let before = Circle.of(previous)
         // The INBOUND half is kept (`settingFollow`), so following back makes
         // a friend and unfollowing a friend leaves a follower. An author never
         // answered for has no known inbound half: asked again below.
-        relations[change.profileID] = (previous ?? .notFollowing).settingFollow(change.isFollowing)
+        let updated = (previous ?? .notFollowing).settingFollow(change.isFollowing)
+        relations[change.profileID] = updated
+        remember([change.profileID: updated])
         if previous == nil, change.isFollowing { reresolve(change.profileID) }
         guard Circle.of(relations[change.profileID]) != before,
               let corpus, corpus.contains(where: { $0.authorID == change.profileID })
@@ -430,6 +464,7 @@ public final class ForYouViewModel {
                   let self, relations[id] != relation else { return }
             let before = circle(of: id)
             relations[id] = relation
+            remember([id: relation])
             guard circle(of: id) != before,
                   corpus?.contains(where: { $0.authorID == id }) == true else { return }
             onCorpusReset?()
@@ -458,9 +493,19 @@ public final class ForYouViewModel {
             for await answer in group { collected.append(answer) }
             return collected
         }
+        var stored: [ProfileID: FollowRelation] = [:]
         for case let (id, relation?) in answers where relations[id] == nil {
             relations[id] = relation
+            stored[id] = relation
         }
+        remember(stored)
+    }
+
+    /// Keeps answers for the next cold start (#893), off the main actor.
+    private func remember(_ answers: [ProfileID: FollowRelation]) {
+        guard !answers.isEmpty else { return }
+        let repository = repository
+        Task { await repository.rememberRelations(answers) }
     }
 
     // MARK: - The corpora
@@ -677,22 +722,29 @@ public final class ForYouViewModel {
                     page = try await followingPage
                 }
                 guard !Task.isCancelled else { return }
+                // What each surface shows now, to tell a revalidation that
+                // changed nothing from one that did.
+                let shownBefore = replacesContent ? (discoverPosts, followingPosts, friendPosts) : nil
                 // Asked before the first publish, so no row ever shows an
                 // author it is about to move.
                 await resolveRelations(for: page.posts)
                 guard !Task.isCancelled else { return }
-                if replacesContent {
-                    // Content → content with no loading frame between: the
-                    // pages would otherwise read a refreshed corpus that
-                    // starts with the old posts as an APPEND (`onCorpusReset`).
-                    onCorpusReset?()
-                }
                 corpus = source.ordering(page.posts)
                 hasDiscovery = discover != nil
                 discovery = discover.map { Self.unique($0.posts) }
                 discoveryToken = discover?.nextPageToken
                 failure = nil
+                isShowingCachedCorpus = false
                 nextPageToken = page.nextPageToken
+                if let shownBefore, shownBefore.0 != discoverPosts
+                    || shownBefore.1 != followingPosts || shownBefore.2 != friendPosts {
+                    // Content → content with no loading frame between: the
+                    // pages would otherwise read a refreshed corpus that
+                    // starts with the old posts as an APPEND (`onCorpusReset`).
+                    // A revalidation that changed nothing publishes the same
+                    // posts, and the pages keep their cells (#893).
+                    onCorpusReset?()
+                }
                 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
                     print("[foryou-page] first count=\(page.posts.count) next=\(page.nextPageToken ?? "nil") reset=\(reset)")
@@ -703,8 +755,10 @@ public final class ForYouViewModel {
                 if replacesContent {
                     // The corpus, its cursors and the published pages are all
                     // still what the viewer sees: nothing to publish, only to
-                    // say (#798).
-                    onRefreshFailed?()
+                    // say (#798) — unless it is the last session's, restored
+                    // at launch, and nobody pulled: then the offline indicator
+                    // is what says why, and a recovery loads again.
+                    if reset || !isShowingCachedCorpus { onRefreshFailed?() }
                     onLoadSettled?()
                     return
                 }

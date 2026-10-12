@@ -19,6 +19,9 @@ let package = Package(
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreRealtime"),
         .package(path: "../../Core/CoreStorage"),
+        // Each tab's last pages on the device (#893).
+        .package(path: "../../Core/CacheKit"),
+        .package(path: "../../Core/LocalStore"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/PostGrid"),
@@ -40,6 +43,8 @@ let package = Package(
                 "CoreNavigation",
                 "CoreRealtime",
                 "CoreStorage",
+                "CacheKit",
+                "LocalStore",
                 "DesignSystem",
                 "EmoteKit",
                 // ⚠️ The library target, not only the test one. `PostCounterReader`
@@ -63,6 +68,8 @@ let package = Package(
                 "CoreNavigation",
                 "CoreNetworking",
                 "CoreStorage",
+                "CacheKit",
+                "LocalStore",
                 "PostGrid",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking"),
                 .product(name: "CoreRealtimeMocks", package: "CoreRealtime")

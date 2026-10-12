@@ -21,10 +21,12 @@ import Feed
 import FeedInterface
 import AVFoundation
 import Foundation
+import LocalStore
 import Maps
 import MapsInterface
 import Notifications
 import NotificationsInterface
+import OSLog
 import Profile
 import ProfileInterface
 import Search
@@ -197,8 +199,10 @@ final class AppContainer {
         let viewer = viewerSession
         // Every app-lifetime cache holding answers computed FOR the viewer
         // (#892): their follow state, their requests, their filtered pages.
+        // The device store is wiped by the cache coordinator, on the
+        // `.viewerDidChange` posted below (#893).
         let scoped: [any ViewerScoped] = [
-            feedRepository, commentsRepository, profileRelationshipsRepository, profileMetadataRepository
+            commentsRepository, profileRelationshipsRepository, profileMetadataRepository
         ]
         viewerTransitionsTask = Task {
             for await state in await viewer.transitions() {
@@ -611,8 +615,37 @@ final class AppContainer {
         likeStaking: likeStaking,
         authSession: sessionManager,
         viewer: viewerSession,
-        snapshotStore: CodableFileStore<[FeedEntry]>(name: "feed-first-page")
+        localCache: feedLocalCache
     )
+
+    // MARK: - Device store
+
+    /// The device's copies of server data (#893): each tab's last pages, so
+    /// a cold start opens on them and then revalidates. Viewer-scoped by
+    /// `StorageScope`. A namespace of `cacheCoordinator`, which sets its
+    /// budget (the `.localStore` pool, 100 MB in Automatic), sweeps it in the
+    /// background and wipes it on every viewer change. Nil only when the file
+    /// cannot be opened even after a reset: the app then runs without it, as
+    /// it did before.
+    private(set) lazy var localStore: LocalStore? = {
+        // The JSON snapshot of the Following feed's first page, which the
+        // store replaces (`FeedLocalCache.ListKey.following`). Not migrated:
+        // it refills on the first online load.
+        try? CodableFileStore<[FeedEntry]>(name: "feed-first-page").clear()
+        do {
+            let store = try LocalStore(viewer: { LocalStoreViewer(StorageScope.shared.owner) })
+            self.cacheCoordinator.register(store)
+            return store
+        } catch {
+            Logger(subsystem: "cn.wynn.core-platform-ios", category: "local-store")
+                .error("local store unavailable: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }()
+
+    /// The feed's lists in `localStore`: For You's two corpora and the
+    /// Following feed.
+    private lazy var feedLocalCache: FeedLocalCache? = localStore.map(FeedLocalCache.init(store:))
 
     /// Forwards every profile switch to `commentsRepository`, for as long as the
     /// container lives.
@@ -684,7 +717,8 @@ final class AppContainer {
         // "Use this sound": the shell opens its camera with it. Read at the
         // tap, because the shell sets it after this builder exists.
         useSound: { [unowned self] sound in self.onUseSound?(sound) },
-        discovery: discoveryRepository
+        discovery: discoveryRepository,
+        localCache: feedLocalCache
     )
 
     /// Discover's pool (`timeline.v1.GetDiscoveryFeed`, backend B3 / #512):
