@@ -2,6 +2,7 @@ import AVFoundation
 import CoreMedia
 import CryptoKit
 import Foundation
+import OSLog
 import UIKit
 
 /// An exported, upload-ready video plus the metadata the media.v1 upload-ticket
@@ -938,6 +939,21 @@ public struct VideoExporter: Sendable {
         )
     }
 
+    /// Names why a session failed (#1012): `.exportFailed` alone says nothing,
+    /// and a failure seen once, on a loaded machine or in the field, is only
+    /// worth anything with its cause. Its status, its error and the error
+    /// under it, in the unified log (and the console under a debugger).
+    private static func logFailure(of session: AVAssetExportSession) {
+        let failure = session.error as NSError?
+        let underlying = failure?.userInfo[NSUnderlyingErrorKey] as? NSError
+        let status: Int = session.status.rawValue
+        let reason: String = failure.map { "\($0.domain) \($0.code) \($0.localizedDescription)" } ?? "no error"
+        let cause: String = underlying.map { "\($0.domain) \($0.code)" } ?? "none"
+        exportLog.error("export failed: status \(status) \(reason, privacy: .public) under \(cause, privacy: .public)")
+    }
+
+    private static let exportLog = Logger(subsystem: "cn.wynn.core-platform-ios", category: "video-export")
+
     public func export(_ plan: VideoExportPlan) async throws -> ExportedVideo {
         let asset = AVURLAsset(url: plan.sourceURL)
         guard (try? await asset.loadTracks(withMediaType: .video).first) != nil else {
@@ -1006,6 +1022,7 @@ public struct VideoExporter: Sendable {
 
         await session.export()
         guard session.status == .completed else {
+            Self.logFailure(of: session)
             throw VideoExportError.exportFailed
         }
 

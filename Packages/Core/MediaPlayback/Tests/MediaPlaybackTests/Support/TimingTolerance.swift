@@ -51,11 +51,15 @@ enum TimingTolerance {
         attempts: Int, isolation: isolated (any Actor)? = #isolation, _ body: () async throws -> T
     ) async throws -> T {
         var lastError: (any Error)?
-        for _ in 0..<max(1, attempts) {
+        for attempt in 1...max(1, attempts) {
             do {
                 return try await body()
             } catch {
                 lastError = error
+                // Said in the log every time, so a refusal is never silent:
+                // the exporter logs its session's own error beside it.
+                let described = String(describing: error)
+                print("[retrying] attempt \(attempt) of \(attempts) refused: \(described)")
             }
         }
         throw lastError ?? CancellationError()
