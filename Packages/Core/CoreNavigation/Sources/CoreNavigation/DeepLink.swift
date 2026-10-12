@@ -3,16 +3,22 @@ import Foundation
 /// Links into the app (#524): the web addresses it shares, opened as
 /// universal links, and the same paths on the app's own scheme.
 ///
-///     https://wynn.cn/@kenji.dev     →  .profileHandle("kenji.dev")
-///     https://wynn.cn/tag/travel     →  .hashtag("travel")
-///     https://wynn.cn/s/Ab3_x-…      →  .profileShareToken("Ab3_x-…")
+///     https://core-platform.click/@kenji.dev     →  .profileHandle("kenji.dev")
+///     https://core-platform.click/tag/travel     →  .hashtag("travel")
+///     https://core-platform.click/s/Ab3_x-…      →  .profileShareToken("Ab3_x-…")
 ///     wynn://@kenji.dev, wynn:/tag/travel   (the same paths)
 ///
 /// The web form is what `ProfileShareLink` and a place's share URL already
 /// hand out; anything this does not know is nil, and the caller lets it go.
 public extension AppRoute {
-    /// The host the app's web links live on.
-    static let webHost = "wynn.cn"
+    /// The host the app's web links live on, and the one place it is set:
+    /// share links (`ProfileShareLink`, a place's share URL) build on it, and
+    /// it must match the `applinks:` entry in `core-platform-ios.entitlements`
+    /// and the domain serving `apple-app-site-association`
+    /// (core-platform-infra `global/web/app-site-association`).
+    /// `core-platform.click` is a provisional name; changing it means this,
+    /// the entitlement and the infra unit's domain together.
+    static let webHost = "core-platform.click"
     /// The app's own URL scheme.
     static let appScheme = "wynn"
 

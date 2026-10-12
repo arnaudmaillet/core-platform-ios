@@ -22,7 +22,7 @@ struct ShareSheetTests {
 
     private static let card = ShareCard(
         displayName: "Paris", handle: "France", avatarURL: nil,
-        url: URL(string: "https://wynn.cn/place/city:paris")!
+        url: URL(string: "https://core-platform.click/place/city:paris")!
     )
 
     private func sheet(targeting: (any ShareTargeting)?, card: ShareCard = Self.card) -> ShareSheetViewController {
@@ -67,7 +67,7 @@ struct ShareSheetTests {
         let flag = UIGraphicsImageRenderer(size: CGSize(width: 96, height: 96)).image { _ in }
         let card = ShareCard(
             displayName: "Paris", handle: "France", avatarURL: nil, avatarImage: flag,
-            url: URL(string: "https://wynn.cn/place/city:paris")!
+            url: URL(string: "https://core-platform.click/place/city:paris")!
         )
         let view = ShareQRCardView(imagePipeline: nil)
         view.configure(with: card)

@@ -471,7 +471,7 @@ struct ProfileViewModelTests {
         viewModel.viewDidLoad()
         await settle()
 
-        #expect(viewModel.shareLink?.absoluteString == "https://wynn.cn/@ada")
+        #expect(viewModel.shareLink?.absoluteString == "https://core-platform.click/@ada")
         #expect(viewModel.handle == "@ada")
     }
 
@@ -482,15 +482,15 @@ struct ProfileViewModelTests {
         let own = ProfileViewModel(repository: StubProfileProvider(.success(sampleProfile())), shareLinks: links)
         own.viewDidLoad()
         await settle()
-        #expect(own.shareLink?.absoluteString == "https://wynn.cn/@ada", "before the token arrives")
+        #expect(own.shareLink?.absoluteString == "https://core-platform.click/@ada", "before the token arrives")
 
         await own.refreshShareToken()
-        #expect(own.shareLink?.absoluteString == "https://wynn.cn/s/Ab3_x-Yz09Qw8RtUvWxYzA")
+        #expect(own.shareLink?.absoluteString == "https://core-platform.click/s/Ab3_x-Yz09Qw8RtUvWxYzA")
         #expect(own.shareCard?.url == own.shareLink, "the QR card carries the same link")
 
         await links.set("NewTokenAfterReset0123")
         await own.refreshShareToken()
-        #expect(own.shareLink?.absoluteString == "https://wynn.cn/s/NewTokenAfterReset0123")
+        #expect(own.shareLink?.absoluteString == "https://core-platform.click/s/NewTokenAfterReset0123")
 
         let other = ProfileViewModel(
             repository: StubProfileProvider(.success(sampleProfile())),
@@ -500,7 +500,7 @@ struct ProfileViewModelTests {
         other.viewDidLoad()
         await settle()
         await other.refreshShareToken()
-        #expect(other.shareLink?.absoluteString == "https://wynn.cn/@ada")
+        #expect(other.shareLink?.absoluteString == "https://core-platform.click/@ada")
     }
 
     private actor StubShareLinks: ShareLinkManaging {

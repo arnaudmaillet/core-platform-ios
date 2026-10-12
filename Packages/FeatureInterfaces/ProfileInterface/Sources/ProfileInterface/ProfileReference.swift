@@ -5,7 +5,7 @@ import CoreModels
 public enum ProfileReference: Hashable, Sendable {
     /// A handle without its `@` (`GetProfileByHandle`, #524).
     case handle(String)
-    /// A share token from a QR code or a `wynn.cn/s/<token>` link
+    /// A share token from a QR code or a `core-platform.click/s/<token>` link
     /// (`ResolveShareToken`, #412).
     case shareToken(String)
 }

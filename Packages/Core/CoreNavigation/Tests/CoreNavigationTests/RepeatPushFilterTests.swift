@@ -155,7 +155,7 @@ struct RepeatPushFilterTests {
     }
 
     /// Ada's profile was opened by id and has loaded her handle: a
-    /// `wynn.cn/@ada` link is the same screen.
+    /// `core-platform.click/@ada` link is the same screen.
     @Test func aHandleRouteOverTheProfileOpenedByItsIDIsARepeat() {
         var filter = RepeatPushFilter<ProfileRouteKey>()
         let profile = Screen()

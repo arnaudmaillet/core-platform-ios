@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import FeedInterface
 import MapsInterface
 import MediaCore
@@ -285,7 +286,7 @@ extension MapsFeatureBuilder {
         )
     }
 
-    /// A place's public web address: `https://wynn.cn/place/<id>`.
+    /// A place's public web address: `https://<AppRoute.webHost>/place/<id>`.
     ///
     /// Synthesized client-side from the place's identity, as a profile's is
     /// from its handle (`ProfileShareLink`, same host): no service returns
@@ -293,7 +294,7 @@ extension MapsFeatureBuilder {
     static func shareURL(of place: MapPlace) -> URL? {
         var components = URLComponents()
         components.scheme = "https"
-        components.host = "wynn.cn"
+        components.host = AppRoute.webHost
         components.path = "/place/" + place.id
         return components.url
     }
