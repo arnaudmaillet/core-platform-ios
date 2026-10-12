@@ -13,6 +13,10 @@ import UIKit
 /// flight is arranged, never raced against a clock.
 @MainActor
 struct CoverLoadCancellationTests {
+    /// A look budget, not a deadline: a wait stops as soon as its condition
+    /// holds, so this only matters on a starved runner (#1004, as #974).
+    private static let looks = 6_000
+
     private static func photo(_ id: String) -> GalleryPost {
         GalleryPost(
             id: PostID(id), kind: .photo, isRepost: false,
@@ -61,12 +65,28 @@ struct CoverLoadCancellationTests {
 
         carousel.configure(with: pages, imagePipeline: pipeline)
         #expect(carousel.loadedPages == [0])
+        // ⚠️ THE CAROUSEL'S FETCH FIRST (#1004). Its load is a task that has
+        // not necessarily run yet; on a loaded runner the test's own fetch
+        // below reached the fetcher first, took the one failure, and the
+        // carousel's late fetch then SUCCEEDED — the page loaded, and the wait
+        // below ran out. Held at the fetcher, it is the fetch to join.
+        var looked = 0
+        while await fetcher.fetchCount == 0, looked < Self.looks {
+            looked += 1
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await fetcher.fetchCount == 1)
         // Join the carousel's own fetch (held, so it is still in flight), let
-        // it fail, and give the carousel's completion its main-actor turn.
+        // it fail, then wait for the carousel's completion to retire the page:
+        // on a look budget, not a yield count — the completion runs after the
+        // pipeline hands the failure back and the load's task gets the main
+        // actor again, which a loaded runner did not do within 100 yields.
         let failure = Task { await fetcher.fail() }
         #expect(await (try? pipeline.image(for: url)) == nil)
         await failure.value
-        for _ in 0..<100 where carousel.loadedPages.contains(0) { await Task.yield() }
+        for _ in 0..<Self.looks where carousel.loadedPages.contains(0) {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
         #expect(carousel.loadedPages.isEmpty)
         #expect(carousel.cover(onPage: 0) == nil)
 
