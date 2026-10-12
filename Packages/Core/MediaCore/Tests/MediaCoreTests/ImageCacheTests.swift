@@ -580,3 +580,76 @@ struct ImageLookaheadTests {
         #expect(rail == CGRect(x: -150, y: 0, width: 500, height: 50))
     }
 }
+
+// MARK: - `-cache-audit` counters (#900)
+
+struct ImageAuditCounterTests {
+    private let folder = Folder()
+
+    @Test func eachImageCountsOnceWhenItArrivesReadyInFlightOrMissed() async throws {
+        let coordinator = CacheCoordinator(device: device())
+        let fetcher = ScriptedFetcher(held: true)
+        let pipeline = ImagePipeline(fetcher: fetcher, coordinator: coordinator)
+        let owner = CacheOwner("grid")
+        let joined = try #require(URL(string: "mock://photo/41"))
+        let cold = try #require(URL(string: "mock://photo/42"))
+        let prefetched = try #require(URL(string: "mock://photo/43"))
+
+        pipeline.prefetch(joined, window: .display, owner: owner)
+        #expect(await eventually { fetcher.fetchCount(for: joined) == 1 })
+        let joining = Task { try await pipeline.image(for: joined) }
+        let missing = Task { try await pipeline.image(for: cold) }
+        #expect(await eventually { fetcher.fetchCount(for: cold) == 1 })
+        fetcher.open()
+        _ = try await joining.value
+        _ = try await missing.value
+
+        pipeline.prefetch(prefetched, window: .display, owner: owner)
+        #expect(await eventually { pipeline.isDecoded(prefetched) })
+        #expect(pipeline.cachedImage(for: prefetched) != nil)
+        // The same images again, by both paths: still one arrival each.
+        #expect(pipeline.cachedImage(for: cold) != nil)
+        _ = try await pipeline.image(for: joined)
+
+        let arrivals = try #require(coordinator.prefetchCounters.snapshot.arrivals[.images])
+        #expect(arrivals.ready == 1)
+        #expect(arrivals.inFlight == 1)
+        #expect(arrivals.missed == 1)
+    }
+
+    @Test func networkBytesAreCountedPerPriorityAndNetwork() async throws {
+        let coordinator = CacheCoordinator(device: device())
+        let pipeline = ImagePipeline(fetcher: ScriptedFetcher(), disk: .folder(folder.url), coordinator: coordinator)
+        await pipeline.waitUntilDiskIsOpen()
+        let shown = try #require(URL(string: "https://cdn.test/audit/44.png"))
+        let preloaded = try #require(URL(string: "https://cdn.test/audit/45.png"))
+
+        _ = try await pipeline.image(for: shown)
+        coordinator.handle(.network(.cellular, isConstrained: false, isExpensive: true))
+        let owner = CacheOwner("feed")
+        pipeline.prefetch(preloaded, window: .preload, owner: owner)
+        #expect(await eventually { pipeline.isOnDisk(preloaded) })
+        owner.revoke()
+
+        let snapshot = coordinator.prefetchCounters.snapshot
+        #expect(snapshot.otherBytes[.visible, default: 0] > 0, "the visible load's bytes, on Wi-Fi")
+        #expect(snapshot.speculativeCellularBytes > 0, "the preload's bytes, on cellular")
+        #expect(snapshot.cellularBytes[.visible] == nil)
+    }
+
+    @Test func theSignedNamespaceReportsItsStoresStatisticsAndReasons() async throws {
+        let coordinator = CacheCoordinator(device: device())
+        let pipeline = ImagePipeline(fetcher: ScriptedFetcher(), disk: .folder(folder.url), coordinator: coordinator)
+        await pipeline.waitUntilDiskIsOpen()
+        let signed = try #require(URL(string: "https://cdn.test/private/46.png?X-Amz-Signature=aaa"))
+        _ = try await pipeline.image(for: signed)
+        #expect(await eventually { pipeline.isOnDisk(signed) })
+
+        coordinator.trim(.viewerChanged)
+
+        let line = try #require(coordinator.usage().lines.first { $0.namespace == ImagePipeline.Namespaces.diskSigned })
+        #expect(line.statistics.removals[.viewerChanged] == 1)
+        let decoded = try #require(coordinator.usage().lines.first { $0.namespace == ImagePipeline.Namespaces.decoded })
+        #expect(decoded.statistics.misses >= 1, "the decoded namespace reports its own lookups")
+    }
+}

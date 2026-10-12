@@ -27,11 +27,20 @@ final class ViewerFacts<Key: Hashable & Sendable, Value: Sendable>: ManagedCache
     var namespace: CacheNamespace { cache.namespace }
     var budget: CacheBudget { cache.budget }
     var usage: CacheUsage { cache.usage }
-    func setLimits(_ limits: CacheLimits) { cache.setLimits(limits) }
-    func trim(_ depth: TrimDepth) { cache.trim(depth) }
+    /// The wrapped cache's counters and the coordinator's reasons go through,
+    /// so `-cache-audit` (#900) reads this namespace like any other.
+    var statistics: CacheStatistics { cache.statistics }
+    func setLimits(_ limits: CacheLimits) { setLimits(limits, reason: .budget) }
+    func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason) { cache.setLimits(limits, reason: reason) }
+    func trim(_ depth: TrimDepth) { trim(depth, reason: .trim) }
+    func trim(_ depth: TrimDepth, reason: CacheEvictionReason) { cache.trim(depth, reason: reason) }
 
     func removeAll() {
-        cache.removeAll()
+        removeAll(reason: .wipe)
+    }
+
+    func removeAll(reason: CacheEvictionReason) {
+        cache.removeAll(reason: reason)
         let action = onWipe.withLock { $0 }
         action?()
     }

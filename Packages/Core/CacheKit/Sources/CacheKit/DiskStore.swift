@@ -216,11 +216,14 @@ public final class DiskStore: ManagedCache {
             let wasLeased = state.leases[key] != nil
             if !wasLeased {
                 if record.isExpired(at: now, idle: idleLifetime) {
-                    state.statistics.expirations += 1
+                    state.statistics.recordRemoval(.expiry, bytes: record.size, wasSpeculative: record.tier == .speculative)
                     state.markChanged(structural: true)
                     return (nil, state.remove(key))
                 }
                 state.unlink(key, record)
+            }
+            if record.tier == .speculative {
+                state.statistics.speculative.recordUsed(bytes: record.size)
             }
             record.promote()
             record.touch(now: now, order: state.takeOrder())
@@ -240,6 +243,11 @@ public final class DiskStore: ManagedCache {
         let lifetime = speculativeLifetime
         let garbage: [String] = state.withLock { state in
             guard var record = state.records[key] else { return [] }
+            if record.tier == .speculative, tier != .speculative {
+                state.statistics.speculative.recordUsed(bytes: record.size)
+            } else if record.tier != .speculative, tier == .speculative {
+                state.statistics.speculative.recordStored(bytes: record.size)
+            }
             let leased = state.leases[key] != nil
             if !leased { state.unlink(key, record) }
             record.tier = tier
@@ -247,7 +255,7 @@ public final class DiskStore: ManagedCache {
             state.records[key] = record
             if !leased { state.link(key, record) }
             state.markChanged(structural: true)
-            return state.enforceLimits(protecting: nil, ceiling: .retained)
+            return state.enforceLimits(protecting: nil, ceiling: .retained, reason: .budget)
         }
         delete(garbage)
         flushIfNeeded()
@@ -255,7 +263,10 @@ public final class DiskStore: ManagedCache {
 
     public func removeValue(for key: String) {
         let garbage = state.withLock { state -> [String] in
-            guard state.records[key] != nil else { return [] }
+            guard let record = state.records[key] else { return [] }
+            if record.tier == .speculative {
+                state.statistics.speculative.recordDiscarded(bytes: record.size)
+            }
             state.markChanged(structural: true)
             return state.remove(key)
         }
@@ -270,12 +281,17 @@ public final class DiskStore: ManagedCache {
     /// stays readable at its path until its last lease ends. A write that
     /// commits after the wipe lands in the fresh folder and is kept.
     public func removeAll() {
+        removeAll(reason: .wipe)
+    }
+
+    public func removeAll(reason: CacheEvictionReason) {
         let fileManager = FileManager.default
         let trash = directory.appending(path: Self.trashPrefix + UUID().uuidString, directoryHint: .isDirectory)
         let objectsFolder = self.objects
         let outcome: (swapped: Bool, garbage: [String]) = state.withLock { state in
             var garbage: [String] = []
-            for key in Array(state.records.keys) {
+            for (key, record) in state.records {
+                state.statistics.recordRemoval(reason, bytes: record.size, wasSpeculative: record.tier == .speculative)
                 garbage += state.remove(key)
             }
             state.markChanged(structural: true)
@@ -310,15 +326,23 @@ public final class DiskStore: ManagedCache {
     }
 
     public func setLimits(_ limits: CacheLimits) {
+        setLimits(limits, reason: .budget)
+    }
+
+    public func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason) {
         let garbage = state.withLock { state -> [String] in
             state.limits = limits
-            return state.enforceLimits(protecting: nil, ceiling: .retained)
+            return state.enforceLimits(protecting: nil, ceiling: .retained, reason: reason)
         }
         delete(garbage)
         flushIfNeeded()
     }
 
     public func trim(_ depth: TrimDepth) {
+        trim(depth, reason: .trim)
+    }
+
+    public func trim(_ depth: TrimDepth, reason: CacheEvictionReason) {
         let now = clock.now
         let garbage = state.withLock { state -> [String] in
             let records = state.records
@@ -329,13 +353,10 @@ public final class DiskStore: ManagedCache {
             )
             var garbage: [String] = []
             for key in victims {
-                let expired = records[key]?.isExpired(at: now, idle: idleLifetime) ?? false
+                guard let record = records[key] else { continue }
+                let expired = record.isExpired(at: now, idle: idleLifetime)
                 garbage += state.remove(key)
-                if expired {
-                    state.statistics.expirations += 1
-                } else {
-                    state.statistics.evictions += 1
-                }
+                state.statistics.recordRemoval(expired ? .expiry : reason, bytes: record.size, wasSpeculative: record.tier == .speculative)
             }
             if !victims.isEmpty { state.markChanged(structural: true) }
             return garbage
@@ -447,8 +468,21 @@ public final class DiskStore: ManagedCache {
             state.records[key] = record
             state.link(key, record)
             state.markChanged(structural: true)
-            let evicted = state.enforceLimits(protecting: key, ceiling: storedTier == .speculative ? .recent : .retained)
-            return (state.records[key]?.file == file, garbage + evicted)
+            let evicted = state.enforceLimits(protecting: key, ceiling: storedTier == .speculative ? .recent : .retained, reason: .budget)
+            let kept = state.records[key]?.file == file
+            // Same fates as `MemoryCache.store`: the speculative entry this
+            // write replaced was used if a higher tier took its place.
+            if let existing, existing.tier == .speculative {
+                if kept, storedTier != .speculative {
+                    state.statistics.speculative.recordUsed(bytes: existing.size)
+                } else {
+                    state.statistics.speculative.recordDiscarded(bytes: existing.size)
+                }
+            }
+            if kept, storedTier == .speculative {
+                state.statistics.speculative.recordStored(bytes: size)
+            }
+            return (kept, garbage + evicted)
         }
         if let moveError {
             try? FileManager.default.removeItem(at: staged)
@@ -472,10 +506,13 @@ public final class DiskStore: ManagedCache {
             }
             let leased = state.leases[key] != nil
             if !leased, record.isExpired(at: now, idle: idleLifetime) {
-                state.statistics.expirations += 1
+                state.statistics.recordRemoval(.expiry, bytes: record.size, wasSpeculative: record.tier == .speculative)
                 state.statistics.misses += 1
                 state.markChanged(structural: true)
                 return (nil, state.remove(key))
+            }
+            if record.tier == .speculative {
+                state.statistics.speculative.recordUsed(bytes: record.size)
             }
             if !leased { state.unlink(key, record) }
             record.promote()
@@ -493,7 +530,10 @@ public final class DiskStore: ManagedCache {
     /// The file was deleted behind the store's back (iOS purging `Caches`).
     private func dropVanished(key: String, file: String) {
         state.withLock { state in
-            guard state.records[key]?.file == file, state.leases[key] == nil else { return }
+            guard let record = state.records[key], record.file == file, state.leases[key] == nil else { return }
+            if record.tier == .speculative {
+                state.statistics.speculative.recordDiscarded(bytes: record.size)
+            }
             _ = state.remove(key)
             state.markChanged(structural: true)
         }
@@ -508,7 +548,7 @@ public final class DiskStore: ManagedCache {
                 }
                 state.leases[key] = nil
                 state.link(key, record)
-                return state.enforceLimits(protecting: nil, ceiling: .retained)
+                return state.enforceLimits(protecting: nil, ceiling: .retained, reason: .budget)
             }
             // The entry was replaced or wiped while leased: its file waited for us.
             guard var doomed = state.doomed[file] else { return [] }
@@ -643,6 +683,11 @@ public final class DiskStore: ManagedCache {
             self.nextOrder = nextOrder
             for record in records.values.sorted(by: { $0.order < $1.order }) {
                 link(record.key, record)
+                // Speculative entries a previous run left count as stored,
+                // so their fates balance.
+                if record.tier == .speculative {
+                    statistics.speculative.recordStored(bytes: record.size)
+                }
             }
         }
 
@@ -693,18 +738,23 @@ public final class DiskStore: ManagedCache {
             return [record.file]
         }
 
-        mutating func enforceLimits(protecting: String?, ceiling: CacheTier) -> [String] {
+        private mutating func evict(_ key: String, reason: CacheEvictionReason) -> [String] {
+            if let record = records[key] {
+                statistics.recordRemoval(reason, bytes: record.size, wasSpeculative: record.tier == .speculative)
+            }
+            return remove(key)
+        }
+
+        mutating func enforceLimits(protecting: String?, ceiling: CacheTier, reason: CacheEvictionReason) -> [String] {
             var garbage: [String] = []
             while tierBytes[.speculative, default: 0] > limits.speculativeBytes,
                   let victim = lru.victim(upTo: .speculative, excluding: protecting) {
-                garbage += remove(victim)
-                statistics.evictions += 1
+                garbage += evict(victim, reason: reason)
             }
             // Doomed files still take disk space until their leases end.
             while totalBytes + doomedBytes > limits.bytes,
                   let victim = lru.victim(upTo: ceiling, excluding: protecting) {
-                garbage += remove(victim)
-                statistics.evictions += 1
+                garbage += evict(victim, reason: reason)
             }
             if !garbage.isEmpty { markChanged(structural: true) }
             guard let protecting, let record = records[protecting], leases[protecting] == nil else { return garbage }

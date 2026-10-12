@@ -47,6 +47,9 @@ public struct CacheUsageReport: Sendable {
         public let namespace: CacheNamespace
         public let medium: CacheMedium
         public let usage: CacheUsage
+        /// Hits, misses, evictions per reason and speculative fates since
+        /// the cache was created.
+        public let statistics: CacheStatistics
     }
 
     public let lines: [Line]
@@ -64,6 +67,14 @@ public struct CacheUsageReport: Sendable {
 
     public func totalBytes(medium: CacheMedium? = nil) -> Int {
         lines.filter { medium == nil || $0.medium == medium }.reduce(0) { $0 + $1.usage.bytes }
+    }
+
+    /// Speculative fates summed over every namespace (or one category): the
+    /// app's waste ratio is `speculative().wasteRatio`.
+    public func speculative(in category: CacheCategory? = nil) -> CacheSpeculativeStatistics {
+        lines
+            .filter { category == nil || $0.namespace.category == category }
+            .reduce(CacheSpeculativeStatistics()) { $0 + $1.statistics.speculative }
     }
 
     /// Every category with its bytes (memory and disk), zero included.
@@ -94,6 +105,11 @@ public final class CacheCoordinator: Sendable {
     /// The global allowance of speculative fills. Pass it to every `CacheFills`.
     public let fillSlots: CacheFillSlots
 
+    /// The lookahead's counters (prefetch arrivals, next-video first range,
+    /// time to first frame, bytes per priority and network), reported by the
+    /// image pipeline, the video cache and the feed lookahead (#900).
+    public let prefetchCounters = CachePrefetchCounters()
+
     private struct State {
         var caches: [any ManagedCache] = []
         var limit: CacheStorageLimit
@@ -101,6 +117,7 @@ public final class CacheCoordinator: Sendable {
         var conditions: CacheConditions
         var sources: [any CacheSignalSource] = []
         var observers: [UInt64: @Sendable (CacheConditions, PrefetchPolicy) -> Void] = [:]
+        var trimObservers: [UInt64: @Sendable (TrimReason) -> Void] = [:]
         var nextObserverID: UInt64 = 0
     }
 
@@ -126,14 +143,14 @@ public final class CacheCoordinator: Sendable {
             state.caches.removeAll { $0.namespace.name == cache.namespace.name && $0.medium == cache.medium }
             state.caches.append(cache)
         }
-        applyBudgets()
+        applyBudgets(reason: .budget)
     }
 
     public func unregister(_ cache: any ManagedCache) {
         state.withLock { state in
             state.caches.removeAll { $0 === cache }
         }
-        applyBudgets()
+        applyBudgets(reason: .budget)
     }
 
     public var registeredCaches: [any ManagedCache] { state.withLock { $0.caches } }
@@ -145,7 +162,7 @@ public final class CacheCoordinator: Sendable {
     /// The Settings → Storage choice (#899). Shrinking evicts at once.
     public func setStorageLimit(_ limit: CacheStorageLimit) {
         state.withLock { $0.limit = limit }
-        applyBudgets()
+        applyBudgets(reason: .budget)
     }
 
     public var diskPressure: DiskPressure { state.withLock { $0.pressure } }
@@ -203,6 +220,30 @@ public final class CacheCoordinator: Sendable {
         }
     }
 
+    /// Calls `handler` after every `trim(_:)` (each signal's trim, a low-disk
+    /// change, a viewer change, a Settings clear), with its reason, on the
+    /// thread that applied it. The
+    /// `-cache-audit` instrument logs a report on each. Keep the returned
+    /// token; the observation ends when it is cancelled or deallocated.
+    public func observeTrims(_ handler: @escaping @Sendable (TrimReason) -> Void) -> CacheObservation {
+        let id = state.withLock { state -> UInt64 in
+            state.nextObserverID += 1
+            state.trimObservers[state.nextObserverID] = handler
+            return state.nextObserverID
+        }
+        return CacheObservation { [weak self] in
+            self?.state.withLock { _ = $0.trimObservers.removeValue(forKey: id) }
+        }
+    }
+
+    /// Counts `bytes` a fill at `priority` fetched over the network, as
+    /// cellular when the current path is cellular or expensive.
+    public func recordTransfer(bytes: Int, priority: CacheFillPriority) {
+        let current = self.conditions
+        let cellular = current.network == .cellular || current.isNetworkExpensive
+        prefetchCounters.recordTransfer(bytes: bytes, priority: priority, cellular: cellular)
+    }
+
     /// Whether a playing video is under-buffered. While it is, no new P2 fill
     /// starts anywhere in the app (the Media3 / BytePlus rule): a prefetch
     /// never competes with the video being watched. The video cache (#895)
@@ -224,21 +265,23 @@ public final class CacheCoordinator: Sendable {
         case .background:
             trimMemory(.background)
             for cache in caches(.disk) {
-                cache.trim(.expired)
+                cache.trim(.expired, reason: .background)
                 cache.flush()
             }
         case .lowDisk(let pressure):
             state.withLock { $0.pressure = pressure }
-            applyBudgets()
+            applyBudgets(reason: .lowDisk)
         case .viewerChanged:
             for cache in registeredCaches where cache.namespace.isWipedOnViewerChange {
-                cache.removeAll()
+                cache.removeAll(reason: .viewerChanged)
             }
         case .clear(let category):
             for cache in registeredCaches where category == nil || cache.namespace.category == category {
-                cache.removeAll()
+                cache.removeAll(reason: .clear)
             }
         }
+        let observers = state.withLock { Array($0.trimObservers.values) }
+        for observer in observers { observer(reason) }
     }
 
     /// Persists every disk index.
@@ -248,7 +291,7 @@ public final class CacheCoordinator: Sendable {
 
     public func usage() -> CacheUsageReport {
         CacheUsageReport(lines: registeredCaches.map { cache in
-            CacheUsageReport.Line(namespace: cache.namespace, medium: cache.medium, usage: cache.usage)
+            CacheUsageReport.Line(namespace: cache.namespace, medium: cache.medium, usage: cache.usage, statistics: cache.statistics)
         })
     }
 
@@ -307,16 +350,21 @@ public final class CacheCoordinator: Sendable {
     }
 
     private func trimMemory(_ pressure: MemoryPressure) {
+        let reason: CacheEvictionReason = switch pressure {
+        case .warning: .memoryWarning
+        case .background: .background
+        case .critical: .memoryCritical
+        }
         for cache in caches(.memory) {
-            cache.trim(cache.namespace.priorityClass.depth(for: pressure))
+            cache.trim(cache.namespace.priorityClass.depth(for: pressure), reason: reason)
         }
     }
 
-    private func applyBudgets() {
+    private func applyBudgets(reason: CacheEvictionReason) {
         budgetGate.withLock { _ in
             let snapshot = state.withLock { $0 }
             for assignment in computeLimits(snapshot) {
-                assignment.cache.setLimits(assignment.limits)
+                assignment.cache.setLimits(assignment.limits, reason: reason)
             }
         }
     }

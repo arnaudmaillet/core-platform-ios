@@ -56,12 +56,13 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
             }
             if entry.leases == 0, entry.isExpired(at: now) {
                 state.remove(key)
-                state.statistics.expirations += 1
+                state.statistics.recordRemoval(.expiry, bytes: entry.cost, wasSpeculative: entry.tier == .speculative)
                 state.statistics.misses += 1
                 return nil
             }
             if entry.leases == 0 {
                 if entry.tier == .speculative {
+                    state.statistics.speculative.recordUsed(bytes: entry.cost)
                     state.unlink(key, entry)
                     entry.promote()
                     state.link(key, entry)
@@ -134,8 +135,11 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
             guard var entry = state.entries[key] else { return nil }
             if entry.leases == 0, entry.isExpired(at: now) {
                 state.remove(key)
-                state.statistics.expirations += 1
+                state.statistics.recordRemoval(.expiry, bytes: entry.cost, wasSpeculative: entry.tier == .speculative)
                 return nil
+            }
+            if entry.tier == .speculative {
+                state.statistics.speculative.recordUsed(bytes: entry.cost)
             }
             state.unlink(key, entry)
             entry.promote()
@@ -154,25 +158,43 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
         let now = clock.now
         mutate { state in
             guard var entry = state.entries[key] else { return }
+            if entry.tier == .speculative, tier != .speculative {
+                state.statistics.speculative.recordUsed(bytes: entry.cost)
+            } else if entry.tier != .speculative, tier == .speculative {
+                state.statistics.speculative.recordStored(bytes: entry.cost)
+            }
             state.unlink(key, entry)
             entry.tier = tier
             entry.speculativeDeadline = tier == .speculative ? now.addingTimeInterval(speculativeLifetime) : nil
             state.link(key, entry)
             state.entries[key] = entry
-            state.enforceLimits(protecting: nil, ceiling: .retained)
+            state.enforceLimits(protecting: nil, ceiling: .retained, reason: .budget)
         }
     }
 
     /// Removes `key`, leased or not. A lease on it becomes a no-op.
     @discardableResult
     public func removeValue(for key: Key) -> Value? {
-        mutate { $0.remove(key)?.value }
+        mutate { state in
+            guard let removed = state.remove(key) else { return nil }
+            if removed.tier == .speculative {
+                state.statistics.speculative.recordDiscarded(bytes: removed.cost)
+            }
+            return removed.value
+        }
     }
 
     // MARK: - ManagedCache
 
     public func removeAll() {
+        removeAll(reason: .wipe)
+    }
+
+    public func removeAll(reason: CacheEvictionReason) {
         mutate { state in
+            for entry in state.entries.values {
+                state.statistics.recordRemoval(reason, bytes: entry.cost, wasSpeculative: entry.tier == .speculative)
+            }
             state.evicted.append(contentsOf: state.entries.values.map(\.value))
             state.entries.removeAll()
             state.lru.removeAll()
@@ -183,13 +205,21 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
     }
 
     public func setLimits(_ limits: CacheLimits) {
+        setLimits(limits, reason: .budget)
+    }
+
+    public func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason) {
         mutate { state in
             state.limits = limits
-            state.enforceLimits(protecting: nil, ceiling: .retained)
+            state.enforceLimits(protecting: nil, ceiling: .retained, reason: reason)
         }
     }
 
     public func trim(_ depth: TrimDepth) {
+        trim(depth, reason: .trim)
+    }
+
+    public func trim(_ depth: TrimDepth, reason: CacheEvictionReason) {
         let now = clock.now
         mutate { state in
             let entries = state.entries
@@ -200,11 +230,11 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
             )
             for key in victims {
                 guard let removed = state.remove(key) else { continue }
-                if removed.isExpired(at: now) {
-                    state.statistics.expirations += 1
-                } else {
-                    state.statistics.evictions += 1
-                }
+                state.statistics.recordRemoval(
+                    removed.isExpired(at: now) ? .expiry : reason,
+                    bytes: removed.cost,
+                    wasSpeculative: removed.tier == .speculative
+                )
             }
         }
     }
@@ -266,7 +296,20 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
             }
             state.link(key, entry)
             state.entries[key] = entry
-            let kept = state.enforceLimits(protecting: key, ceiling: entry.tier == .speculative ? .recent : .retained)
+            let kept = state.enforceLimits(protecting: key, ceiling: entry.tier == .speculative ? .recent : .retained, reason: .budget)
+            // The speculative entry this store replaced was used if a store at
+            // a higher tier took its place, and discarded otherwise (replaced
+            // by another prefetch, or gone with a refused store).
+            if let existing, existing.tier == .speculative {
+                if kept, entry.tier != .speculative {
+                    state.statistics.speculative.recordUsed(bytes: existing.cost)
+                } else {
+                    state.statistics.speculative.recordDiscarded(bytes: existing.cost)
+                }
+            }
+            if kept, entry.tier == .speculative {
+                state.statistics.speculative.recordStored(bytes: cost)
+            }
             return kept ? entry.id : nil
         }
     }
@@ -300,7 +343,7 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
             state.link(key, entry)
             state.entries[key] = entry
             if entry.leases == 0 {
-                state.enforceLimits(protecting: nil, ceiling: .retained)
+                state.enforceLimits(protecting: nil, ceiling: .retained, reason: .budget)
             }
         }
     }
@@ -383,19 +426,22 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
             return entry
         }
 
+        private mutating func evict(_ key: Key, reason: CacheEvictionReason) {
+            guard let removed = remove(key) else { return }
+            statistics.recordRemoval(reason, bytes: removed.cost, wasSpeculative: removed.tier == .speculative)
+        }
+
         /// Evicts to the limits. `protecting` (the entry being stored) goes
         /// last, and only if it cannot fit at all; `ceiling` is the highest
         /// tier it may displace.
         @discardableResult
-        mutating func enforceLimits(protecting: Key?, ceiling: CacheTier) -> Bool {
+        mutating func enforceLimits(protecting: Key?, ceiling: CacheTier, reason: CacheEvictionReason) -> Bool {
             while tierBytes[.speculative, default: 0] > limits.speculativeBytes,
                   let victim = lru.victim(upTo: .speculative, excluding: protecting) {
-                remove(victim)
-                statistics.evictions += 1
+                evict(victim, reason: reason)
             }
             while totalBytes > limits.bytes, let victim = lru.victim(upTo: ceiling, excluding: protecting) {
-                remove(victim)
-                statistics.evictions += 1
+                evict(victim, reason: reason)
             }
             guard let protecting, let entry = entries[protecting], entry.leases == 0 else { return true }
             let overSpeculative = entry.tier == .speculative && tierBytes[.speculative, default: 0] > limits.speculativeBytes

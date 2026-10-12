@@ -190,6 +190,12 @@ public final class ImagePipeline: Sendable {
     private let decodes: CacheFills<ImageKey, UIImage>
     private let bytes: CacheFills<String, ImageFetchResult>
     private let legacyOwner = CacheOwner("ImagePipeline.prefetch")
+    /// Where the pipeline reports its network bytes and, in DEBUG, what each
+    /// image found on arrival (`-cache-audit`, #900).
+    private let coordinator: CacheCoordinator?
+    #if DEBUG
+    private let arrivals = ImageArrivals()
+    #endif
     private let clock: any CacheClock
     private let negativeLifetime: TimeInterval
     private let state = Mutex(State())
@@ -213,6 +219,7 @@ public final class ImagePipeline: Sendable {
     ) {
         self.fetcher = fetcher
         self.maxPixelSize = maxPixelSize
+        self.coordinator = coordinator
         self.clock = clock
         self.negativeLifetime = negativeLifetime
         let physicalMemory = ProcessInfo.processInfo.physicalMemory
@@ -312,7 +319,22 @@ public final class ImagePipeline: Sendable {
     /// only when nobody else (another caller, a prefetch) still wants it.
     public func image(for url: URL, size: ImageBucket = .full, priority: CacheFillPriority = .visible) async throws -> UIImage {
         let key = ImageKey(url: url, bucket: size)
-        if let cached = cachedImage(key) { return cached }
+        if let cached = cachedImage(key) {
+            if priority == .visible { recordArrival(key, .ready) }
+            return cached
+        }
+        #if DEBUG
+        if priority == .visible {
+            // A prefetch on its way (a display decode, or a preload's
+            // download) saved part of the wait; bytes on disk, all of the
+            // network.
+            if decodes.isInFlight(key) || bytes.isInFlight(key.media) {
+                recordArrival(key, .inFlight)
+            } else {
+                recordArrival(key, isOnDisk(key) ? .ready : .missed)
+            }
+        }
+        #endif
         return try await decodes.value(for: key, priority: priority) { [self] context in
             try await decodeFill(url, key: key, context: context)
         }
@@ -322,7 +344,12 @@ public final class ImagePipeline: Sendable {
     /// configuration paths that must not suspend. Served by `size` or any
     /// larger bucket already decoded; never touches the disk.
     public func cachedImage(for url: URL, size: ImageBucket = .full) -> UIImage? {
-        cachedImage(ImageKey(url: url, bucket: size))
+        let key = ImageKey(url: url, bucket: size)
+        let image = cachedImage(key)
+        // A hit is an arrival found ready; a miss is not one yet: the caller
+        // goes on to `image(for:)`, which counts what it finds.
+        if image != nil { recordArrival(key, .ready) }
+        return image
     }
 
     /// Seeds the cache with an already-decoded image under `url`. Used for
@@ -537,6 +564,7 @@ public final class ImagePipeline: Sendable {
             }
             throw error
         }
+        coordinator?.recordTransfer(bytes: result.data.count, priority: context.priority)
         try Task.checkCancellation()
         audit("network", key)
         if result.isCacheable {
@@ -680,6 +708,16 @@ public final class ImagePipeline: Sendable {
 
     /// `-cache-audit` (DEBUG): one line per image that came from the disk or
     /// the network, so a relaunch shows the disk serving what was seen.
+    /// Counts what an image found when it reached the screen, once per image
+    /// per stay (`ImageArrivals`). DEBUG only: the ledger is a set lookup on
+    /// every cell configuration.
+    private func recordArrival(_ key: ImageKey, _ arrival: CachePrefetchCounters.Arrival) {
+        #if DEBUG
+        guard let coordinator, arrivals.isFirstArrival(of: key) else { return }
+        coordinator.prefetchCounters.recordArrival(.images, arrival)
+        #endif
+    }
+
     private func audit(_ source: StaticString, _ key: ImageKey) {
         #if DEBUG
         if Self.audits {
@@ -764,6 +802,38 @@ private struct ImageDisks: Sendable {
     }
 }
 
+#if DEBUG
+/// The images that arrived recently, so an image counts once per stay on
+/// screen: a cell's synchronous check, its configuration and the async load
+/// that follows a miss are one arrival. An image scrolled far away and back
+/// (out of the last `capacity`) counts again.
+private final class ImageArrivals: Sendable {
+    static let capacity = 512
+
+    private struct State {
+        var seen: Set<ImageKey> = []
+        var order: [ImageKey] = []
+        var next = 0
+    }
+
+    private let state = Mutex(State())
+
+    func isFirstArrival(of key: ImageKey) -> Bool {
+        state.withLock { state in
+            guard state.seen.insert(key).inserted else { return false }
+            if state.order.count < Self.capacity {
+                state.order.append(key)
+            } else {
+                state.seen.remove(state.order[state.next])
+                state.order[state.next] = key
+                state.next = (state.next + 1) % Self.capacity
+            }
+            return true
+        }
+    }
+}
+#endif
+
 /// The signed namespace as the coordinator sees it, registered before its
 /// `DiskStore` has opened: limits and a wipe that arrive meanwhile are kept
 /// and applied to the store when it attaches. A wipe (a logout, a profile
@@ -774,8 +844,8 @@ private final class SignedImageDisk: ManagedCache {
 
     private struct State {
         var store: DiskStore?
-        var limits: CacheLimits?
-        var wipePending = false
+        var limits: (CacheLimits, CacheEvictionReason)?
+        var wipePending: CacheEvictionReason?
     }
 
     private let state = Mutex(State())
@@ -787,38 +857,48 @@ private final class SignedImageDisk: ManagedCache {
 
     /// The store opened: what arrived before it is applied now.
     func attach(_ store: DiskStore) {
-        let pending = state.withLock { state -> (CacheLimits?, Bool) in
+        let pending = state.withLock { state -> ((CacheLimits, CacheEvictionReason)?, CacheEvictionReason?) in
             state.store = store
             let taken = (state.limits, state.wipePending)
-            state.wipePending = false
+            state.wipePending = nil
             return taken
         }
-        if let limits = pending.0 { store.setLimits(limits) }
-        if pending.1 { store.removeAll() }
+        if let limits = pending.0 { store.setLimits(limits.0, reason: limits.1) }
+        if let reason = pending.1 { store.removeAll(reason: reason) }
     }
 
     private var store: DiskStore? { state.withLock { $0.store } }
 
     var namespace: CacheNamespace { ImagePipeline.Namespaces.diskSigned }
     var budget: CacheBudget { .disk(Self.diskBudget) }
-    var usage: CacheUsage { store?.usage ?? CacheUsage(byteLimit: state.withLock { $0.limits?.bytes ?? .max }) }
-    func trim(_ depth: TrimDepth) { store?.trim(depth) }
+    var usage: CacheUsage { store?.usage ?? CacheUsage(byteLimit: state.withLock { $0.limits?.0.bytes ?? .max }) }
+    var statistics: CacheStatistics { store?.statistics ?? CacheStatistics() }
+    func trim(_ depth: TrimDepth) { trim(depth, reason: .trim) }
+    func trim(_ depth: TrimDepth, reason: CacheEvictionReason) { store?.trim(depth, reason: reason) }
     func flush() { store?.flush() }
 
     func setLimits(_ limits: CacheLimits) {
+        setLimits(limits, reason: .budget)
+    }
+
+    func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason) {
         let attached = state.withLock { state -> DiskStore? in
-            state.limits = limits
+            state.limits = (limits, reason)
             return state.store
         }
-        attached?.setLimits(limits)
+        attached?.setLimits(limits, reason: reason)
     }
 
     func removeAll() {
+        removeAll(reason: .wipe)
+    }
+
+    func removeAll(reason: CacheEvictionReason) {
         let attached = state.withLock { state -> DiskStore? in
-            if state.store == nil { state.wipePending = true }
+            if state.store == nil { state.wipePending = reason }
             return state.store
         }
-        attached?.removeAll()
+        attached?.removeAll(reason: reason)
         let handler = onRemoveAll.withLock { $0 }
         handler?()
     }
