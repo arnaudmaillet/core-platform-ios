@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import Profile
 
@@ -27,6 +28,20 @@ struct MediaCacheInventoryTests {
         inventory.clear()
         #expect(inventory.size() == 0)
         #expect(FileManager.default.fileExists(atPath: draft.path), "a file it doesn't own must survive")
+    }
+
+    /// An indexed cache (the UI assets namespace) is measured and cleared
+    /// through itself, never by deleting its folder.
+    @Test func indexedCachesAreMeasuredAndClearedThroughThemselves() {
+        let held = Mutex<Int64>(700)
+        let inventory = MediaCacheInventory(
+            locations: { [] }, urlCache: nil,
+            indexedBytes: { held.withLock { $0 } },
+            clearIndexed: { held.withLock { $0 = 0 } }
+        )
+        #expect(inventory.size() == 700)
+        inventory.clear()
+        #expect(inventory.size() == 0)
     }
 
     @Test func missingLocationsCountForNothing() {

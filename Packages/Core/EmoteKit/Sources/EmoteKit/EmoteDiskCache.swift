@@ -1,36 +1,65 @@
+import CacheKit
 import ImageIO
 import MediaCore
 import UIKit
 import UniformTypeIdentifiers
 
-/// Baked sheets kept in Caches across launches, so an emote is rasterised once
-/// per install and size rather than once per launch.
-///
-/// A PNG per sheet plus a few bytes of JSON saying how to cut it. Everything
-/// here runs OFF the main actor: callers hop to it with `Task.detached`.
-///
-/// ⚠️ **VERSIONED BY FOLDER.** Changing how a sheet is baked (rate, gutter,
-/// caps) must bump `version`, or a device keeps playing sheets cut by the old
-/// rules against the new metadata.
-/// The root of EmoteKit's on-disk sheet cache (`Caches/EmoteKit`), for the
-/// settings that measure and clear rebuildable caches (#409). Every sheet in
-/// it is baked again on demand.
+/// EmoteKit's share of the UI assets disk namespace (`UIAssetCaches.disk`,
+/// #971), for the settings that measure and clear rebuildable caches (#409).
+/// Every sheet in it is baked again on demand.
 public enum EmoteCache {
-    public static var directory: URL? {
-        EmoteDiskCache.standard()?.directory.deletingLastPathComponent()
+    /// Bytes the UI assets disk namespace holds (emote sheets today). Opens
+    /// the namespace if needed: call it off the main thread.
+    public static func diskBytes() -> Int64 {
+        Int64(UIAssetCaches.disk?.usage.bytes ?? 0)
+    }
+
+    /// Removes every baked sheet from the disk, through the namespace, so its
+    /// index stays true. An explicit clear: the one way, short of a nearly
+    /// full disk, that UI assets leave the disk.
+    public static func removeAll() {
+        UIAssetCaches.disk?.removeAll()
     }
 }
 
+/// Baked sheets kept on disk across launches, so an emote is rasterised once
+/// per install and size rather than once per launch.
+///
+/// One entry per sheet in the UI assets namespace (`UIAssetCaches`): the cut
+/// (`Metadata`) and the PNG in one file (`EmoteSheetFile`), so the two can
+/// never be evicted apart. Everything here runs OFF the main actor: callers
+/// hop to it with `Task.detached`.
+///
+/// ⚠️ **VERSIONED BY KEY.** Changing how a sheet is baked (rate, gutter,
+/// caps) must bump `version`, or a device keeps playing sheets cut by the old
+/// rules against the new metadata. Old keys are never read again and leave
+/// with the namespace's 30-day idle expiry.
 struct EmoteDiskCache: Sendable {
     static let version = 1
-    let directory: URL
+    /// The store, opened on first use. A closure so that the shared engine,
+    /// made on the main actor, never opens the store (index read and
+    /// reconciliation) there: the first disk read, on a detached task, does.
+    private let openStore: @Sendable () -> DiskStore?
 
-    /// `Caches/EmoteKit/v<version>`. Nil only if the system has no Caches
-    /// directory, in which case every sheet is simply baked again.
-    static func standard() -> EmoteDiskCache? {
-        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
-        return EmoteDiskCache(directory: caches.appendingPathComponent("EmoteKit/v\(version)", isDirectory: true))
+    init(store: @escaping @Sendable () -> DiskStore?) {
+        self.openStore = store
     }
+
+    /// The app's UI assets namespace. Nil never in practice; the optional is
+    /// the engine's seam for "no disk".
+    static func standard() -> EmoteDiskCache? {
+        EmoteDiskCache {
+            _ = removeLegacyFolderOnce
+            return UIAssetCaches.disk
+        }
+    }
+
+    /// Before #971 the sheets lived in `Caches/EmoteKit` as PNG + JSON pairs
+    /// no index knew about. Removed once per launch, on the first disk use.
+    private static let removeLegacyFolderOnce: Void = {
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else { return }
+        try? FileManager.default.removeItem(at: caches.appendingPathComponent("EmoteKit", isDirectory: true))
+    }()
 
     struct Metadata: Codable, Equatable {
         let frameCount: Int
@@ -45,38 +74,71 @@ struct EmoteDiskCache: Sendable {
         return "\(String(safe))@\(side)\(still ? "-still" : "")"
     }
 
+    /// The namespace key of one sheet.
+    static func key(stem: String) -> String {
+        "emote/v\(version)/\(stem)"
+    }
+
     func load(stem: String) -> AnimatedIconArt? {
-        let png = directory.appendingPathComponent(stem + ".png")
-        let json = directory.appendingPathComponent(stem + ".json")
-        guard let metaData = try? Data(contentsOf: json),
-              let meta = try? JSONDecoder().decode(Metadata.self, from: metaData),
-              let data = try? Data(contentsOf: png),
-              let image = Self.decoded(data)
+        guard let data = openStore()?.data(for: Self.key(stem: stem)) else { return nil }
+        return EmoteSheetFile.art(from: data)
+    }
+
+    func store(_ sheet: AnimatedIconSheet, gutter: Int, stem: String) {
+        guard let disk = openStore(), let data = EmoteSheetFile.data(for: sheet, gutter: gutter) else { return }
+        // A full disk costs a re-bake next launch, nothing more.
+        _ = try? disk.write(data, for: Self.key(stem: stem), tier: .recent)
+    }
+
+    /// Whether the sheet is on disk, without counting as a use.
+    func contains(stem: String) -> Bool {
+        openStore()?.contains(Self.key(stem: stem)) ?? false
+    }
+
+    func removeAll() {
+        openStore()?.removeAll()
+    }
+}
+
+/// One baked sheet as bytes: a 4-byte big-endian length, the JSON `Metadata`,
+/// then the PNG. The disk cache writes it and the bundled seed set
+/// (`EmoteSeeds`) ships it, so a seed reads exactly as a disk hit does.
+enum EmoteSheetFile {
+    static func data(for sheet: AnimatedIconSheet, gutter: Int) -> Data? {
+        guard let image = sheet.sheet.cgImage else { return nil }
+        let meta = EmoteDiskCache.Metadata(
+            frameCount: sheet.frameCount, columns: sheet.columns,
+            frameDuration: sheet.frameDuration, gutter: gutter
+        )
+        guard let metaData = try? JSONEncoder().encode(meta) else { return nil }
+        let png = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(png, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        var length = UInt32(metaData.count).bigEndian
+        var data = Data(bytes: &length, count: 4)
+        data.append(metaData)
+        data.append(png as Data)
+        return data
+    }
+
+    static func metadata(in data: Data) -> (meta: EmoteDiskCache.Metadata, png: Data)? {
+        guard data.count > 4 else { return nil }
+        let start = data.startIndex
+        let length = data[start..<start + 4].reduce(0) { $0 << 8 | Int($1) }
+        let metaEnd = start + 4 + length
+        guard length > 0, metaEnd < data.endIndex,
+              let meta = try? JSONDecoder().decode(EmoteDiskCache.Metadata.self, from: data[(start + 4)..<metaEnd])
         else { return nil }
+        return (meta, data[metaEnd...])
+    }
+
+    static func art(from data: Data) -> AnimatedIconArt? {
+        guard let (meta, png) = metadata(in: data), let image = decoded(png) else { return nil }
         return .sheet(AnimatedIconSheet(
             sheet: UIImage(cgImage: image), frameCount: meta.frameCount, columns: meta.columns,
             frameDuration: meta.frameDuration, gutterPX: meta.gutter
         ))
-    }
-
-    func store(_ sheet: AnimatedIconSheet, gutter: Int, stem: String) {
-        guard let image = sheet.sheet.cgImage else { return }
-        let meta = Metadata(frameCount: sheet.frameCount, columns: sheet.columns,
-                            frameDuration: sheet.frameDuration, gutter: gutter)
-        guard let metaData = try? JSONEncoder().encode(meta) else { return }
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else { return }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else { return }
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            // The PNG first and the metadata last: a crash between the two
-            // leaves a PNG with no metadata, which `load` treats as a miss.
-            try (data as Data).write(to: directory.appendingPathComponent(stem + ".png"), options: .atomic)
-            try metaData.write(to: directory.appendingPathComponent(stem + ".json"), options: .atomic)
-        } catch {
-            // A full disk costs a re-bake next launch, nothing more.
-        }
     }
 
     /// The PNG decoded NOW, into a bitmap Core Animation can upload as is.
@@ -95,9 +157,5 @@ struct EmoteDiskCache: Sendable {
         else { return nil }
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         return context.makeImage()
-    }
-
-    func removeAll() {
-        try? FileManager.default.removeItem(at: directory)
     }
 }

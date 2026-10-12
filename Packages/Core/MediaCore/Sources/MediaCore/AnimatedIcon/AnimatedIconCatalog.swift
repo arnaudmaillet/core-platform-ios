@@ -1,3 +1,4 @@
+import CacheKit
 import ImageIO
 import UIKit
 
@@ -8,6 +9,10 @@ import UIKit
 /// `AnimatedIcon.sheet_url` / `still_url`; today the mock reads a bundled copy,
 /// and this type is the seam that will not change when the URL arrives — only
 /// `loadAsset` will.
+///
+/// Resident icons live in the device cache's UI assets class (#971,
+/// `UIAssetCaches`): kept through a memory warning and the background, after
+/// feed media has gone, and dropped only on a CRITICAL warning.
 @MainActor
 public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
 
@@ -38,38 +43,49 @@ public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
         let startMS: Int?
     }
 
-    private final class Box {
-        let art: AnimatedIconArt
-        init(_ art: AnimatedIconArt) { self.art = art }
-    }
-
     private let bundle: Bundle
     private let entries: [String: Entry]
     /// Stable order, so a caller that wants "some icon" gets the same one twice.
     public let ids: [String]
-    private let cache = NSCache<NSString, Box>()
+    /// Resident art, in the UI assets class.
+    let cache: MemoryCache<String, AnimatedIconArt>
     private var inflight: [String: Task<AnimatedIconArt, Error>] = [:]
+    /// Ids ever resolved to the cheap path: `residentDecomposed` asks the
+    /// cache which of them are still there.
+    private var decomposedIDs: Set<String> = []
 
-    /// What is resident right now, and what it costs.
-    ///
-    /// Tracked here because `NSCache` will not say: it exposes no count, no
-    /// contents and no total. Eviction is observed through
-    /// `NSCacheDelegate` rather than inferred, so the figure follows the cache
-    /// down as well as up — a resident total that only ever grows is the kind
-    /// of readout that makes a memory problem look like a memory success.
-    public private(set) var residentBytes = 0
-    public private(set) var residentCount = 0
+    /// What is resident right now, and what it costs — read off the cache's
+    /// own accounting, so the figure follows evictions and trims down as well
+    /// as up. A resident total that only ever grows is the kind of readout
+    /// that makes a memory problem look like a memory success.
+    public var residentBytes: Int { cache.usage.bytes }
+    public var residentCount: Int { cache.usage.count }
     /// How many of the resident icons took the cheap path.
-    public private(set) var residentDecomposed = 0
+    public var residentDecomposed: Int { decomposedIDs.filter(cache.contains).count }
 
     /// ⚠️ A BYTE budget, not a count.
     ///
     /// `ImagePipeline` caps by `countLimit`, which is right for photographs and
     /// wrong here: a sheet is up to 1.7 MB, so 300 of them is 500 MB and a count
     /// limit would never evict.
-    public init(bundle: Bundle = .main, manifest: String, memoryBudgetMB: Int = 24) {
+    ///
+    /// - Parameters:
+    ///   - priorityClass: `persistent` for icons, a UI asset. The map's
+    ///     preview sheets are cut from posts' clips, feed media in all but
+    ///     format: they pass `standard` and go with the feed under pressure.
+    ///   - registry: where the cache is announced (namespace
+    ///     `UIAssets.icons.<manifest>`), so the app's coordinator budgets and
+    ///     trims it; nil keeps it to itself.
+    public init(
+        bundle: Bundle = .main, manifest: String, memoryBudgetMB: Int = 24,
+        priorityClass: CachePriorityClass = .persistent, registry: UIAssetCaches? = .shared
+    ) {
         self.bundle = bundle
-        cache.totalCostLimit = memoryBudgetMB * 1024 * 1024
+        cache = UIAssetCaches.memoryCache(
+            "UIAssets.icons.\(manifest)", budget: .fixed(bytes: memoryBudgetMB * CacheBytes.mebibyte),
+            priorityClass: priorityClass
+        )
+        registry?.adopt(cache)
         guard let url = bundle.url(forResource: manifest, withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode([Entry].self, from: data)
@@ -82,13 +98,12 @@ public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
         self.entries = Dictionary(decoded.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         self.ids = decoded.map(\.id)
         super.init()
-        cache.delegate = self
     }
 
     public var isEmpty: Bool { entries.isEmpty }
 
     public func cached(_ id: String) -> AnimatedIconArt? {
-        cache.object(forKey: id as NSString)?.art
+        cache.value(for: id)
     }
 
     /// Resolves an id, coalescing concurrent callers.
@@ -107,10 +122,8 @@ public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
         defer { inflight[id] = nil }
 
         let art = try await task.value
-        cache.setObject(Box(art), forKey: id as NSString, cost: art.byteCost)
-        residentBytes += art.byteCost
-        residentCount += 1
-        if art.isDecomposed { residentDecomposed += 1 }
+        cache.insert(art, for: id, cost: art.byteCost)
+        if art.isDecomposed { decomposedIDs.insert(id) }
         return art
     }
 
@@ -171,23 +184,5 @@ public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
                 startTime: entry.startMS.map { TimeInterval($0) / 1000 }
             ))
         }.value
-    }
-}
-
-extension AnimatedIconCatalog: NSCacheDelegate {
-    /// ⚠️ Called on whatever thread evicted, which is why the accounting hops
-    /// back to the main actor rather than mutating from here. `NSCache` also
-    /// evicts on memory PRESSURE, not only over budget, so this is the only
-    /// place the resident figure can learn it went down.
-    public nonisolated func cache(_ cache: NSCache<AnyObject, AnyObject>, willEvictObject obj: Any) {
-        guard let box = obj as? Box else { return }
-        let cost = box.art.byteCost
-        let decomposed = box.art.isDecomposed
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.residentBytes = max(0, self.residentBytes - cost)
-            self.residentCount = max(0, self.residentCount - 1)
-            if decomposed { self.residentDecomposed = max(0, self.residentDecomposed - 1) }
-        }
     }
 }

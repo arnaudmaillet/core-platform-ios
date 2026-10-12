@@ -10,10 +10,13 @@ let package = Package(
     dependencies: [
         // `MotionPreference`: the app-level Reduce Motion the animated icons
         // honour alongside the iOS setting (#468).
-        .package(path: "../DesignSystem")
+        .package(path: "../DesignSystem"),
+        // The device cache (#891): resident animated icons live in its UI
+        // assets class (#971).
+        .package(path: "../CacheKit")
     ],
     targets: [
-        .target(name: "MediaCore", dependencies: ["DesignSystem"]),
-        .testTarget(name: "MediaCoreTests", dependencies: ["MediaCore"])
+        .target(name: "MediaCore", dependencies: ["DesignSystem", "CacheKit"]),
+        .testTarget(name: "MediaCoreTests", dependencies: ["MediaCore", "CacheKit"])
     ]
 )

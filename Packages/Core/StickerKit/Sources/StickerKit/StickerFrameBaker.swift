@@ -1,3 +1,4 @@
+import CacheKit
 import Lottie
 import UIKit
 
@@ -20,6 +21,11 @@ import UIKit
 /// raw that is about 176 MB each. Halving the rate, capping the side and
 /// storing compressed bytes brings a loop down to a few megabytes, and a strip
 /// holds one decoded frame at a time (`StickerStrip`).
+///
+/// Strips live in the device cache's UI assets class (#971, `UIAssetCaches`):
+/// kept through a memory warning and the background, after feed media has
+/// gone, and dropped only on a CRITICAL warning — a sticker placed in the
+/// editor is not baked twice because the app was briefly under pressure.
 @MainActor
 public final class StickerFrameBaker: NSObject {
     /// How many frames a second a loop is baked at.
@@ -31,7 +37,11 @@ public final class StickerFrameBaker: NSObject {
 
     /// The baker the app shares, so a strip baked for the canvas is not baked
     /// again by the publish that follows.
-    public static let shared = StickerFrameBaker()
+    public static let shared = StickerFrameBaker(registry: .shared)
+
+    /// Resident strips: 48 MB. A loop is a few megabytes of PNG (see above),
+    /// so this holds every sticker a post can carry at both sides.
+    nonisolated static let memoryBudget = MemoryBudget.fixed(bytes: 48 * CacheBytes.mebibyte)
 
     /// Whether a strip is the whole loop or its first frame alone.
     public enum Motion: Sendable {
@@ -41,7 +51,7 @@ public final class StickerFrameBaker: NSObject {
         case still
     }
 
-    private struct Key: Hashable {
+    struct Key: Hashable, Sendable {
         let id: String
         let side: Int
         let motion: Motion
@@ -51,7 +61,8 @@ public final class StickerFrameBaker: NSObject {
     /// back: half a 60Hz frame. At least one frame is drawn per slice.
     static let slice = Duration.milliseconds(8)
 
-    private var strips: [Key: StickerStrip] = [:]
+    /// Baked strips, in the UI assets class.
+    let strips: MemoryCache<Key, StickerStrip>
     private var baking: [Key: Task<StickerStrip?, Never>] = [:]
     /// Bakes actually started — what `theBakerCaches` counts.
     private(set) var bakes = 0
@@ -59,20 +70,14 @@ public final class StickerFrameBaker: NSObject {
     /// between two slices.
     private(set) var framesDrawn = 0
 
-    override public init() {
+    /// - Parameter registry: where the strip cache is announced, so the app's
+    ///   coordinator budgets and trims it (memory pressure is its call, not a
+    ///   notification observer's). Strips are caches, never state: anything
+    ///   holding one keeps it alive, and everything else can be baked again.
+    public init(registry: UIAssetCaches? = nil) {
+        strips = UIAssetCaches.memoryCache("UIAssets.stickers", budget: Self.memoryBudget)
         super.init()
-        // A selector observer is dropped with its observer, so a baker made
-        // for one publish leaves nothing registered behind.
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(dropStrips),
-            name: UIApplication.didReceiveMemoryWarningNotification, object: nil
-        )
-    }
-
-    /// Strips are caches, never state: anything holding one keeps it alive,
-    /// and everything else can be baked again.
-    @objc private func dropStrips() {
-        strips.removeAll()
+        registry?.adopt(strips)
     }
 
     /// The sticker's strip at `side` pixels (clamped to `1...exportSide`), baked
@@ -82,13 +87,13 @@ public final class StickerFrameBaker: NSObject {
     /// Two callers asking for the same strip while it bakes wait on ONE bake.
     public func strip(for sticker: Sticker, side: Int, motion: Motion = .loop) async -> StickerStrip? {
         let key = Key(id: sticker.id, side: Self.clampedSide(side), motion: motion)
-        if let strip = strips[key] { return strip }
+        if let strip = strips.value(for: key) { return strip }
         if let running = baking[key] { return await running.value }
         let task = Task { await self.bake(sticker, side: key.side, motion: motion) }
         baking[key] = task
         let strip = await task.value
         baking[key] = nil
-        if let strip { strips[key] = strip }
+        if let strip { strips.insert(strip, for: key, cost: Self.cost(of: strip)) }
         return strip
     }
 
@@ -154,6 +159,12 @@ public final class StickerFrameBaker: NSObject {
     /// hair above 90 and must not become 91.
     nonisolated static func frameCount(forSeconds seconds: Double) -> Int {
         max(1, Int((seconds * Double(framesPerSecond) - 1e-6).rounded(.up)))
+    }
+
+    /// What a strip holds: its compressed frames, and the one frame it keeps
+    /// decoded (`StickerStrip`).
+    nonisolated static func cost(of strip: StickerStrip) -> Int {
+        strip.byteCount + strip.side * strip.side * 4
     }
 
     nonisolated static func clampedSide(_ side: Int) -> Int {
