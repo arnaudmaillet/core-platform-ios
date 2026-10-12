@@ -374,4 +374,16 @@ struct CacheSignalSourceTests {
         #expect(PrefetchPolicy.full.maxConcurrentSpeculativeFills == 2)
         #expect(PrefetchPolicy.reduced.maxConcurrentSpeculativeFills == 0)
     }
+
+    /// Settings → Storage → Use Less Cellular Data (#899): cellular drops to
+    /// `reduced` (P2 off, one video ahead); Wi-Fi keeps the full lookahead.
+    @Test func useLessCellularDataReducesOnlyCellularPrefetch() {
+        #expect(PrefetchPolicy(conditions: CacheConditions(network: .cellular, usesLessCellularData: true)) == .reduced)
+        #expect(PrefetchPolicy(conditions: CacheConditions(network: .wifi, isNetworkExpensive: true, usesLessCellularData: true)) == .reduced,
+                "a personal hotspot is metered too")
+        #expect(PrefetchPolicy(conditions: CacheConditions(network: .wifi, usesLessCellularData: true)) == .full)
+        #expect(PrefetchPolicy(conditions: CacheConditions(network: .offline, usesLessCellularData: true)) == .off)
+        #expect(PrefetchPolicy.reduced.videoPreloadDepth < PrefetchPolicy.cellular.videoPreloadDepth)
+        #expect(PrefetchPolicy.reduced.preloadScreens == 0)
+    }
 }

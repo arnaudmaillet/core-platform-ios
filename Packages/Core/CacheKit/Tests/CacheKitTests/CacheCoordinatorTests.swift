@@ -344,6 +344,25 @@ final class CacheCoordinatorTests {
         #expect(recorder.signals.count == 2)
     }
 
+    /// The Settings toggle reaches the coordinator through `updateConditions`:
+    /// on cellular it stops every P2 fill at once and tells the lookaheads.
+    @Test func useLessCellularDataOnCellularStopsSpeculativeFills() {
+        let coordinator = makeCoordinator(conditions: CacheConditions(network: .cellular))
+        #expect(coordinator.prefetchPolicy == .cellular)
+        let recorder = SignalRecorder()
+        let observation = coordinator.observeConditions { conditions, _ in
+            recorder.record(.network(conditions.network, isConstrained: false, isExpensive: conditions.usesLessCellularData))
+        }
+        coordinator.updateConditions { $0.usesLessCellularData = true }
+        #expect(coordinator.prefetchPolicy == .reduced)
+        #expect(coordinator.fillSlots.limit == 0)
+        #expect(recorder.signals.count == 1)
+        coordinator.handle(.network(.wifi, isConstrained: false, isExpensive: false))
+        #expect(coordinator.prefetchPolicy == .full, "a network change keeps the user's choice and Wi-Fi ignores it")
+        #expect(coordinator.conditions.usesLessCellularData)
+        observation.cancel()
+    }
+
     @Test func theInitialConditionsSizeTheFillSlots() {
         let constrained = makeCoordinator(conditions: CacheConditions(isNetworkConstrained: true))
         #expect(constrained.fillSlots.limit == 0)

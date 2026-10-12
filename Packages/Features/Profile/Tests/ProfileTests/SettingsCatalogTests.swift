@@ -42,8 +42,8 @@ struct SettingsCatalogTests {
         #expect(AppPreferencesViewController.sections(for: .emojis) == [.emojis])
         #expect(AppPreferencesViewController.sections(for: .mediaComments) == [.band, .subtitles, .commentsScreen, .muted])
         #expect(AppPreferencesViewController.sections(for: .language) == [.language])
-        #expect(AppPreferencesViewController.sections(for: .storage) == [.storage])
-        for section in SettingsSection.sections(in: .device) {
+        #expect(AppPreferencesViewController.sections(for: .storage).isEmpty, "Storage has its own screen (#899)")
+        for section in SettingsSection.sections(in: .device) where section != .storage {
             let page = AppPreferencesViewController(page: section)
             page.loadViewIfNeeded()
             #expect(page.title == section.title)

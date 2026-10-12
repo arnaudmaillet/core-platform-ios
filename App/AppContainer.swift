@@ -314,9 +314,14 @@ final class AppContainer {
     /// Settings limit, and releases memory and disk on the signals
     /// `startCacheCoordinator()` wires.
     ///
-    /// `.automatic` (images 300 MB, video 500 MB, LocalStore 100 MB) until
-    /// Settings → Storage offers the choice (#899).
-    let cacheCoordinator = CacheCoordinator(storageLimit: .automatic)
+    /// Starts on the device's Settings → Storage choices (#899): the storage
+    /// limit (`.automatic` = images 300 MB, video 500 MB, LocalStore 100 MB,
+    /// unless the viewer chose 0.5, 1 or 2 GB) and Use Less Cellular Data.
+    /// Settings applies later changes to it directly.
+    let cacheCoordinator = CacheCoordinator(
+        storageLimit: CacheStoragePreference.load(),
+        conditions: CacheConditions(usesLessCellularData: MediaPlaybackPreferencesStore.standard.preferences.dataSaver)
+    )
 
     /// Starts the coordinator's signal sources: memory warning and critical
     /// pressure, background and foreground, Low Power, thermal, the network
@@ -1183,8 +1188,8 @@ final class AppContainer {
         // A follow made on another surface (a feed's "+", a card's Unfollow)
         // reaches the profile screens and their followers lists.
         builder.followEvents = followGraphEvents
-        // Settings → Storage measures and clears the images (#894) through
-        // the coordinator that owns their stores.
+        // Settings → Storage measures and clears every cache, and applies the
+        // storage limit and the cellular choice, through the coordinator (#899).
         builder.cacheCoordinator = cacheCoordinator
         // What You See → Your Interests (#413).
         builder.interestTags = InterestTagsRepository(

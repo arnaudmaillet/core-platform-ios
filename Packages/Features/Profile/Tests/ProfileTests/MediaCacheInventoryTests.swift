@@ -6,8 +6,8 @@ import Testing
 import UIKit
 @testable import Profile
 
-/// Settings → App Preferences → Storage (#409): the media cache is measured
-/// and cleared by what it OWNS, never by directory.
+/// Settings → Storage (#409, #899): the caches are measured and cleared by
+/// what the inventory OWNS, never by directory.
 struct MediaCacheInventoryTests {
     private func scratch() throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("cache-test-\(UUID().uuidString)", isDirectory: true)
@@ -27,9 +27,9 @@ struct MediaCacheInventoryTests {
         try Data(count: 2_000).write(to: draft)
 
         let inventory = MediaCacheInventory(locations: { [clip, emotes] }, urlCache: nil)
-        #expect(inventory.size() == 1_500)
-        inventory.clear()
-        #expect(inventory.size() == 0)
+        #expect(inventory.report().total == 1_500)
+        inventory.clear(nil)
+        #expect(inventory.report().total == 0)
         #expect(FileManager.default.fileExists(atPath: draft.path), "a file it doesn't own must survive")
     }
 
@@ -42,15 +42,15 @@ struct MediaCacheInventoryTests {
             indexedBytes: { held.withLock { $0 } },
             clearIndexed: { held.withLock { $0 = 0 } }
         )
-        #expect(inventory.size() == 700)
-        inventory.clear()
-        #expect(inventory.size() == 0)
+        #expect(inventory.report().bytes(in: .other) == 700)
+        inventory.clear(.other)
+        #expect(inventory.report().total == 0)
     }
 
     @Test func missingLocationsCountForNothing() {
         let inventory = MediaCacheInventory(locations: { [URL(fileURLWithPath: "/nonexistent/\(UUID().uuidString)")] }, urlCache: nil)
-        #expect(inventory.size() == 0)
-        inventory.clear()
+        #expect(inventory.report().total == 0)
+        inventory.clear(nil)
     }
 
     /// Since #894 the images live in the pipeline's CacheKit stores, not in
@@ -65,8 +65,7 @@ struct MediaCacheInventoryTests {
         let fetcher = CountingImageFetcher()
         let pipeline = ImagePipeline(fetcher: fetcher, disk: .folder(root), coordinator: coordinator)
         await pipeline.waitUntilDiskIsOpen()
-        // A UI assets namespace (`.other`): measured and cleared by
-        // `indexedBytes`/`clearIndexed`, never a second time here.
+        // A UI assets namespace (`.other`): left to its own category's clear.
         let assets = try DiskStore(
             namespace: CacheNamespace("ui.assets.test", category: .other, scope: .public, priorityClass: .persistent),
             budget: .reserved(CacheBytes.megabyte, in: .images), root: root
@@ -85,15 +84,14 @@ struct MediaCacheInventoryTests {
         for name in ["images", "images.small", "images.signed"] {
             #expect((before.usage(of: name, medium: .disk)?.bytes ?? 0) > 0, "\(name) holds an image")
         }
-        let imageBytes = Int64(before.bytes(in: .images, medium: .disk))
         let inventory = MediaCacheInventory(locations: { [] }, urlCache: nil, coordinator: coordinator)
-        #expect(inventory.size() == imageBytes, "every image store is counted, the UI assets one is not")
+        #expect(inventory.report().bytes(in: .images) == Int64(before.bytes(in: .images)), "every image store and decoded memory")
 
-        inventory.clear()
+        inventory.clear(.images)
 
         let after = coordinator.usage()
         #expect(after.bytes(in: .images) == 0, "disk and decoded memory both emptied")
-        #expect(inventory.size() == 0)
+        #expect(inventory.report().bytes(in: .images) == 0)
         #expect(!pipeline.isDecoded(photo) && !pipeline.isOnDisk(photo))
         #expect(after.usage(of: "ui.assets.test", medium: .disk)?.bytes == before.usage(of: "ui.assets.test", medium: .disk)?.bytes,
                 "another category is left to its own clear")

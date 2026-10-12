@@ -57,6 +57,27 @@ public enum CacheStorageLimit: Sendable, Hashable {
     public static let choices: [CacheStorageLimit] = [.automatic, .halfGigabyte, .oneGigabyte, .twoGigabytes]
 }
 
+/// The Settings → Storage limit, kept on this device (#899): a device
+/// preference like the playback ones, never the profile's. The app reads it
+/// once to build its coordinator; Settings writes it and applies it.
+public enum CacheStoragePreference {
+    static let key = "device.cacheStorageLimit"
+
+    /// The saved limit; `.automatic` when none was chosen, or when what is
+    /// saved is not a positive byte count.
+    public static func load(from defaults: UserDefaults = .standard) -> CacheStorageLimit {
+        let bytes = defaults.integer(forKey: key)
+        return bytes > 0 ? .total(bytes: bytes) : .automatic
+    }
+
+    public static func save(_ limit: CacheStorageLimit, to defaults: UserDefaults = .standard) {
+        switch limit {
+        case .automatic: defaults.removeObject(forKey: key)
+        case .total(let bytes): defaults.set(max(1, bytes), forKey: key)
+        }
+    }
+}
+
 /// How short the device is of free disk space, measured with
 /// `volumeAvailableCapacityForImportantUsage`.
 public enum DiskPressure: Int, Sendable, Comparable {

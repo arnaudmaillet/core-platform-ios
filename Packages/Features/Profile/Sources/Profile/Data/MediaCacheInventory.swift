@@ -3,48 +3,97 @@ import EmoteKit
 import Foundation
 import MediaPlayback
 
-/// The rebuildable media caches on this device, measured and cleared from
-/// Settings → App Preferences (#409): downloaded or synthesised video clips
-/// (`VideoSourceCache`), baked emote sheets (`EmoteCache`, the UI assets
-/// disk namespace of #971), the shared HTTP cache, and every image the
-/// pipeline keeps (#894), through the app's `CacheCoordinator`.
+/// What Settings → Storage measures: each category's bytes, memory and disk.
+struct StorageReport: Equatable, Sendable {
+    /// Memory and disk bytes of each category: the coordinator's namespaces
+    /// plus the caches the inventory names itself.
+    var bytes: [CacheCategory: Int64]
+    /// Bytes on disk of the coordinator's namespaces: what the storage limit
+    /// caps.
+    var limitedDiskBytes: Int64
+
+        func bytes(in category: CacheCategory) -> Int64 { bytes[category] ?? 0 }
+    var total: Int64 { bytes.values.reduce(0, +) }
+}
+
+/// The rebuildable caches on this device, measured and cleared per category
+/// from Settings → Storage (#409, #899).
+///
+/// - **Through the coordinator:** every namespace registered with the app's
+///   `CacheCoordinator`, memory and disk: images (#894), UI assets and the
+///   LocalStore pages (`.other`, #971, #893), and video and messages as they
+///   join it (#895, #897). Cleared with `trim(.clear(category))`: a leased
+///   entry (on screen, an upload in flight) stops being served at once and
+///   its bytes go when its lease ends.
+/// - **Named here:** the synthesised video clips (`VideoSourceCache`, Videos)
+///   and the shared HTTP cache (Other), which no namespace holds yet. Without
+///   a coordinator, also the UI assets disk namespace (`indexedBytes`).
 ///
 /// Deliberately a list of what is OWNED, never "the caches directory": the
 /// temporary directory also holds Upload's captures and soundtracks in
-/// flight, and clearing those would break a post being made.
+/// flight, and drafts, the like outbox, preferences and the session live
+/// elsewhere; none of them is a cache.
 struct MediaCacheInventory: Sendable {
-    /// Files and directories to measure and remove.
+    /// Files and directories counted as Videos, measured and removed by path.
     var locations: @Sendable () -> [URL]
+    /// Counted as Other.
     var urlCache: URLCache?
-    /// Bytes of the caches that keep an index (CacheKit namespaces), measured
-    /// by the cache itself.
+    /// Bytes of an indexed cache no coordinator holds (Other), measured by
+    /// the cache itself.
     var indexedBytes: @Sendable () -> Int64 = { 0 }
-    /// Clears those caches THROUGH their index: deleting their folder behind
-    /// their back would leave an index naming files that are gone.
+    /// Clears it THROUGH its index: deleting its folder behind its back would
+    /// leave an index naming files that are gone.
     var clearIndexed: @Sendable () -> Void = {}
-    /// The app's cache coordinator, which measures and clears the namespaces
-    /// of `coordinatedCategories`. Since #894 images live in its disk stores (`images`, `images.small`,
-    /// `images.signed`) and decoded memory, not in `URLCache.shared`: a clear
-    /// that skipped them left up to the whole images pool behind.
     var coordinator: CacheCoordinator?
 
-    /// The categories this inventory measures and clears through `coordinator`.
-    /// UI assets (`.other`) stay with `indexedBytes`/`clearIndexed`, and the
-    /// LocalStore (#893) is not a media cache.
-    static let coordinatedCategories: [CacheCategory] = [.images]
-
+    /// The app's inventory. With a coordinator the UI assets namespace is one
+    /// of its `.other` namespaces, so it is not named a second time.
     static func standard(coordinator: CacheCoordinator? = nil) -> MediaCacheInventory {
-        MediaCacheInventory(
+        var inventory = MediaCacheInventory(
             locations: { VideoSourceCache.files() },
             urlCache: .shared,
-            indexedBytes: { EmoteCache.diskBytes() },
-            clearIndexed: { EmoteCache.removeAll() },
             coordinator: coordinator
         )
+        if coordinator == nil {
+            inventory.indexedBytes = { EmoteCache.diskBytes() }
+            inventory.clearIndexed = { EmoteCache.removeAll() }
+        }
+        return inventory
     }
 
-    /// Bytes on disk. Walks the file system: call it off the main thread.
-    func size() -> Int64 {
+    /// Measures every category. Walks the file system: call it off the main
+    /// thread.
+    func report() -> StorageReport {
+        var bytes = Dictionary(uniqueKeysWithValues: CacheCategory.allCases.map { ($0, Int64(0)) })
+        var limited: Int64 = 0
+        if let coordinator {
+            let usage = coordinator.usage()
+            for category in CacheCategory.allCases {
+                bytes[category, default: 0] += Int64(usage.bytes(in: category))
+            }
+            limited = Int64(usage.totalBytes(medium: .disk))
+        }
+        bytes[.videos, default: 0] += filesBytes()
+        bytes[.other, default: 0] += indexedBytes() + Int64(urlCache?.currentDiskUsage ?? 0)
+        return StorageReport(bytes: bytes, limitedDiskBytes: limited)
+    }
+
+    /// Removes one category, or everything (`nil`), memory and disk together.
+    /// Anything in use is rebuilt on its next read.
+    func clear(_ category: CacheCategory?) {
+        coordinator?.trim(.clear(category))
+        if category == nil || category == .videos {
+            for url in locations() {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        if category == nil || category == .other {
+            clearIndexed()
+            urlCache?.removeAllCachedResponses()
+        }
+    }
+
+    private func filesBytes() -> Int64 {
         let fileManager = FileManager.default
         var total: Int64 = 0
         for url in locations() {
@@ -59,29 +108,7 @@ struct MediaCacheInventory: Sendable {
                 total += Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
             }
         }
-        return total + indexedBytes() + coordinatedBytes() + Int64(urlCache?.currentDiskUsage ?? 0)
-    }
-
-    /// Bytes on disk of the coordinated categories, as their stores report.
-    private func coordinatedBytes() -> Int64 {
-        guard let coordinator else { return 0 }
-        let report = coordinator.usage()
-        return Self.coordinatedCategories.reduce(0) { $0 + Int64(report.bytes(in: $1, medium: .disk)) }
-    }
-
-    /// Removes every owned cache. Anything in use is rebuilt on its next read.
-    func clear() {
-        for url in locations() {
-            try? FileManager.default.removeItem(at: url)
-        }
-        clearIndexed()
-        // Memory and disk together, so a cleared image is fetched again rather
-        // than still served decoded until the next launch. A leased entry (on
-        // screen) stops being served at once; its bytes go when the lease ends.
-        for category in Self.coordinatedCategories {
-            coordinator?.trim(.clear(category))
-        }
-        urlCache?.removeAllCachedResponses()
+        return total
     }
 
     static func formatted(_ bytes: Int64) -> String {
