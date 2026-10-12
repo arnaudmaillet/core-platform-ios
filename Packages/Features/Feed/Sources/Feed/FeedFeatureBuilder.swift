@@ -95,9 +95,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         /// `GetDiscoveryFeed`, the same pool for guests and members. Nil:
         /// Discover is the following timeline, as before the backend served
         /// one.
-        discovery: (any FeedProviding)? = nil
+        discovery: (any FeedProviding)? = nil,
+        /// For You's corpora on the device (#893): the tab opens on the last
+        /// session's pages, then revalidates. Nil: it opens on skeletons.
+        localCache: FeedLocalCache? = nil
     ) {
         self.discovery = discovery
+        self.localCache = localCache
         self.postDrafts = postDrafts
         self.soundProvider = soundProvider
         self.useSound = useSound
@@ -261,6 +265,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
 
     private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
     private let discovery: (any FeedProviding)?
+    private let localCache: FeedLocalCache?
 
     public func makeForYouViewController(
         onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
@@ -270,7 +275,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             viewModel: ForYouViewModel(
                 // Two corpora: the following timeline makes the rows (a guest
                 // has none, and they stay empty); Discover reads its own pool.
-                repository: ForYouRepository(feed: repository, counterClient: counterClient, discovery: discovery),
+                repository: ForYouRepository(
+                    feed: repository, counterClient: counterClient, discovery: discovery, localCache: localCache
+                ),
                 contextStore: ContentContextStore(),
                 // The rows split the people the viewer follows into FRIENDS
                 // (mutual) and the rest: asked of the graph as pages land, and

@@ -1,0 +1,233 @@
+import CacheKit
+import Foundation
+import GRDB
+
+/// Budgets, trims and expiry, inside the writer's transactions.
+///
+/// What can go, lowest tier first and least recently used first:
+/// - a list's PAGES, from its tail: evicting page k takes every page after it,
+///   so what is left of a list is always its first k pages, and its cursor is
+///   page k-1's (paging resumes exactly where the stored pages stop). The
+///   entities only those pages held go with them.
+/// - entities no list holds (written on their own), by their own tier.
+///
+/// Pages never outrank the page before them (`appendPage`), so the order
+/// above always takes a list from its tail.
+extension LocalStore {
+    /// The cost of a page row beyond its entities, as SQL over `table`.
+    static func pageCostSQL(_ table: String) -> String {
+        "(\(table).item_count * \(itemOverhead) + \(pageOverhead) + IFNULL(length(\(table).next_cursor), 0))"
+    }
+
+    struct Victim {
+        enum Kind {
+            case page(list: String, index: Int)
+            case entity(LocalEntityKey)
+        }
+
+        let kind: Kind
+        let tier: CacheTier
+        let accessedAt: Double
+        let bytes: Int
+
+        /// Lowest tier first, least recently used first; within a list, its
+        /// tail first; an entity no list holds before a page of equal rank.
+        static func evictionOrder(_ lhs: Victim, _ rhs: Victim) -> Bool {
+            if lhs.tier != rhs.tier { return lhs.tier < rhs.tier }
+            if lhs.accessedAt != rhs.accessedAt { return lhs.accessedAt < rhs.accessedAt }
+            switch (lhs.kind, rhs.kind) {
+            case (.entity, .page): return true
+            case (.page, .entity): return false
+            case let (.page(_, left), .page(_, right)): return left > right
+            case let (.entity(left), .entity(right)): return (left.type, left.id) < (right.type, right.id)
+            }
+        }
+    }
+
+    // MARK: - Budget
+
+    /// Evicts until the store fits `limits` (and its speculative pages fit
+    /// their cap), never above `ceiling`, and the pages of `protecting`'s list
+    /// last: if nothing else can go, the page just written goes (with the
+    /// pages after it), and the write did not fit.
+    func enforce(
+        _ db: Database, limits: CacheLimits, now: Date,
+        protecting written: (list: String, index: Int)?, ceiling: CacheTier
+    ) throws -> (evicted: Int, fits: Bool) {
+        var evicted = 0
+        // A few rounds: a page shares entities with other lists, so what a
+        // round frees is measured again rather than trusted.
+        for _ in 0..<16 {
+            let total = try totalBytes(db)
+            let speculative = try speculativeBytes(db)
+            let overTotal = total - limits.bytes
+            let overSpeculative = speculative - limits.speculativeBytes
+            guard overTotal > 0 || overSpeculative > 0 else { return (evicted, true) }
+            var freedTotal = 0
+            var freedSpeculative = 0
+            var progress = false
+            var gone: [String: Int] = [:]
+            for victim in try victims(db, maximumTier: ceiling) {
+                let needsTotal = freedTotal < overTotal
+                let needsSpeculative = freedSpeculative < overSpeculative
+                guard needsTotal || needsSpeculative else { break }
+                if !needsTotal, victim.tier != .speculative { continue }
+                if case .page(let list, let index) = victim.kind {
+                    if list == written?.list { continue }
+                    if let first = gone[list], index >= first { continue }
+                    gone[list] = min(gone[list] ?? .max, index)
+                }
+                try delete(victim, in: db)
+                freedTotal += victim.bytes
+                if victim.tier == .speculative { freedSpeculative += victim.bytes }
+                evicted += 1
+                progress = true
+            }
+            guard progress else { break }
+        }
+        let fits = try totalBytes(db) <= limits.bytes && speculativeBytes(db) <= limits.speculativeBytes
+        guard !fits, let written else { return (evicted, fits) }
+        try deletePages(of: written.list, from: written.index, in: db)
+        return (evicted + 1, false)
+    }
+
+    func totalBytes(_ db: Database) throws -> Int {
+        try Int.fetchOne(db, sql: """
+            SELECT IFNULL((SELECT SUM(size) FROM entity), 0)
+                 + IFNULL((SELECT SUM(\(Self.pageCostSQL("list_page"))) FROM list_page), 0)
+            """) ?? 0
+    }
+
+    /// Bytes of prefetched pages nobody read yet: their own cost and the
+    /// entities only they hold.
+    private func speculativeBytes(_ db: Database) throws -> Int {
+        try Int.fetchOne(db, sql: """
+            SELECT IFNULL(SUM(\(Self.pageCostSQL("p")) + \(Self.exclusiveEntityBytesSQL)), 0)
+            FROM list_page p WHERE p.tier = 0
+            """) ?? 0
+    }
+
+    /// The bytes of the entities page `p` alone holds, as SQL.
+    private static let exclusiveEntityBytesSQL = """
+        IFNULL((SELECT SUM(e.size) FROM list_item i
+                JOIN entity e ON e.type = i.entity_type AND e.id = i.entity_id
+                WHERE i.list_key = p.list_key AND i.page_index = p.page_index AND e.tier = 0
+                  AND (SELECT COUNT(*) FROM list_item j
+                       WHERE j.entity_type = e.type AND j.entity_id = e.id) = 1), 0)
+        """
+
+    /// Every evictable page and every entity no list holds, in eviction order.
+    func victims(_ db: Database, maximumTier: CacheTier = .retained) throws -> [Victim] {
+        var victims: [Victim] = []
+        let pages = try Row.fetchAll(db, sql: """
+            SELECT p.list_key, p.page_index, p.tier, l.accessed_at,
+                   \(Self.pageCostSQL("p")) + \(Self.exclusiveEntityBytesSQL)
+            FROM list_page p JOIN list l ON l.key = p.list_key
+            WHERE p.tier <= ?
+            """, arguments: [maximumTier.storedRank])
+        for row in pages {
+            victims.append(Victim(
+                kind: .page(list: row[0], index: row[1]),
+                tier: CacheTier(storedRank: row[2]), accessedAt: row[3], bytes: row[4]
+            ))
+        }
+        let loose = try Row.fetchAll(db, sql: """
+            SELECT type, id, tier, accessed_at, size FROM entity e
+            WHERE e.tier <= ?
+              AND NOT EXISTS (SELECT 1 FROM list_item i WHERE i.entity_type = e.type AND i.entity_id = e.id)
+            """, arguments: [maximumTier.storedRank])
+        for row in loose {
+            victims.append(Victim(
+                kind: .entity(LocalEntityKey(type: row[0], id: row[1])),
+                tier: CacheTier(storedRank: row[2]), accessedAt: row[3], bytes: row[4]
+            ))
+        }
+        return victims.sorted(by: Victim.evictionOrder)
+    }
+
+    func delete(_ victim: Victim, in db: Database) throws {
+        switch victim.kind {
+        case .entity(let key):
+            try db.execute(sql: "DELETE FROM entity WHERE type = ? AND id = ?", arguments: [key.type, key.id])
+        case .page(let list, let index):
+            try deletePages(of: list, from: index, in: db)
+        }
+    }
+
+    /// Deletes pages `index...` of `list` (the whole list from 0) and the
+    /// entities only they held.
+    func deletePages(of list: String, from index: Int, in db: Database) throws {
+        let arguments: StatementArguments = ["list": list, "index": index]
+        try db.execute(sql: """
+            DELETE FROM entity
+            WHERE tier = 0
+              AND (type, id) IN (SELECT entity_type, entity_id FROM list_item
+                                 WHERE list_key = :list AND page_index >= :index)
+              AND NOT EXISTS (SELECT 1 FROM list_item j
+                              WHERE j.entity_type = entity.type AND j.entity_id = entity.id
+                                AND NOT (j.list_key = :list AND j.page_index >= :index))
+            """, arguments: arguments)
+        if index <= 0 {
+            try db.execute(sql: "DELETE FROM list WHERE key = :list", arguments: arguments)
+        } else {
+            try db.execute(sql: "DELETE FROM list_page WHERE list_key = :list AND page_index >= :index", arguments: arguments)
+        }
+    }
+
+    // MARK: - Trims
+
+    /// Applies `depth`: expired rows always; then prefetched pages, half of
+    /// `recent`, everything below `retained`, or everything.
+    func trimRows(_ db: Database, depth: TrimDepth, now: Date) throws -> (expired: Int, evicted: Int) {
+        let expired = try sweepExpired(db, now: now)
+        var evicted = 0
+        switch depth {
+        case .expired:
+            break
+        case .speculative:
+            evicted = try evict(try victims(db, maximumTier: .speculative), in: db)
+        case .speculativeAndHalfRecent:
+            evicted = try evict(try victims(db, maximumTier: .speculative), in: db)
+            let recent = try victims(db, maximumTier: .recent)
+            let half = recent.reduce(0) { $0 + $1.bytes } / 2
+            var freed = 0
+            var chosen: [Victim] = []
+            for victim in recent where freed < half {
+                chosen.append(victim)
+                freed += victim.bytes
+            }
+            evicted += try evict(chosen, in: db)
+        case .belowRetained:
+            evicted = try evict(try victims(db, maximumTier: .recent), in: db)
+        case .allButPinned:
+            evicted = try Int.fetchOne(db, sql: "SELECT (SELECT COUNT(*) FROM entity) + (SELECT COUNT(*) FROM list_page)") ?? 0
+            try db.execute(sql: "DELETE FROM list; DELETE FROM entity;")
+        }
+        return (expired, evicted)
+    }
+
+    private func evict(_ victims: [Victim], in db: Database) throws -> Int {
+        var gone: [String: Int] = [:]
+        var count = 0
+        for victim in victims {
+            if case .page(let list, let index) = victim.kind {
+                if let first = gone[list], index >= first { continue }
+                gone[list] = min(gone[list] ?? .max, index)
+            }
+            try delete(victim, in: db)
+            count += 1
+        }
+        return count
+    }
+
+    /// Lists past their lifetime (with the entities only they held), and
+    /// entities past theirs. Returns how many rows went.
+    private func sweepExpired(_ db: Database, now: Date) throws -> Int {
+        let lists = try String.fetchAll(db, sql: "SELECT key FROM list WHERE expires_at <= ?", arguments: [now.timeIntervalSince1970])
+        for list in lists {
+            try deletePages(of: list, from: 0, in: db)
+        }
+        try db.execute(sql: "DELETE FROM entity WHERE expires_at <= ?", arguments: [now.timeIntervalSince1970])
+        return lists.count + db.changesCount
+    }
+}

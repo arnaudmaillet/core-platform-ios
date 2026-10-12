@@ -26,7 +26,7 @@ extension FeedError: NetworkFailureCarrying {
 /// view-model tests.
 public protocol FeedProviding: Sendable {
     /// Last persisted first page, for instant offline-first render. Never fails
-    /// visibly — a broken snapshot is just a cache miss.
+    /// visibly — a broken or missing copy is just a cache miss.
     func cachedFirstPage() async -> [FeedEntry]?
     func loadFirstPage() async throws -> FeedPage
     func loadPage(afterToken token: String) async throws -> FeedPage
@@ -109,7 +109,9 @@ public actor FeedRepository: FeedProviding {
     /// a like throws.
     private let likeStaking: (any LikeStaking)?
     private let authSession: any AuthSessionProviding
-    private let snapshotStore: CodableFileStore<[FeedEntry]>?
+    /// The following timeline's pages on the device (#893): the first page a
+    /// cold start opens on, the pages after it, and the cursor to go on.
+    private let localCache: FeedLocalCache?
     private let pageSize: Int32
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "feed")
 
@@ -138,7 +140,7 @@ public actor FeedRepository: FeedProviding {
         likeStaking: (any LikeStaking)? = nil,
         authSession: any AuthSessionProviding,
         viewer: (any ViewerProviding)? = nil,
-        snapshotStore: CodableFileStore<[FeedEntry]>? = nil,
+        localCache: FeedLocalCache? = nil,
         pageSize: Int32 = 20
     ) {
         self.timelineClient = timelineClient
@@ -154,31 +156,39 @@ public actor FeedRepository: FeedProviding {
             try await AccountProfilesReader.profileIDs(ofAccount: account.rawValue, using: profileClient)
                 .map { ProfileID($0) }
         }
-        self.snapshotStore = snapshotStore
+        self.localCache = localCache
         self.pageSize = pageSize
     }
 
     // MARK: - FeedProviding
 
     public func cachedFirstPage() async -> [FeedEntry]? {
-        guard let entries = try? snapshotStore?.load(), !entries.isEmpty else { return nil }
+        guard let entries = localCache?.firstPage(of: .following)?.entries, !entries.isEmpty else { return nil }
         return entries
     }
 
     public func loadFirstPage() async throws -> FeedPage {
+        // Whose page this is, asked BEFORE the fetch: a page that lands after
+        // a switch is not written as the next viewer's.
+        let writer = localCache?.viewer
         let page = try await loadPage(token: "")
-        if let snapshotStore {
-            do {
-                try snapshotStore.save(page.entries)
-            } catch {
-                logger.error("feed snapshot write failed: \(error)")
-            }
-        }
+        localCache?.storeFirstPage(page.entries, nextCursor: page.nextPageToken, in: .following, as: writer)
         return page
     }
 
     public func loadPage(afterToken token: String) async throws -> FeedPage {
-        try await loadPage(token: token)
+        let writer = localCache?.viewer
+        let page: FeedPage
+        do {
+            page = try await loadPage(token: token)
+        } catch {
+            // Offline after a cold start: the pages the device holds go on
+            // where the network cannot.
+            guard let stored = localCache?.page(after: token, in: .following) else { throw error }
+            return FeedPage(entries: stored.entries, nextPageToken: stored.nextCursor, isCold: false)
+        }
+        localCache?.storeNextPage(page.entries, nextCursor: page.nextPageToken, after: token, in: .following, as: writer)
+        return page
     }
 
     /// Cache-first, single-flight hydration of one post. A warm id returns from
@@ -413,7 +423,9 @@ public actor FeedRepository: FeedProviding {
         }
     }
 
-    private static func makePost(from view: Post_V1_PostView) -> Post {
+    /// The domain post a `post.v1` view maps to: the network read and the
+    /// device copy (`FeedLocalCache`) decode the same way.
+    static func makePost(from view: Post_V1_PostView) -> Post {
         Post(
             id: PostID(view.postID),
             authorID: ProfileID(view.profileID),
@@ -497,18 +509,5 @@ private final class LockedPostCacheMirror: @unchecked Sendable {
 
     func remove(_ id: PostID) {
         lock.withLock { entries[id] = nil }
-    }
-}
-
-extension FeedRepository: ViewerScoped {
-    /// The first-page snapshot is the PREVIOUS viewer's following timeline:
-    /// shown on the next launch, it would open the feed on someone else's
-    /// people. Hydrated posts and authors are not the viewer's and stay.
-    public func viewerDidChange(_ state: ViewerState) async {
-        do {
-            try snapshotStore?.clear()
-        } catch {
-            logger.error("feed snapshot clear failed: \(error)")
-        }
     }
 }

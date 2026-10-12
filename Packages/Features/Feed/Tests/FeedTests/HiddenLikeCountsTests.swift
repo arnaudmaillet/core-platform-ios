@@ -33,7 +33,7 @@ struct HiddenLikeCountsTests {
             counterClient: Counter_V1_CounterServiceClient(client: client),
             engagementClient: Engagement_V1_EngagementServiceClient(client: client),
             authSession: Session(),
-            snapshotStore: nil
+            localCache: nil
         )
         return (repository, dataset)
     }

@@ -77,11 +77,36 @@ public protocol ForYouProviding: Sendable {
     func page(after token: String) async throws -> ForYouPage
     func discoveryFirstPage() async throws -> ForYouPage?
     func discoveryPage(after token: String) async throws -> ForYouPage?
+    /// What the last session loaded, read from the device SYNCHRONOUSLY: the
+    /// screen opens on it in its first frame, then revalidates (#893). nil
+    /// when nothing is stored for this viewer.
+    func cachedPages() -> ForYouCachedPages?
+    /// Keeps where the viewer stands with these authors, so the next cold
+    /// start splits the rows as this one did.
+    func rememberRelations(_ relations: [ProfileID: FollowRelation]) async
 }
 
 public extension ForYouProviding {
     func discoveryFirstPage() async throws -> ForYouPage? { nil }
     func discoveryPage(after token: String) async throws -> ForYouPage? { nil }
+    func cachedPages() -> ForYouCachedPages? { nil }
+    func rememberRelations(_ relations: [ProfileID: FollowRelation]) async {}
+}
+
+/// For You's corpora as the last session left them on the device.
+public struct ForYouCachedPages: Sendable, Equatable {
+    /// Discover's corpus; nil when the provider serves no discovery.
+    public let discovery: ForYouPage?
+    /// The following timeline (the rows); empty when none was stored.
+    public let following: ForYouPage
+    /// Where the viewer stood with the authors of both.
+    public let relations: [ProfileID: FollowRelation]
+
+    public init(discovery: ForYouPage?, following: ForYouPage, relations: [ProfileID: FollowRelation]) {
+        self.discovery = discovery
+        self.following = following
+        self.relations = relations
+    }
 }
 
 /// Serves the For You grid off the existing timeline read path.
@@ -93,43 +118,119 @@ public extension ForYouProviding {
 /// nothing above it has to.
 public actor ForYouRepository: ForYouProviding {
     private let feed: any FeedProviding
-    /// Reads the numbers the timeline does not carry — see `withCounters`.
+    /// Reads the numbers the timeline does not carry — see `counters(for:)`.
     /// Optional so a composition root without one still gets a working grid,
     /// with its counters hidden, which is what every card did before this.
     private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
     /// Discover's own corpus (`DiscoveryFeedRepository`). Nil: Discover is
     /// `feed`.
     private let discovery: (any FeedProviding)?
+    /// Both corpora on the device (#893): every page that lands is written
+    /// with its counters, and `cachedPages` reads them back at cold start.
+    private nonisolated let localCache: FeedLocalCache?
 
     public init(
         feed: any FeedProviding,
         counterClient: (any Counter_V1_CounterServiceClientInterface)? = nil,
-        discovery: (any FeedProviding)? = nil
+        discovery: (any FeedProviding)? = nil,
+        localCache: FeedLocalCache? = nil
     ) {
         self.feed = feed
         self.counterClient = counterClient
         self.discovery = discovery
+        self.localCache = localCache
     }
 
     public func discoveryFirstPage() async throws -> ForYouPage? {
         guard let discovery else { return nil }
-        return await withCounters(Self.map(try await discovery.loadFirstPage()))
+        let writer = localCache?.viewer
+        let page = try await discovery.loadFirstPage()
+        let pageCounters = await counters(for: page)
+        localCache?.storeFirstPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, in: .forYouDiscover, as: writer)
+        return Self.decorate(Self.map(page), with: pageCounters)
     }
 
     public func discoveryPage(after token: String) async throws -> ForYouPage? {
         guard let discovery else { return nil }
-        return await withCounters(Self.map(try await discovery.loadPage(afterToken: token)))
+        let writer = localCache?.viewer
+        let page: FeedPage
+        do {
+            page = try await discovery.loadPage(afterToken: token)
+        } catch {
+            guard let stored = storedPage(after: token, in: .forYouDiscover) else { throw error }
+            return stored
+        }
+        let pageCounters = await counters(for: page)
+        localCache?.storeNextPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .forYouDiscover, as: writer)
+        return Self.decorate(Self.map(page), with: pageCounters)
     }
 
     public func firstPage() async throws -> ForYouPage {
-        await withCounters(Self.map(try await feed.loadFirstPage()))
+        let writer = localCache?.viewer
+        let page = try await feed.loadFirstPage()
+        let pageCounters = await counters(for: page)
+        localCache?.storeFirstPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, in: .forYouFollowing, as: writer)
+        return Self.decorate(Self.map(page), with: pageCounters)
     }
 
     public func page(after token: String) async throws -> ForYouPage {
-        await withCounters(Self.map(try await feed.loadPage(afterToken: token)))
+        let writer = localCache?.viewer
+        let page: FeedPage
+        do {
+            page = try await feed.loadPage(afterToken: token)
+        } catch {
+            guard let stored = storedPage(after: token, in: .forYouFollowing) else { throw error }
+            return stored
+        }
+        let pageCounters = await counters(for: page)
+        localCache?.storeNextPage(page.entries, counters: pageCounters, nextCursor: page.nextPageToken, after: token, in: .forYouFollowing, as: writer)
+        return Self.decorate(Self.map(page), with: pageCounters)
     }
 
-    /// Decorates a page with its `counter.v1` projections.
+    /// The page the device holds after `token`, for when the network cannot
+    /// answer (offline after a cold start): paging goes on through what the
+    /// last session loaded.
+    private func storedPage(after token: String, in key: FeedLocalCache.ListKey) -> ForYouPage? {
+        guard let stored = localCache?.page(after: token, in: key) else { return nil }
+        let projected = ForYouPage(posts: stored.entries.map(Self.galleryPost(from:)), nextPageToken: stored.nextCursor)
+        return Self.decorate(projected, with: stored.counters)
+    }
+
+    /// Discover (when served) and the following timeline's FIRST pages as the
+    /// device holds them, projected and decorated exactly as a network page is, so the
+    /// revalidation that follows changes nothing when nothing changed.
+    ///
+    /// nil unless the corpus Discover draws from is stored with posts in it:
+    /// a screen half-restored would reshuffle when the rest lands.
+    public nonisolated func cachedPages() -> ForYouCachedPages? {
+        guard let localCache else { return nil }
+        let following = localCache.firstPage(of: .forYouFollowing)
+        let discover = discovery == nil ? nil : localCache.firstPage(of: .forYouDiscover)
+        if discovery != nil {
+            guard let discover, !discover.entries.isEmpty else { return nil }
+        } else {
+            guard let following, !following.entries.isEmpty else { return nil }
+        }
+        func page(_ list: FeedLocalCache.CachedList?) -> ForYouPage? {
+            guard let list else { return nil }
+            let projected = ForYouPage(posts: list.entries.map(Self.galleryPost(from:)), nextPageToken: list.nextCursor)
+            return Self.decorate(projected, with: list.counters)
+        }
+        let followingPage = page(following) ?? ForYouPage(posts: [], nextPageToken: nil)
+        let discoveryPage = page(discover)
+        let authors = Set((followingPage.posts + (discoveryPage?.posts ?? [])).compactMap(\.authorID))
+        return ForYouCachedPages(
+            discovery: discoveryPage,
+            following: followingPage,
+            relations: localCache.relations(for: authors)
+        )
+    }
+
+    public func rememberRelations(_ relations: [ProfileID: FollowRelation]) async {
+        localCache?.storeRelations(relations, as: localCache?.viewer)
+    }
+
+    /// A page's `counter.v1` projections, applied by `decorate`.
     ///
     /// The timeline read hydrates LIKES only — a `FeedEntry` carries a like
     /// count and nothing else — so a card had no reach to show, and once its
@@ -144,15 +245,21 @@ public actor ForYouRepository: ForYouProviding {
     /// timeline's own. Two sources for one number is how a card and the post it
     /// opens end up disagreeing; the counter is the one the rest of the app
     /// reads.
-    private func withCounters(_ page: ForYouPage) async -> ForYouPage {
-        guard let counterClient, !page.posts.isEmpty else { return page }
+    private func counters(for page: FeedPage) async -> [PostID: PostCounters] {
+        guard let counterClient, !page.entries.isEmpty else { return [:] }
         let byPostID = await PostCounterReader.counters(
-            forPostIDs: page.posts.map(\.id.rawValue), using: counterClient
+            forPostIDs: page.entries.map(\.post.id.rawValue), using: counterClient
         )
-        guard !byPostID.isEmpty else { return page }
+        return Dictionary(byPostID.map { (PostID($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// `page` with its counters applied — the network page and the stored
+    /// one alike.
+    private static func decorate(_ page: ForYouPage, with counters: [PostID: PostCounters]) -> ForYouPage {
+        guard !counters.isEmpty else { return page }
         return ForYouPage(
             posts: page.posts.map { post in
-                guard let counts = byPostID[post.id.rawValue] else { return post }
+                guard let counts = counters[post.id] else { return post }
                 var decorated = post
                 decorated.reactionCount = counts.likes ?? post.reactionCount
                 decorated.commentCount = counts.comments
@@ -165,7 +272,7 @@ public actor ForYouRepository: ForYouProviding {
     /// Projects hydrated timeline entries onto grid tiles.
     ///
     /// `commentCount` is left absent HERE and filled by
-    /// `withCounters` afterwards: a `FeedEntry` carries a like count and nothing
+    /// `decorate` afterwards: a `FeedEntry` carries a like count and nothing
     /// else, so the numbers come from `counter.v1` in one batched read per page.
     ///
     /// `isRepost` is still absent and still asserted nowhere — a `FeedEntry`

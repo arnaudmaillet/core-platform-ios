@@ -37,7 +37,7 @@ struct DiscoveryFeedRepositoryTests {
             counterClient: Counter_V1_CounterServiceClient(client: client),
             engagementClient: Engagement_V1_EngagementServiceClient(client: client),
             authSession: GuestSession(),
-            snapshotStore: nil
+            localCache: nil
         )
         let discovery = DiscoveryFeedRepository(
             timelineClient: Timeline_V1_TimelineServiceClient(client: client),
