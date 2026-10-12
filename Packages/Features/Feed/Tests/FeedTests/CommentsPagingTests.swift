@@ -99,10 +99,18 @@ private actor PagedComments: CommentsProviding {
         return pages[pageToken] ?? CommentPage(entries: [], nextPageToken: nil)
     }
 
+    /// Comments posted while set are accepted, as the server's newest.
+    private var acceptsComments = false
+    func acceptComments() { acceptsComments = true }
+
     func addComment(
         _ body: String, to postID: PostID, parentID: String?, commentID: String
     ) async throws -> CommentEntry {
-        throw CommentsError.transport(message: "not used")
+        guard acceptsComments else { throw CommentsError.transport(message: "not used") }
+        return CommentEntry(
+            id: commentID, authorID: ProfileID("me"), authorName: "Me", authorHandle: "me",
+            body: body, createdAt: Date(timeIntervalSince1970: 10_000), parentID: parentID
+        )
     }
 }
 
@@ -142,7 +150,11 @@ struct CommentsPagingTests {
         var loaded = false
     }
 
-    private func load(_ provider: PagedComments) async -> (PostDetailViewModel, Shown) {
+    /// `waitingForThePost`: also until the post itself and the first page
+    /// have landed — `refresh()` is a no-op before.
+    private func load(
+        _ provider: PagedComments, waitingForThePost: Bool = false
+    ) async -> (PostDetailViewModel, Shown) {
         let viewModel = PostDetailViewModel(
             postID: PostID("post-1"), repository: PagingFeedProvider(), commentsProvider: provider
         )
@@ -152,12 +164,72 @@ struct CommentsPagingTests {
             shown.ids = models.map(\.id)
             shown.loaded = true
         }
+        var postLoads = 0
+        viewModel.onPhaseChange = { if case .content = $0 { postLoads += 1 } }
         viewModel.viewDidLoad()
         await settle { shown.loaded }
+        if waitingForThePost {
+            await settle { postLoads >= 1 && !viewModel.isLoadingFirstPage }
+        }
         return (viewModel, shown)
     }
 
     // MARK: - The view model
+
+    /// ⚠️ A first page asked for BEFORE the viewer's comment cannot carry it
+    /// (#993): the refresh a stream opened on its cached page starts at once,
+    /// and when it lands after a post — late, on a loaded machine — its
+    /// answer must not take the viewer's comment back off the screen.
+    @Test func aFirstPageAskedBeforeAPostKeepsThePostedComment() async {
+        let provider = PagedComments([nil: CommentPage(entries: [entry("a"), entry("b")], nextPageToken: nil)])
+        await provider.acceptComments()
+        let (viewModel, shown) = await load(provider, waitingForThePost: true)
+        await provider.gateFirstPage()
+        viewModel.refresh()
+        await settle(untilAsync: { await provider.firstPageWaitingCount == 1 })
+
+        viewModel.submitComment("mine")
+        await settle { shown.ids.count == 3 }
+        let mine = shown.ids[0]
+        #expect(!["a", "b"].contains(mine))
+        #expect(shown.ids == [mine, "a", "b"])
+
+        await provider.releaseOldestFirstPage() // asked before the post: no "mine"
+        await settle { !viewModel.isLoadingFirstPage }
+        await settle()
+        #expect(shown.ids == [mine, "a", "b"])
+
+        // A page asked for after it is the truth about it.
+        viewModel.refresh()
+        await settle(untilAsync: { await provider.firstPageWaitingCount == 1 })
+        await provider.releaseOldestFirstPage()
+        await settle { shown.ids == ["a", "b"] }
+        #expect(shown.ids == ["a", "b"])
+    }
+
+    /// The same with later pages on screen: the refreshed first page goes
+    /// over the old one (`merging`), and still keeps the viewer's comment.
+    @Test func aMergedFirstPageAskedBeforeAPostKeepsThePostedComment() async {
+        let provider = PagedComments([
+            nil: CommentPage(entries: [entry("a", at: 20), entry("b", at: 10)], nextPageToken: "p2"),
+            "p2": CommentPage(entries: [entry("c", at: 5)], nextPageToken: nil),
+        ])
+        await provider.acceptComments()
+        let (viewModel, shown) = await load(provider, waitingForThePost: true)
+        viewModel.loadMoreComments()
+        await settle { shown.ids.count == 3 }
+        await provider.gateFirstPage()
+        viewModel.refresh()
+        await settle(untilAsync: { await provider.firstPageWaitingCount == 1 })
+
+        viewModel.submitComment("mine")
+        await settle { shown.ids.count == 4 }
+        let mine = shown.ids[0]
+        await provider.releaseOldestFirstPage()
+        await settle { !viewModel.isLoadingFirstPage }
+        await settle()
+        #expect(shown.ids == [mine, "a", "b", "c"])
+    }
 
     @Test func nearingTheEndAppendsTheNextPageOnceAndStopsAtTheEnd() async {
         let provider = PagedComments([

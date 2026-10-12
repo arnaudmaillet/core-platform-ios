@@ -654,7 +654,7 @@ final class SnapCommentTickerView: UIView {
         let exitX = -bubble.width / 2
         guard startX > exitX else { return }
         bubble.flightStartX = startX
-        bubble.flightStartTime = CACurrentMediaTime()
+        bubble.flightStartTime = clock()
 
         let flight = CABasicAnimation(keyPath: "position.x")
         flight.fromValue = startX
@@ -762,7 +762,7 @@ final class SnapCommentTickerView: UIView {
         }
         mode = .coasting
         coastReleaseVelocity = releaseVelocity
-        coastStart = CACurrentMediaTime()
+        coastStart = clock()
         coastLastTimestamp = coastStart
         let link = CADisplayLink(target: DisplayLinkProxy(self), selector: #selector(DisplayLinkProxy.tick(_:)))
         link.add(to: .main, forMode: .common)
@@ -935,6 +935,15 @@ final class SnapCommentTickerView: UIView {
     /// The blur's strength (0…1) when `usesBlur` — 0 otherwise.
     var currentBlurStrength: CGFloat { blurBackdrop?.strength ?? 0 }
 
+    /// The clock flights and coasts are stamped and frozen with:
+    /// `CACurrentMediaTime()`, Core Animation's own. A test pins it (#993):
+    /// a flight grabbed before its first committed frame is frozen
+    /// analytically, at its start minus speed × elapsed, and on a starved
+    /// runner the "elapsed" between `setActive` and `beginScrub` — two lines
+    /// apart — stretched far enough to carry every bubble out of the band
+    /// the test reads.
+    var clock: () -> CFTimeInterval = { CACurrentMediaTime() }
+
     /// When the coast began, in `CACurrentMediaTime()`'s clock.
     ///
     /// Exposed so a test can express "one millisecond after release" as
@@ -1020,7 +1029,7 @@ final class SnapCommentTickerView: UIView {
             return max(
                 -bubble.width / 2,
                 bubble.flightStartX - Self.laneSpeeds[lane]
-                    * CGFloat(CACurrentMediaTime() - bubble.flightStartTime)
+                    * CGFloat(clock() - bubble.flightStartTime)
             )
         }
         return layer.position.x

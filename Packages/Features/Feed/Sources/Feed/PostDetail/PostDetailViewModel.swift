@@ -144,6 +144,17 @@ public final class PostDetailViewModel {
     /// The newest first-page load whose answer has landed: an OLDER answer
     /// arriving after it is stale and dropped.
     private var appliedFirstPageGeneration = 0
+    /// The viewer's comments, each with the newest first-page load asked for
+    /// BEFORE it landed (#993).
+    ///
+    /// ⚠️ A FIRST PAGE ASKED FOR BEFORE A COMMENT CANNOT CARRY IT. Opened on a
+    /// cached page, the stream refreshes it at once; post while that refresh
+    /// is out and its answer — the page as it was before the comment —
+    /// replaced the stream and took the viewer's comment back off the screen,
+    /// right after it had bounced in. Under load the refresh lands that late
+    /// (the suite caught it). Such a page keeps these comments; one asked for
+    /// after them is the truth about them, and retires them.
+    private var postedDuringFirstPage: [(entry: CommentEntry, askedBefore: Int)] = []
     /// The view is showing an answer — a loaded stream, empty or not — rather
     /// than its skeleton or the failed row. What a failure must never cover.
     private var showsAnswer = false
@@ -407,6 +418,7 @@ public final class PostDetailViewModel {
                     body, to: postID, parentID: parentID, commentID: commentID
                 )
                 self.unsent = nil
+                self.postedDuringFirstPage.append((entry, self.firstPageGeneration))
                 // Only a row that is NEW arrives: a replay answered with a
                 // comment already on screen (#795) is not one.
                 if self.insertSubmitted(entry) { self.onCommentPosted?(entry.id) }
@@ -496,17 +508,39 @@ public final class PostDetailViewModel {
             comments[index] = entry
             return false
         }
+        comments = Self.inserting(entry, into: comments)
+        return true
+    }
+
+    /// `list` with the viewer's `entry` where a new comment goes: a top-level
+    /// one first, a reply after its parent's last reply.
+    static func inserting(_ entry: CommentEntry, into list: [CommentEntry]) -> [CommentEntry] {
+        var list = list
         guard let parentID = entry.parentID,
-              let parentIndex = comments.firstIndex(where: { $0.id == parentID }) else {
-            comments.insert(entry, at: 0)
-            return true
+              let parentIndex = list.firstIndex(where: { $0.id == parentID }) else {
+            list.insert(entry, at: 0)
+            return list
         }
         var insertAt = parentIndex + 1
-        while insertAt < comments.count, comments[insertAt].parentID == parentID {
+        while insertAt < list.count, list[insertAt].parentID == parentID {
             insertAt += 1
         }
-        comments.insert(entry, at: insertAt)
-        return true
+        list.insert(entry, at: insertAt)
+        return list
+    }
+
+    /// A landed first page asked for as load `generation`, with the viewer's
+    /// comments it cannot know about put back (`postedDuringFirstPage`).
+    private func keepingPostedComments(in page: [CommentEntry], generation: Int) -> [CommentEntry] {
+        let carried = postedDuringFirstPage.filter { generation <= $0.askedBefore }.map(\.entry)
+        postedDuringFirstPage.removeAll { generation > $0.askedBefore }
+        let present = Set(page.map(\.id))
+        // Oldest first, so the newest ends on top as it did when posted. A
+        // reply goes back only under its parent: one whose thread the page
+        // does not have (declined, or on a later page) is not made a thread.
+        return carried
+            .filter { !present.contains($0.id) && ($0.parentID.map(present.contains) ?? true) }
+            .reduce(page) { Self.inserting($1, into: $0) }
     }
 
     /// A comment row's avatar tapped — route to that author's profile,
@@ -648,14 +682,15 @@ public final class PostDetailViewModel {
             // over the old one and the rest stays — a refresh, or the check
             // after a review, must not cut the stream under the viewer. A
             // failure leaves it all as it is.
+            let firstPage = self.keepingPostedComments(in: page.entries, generation: generation)
             if self.hasLaterPages {
-                let merged = Self.merging(firstPage: page.entries, over: self.comments)
+                let merged = Self.merging(firstPage: firstPage, over: self.comments)
                 guard merged != self.comments else { return }
                 self.comments = merged
                 self.emitComments()
                 return
             }
-            let loaded = page.entries
+            let loaded = firstPage
             self.nextPageToken = page.nextPageToken
             // The equality skip applies ONLY when a prefetched page is already
             // on screen. Without one the view is sitting in `.loading` and has
