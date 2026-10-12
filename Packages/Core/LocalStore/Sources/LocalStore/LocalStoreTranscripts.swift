@@ -247,7 +247,8 @@ extension LocalStore {
         for item in items {
             let isBoundary = item.id == boundary?.id
             let cursor = isBoundary ? boundary?.cursor : nil
-            let size = item.payload.count + item.id.utf8.count + (cursor?.utf8.count ?? 0) + Self.transcriptItemOverhead
+            let cursorBytes: Int = cursor?.utf8.count ?? 0
+            let size: Int = item.payload.count + item.id.utf8.count + cursorBytes + Self.transcriptItemOverhead
             try statement.execute(arguments: [
                 key, item.id, item.sortKey, item.format, item.payload, size, isBoundary ? 1 : 0, cursor
             ])
