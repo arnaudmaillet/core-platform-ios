@@ -172,11 +172,17 @@ public final class ToastView: UIView {
         /// What identifies it for an update or a repeat: the caller's `id`,
         /// or else its style and words.
         var key: String
+        /// A CONDITION ("Offline", #955): it stays, with no close button,
+        /// until the same `id` says the condition has cleared; it takes
+        /// priority over the plain confirmations at its position, and nothing
+        /// preempts it.
+        var isCondition = false
 
         init(
             message: String, detail: String?, symbol: String?, style: Style, action: Action?,
-            undoable: Undoable?, id: String?
+            undoable: Undoable?, id: String?, isCondition: Bool = false
         ) {
+            self.isCondition = isCondition
             self.message = message
             self.detail = detail
             self.symbol = symbol
@@ -190,6 +196,7 @@ public final class ToastView: UIView {
                 isUndoable: undoable != nil, assistiveTechnologyRunning: ToastView.isAssistiveTechnologyRunning()
             )
             key = id ?? "\(style)|\(message)|\(detail ?? "")"
+            if isCondition { duration = nil }
         }
     }
 
@@ -258,8 +265,8 @@ public final class ToastView: UIView {
     /// The glass view (tests).
     var glassView: UIVisualEffectView { backdrop }
     /// How far the capsule slides on its way in: zero under Reduce Motion
-    /// (tests).
-    var entranceTravel: CGFloat { abs(offConstant - restConstant) }
+    /// (tests, here and in the packages that show toasts).
+    public var entranceTravel: CGFloat { abs(offConstant - restConstant) }
     /// Whether it is on its way out (tests).
     var isDismissing: Bool { isLeaving }
 
@@ -309,13 +316,14 @@ public final class ToastView: UIView {
         action: Action? = nil,
         undoable: Undoable? = nil,
         id: String? = nil,
+        isCondition: Bool = false,
         position: ToastPosition,
         in container: UIView,
         edge: NSLayoutYAxisAnchor? = nil
     ) -> ToastView {
         let content = Content(
             message: message, detail: detail, symbol: symbol, style: style, action: action,
-            undoable: undoable, id: id
+            undoable: undoable, id: id, isCondition: isCondition
         )
         let existing = stack(at: position, in: container).last { $0.content.key == content.key }
         // One undo slot: a second undoable action commits the first at once
@@ -327,8 +335,11 @@ public final class ToastView: UIView {
             existing.update(to: content)
             return existing
         }
-        if style == .failure {
-            for toast in stack(at: position, in: container) where toast.style == .confirmation && toast.undoable == nil {
+        // A failure, or a condition, preempts the plain confirmations there —
+        // never an undo, which must be settled, nor a condition.
+        if style == .failure || isCondition {
+            for toast in stack(at: position, in: container)
+            where toast.style == .confirmation && toast.undoable == nil && !toast.content.isCondition {
                 toast.dismiss(animated: true)
             }
         }
@@ -695,7 +706,7 @@ public final class ToastView: UIView {
         // Something has to close a toast that does not leave on its own — a
         // loading one leaves when its outcome replaces it.
         closeButton = content.action == nil && content.duration == nil && content.style != .loading
-            ? Self.makeCloseButton() : nil
+            && !content.isCondition ? Self.makeCloseButton() : nil
         if let actionButton {
             actionButton.addAction(UIAction { [weak self] _ in self?.runAction() }, for: .primaryActionTriggered)
             arranged.append(actionButton)
