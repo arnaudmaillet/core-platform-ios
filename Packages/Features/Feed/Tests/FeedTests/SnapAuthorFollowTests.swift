@@ -152,7 +152,7 @@ struct SnapAuthorFollowTests {
         graph.answerFollow(accepting: true)
         await Self.settle { feed.followStore.followsInFlight.isEmpty }
         #expect(feed.followStore.followsInFlight.isEmpty)
-        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .following)
+        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .following)
     }
 
     /// Each relation draws its own badge — so a friend reads apart from a
@@ -284,7 +284,7 @@ struct SnapAuthorFollowTests {
         graph.answerFollow(accepting: true)
         await Self.settle { feed.followStore.followsInFlight.isEmpty && pill.followBadge == .pending }
 
-        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .requested)
+        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .requested)
         #expect(pill.followBadge == .pending)
         #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
         #expect(pill.badgeReplaceCount == replaces + 2, "plus → pending was not drawn by symbol replaces alone")
@@ -330,12 +330,12 @@ struct SnapAuthorFollowTests {
         feed.followAuthor(ProfileID("prof-2"))
 
         #expect(try Self.pill(feed).followBadge == .friends)
-        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .mutual)
+        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .mutual)
         await Self.settle { graph.pendingFollows == 1 }
         #expect(graph.follows == [ProfileID("prof-2")])
         graph.answerFollow(accepting: true)
         await Self.settle { feed.followStore.followsInFlight.isEmpty }
-        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .mutual)
+        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .mutual)
     }
 
     /// A state mark is not an action: it takes no touch, so a tap on it is a
@@ -434,7 +434,7 @@ struct SnapAuthorFollowTests {
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: false))
         await Self.settle { (try? Self.pill(feed).followBadge) == .follow }
         #expect(try Self.pill(feed).followBadge == .follow)
-        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-2")] == .followedBy)
+        #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .followedBy)
 
         events.publish(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true))
         await Self.settle { (try? Self.pill(feed).followBadge) == .friends }
@@ -454,11 +454,11 @@ struct SnapAuthorFollowTests {
         // Delivery keeps publication order: once a later change has landed,
         // both of these have been heard — no clock to outwait.
         events.publish(FollowChange(profileID: ProfileID("prof-4"), isFollowing: true))
-        await Self.settle { feed.followStore.relationsByAuthor[ProfileID("prof-4")] != nil }
-        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-4")] == .following, "the events were never heard")
+        await Self.settle { feed.followStore.relation(for: ProfileID("prof-4")) != nil }
+        #expect(feed.followStore.relation(for: ProfileID("prof-4")) == .following, "the events were never heard")
 
-        #expect(feed.followStore.relationsByAuthor[ProfileID("me")] == .viewer)
-        #expect(feed.followStore.relationsByAuthor[ProfileID("prof-3")] == .blocked)
+        #expect(feed.followStore.relation(for: ProfileID("me")) == .viewer)
+        #expect(feed.followStore.relation(for: ProfileID("prof-3")) == .blocked)
     }
 
     /// Nothing to follow THROUGH, nothing offered — an action that cannot act

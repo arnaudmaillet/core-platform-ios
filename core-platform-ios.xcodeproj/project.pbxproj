@@ -36,6 +36,7 @@
 		5F00000000000000000030B1 /* EmoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000030C1 /* EmoteKit */; };
 		5F00000000000000000040B1 /* CacheKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000040C1 /* CacheKit */; };
 		5F00000000000000000050B1 /* LocalStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000050C1 /* LocalStore */; };
+		5F00000000000000000060B1 /* EntityStore in Frameworks */ = {isa = PBXBuildFile; productRef = 5F00000000000000000060C1 /* EntityStore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -113,6 +114,7 @@
 				5F00000000000000000030B1 /* EmoteKit in Frameworks */,
 				5F00000000000000000040B1 /* CacheKit in Frameworks */,
 				5F00000000000000000050B1 /* LocalStore in Frameworks */,
+				5F00000000000000000060B1 /* EntityStore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -185,6 +187,7 @@
 				5F00000000000000000030C1 /* EmoteKit */,
 				5F00000000000000000040C1 /* CacheKit */,
 				5F00000000000000000050C1 /* LocalStore */,
+				5F00000000000000000060C1 /* EntityStore */,
 			);
 			productName = "core-platform-ios";
 			productReference = 51A1B7722FFBCAB6005918BC /* core-platform-ios.app */;
@@ -267,6 +270,7 @@
 				5F00000000000000000030A1 /* XCLocalSwiftPackageReference "Packages/Core/EmoteKit" */,
 				5F00000000000000000040A1 /* XCLocalSwiftPackageReference "Packages/Core/CacheKit" */,
 				5F00000000000000000050A1 /* XCLocalSwiftPackageReference "Packages/Core/LocalStore" */,
+				5F00000000000000000060A1 /* XCLocalSwiftPackageReference "Packages/Core/EntityStore" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 51A1B7732FFBCAB6005918BC /* Products */;
@@ -699,6 +703,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/Core/LocalStore;
 		};
+		5F00000000000000000060A1 /* XCLocalSwiftPackageReference "Packages/Core/EntityStore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/Core/EntityStore;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -817,6 +825,10 @@
 		5F00000000000000000050C1 /* LocalStore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = LocalStore;
+		};
+		5F00000000000000000060C1 /* EntityStore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = EntityStore;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

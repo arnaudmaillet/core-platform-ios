@@ -17,6 +17,7 @@ import CoreRealtimeMocks
 import CoreStorage
 import DesignSystem
 import EmoteKit
+import EntityStore
 import Feed
 import FeedInterface
 import AVFoundation
@@ -346,6 +347,24 @@ final class AppContainer {
     }
 
     private var cacheSignalsStarted = false
+
+    /// One post and one profile per id, read by every screen (#896): a like,
+    /// a follow, a save or a delete made on one reaches all of them. Its
+    /// content namespaces and the viewer's facts register with
+    /// `cacheCoordinator`, which bounds them and wipes the viewer's facts on
+    /// every viewer change. A follow the graph accepts, from any repository,
+    /// is written in (`FollowGraphEvents`).
+    private(set) lazy var entityStore: EntityStore = {
+        let store = EntityStore()
+        store.register(with: cacheCoordinator)
+        entityFollowSubscription = followGraphEvents.subscribe { [store] change in
+            store.applyFollowChange(change)
+        }
+        return store
+    }()
+
+    /// Keeps `entityStore` hearing the follow channel for the app's life.
+    private var entityFollowSubscription: FollowGraphSubscription?
 
     // MARK: - Media
 
@@ -753,7 +772,8 @@ final class AppContainer {
         // tap, because the shell sets it after this builder exists.
         useSound: { [unowned self] sound in self.onUseSound?(sound) },
         discovery: discoveryRepository,
-        localCache: feedLocalCache
+        localCache: feedLocalCache,
+        entities: entityStore
     )
 
     /// Discover's pool (`timeline.v1.GetDiscoveryFeed`, backend B3 / #512):

@@ -3,6 +3,7 @@ import MediaCore
 import CoreModels
 import CoreNavigation
 import DesignSystem
+import EntityStore
 import FeedInterface
 import MediaPlayback
 import PostGrid
@@ -466,6 +467,7 @@ final class SnapFeedViewController: UIViewController {
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
         followEvents: FollowGraphEvents? = nil,
+        entities: EntityStore = EntityStore(),
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,
         openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)? = nil,
@@ -486,7 +488,7 @@ final class SnapFeedViewController: UIViewController {
         self.boost = SnapBoostController(wallet: wallet)
         self.makeWalletSheet = makeWalletSheet
         self.reporting = reporting
-        self.followStore = SnapAuthorFollowStore(writer: socialGraph, reader: followRelations)
+        self.followStore = SnapAuthorFollowStore(writer: socialGraph, reader: followRelations, entities: entities)
         super.init(nibName: nil, bundle: nil)
         followStore.onRelationChange = { [weak self] author in
             guard let self else { return }
