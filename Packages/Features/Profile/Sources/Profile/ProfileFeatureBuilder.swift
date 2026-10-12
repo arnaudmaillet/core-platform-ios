@@ -120,8 +120,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 switch section {
                 // Device settings need no account: a guest's choices stay on
                 // this iPhone like anyone's (#468).
-                case .playback, .display, .emojis, .mediaComments, .language, .storage:
-                    makeAppPreferences(section)
+                case .playback, .display, .emojis, .mediaComments, .language:
+                    AppPreferencesViewController(page: section)
+                case .storage:
+                    makeStorageSettings()
                 case .help:
                     SettingsLinksViewController.help(links: .current)
                 case .legal:
@@ -327,8 +329,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             }
                                         })
                                     }
-                                case .playback, .display, .emojis, .mediaComments, .language, .storage:
-                                    makeAppPreferences(section)
+                                case .playback, .display, .emojis, .mediaComments, .language:
+                                    AppPreferencesViewController(page: section)
+                                case .storage:
+                                    makeStorageSettings()
                                 case .help:
                                     SettingsLinksViewController.help(links: .current)
                                 case .legal:
@@ -408,13 +412,17 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// Nil leaves the Your Interests section out.
     public var interestTags: (any InterestTagsManaging)?
     /// The app's one cache coordinator, through which Settings → Storage
-    /// measures and clears the caches it manages (images since #894). Nil
-    /// leaves Storage with the caches it names itself.
+    /// measures and clears every cache, and applies the storage limit and
+    /// the cellular choice (#899). Nil leaves Storage with the caches it
+    /// names itself.
     public var cacheCoordinator: CacheCoordinator?
 
-    /// One App and Device page, with Storage measuring through the coordinator.
-    private func makeAppPreferences(_ section: SettingsSection) -> AppPreferencesViewController {
-        AppPreferencesViewController(page: section, cache: .standard(coordinator: cacheCoordinator))
+    /// Settings → Storage, on the app's coordinator.
+    private func makeStorageSettings() -> StorageSettingsViewController {
+        StorageSettingsViewController(model: StorageSettingsModel(
+            inventory: .standard(coordinator: cacheCoordinator),
+            coordinator: cacheCoordinator
+        ))
     }
 
     /// What Delete Account names before the irreversible step (#402): every

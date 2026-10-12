@@ -3,18 +3,19 @@ import DesignSystem
 import UIKit
 
 /// The screens of Settings → App and Device (#468): Playback and Sound,
-/// Display, Emojis, Comments on Media, Language and Storage — one controller, one
-/// page per section (#409, #410). Everything here is stored on the device
+/// Display, Emojis, Comments on Media and Language — one controller, one page
+/// per section (#409, #410). Storage has its own screen
+/// (`StorageSettingsViewController`, #899). Everything here is stored on the device
 /// (`MediaPlaybackPreferencesStore`, `MediaCommentPreferencesStore`,
 /// `AppearancePreference`, `MotionPreference`) and follows the iPhone, not
 /// the profile.
 final class AppPreferencesViewController: UIViewController {
     enum Section: Int, CaseIterable {
-        case playback, players, sounds, appearance, care, motion, emojis, band, subtitles, commentsScreen, muted, language, storage
+        case playback, players, sounds, appearance, care, motion, emojis, band, subtitles, commentsScreen, muted, language
     }
 
     private enum Item: Hashable {
-        case autoplay, startsWithSound, dataSaver
+        case autoplay, startsWithSound
         case backgroundPlay, pictureInPicture
         case playerPool
         case interfaceSounds, haptics
@@ -25,7 +26,6 @@ final class AppPreferencesViewController: UIViewController {
         case subtitlesSwitch, subtitleBackground
         case commentsBackdrop
         case appLanguage
-        case cacheSize, clearCache
     }
 
     /// The sections each App and Device page shows.
@@ -36,7 +36,6 @@ final class AppPreferencesViewController: UIViewController {
         case .emojis: [.emojis]
         case .mediaComments: [.band, .subtitles, .commentsScreen, .muted]
         case .language: [.language]
-        case .storage: [.storage]
         default: []
         }
     }
@@ -45,22 +44,17 @@ final class AppPreferencesViewController: UIViewController {
 
     private let store: MediaCommentPreferencesStore
     private let playback: MediaPlaybackPreferencesStore
-    private let cache: MediaCacheInventory
-    /// Bytes in the media caches; nil while measuring.
-    private var cacheBytes: Int64?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
     init(
         page: SettingsSection,
         store: MediaCommentPreferencesStore = .standard,
-        playback: MediaPlaybackPreferencesStore = .standard,
-        cache: MediaCacheInventory = .standard()
+        playback: MediaPlaybackPreferencesStore = .standard
     ) {
         self.page = page
         self.store = store
         self.playback = playback
-        self.cache = cache
         super.init(nibName: nil, bundle: nil)
         title = page.title
         hidesBottomBarWhenPushed = true
@@ -85,7 +79,6 @@ final class AppPreferencesViewController: UIViewController {
         view.addSubview(collectionView)
         configureDataSource()
         applySnapshot()
-        if page == .storage { measureCache() }
         // The footer quotes the iOS setting; keep it true when iOS changes.
         NotificationCenter.default.addObserver(
             self, selector: #selector(motionSettingChanged),
@@ -110,40 +103,6 @@ final class AppPreferencesViewController: UIViewController {
     /// until it is off.
     private var isPowerSaving: Bool { PowerSavingPreference.isOn }
 
-    private func measureCache() {
-        let cache = cache
-        Task { [weak self] in
-            let bytes = await Task.detached(priority: .utility) { cache.size() }.value
-            self?.cacheBytes = bytes
-            self?.reconfigure([.cacheSize, .clearCache])
-        }
-    }
-
-    private func confirmClearCache() {
-        let sheet = UIAlertController(
-            title: "Clear media cache?",
-            message: "Images, videos and animations are downloaded again when you next see them. Drafts and posts aren't affected.",
-            preferredStyle: .actionSheet
-        )
-        sheet.addAction(UIAlertAction(title: "Clear Cache", style: .destructive) { [weak self] _ in
-            guard let self else { return }
-            let cache = cache
-            cacheBytes = nil
-            reconfigure([.cacheSize, .clearCache])
-            Task { [weak self] in
-                await Task.detached(priority: .utility) { cache.clear() }.value
-                self?.measureCache()
-            }
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        if let popover = sheet.popoverPresentationController {
-            popover.sourceView = view
-            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY - 60, width: 0, height: 0)
-            popover.permittedArrowDirections = []
-        }
-        present(sheet, animated: true)
-    }
-
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         // The muted counts change on the pushed editors.
@@ -166,7 +125,6 @@ final class AppPreferencesViewController: UIViewController {
         case .muted: "Muted on Media"
         case .subtitles: "Subtitles"
         case .commentsScreen: "Comments Screen"
-        case .storage: "Storage"
         }
     }
 
@@ -190,13 +148,12 @@ final class AppPreferencesViewController: UIViewController {
         case .players: Self.playerPoolFooter
         case .playback:
             (PowerSavingPreference.isOn ? Self.powerSavingNote + " " : "")
-                + "Autoplay applies to videos in grids, rails and previews; a post you open full screen always plays. A video that doesn't start on its own shows its first frame with a play mark; tap it to play. Data Saver lowers stream quality and stops loading upcoming videos ahead while on cellular. "
+                + "Autoplay applies to videos in grids, rails and previews; a post you open full screen always plays. A video that doesn't start on its own shows its first frame with a play mark; tap it to play. To use less cellular data, see Storage. "
                 + Self.backgroundPlayNote
         case .band: "The short reactions that scroll over videos and photos. Background darkens the strip behind them; it darkens more while you scrub through them. Don't Cover People lets reactions pass behind the people in a playing video; it pauses in Low Power Mode, with Power Saving on, or when your iPhone is hot."
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
         case .commentsScreen: "How dark a video or photo gets behind its comments when you open them. Darker reads more easily; lighter keeps more of the post."
-        case .storage: "Downloaded images, videos and animations, kept so they open instantly. Clearing them frees space; nothing you made is removed."
         }
     }
 
@@ -277,7 +234,7 @@ final class AppPreferencesViewController: UIViewController {
 
     private static func items(in section: Section) -> [Item] {
         switch section {
-        case .playback: [.autoplay, .startsWithSound, .dataSaver, .backgroundPlay, .pictureInPicture]
+        case .playback: [.autoplay, .startsWithSound, .backgroundPlay, .pictureInPicture]
         case .players: [.playerPool]
         case .sounds: [.interfaceSounds, .haptics]
         case .appearance: [.appearance]
@@ -289,7 +246,6 @@ final class AppPreferencesViewController: UIViewController {
         case .subtitles: [.subtitlesSwitch, .subtitleBackground]
         case .commentsScreen: [.commentsBackdrop]
         case .language: [.appLanguage]
-        case .storage: [.cacheSize, .clearCache]
         }
     }
 
@@ -368,11 +324,6 @@ final class AppPreferencesViewController: UIViewController {
             cell.accessories = [switchAccessory(isOn: playback.preferences.startsWithSound) { [weak self] isOn in
                 self?.playback.update { $0.startsWithSound = isOn }
             }]
-        case .dataSaver:
-            cell.contentConfiguration = Self.label("Data Saver", symbol: "antenna.radiowaves.left.and.right")
-            cell.accessories = [switchAccessory(isOn: playback.preferences.dataSaver) { [weak self] isOn in
-                self?.playback.update { $0.dataSaver = isOn }
-            }]
         case .backgroundPlay:
             cell.contentConfiguration = Self.label("Background Play", symbol: "lock.iphone")
             cell.accessories = [switchAccessory(isOn: playback.preferences.backgroundPlay) { [weak self] isOn in
@@ -397,15 +348,6 @@ final class AppPreferencesViewController: UIViewController {
                 self?.playback.update { $0.playerPool = pool }
             }, for: .valueChanged)
             install(slider, in: cell, title: nil)
-        case .cacheSize:
-            var content = Self.label("Media Cache", symbol: "internaldrive")
-            content.secondaryText = cacheBytes.map(MediaCacheInventory.formatted) ?? "Measuring…"
-            cell.contentConfiguration = content
-        case .clearCache:
-            var content = UIListContentConfiguration.cell()
-            content.text = "Clear Cache"
-            content.textProperties.color = cacheBytes.map { $0 > 0 } == true ? .systemRed : .secondaryLabel
-            cell.contentConfiguration = content
         case .bandSwitch:
             cell.contentConfiguration = Self.label("Show Reaction Band", symbol: "text.bubble")
             cell.accessories = [switchAccessory(isOn: preferences.showsReactionBand) { [weak self] isOn in
@@ -601,7 +543,6 @@ extension AppPreferencesViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .mutedWords, .mutedAccounts: true
-        case .clearCache: cacheBytes.map { $0 > 0 } == true
         default: false
         }
     }
@@ -611,7 +552,6 @@ extension AppPreferencesViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .mutedWords: navigationController?.pushViewController(mutedWordsEditor(), animated: true)
         case .mutedAccounts: navigationController?.pushViewController(mutedAccountsEditor(), animated: true)
-        case .clearCache: confirmClearCache()
         default: break
         }
     }

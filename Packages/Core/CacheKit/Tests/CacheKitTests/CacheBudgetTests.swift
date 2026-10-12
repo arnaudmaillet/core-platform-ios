@@ -29,6 +29,21 @@ struct CacheBudgetTests {
         #expect(CacheStorageLimit.choices == [.automatic, .total(bytes: 500_000_000), .total(bytes: 1_000_000_000), .total(bytes: 2_000_000_000)])
     }
 
+    /// The Settings choice survives a relaunch (#899); nothing saved, or
+    /// Automatic, reads back as Automatic.
+    @Test func theStorageLimitIsKeptOnTheDevice() throws {
+        let suite = "CacheStoragePreferenceTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(CacheStoragePreference.load(from: defaults) == .automatic)
+        for limit in CacheStorageLimit.choices {
+            CacheStoragePreference.save(limit, to: defaults)
+            #expect(CacheStoragePreference.load(from: defaults) == limit)
+        }
+        CacheStoragePreference.save(.automatic, to: defaults)
+        #expect(defaults.object(forKey: CacheStoragePreference.key) == nil)
+    }
+
     @Test func lowDiskHalvesEveryPoolBelowTheLimit() {
         #expect(DiskPoolBudgets(limit: .automatic, pressure: .low)
             == DiskPoolBudgets(images: 150 * megabyte, video: 250 * megabyte, localStore: 50 * megabyte))

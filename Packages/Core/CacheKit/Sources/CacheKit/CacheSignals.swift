@@ -21,20 +21,26 @@ public struct CacheConditions: Sendable, Equatable {
     public var isNetworkConstrained: Bool
     /// Cellular or a personal hotspot (`NWPath.isExpensive`).
     public var isNetworkExpensive: Bool
+    /// Settings → Storage → Use Less Cellular Data (#899, Instagram's
+    /// pattern): on cellular, prefetching drops to `reduced`.
+    public var usesLessCellularData: Bool
 
     public init(
         isLowPowerModeEnabled: Bool = false,
         thermalState: ProcessInfo.ThermalState = .nominal,
         network: CacheNetworkInterface = .wifi,
         isNetworkConstrained: Bool = false,
-        isNetworkExpensive: Bool = false
+        isNetworkExpensive: Bool = false,
+        usesLessCellularData: Bool = false
     ) {
         self.isLowPowerModeEnabled = isLowPowerModeEnabled
         self.thermalState = thermalState
         self.network = network
         self.isNetworkConstrained = isNetworkConstrained
         self.isNetworkExpensive = isNetworkExpensive
+        self.usesLessCellularData = usesLessCellularData
     }
+
 }
 
 /// How much lookahead the device allows now (#970). Prefetchers read it from
@@ -46,8 +52,9 @@ public struct PrefetchPolicy: Sendable, Equatable {
     public enum Level: Int, Sendable, Comparable {
         /// Critical thermal state or offline: P0 only.
         case off
-        /// Low Data Mode, Low Power Mode or a serious thermal state: P0 and P1
-        /// (the next item), no P2 network work.
+        /// Low Data Mode, Low Power Mode, a serious thermal state, or
+        /// cellular with Use Less Cellular Data on: P0 and P1 (the next
+        /// item), no P2 network work.
         case reduced
         /// Cellular: a shorter video lookahead.
         case cellular
@@ -86,7 +93,9 @@ public struct PrefetchPolicy: Sendable, Equatable {
         } else if conditions.isNetworkConstrained || conditions.isLowPowerModeEnabled || conditions.thermalState == .serious {
             self = .reduced
         } else if conditions.network == .cellular || conditions.isNetworkExpensive {
-            self = .cellular
+            // The user's choice caps cellular prefetch at the next item and
+            // turns P2 off; Wi-Fi keeps the full lookahead.
+            self = conditions.usesLessCellularData ? .reduced : .cellular
         } else {
             self = .full
         }
