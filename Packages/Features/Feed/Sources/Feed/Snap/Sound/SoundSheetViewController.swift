@@ -268,6 +268,19 @@ final class SoundSheetViewController: UIViewController {
 
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
+
+    /// The sheet's lookahead (#970): the Popular row's and the Recent grid's
+    /// covers a screen ahead decoded, two and a half ahead on disk, under the
+    /// sheet's own owner while it is on screen.
+    private lazy var lookahead: ScrollLookahead = {
+        let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "sound-sheet", kind: .grid) { [weak self] path in
+            guard let self, case .tile(let id, _)? = dataSource?.itemIdentifier(for: path),
+                  let url = tileByID[id]?.thumbnailURL else { return [] }
+            return [ImageRequest(url: url)]
+        }
+        lookahead.attach(to: collectionView)
+        return lookahead
+    }()
     private weak var header: SoundSheetHeaderView?
     private weak var shareItem: UIBarButtonItem?
     private weak var useItem: UIBarButtonItem?
@@ -473,6 +486,7 @@ final class SoundSheetViewController: UIViewController {
 
     override func viewIsAppearing(_ animated: Bool) {
         super.viewIsAppearing(animated)
+        lookahead.setOnScreen(true)
         // In a window now: the real width, and the toolbar's real band — the
         // bottom safe area less the window's. Both are the BAR's and the
         // screen's, the same at any detent, so reading them here converges:
@@ -562,8 +576,10 @@ final class SoundSheetViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        // Off screen (a section pushed over it, or gone): nothing to watch.
+        // Off screen (a section pushed over it, or gone): nothing to watch,
+        // and nothing to fetch ahead for — the stay's owner is revoked.
         reveal.sleep()
+        lookahead.setOnScreen(false)
         guard isSheetBeingDismissed else { return }
         setCovering(false)
         onDismissed?()
@@ -875,6 +891,7 @@ final class SoundSheetViewController: UIViewController {
             if case .tile(let id, _) = $0 { changed.contains(id) } else { false }
         })
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
+        lookahead.setNeedsPlan()
         refreshDetentMetrics(reason: "posts")
         // A section's chevron follows what it now holds — its head
         // reconfigured where it stands, not its section reloaded (which
@@ -1537,6 +1554,8 @@ final class SoundSheetViewController: UIViewController {
     /// The tiles are (or are no longer) the viewer's: on screen and not
     /// covered. Inactive, every one gives its player back at once.
     private func setAutoplayActive(_ active: Bool) {
+        // Covered by a feed opened from a tile: minimum windows (#970).
+        lookahead.setHidden(!active)
         guard let autoplay else { return }
         autoplay.setActive(active)
         guard active else { return }
@@ -1845,6 +1864,7 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         reconcileAutoplay(allowingStarts: GridAutoplayRanking.allowsStarts(
             atVelocity: scrollView.panGestureRecognizer.velocity(in: scrollView).y
         ))
+        lookahead.scrollViewDidScroll()
         // The line follows the Popular row as the posts scroll.
         guard reveal.progress < 1 else { return }
         updateRevealLine()
@@ -1853,6 +1873,7 @@ extension SoundSheetViewController: UICollectionViewDelegate {
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         guard scrollView === collectionView else { return }
         reconcileAutoplay()
+        lookahead.scrollViewDidEndScrolling()
     }
 
     func collectionView(
