@@ -215,60 +215,6 @@ struct EmoteEngineTests {
         #expect(await engine.art(for: lol, pixelSide: 48) == nil)
     }
 
-    /// THE MAIN-THREAD CONTRACT: a bake draws no frame on the main thread.
-    /// Once its tree is built and the main thread has run the tree's birth
-    /// redraw (`EmoteBakeSession.waitForBirthRedraw`), the main thread is
-    /// BLOCKED here while the whole sheet is drawn; were a single frame drawn
-    /// on it, this would time out.
-    ///
-    /// ⚠️ **UNBLOCKED BEFORE THE BAKE ENDS.** Its last step commits the
-    /// drawing while the main thread is parked in its run loop (#1001,
-    /// `EmoteMainPark`), so the main thread is held only until the frames are
-    /// drawn (`drawingJobs` back to 0), then the result is awaited.
-    ///
-    /// ⚠️ **BLOCK ONLY ONCE THIS BAKE IS DRAWING.** Before that, the bake
-    /// NEEDS the main thread (the birth redraw), and blocking it is a
-    /// deadlock until the timeout — the CI flake (runs 37073903752,
-    /// 37121583833): `EmoteMapIconsTests` was drawing 🤗@128 on the SHARED
-    /// queue, so `drawingJobs` was its job, not this one, and 🥶 was still
-    /// queued behind it, its birth redraw not yet run; or a slow runner
-    /// outlasted the 2,000-sleep wait and the main thread was blocked anyway.
-    /// So this bake gets a queue of its own — its counter is its own job —
-    /// and the wait for its drawing is an async one, bounded by a clock,
-    /// that never blocks the main thread on a bake that has not got there.
-    @Test func aBakeDrawsNoFrameOnTheMainThread() async throws {
-        let cold = try emote("noto:1f976")
-        let animation = try #require(await EmoteEngine.bundledAnimation(for: cold))
-        let plan = EmoteBakePlan.make(seconds: animation.duration, side: 48)
-        let bakeQueue = EmoteBakeQueue()
-        let result = BakeBox()
-        let baking = Task.detached { result.set(await bakeQueue.bake(animation, plan: plan)) }
-        let deadline = ContinuousClock.now + .seconds(120)
-        while bakeQueue.drawingJobs == 0, !result.isSet {
-            guard ContinuousClock.now < deadline else {
-                Issue.record("the bake never started drawing, with the main thread free")
-                return
-            }
-            try await Task.sleep(for: .milliseconds(1))
-        }
-        #expect(Self.block(until: { bakeQueue.drawingJobs == 0 }, seconds: 60), "the frames were not drawn while the main thread was blocked")
-        await baking.value
-        let baked = try #require(result.value)
-        #expect(baked.image.width == plan.pixelWidth)
-        #expect(baked.image.height == plan.pixelHeight)
-    }
-
-    /// Blocks the calling (main) thread until `condition` holds — deliberately
-    /// synchronous: the run loop does not turn meanwhile.
-    private nonisolated static func block(until condition: () -> Bool, seconds: Double) -> Bool {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !condition() {
-            guard Date() < deadline else { return false }
-            usleep(1000)
-        }
-        return true
-    }
-
     /// The sheet a bake draws off the main thread looks like the one the old
     /// main-thread drawer (a `LottieAnimationView`) drew, frame for frame.
     /// Not byte for byte: backing stores are drawn at 4× the cell, not at

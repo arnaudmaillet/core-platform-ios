@@ -47,6 +47,12 @@ extension Trait where Self == MainThreadAccess {
     static var sharesMainThread: Self { Self(exclusive: false) }
     /// Runs alone. See `MainThreadAccess`.
     static var measuresMainThread: Self { Self(exclusive: true) }
+    /// Runs alone, like a measurer: a suite that BLOCKS or holds the main
+    /// thread (#1038). Blocked beside the others, it stalls every main-actor
+    /// test and books its block as a measurer's cost: `EmoteBakeCostTests`
+    /// read 2415 and 1443 ms of main-thread "bake cost" against 565 and 1101
+    /// while `noBakeCommitsWhileTheMainThreadIsBusy` held the main thread.
+    static var blocksMainThread: Self { Self(exclusive: true) }
 }
 
 /// A readers-writer async lock that prefers the readers (see above).
