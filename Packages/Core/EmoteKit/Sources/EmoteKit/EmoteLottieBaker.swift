@@ -1,3 +1,4 @@
+import Foundation
 import Lottie
 import QuartzCore
 import Synchronization
@@ -31,15 +32,38 @@ import Synchronization
 /// in nearly every bake that overlaps it: 😂's face orange (its inverted matte
 /// cut nothing out). So a job builds the tree, lets the main thread run that
 /// one redraw and commit it (`EmoteMainCommit`), and only then draws — on
-/// the queue, alone. The main thread's share is that one small redraw.
+/// the bake thread, alone. The main thread's share is that one small redraw,
+/// and the two commits it waits out (below).
 ///
 /// ⚠️ **ONE JOB AT A TIME, AT UTILITY QoS.** A bake is invisible work: the
-/// label shows the system glyph until its sheet lands. One serial queue keeps
-/// the drawing to one core and below everything the user is waiting on.
+/// label shows the system glyph until its sheet lands. One thread keeps the
+/// drawing to one core and below everything the user is waiting on.
+///
+/// ⚠️ **EVERY COMMIT WAITS FOR THE MAIN THREAD TO PARK (#1001).** The tree
+/// needs Core Animation transactions, and a commit, on ANY thread, lays out
+/// every window in the process, not only the layers it changed:
+/// `CA::Context::commit_transaction` walks all contexts and calls
+/// `layout_and_display_if_needed` on each one's root. Committed at a moment
+/// of the bake's choosing, the bake's transaction now and then landed while
+/// the main thread was committing a window with layout in flight, and laid
+/// that window out on `EmoteKit.bake`: AutoLayout threw ("modifications to the
+/// layout engine must not be performed from a background thread") under the
+/// commit in `EmoteFrameDrawer.init`, now and then in a full Feed test run. So
+/// the bake commits only while the main thread waits in its run loop right
+/// after its own commit (`EmoteMainPark`), when no window has layout in flight.
+/// The main thread's share is the commit itself: 0.07 ms median, 0.3 ms at
+/// the 90th percentile, 2.3 ms at worst (36 commits, Debug, iOS 27 simulator).
+///
+/// ⚠️ **A THREAD OF ITS OWN, NEVER A GCD WORKER.** A transaction belongs to a
+/// THREAD, not to the code that opened it. On a GCD worker, which every queue
+/// in the process shares, a transaction another queue left open would nest the
+/// bake's, and the real commit would come later, unparked. And a parked
+/// commit blocks its thread for a main-thread turn, which a shared worker
+/// should not. On `EmoteBakeThread` nothing but a bake ever runs.
 final class EmoteBakeQueue: Sendable {
     static let shared = EmoteBakeQueue()
 
-    private let queue = DispatchQueue(label: "EmoteKit.bake", qos: .utility)
+    private let thread = EmoteBakeThread()
     private let queued = Atomic<Int>(0)
     private let drawing = Atomic<Int>(0)
 
@@ -56,28 +80,86 @@ final class EmoteBakeQueue: Sendable {
         queued.add(1, ordering: .relaxed)
         defer { queued.subtract(1, ordering: .relaxed) }
         return await withTaskCancellationHandler {
-            guard let session = await onQueue({ EmoteBakeSession(animation: animation, plan: plan) }) else {
+            guard let session = await run({ EmoteBakeSession(animation: animation, plan: plan) }) else {
                 return nil
             }
             await session.waitForBirthRedraw()
-            return await onQueue {
+            return await run {
                 self.drawing.add(1, ordering: .relaxed)
-                defer { self.drawing.subtract(1, ordering: .relaxed) }
-                return session.render(cancellation: cancellation)
+                let result = session.render(cancellation: cancellation)
+                self.drawing.subtract(1, ordering: .relaxed)
+                session.finish()
+                return result
             }
         } onCancel: {
             cancellation.cancel()
         }
     }
 
-    private func onQueue<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
+    /// Runs `body` on the bake thread, after every job handed over before it.
+    func run<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
         await withCheckedContinuation { continuation in
-            queue.async { continuation.resume(returning: body()) }
+            thread.enqueue { continuation.resume(returning: body()) }
         }
     }
 }
 
-/// A finished sheet, and what drawing it cost (on the bake queue).
+/// A thread that runs the jobs handed to it one at a time, in order — and
+/// nothing else, ever (see `EmoteBakeQueue`). It ends once its owner is gone
+/// and its last job has run.
+final class EmoteBakeThread: Sendable {
+    private static let marker = "EmoteKit.bake"
+
+    /// Whether the caller runs on a bake thread.
+    static var isCurrent: Bool { Thread.current.threadDictionary[marker] != nil }
+
+    /// What the thread and its owner share — never the owner itself, so the
+    /// owner can go.
+    private final class Inbox: Sendable {
+        enum Job {
+            case run(@Sendable () -> Void)
+            case stop
+        }
+
+        private let jobs = Mutex<[Job]>([])
+        private let ready = DispatchSemaphore(value: 0)
+
+        func post(_ job: Job) {
+            jobs.withLock { $0.append(job) }
+            ready.signal()
+        }
+
+        func next() -> Job {
+            ready.wait()
+            return jobs.withLock { $0.removeFirst() }
+        }
+    }
+
+    private let inbox = Inbox()
+
+    init() {
+        let shared = self.inbox
+        let thread = Thread {
+            Thread.current.threadDictionary[Self.marker] = true
+            while case .run(let job) = shared.next() {
+                autoreleasepool { job() }
+            }
+        }
+        thread.name = Self.marker
+        thread.qualityOfService = .utility
+        thread.start()
+    }
+
+    deinit {
+        inbox.post(.stop)
+    }
+
+    func enqueue(_ job: @escaping @Sendable () -> Void) {
+        inbox.post(.run(job))
+    }
+}
+
+/// A finished sheet, and what drawing it cost (on the bake thread).
 struct EmoteBakeResult: Sendable {
     let image: CGImage
     let drawingTime: Duration
@@ -90,18 +172,24 @@ final class EmoteBakeCancellation: Sendable {
     func cancel() { flag.store(true, ordering: .relaxed) }
 }
 
-/// One bake's tree and sheet, handed between the bake queue and the main
+/// One bake's tree and sheet, handed between the bake thread and the main
 /// thread — never used by both at once.
 ///
-/// `@unchecked Sendable` because its layers are not: the queue builds it,
-/// the main thread only reads one reference count while the queue waits, and
-/// the queue draws after the main thread is done — each hand-off a
-/// continuation, so each step happens-after the last.
+/// `@unchecked Sendable` because its layers are not: the bake thread builds
+/// it, the main thread only reads one reference count while the bake thread
+/// waits, and the bake thread draws after the main thread is done — each
+/// hand-off a continuation, so each step happens-after the last.
+///
+/// Built, drawn and let go ON THE BAKE THREAD (`EmoteBakeThread`): every
+/// Core Animation transaction the tree needs is opened there and committed
+/// there while the main thread is parked, and the tree is released inside the
+/// last one, so no other thread is left holding a transaction of the bake's.
 final class EmoteBakeSession: @unchecked Sendable {
     private let drawer: EmoteFrameDrawer
     private let plan: EmoteBakePlan
 
     init?(animation: LottieAnimation, plan: EmoteBakePlan) {
+        assert(EmoteBakeThread.isCurrent, "a bake session is built on the bake thread")
         guard let drawer = EmoteFrameDrawer(animation: animation, side: plan.side) else { return nil }
         self.drawer = drawer
         self.plan = plan
@@ -122,15 +210,16 @@ final class EmoteBakeSession: @unchecked Sendable {
         }
     }
 
-    /// Draws every frame on the calling thread (the bake queue).
+    /// Draws every frame on the calling thread (the bake thread). Called
+    /// once, and followed by `finish()` whatever it returns.
     func render(cancellation: EmoteBakeCancellation) -> EmoteBakeResult? {
-        defer { drawer.close() }
+        assert(EmoteBakeThread.isCurrent, "a bake draws on the bake thread")
+        drawer.open()
         guard !cancellation.isCancelled,
               let sheet = EmoteCanvas.make(width: plan.pixelWidth, height: plan.pixelHeight)
         else { return nil }
         let clock = ContinuousClock()
         let started = clock.now
-        drawer.open()
         for index in 0..<plan.frameCount {
             if cancellation.isCancelled { return nil }
             autoreleasepool {
@@ -141,6 +230,13 @@ final class EmoteBakeSession: @unchecked Sendable {
         }
         guard let image = sheet.makeImage() else { return nil }
         return EmoteBakeResult(image: image, drawingTime: clock.now - started)
+    }
+
+    /// Lets the tree go and commits the drawing — while the main thread is
+    /// parked. The one step of a bake that waits for the main thread.
+    func finish() {
+        assert(EmoteBakeThread.isCurrent, "a bake finishes on the bake thread")
+        drawer.close()
     }
 }
 
@@ -163,6 +259,76 @@ enum EmoteMainCommit {
     }
 }
 
+/// Core Animation commits made off the main thread while the main thread
+/// waits (#1001).
+///
+/// A commit on any thread lays out EVERY window in the process (see
+/// `EmoteBakeQueue`), so an off-main commit must not meet a window whose
+/// layout the main thread has in flight. The main thread is parked where it
+/// has none: in its run loop, right after its own commit (the same observer
+/// slot as `EmoteMainCommit`). There it waits, without running anything, while
+/// the bake thread commits, then goes on.
+enum EmoteMainPark {
+    /// The longest the main thread waits for one commit. A commit of a
+    /// bake's detached tree takes a few tenths of a millisecond; this only bounds
+    /// a commit that cannot finish while the main thread waits (a run loop
+    /// nested inside a commit of its own, holding what the bake's needs).
+    static let longestWait = DispatchTimeInterval.milliseconds(250)
+
+    private static let parked = Atomic<Int>(0)
+    private static let waiting = Atomic<Int>(0)
+
+    /// Commits made while the main thread was parked — a test seam.
+    static var parkedCommits: Int { parked.load(ordering: .relaxed) }
+    /// Threads waiting for the main thread to park — a test seam.
+    static var waitingCommits: Int { waiting.load(ordering: .relaxed) }
+
+    /// Commits the calling thread's transaction: at once on the main thread,
+    /// and off it once the main thread is parked.
+    static func commit() {
+        guard !Thread.isMainThread else {
+            CATransaction.commit()
+            return
+        }
+        whileParked { CATransaction.commit() }
+    }
+
+    /// Runs `body` on the calling (background) thread while the main thread
+    /// is parked. Blocks the caller until the main thread gets there.
+    ///
+    /// ⚠️ **AT THE MAIN THREAD'S PRIORITY MEANWHILE.** A semaphore lends no
+    /// priority: a utility thread the main thread waits on could sit behind
+    /// every busier thread while the main thread stands still. The calling
+    /// thread is raised to user-interactive for the wait and the commit, then
+    /// put back (a plain thread, not a GCD worker, so its QoS is its own).
+    static func whileParked(_ body: () -> Void) {
+        dispatchPrecondition(condition: .notOnQueue(.main))
+        let previous = qos_class_self()
+        pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
+        defer { pthread_set_qos_class_self_np(previous, 0) }
+        let arrived = DispatchSemaphore(value: 0)
+        let released = DispatchSemaphore(value: 0)
+        let observer = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, false, 2_000_100
+        ) { _, _ in
+            arrived.signal()
+            if released.wait(timeout: .now() + longestWait) == .timedOut {
+                #if DEBUG
+                print("[emote] the main thread waited \(longestWait) for a bake's commit, and went on")
+                #endif
+            }
+        }
+        waiting.add(1, ordering: .relaxed)
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+        arrived.wait()
+        waiting.subtract(1, ordering: .relaxed)
+        body()
+        parked.add(1, ordering: .relaxed)
+        released.signal()
+    }
+}
+
 /// A detached `.mainThread`-engine Lottie layer tree that draws one animation
 /// at chosen times — on one thread at a time.
 ///
@@ -182,27 +348,37 @@ enum EmoteMainCommit {
 /// unchanged. The pixels move by at most 16/255 (42 on 🔥's one-pixel sparks)
 /// — invisible at text size. At 2× they moved by up to 108.
 ///
-/// ⚠️ **ONE TRANSACTION FOR THE WHOLE DRAWING, STORES DRAWN BY HAND.** A queue
-/// thread has no run loop to commit an implicit transaction, and a commit
-/// mid-bake is what would draw the backing stores — at a moment of Core
-/// Animation's choosing. Instead the drawing runs in one explicit transaction
-/// (`open()` … `close()`), and before each render every self-drawing layer is
-/// displayed by hand, inputs first (an inverted matte renders another layer's
-/// store from inside its own `display`).
+/// ⚠️ **ONE TRANSACTION FOR THE WHOLE DRAWING, STORES DRAWN BY HAND.** A
+/// bake thread has no run loop to commit an implicit transaction, and a
+/// commit mid-bake is what would draw the backing stores — at a moment of
+/// Core Animation's choosing. Instead the drawing runs in one explicit
+/// transaction (`open()` … `close()`), and before each render every
+/// self-drawing layer is displayed by hand, inputs first (an inverted matte
+/// renders another layer's store from inside its own `display`). `close()`
+/// lets the tree go INSIDE that transaction, so tearing it down opens no
+/// implicit one on whatever thread drops the drawer last.
+///
+/// Used on the bake thread (`EmoteBakeThread`), or on the main thread by
+/// tests — never on a thread other code shares.
 final class EmoteFrameDrawer {
     /// How many times finer than the cell a backing store is drawn.
     static let supersampling: CGFloat = 4
 
-    private var layer: LottieAnimationLayer
-    private let root: CALayer
+    /// The detached tree: until `close()`.
+    private struct Tree {
+        var layer: LottieAnimationLayer
+        let root: CALayer
+        /// Every layer of the tree, each after everything it may render.
+        let layers: [CALayer]
+        /// The layers that draw their own backing store (Lottie's `draw(in:)`
+        /// overrides: gradients, inverted mattes, shapes drawn in context,
+        /// text), in the same order.
+        let selfDrawing: [CALayer]
+    }
+
+    private var tree: Tree?
     private let animation: LottieAnimation
     private let side: Int
-    /// Every layer of the tree, each after everything it may render.
-    private let layers: [CALayer]
-    /// The layers that draw their own backing store (Lottie's `draw(in:)`
-    /// overrides: gradients, inverted mattes, shapes drawn in context, text),
-    /// in the same order.
-    private let selfDrawing: [CALayer]
     private let invertedMatteTotal: Int
     private let canvas: CGContext
     private var isOpen = false
@@ -210,10 +386,11 @@ final class EmoteFrameDrawer {
     /// Nil when the tree cannot be driven frame by frame (no main-thread
     /// root, or a Lottie whose root no longer has `currentFrame`).
     init?(animation: LottieAnimation, side: Int) {
+        assert(EmoteBakeThread.isCurrent || Thread.isMainThread, "a frame drawer runs on the bake thread or the main thread")
         guard let canvas = EmoteCanvas.make(width: side, height: side) else { return nil }
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        defer { CATransaction.commit() }
+        defer { EmoteMainPark.commit() }
         let made = LottieAnimationLayer(animation: animation, configuration: LottieConfiguration(renderingEngine: .mainThread))
         // The root's `currentFrame` is an `@NSManaged` Core Animation property:
         // set by key, it moves the tree without `LottieAnimationLayer`'s own
@@ -221,15 +398,12 @@ final class EmoteFrameDrawer {
         guard let root = made.animationLayer, root.responds(to: NSSelectorFromString("setCurrentFrame:")) else {
             return nil
         }
-        layer = made
-        self.root = root
+        var layers: [CALayer] = []
+        Self.collect(root, into: &layers)
+        tree = Tree(layer: made, root: root, layers: layers, selfDrawing: layers.filter(Self.drawsItself))
         self.animation = animation
         self.side = side
         self.canvas = canvas
-        var layers: [CALayer] = []
-        Self.collect(root, into: &layers)
-        self.layers = layers
-        selfDrawing = layers.filter(Self.drawsItself)
         invertedMatteTotal = layers.filter { Self.matteInput(of: $0) != nil }.count
         // Before the commit, so the main thread's birth redraw already draws
         // small stores.
@@ -242,31 +416,37 @@ final class EmoteFrameDrawer {
     /// Whether the redraw `LottieAnimationLayer` scheduled at birth has run:
     /// that block holds the layer strongly until it has.
     func birthRedrawHasRun() -> Bool {
-        isKnownUniquelyReferenced(&layer)
+        guard tree != nil else { return true }
+        return isKnownUniquelyReferenced(&tree!.layer)
     }
 
     /// Opens the transaction the frames are drawn in.
     func open() {
-        guard !isOpen else { return }
+        guard !isOpen, tree != nil else { return }
         isOpen = true
         CATransaction.begin()
         CATransaction.setDisableActions(true)
     }
 
-    /// Commits the drawing transaction, if open. Idempotent.
+    /// Lets the tree go and commits the drawing transaction, if open. The
+    /// drawer draws nothing after. Idempotent.
     func close() {
         guard isOpen else { return }
         isOpen = false
-        CATransaction.commit()
+        tree = nil
+        EmoteMainPark.commit()
     }
 
     /// Draws the frame at `seconds`, aspect-fit in a `side`-pixel square, and
-    /// returns the canvas holding it — valid until the next call.
+    /// returns the canvas holding it — valid until the next call; blank once
+    /// the drawer is closed.
     func draw(atSeconds seconds: Double) -> CGContext {
-        root.setValue(animation.frameTime(forTime: seconds), forKey: Self.frameKey)
-        layer.forceDisplayUpdate()
         EmoteCanvas.clear(canvas)
-        for store in selfDrawing {
+        guard let tree else { return canvas }
+        let root = tree.root
+        root.setValue(animation.frameTime(forTime: seconds), forKey: Self.frameKey)
+        tree.layer.forceDisplayUpdate()
+        for store in tree.selfDrawing {
             store.setNeedsDisplay()
             store.displayIfNeeded()
         }
@@ -313,10 +493,10 @@ final class EmoteFrameDrawer {
 
     // MARK: - Test seams
 
-    var layerCount: Int { layers.count }
+    var layerCount: Int { tree?.layers.count ?? 0 }
     var invertedMatteCount: Int { invertedMatteTotal }
-    var selfDrawingCount: Int { selfDrawing.count }
-    var backingStoreScales: Set<CGFloat> { Set(layers.map(\.contentsScale)) }
+    var selfDrawingCount: Int { tree?.selfDrawing.count ?? 0 }
+    var backingStoreScales: Set<CGFloat> { Set(tree?.layers.map(\.contentsScale) ?? []) }
 }
 
 /// The bitmaps a bake draws into: BGRA, premultiplied (what Core Animation

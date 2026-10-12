@@ -221,6 +221,11 @@ struct EmoteEngineTests {
     /// BLOCKED here while the whole sheet is drawn; were a single frame drawn
     /// on it, this would time out.
     ///
+    /// ⚠️ **UNBLOCKED BEFORE THE BAKE ENDS.** Its last step commits the
+    /// drawing while the main thread is parked in its run loop (#1001,
+    /// `EmoteMainPark`), so the main thread is held only until the frames are
+    /// drawn (`drawingJobs` back to 0), then the result is awaited.
+    ///
     /// ⚠️ **BLOCK ONLY ONCE THIS BAKE IS DRAWING.** Before that, the bake
     /// NEEDS the main thread (the birth redraw), and blocking it is a
     /// deadlock until the timeout — the CI flake (runs 37073903752,
@@ -236,12 +241,8 @@ struct EmoteEngineTests {
         let animation = try #require(await EmoteEngine.bundledAnimation(for: cold))
         let plan = EmoteBakePlan.make(seconds: animation.duration, side: 48)
         let bakeQueue = EmoteBakeQueue()
-        let done = DispatchSemaphore(value: 0)
         let result = BakeBox()
-        Task.detached {
-            result.set(await bakeQueue.bake(animation, plan: plan))
-            done.signal()
-        }
+        let baking = Task.detached { result.set(await bakeQueue.bake(animation, plan: plan)) }
         let deadline = ContinuousClock.now + .seconds(120)
         while bakeQueue.drawingJobs == 0, !result.isSet {
             guard ContinuousClock.now < deadline else {
@@ -250,15 +251,22 @@ struct EmoteEngineTests {
             }
             try await Task.sleep(for: .milliseconds(1))
         }
-        #expect(Self.block(on: done, seconds: 60), "the bake did not finish while the main thread was blocked")
+        #expect(Self.block(until: { bakeQueue.drawingJobs == 0 }, seconds: 60), "the frames were not drawn while the main thread was blocked")
+        await baking.value
         let baked = try #require(result.value)
         #expect(baked.image.width == plan.pixelWidth)
         #expect(baked.image.height == plan.pixelHeight)
     }
 
-    /// Blocks the calling (main) thread — deliberately synchronous.
-    private nonisolated static func block(on semaphore: DispatchSemaphore, seconds: Double) -> Bool {
-        semaphore.wait(timeout: .now() + seconds) == .success
+    /// Blocks the calling (main) thread until `condition` holds — deliberately
+    /// synchronous: the run loop does not turn meanwhile.
+    private nonisolated static func block(until condition: () -> Bool, seconds: Double) -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition() {
+            guard Date() < deadline else { return false }
+            usleep(1000)
+        }
+        return true
     }
 
     /// The sheet a bake draws off the main thread looks like the one the old
