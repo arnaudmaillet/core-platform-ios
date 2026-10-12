@@ -294,7 +294,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // kept live by the app's follow channel. Discover (everyone)
                 // reads neither.
                 followRelations: followRelations,
-                followEvents: followEvents
+                followEvents: followEvents,
+                // A post deleted anywhere (the author's profile) leaves the
+                // grid and the rows (#896).
+                entities: entities
             ),
             imagePipeline: imagePipeline,
             // Deliberately the SAME pool the snap feed uses. The grid parks a
