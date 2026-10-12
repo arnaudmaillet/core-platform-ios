@@ -17,9 +17,11 @@ import UIKit
 /// Text with no emotes takes `UILabel`'s own path, untouched. Text with emotes
 /// is drawn through `EmoteTextLayout`, which also says where each emote's glyph
 /// landed. Over each visible glyph the label places an `AnimatedIconView` —
-/// the map's sprite-sheet player — and only once that view holds art does the
-/// label stop drawing the glyph underneath. Until then, and whenever an emote
-/// cannot animate, the glyph is simply the system emoji. Never blank.
+/// the map's sprite-sheet player — and stops drawing the glyph underneath.
+/// While its art is on its way the emote's square holds a skeleton
+/// (`EmoteSkeleton`, #987) rather than the glyph, so the glyph never flashes
+/// between the two; when no art can be had, and whenever an emote cannot
+/// animate, the glyph is simply the system emoji.
 ///
 /// ## What it costs
 ///
@@ -33,7 +35,7 @@ import UIKit
 /// - **Nothing per frame.** Playback is a `CAKeyframeAnimation` on the render
 ///   server; scrolling moves the label, which re-lays nothing out.
 /// - **Bounded.** At most `EmoteEngine.maxAnimatedEmotes` animate at once,
-///   app-wide; the rest keep their static glyph until a slot frees.
+///   app-wide; the rest hold their art's poster frame until a slot frees.
 /// - **Reduce Motion** (and serious thermal pressure): no animation at all.
 ///   Emoji stay the system's own still glyph and nothing is baked; a house
 ///   emote shows its first frame.
@@ -408,7 +410,8 @@ open class EmoteLabel: UILabel {
                 start(player, index: index)
             }
             player.view.frame = square
-            if !player.isShowing, let art = player.art {
+            player.skeleton.frame = square
+            if player.awaitsSlot, let art = player.art {
                 // Art that arrived while every playback slot was taken.
                 present(art, in: player, index: index)
             }
@@ -424,35 +427,67 @@ open class EmoteLabel: UILabel {
             present(art, in: player, index: index)
             return
         }
-        player.request = engine.requestArt(
+        var answered = false
+        let request = engine.requestArt(
             for: player.emote, pixelSide: player.side, motion: player.motion
         ) { [weak self, weak player] art in
+            answered = true
             guard let self, let player, self.players[index] === player else { return }
             player.request = nil
-            guard let art else { return }
-            self.present(art, in: player, index: index)
+            if let art {
+                self.present(art, in: player, index: index)
+            } else {
+                // No art to be had: the glyph, while the emote stays on
+                // screen (#987).
+                player.skeleton.hide(fading: true)
+            }
             self.updateCoveredMarks()
         }
+        guard !answered else { return }
+        player.request = request
+        // The glyph goes (`updateCoveredMarks`) and the skeleton holds the
+        // square: at once for a bake, after a grace for a read (#987).
+        player.skeleton.show(
+            in: self, below: player.view,
+            after: engine.skeletonDelay(for: player.emote, pixelSide: player.side, motion: player.motion),
+            engine: engine
+        )
     }
 
     private func present(_ art: AnimatedIconArt, in player: EmotePlayer, index: Int) {
         player.art = art
         let animates = player.motion == .loop && art.frameCount > 1
         if animates, !player.holdsSlot {
-            guard engine.acquirePlaybackSlot(waiter: self) else { return }
+            guard engine.acquirePlaybackSlot(waiter: self) else {
+                // No slot to play in: the art itself, held on its poster
+                // frame — not the glyph — until one frees, as the composer
+                // does (#731). A skeleton never gives way to the glyph.
+                if !player.awaitsSlot {
+                    player.view.setArt(art, phase: art.posterFrame(), paused: true)
+                    player.view.isHidden = false
+                    player.awaitsSlot = true
+                    player.isShowing = true
+                    player.skeleton.hide(fading: true)
+                }
+                return
+            }
             player.holdsSlot = true
         }
+        player.awaitsSlot = false
         player.view.setArt(art)
         player.view.isHidden = false
         player.isShowing = true
+        player.skeleton.hide(fading: true)
     }
 
     private func release(_ player: EmotePlayer) {
         player.request?.cancel()
         player.request = nil
+        player.skeleton.hide()
         player.view.setArt(nil)
         player.view.removeFromSuperview()
         player.isShowing = false
+        player.awaitsSlot = false
         if player.holdsSlot {
             player.holdsSlot = false
             engine.releasePlaybackSlot()
@@ -470,8 +505,10 @@ open class EmoteLabel: UILabel {
 
     /// Redraws the text only when the set of covered glyphs changed — a label
     /// whose emotes are all already playing is not redrawn by a layout pass.
+    /// A glyph is covered by art on show, and by art on its way (its square
+    /// is the skeleton's, #987); only an emote with no art draws its glyph.
     private func updateCoveredMarks() {
-        let covered = Set(players.compactMap { $0.value.isShowing ? $0.key : nil })
+        let covered = Set(players.compactMap { $0.value.coversGlyph ? $0.key : nil })
         guard covered != coveredMarks else { return }
         coveredMarks = covered
         setNeedsDisplay()
@@ -519,8 +556,18 @@ open class EmoteLabel: UILabel {
 
     /// How many emotes are placed (animating or waiting on art).
     var placedEmoteCount: Int { players.count }
-    /// How many are showing art over their glyph.
-    var showingEmoteCount: Int { players.values.filter(\.isShowing).count }
+    /// How many are PLAYING art over their glyph.
+    var showingEmoteCount: Int { players.values.filter { $0.isShowing && !$0.awaitsSlot }.count }
+    /// How many hold their art's poster frame, waiting on a playback slot.
+    var posterEmoteCount: Int { players.values.filter(\.awaitsSlot).count }
+    /// How many show a skeleton, waiting on their art (#987).
+    var skeletonCount: Int { players.values.filter(\.skeleton.isShowing).count }
+    /// How many wait on their art, skeleton or not yet.
+    var pendingEmoteCount: Int { players.values.filter { $0.request != nil }.count }
+    /// The skeletons on show, in mark order.
+    var skeletons: [EmoteSkeleton] {
+        players.keys.sorted().compactMap { players[$0]?.skeleton }.filter(\.isShowing)
+    }
     /// The squares the players occupy, in the label's coordinates.
     var emoteFrames: [CGRect] { players.keys.sorted().compactMap { players[$0]?.view.frame } }
     var coveredMarkIndices: Set<Int> { coveredMarks }
@@ -541,8 +588,17 @@ final class EmotePlayer {
     let view: AnimatedIconView
     var request: EmoteRequest?
     var art: AnimatedIconArt?
+    /// Art on show: playing, or held on its poster frame (`awaitsSlot`).
     var isShowing = false
+    /// The art is held on its poster frame until a playback slot frees.
+    var awaitsSlot = false
     var holdsSlot = false
+    /// What holds the square while the art is on its way (#987).
+    let skeleton = EmoteSkeleton()
+
+    /// Whether the glyph under this emote must not be drawn: art is on show,
+    /// or on its way.
+    var coversGlyph: Bool { isShowing || request != nil }
 
     init(emote: Emote, side: Int, motion: EmoteEngine.Motion) {
         self.emote = emote

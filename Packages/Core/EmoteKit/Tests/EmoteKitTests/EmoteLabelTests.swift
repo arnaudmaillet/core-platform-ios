@@ -76,10 +76,13 @@ struct EmoteLabelTests {
 
     /// The glyph the label drew is exactly where the animation goes: its ink
     /// lies inside the player's square.
-    @Test func theSquareCoversTheDrawnGlyph() throws {
-        let engine = EmoteEngine(diskCache: nil)   // cold: nothing covers the glyph yet
+    @Test func theSquareCoversTheDrawnGlyph() async throws {
+        // No art to be had: once that is known, nothing covers the glyph.
+        let engine = EmoteEngine(diskCache: nil)
+        engine.artProvider = { _, _, _ in nil }
         let (label, window) = hostedLabel("go 🔥 go", engine: engine)
         defer { window.isHidden = true }
+        try #require(await settle { label.pendingEmoteCount == 0 })
         let frame = try #require(label.emoteFrames.first)
         #expect(label.showingEmoteCount == 0)
 
@@ -88,13 +91,19 @@ struct EmoteLabelTests {
         #expect(ink.height > frame.height * 0.7, "ink \(ink) much smaller than \(frame)")
     }
 
-    /// Never blank: before art arrives the glyph is drawn; once a player
-    /// shows art, that glyph (and only that one) is not.
-    @Test func theGlyphIsErasedOnlyUnderAShowingPlayer() throws {
+    /// The glyph is erased under a player showing art, and under art on its
+    /// way, whose square is a skeleton (#987): drawn, it would flash between
+    /// the skeleton and the art. (No art at all: `EmoteSkeletonTests`.)
+    @Test func theGlyphIsErasedUnderArtAndUnderArtOnItsWay() throws {
         let cold = EmoteEngine(diskCache: nil)
+        cold.artProvider = { _, _, _ in
+            try? await Task.sleep(for: .seconds(30))
+            return nil
+        }
         let (before, w1) = hostedLabel("🔥", engine: cold)
         defer { w1.isHidden = true }
-        #expect(Self.colouredInk(of: before) != nil, "a cold emote must still draw its glyph")
+        #expect(before.skeletonCount == 1)
+        #expect(Self.colouredInk(of: before) == nil, "a glyph under the skeleton of a cold emote")
 
         let (after, w2) = hostedLabel("🔥", engine: try warmEngine(["noto:1f525"]))
         defer { w2.isHidden = true }
@@ -167,18 +176,21 @@ struct EmoteLabelTests {
         #expect(engine.animatedCount == 0)
     }
 
-    /// Over the budget, the extra emotes keep their static glyph — drawn, not
-    /// blank — and take a slot when one frees.
+    /// Over the budget, the extra emotes hold their art's poster frame — the
+    /// art, still, never the glyph a skeleton would give way to (#987) — and
+    /// take a slot when one frees.
     @Test func theBudgetCapsAnimationsAndHandsSlotsOn() throws {
         let engine = try warmEngine(["noto:1f525"])
         engine.maxAnimatedEmotes = 1
         let (first, w1) = hostedLabel("🔥🔥", engine: engine)
         defer { w1.isHidden = true }
         #expect(first.showingEmoteCount == 1)
-        #expect(first.coveredMarkIndices.count == 1)
+        #expect(first.posterEmoteCount == 1)
+        #expect(first.coveredMarkIndices == [0, 1])
         let (second, w2) = hostedLabel("🔥", engine: engine)
         defer { w2.isHidden = true }
         #expect(second.showingEmoteCount == 0)
+        #expect(second.posterEmoteCount == 1)
 
         first.removeFromSuperview()
         second.layoutIfNeeded()
@@ -339,7 +351,9 @@ struct EmoteLabelTests {
         visible.setEmoteText("🔥")
         window.addSubview(visible)
         visible.layoutIfNeeded()
-        #expect(visible.showingEmoteCount == 0, "over the cap: waits on its glyph")
+        #expect(visible.showingEmoteCount == 0, "over the cap: waits for a slot")
+        #expect(visible.posterEmoteCount == 1, "over the cap: the art's poster frame, not the glyph")
+        #expect(visible.coveredMarkIndices == [0])
         #expect(EmoteVisibilityMonitor.shared.isRunning)
 
         container.isHidden = true

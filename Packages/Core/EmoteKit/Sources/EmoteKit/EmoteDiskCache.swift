@@ -1,5 +1,6 @@
 import CacheKit
 import ImageIO
+import Synchronization
 import MediaCore
 import UIKit
 import UniformTypeIdentifiers
@@ -40,19 +41,33 @@ struct EmoteDiskCache: Sendable {
     /// made on the main actor, never opens the store (index read and
     /// reconciliation) there: the first disk read, on a detached task, does.
     private let openStore: @Sendable () -> DiskStore?
+    /// Whether `openStore` would answer without opening anything — what the
+    /// main actor may ask (`containsIfOpen`).
+    private let isOpen: @Sendable () -> Bool
 
-    init(store: @escaping @Sendable () -> DiskStore?) {
+    /// - Parameter isOpen: whether the store is open already. Always, for a
+    ///   store a test made and holds.
+    init(store: @escaping @Sendable () -> DiskStore?, isOpen: @escaping @Sendable () -> Bool = { true }) {
         self.openStore = store
+        self.isOpen = isOpen
     }
 
     /// The app's UI assets namespace. Nil never in practice; the optional is
     /// the engine's seam for "no disk".
     static func standard() -> EmoteDiskCache? {
-        EmoteDiskCache {
-            _ = removeLegacyFolderOnce
-            return UIAssetCaches.disk
-        }
+        EmoteDiskCache(
+            store: {
+                _ = removeLegacyFolderOnce
+                let store = UIAssetCaches.disk
+                standardOpened.store(true, ordering: .releasing)
+                return store
+            },
+            isOpen: { standardOpened.load(ordering: .acquiring) }
+        )
     }
+
+    /// Whether the UI assets namespace has been opened, by any cache.
+    private static let standardOpened = Atomic<Bool>(false)
 
     /// Before #971 the sheets lived in `Caches/EmoteKit` as PNG + JSON pairs
     /// no index knew about. Removed once per launch, on the first disk use.
@@ -93,6 +108,18 @@ struct EmoteDiskCache: Sendable {
     /// Whether the sheet is on disk, without counting as a use.
     func contains(stem: String) -> Bool {
         openStore()?.contains(Self.key(stem: stem)) ?? false
+    }
+
+    /// `contains`, answered only from an index already open: false while the
+    /// store is not, since opening it reads the index and reconciles it with
+    /// the files — never on the main thread. A lock and a lookup.
+    func containsIfOpen(stem: String) -> Bool {
+        isOpen() && contains(stem: stem)
+    }
+
+    /// Opens the store. Off the main thread.
+    func open() {
+        _ = openStore()
     }
 
     func removeAll() {

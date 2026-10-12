@@ -2,8 +2,8 @@ import MediaCore
 import UIKit
 
 /// One emote in the panel, the strip, the suggestion row or the feed's
-/// shortcut rail: its glyph at once, its animated art over it when there is
-/// one.
+/// shortcut rail: its animated art when there is some — a skeleton while it
+/// is on its way (`EmoteSkeleton`, #987) — and its system glyph otherwise.
 ///
 /// ## What is dressed, and what it costs
 ///
@@ -33,7 +33,9 @@ import UIKit
 ///
 /// The tile and its cell paint no background: the art's own alpha is its
 /// shape, on whatever hosts it (the panel's keyboard material, the strip's
-/// glass). The press is the cell's (`EmoteTileCell.isHighlighted`).
+/// glass). The press is the cell's (`EmoteTileCell.isHighlighted`). The one
+/// exception is the skeleton, which fills the tile's square only while the
+/// art is pending.
 @MainActor
 public final class EmoteTileView: UIView {
     /// The sheet side tiles ask for: the text bucket, so a sheet baked for a
@@ -47,6 +49,8 @@ public final class EmoteTileView: UIView {
     public private(set) var emote: Emote?
     private weak var engine: EmoteEngine?
     private var prefersAnimation = false
+    /// What holds the square while the art is on its way (#987).
+    let skeleton = EmoteSkeleton()
 
     /// Whether art is showing over the glyph.
     public private(set) var isShowingArt = false
@@ -87,14 +91,21 @@ public final class EmoteTileView: UIView {
 
     override public func layoutSubviews() {
         super.layoutSubviews()
-        let side = min(bounds.width, bounds.height)
-        let square = CGRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side)
-        glyphLabel.frame = square
+        let box = square
+        let side = box.width
+        glyphLabel.frame = box
         // Apple Color Emoji draws ~1.2 em tall: a font of 0.8 of the side
         // fills the square the way the animation does.
         let size = (side * 0.8).rounded()
         if glyphLabel.font?.pointSize != size { glyphLabel.font = .systemFont(ofSize: size) }
-        player.frame = square
+        player.frame = box
+        skeleton.frame = box
+    }
+
+    /// The square the emote fills, in the tile's coordinates.
+    private var square: CGRect {
+        let side = min(bounds.width, bounds.height)
+        return CGRect(x: (bounds.width - side) / 2, y: (bounds.height - side) / 2, width: side, height: side)
     }
 
     /// Shows `emote`, dressing its art if the rules above allow — still, on
@@ -119,22 +130,32 @@ public final class EmoteTileView: UIView {
             return
         }
         guard prefersAnimation || !emote.isUnicodeEmoji else { return }
-        // ⚠️ NOTHING BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): the slot
-        // stays empty — no system glyph standing in — and the art arrives
-        // with a bounce. The glyph comes back only if no art does.
+        // ⚠️ NO GLYPH BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): the slot
+        // holds a skeleton (#987) — no system glyph standing in, which would
+        // flash between the two — and the art arrives with a bounce. The
+        // glyph comes back only if no art does.
         glyphLabel.isHidden = true
         var answeredAtOnce = true
+        var answered = false
         request = engine.requestArt(for: emote, pixelSide: Self.pixelSide, motion: motion) { [weak self] art in
+            answered = true
             guard let self, self.emote?.id == emote.id else { return }
             self.request = nil
             if let art {
                 self.present(art, motion: motion)
                 if !answeredAtOnce { self.bounceIn() }
             } else {
+                self.skeleton.hide(fading: true)
                 self.glyphLabel.isHidden = false
             }
         }
         answeredAtOnce = false
+        guard !answered else { return }
+        skeleton.frame = square
+        skeleton.show(
+            in: self, below: player,
+            after: engine.skeletonDelay(for: emote, pixelSide: Self.pixelSide, motion: motion), engine: engine
+        )
     }
 
     /// The art arriving after the tile showed: from nothing, past its size
@@ -162,6 +183,8 @@ public final class EmoteTileView: UIView {
     private(set) var bounceInCount = 0
     /// Whether the system glyph shows. Internal for tests.
     var showsGlyph: Bool { !glyphLabel.isHidden }
+    /// Whether a skeleton holds the square (#987). Internal for tests.
+    var showsSkeleton: Bool { skeleton.isShowing }
 
     /// Dresses the art still on its poster frame, and plays it from there if
     /// the owner wants it moving.
@@ -170,6 +193,7 @@ public final class EmoteTileView: UIView {
         player.isHidden = false
         glyphLabel.isHidden = true
         isShowingArt = true
+        skeleton.hide(fading: true)
         artMoves = motion == .loop && art.frameCount > 1
         if isPlaying { play() }
     }
@@ -254,6 +278,7 @@ public final class EmoteTileView: UIView {
     func reset() {
         request?.cancel()
         request = nil
+        skeleton.hide()
         player.setArt(nil)
         player.isHidden = true
         player.layer.removeAllAnimations()
