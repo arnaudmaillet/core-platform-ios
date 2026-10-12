@@ -745,9 +745,10 @@ public final class LocalStore: ManagedCache {
         }
     }
 
-    /// Waits until every write scheduled so far (touches, background wipes,
-    /// compactions) has run. Tests only.
-    func waitForPendingWrites() {
+    /// Waits until every write scheduled so far (wipes, budgets, trims,
+    /// touches, compactions) has run. For tests, here and in the features
+    /// that write through the store.
+    public func waitForPendingWrites() {
         try? pool.writeWithoutTransaction { _ in }
     }
 

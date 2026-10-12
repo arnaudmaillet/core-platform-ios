@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import Foundation
+import LocalStore
 
 public enum CommentsError: Error, Equatable, Sendable {
     case notAuthenticated
@@ -220,15 +221,20 @@ public actor CommentsRepository: CommentsProviding {
     /// can read one synchronously while it mounts. Locked rather than
     /// isolated for exactly that reason — an `await` here would put a
     /// skeleton on screen, which is the thing being removed.
-    private nonisolated let topPages = TopCommentsCache()
+    private nonisolated let topPages: TopCommentsCache
 
+    /// `localStore` keeps the first pages on the device too (#893): a post
+    /// opened in an earlier session opens on its last comments. Nil keeps
+    /// them in memory.
     public init(
         commentClient: any Comment_V1_CommentServiceClientInterface,
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         authSession: any AuthSessionProviding,
         viewer: (any ViewerProviding)? = nil,
-        pageSize: Int32 = 50
+        pageSize: Int32 = 50,
+        localStore: LocalStore? = nil
     ) {
+        self.topPages = TopCommentsCache(disk: localStore.map(CommentsDiskTier.init(store:)))
         self.commentClient = commentClient
         self.profileClient = profileClient
         self.authSession = authSession
@@ -262,6 +268,8 @@ public actor CommentsRepository: CommentsProviding {
     /// after reading it (blocks, hidden words, held comments), so a page can
     /// come back short, or empty, with more behind it.
     public func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage {
+        // Whose page this is, asked before the fetch (#893).
+        let writer = topPages.viewer
         var request = Comment_V1_ListTopLevelRequest()
         request.postID = postID.rawValue
         request.limit = pageSize
@@ -311,7 +319,7 @@ public actor CommentsRepository: CommentsProviding {
         // Every first-page load fills the cache, not just an explicit
         // prefetch: a page opened once and returned to should render
         // instantly the second time for the same reason it should the first.
-        if pageToken == nil { topPages.set(entries, for: postID) }
+        if pageToken == nil { topPages.set(entries, for: postID, persistingAs: writer) }
         return CommentPage(entries: entries, nextPageToken: nextToken.isEmpty ? nil : nextToken)
     }
 
@@ -375,6 +383,11 @@ public actor CommentsRepository: CommentsProviding {
 
     public nonisolated func seedTopComments(_ entries: [CommentEntry], for postID: PostID) {
         topPages.set(entries, for: postID)
+    }
+
+    /// Waits until every first page so far is on the device. Tests only.
+    nonisolated func waitForDeviceWrites() {
+        topPages.waitForPendingWrites()
     }
 
     /// Adopts `id` through the shared viewer — idempotent next to
@@ -489,27 +502,59 @@ public actor CommentsRepository: CommentsProviding {
 /// inside a layout pass and cannot await anything — whatever it has to await,
 /// it renders a skeleton for. This is the one piece of the repository that has
 /// to answer synchronously.
+///
+/// Memory first; behind it, when the app hands one in, the device (#893): a
+/// memory miss reads it synchronously, once per post.
 private final class TopCommentsCache: @unchecked Sendable {
     private let lock = NSLock()
     private var pages: [PostID: [CommentEntry]] = [:]
+    /// Posts the device was asked for and did not have.
+    private var missingOnDisk: Set<PostID> = []
+    private let disk: CommentsDiskTier?
+
+    init(disk: CommentsDiskTier?) {
+        self.disk = disk
+    }
+
+    var viewer: LocalStoreViewer? { disk?.viewer }
 
     func value(for postID: PostID) -> [CommentEntry]? {
-        lock.lock()
-        defer { lock.unlock() }
-        return pages[postID]
+        let known: (entries: [CommentEntry]?, askDisk: Bool) = lock.withLock {
+            (pages[postID], pages[postID] == nil && !missingOnDisk.contains(postID))
+        }
+        if let entries = known.entries { return entries }
+        guard known.askDisk, let disk else { return nil }
+        // Read outside the lock: the store has its own.
+        let stored = disk.firstPage(for: postID)
+        lock.withLock {
+            if let stored {
+                if pages[postID] == nil { pages[postID] = stored }
+            } else {
+                missingOnDisk.insert(postID)
+            }
+        }
+        return stored
     }
 
-    func set(_ entries: [CommentEntry], for postID: PostID) {
-        lock.lock()
-        defer { lock.unlock() }
-        pages[postID] = entries
+    /// `persistingAs`: also keeps the page on the device, as that viewer's.
+    func set(_ entries: [CommentEntry], for postID: PostID, persistingAs viewer: LocalStoreViewer? = nil) {
+        lock.withLock {
+            pages[postID] = entries
+            missingOnDisk.remove(postID)
+        }
+        if let viewer { disk?.save(entries, for: postID, as: viewer) }
     }
 
+    /// Memory only: the device tier is wiped by the cache coordinator on the
+    /// same viewer change.
     func removeAll() {
-        lock.lock()
-        defer { lock.unlock() }
-        pages.removeAll()
+        lock.withLock {
+            pages.removeAll()
+            missingOnDisk.removeAll()
+        }
     }
+
+    func waitForPendingWrites() { disk?.waitForPendingWrites() }
 }
 
 extension CommentsRepository: HeldCommentReviewing {

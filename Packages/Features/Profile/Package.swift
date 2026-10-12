@@ -18,6 +18,9 @@ let package = Package(
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreStorage"),
+        // The profile screens' last content on the device (#893).
+        .package(path: "../../Core/CacheKit"),
+        .package(path: "../../Core/LocalStore"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/MediaPlayback"),
@@ -37,6 +40,8 @@ let package = Package(
                 "MediaCore",
                 "CoreNavigation",
                 "CoreStorage",
+                "CacheKit",
+                "LocalStore",
                 "DesignSystem",
                 "EmoteKit",
                 // Settings → App Preferences measures and clears the video
@@ -65,6 +70,8 @@ let package = Package(
                 "ShareSheet",
                 "CoreNavigation",
                 "CoreStorage",
+                "CacheKit",
+                "LocalStore",
                 // The identity-ink suite reads `HeroInk`'s constants directly.
                 "DesignSystem",
                 "CoreNetworking",

@@ -1,6 +1,7 @@
 import AuthInterface
 import CoreModels
 import Foundation
+import LocalStore
 
 /// Last-known profiles, keyed by id — the "stale" half of stale-while-revalidate.
 ///
@@ -17,11 +18,17 @@ import Foundation
 /// turn the switch is handled, so the first frame after a switch already carries
 /// the new identity.
 ///
-/// In memory only, and deliberately. A profile's counters go stale quickly, so
-/// there is no version of this worth persisting to disk; its job is to cover the
-/// gap between a switch and a round trip, not to survive relaunch. One instance
-/// is held by `ProfileFeatureBuilder` for the app's lifetime, so every profile
-/// screen shares it.
+/// **Two tiers (#893).** Memory is the fast path, bounded by `limit`. Behind
+/// it, when the app hands one in, the LocalStore keeps what each profile
+/// screen showed (`ProfileDiskTier`), so a COLD START opens the viewer's own
+/// profile and the profiles they visited on their last content too, then
+/// revalidates exactly as a revisit does. A memory miss reads the device
+/// synchronously (one indexed row); every change is written back off the main
+/// thread, coalesced per turn. The device tier is viewer-scoped by the store
+/// and wiped by the cache coordinator on a viewer change, as memory is here.
+///
+/// One instance is held by `ProfileFeatureBuilder` for the app's lifetime, so
+/// every profile screen shares it.
 @MainActor
 public final class ProfileCache {
     /// Enough for an account's own profiles plus a browsing session's worth of
@@ -44,11 +51,24 @@ public final class ProfileCache {
     /// Every relationship here is the VIEWER's ("you follow them"): once the
     /// viewer is someone else, none of it is true any more.
     private var viewerObserver: NSObjectProtocol?
+    /// The device tier; nil keeps this cache in memory only (tests, previews).
+    private let disk: ProfileDiskTier?
+    /// Ids the device was asked for and did not have, so a miss reads it once.
+    private var missingOnDisk: Set<ProfileID> = []
+    /// Ids changed this turn, written back together at its end.
+    private var pendingWrites: Set<ProfileID> = []
+    private var writeScheduled = false
+    /// Which profile is the viewer's own, once known.
+    private var currentUser: ProfileID?
+    /// Whether the device was asked which profile is the viewer's own.
+    private var askedDiskForCurrentUser = false
 
     /// `center` is where viewer changes are heard: the default one; a test
     /// hands its own, since posting on the shared one reaches every suite.
-    public init(limit: Int = 16, center: NotificationCenter = .default) {
+    /// `store` is the device tier (#893); nil keeps the cache in memory.
+    public init(limit: Int = 16, center: NotificationCenter = .default, store: LocalStore? = nil) {
         self.limit = limit
+        disk = store.map(ProfileDiskTier.init(store:))
         viewerObserver = center.addObserver(
             forName: .viewerDidChange, object: nil, queue: .main
         ) { [weak self] _ in
@@ -56,13 +76,19 @@ public final class ProfileCache {
         }
     }
 
-    /// Forgets everything — what a change of viewer calls.
+    /// Forgets everything — what a change of viewer calls. The device tier is
+    /// wiped by the cache coordinator on the same change.
     public func removeAll() {
         entries.removeAll()
         recency.removeAll()
+        missingOnDisk.removeAll()
+        pendingWrites.removeAll()
+        currentUser = nil
+        askedDiskForCurrentUser = false
     }
 
     public func profile(for id: ProfileID) -> UserProfile? {
+        loadFromDisk(id)
         guard let profile = entries[id]?.profile else { return nil }
         touch(id)
         return profile
@@ -71,44 +97,72 @@ public final class ProfileCache {
     public func store(_ profile: UserProfile) {
         entries[profile.id, default: Entry()].profile = profile
         touch(profile.id)
+        persist(profile.id)
+    }
+
+    /// Which profile is the viewer's own, as last loaded: what the viewer's
+    /// own profile screen seeds from at a cold start, before the network
+    /// can say who they are (#893).
+    public func currentUserID() -> ProfileID? {
+        if currentUser == nil, !askedDiskForCurrentUser {
+            askedDiskForCurrentUser = true
+            currentUser = disk?.currentUserID()
+        }
+        return currentUser
+    }
+
+    /// Records `id` as the viewer's own profile (it is then kept longest).
+    public func storeCurrentUser(_ id: ProfileID) {
+        guard currentUser != id else { return }
+        currentUser = id
+        persist(id)
     }
 
     /// The viewer's relationship to `id` as last read or changed here — the
     /// Follow / Following a revisit opens on. Stale-while-revalidate like the
     /// profile: the screen reads it again and corrects in place.
     public func relationship(for id: ProfileID) -> ProfileRelationship? {
-        entries[id]?.relationship
+        loadFromDisk(id)
+        return entries[id]?.relationship
     }
 
     public func store(_ relationship: ProfileRelationship, for id: ProfileID) {
+        loadFromDisk(id)
         dropGalleryIfHidden(by: relationship, for: id)
         entries[id, default: Entry()].relationship = relationship
         touch(id)
+        persist(id)
     }
 
     /// The gallery pages last loaded for `id`, as far as they went — what a
     /// revisit renders at frame 0 (#887). Stale-while-revalidate like the
     /// profile: the screen fetches the first pages again and merges them in.
     func gallery(for id: ProfileID) -> ProfileGalleryStore.Corpora? {
-        entries[id]?.gallery
+        loadFromDisk(id)
+        return entries[id]?.gallery
     }
 
     /// Keeps the gallery a screen holds. A corpus the screen has not loaded
     /// (a failed fetch) keeps the one already cached: the next visit still
     /// has something true-ish to open on, and revalidates it.
     func store(_ gallery: ProfileGalleryStore.Corpora, for id: ProfileID) {
+        loadFromDisk(id)
         let kept = entries[id]?.gallery
         entries[id, default: Entry()].gallery = ProfileGalleryStore.Corpora(
             authored: gallery.authored ?? kept?.authored,
             tagged: gallery.tagged ?? kept?.tagged
         )
         touch(id)
+        persist(id)
     }
 
     /// Forgets `id`'s gallery: what it showed may no longer be what the viewer
     /// may see.
     func removeGallery(for id: ProfileID) {
+        loadFromDisk(id)
+        guard entries[id]?.gallery != nil else { return }
         entries[id]?.gallery = nil
+        persist(id)
     }
 
     /// ⚠️ A FOLLOW OR A BLOCK CAN CHANGE WHAT THE GALLERY SHOWS. A private
@@ -144,6 +198,9 @@ public final class ProfileCache {
     }
 
     private func followGraphDidChange(_ change: FollowChange) {
+        // A profile visited in an earlier session hears it too: its device
+        // copy must not reopen on the old answer, or on posts it now hides.
+        loadFromDisk(change.profileID)
         guard case .other(let wasFollowing, let isMutual, let isBlocked)? = entries[change.profileID]?.relationship,
               wasFollowing != change.isFollowing else { return }
         // Mutual implies following: an unfollow ends it. A follow cannot say
@@ -155,6 +212,64 @@ public final class ProfileCache {
         )
         dropGalleryIfHidden(by: relationship, for: change.profileID)
         entries[change.profileID]?.relationship = relationship
+        persist(change.profileID)
+    }
+
+    // MARK: - Device tier
+
+    /// Fills memory from the device for an id memory does not hold. Read once
+    /// per id: a miss is remembered until something is stored for it.
+    private func loadFromDisk(_ id: ProfileID) {
+        guard entries[id] == nil, let disk, !missingOnDisk.contains(id) else { return }
+        guard let record = disk.record(for: id) else {
+            missingOnDisk.insert(id)
+            return
+        }
+        entries[id] = Entry(
+            profile: record.profile?.userProfile,
+            relationship: record.relationship?.relationship,
+            gallery: record.gallery?.corpora
+        )
+        touch(id)
+    }
+
+    /// Writes `id`'s entry back at the end of this turn, with every other
+    /// change of the turn: a profile, its relationship and its gallery landing
+    /// together cost one write.
+    private func persist(_ id: ProfileID) {
+        guard let disk else { return }
+        missingOnDisk.remove(id)
+        pendingWrites.insert(id)
+        guard !writeScheduled else { return }
+        writeScheduled = true
+        // Who the entries belong to, asked now: memory holds this viewer's.
+        let viewer = disk.viewer
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.writePending(as: viewer) }
+        }
+    }
+
+    private func writePending(as viewer: LocalStoreViewer?) {
+        writeScheduled = false
+        let ids = pendingWrites
+        pendingWrites.removeAll()
+        guard let disk, !ids.isEmpty else { return }
+        var records: [ProfileID: ProfileDiskRecord] = [:]
+        for id in ids {
+            guard let entry = entries[id] else { continue }
+            records[id] = ProfileDiskRecord(
+                profile: entry.profile.map(ProfileDiskRecord.Header.init),
+                relationship: entry.relationship.map(ProfileDiskRecord.Relationship.init),
+                gallery: entry.gallery.map(ProfileDiskRecord.Gallery.init)
+            )
+        }
+        disk.save(records, currentUser: currentUser.flatMap { ids.contains($0) ? $0 : nil }, as: viewer)
+    }
+
+    /// Waits until every change so far is on the device. Tests only.
+    func waitForDeviceWrites() {
+        if writeScheduled { writePending(as: disk?.viewer) }
+        disk?.waitForPendingWrites()
     }
 
     private func touch(_ id: ProfileID) {
