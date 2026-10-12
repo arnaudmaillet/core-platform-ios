@@ -725,7 +725,7 @@ final class ConversationThreadViewController: UIViewController {
     /// menu that closes on nothing reads as a tap that missed. Over the
     /// composer, as the mute's toast is. Internal for tests.
     func confirmCopied() {
-        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: composeBar.inputRowTopAnchor)
+        Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: composeBar.inputRowView)
     }
 
     /// Mutes or unmutes through the driver, and says so (#729): the same
@@ -744,13 +744,13 @@ final class ConversationThreadViewController: UIViewController {
                     symbol: mute ? "bell.slash.fill" : "bell.fill",
                     from: self,
                     // Over the composer, which rests where the toast would.
-                    above: composeBar.inputRowTopAnchor
+                    above: composeBar.inputRowView
                 )
             } else {
                 Feedback.failure(
                     mute ? "Couldn't mute notifications" : "Couldn't turn notifications on",
                     from: self,
-                    above: composeBar.inputRowTopAnchor
+                    above: composeBar.inputRowView
                 )
             }
         }
@@ -1587,7 +1587,7 @@ extension ConversationThreadViewController {
                 Feedback.failure(
                     name.map { "Couldn't follow \($0)" } ?? "Couldn't follow",
                     from: self,
-                    above: self.composeBar.inputRowTopAnchor
+                    above: self.composeBar.inputRowView
                 )
             }
             // The peer changed mid-follow: its relation was never asked.

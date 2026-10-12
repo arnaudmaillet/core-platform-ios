@@ -56,6 +56,20 @@ extension MainTabCoordinator {
         if arguments.contains("-open-feed") {
             DispatchQueue.main.async { [weak self] in self?.openFeed() }
         }
+        // `-toast-demo` (#954): a toast at each of the six positions, from the
+        // selected tab's top screen, fired again every 1.5 s for 20 s so a
+        // screenshot catches them all. `-toast-demo pop` instead fires one
+        // from a screen pushed for the purpose and pops it in the same turn:
+        // the toast must stay (it lives in the scene's overlay, not in the
+        // screen).
+        if let index = arguments.firstIndex(of: "-toast-demo") {
+            let mode = index + 1 < arguments.count ? arguments[index + 1] : ""
+            for round in 0..<14 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 1.5) { [weak self] in
+                    self?.debugToastDemo(pops: mode == "pop")
+                }
+            }
+        }
         // `-open-my-profile` selects the Profile tab on launch. It used to push
         // the avatar's destination; the destination is now a root, so the intent
         // "show me my profile" is a selection. Deferred a tick: at `start()` the
@@ -447,4 +461,30 @@ extension MainTabCoordinator {
         }
     }
 }
+// MARK: - Toast demo (#954)
+
+extension MainTabCoordinator {
+    fileprivate func debugToastDemo(pops: Bool) {
+        guard let stack = tabBarController.selectedViewController as? UINavigationController,
+              let top = stack.topViewController else { return }
+        if pops {
+            let pushed = UIViewController()
+            pushed.view.backgroundColor = .systemBackground
+            stack.pushViewController(pushed, animated: false)
+            // In the window, as a screen firing a toast is.
+            stack.view.layoutIfNeeded()
+            Feedback.success("Still here after the pop", from: pushed)
+            stack.popViewController(animated: false)
+            return
+        }
+        let names: [ToastPosition: String] = [
+            .topLeading: "Top leading", .top: "Top", .topTrailing: "Top trailing",
+            .bottomLeading: "Bottom leading", .bottom: "Bottom", .bottomTrailing: "Bottom trailing",
+        ]
+        for position in ToastPosition.allCases {
+            Feedback.info(names[position] ?? "", symbol: nil, from: top, at: position)
+        }
+    }
+}
+
 #endif

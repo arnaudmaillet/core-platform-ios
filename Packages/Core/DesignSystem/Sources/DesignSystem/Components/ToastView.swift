@@ -16,8 +16,12 @@ import UIKit
 ///
 /// Presentation is view-controller-agnostic (`present(_:in:)` takes any view),
 /// and toasts are self-owning: the caller fires and forgets. Only one shows at
-/// a time per host view — a second replaces the first rather than stacking, so
-/// a fast double-tap can't build a tower.
+/// a time per position in a container — a second replaces the first rather
+/// than stacking, so a fast double-tap can't build a tower.
+///
+/// Since #954 `Feedback` draws them in the scene's `ToastOverlay`, at one of
+/// six `ToastPosition`s; drawing in the screen itself is the fallback for a
+/// window in no scene (a package test host).
 ///
 /// **Why the animation looks the way it does.** Two house rules about glass
 /// constrain it, and both were learned the expensive way elsewhere in this
@@ -36,7 +40,7 @@ import UIKit
 @MainActor
 public final class ToastView: UIView {
     private enum Metrics {
-        /// Gap between the capsule and the bottom safe area.
+        /// Gap between the capsule and the edge it stands on (or hangs from).
         static let bottomGap: CGFloat = Spacing.lg
         /// How far the capsule travels on entrance/exit.
         static let travel: CGFloat = 24
@@ -67,11 +71,22 @@ public final class ToastView: UIView {
     /// The style this toast was drawn in (read by tests).
     public let style: Style
 
+    /// Where the toast sits (#954).
+    public private(set) var position: ToastPosition = .bottom
+
+    /// Called once the toast has left its superview — so the scene overlay
+    /// that holds it can hide its window when it holds no more (#954).
+    var onRemoved: (() -> Void)?
+
     private var dismissWorkItem: DispatchWorkItem?
     private let backdrop = UIVisualEffectView(effect: nil)
-    /// The capsule's distance below its resting place. Driven instead of a
-    /// transform (see the type doc); `travel` while off, zero at rest.
+    /// Pins the capsule to its edge. Driven instead of a transform (see the
+    /// type doc): `offConstant` while off — `travel` further out than its
+    /// resting place, below it for a bottom toast, above it for a top one —
+    /// and `restConstant` at rest.
     private var slide: NSLayoutConstraint?
+    private var restConstant: CGFloat = 0
+    private var offConstant: CGFloat = 0
     private let row = UIStackView()
 
     /// Shows `message` over `host`, replacing any toast already up there.
@@ -93,25 +108,59 @@ public final class ToastView: UIView {
         above floor: NSLayoutYAxisAnchor? = nil,
         style: Style = .confirmation
     ) -> ToastView {
-        host.viewWithTag(hostTag).flatMap { $0 as? ToastView }?.dismiss(animated: false)
+        present(
+            message, symbol: symbol, style: style, position: .bottom, in: host,
+            edge: floor ?? host.safeAreaLayoutGuide.bottomAnchor
+        )
+    }
+
+    /// Shows `message` at `position` in `container`, replacing any toast
+    /// already at that position there.
+    ///
+    /// - Parameter edge: what the capsule hangs from (a top position) or
+    ///   stands on (a bottom one). The container's own safe area edge unless
+    ///   told otherwise.
+    static func present(
+        _ message: String,
+        symbol: String?,
+        style: Style,
+        position: ToastPosition,
+        in container: UIView,
+        edge: NSLayoutYAxisAnchor? = nil
+    ) -> ToastView {
+        let tag = hostTag + position.rawValue
+        container.viewWithTag(tag).flatMap { $0 as? ToastView }?.dismiss(animated: false)
 
         let toast = ToastView(message: message, symbol: symbol, style: style)
-        toast.tag = hostTag
-        let slide = toast.bottomAnchor.constraint(
-            equalTo: floor ?? host.safeAreaLayoutGuide.bottomAnchor,
-            constant: -Metrics.bottomGap + Metrics.travel
-        )
+        toast.tag = tag
+        toast.position = position
+        let slide: NSLayoutConstraint
+        if position.isTop {
+            toast.restConstant = Metrics.bottomGap
+            toast.offConstant = Metrics.bottomGap - Metrics.travel
+            slide = toast.topAnchor.constraint(
+                equalTo: edge ?? container.safeAreaLayoutGuide.topAnchor, constant: toast.offConstant
+            )
+        } else {
+            toast.restConstant = -Metrics.bottomGap
+            toast.offConstant = -Metrics.bottomGap + Metrics.travel
+            slide = toast.bottomAnchor.constraint(
+                equalTo: edge ?? container.safeAreaLayoutGuide.bottomAnchor, constant: toast.offConstant
+            )
+        }
         toast.slide = slide
-        toast.constrain(in: host) { parent in
-            toast.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+        let margins = container.layoutMarginsGuide
+        let along: NSLayoutConstraint = switch position.alignment {
+        case .leading: toast.leadingAnchor.constraint(equalTo: margins.leadingAnchor)
+        case .center: toast.centerXAnchor.constraint(equalTo: container.centerXAnchor)
+        case .trailing: toast.trailingAnchor.constraint(equalTo: margins.trailingAnchor)
+        }
+        toast.constrain(in: container) { _ in
+            along
             slide
-            // Never wider than the host, however long the message.
-            toast.leadingAnchor.constraint(
-                greaterThanOrEqualTo: parent.layoutMarginsGuide.leadingAnchor
-            )
-            toast.trailingAnchor.constraint(
-                lessThanOrEqualTo: parent.layoutMarginsGuide.trailingAnchor
-            )
+            // Never wider than the container, however long the message.
+            toast.leadingAnchor.constraint(greaterThanOrEqualTo: margins.leadingAnchor)
+            toast.trailingAnchor.constraint(lessThanOrEqualTo: margins.trailingAnchor)
         }
         toast.animateIn()
         return toast
@@ -247,7 +296,7 @@ public final class ToastView: UIView {
         // Land the pre-entrance state before animating: the capsule sits one
         // `travel` low, with no glass and no shadow to inherit.
         superview?.layoutIfNeeded()
-        slide?.constant = -Metrics.bottomGap
+        slide?.constant = restConstant
         UIView.animate(withDuration: Metrics.transitionDuration, delay: 0, options: .curveEaseOut) {
             // Layout drives the slide, so the material re-renders in place
             // each frame instead of being carried as a stale image.
@@ -265,14 +314,14 @@ public final class ToastView: UIView {
         DispatchQueue.main.asyncAfter(deadline: .now() + Metrics.visibleDuration, execute: dismissal)
     }
 
-    private func dismiss(animated: Bool) {
+    func dismiss(animated: Bool) {
         dismissWorkItem?.cancel()
         dismissWorkItem = nil
         // The outgoing toast must stop answering `viewWithTag` immediately, or
         // a replacement arriving mid-fade would find and re-dismiss it.
         tag = 0
         guard animated else {
-            removeFromSuperview()
+            leave()
             return
         }
         // Settle whatever the host has pending BEFORE the exit animates — the
@@ -282,7 +331,7 @@ public final class ToastView: UIView {
         // the block below, growing out of the top-left corner. Before the
         // constant changes, or the slide itself would be settled away.
         superview?.layoutIfNeeded()
-        slide?.constant = -Metrics.bottomGap + Metrics.travel
+        slide?.constant = offConstant
         UIView.animate(withDuration: Metrics.transitionDuration, delay: 0, options: .curveEaseIn) {
             self.superview?.layoutIfNeeded()
             // Dissolving the effect is how glass leaves; fading the view would
@@ -293,8 +342,15 @@ public final class ToastView: UIView {
             // as a grey smear for the length of the exit.
             self.layer.shadowOpacity = 0
         } completion: { _ in
-            self.removeFromSuperview()
+            self.leave()
         }
+    }
+
+    private func leave() {
+        removeFromSuperview()
+        let removed = onRemoved
+        onRemoved = nil
+        removed?()
     }
 }
 

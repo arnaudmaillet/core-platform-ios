@@ -2793,7 +2793,7 @@ final class PostDetailViewController: UIViewController {
     /// A comment's Copy says so (#803) — over the composer, which rests where
     /// the toast would, as in a conversation. Internal for tests.
     func confirmCopied() {
-        let floor = composeBar.superview != nil && !composeBar.isHidden ? composeBar.inputRowTopAnchor : nil
+        let floor = composeBar.superview != nil && !composeBar.isHidden ? composeBar.inputRowView : nil
         Feedback.success("Copied", symbol: "doc.on.doc.fill", from: self, above: floor)
     }
 

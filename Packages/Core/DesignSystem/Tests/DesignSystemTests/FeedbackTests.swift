@@ -239,7 +239,9 @@ struct FeedbackTests {
     // MARK: - The guard
 
     /// ⚠️ The presenter only works if NOTHING bypasses it. Scans the app's and
-    /// the packages' sources for `ToastView.present(` anywhere but here.
+    /// the packages' sources for `ToastView.present(` anywhere but `Feedback`
+    /// and the scene overlay it draws through (#954), which only `Feedback`
+    /// reaches.
     @Test func onlyFeedbackPresentsToasts() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // DesignSystemTests
@@ -255,7 +257,7 @@ struct FeedbackTests {
             while let url = enumerator?.nextObject() as? URL {
                 let path = url.path
                 guard url.pathExtension == "swift", !path.contains("/.build/"), !path.contains("/Tests/"),
-                      url.lastPathComponent != "Feedback.swift" else { continue }
+                      !["Feedback.swift", "ToastOverlay.swift"].contains(url.lastPathComponent) else { continue }
                 let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
                 if text.contains(pattern) { offenders.append(url.lastPathComponent) }
             }
