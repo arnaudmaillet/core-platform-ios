@@ -1,6 +1,9 @@
+import CacheKit
 import Foundation
+import MediaCore
 import Synchronization
 import Testing
+import UIKit
 @testable import Profile
 
 /// Settings → App Preferences → Storage (#409): the media cache is measured
@@ -48,5 +51,70 @@ struct MediaCacheInventoryTests {
         let inventory = MediaCacheInventory(locations: { [URL(fileURLWithPath: "/nonexistent/\(UUID().uuidString)")] }, urlCache: nil)
         #expect(inventory.size() == 0)
         inventory.clear()
+    }
+
+    /// Since #894 the images live in the pipeline's CacheKit stores, not in
+    /// `URLCache.shared`: Storage counts every image store and a clear empties
+    /// them, memory included, so the next request goes to the network.
+    @Test func imagesAreMeasuredAndClearedThroughTheCoordinator() async throws {
+        let root = try scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = CacheCoordinator(device: CacheDevice(
+            physicalMemory: { 4 << 30 }, availableDiskCapacity: { 100 * Int64(CacheBytes.gigabyte) }
+        ))
+        let fetcher = CountingImageFetcher()
+        let pipeline = ImagePipeline(fetcher: fetcher, disk: .folder(root), coordinator: coordinator)
+        await pipeline.waitUntilDiskIsOpen()
+        // A UI assets namespace (`.other`): measured and cleared by
+        // `indexedBytes`/`clearIndexed`, never a second time here.
+        let assets = try DiskStore(
+            namespace: CacheNamespace("ui.assets.test", category: .other, scope: .public, priorityClass: .persistent),
+            budget: .reserved(CacheBytes.megabyte, in: .images), root: root
+        )
+        _ = try assets.write(Data(count: 4_000), for: "sheet", tier: .recent)
+        coordinator.register(assets)
+
+        let photo = try #require(URL(string: "https://cdn.example.com/photo/1.png"))
+        let avatar = try #require(URL(string: "https://cdn.example.com/avatar/1.png"))
+        let signed = try #require(URL(string: "https://cdn.example.com/private/1.png?X-Amz-Signature=abc&X-Amz-Expires=60"))
+        _ = try await pipeline.image(for: photo)
+        _ = try await pipeline.image(for: avatar, size: .avatar)
+        _ = try await pipeline.image(for: signed)
+
+        let before = coordinator.usage()
+        for name in ["images", "images.small", "images.signed"] {
+            #expect((before.usage(of: name, medium: .disk)?.bytes ?? 0) > 0, "\(name) holds an image")
+        }
+        let imageBytes = Int64(before.bytes(in: .images, medium: .disk))
+        let inventory = MediaCacheInventory(locations: { [] }, urlCache: nil, coordinator: coordinator)
+        #expect(inventory.size() == imageBytes, "every image store is counted, the UI assets one is not")
+
+        inventory.clear()
+
+        let after = coordinator.usage()
+        #expect(after.bytes(in: .images) == 0, "disk and decoded memory both emptied")
+        #expect(inventory.size() == 0)
+        #expect(!pipeline.isDecoded(photo) && !pipeline.isOnDisk(photo))
+        #expect(after.usage(of: "ui.assets.test", medium: .disk)?.bytes == before.usage(of: "ui.assets.test", medium: .disk)?.bytes,
+                "another category is left to its own clear")
+        _ = try await pipeline.image(for: photo)
+        #expect(fetcher.fetchCount(for: photo) == 2, "the next request goes to the network")
+    }
+}
+
+/// Serves a small PNG for any URL and counts fetches per URL.
+private final class CountingImageFetcher: ImageFetching {
+    private let fetches = Mutex<[URL: Int]>([:])
+
+    func fetchCount(for url: URL) -> Int { fetches.withLock { $0[url] ?? 0 } }
+
+    func fetchImageData(for url: URL) async throws -> Data {
+        fetches.withLock { $0[url, default: 0] += 1 }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64), format: format).pngData { context in
+            UIColor.orange.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+        }
     }
 }

@@ -1,3 +1,4 @@
+import CacheKit
 import MediaCore
 import CoreModels
 import CoreNavigation
@@ -120,7 +121,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 // Device settings need no account: a guest's choices stay on
                 // this iPhone like anyone's (#468).
                 case .playback, .display, .emojis, .mediaComments, .language, .storage:
-                    AppPreferencesViewController(page: section)
+                    makeAppPreferences(section)
                 case .help:
                     SettingsLinksViewController.help(links: .current)
                 case .legal:
@@ -327,7 +328,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                         })
                                     }
                                 case .playback, .display, .emojis, .mediaComments, .language, .storage:
-                                    AppPreferencesViewController(page: section)
+                                    makeAppPreferences(section)
                                 case .help:
                                     SettingsLinksViewController.help(links: .current)
                                 case .legal:
@@ -406,6 +407,15 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// The active profile's interest tags (timeline #662), for What You See.
     /// Nil leaves the Your Interests section out.
     public var interestTags: (any InterestTagsManaging)?
+    /// The app's one cache coordinator, through which Settings → Storage
+    /// measures and clears the caches it manages (images since #894). Nil
+    /// leaves Storage with the caches it names itself.
+    public var cacheCoordinator: CacheCoordinator?
+
+    /// One App and Device page, with Storage measuring through the coordinator.
+    private func makeAppPreferences(_ section: SettingsSection) -> AppPreferencesViewController {
+        AppPreferencesViewController(page: section, cache: .standard(coordinator: cacheCoordinator))
+    }
 
     /// What Delete Account names before the irreversible step (#402): every
     /// profile on the account, and what is left in the wallet.

@@ -55,7 +55,7 @@ final class AppPreferencesViewController: UIViewController {
         page: SettingsSection,
         store: MediaCommentPreferencesStore = .standard,
         playback: MediaPlaybackPreferencesStore = .standard,
-        cache: MediaCacheInventory = .standard
+        cache: MediaCacheInventory = .standard()
     ) {
         self.page = page
         self.store = store
@@ -122,7 +122,7 @@ final class AppPreferencesViewController: UIViewController {
     private func confirmClearCache() {
         let sheet = UIAlertController(
             title: "Clear media cache?",
-            message: "Videos and animations are downloaded again when you next see them. Drafts and posts aren't affected.",
+            message: "Images, videos and animations are downloaded again when you next see them. Drafts and posts aren't affected.",
             preferredStyle: .actionSheet
         )
         sheet.addAction(UIAlertAction(title: "Clear Cache", style: .destructive) { [weak self] _ in
@@ -196,7 +196,7 @@ final class AppPreferencesViewController: UIViewController {
         case .muted: "Comments with these words, or from these accounts, never appear in the reaction band or the subtitles. They still show in the comments."
         case .subtitles: "Comments shown as captions above the reaction band. Background is the shade behind each caption."
         case .commentsScreen: "How dark a video or photo gets behind its comments when you open them. Darker reads more easily; lighter keeps more of the post."
-        case .storage: "Downloaded videos and animations, kept so they open instantly. Clearing them frees space; nothing you made is removed."
+        case .storage: "Downloaded images, videos and animations, kept so they open instantly. Clearing them frees space; nothing you made is removed."
         }
     }
 
