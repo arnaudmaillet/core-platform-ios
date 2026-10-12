@@ -138,8 +138,13 @@ final class AppContainer {
     private let composedPostChannel = ComposedPostChannel()
     /// The viewer's accepted follows and unfollows, announced by every
     /// repository that writes them and heard by every surface that shows one
-    /// — see `FollowGraphEvents`. One instance, like the channel above.
-    private let followGraphEvents = FollowGraphEvents()
+    /// — see `FollowGraphEvents`. One instance, like the channel above. A
+    /// change made as a profile that is no longer the active one is dropped
+    /// (#978): the active profile is the one `StorageScope` holds.
+    private let followGraphEvents = FollowGraphEvents(currentViewer: {
+        guard case .member(_, let profile?) = StorageScope.shared.owner else { return nil }
+        return ProfileID(profile)
+    })
 
     private lazy var unauthenticatedRPCClient = ConnectClientFactory.makeUnauthenticated(
         host: environment.host,
@@ -204,7 +209,9 @@ final class AppContainer {
         // The device store is wiped by the cache coordinator, on the
         // `.viewerDidChange` posted below (#893).
         let scoped: [any ViewerScoped] = [
-            commentsRepository, profileRelationshipsRepository, profileMetadataRepository
+            commentsRepository, profileRelationshipsRepository, profileMetadataRepository,
+            // What notification lookups answered, missing posts included (#978).
+            notificationsRepository
         ]
         viewerTransitionsTask = Task {
             for await state in await viewer.transitions() {

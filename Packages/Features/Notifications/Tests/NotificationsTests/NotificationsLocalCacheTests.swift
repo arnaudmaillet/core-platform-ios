@@ -321,3 +321,76 @@ struct NotificationsLookupExpiryTests {
         #expect(retried.contains { $0.senderName != "Someone" }, "then asked again")
     }
 }
+
+/// Fails every post.v1 call while `failing` is set; everything else goes to
+/// the mock server.
+private final class FlakyPosts: HTTPClientInterface, Sendable {
+    let bff: MockBFF
+    private let state = Mutex(false)
+
+    init(bff: MockBFF) { self.bff = bff }
+
+    var failing: Bool {
+        get { state.withLock { $0 } }
+        set { state.withLock { $0 = newValue } }
+    }
+
+    func unary(
+        request: HTTPRequest<Data?>,
+        onMetrics: @escaping @Sendable (HTTPMetrics) -> Void,
+        onResponse: @escaping @Sendable (HTTPResponse) -> Void
+    ) -> Cancelable {
+        guard failing, request.url.path.contains("PostService") else {
+            return bff.unary(request: request, onMetrics: onMetrics, onResponse: onResponse)
+        }
+        DispatchQueue.global().async {
+            onResponse(HTTPResponse(
+                code: .notFound, headers: [:], message: nil, trailers: [:],
+                error: ConnectError(code: .notFound, message: "not for this viewer"), tracingInfo: nil
+            ))
+        }
+        return Cancelable {}
+    }
+
+    func stream(request: HTTPRequest<Data?>, responseCallbacks: ResponseCallbacks) -> RequestCallbacks<Data> {
+        bff.stream(request: request, responseCallbacks: responseCallbacks)
+    }
+}
+
+/// A post one viewer could not read is not missing for the next (#978).
+struct NotificationsLookupViewerChangeTests {
+    @Test func aViewerChangeForgetsThePostsThePreviousViewerCouldNotRead() async throws {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockSocialServices(dataset: dataset).register(on: bff)
+        MockNotificationService(dataset: dataset).register(on: bff)
+        let transport = FlakyPosts(bff: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: transport)
+        let repository = NotificationsRepository(
+            notificationClient: Notification_V1_NotificationServiceClient(client: client),
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            postClient: Post_V1_PostServiceClient(client: client),
+            authSession: SignedInSession()
+        )
+
+        // Viewer A cannot read the posts the rows are about.
+        transport.failing = true
+        let asA = try await repository.loadNotifications(limit: 20)
+        let aboutPosts = asA.filter { $0.postSubjectID != nil }
+        try #require(!aboutPosts.isEmpty, "guard: the mock has notifications about posts")
+        #expect(aboutPosts.allSatisfy { $0.subjectPreview == nil })
+
+        // The posts are readable now, but the failure is still believed.
+        transport.failing = false
+        let stillA = try await repository.loadNotifications(limit: 20)
+        #expect(stillA.filter { $0.postSubjectID != nil }.allSatisfy { $0.subjectPreview == nil },
+                "guard: a failed lookup is believed within its lifetime")
+
+        // Another viewer: the lookups start over.
+        await repository.viewerDidChange(.member(AccountID(MockAuthService.accountID), activeProfile: ProfileID("prof-b")))
+        #expect(await repository.lookupCounts.previews == 0, "the previous viewer's lookups were kept")
+        let asB = try await repository.loadNotifications(limit: 20)
+        #expect(asB.contains { $0.postSubjectID != nil && $0.subjectPreview != nil },
+                "B was shown A's missing posts as missing")
+    }
+}

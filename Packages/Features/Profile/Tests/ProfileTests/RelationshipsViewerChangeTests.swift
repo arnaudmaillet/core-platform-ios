@@ -22,7 +22,11 @@ struct RelationshipsViewerChangeTests {
 
     /// A follows x and y; B follows nobody. Everyone is followed by `p`
     /// (private: a follow is a request) and `q` (refuses any follow).
-    private func makeRepository(viewer: SwitchableViewer) -> ProfileRelationshipsRepository {
+    private func makeRepository(
+        viewer: SwitchableViewer, followEvents: FollowGraphEvents? = nil,
+        duringFollow: @escaping @Sendable () -> Void = {},
+        gate: FollowGate? = nil
+    ) -> ProfileRelationshipsRepository {
         let bff = MockBFF()
         bff.register(path: "/social_graph.v1.SocialGraphService/ListFollowing") { (request: SocialGraph_V1_ListFollowingRequest) in
             var response = SocialGraph_V1_ListFollowingResponse()
@@ -44,6 +48,7 @@ struct RelationshipsViewerChangeTests {
             return .success(response)
         }
         bff.register(path: "/social_graph.v1.SocialGraphService/Follow") { (request: SocialGraph_V1_FollowRequest) -> Result<SocialGraph_V1_CommandResponse, ConnectError> in
+            duringFollow()
             if request.targetID == "prof-q" {
                 return .failure(ConnectError(code: .permissionDenied, message: "blocked"))
             }
@@ -58,12 +63,16 @@ struct RelationshipsViewerChangeTests {
             view.handle = request.profileID
             return .success(view)
         }
-        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        gate?.bff = bff
+        let client = ConnectClientFactory.makeUnauthenticated(
+            host: "https://mock.bff.local", httpClient: gate ?? bff
+        )
         return ProfileRelationshipsRepository(
             socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             viewer: viewer,
-            supportsFollowerRemoval: true
+            supportsFollowerRemoval: true,
+            followEvents: followEvents
         )
     }
 
@@ -120,5 +129,117 @@ struct RelationshipsViewerChangeTests {
 
         #expect(try await !row("prof-x", in: repository, direction: .following).viewerFollows)
         #expect(try await !row("prof-p", in: repository, direction: .followers).viewerRequested)
+    }
+
+    // MARK: - Follow events carry the viewer (#978)
+
+    private final class Heard: @unchecked Sendable {
+        private let changes = Mutex<[FollowChange]>([])
+        func append(_ change: FollowChange) { changes.withLock { $0.append(change) } }
+        var all: [FollowChange] { changes.withLock { $0 } }
+    }
+
+    /// The announced follow names the profile it was made as.
+    @Test func anAcceptedFollowIsAnnouncedAsTheViewerWhoMadeIt() async throws {
+        let viewer = SwitchableViewer()
+        let events = FollowGraphEvents(currentViewer: { ProfileID("prof-a") })
+        let heard = Heard()
+        let subscription = events.subscribe { heard.append($0) }
+        let repository = makeRepository(viewer: viewer, followEvents: events)
+
+        #expect(try await repository.follow(ProfileID("prof-y")) == .following)
+
+        #expect(heard.all == [FollowChange(profileID: ProfileID("prof-y"), isFollowing: true, viewerID: ProfileID("prof-a"))])
+        withExtendedLifetime(subscription) {}
+    }
+
+    /// A follow sent as A, accepted after the switch to B, never reaches B's
+    /// surfaces: the channel drops a change made as a viewer who has left.
+    @Test func aFollowAcceptedAfterASwitchReachesNobody() async throws {
+        let viewer = SwitchableViewer()
+        let active = Mutex<ProfileID?>(ProfileID("prof-a"))
+        let events = FollowGraphEvents(currentViewer: { active.withLock { $0 } })
+        let heard = Heard()
+        let subscription = events.subscribe { heard.append($0) }
+        // The switch lands while the follow is on its way.
+        let repository = makeRepository(viewer: viewer, followEvents: events) {
+            active.withLock { $0 = ProfileID("prof-b") }
+            viewer.set(ProfileID("prof-b"))
+        }
+
+        #expect(try await repository.follow(ProfileID("prof-y")) == .following)
+
+        #expect(heard.all.isEmpty, "B heard A's follow: \(heard.all)")
+        withExtendedLifetime(subscription) {}
+    }
+
+    /// Holds the answer to a Follow until `release()`, so a test can switch
+    /// the viewer while the follow is on its way.
+    final class FollowGate: HTTPClientInterface, @unchecked Sendable {
+        private struct State {
+            var bff: MockBFF?
+            var held: (@Sendable () -> Void)?
+        }
+        private let state = Mutex(State())
+
+        var bff: MockBFF? {
+            get { state.withLock { $0.bff } }
+            set { state.withLock { $0.bff = newValue } }
+        }
+
+        var isHolding: Bool { state.withLock { $0.held != nil } }
+
+        func release() {
+            let held = state.withLock { state -> (@Sendable () -> Void)? in
+                defer { state.held = nil }
+                return state.held
+            }
+            held?()
+        }
+
+        func unary(
+            request: HTTPRequest<Data?>,
+            onMetrics: @escaping @Sendable (HTTPMetrics) -> Void,
+            onResponse: @escaping @Sendable (HTTPResponse) -> Void
+        ) -> Cancelable {
+            guard let bff else { return Cancelable {} }
+            guard request.url.path.hasSuffix("SocialGraphService/Follow") else {
+                return bff.unary(request: request, onMetrics: onMetrics, onResponse: onResponse)
+            }
+            return bff.unary(request: request, onMetrics: onMetrics) { [weak self] response in
+                self?.state.withLock { $0.held = { onResponse(response) } }
+            }
+        }
+
+        func stream(request: HTTPRequest<Data?>, responseCallbacks: ResponseCallbacks) -> RequestCallbacks<Data> {
+            bff!.stream(request: request, responseCallbacks: responseCallbacks)
+        }
+    }
+
+    /// The repository's own copy of the follow set: a follow A made, accepted
+    /// after the switch to B and after B's set was read, is not filed in it.
+    @Test func aFollowAcceptedAfterASwitchIsNotFiledUnderTheNewViewer() async throws {
+        let viewer = SwitchableViewer()
+        let gate = FollowGate()
+        let repository = makeRepository(viewer: viewer, gate: gate)
+
+        let follow = Task { try await repository.setFollowing(true, for: ProfileID("prof-p")) }
+        var looks = 0
+        while !gate.isHolding, looks < 6_000 {
+            looks += 1
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(gate.isHolding, "the follow never reached the server")
+
+        viewer.set(ProfileID("prof-b"))
+        await repository.viewerDidChange(.member(AccountID("acct-1"), activeProfile: ProfileID("prof-b")))
+        // B's set is read while A's follow is still on its way.
+        #expect(try await !row("prof-p", in: repository, direction: .followers).viewerFollows)
+
+        gate.release()
+        try await follow.value
+
+        #expect(try await !row("prof-p", in: repository, direction: .followers).viewerFollows,
+                "A's late follow was filed in B's follow set")
     }
 }

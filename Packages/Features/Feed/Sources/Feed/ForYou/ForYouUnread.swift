@@ -1,3 +1,4 @@
+import CoreStorage
 import Foundation
 import PostGrid
 
@@ -46,9 +47,16 @@ enum ForYouUnread {
 /// type owns the *filter* pair and its default prefix is the profile gallery's,
 /// which For You must never write to (see its note on why the default is
 /// load-bearing).
+///
+/// **The viewer's own (#978).** "Since you last looked" is a person's: each
+/// watermark is keyed by the active profile (`StorageScope.profileKey`, the
+/// #443 policy), so a profile switch or another account counts from its own.
+/// The device-wide keys of earlier builds are adopted once, by the first
+/// profile that reads them.
 public final class ForYouUnreadStore {
     private let defaults: UserDefaults
     private let keyPrefix: String
+    private let scope: StorageScope
     /// Formats whose count is currently being forced by a launch argument.
     /// Consumed by the first `markSeen` for that format, so a QA run can watch
     /// a badge render AND watch it clear.
@@ -61,10 +69,12 @@ public final class ForYouUnreadStore {
         defaults: UserDefaults = .standard,
         keyPrefix: String = "foryou.unread",
         arguments: [String] = ProcessInfo.processInfo.arguments,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        scope: StorageScope = .shared
     ) {
         self.defaults = defaults
         self.keyPrefix = keyPrefix
+        self.scope = scope
         self.now = now
         forced = Self.forcedCounts(from: arguments)
     }
@@ -208,7 +218,8 @@ public final class ForYouUnreadStore {
     }
 
     private func key(for format: GalleryFilter.Format) -> String {
-        keyPrefix + "." + Self.name(for: format)
+        let base = "\(keyPrefix).\(Self.name(for: format))"
+        return scope.profileKey(base, adoptingLegacyIn: defaults)
     }
 
     private static func name(for format: GalleryFilter.Format) -> String {

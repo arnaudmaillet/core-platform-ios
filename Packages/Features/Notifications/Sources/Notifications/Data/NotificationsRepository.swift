@@ -156,7 +156,7 @@ extension NotificationsProviding {
 /// notification view leaves as ids: each sender's name and picture via
 /// profile.v1, and — when a post client is supplied — the subject post's
 /// thumbnail or text via post.v1.
-public actor NotificationsRepository: NotificationsProviding {
+public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
     let notificationClient: any Notification_V1_NotificationServiceClientInterface
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let postClient: (any Post_V1_PostServiceClientInterface)?
@@ -171,6 +171,9 @@ public actor NotificationsRepository: NotificationsProviding {
     private var actorCache: LookupCache<ProfileID, NotificationActor>
     private var previewCache: LookupCache<PostID, NotificationSubjectPreview>
     private let now: @Sendable () -> Date
+    /// Bumped by every viewer change, so a lookup that left for the previous
+    /// viewer and lands after the change is not kept for the new one.
+    private var viewerGeneration = 0
 
     /// The people and posts kept between loads: a drawer's worth many times
     /// over (100 stored rows, two faces and one post each).
@@ -252,6 +255,22 @@ public actor NotificationsRepository: NotificationsProviding {
         }
     }
 
+    // MARK: - Viewer
+
+    /// ⚠️ WHAT A LOOKUP ANSWERED IS THE VIEWER'S (#978). A post another viewer
+    /// could not read (private, blocked, deleted for them) is remembered as
+    /// missing for `failedLookupLifetime`; after a switch, the new viewer may
+    /// well see it. A profile is read through the viewer's eyes too (blocks).
+    /// Both caches start over, and lookups in flight are dropped on arrival.
+    public func viewerDidChange(_ state: ViewerState) async {
+        viewerGeneration += 1
+        actorCache.removeAll()
+        previewCache.removeAll()
+    }
+
+    /// How many answers each lookup cache holds, for tests.
+    var lookupCounts: (actors: Int, previews: Int) { (actorCache.count, previewCache.count) }
+
     // MARK: - Hydration
 
     /// Names and pictures for every primary sender, plus the first sampled
@@ -264,6 +283,7 @@ public actor NotificationsRepository: NotificationsProviding {
             if let second = Self.sampledOthers(of: view).first { wanted.insert(second) }
         }
         let asked = now()
+        let generation = viewerGeneration
         let missing = wanted.filter { !actorCache.isKnown($0, now: asked) && !$0.rawValue.isEmpty }
         guard !missing.isEmpty else { return }
 
@@ -285,6 +305,7 @@ public actor NotificationsRepository: NotificationsProviding {
             return await group.reduce(into: [(ProfileID, NotificationActor?)]()) { $0.append($1) }
         }
         let answered = now()
+        guard generation == viewerGeneration else { return }
         for (id, actor) in fetched {
             actorCache.record(actor, for: id, now: answered)
         }
@@ -299,6 +320,7 @@ public actor NotificationsRepository: NotificationsProviding {
             .filter { $0.subjectKind == .post && !$0.subjectID.isEmpty }
             .map { PostID($0.subjectID) }
         let asked = now()
+        let generation = viewerGeneration
         let missing = Set(subjects).filter { !previewCache.isKnown($0, now: asked) }
         guard !missing.isEmpty else { return }
 
@@ -315,6 +337,7 @@ public actor NotificationsRepository: NotificationsProviding {
             return await group.reduce(into: [(PostID, NotificationSubjectPreview?)]()) { $0.append($1) }
         }
         let answered = now()
+        guard generation == viewerGeneration else { return }
         for (id, preview) in fetched {
             previewCache.record(preview, for: id, now: answered)
         }

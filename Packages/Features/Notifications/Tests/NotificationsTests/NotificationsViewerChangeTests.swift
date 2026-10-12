@@ -45,6 +45,29 @@ struct NotificationsViewerChangeTests {
         }
     }
 
+    /// The block observer goes with the model (#978): its holder is released
+    /// with it, and unregisters from the center as it goes.
+    @Test func theViewerObserverIsRemovedWithTheModel() async {
+        let center = NotificationCenter()
+        weak var model: NotificationsViewModel?
+        weak var observation: AnyObject?
+        do {
+            let viewModel = NotificationsViewModel(repository: SwitchableProvider())
+            viewModel.notificationCenter = center
+            viewModel.viewDidLoad()
+            model = viewModel
+            observation = viewModel.viewerObservation
+            #expect(observation != nil, "guard: the model observes viewer changes")
+        }
+        // The first load holds the model until it answers.
+        for _ in 0..<6_000 where model != nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(model == nil, "the model was never released")
+        #expect(observation == nil, "the viewer observer outlived its model")
+        center.post(name: .viewerDidChange, object: nil)
+    }
+
     @Test func aViewerChangeLoadsTheNewViewersRows() async {
         let provider = SwitchableProvider()
         let center = NotificationCenter()

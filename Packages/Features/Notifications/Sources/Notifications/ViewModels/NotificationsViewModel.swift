@@ -81,7 +81,9 @@ public final class NotificationsViewModel {
     /// Where viewer changes are heard — the default center; a test hands its
     /// own, since posting on the shared one reaches every suite at once.
     var notificationCenter: NotificationCenter = .default
-    private var viewerObserver: NSObjectProtocol?
+    /// Removes its block observer when the model goes (#978): a `deinit` of
+    /// a main-actor model cannot reach the token itself.
+    private var viewerObserver: ViewerObserver?
     /// The drawer's last 100 rows on the device (#897): the list opens on
     /// them, offline included, and every page the network answers is written
     /// back. Nil keeps them in memory.
@@ -129,12 +131,18 @@ public final class NotificationsViewModel {
     /// viewer's first page.
     private func observeViewer() {
         guard viewerObserver == nil else { return }
-        viewerObserver = notificationCenter.addObserver(
+        let center = notificationCenter
+        let token = center.addObserver(
             forName: .viewerDidChange, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.viewerDidChange() }
         }
+        viewerObserver = ViewerObserver(center: center, token: token)
     }
+
+    /// The viewer observer's holder, for tests: it goes with the model, and
+    /// unregisters as it goes.
+    var viewerObservation: AnyObject? { viewerObserver }
 
     private func viewerDidChange() {
         load?.cancel()
@@ -349,4 +357,18 @@ public final class NotificationsViewModel {
             from: items, newExpanded: isNewExpanded, now: now()
         ))
     }
+}
+
+/// A block observer, unregistered when this goes: with the view model that
+/// holds it, whatever thread releases it.
+final class ViewerObserver: @unchecked Sendable {
+    private let center: NotificationCenter
+    private let token: NSObjectProtocol
+
+    init(center: NotificationCenter, token: NSObjectProtocol) {
+        self.center = center
+        self.token = token
+    }
+
+    deinit { center.removeObserver(token) }
 }
