@@ -72,7 +72,11 @@ struct ProfileFollowChannelTests {
         // Followed from the profile Search opened.
         try await profiles.setFollowing(true, for: target)
 
-        #expect(heard.all == [FollowChange(profileID: target, isFollowing: true)], "announced once, after the graph accepted")
+        #expect(heard.all.map(\.profileID) == [target], "announced once, after the graph accepted")
+        #expect(heard.all.map(\.isFollowing) == [true])
+        // Made as the viewer who followed (#978): the channel drops it once
+        // that viewer has left.
+        #expect(heard.all.allSatisfy { $0.viewerID != nil }, "the change carries no viewer")
         #expect(entities.relation(to: target) == .following, "the feed's '+' is Following")
 
         try await profiles.setFollowing(false, for: target)

@@ -1,3 +1,4 @@
+import AuthInterface
 import CoreModels
 import CoreNavigation
 import CoreNetworking
@@ -131,6 +132,8 @@ public final class SearchViewModel {
     /// The app's follow channel (#896): a follow or an unfollow accepted on any
     /// screen re-draws the person's row ("Following", or their followers).
     private var followSubscription: FollowGraphSubscription?
+    /// Hears `.viewerDidChange` for as long as this model lives (#978).
+    private var viewerObservation: NotificationObservation?
 
     public convenience init(
         repository: any SearchProviding,
@@ -143,12 +146,14 @@ public final class SearchViewModel {
         creatorLimit: Int = 12,
         suggestLimit: Int32 = 8,
         suggestDebounce: Duration = .milliseconds(200),
-        followEvents: FollowGraphEvents? = nil
+        followEvents: FollowGraphEvents? = nil,
+        notificationCenter: NotificationCenter = .default
     ) {
         self.init(
             repository: repository, router: router, recentSearches: recentSearches, explore: explore,
             metadata: metadata, pageSize: pageSize, trendingLimit: trendingLimit, creatorLimit: creatorLimit,
-            suggestLimit: suggestLimit, suggestDebounce: suggestDebounce, localCache: nil, followEvents: followEvents
+            suggestLimit: suggestLimit, suggestDebounce: suggestDebounce, localCache: nil, followEvents: followEvents,
+            notificationCenter: notificationCenter
         )
     }
 
@@ -167,7 +172,8 @@ public final class SearchViewModel {
         suggestDebounce: Duration = .milliseconds(200),
         localCache: SearchLocalCache?,
         now: @escaping () -> Date = Date.init,
-        followEvents: FollowGraphEvents? = nil
+        followEvents: FollowGraphEvents? = nil,
+        notificationCenter: NotificationCenter = .default
     ) {
         self.localCache = localCache
         self.now = now
@@ -196,6 +202,9 @@ public final class SearchViewModel {
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.applyFollowChange(change)
         }
+        viewerObservation = NotificationObservation(center: notificationCenter, name: .viewerDidChange) { [weak self] in
+            self?.viewerDidChange()
+        }
     }
 
     /// A follow the graph accepted elsewhere (a profile pushed from these
@@ -207,6 +216,33 @@ public final class SearchViewModel {
         guard let known = resolvedMetadata[change.profileID], known.isFollowed != change.isFollowing else { return }
         resolvedMetadata[change.profileID] = known.following(change.isFollowing)
         rerenderWithAvatars()
+    }
+
+    /// ⚠️ THE ROWS ARE THE VIEWER'S (#978). A Search screen can stay pushed
+    /// across a profile switch or a sign-out and a sign-in, and what it shows
+    /// about each person — "Following", "Follows you", the Following scope —
+    /// was read for the previous viewer. It forgets those answers and asks
+    /// again for whatever it is showing: the history and the trending people,
+    /// the typeahead, or the submitted search, run again from the top. The
+    /// metadata repository has already reset itself for the new viewer by the
+    /// time this is posted (`AppContainer.observeViewerTransitions`).
+    func viewerDidChange() {
+        metadataTask?.cancel()
+        metadataTask = nil
+        resolvedMetadata = [:]
+        switch phase {
+        case .explore:
+            showExplore()
+        case .suggesting:
+            queryChanged(query)
+        case .loading, .results, .empty, .failed:
+            let submitted = submittedQuery
+            guard !submitted.isEmpty else { return showExplore() }
+            searchTask?.cancel()
+            searchTask = Task { [weak self] in
+                await self?.runSearch(submitted)
+            }
+        }
     }
 
     // MARK: - Inputs
@@ -1199,4 +1235,21 @@ public final class SearchViewModel {
             onPeoplePagingChange?(false)
         }
     }
+}
+
+/// A block observer on a notification center, removed when this goes — so an
+/// owner on the main actor needs no `deinit` of its own to unregister.
+final class NotificationObservation: @unchecked Sendable {
+    private let center: NotificationCenter
+    private let token: NSObjectProtocol
+
+    /// `handler` runs on the main actor, on the main queue.
+    init(center: NotificationCenter, name: Notification.Name, handler: @escaping @MainActor () -> Void) {
+        self.center = center
+        token = center.addObserver(forName: name, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { handler() }
+        }
+    }
+
+    deinit { center.removeObserver(token) }
 }

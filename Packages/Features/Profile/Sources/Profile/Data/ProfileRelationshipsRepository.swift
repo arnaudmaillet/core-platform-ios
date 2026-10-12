@@ -517,8 +517,9 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         guard response.message?.success == true else {
             throw RelationshipsError.transport(message: "command rejected")
         }
-        let change = FollowChange(profileID: profileID, isFollowing: true)
-        fold(change)
+        let change = FollowChange(profileID: profileID, isFollowing: true, viewerID: viewerID)
+        // Accepted for a viewer who has since left: not the new one's (#978).
+        if generation == viewerGeneration { fold(change) }
         followEvents?.publish(change)
         return .following
     }
@@ -536,6 +537,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
     }
 
     public func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {
+        let generation = viewerGeneration
         guard let viewerID = await viewer.viewerProfileID() else {
             throw RelationshipsError.transport(message: "no viewer profile")
         }
@@ -555,8 +557,9 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         // Keep the cached set honest, so a later page of the same screen
         // renders this row's new state rather than the one it was loaded with
         // — at once, not a hop later through our own announcement.
-        let change = FollowChange(profileID: profileID, isFollowing: following)
-        fold(change)
+        let change = FollowChange(profileID: profileID, isFollowing: following, viewerID: viewerID)
+        // Accepted for a viewer who has since left: not the new one's (#978).
+        if generation == viewerGeneration { fold(change) }
         followEvents?.publish(change)
     }
 

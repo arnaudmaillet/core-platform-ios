@@ -52,7 +52,7 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
         let response = await socialGraphClient.follow(request: request, headers: [:])
         try Self.ensureAccepted(response)
         if response.message?.requested == true { return .requested }
-        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: true))
+        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: true, viewerID: viewer))
         return .following
     }
 

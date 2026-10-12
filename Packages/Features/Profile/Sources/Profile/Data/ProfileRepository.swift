@@ -447,7 +447,7 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
             request.targetID = profileID.rawValue
             try Self.ensureAccepted(await socialGraphClient.unfollow(request: request, headers: [:]))
         }
-        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: following))
+        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: following, viewerID: viewer))
     }
 
     public func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {

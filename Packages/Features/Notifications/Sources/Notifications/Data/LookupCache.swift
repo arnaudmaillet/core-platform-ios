@@ -36,6 +36,12 @@ struct LookupCache<Key: Hashable, Value> {
         entries[key]?.value ?? nil
     }
 
+    /// Forgets every answer (a viewer change, #978).
+    mutating func removeAll() {
+        entries.removeAll()
+        order.removeAll()
+    }
+
     /// Records `value` (nil: the lookup failed) as the newest answer.
     mutating func record(_ value: Value?, for key: Key, now: Date) {
         if entries.updateValue(Entry(value: value, storedAt: now), forKey: key) != nil {

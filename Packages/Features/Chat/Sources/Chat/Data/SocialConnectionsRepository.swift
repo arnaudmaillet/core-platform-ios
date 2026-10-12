@@ -204,7 +204,7 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         if case .failure(let error) = response.result {
             throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
-        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: true))
+        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: true, viewerID: viewerID))
     }
 
     public func unfollow(_ profileID: ProfileID) async throws {
@@ -216,7 +216,7 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         if case .failure(let error) = response.result {
             throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
-        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: false))
+        followEvents?.publish(FollowChange(profileID: profileID, isFollowing: false, viewerID: viewerID))
     }
 
     // MARK: - Edges

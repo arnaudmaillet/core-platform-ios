@@ -64,4 +64,89 @@ struct FollowGraphEventsTests {
         #expect(heard.all.map(\.isFollowing) == [true, false])
         withExtendedLifetime(subscription) {}
     }
+
+    // MARK: - One viewer's changes (#978)
+
+    /// The viewer the app is used as, switchable from a test.
+    private final class Viewer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var current: ProfileID?
+        init(_ current: ProfileID?) { self.current = current }
+        var id: ProfileID? {
+            get { lock.withLock { current } }
+            set { lock.withLock { current = newValue } }
+        }
+    }
+
+    /// Up to 6 000 looks 10 ms apart: a look budget, not a deadline, so a
+    /// starved runner gets more time, never a false failure.
+    @MainActor
+    private func settle(_ done: () -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            if done() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return done()
+    }
+
+    @Test func aChangeCarriesTheViewerItWasMadeAs() {
+        let change = FollowChange(profileID: ProfileID("prof-2"), isFollowing: true, viewerID: ProfileID("me"))
+        #expect(change.viewerID == ProfileID("me"))
+        #expect(FollowChange(profileID: ProfileID("prof-2"), isFollowing: true).viewerID == nil)
+    }
+
+    /// A follow sent as A and accepted after the switch to B reaches nobody;
+    /// B's own changes, and changes made as nobody in particular, go through.
+    @Test func aChangeMadeAsAnotherViewerIsNotDelivered() {
+        let viewer = Viewer(ProfileID("viewer-b"))
+        let events = FollowGraphEvents(currentViewer: { viewer.id })
+        let heard = Heard()
+        let subscription = events.subscribe { heard.append($0) }
+
+        let late = FollowChange(profileID: ProfileID("x"), isFollowing: true, viewerID: ProfileID("viewer-a"))
+        let own = FollowChange(profileID: ProfileID("y"), isFollowing: true, viewerID: ProfileID("viewer-b"))
+        let unattributed = FollowChange(profileID: ProfileID("z"), isFollowing: false)
+        events.publish(late)
+        events.publish(own)
+        events.publish(unattributed)
+
+        #expect(heard.all == [own, unattributed], "heard \(heard.all)")
+        #expect(!events.isForCurrentViewer(late))
+        withExtendedLifetime(subscription) {}
+    }
+
+    /// A channel told of no viewer (or a viewer not known yet) delivers
+    /// everything: nothing to tell the changes apart by.
+    @Test func withNoViewerKnownEveryChangeIsDelivered() {
+        let viewer = Viewer(nil)
+        let events = FollowGraphEvents(currentViewer: { viewer.id })
+        let heard = Heard()
+        let subscription = events.subscribe { heard.append($0) }
+
+        let change = FollowChange(profileID: ProfileID("x"), isFollowing: true, viewerID: ProfileID("viewer-a"))
+        events.publish(change)
+
+        #expect(heard.all == [change])
+        withExtendedLifetime(subscription) {}
+    }
+
+    /// The main-actor hop is a turn later: a switch that lands in between
+    /// drops the change there too.
+    @MainActor
+    @Test func aSwitchDuringTheMainActorHopDropsTheChange() async {
+        let viewer = Viewer(ProfileID("viewer-a"))
+        let events = FollowGraphEvents(currentViewer: { viewer.id })
+        let heard = Heard()
+        let subscription = events.subscribeOnMain { heard.append($0) }
+
+        events.publish(FollowChange(profileID: ProfileID("x"), isFollowing: true, viewerID: ProfileID("viewer-a")))
+        // On the main actor still: the hop has not run yet.
+        viewer.id = ProfileID("viewer-b")
+        let marker = FollowChange(profileID: ProfileID("marker"), isFollowing: true, viewerID: ProfileID("viewer-b"))
+        events.publish(marker)
+
+        #expect(await settle { !heard.all.isEmpty }, "the marker never arrived")
+        #expect(heard.all == [marker], "a change made as the previous viewer was delivered: \(heard.all)")
+        withExtendedLifetime(subscription) {}
+    }
 }
