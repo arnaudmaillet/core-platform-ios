@@ -197,6 +197,18 @@ struct ToastOverlayTests {
         }
     }
 
+    /// ⚠️ A toast that replaces another at its position keeps the window up:
+    /// the one it replaced leaves first, and an empty window hides itself.
+    @Test func aReplacementKeepsTheWindowUp() {
+        let screen = UIViewController()
+        hosting(screen) { _, overlay in
+            _ = Feedback.info("One", from: screen)
+            let second = Feedback.info("Two", from: screen)
+            #expect(second.superview === overlay.container)
+            #expect(!overlay.window.isHidden)
+        }
+    }
+
     /// The window is up only while it holds a toast.
     @Test func theWindowHidesWithItsLastToast() {
         let screen = UIViewController()

@@ -147,6 +147,12 @@ final class ToastOverlay {
             edge: position.isTop ? container.topAnchor : container.bottomAnchor
         )
         toast.onRemoved = { [weak self] in self?.hideIfEmpty() }
+        // ⚠️ AGAIN, AFTER: the toast this one replaced left inside
+        // `ToastView.present`, before this one was added — the window was
+        // empty for that instant and hid itself, and stopped following the
+        // floor. A second toast at the same position showed nothing.
+        window.isHidden = false
+        followFloor()
         return toast
     }
 
