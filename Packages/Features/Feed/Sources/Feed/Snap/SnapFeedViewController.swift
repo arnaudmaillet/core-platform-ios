@@ -4088,6 +4088,10 @@ final class SnapFeedViewController: UIViewController {
     // MARK: - Active-item lifecycle
 
     private func refreshVisibility() {
+        // Off screen, nothing is planned ahead: the warmed and kept players go
+        // back and every head preload is cancelled. The next activation plans
+        // again (`warmSettledWindow`).
+        if !(isOnScreen && isForeground) { videoLookahead?.stop() }
         apply(lifecycle.setVisible(isOnScreen && isForeground))
         refreshAudibleSurface()
         setCoverSpinWatch(isOnScreen && isForeground)
@@ -4931,6 +4935,39 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// The video around the settled page (#895): with the byte cache, the
+    /// lookahead warms +1's player, preloads the head ranges of +2 and +3 to
+    /// disk once the playing clip has buffered enough, and keeps −1's player
+    /// (`VideoLookahead`). A pool without a byte cache (tests) only prerolls
+    /// the neighbours, as before.
+    private func warmVideo(around active: Int) {
+        guard let videoLookahead else {
+            warmPlayers(at: SnapWarmWindow.players(around: active, count: orderedIDs.count))
+            return
+        }
+        guard orderedIDs.indices.contains(active) else { return }
+        let window = SnapWarmWindow.videoLookahead(around: active, count: orderedIDs.count)
+        videoLookahead.update(
+            page: orderedIDs[active].rawValue,
+            playing: lookaheadItem(at: active),
+            ahead: window.ahead.map(lookaheadItem(at:)),
+            behind: window.behind.flatMap(lookaheadItem(at:)),
+            // Data saver on cellular: nothing loads ahead of the viewer (#409).
+            allowsPreload: MediaPlaybackPolicy.preloads
+        )
+    }
+
+    /// A single-video page's clip, under the post it plays for — the scope
+    /// its cell plays it with. Galleries warm their own pages.
+    private func lookaheadItem(at index: Int) -> VideoLookaheadItem? {
+        guard orderedIDs.indices.contains(index), let model = modelsByID[orderedIDs[index]],
+              model.mediaKind == .video, let url = model.mediaURL else { return nil }
+        return VideoLookaheadItem(url: url, scope: orderedIDs[index].rawValue)
+    }
+
+    /// The vertical feed's video lookahead; nil when the pool has no byte cache.
+    private lazy var videoLookahead: VideoLookahead? = videoPlayback?.makeLookahead(name: "snap-feed")
+
     /// ⚠️ A DEFINED WINDOW AROUND THE PAGE THE VIEWER SETTLED ON.
     ///
     /// `UICollectionViewDataSourcePrefetching` is UIKit's guess, made from
@@ -4948,7 +4985,7 @@ final class SnapFeedViewController: UIViewController {
         let count = orderedIDs.count
         let content = SnapWarmWindow.content(around: active, count: count)
         warmContent(at: content)
-        warmPlayers(at: SnapWarmWindow.players(around: active, count: count))
+        warmVideo(around: active)
         // ⚠️ AND THE NEXT TEXT PAGE'S INTERFACE, which is the one page whose
         // content is a whole view controller rather than an image. Only the
         // page immediately ahead: it is one view controller's memory, and the

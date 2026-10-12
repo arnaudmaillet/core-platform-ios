@@ -1,4 +1,5 @@
 import AVFoundation
+import CacheKit
 import CoreMedia
 import Foundation
 import UIKit
@@ -266,18 +267,39 @@ public final class VideoPlaybackController {
     /// players continuously — a cache smaller than the working set drops every
     /// returned player on the floor. They default to the same number for that
     /// reason, and are separate because they answer different questions.
-    public init(source: any VideoSource, poolSize: Int = 6, capacity: Int = 6) {
+    ///
+    /// - Parameter byteCache: the device cache's video bytes (#895). With
+    ///   one, every progressive HTTP(S) file a player opens reads through it
+    ///   (`VideoByteCache.asset(for:priority:)`), and `makeLookahead` can plan
+    ///   the vertical feed's preload. Without one (tests, the upload preview),
+    ///   players open the URL directly, as before.
+    public init(source: any VideoSource, poolSize: Int = 6, capacity: Int = 6, byteCache: VideoByteCache? = nil) {
         self.source = source
         self.poolSize = poolSize
         self.capacity = capacity
+        self.byteCache = byteCache
         try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
         // Return players are a convenience the close can do without (#923):
         // under memory pressure they go first, and the close lands on a still.
+        // Lookahead players (#895) are speculative too, and go with them.
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.releaseAllReturnPlaybacks() }
+            MainActor.assumeIsolated {
+                self?.releaseAllReturnPlaybacks()
+                self?.releaseAllLookaheadPlaybacks()
+            }
         }
+    }
+
+    /// The device cache's video bytes, when the app gave the pool one.
+    public let byteCache: VideoByteCache?
+
+    /// The item for a resolved URL: read through the byte cache when there is
+    /// one and the file is cacheable, straight from the URL otherwise.
+    private func makeItem(for playableURL: URL, priority: CacheFillPriority) -> AVPlayerItem {
+        guard let byteCache, VideoByteCache.isCacheable(playableURL) else { return AVPlayerItem(url: playableURL) }
+        return AVPlayerItem(asset: byteCache.asset(for: playableURL, priority: priority))
     }
 
     /// Never removed: the block holds this pool weakly, and a pool lives as
@@ -308,6 +330,7 @@ public final class VideoPlaybackController {
         let key = ObjectIdentifier(view)
         let token = nextGenerationToken()
         generation[key] = token
+        let requested = CACurrentMediaTime()
 
         // A player parked for this exact asset is adopted whole — same item,
         // same playhead — instead of starting a second one at zero. This is the
@@ -379,6 +402,15 @@ public final class VideoPlaybackController {
             return
         }
 
+        // A player the vertical feed's lookahead kept for this clip and post
+        // (#895) — the next page warmed, or the page just left — is adopted
+        // whole, as a parked one is: no resolution, no await, a frame ready.
+        if let scope, let entry = takeLookaheadPlayback(of: mediaURL, scope: scope) {
+            adoptLookahead(entry, in: view, key: key, url: mediaURL, scope: scope, peakBitRate: peakBitRate)
+            measureFirstFrame(of: entry.player, in: view, since: requested)
+            return
+        }
+
         // ⚠️ THE ONE STEP THAT COULD FAIL IN SILENCE.
         //
         // A resolution that throws returned from here with nothing bound, no
@@ -421,7 +453,7 @@ public final class VideoPlaybackController {
             return
         }
 
-        let item = AVPlayerItem(url: playableURL)
+        let item = makeItem(for: playableURL, priority: .visible)
         // Set BEFORE the item goes live, so the very first segment request
         // already asks for the capped rung — set afterwards, the player has
         // usually committed to a higher one and the cap only takes effect at
@@ -439,7 +471,31 @@ public final class VideoPlaybackController {
             startingAt: takeResume(scope: scope, url: mediaURL)
         )
         VideoPlaybackTrace.emit("bound \(mediaURL.lastPathComponent) scope=\(scope ?? "-")")
+        if let player = activePlayers[key] { measureFirstFrame(of: player, in: view, since: requested) }
     }
+
+    /// Times a player a `play` minted or adopted to its first frame on `view`,
+    /// for the coordinator's prefetch counters (#900, `-cache-audit`). Only
+    /// with a byte cache; gives up after 10 s, or once the view holds another
+    /// player.
+    private func measureFirstFrame(of player: AVPlayer, in view: VideoRenderView, since start: CFTimeInterval) {
+        guard let byteCache else { return }
+        let key = ObjectIdentifier(view)
+        Task { @MainActor [weak self, weak view, weak player] in
+            for _ in 0..<Self.firstFramePolls {
+                guard let self, let view, let player, activePlayers[key] === player else { return }
+                if view.isReadyForDisplay {
+                    let elapsed = CACurrentMediaTime() - start
+                    byteCache.recordTimeToFirstFrame(elapsed)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
+    }
+
+    /// 10 s at 50 ms.
+    private static let firstFramePolls = 200
 
     /// Loans a player, gives it `item`, binds it to `view` and starts it — the
     /// tail every first start shares.
@@ -915,7 +971,7 @@ public final class VideoPlaybackController {
         }
         guard returnParkTokens[key] == token else { return false }
         returnParkTokens[key] = nil
-        let item = AVPlayerItem(url: resolved)
+        let item = makeItem(for: resolved, priority: .next)
         item.preferredPeakBitRate = peakBitRate
         let player = idlePlayers.popLast() ?? AVPlayer()
         itemCreations += 1
@@ -961,26 +1017,35 @@ public final class VideoPlaybackController {
 
     /// Lets the holder go once the PARKED frame exists (not the item's first
     /// frame, decoded before the seek lands), or after a ceiling.
+    /// Shared by the return ledger and the lookahead ledger (#895): both keep
+    /// a paused player behind a holder until its frame exists.
     private func releaseHolderOnceDecoded(_ player: AVPlayer, at parkedAt: CMTime) {
         Task { @MainActor [weak self] in
             for _ in 0..<Self.returnHolderPolls {
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 guard let self else { return }
-                guard let index = returnPlaybacks.firstIndex(where: { $0.player === player }) else {
-                    return
-                }
+                guard isHeldInLedger(player) else { return }
                 guard let frameTime = renderers[ObjectIdentifier(player)]?.currentFrameTime,
                       frameTime.isValid, abs(frameTime.seconds - parkedAt.seconds) < 0.5
                 else { continue }
-                returnPlaybacks[index].holder?.detach(reason: "returnHolderDecoded")
-                returnPlaybacks[index].holder = nil
+                detachLedgerHolder(of: player, decoded: true)
                 return
             }
-            guard let self,
-                  let index = returnPlaybacks.firstIndex(where: { $0.player === player })
-            else { return }
-            returnPlaybacks[index].holder?.detach(reason: "returnHolderCeiling")
+            self?.detachLedgerHolder(of: player, decoded: false)
+        }
+    }
+
+    private func isHeldInLedger(_ player: AVPlayer) -> Bool {
+        returnPlaybacks.contains { $0.player === player } || lookaheadPlaybacks.contains { $0.player === player }
+    }
+
+    private func detachLedgerHolder(of player: AVPlayer, decoded: Bool) {
+        if let index = returnPlaybacks.firstIndex(where: { $0.player === player }) {
+            returnPlaybacks[index].holder?.detach(reason: decoded ? "returnHolderDecoded" : "returnHolderCeiling")
             returnPlaybacks[index].holder = nil
+        } else if let index = lookaheadPlaybacks.firstIndex(where: { $0.player === player }) {
+            lookaheadPlaybacks[index].holder?.detach(reason: decoded ? "lookaheadHolderDecoded" : "lookaheadHolderCeiling")
+            lookaheadPlaybacks[index].holder = nil
         }
     }
 
@@ -1064,6 +1129,319 @@ public final class VideoPlaybackController {
         entry.holder?.detach(reason: "returnClaimed")
         VideoProducerLog.emit("RETURN CLAIM \(VideoProducerLog.name(player)) \(entry.key.url.lastPathComponent)")
         return entry.key
+    }
+
+    // MARK: - Lookahead playback (#895)
+
+    /// How many lookahead players may be kept at once: the vertical feed's
+    /// +1 (warmed) and −1 (kept). With the playing page's own player that is
+    /// three, the pool every short-video feed runs and well under the device's
+    /// decoder ceiling (Apple: no good way past 4–6).
+    public static let lookaheadCapacity = 2
+
+    /// The read-ahead a lookahead player's item may buffer while it waits:
+    /// ~5 s, Media3's +1. The playing item goes back to the default (0, the
+    /// system decides) when it is adopted.
+    public static let lookaheadForwardBufferSeconds: TimeInterval = 5
+
+    /// One player kept ready around the vertical feed's page.
+    struct LookaheadPlayback {
+        let key: ReturnKey
+        let player: AVPlayer
+        /// As a return player's: pulls the first frame in sample-buffer mode,
+        /// let go once it is decoded.
+        var holder: VideoRenderView?
+    }
+
+    /// Players kept ready for the vertical feed (#895): the next page's clip,
+    /// warmed to its first frame with a few seconds read ahead, and the page
+    /// just left, paused where the viewer left it.
+    ///
+    /// ⚠️ NOT IN `activePlayers`, like the return ledger and for its reasons:
+    /// nothing that sizes itself against the pool sees them, `play` never
+    /// JOINS one, and no URL lookup returns one. `play` ADOPTS one whole when
+    /// it is asked for that clip under that post — the swipe the player was
+    /// kept for. They leave this ledger by adoption, by `setLookahead` no
+    /// longer wanting them, or all at once on a memory warning.
+    private var lookaheadPlaybacks: [LookaheadPlayback] = []
+    /// The clips the lookahead wants now, next first.
+    private var lookaheadWanted: [ReturnKey] = []
+    /// One token per warm-up still resolving.
+    private var lookaheadTokens: [ReturnKey: Int] = [:]
+
+    public var lookaheadPlaybackCount: Int { lookaheadPlaybacks.count }
+
+    public func hasLookaheadPlayback(of url: URL, scope: String) -> Bool {
+        lookaheadPlaybacks.contains { $0.key == ReturnKey(scope: scope, url: url, owner: nil) }
+    }
+
+    /// A lookahead for the vertical feed, planning its preload through this
+    /// pool and the byte cache. Nil without a byte cache: the feed then only
+    /// prerolls its neighbours, as before.
+    public func makeLookahead(name: String) -> VideoLookahead? {
+        guard let byteCache else { return nil }
+        return VideoLookahead(playback: self, cache: byteCache, name: name)
+    }
+
+    /// Declares the clips the vertical feed wants kept ready: `next` is
+    /// warmed (when `warmNext`, unless another surface already plays it),
+    /// either is kept when its page lets go of it (`stop(_:keepingLookahead:)`),
+    /// and every other lookahead player is given back. Idempotent.
+    ///
+    /// `warmNext` false still WANTS `next`: the page just swiped back from is
+    /// the new +1, and its player is kept when the page lets go, while a
+    /// fresh warm-up waits for the playing clip to be under way.
+    ///
+    /// `client` names the lookahead asking (one per feed screen): a screen
+    /// covered by another feed clears only what it set (`clearLookahead`).
+    public func setLookahead(
+        next: VideoLookaheadItem?, previous: VideoLookaheadItem?, warmNext: Bool = true,
+        client: ObjectIdentifier? = nil
+    ) {
+        lookaheadClient = client
+        let wanted = [next, previous].compactMap { $0.map { ReturnKey(scope: $0.scope, url: $0.url, owner: nil) } }
+        if releasedNext != next.map({ ReturnKey(scope: $0.scope, url: $0.url, owner: nil) }) { releasedNext = nil }
+        lookaheadWanted = wanted
+        lookaheadTokens = lookaheadTokens.filter { wanted.contains($0.key) }
+        let unwanted = lookaheadPlaybacks.filter { !wanted.contains($0.key) }
+        lookaheadPlaybacks.removeAll { !wanted.contains($0.key) }
+        for entry in unwanted { retireLookahead(entry) }
+        if let next, warmNext { warmLookahead(next) }
+    }
+
+    /// Gives back every lookahead player, if `client` is the lookahead that
+    /// set them: a feed leaving the screen does not clear the one pushed over
+    /// it.
+    public func clearLookahead(for client: ObjectIdentifier) {
+        guard lookaheadClient == nil || lookaheadClient == client else { return }
+        setLookahead(next: nil, previous: nil, warmNext: false)
+    }
+
+    /// The lookahead that set the ledger's wanted clips last.
+    private var lookaheadClient: ObjectIdentifier?
+
+    /// Stops `view`, unless the clip it plays is one the lookahead wants kept
+    /// (the page just left, −1): its player is then kept, paused where it
+    /// stands, for a swipe back to adopt. Returns whether it was kept.
+    ///
+    /// Kept only when this view holds the player alone: a player another
+    /// surface still uses is not this page's to keep, and goes through `stop`.
+    @discardableResult
+    public func stop(_ view: VideoRenderView, keepingLookahead: Bool) -> Bool {
+        forgetDeadSurfaces()
+        let key = ObjectIdentifier(view)
+        guard keepingLookahead, let player = activePlayers[key], let url = playingURL[key],
+              let scope = playingScope[key]
+        else {
+            stop(view)
+            return false
+        }
+        let entryKey = ReturnKey(scope: scope, url: url, owner: nil)
+        let sharedElsewhere = activePlayers.contains { $0.key != key && $0.value === player }
+            || parked.map { $0.player === player } ?? false
+        guard lookaheadWanted.contains(entryKey), !sharedElsewhere,
+              !lookaheadPlaybacks.contains(where: { $0.key == entryKey }),
+              player.currentItem.map({ $0.status != .failed }) ?? false
+        else {
+            stop(view)
+            return false
+        }
+        VideoPlaybackTrace.emit("stop keeping lookahead \(url.lastPathComponent)")
+        lookaheadTokens[entryKey] = nil
+        view.detach(reason: "lookahead.keep")
+        surfaces[key] = nil
+        playingURL[key] = nil
+        playingScope[key] = nil
+        generation[key] = nil
+        activePlayers[key] = nil
+        pausedAnchors[ObjectIdentifier(player)] = player.currentTime()
+        player.pause()
+        // Heard no more, and off the Lock Screen: it is a page nobody is on.
+        forgetSound(of: player)
+        if let item = player.currentItem {
+            item.preferredForwardBufferDuration = Self.lookaheadForwardBufferSeconds
+            byteCache?.setPriority(.next, of: item.asset)
+        }
+        lookaheadPlaybacks.append(LookaheadPlayback(key: entryKey, player: player, holder: nil))
+        let keptName: String = VideoProducerLog.name(player)
+        let keptFile: String = url.lastPathComponent
+        VideoProducerLog.emit("LOOKAHEAD KEEP \(keptName) \(keptFile)")
+        trimLookaheadPlaybacks()
+        return true
+    }
+
+    /// Gives back every lookahead player: a memory warning.
+    ///
+    /// The clip that was warmed is not warmed again for the page it was
+    /// warmed for: the lookahead asks again every tick, and a warm-up minted
+    /// half a second after a memory warning would undo it. The next page's
+    /// `+1` warms as usual.
+    public func releaseAllLookaheadPlaybacks() {
+        releasedNext = lookaheadWanted.first
+        lookaheadTokens.removeAll()
+        let released = lookaheadPlaybacks
+        lookaheadPlaybacks.removeAll()
+        for entry in released { retireLookahead(entry) }
+    }
+
+    /// The vertical feed's playing clip, as its lookahead reads it.
+    public func playingState(of url: URL, scope: String?) -> VideoPlayingState {
+        guard let item = sharedActivePlayer(playing: url, scope: scope)?.currentItem else { return .notReady }
+        switch item.status {
+        case .failed:
+            return .failed
+        case .readyToPlay:
+            return .ready(VideoBufferStatus(
+                current: item.currentTime().seconds, duration: item.duration.seconds,
+                loaded: item.loadedTimeRanges.map(\.timeRangeValue)
+            ))
+        default:
+            return .notReady
+        }
+    }
+
+    /// The URL a player opens for `url`, as `play` resolves it: what the byte
+    /// cache keys and preloads.
+    public func playableURL(for url: URL) async throws -> URL {
+        try await source.playableURL(for: url)
+    }
+
+    /// The +1 a memory warning released; not warmed again while it is +1.
+    private var releasedNext: ReturnKey?
+
+    private func warmLookahead(_ item: VideoLookaheadItem) {
+        let key = ReturnKey(scope: item.scope, url: item.url, owner: nil)
+        guard releasedNext != key, lookaheadTokens[key] == nil,
+              !lookaheadPlaybacks.contains(where: { $0.key == key }),
+              sharedActivePlayer(playing: item.url, scope: item.scope) == nil,
+              parked.map({ $0.url != item.url }) ?? true
+        else { return }
+        let token = nextGenerationToken()
+        lookaheadTokens[key] = token
+        Task { [weak self] in await self?.mintLookahead(item, key: key, token: token) }
+    }
+
+    private func mintLookahead(_ item: VideoLookaheadItem, key: ReturnKey, token: Int) async {
+        let resolved: URL
+        do {
+            resolved = try await source.playableURL(for: item.url)
+        } catch {
+            VideoPlaybackTrace.emit("lookahead resolve FAILED \(item.url.lastPathComponent): \(error)")
+            if lookaheadTokens[key] == token { lookaheadTokens[key] = nil }
+            return
+        }
+        guard lookaheadTokens[key] == token else { return }
+        lookaheadTokens[key] = nil
+        // Asked again after the await: the page may have started it meanwhile.
+        guard lookaheadWanted.contains(key),
+              sharedActivePlayer(playing: item.url, scope: item.scope) == nil,
+              !lookaheadPlaybacks.contains(where: { $0.key == key })
+        else { return }
+        let playerItem = makeItem(for: resolved, priority: .next)
+        playerItem.preferredForwardBufferDuration = Self.lookaheadForwardBufferSeconds
+        let player = idlePlayers.popLast() ?? AVPlayer()
+        itemCreations += 1
+        installLoop(for: player, item: playerItem)
+        settle(nil, on: playerItem, of: player)
+        player.replaceCurrentItem(with: playerItem)
+        // A position filed for this post (a stop, a flight) is where its page
+        // will start: warm THAT frame. Read, not spent: the adoption spends it.
+        let start = resumeTimes[ResumeKey(scope: item.scope, url: item.url)] ?? .zero
+        if start.seconds > 0 {
+            player.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+        }
+        renderer(for: player)?.setItem(playerItem)
+        player.isMuted = true
+        player.actionAtItemEnd = .none
+        var holder: VideoRenderView?
+        if VideoRenderFlags.usesSampleBufferLayer {
+            let view = VideoRenderView()
+            #if DEBUG
+            view.debugLabel = "lookahead-holder"
+            #endif
+            bind(player, to: view)
+            holder = view
+        }
+        // Play-then-pause, as `prewarm` does: a player that never ran has
+        // decoded nothing, and the first frame is the point.
+        player.play()
+        pausedAnchors[ObjectIdentifier(player)] = start
+        player.pause()
+        lookaheadPlaybacks.append(LookaheadPlayback(key: key, player: player, holder: holder))
+        let warmName: String = VideoProducerLog.name(player)
+        let warmFile: String = item.url.lastPathComponent
+        let warmAddress: String = item.url.absoluteString
+        let resolvedFile: String = resolved.lastPathComponent
+        VideoProducerLog.emit("LOOKAHEAD WARM \(warmName) \(warmFile)")
+        VideoCacheAudit.emit("lookahead player warmed \(warmAddress) -> \(resolvedFile)")
+        trimLookaheadPlaybacks()
+        if holder != nil { releaseHolderOnceDecoded(player, at: start) }
+    }
+
+    /// Takes the lookahead player kept for this clip and post out of the
+    /// ledger, for `play` to adopt.
+    private func takeLookaheadPlayback(of url: URL, scope: String) -> LookaheadPlayback? {
+        let key = ReturnKey(scope: scope, url: url, owner: nil)
+        guard let index = lookaheadPlaybacks.firstIndex(where: { $0.key == key }) else { return nil }
+        let entry = lookaheadPlaybacks.remove(at: index)
+        guard entry.player.currentItem.map({ $0.status != .failed }) ?? false else {
+            retireLookahead(entry)
+            return nil
+        }
+        return entry
+    }
+
+    /// Binds an adopted lookahead player to `view` and starts it where it
+    /// stands: the warmed first frame, or the playhead the page left.
+    private func adoptLookahead(
+        _ entry: LookaheadPlayback, in view: VideoRenderView, key: ObjectIdentifier,
+        url: URL, scope: String, peakBitRate: Double
+    ) {
+        entry.holder?.detach(reason: "lookaheadAdopted")
+        detach(key: key, view: view)
+        let player = entry.player
+        if let item = player.currentItem {
+            item.preferredForwardBufferDuration = 0
+            item.preferredPeakBitRate = peakBitRate
+            byteCache?.setPriority(.visible, of: item.asset)
+        }
+        bind(player, to: view)
+        activePlayers[key] = player
+        surfaces[key] = WeakSurface(view: view)
+        playingURL[key] = url
+        playingScope[key] = scope
+        let playerKey = ObjectIdentifier(player)
+        var target = pausedAnchors.removeValue(forKey: playerKey)
+        // A start filed since (a flight's frame) wins over where it waited.
+        if let filed = takeResume(scope: scope, url: url) { target = filed }
+        if let target, target.isValid {
+            let drift = (player.currentTime() - target).seconds
+            if drift.isFinite, abs(drift) > 0.15 {
+                player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+            }
+        }
+        let name: String = VideoProducerLog.name(player)
+        let owner: String = view.debugProducerName
+        let file: String = url.lastPathComponent
+        VideoProducerLog.emit("LOOKAHEAD ADOPT \(name) owner=\(owner) \(file)")
+        VideoCacheAudit.emit("lookahead player adopted \(url.absoluteString)")
+        player.play()
+    }
+
+    private func trimLookaheadPlaybacks() {
+        while lookaheadPlaybacks.count > Self.lookaheadCapacity {
+            retireLookahead(lookaheadPlaybacks.removeFirst())
+        }
+    }
+
+    private func retireLookahead(_ entry: LookaheadPlayback) {
+        entry.holder?.detach(reason: "lookaheadReleased")
+        let releasedName: String = VideoProducerLog.name(entry.player)
+        let releasedFile: String = entry.key.url.lastPathComponent
+        VideoProducerLog.emit("LOOKAHEAD RELEASE \(releasedName) \(releasedFile)")
+        // Where the viewer left it, for the next time this post opens.
+        rememberResume(scope: entry.key.scope, url: entry.key.url, player: entry.player)
+        retire(entry.player)
     }
 
     /// Re-caps the bit rate of the item already playing in `view`, in bits per
@@ -2158,7 +2536,9 @@ public final class VideoPlaybackController {
     }
 
     /// Warms the source (synthesis/cache) for an upcoming page so its `play` is
-    /// instant. No player is loaned.
+    /// instant. No player is loaned and no byte is fetched: with a byte cache,
+    /// the vertical feed's real preload is `VideoLookahead` (#895); this is
+    /// what a pool without one (and UIKit's prefetch guess) still uses.
     public func preroll(_ mediaURL: URL) {
         let source = source
         Task { _ = try? await source.playableURL(for: mediaURL) }

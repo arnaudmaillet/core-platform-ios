@@ -1,6 +1,7 @@
 import CacheKit
 import Foundation
 import MediaCore
+import MediaPlayback
 import Synchronization
 import Testing
 import UIKit
@@ -97,6 +98,28 @@ struct MediaCacheInventoryTests {
                 "another category is left to its own clear")
         _ = try await pipeline.image(for: photo)
         #expect(fetcher.fetchCount(for: photo) == 2, "the next request goes to the network")
+    }
+
+    /// The video byte cache (#895) is counted and cleared as Videos: its two
+    /// namespaces are in the `.videos` category.
+    @Test func videoRangesAreMeasuredAndClearedThroughTheCoordinator() throws {
+        let root = try scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = CacheCoordinator(device: CacheDevice(
+            physicalMemory: { 4 << 30 }, availableDiskCapacity: { 100 * Int64(CacheBytes.gigabyte) }
+        ))
+        for namespace in [VideoByteCache.publicNamespace, VideoByteCache.signedNamespace] {
+            let store = try DiskStore(namespace: namespace, budget: DiskBudget(pool: .video), root: root)
+            _ = try store.write(Data(count: 3_000), for: "https://cdn.example.com/v.mp4#0", tier: .retained)
+            coordinator.register(store)
+        }
+        let inventory = MediaCacheInventory(locations: { [] }, urlCache: nil, coordinator: coordinator)
+        #expect(inventory.report().bytes(in: .videos) == 6_000)
+
+        inventory.clear(.videos)
+
+        #expect(coordinator.usage().bytes(in: .videos) == 0)
+        #expect(inventory.report().bytes(in: .videos) == 0)
     }
 }
 

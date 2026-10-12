@@ -65,4 +65,18 @@ struct SnapWarmWindowTests {
 
         #expect(window == [11, 9, 12, 13])
     }
+
+    /// The video lookahead (#895) plans +1…+3 in order (+1 warmed, +2/+3
+    /// head ranges) and names −1 to keep; it clamps at both ends.
+    @Test func theVideoLookaheadPlansThreeAheadAndOneBehind() {
+        let middle = SnapWarmWindow.videoLookahead(around: 5, count: 20)
+        #expect(middle.ahead == [6, 7, 8])
+        #expect(middle.behind == 4)
+        let first = SnapWarmWindow.videoLookahead(around: 0, count: 20)
+        #expect(first.ahead == [1, 2, 3])
+        #expect(first.behind == nil)
+        let nearEnd = SnapWarmWindow.videoLookahead(around: 18, count: 20)
+        #expect(nearEnd.ahead == [19])
+        #expect(SnapWarmWindow.videoLookahead(around: 3, count: 2).ahead.isEmpty)
+    }
 }

@@ -80,8 +80,10 @@ let package = Package(
                 "DesignSystem",
                 "CoreNetworking",
                 "PostGrid",
-                // The Storage suite drives a real coordinator and image pipeline.
+                // The Storage suite drives a real coordinator and image pipeline,
+                // and the video byte cache's namespaces.
                 "MediaCore",
+                "MediaPlayback",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

@@ -2936,7 +2936,9 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // true — so the number of retained players stays bounded by the cells
         // the feed keeps alive rather than by how far the viewer has scrolled.
         if releasingPlayback {
-            videoPlayback.stop(mediaCard.renderView)
+            // Kept, paused, when the feed's lookahead wants this clip (the
+            // page just left, or the next one): a swipe back adopts it (#895).
+            videoPlayback.stop(mediaCard.renderView, keepingLookahead: true)
             // ⚠️ The neighbours go too, and they are invisible from here.
             //
             // A retained clip's player is bound to a surface this method never
@@ -3094,7 +3096,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         chrome.alpha = 1
         chrome.setColumnHeld(false)
         cancelPrewarming()
-        videoPlayback?.stop(mediaCard.renderView)
+        // A swiped-past page keeps its paused player until its cell is reused:
+        // this is where −1 (or +1, after a swipe back) is handed to the feed's
+        // lookahead instead of being retired, when it wants that clip (#895).
+        videoPlayback?.stop(mediaCard.renderView, keepingLookahead: true)
         // Reuse is the other door out, and a retained clip must not walk
         // through it into the next post.
         for view in mediaCard.releaseRetainedSurfaces() {
