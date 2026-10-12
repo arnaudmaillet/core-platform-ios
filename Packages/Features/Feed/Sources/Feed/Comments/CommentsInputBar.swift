@@ -1387,9 +1387,10 @@ final class CommentsInputBar: UIView {
         }
     }
 
-    /// The post's like count, the viewer's stake NOT included — the bar adds
-    /// it, as the rail's chrome does. Nil when the author hides it (#397).
-    /// Read only by the like face.
+    /// The post's live like count, the viewer's stake already in it
+    /// (`WalletStakeLikes`, #896) — the bar draws it as given, as the rail's
+    /// chrome does. Nil when the author hides it (#397). Read only by the
+    /// like face.
     func setLikeCount(_ count: Int64?) {
         guard count != boostPostLikeCount else { return }
         boostPostLikeCount = count
@@ -1442,7 +1443,7 @@ final class CommentsInputBar: UIView {
             // on the light panel, white over dimmed media — and the points'
             // red fill once staked (#680), over the count, one even gap apart
             // (#692: the count is the pill's own title).
-            let count = SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: total)
+            let count = boostPostLikeCount
             let shows = showsStake && visibilityMenu == nil
             if let base = boostButton.configuration {
                 boostButton.configuration = SnapActionColumn.likeConfiguration(
@@ -1451,7 +1452,7 @@ final class CommentsInputBar: UIView {
             }
             boostButton.accessibilityLabel = "Like"
             boostButton.accessibilityValue = SnapRailBoostButton.accessibilityValue(
-                likeCount: SnapChromeView.displayedLikeCount(postLikes: boostPostLikeCount, viewerStake: total),
+                likeCount: boostPostLikeCount,
                 staked: total
             )
             return

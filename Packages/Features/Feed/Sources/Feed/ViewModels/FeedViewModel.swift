@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreNetworking
 import CoreRealtime
 import CoreStorage
+import EntityStore
 import Foundation
 
 /// The slice of the realtime client the feed consumes; a seam for tests.
@@ -99,7 +100,18 @@ public final class FeedViewModel {
     /// one; a test hands its own (the shared one is process-wide).
     var connectivity: ConnectivityMonitor = .shared
     private var items: [FeedItemDisplayModel] = []
+    /// The viewer's own like per post, and the count a post had when it was
+    /// loaded — the fallback for a post the store no longer holds.
     private var engagement: [PostID: EngagementState] = [:]
+    /// Where every post's live count is (#896): what the pages read, the
+    /// realtime ticks, the reconciles, and every point the viewer stakes,
+    /// from any screen. The view model writes what it loads and re-draws
+    /// what changed, whoever changed it.
+    private let entities: EntityStore
+    private var entityObservation: EntityObservation?
+    /// Keeps the active page's post in the store, whatever a memory trim
+    /// takes: a stake on it needs a count to move.
+    private var activePostPin: EntityObservation?
     private var likesInFlight: Set<PostID> = []
     /// Identity slices of every author rendered so far, keyed by profile id —
     /// attached to `.profile` routes so the destination composes its chrome
@@ -162,8 +174,10 @@ public final class FeedViewModel {
         composedPosts: ComposedPostChannel? = nil,
         router: (any Router)? = nil,
         commentPreferences: MediaCommentPreferencesStore = .standard,
+        entities: EntityStore? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.entities = entities ?? EntityStore()
         self.commentPreferences = commentPreferences
         self.repository = repository
         self.engagementProvider = engagementProvider
@@ -176,6 +190,9 @@ public final class FeedViewModel {
             forName: .mediaCommentPreferencesDidChange, object: nil, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.rebuildCommentStreams() }
+        }
+        entityObservation = self.entities.observePosts { [weak self] change in
+            self?.entitiesDidChange(change)
         }
     }
 
@@ -203,35 +220,68 @@ public final class FeedViewModel {
     /// Whether a like on the post is still on its way. Internal for tests.
     func isLikeInFlight(_ id: PostID) -> Bool { likesInFlight.contains(id) }
 
+    /// The post's live count — the store's, else the one it was loaded
+    /// with — and whether the viewer liked it here.
     public func engagementState(for id: PostID) -> EngagementState {
-        engagement[id] ?? EngagementState(likeCount: 0, isLiked: false)
+        let own = engagement[id] ?? EngagementState(likeCount: 0, isLiked: false)
+        return EngagementState(likeCount: entities.post(id)?.likeCount ?? own.likeCount, isLiked: own.isLiked)
+    }
+
+    /// The like count `model`'s page draws: the post's live one (#896), nil
+    /// when its author hides it. What a cell is configured with, so a page
+    /// scrolled back to shows a like placed meanwhile, here or elsewhere.
+    func visibleLikeCount(for model: FeedItemDisplayModel) -> Int64? {
+        guard !model.likeCountHidden else { return nil }
+        return entities.post(model.id)?.likeCount ?? model.likeCount
     }
 
     /// Optimistic like: one point on the post (#676), shown at once, taken
     /// back if it does not land. A like is final — there is no unlike — so
     /// every like adds one. One in flight per post; extra taps are dropped.
+    ///
+    /// The point goes on the store's count, so every screen showing the post
+    /// shows it (#896); the store's change is what re-draws this one.
     public func like(for id: PostID) {
         guard let engagementProvider, !likesInFlight.contains(id) else { return }
         let before = engagementState(for: id)
-        var state = before
-        state.isLiked = true
-        state.likeCount += 1
-        engagement[id] = state
+        engagement[id, default: before].isLiked = true
         likesInFlight.insert(id)
-        onEngagementChange?(id, state)
+        if entities.post(id)?.likeCount == nil {
+            entities.setLikeCount(before.likeCount + 1, for: id)
+        } else {
+            entities.addLikes(1, to: id)
+        }
 
         Task {
             do {
                 try await engagementProvider.like(id)
             } catch {
                 // Roll back: the point did not land.
-                var reverted = self.engagementState(for: id)
-                reverted.isLiked = before.isLiked
-                reverted.likeCount = max(0, reverted.likeCount - 1)
-                self.engagement[id] = reverted
-                self.onEngagementChange?(id, reverted)
+                self.engagement[id]?.isLiked = before.isLiked
+                self.entities.addLikes(-1, to: id)
             }
             self.likesInFlight.remove(id)
+        }
+    }
+
+    /// A post changed in the store — this screen's write or anyone's: the
+    /// pages showing it re-draw their count, and a post deleted anywhere
+    /// leaves the feed.
+    private func entitiesDidChange(_ change: EntityChange<PostID>) {
+        // `.everything` is a viewer change wiping the viewer's facts: no
+        // count moved.
+        guard case .some(let ids) = change else { return }
+        let shown = Set(items.map(\.id)).intersection(ids)
+        guard !shown.isEmpty else { return }
+        let deleted = shown.filter(entities.isDeleted)
+        if !deleted.isEmpty {
+            items.removeAll { deleted.contains($0.id) }
+            for id in deleted { engagement[id] = nil }
+            if items.isEmpty, phase == .content { phase = .empty }
+            emit()
+        }
+        for id in shown.subtracting(deleted) {
+            onEngagementChange?(id, engagementState(for: id))
         }
     }
 
@@ -292,6 +342,7 @@ public final class FeedViewModel {
     /// zone rides the transition with the instant entrance instead of
     /// fading in after arrival.
     public func pageDidBecomeActive(_ id: PostID) {
+        activePostPin = entities.observePost(id) { _ in }
         ensureCommentStreams(for: id)
         if let index = items.firstIndex(where: { $0.id == id }) {
             for neighbor in [index - 1, index + 1] where items.indices.contains(neighbor) {
@@ -429,8 +480,9 @@ public final class FeedViewModel {
     /// arriving after one would be a downgrade. `phase` moves to `.content` so
     /// the page lays out immediately rather than sitting in its loading state.
     public func seed(_ models: [FeedItemDisplayModel]) {
-        guard items.isEmpty, !models.isEmpty else { return }
-        items = models
+        let kept = withoutDeleted(models)
+        guard items.isEmpty, !kept.isEmpty else { return }
+        items = kept
         phase = .content
         emit()
     }
@@ -482,8 +534,9 @@ public final class FeedViewModel {
         // Offline-first: render the snapshot immediately if there is one…
         if let cached = await repository.cachedFirstPage(), isCurrentInitialLoad(generation),
            let models = await build(cached), isCurrentInitialLoad(generation) {
-            items = models
-            seedEngagement(from: cached)
+            items = withoutDeleted(models)
+            // A copy from the device: it never replaces a fresher count.
+            seedEngagement(from: cached, counts: .ifUnknown)
             phase = .content
             emit()
         }
@@ -504,13 +557,13 @@ public final class FeedViewModel {
                 initialLoad = nil
                 return
             }
-            items = models
+            items = withoutDeleted(models)
             seedEngagement(from: page.entries)
-            subscribeToCounters(for: models.map(\.id))
+            subscribeToCounters(for: items.map(\.id))
             nextPageToken = page.nextPageToken
             isSourceExhausted = page.nextPageToken == nil && page.isEndOfSource
             isColdRefreshing = page.isCold
-            phase = models.isEmpty ? .empty : .content
+            phase = items.isEmpty ? .empty : .content
         } catch {
             // A superseded load's failure is not the feed's.
             guard isCurrentInitialLoad(generation) else { return }
@@ -537,7 +590,7 @@ public final class FeedViewModel {
             let page = try await repository.loadPage(afterToken: token)
             if let models = await build(page.entries) {
                 let known = Set(items.map(\.id))
-                let fresh = models.filter { !known.contains($0.id) }
+                let fresh = withoutDeleted(models).filter { !known.contains($0.id) }
                 items += fresh
                 seedEngagement(from: page.entries)
                 subscribeToCounters(for: fresh.map(\.id))
@@ -590,7 +643,7 @@ public final class FeedViewModel {
     private func prepend(_ entry: FeedEntry) async {
         guard let models = await build([entry]), let model = models.first else { return }
         // Guard against a later network refresh having already surfaced it.
-        guard !items.contains(where: { $0.id == model.id }) else { return }
+        guard !items.contains(where: { $0.id == model.id }), !entities.isDeleted(model.id) else { return }
         items.insert(model, at: 0)
         seedEngagement(from: [entry])
         subscribeToCounters(for: [model.id])
@@ -605,34 +658,28 @@ public final class FeedViewModel {
         Task { await realtime.subscribe(to: channels) }
     }
 
+    /// Into the store: every screen showing the post hears the tick.
     private func applyCounterSnapshot(_ snapshot: Counter_V1_CounterSnapshot) {
         guard let like = snapshot.values.first(where: { $0.metric == .like }) else { return }
-        let id = PostID(snapshot.entity.id)
-        var state = engagementState(for: id)
-        state.likeCount = like.value
-        engagement[id] = state
-        onEngagementChange?(id, state)
+        entities.setLikeCount(like.value, for: PostID(snapshot.entity.id))
     }
 
     private func reconcileCounts() async {
         guard let engagementProvider, !items.isEmpty else { return }
         guard let counts = try? await engagementProvider.likeCounts(for: items.map(\.id)) else { return }
-        for (id, count) in counts {
-            var state = engagementState(for: id)
-            guard state.likeCount != count else { continue }
-            state.likeCount = count
-            engagement[id] = state
-            onEngagementChange?(id, state)
-        }
+        entities.mergeCounts(counts.mapValues { PostCounts(likes: $0) })
     }
 
-    private func seedEngagement(from entries: [FeedEntry]) {
+    /// What a page loaded goes into the store — one entity per post, shared
+    /// with every other list that loads it (#970) — and is remembered here
+    /// as the fallback.
+    private func seedEngagement(from entries: [FeedEntry], counts given: CountFreshness? = nil) {
+        let freshness = given ?? (repository.pagesCarryFreshCounts ? .fresh : .ifUnknown)
         for entry in entries {
             let id = entry.post.id
-            var state = engagementState(for: id)
-            state.likeCount = entry.likeCount
-            engagement[id] = state
+            engagement[id] = EngagementState(likeCount: entry.likeCount, isLiked: engagement[id]?.isLiked ?? false)
         }
+        entities.upsert(entries, counts: freshness)
     }
 
     private func build(_ entries: [FeedEntry]) async -> [FeedItemDisplayModel]? {
@@ -651,6 +698,11 @@ public final class FeedViewModel {
         return await Task.detached(priority: .userInitiated) {
             builder.build(entries, relativeTo: now)
         }.value
+    }
+
+    /// A page fetched before a delete still lists the post: it stays out.
+    private func withoutDeleted(_ models: [FeedItemDisplayModel]) -> [FeedItemDisplayModel] {
+        models.filter { !entities.isDeleted($0.id) }
     }
 
     private func emit() {

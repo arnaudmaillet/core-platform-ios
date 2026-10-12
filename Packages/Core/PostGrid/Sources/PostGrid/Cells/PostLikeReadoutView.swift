@@ -5,10 +5,20 @@ import UIKit
 /// heart turns the points' red once there is any. What `PostCardStaking`
 /// keeps current from the wallet: the list's card, whose like chip stakes
 /// (`bind`), and the compact cards, whose heart only reads (`bindReadout`).
+/// And the post's count, from the app's `EntityStore` (#896).
 @MainActor
 public protocol PostCardLikeReadout: UIView {
-    /// What the viewer has staked on the post. The count stays the post's.
+    /// What the viewer has staked on the post: the heart's colour.
     func setViewerStake(_ total: Int)
+    /// The post's like count as the app knows it now — a realtime tick, the
+    /// feed's fresher read, the viewer's own stake (`WalletStakeLikes`).
+    /// Replaces a number the card draws; never makes one appear on a card
+    /// without one, nor on a post whose author hides it.
+    func showLikeCount(_ count: Int64)
+    /// The count the card's post carried when it was configured — what a
+    /// grid tells the store about a post no feed has loaded. Nil when the
+    /// card draws none.
+    var postLikeCount: Int64? { get }
 }
 
 extension PostGridListRowCell: PostCardLikeReadout {}
@@ -81,6 +91,13 @@ public final class PostLikeReadoutView: UIView, PostCardLikeReadout {
         self.count = count
         apply()
     }
+
+    public func showLikeCount(_ count: Int64) {
+        guard self.count != nil, self.count != count else { return }
+        setCount(count)
+    }
+
+    public var postLikeCount: Int64? { count }
 
     public func setViewerStake(_ total: Int) {
         guard total != viewerStake else { return }

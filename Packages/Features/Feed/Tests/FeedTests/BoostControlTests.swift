@@ -316,14 +316,18 @@ struct BoostControlTests {
         return chrome
     }
 
-    /// The post's count with the viewer's stake in it: a stake adds, an Undo
-    /// takes it back off.
-    @Test func theBadgeCountsThePostsLikesWithTheViewersStake() {
+    /// The post's live count, the viewer's stake already in it (#896): the
+    /// stake itself only inks the heart — adding it here counted a committed
+    /// stake twice — and the count moves when the store's does.
+    @Test func theBadgeIsThePostsLiveCountAndTheStakeOnlyInksTheHeart() {
         let chrome = Self.chrome(likes: 40)
         #expect(chrome.debugLikeBadgeText == "40")
         chrome.setBoostTotal(2, animated: true)
+        #expect(chrome.debugLikeBadgeText == "40", "the stake reaches the count through the store, once")
+        chrome.setPostLikeCount(42)
         #expect(chrome.debugLikeBadgeText == "42")
         chrome.setBoostTotal(0, animated: true)
+        chrome.setPostLikeCount(40)
         #expect(chrome.debugLikeBadgeText == "40")
         // The app's one compact spelling.
         #expect(Self.chrome(likes: 1_203).debugLikeBadgeText == "1.2K")
@@ -334,9 +338,9 @@ struct BoostControlTests {
     @Test func zeroLikesReadZero() {
         let chrome = Self.chrome(likes: 0)
         #expect(chrome.debugLikeBadgeText == "0")
-        chrome.setBoostTotal(1, animated: true)
+        chrome.setPostLikeCount(1)
         #expect(chrome.debugLikeBadgeText == "1")
-        chrome.setBoostTotal(0, animated: true)
+        chrome.setPostLikeCount(0)
         #expect(chrome.debugLikeBadgeText == "0")
     }
 
@@ -351,7 +355,7 @@ struct BoostControlTests {
         #expect(chrome.debugLikeBadgeFrame.minY > chrome.debugLikeHeartFrame.maxY, "the count is not under the heart")
         #expect(chrome.debugBoostButton.titleLabel?.isDescendant(of: chrome.debugBoostButton) == true)
 
-        chrome.setBoostTotal(1, animated: true)
+        chrome.setPostLikeCount(1)
         #expect(pill.configuration?.title == "1")
     }
 
@@ -361,6 +365,7 @@ struct BoostControlTests {
     @Test func noLikeButtonForAHiddenCountButOnATextPage() {
         let hidden = Self.chrome(likes: 900, hidden: true)
         hidden.setBoostTotal(3)
+        hidden.setPostLikeCount(903)
         #expect(hidden.debugBoostButton.isHidden, "the like button stayed on a hidden-likes post")
         #expect(hidden.debugLikeBadgeText == nil)
 
@@ -384,7 +389,10 @@ struct BoostControlTests {
         #expect(boost.configuration?.image?.renderingMode == .alwaysTemplate)
         #expect(boost.configuration?.baseForegroundColor == .label)
 
+        // The stake inks the heart; the count arrives from the store with
+        // the stake in it (#896).
         bar.setBoostTotal(2, animated: true)
+        bar.setLikeCount(42)
         #expect(bar.debugLikeBadgeText == "42")
         #expect(boost.configuration?.image != nil)
         #expect(boost.configuration?.title == "42", "the composer's pill does not carry its count")

@@ -1,6 +1,7 @@
 import CoreModels
 import CoreStorage
 import DesignSystem
+import EntityStore
 import UIKit
 import CoreNavigation
 
@@ -21,9 +22,16 @@ import CoreNavigation
 /// The card reads the store's answer back rather than counting for itself,
 /// so a stake placed in the feed shows on the card that opened it the moment
 /// the store says so (`didChangeNotification`).
+///
+/// The COUNT too, from the app's `EntityStore` (#896): every bound card draws
+/// its post's live count — a stake from any surface (`WalletStakeLikes`), a
+/// realtime tick or a fresher read the feed made — and tells the store the
+/// count its own post carried, for a post no feed has loaded yet.
 @MainActor
 public final class PostCardStaking {
     private let wallet: WalletStore
+    private let entities: EntityStore?
+    private var entityObservation: EntityObservation?
     /// Which post each bound row shows — keyed by the CELL, weakly: a row is
     /// recycled onto another post, and keyed by post it would stay listed
     /// under the one it no longer draws.
@@ -32,12 +40,23 @@ public final class PostCardStaking {
     private var session: [String: Int] = [:]
     private var observer: NSObjectProtocol?
 
-    public init(wallet: WalletStore) {
+    /// Each card keeps the count its post was configured with.
+    public convenience init(wallet: WalletStore) {
+        self.init(wallet: wallet, entities: nil)
+    }
+
+    /// - Parameter entities: where the cards' counts come from. Nil: each
+    ///   card keeps the count its post was configured with.
+    public init(wallet: WalletStore, entities: EntityStore?) {
         self.wallet = wallet
+        self.entities = entities
         observer = NotificationCenter.default.addObserver(
             forName: WalletStore.didChangeNotification, object: wallet, queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.refreshBoundCells() }
+        }
+        entityObservation = entities?.observePosts { [weak self] change in
+            self?.refreshCounts(change)
         }
     }
 
@@ -74,6 +93,7 @@ public final class PostCardStaking {
             )
         }
         cell.setViewerStake(wallet.boostTotal(forTarget: key))
+        bindCount(cell, to: postID)
     }
 
     /// Keeps `readout`'s heart on what the viewer has staked on `postID` —
@@ -85,6 +105,42 @@ public final class PostCardStaking {
         let key = postID.rawValue
         cells.setObject(key as NSString, forKey: readout)
         readout.setViewerStake(wallet.boostTotal(forTarget: key))
+        bindCount(readout, to: postID)
+    }
+
+    /// The post's live count, on a card just configured with its post's:
+    /// the store learns the card's count if it knew none, and the card
+    /// draws the store's.
+    private func bindCount(_ readout: any PostCardLikeReadout, to postID: PostID) {
+        guard let entities else { return }
+        if let carried = readout.postLikeCount {
+            entities.mergeCounts([postID: PostCounts(likes: carried)], freshness: .ifUnknown)
+        }
+        if let live = entities.post(postID)?.likeCount { readout.showLikeCount(live) }
+    }
+
+    /// The store moved: every bound card of a changed post draws its count.
+    private func refreshCounts(_ change: EntityChange<PostID>) {
+        guard let entities else { return }
+        let enumerator = cells.keyEnumerator()
+        while let cell = enumerator.nextObject() as? any PostCardLikeReadout {
+            guard let key = cells.object(forKey: cell) as String? else { continue }
+            let postID = PostID(key)
+            guard change.contains(postID), let live = entities.post(postID)?.likeCount else { continue }
+            cell.showLikeCount(live)
+        }
+    }
+
+    /// `post` with its live like count — for a copy of a card (a flight's
+    /// card, a close's stand-in), which must draw the number the bound card
+    /// draws, or the count changes in the landing frame. `post` itself when
+    /// the store knows no count, or the card draws none.
+    public func liveCopy(of post: GalleryPost) -> GalleryPost {
+        guard let entities, !post.likeCountsHidden, post.reactionCount != nil,
+              let live = entities.post(post.id)?.likeCount else { return post }
+        var copy = post
+        copy.reactionCount = live
+        return copy
     }
 
     /// What the viewer has staked on `postID` — the answer a bound row draws,

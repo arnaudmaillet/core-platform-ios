@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import EntityStore
 import FeedInterface
 import MediaCore
 import MediaPlayback
@@ -740,6 +741,7 @@ final class PlaceProfileViewController: UIViewController {
         following: ClusterGalleryFollowing? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        entities: EntityStore? = nil,
         loadPosts: @escaping () async throws -> [GalleryPost],
         openPost: @escaping (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void
     ) {
@@ -771,7 +773,7 @@ final class PlaceProfileViewController: UIViewController {
         super.init(nibName: nil, bundle: nil)
         // The Activity list draws the same cards For You does, and its like
         // chips stake the same way.
-        activityPage.staking = wallet.map(PostCardStaking.init)
+        activityPage.staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
     }
 
     @available(*, unavailable)

@@ -103,11 +103,10 @@ final class SnapChromeView: UIView {
     private let boostButton = SnapRailBoostButton()
     /// The post's like count on the like button's corner (#668) — or, in the
     /// like pill (#669), under its heart.
-    /// The post's own like count from `configure` — nil when the author hides
-    /// it (#397). The badge adds the viewer's stake to it.
+    /// The post's like count — `configure`'s, then the live one
+    /// (`setPostLikeCount`), the viewer's stake in it; nil when the author
+    /// hides it (#397).
     private var postLikeCount: Int64?
-    /// The viewer's stake on the post, as last pushed (`setBoostTotal`).
-    private var boostTotal = 0
     /// The band's trailing edge: under the like pill's glass, or — a post
     /// whose likes are hidden, which has no like pill (#680) — the screen's.
     private var tickerUnderPill: NSLayoutConstraint!
@@ -663,8 +662,8 @@ final class SnapChromeView: UIView {
         // On every page (#695): a text page's composer reserves its room.
         boostButton.isHidden = likesHidden
         applyTickerReach()
-        // The badge's count, from what the card knew; the stake pushed after
-        // `configure` is added in `setBoostTotal`.
+        // The badge's count, from what the card knew; the screen then pushes
+        // the post's live one (`setPostLikeCount`).
         postLikeCount = model.visibleLikeCount
         applyLikeBadge(animated: false)
         applySoundVisibility()
@@ -1367,7 +1366,6 @@ final class SnapChromeView: UIView {
         likesHidden = false
         applyTickerReach()
         boostButton.setSpentTotal(0)
-        boostTotal = 0
         postLikeCount = nil
         applyLikeBadge(animated: false)
         soundFace = nil
@@ -1390,22 +1388,24 @@ final class SnapChromeView: UIView {
     // MARK: - Boost feedback
 
     /// The viewer's cumulative spend on the represented post — turns the like
-    /// heart red and moves the like badge with it (#668). Owned by the cell's
-    /// configurator (the chrome has no wallet); reset to 0 with the rest of
-    /// the post state on reuse. `animated` for the viewer's own stake or
-    /// undo, so a badge leaving zero arrives with its bounce; a page opening
-    /// on an earlier stake does not perform.
+    /// heart red (#668); the count moves through the store
+    /// (`setPostLikeCount`). Owned by the cell's configurator (the chrome has
+    /// no wallet); reset to 0 with the rest of the post state on reuse.
+    /// `animated` is kept for the callers' stake and undo theatre.
     func setBoostTotal(_ total: Int, animated: Bool = false) {
         boostButton.setSpentTotal(total)
-        boostTotal = total
         applyLikeBadge(animated: animated)
     }
 
-    /// The count the badge shows: the post's, the viewer's stake included
-    /// (product decision 2026-10-08). Nil when the author hides it.
-    static func displayedLikeCount(postLikes: Int64?, viewerStake: Int) -> Int64? {
-        postLikes.map { $0 + Int64(max(0, viewerStake)) }
+    /// The post's live like count (#896) — the app's `EntityStore`, where
+    /// the viewer's stakes already are (`WalletStakeLikes`). Nothing for a
+    /// post whose author hides it: the pill stays without a number.
+    func setPostLikeCount(_ count: Int64?) {
+        guard !likesHidden, count != postLikeCount else { return }
+        postLikeCount = count
+        applyLikeBadge(animated: false)
     }
+
 
     /// The band under the pill, or to the edge when there is no pill (#680).
     private func applyTickerReach() {
@@ -1415,9 +1415,14 @@ final class SnapChromeView: UIView {
         commentTicker.runsToTrailingEdge = toEdge
     }
 
+    /// The badge's count: the post's, the viewer's stake included (product
+    /// decision 2026-10-08) — and included ONCE, by the store the count
+    /// comes from (`WalletStakeLikes`, #896). Adding the stake here counted a
+    /// committed stake twice (the server's count already holds it), and the
+    /// card the post opened from showed another number.
     private func applyLikeBadge(animated: Bool) {
         // Drawn by the pill itself, under its heart (#692).
-        boostButton.setLikeCount(Self.displayedLikeCount(postLikes: postLikeCount, viewerStake: boostTotal))
+        boostButton.setLikeCount(postLikeCount)
     }
 
     #if DEBUG

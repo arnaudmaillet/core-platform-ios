@@ -133,6 +133,10 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
         try await base.loadPost(id)
     }
 
+    /// Each post comes from `base.loadPost`, whose cache keeps a count as it
+    /// was fetched.
+    nonisolated var pagesCarryFreshCounts: Bool { false }
+
     /// Forwarded, like the peek: the post is held where every read looks.
     func remember(_ entry: FeedEntry) async {
         await base.remember(entry)

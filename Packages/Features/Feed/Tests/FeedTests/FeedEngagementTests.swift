@@ -1,6 +1,7 @@
 import CoreContracts
 import CoreModels
 import CoreRealtime
+import EntityStore
 import Foundation
 import Testing
 @testable import Feed
@@ -77,6 +78,21 @@ private final class FakeRealtime: FeedRealtimeSubscribing, @unchecked Sendable {
 
     func pushReconnected() {
         connectionContinuation.yield(.connected(resumed: true))
+    }
+}
+
+/// A provider whose posts come from a cache (`FixedPostsFeedProvider`'s shape).
+private final class CachedPageProvider: FeedProviding, @unchecked Sendable {
+    let entries: [FeedEntry]
+    init(entries: [FeedEntry]) { self.entries = entries }
+
+    var pagesCarryFreshCounts: Bool { false }
+    func cachedFirstPage() async -> [FeedEntry]? { nil }
+    func loadFirstPage() async throws -> FeedPage { FeedPage(entries: entries, nextPageToken: nil, isCold: false) }
+    func loadPage(afterToken token: String) async throws -> FeedPage { FeedPage(entries: [], nextPageToken: nil, isCold: false) }
+    func loadPost(_ id: PostID) async throws -> FeedEntry {
+        guard let entry = entries.first(where: { $0.post.id == id }) else { throw FeedError.transport(message: "not found") }
+        return entry
     }
 }
 
@@ -216,6 +232,141 @@ struct FeedEngagementTests {
         #expect(await eventuallyMain { updates.count == 1 })
         #expect(updates.first?.0 == PostID("post-a"))
         #expect(updates.first?.1.likeCount == 500)
+    }
+}
+
+// MARK: - One count per post, for every screen (#896)
+
+@MainActor
+struct FeedEntityStoreTests {
+    private func loaded(
+        _ entries: [FeedEntry], entities: EntityStore,
+        engagement: FakeEngagementProvider = FakeEngagementProvider(), realtime: FakeRealtime? = nil
+    ) async -> FeedViewModel {
+        let viewModel = FeedViewModel(
+            repository: SinglePageProvider(entries: entries),
+            engagementProvider: engagement,
+            realtime: realtime,
+            entities: entities
+        )
+        await withCheckedContinuation { continuation in
+            viewModel.onStateChange = { state in
+                if state.phase == .content {
+                    viewModel.onStateChange = nil
+                    continuation.resume()
+                }
+            }
+            viewModel.viewDidLoad()
+        }
+        return viewModel
+    }
+
+    private func model(_ id: String, likes: Int64, hidden: Bool = false) -> FeedItemDisplayModel {
+        FeedItemDisplayModel(
+            id: PostID(id), authorID: ProfileID("prof-1"), authorName: "Ava", metaText: "@ava",
+            avatarURL: nil, caption: "c", mediaURL: nil, mediaKind: .image, thumbnailURL: nil,
+            audioText: nil, likeCount: likes, likeCountHidden: hidden
+        )
+    }
+
+    /// The Following feed and a feed opened from a grid show the same post:
+    /// a like in one is the count of the other, and a realtime tick heard by
+    /// one reaches both.
+    @Test func aLikeOrATickInOneFeedReachesTheOther() async {
+        let entities = EntityStore()
+        let realtime = FakeRealtime()
+        let following = await loaded(
+            [makeEntry("post-a", likeCount: 10), makeEntry("post-b", likeCount: 5)],
+            entities: entities, realtime: realtime
+        )
+        let opened = await loaded([makeEntry("post-a", likeCount: 10)], entities: entities)
+        var openedHeard: [Int64] = []
+        opened.onEngagementChange = { _, state in openedHeard.append(state.likeCount) }
+
+        following.like(for: PostID("post-a"))
+        #expect(openedHeard == [11])
+        #expect(opened.engagementState(for: PostID("post-a")).isLiked == false, "the like is the other screen's own")
+
+        #expect(await eventuallyMain { realtime.subscribed.contains(.counter(entityID: "post-a")) })
+        realtime.pushLikeCount(99, postID: "post-a", streamSeq: 1)
+        #expect(await eventuallyMain { openedHeard.last == 99 })
+    }
+
+    /// A page drawn again after a like elsewhere draws the live count, not
+    /// the one it was loaded with.
+    @Test func aPageConfiguredAfterALikeElsewhereDrawsTheLiveCount() async {
+        let entities = EntityStore()
+        let viewModel = await loaded([makeEntry("post-a", likeCount: 10)], entities: entities)
+        entities.addLikes(3, to: PostID("post-a"))
+        #expect(viewModel.visibleLikeCount(for: model("post-a", likes: 10)) == 13)
+        #expect(viewModel.visibleLikeCount(for: model("post-a", likes: 10, hidden: true)) == nil)
+    }
+
+    /// Deleted from the profile: the post leaves the feed, and a page that
+    /// still lists it never brings it back.
+    @Test func aPostDeletedElsewhereLeavesTheFeed() async {
+        let entities = EntityStore()
+        let viewModel = await loaded(
+            [makeEntry("post-a", likeCount: 10), makeEntry("post-b", likeCount: 5)], entities: entities
+        )
+        var rendered: [[PostID]] = []
+        viewModel.onStateChange = { rendered.append($0.items.map(\.id)) }
+
+        entities.deletePost(PostID("post-a"))
+
+        #expect(rendered.last == [PostID("post-b")])
+        viewModel.refresh()
+        #expect(await eventuallyMain { rendered.count >= 2 })
+        #expect(rendered.last == [PostID("post-b")], "the refreshed page still lists it")
+    }
+
+    /// A feed opened from a tile reads its posts through the repository's
+    /// cache, whose counts are as old as the fetch: opening it again after a
+    /// like never takes the like back.
+    @Test func aFeedReadFromACacheNeverUndoesALike() async {
+        let entities = EntityStore()
+        let first = await loaded([makeEntry("post-a", likeCount: 10)], entities: entities)
+        first.like(for: PostID("post-a"))
+        let cached = FeedViewModel(
+            repository: CachedPageProvider(entries: [makeEntry("post-a", likeCount: 10)]),
+            entities: entities
+        )
+        await withCheckedContinuation { continuation in
+            cached.onStateChange = { state in
+                if state.phase == .content {
+                    cached.onStateChange = nil
+                    continuation.resume()
+                }
+            }
+            cached.viewDidLoad()
+        }
+        #expect(cached.engagementState(for: PostID("post-a")).likeCount == 11)
+        #expect(first.engagementState(for: PostID("post-a")).likeCount == 11)
+    }
+
+    /// The post page opened from the feed shows the feed's like, and its own
+    /// like reaches the feed.
+    @Test func thePostPageAndTheFeedShareTheCount() async {
+        let entities = EntityStore()
+        let feed = await loaded([makeEntry("post-a", likeCount: 10)], entities: entities)
+        feed.like(for: PostID("post-a"))
+        let detail = PostDetailViewModel(
+            postID: PostID("post-a"),
+            repository: SinglePageProvider(entries: [makeEntry("post-a", likeCount: 10)]),
+            engagementProvider: FakeEngagementProvider(),
+            entities: entities
+        )
+        var detailHeard: PostDetailViewModel.EngagementState?
+        detail.onEngagementChange = { detailHeard = $0 }
+        detail.viewDidLoad()
+        #expect(await eventuallyMain { detailHeard != nil })
+        #expect(detailHeard?.likeCount == 11, "the repository's older copy did not replace the live count")
+
+        var feedHeard: [Int64] = []
+        feed.onEngagementChange = { _, state in feedHeard.append(state.likeCount) }
+        #expect(await eventuallyMain { !feed.isLikeInFlight(PostID("post-a")) })
+        detail.like()
+        #expect(feedHeard == [12])
     }
 }
 

@@ -520,9 +520,12 @@ final class SnapFeedViewController: UIViewController {
         observeAppLifecycle()
 
         viewModel.onStateChange = { [weak self] state in self?.render(state) }
-        // No onEngagementChange subscription: the page shows no like/comment
-        // affordances this iteration (the engagement rail was removed; the
-        // view-model seam stays for their return).
+        // The like pill's count is the post's live one (#896): a like placed
+        // on a card, in the comments bar or on this rail, a realtime tick —
+        // whoever moved it, the page showing the post re-draws it.
+        viewModel.onEngagementChange = { [weak self] id, _ in
+            self?.refreshLikeCount(for: id)
+        }
         viewModel.onCommentStreamsChange = { [weak self] id, streams in
             self?.updateVisibleStreams(for: id, streams: streams)
         }
@@ -1378,6 +1381,8 @@ final class SnapFeedViewController: UIViewController {
                     // no later one.
                     initialMediaPage: self.consumeInitialMediaPage(for: id)
                 )
+                // The live count, not the one the page was loaded with.
+                cell.setPostLikeCount(self.viewModel.visibleLikeCount(for: model))
                 // Paging this post's collection travels back to whoever opened
                 // the feed — see `onMediaPageChanged`.
                 cell.onMediaPageChanged = { [weak self] page in
@@ -2666,6 +2671,14 @@ final class SnapFeedViewController: UIViewController {
             tap: { [weak self] in self?.presentSoundSheet() },
             hold: { [weak self] in self?.toggleSound() }
         )
+    }
+
+    /// Re-draws the like count of the visible page showing `id`.
+    private func refreshLikeCount(for id: PostID) {
+        guard let model = modelsByID[id] else { return }
+        for case let cell as SnapFeedCell in collectionView.visibleCells where cell.representedPostID == id {
+            cell.setPostLikeCount(viewModel.visibleLikeCount(for: model))
+        }
     }
 
     private func refreshVisibleBoostControls() {
@@ -6329,6 +6342,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         guard orderedIDs.indices.contains(index),
               let model = modelsByID[orderedIDs[index]] else { return }
         chrome.configure(with: model)
+        chrome.setPostLikeCount(viewModel.visibleLikeCount(for: model))
         chrome.setImagePipeline(imagePipeline)
         // ⚠️ THE REPLICA CARRIES EVERYTHING THE PAGE'S CHROME WILL SHOW AT
         // LANDING (charter P9). It used to carry the caption and the author

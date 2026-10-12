@@ -1587,6 +1587,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// (the rail's red count) rather than inside the likes. The card follows
     /// the feed instead: the receipt is the red heart and a "+N" rising off
     /// the chip, the rail's own receipt.
+    ///
+    /// Since #896 the post's count is the app's live one, where the stake is
+    /// counted once (`PostCardStaking`, `WalletStakeLikes`): the card, its
+    /// flight card, the post page and the feed draw one number.
     public func setViewerStake(_ total: Int) {
         guard total != viewerStake else { return }
         viewerStake = total
@@ -1622,6 +1626,23 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     private var baseReactionCount: Int64?
     private var viewerStake = 0
+    /// What `configure` drew, and whether the author hides the count from
+    /// this reader — `postLikeCount`, `showLikeCount`.
+    private var configuredReactionCount: Int64?
+    private var likeCountsHidden = false
+
+    public var postLikeCount: Int64? { likeCountsHidden ? nil : configuredReactionCount }
+
+    public func showLikeCount(_ count: Int64) {
+        guard !likeCountsHidden, baseReactionCount != nil, baseReactionCount != count else { return }
+        baseReactionCount = count
+        applyReactionCount()
+    }
+
+    #if DEBUG
+    /// The like count the card draws — nil while it draws none.
+    public var debugReactionCount: Int64? { baseReactionCount }
+    #endif
 
     private func applyStakeWiring() {
         let stakes = onStake != nil
@@ -2418,6 +2439,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         NSLayoutConstraint.activate(hasMedia ? mediaConstraints : [])
 
         baseReactionCount = post.reactionCount
+        configuredReactionCount = post.reactionCount
+        likeCountsHidden = post.likeCountsHidden
         applyReactionCount()
         comments.set(post.commentCount)
         // A number the post does not have leaves an empty capsule on the card,
@@ -2772,6 +2795,24 @@ public final class PostGridTileCell: UICollectionViewCell {
         infoOverlay?.setLikeCount(post.reactionCount)
     }
 
+    /// What `configure` drew — `postLikeCount`.
+    private var configuredLikeCount: Int64?
+
+    public var postLikeCount: Int64? {
+        infoPost?.likeCountsHidden == true ? nil : configuredLikeCount
+    }
+
+    public func showLikeCount(_ count: Int64) {
+        guard var post = infoPost, !post.likeCountsHidden,
+              let shown = post.reactionCount, shown != count else { return }
+        // Kept on the post too: the words' overlay is rebuilt from it when
+        // the tile changes size.
+        post.reactionCount = count
+        infoPost = post
+        likes.set(count)
+        infoOverlay?.setLikeCount(count)
+    }
+
     // MARK: - The viewer's like
 
     /// Whether the viewer has staked on the post the tile shows.
@@ -2919,6 +2960,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         contentView.backgroundColor = Self.fillColor(for: post)
 
         likes.set(post.reactionCount)
+        configuredLikeCount = post.reactionCount
 
         // The words: a new post is a new overlay, whatever the variant.
         removeInfoOverlay()

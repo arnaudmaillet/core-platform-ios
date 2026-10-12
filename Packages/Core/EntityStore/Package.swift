@@ -15,10 +15,13 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../CacheKit"),
-        .package(path: "../../Kit/CoreModels")
+        .package(path: "../../Kit/CoreModels"),
+        // The viewer's stakes (`WalletStore`) move a post's count
+        // (`WalletStakeLikes`). CoreStorage depends on CoreModels alone.
+        .package(path: "../CoreStorage")
     ],
     targets: [
-        .target(name: "EntityStore", dependencies: ["CacheKit", "CoreModels"]),
-        .testTarget(name: "EntityStoreTests", dependencies: ["EntityStore", "CacheKit", "CoreModels"])
+        .target(name: "EntityStore", dependencies: ["CacheKit", "CoreModels", "CoreStorage"]),
+        .testTarget(name: "EntityStoreTests", dependencies: ["EntityStore", "CacheKit", "CoreModels", "CoreStorage"])
     ]
 )
