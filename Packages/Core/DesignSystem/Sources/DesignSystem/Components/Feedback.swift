@@ -151,6 +151,22 @@ public enum Feedback {
         )
     }
 
+    /// A condition the viewer should know while it lasts ("Offline", #955):
+    /// no haptic, no timer and no close button — it stays until a toast with
+    /// the same `id` replaces it in place ("Back online"). It takes priority
+    /// over the plain confirmations at its position.
+    @discardableResult
+    public static func condition(
+        _ message: String,
+        detail: String? = nil,
+        symbol: String? = Kind.info.defaultSymbol,
+        id: String,
+        from source: UIViewController,
+        at position: ToastPosition = .top
+    ) -> ToastView {
+        show(.info, message, detail: detail, symbol: symbol, from: source, above: nil, at: position, action: nil, id: id, isCondition: true)
+    }
+
     /// Something is under way ("Posting…"): a spinner, no haptic, and no
     /// timer — it stays until a toast with the same `id` (success, failure…)
     /// replaces it in place (#954).
@@ -217,7 +233,8 @@ public enum Feedback {
         at position: ToastPosition,
         action: ToastView.Action?,
         undoable: ToastView.Undoable? = nil,
-        id: String? = nil
+        id: String? = nil,
+        isCondition: Bool = false
     ) -> ToastView {
         let host = host(for: source)
         let floor = host === source && floor?.window != nil ? floor : nil
@@ -226,7 +243,7 @@ public enum Feedback {
             // The scene's overlay (#954): the toast outlives the screen.
             toast = overlay.present(
                 message, detail: detail, symbol: symbol, style: kind.style, action: action, undoable: undoable,
-                id: id, position: position,
+                id: id, isCondition: isCondition, position: position,
                 from: host, above: floor,
                 keyboardTopY: keyboardTopY(of: host, in: window),
                 interfaceStyle: pinnedStyle(of: host)
@@ -235,7 +252,7 @@ public enum Feedback {
             // No scene to draw over (a package test host): in the screen.
             toast = ToastView.present(
                 message, detail: detail, symbol: symbol, style: kind.style, action: action, undoable: undoable,
-                id: id, position: position, in: host.view,
+                id: id, isCondition: isCondition, position: position, in: host.view,
                 edge: position.isTop ? nil : floor?.topAnchor
             )
         }

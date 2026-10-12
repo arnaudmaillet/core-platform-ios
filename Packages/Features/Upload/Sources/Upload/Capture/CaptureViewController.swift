@@ -83,8 +83,6 @@ final class CaptureViewController: UIViewController {
     private let focusRing = UIView()
     private let timePill = UIVisualEffectView(effect: nil)
     private let timeLabel = UILabel()
-    private let toast = UIVisualEffectView(effect: nil)
-    private let toastLabel = UILabel()
     private var notice: CaptureAccessNoticeView?
 
     let shutter = CaptureShutterView()
@@ -612,19 +610,6 @@ final class CaptureViewController: UIViewController {
             timePill.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: Spacing.sm)
         }
 
-        toast.cornerConfiguration = .capsule()
-        toastLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 22)
-        toastLabel.adjustsFontForContentSizeCategory = true
-        toastLabel.textColor = .white
-        toastLabel.textAlignment = .center
-        toastLabel.pin(to: toast.contentView, insets: NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16))
-        toast.alpha = 0
-        toast.isUserInteractionEnabled = false
-        toast.constrain(in: view) { view in
-            toast.centerXAnchor.constraint(equalTo: view.centerXAnchor)
-            toast.centerYAnchor.constraint(equalTo: previewContainer.centerYAnchor)
-        }
-
         ringLink.onTick = { [weak self] in self?.ringTick() }
         loadLibraryShortcut()
     }
@@ -639,7 +624,6 @@ final class CaptureViewController: UIViewController {
         super.viewIsAppearing(animated)
         handOverSelector(animated: false)
         if timePill.effect == nil { timePill.effect = UIGlassEffect() }
-        if toast.effect == nil { toast.effect = UIGlassEffect() }
     }
 
     // MARK: - Selector
@@ -1141,7 +1125,7 @@ final class CaptureViewController: UIViewController {
                 let photo = try await source.capturePhoto(flash: flash, into: folder)
                 photographed(photo)
             } catch {
-                say("The photo could not be taken")
+                say("The photo could not be taken", failure: true)
             }
             isBusy = false
             shutter.setLook(.idle, animated: true)
@@ -1252,7 +1236,7 @@ final class CaptureViewController: UIViewController {
         shutter.setLook(.idle, animated: true)
         setChromeHidden(false)
         refreshTakeControls(animated: true)
-        if clip == nil, !wasSlip { say("The clip could not be recorded") }
+        if clip == nil, !wasSlip { say("The clip could not be recorded", failure: true) }
         if take.isFull { say(take.limitReachedMessage) }
     }
 
@@ -1329,7 +1313,7 @@ final class CaptureViewController: UIViewController {
                 let item = captures.register(url, kind: .video(duration: duration))
                 openEditor([item], edits: [item.id: handOffEdits(uprightSize: size)])
             } catch {
-                say("The video could not be put together")
+                say("The video could not be put together", failure: true)
             }
         }
     }
@@ -1787,20 +1771,17 @@ final class CaptureViewController: UIViewController {
         lensChips.isHidden = true
     }
 
-    private func say(_ text: String) {
-        toastLabel.text = text
+    /// Says something over the camera — through the app's one toast (#955):
+    /// at the top, clear of the shutter and the selector, with its own
+    /// motion, Reduce Motion handling and announcement. A `failure` (a photo
+    /// or a clip that could not be made) stays until closed, and plays the
+    /// error haptic.
+    private func say(_ text: String, failure: Bool = false) {
         debugLastToast = text
         debugToasts.append(text)
-        // ⚠️ REDUCE MOTION FADES; IT DOES NOT SCALE.
-        toast.transform = reducesMotion() ? .identity : CGAffineTransform(scaleX: 0.9, y: 0.9)
-        debugToastStart = toast.transform
-        UIView.animate(withDuration: 0.3, delay: 0, usingSpringWithDamping: 0.8, initialSpringVelocity: 0) {
-            self.toast.alpha = 1
-            self.toast.transform = .identity
-        }
-        UIView.animate(withDuration: 0.3, delay: 2, options: [.beginFromCurrentState]) {
-            self.toast.alpha = 0
-        }
+        debugLastToastView = failure
+            ? Feedback.failure(text, from: self, at: .top)
+            : Feedback.info(text, from: self, at: .top)
     }
 
     // MARK: - Appearing and leaving
@@ -1858,9 +1839,10 @@ final class CaptureViewController: UIViewController {
     private(set) var debugCardRefreshes = 0
     private(set) var debugLastToast: String?
     private(set) var debugToasts: [String] = []
-    /// What the focus ring and the toast were staged at before they spring in.
+    /// What the focus ring was staged at before it springs in.
     private(set) var debugFocusRingStart: CGAffineTransform?
-    private(set) var debugToastStart: CGAffineTransform?
+    /// The last toast said (#955).
+    private(set) weak var debugLastToastView: ToastView?
     func debugTapPreview(at point: CGPoint) { previewTapped(at: point) }
     #if DEBUG
     // ⚠️ DEBUG ONLY, LIKE THE BAR'S OWN `debugDrawnAlpha` IT READS — this

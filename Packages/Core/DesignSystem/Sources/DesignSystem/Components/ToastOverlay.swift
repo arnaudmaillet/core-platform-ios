@@ -77,6 +77,10 @@ final class ToastOverlay {
     /// The screen's floor, in `appWindow`'s coordinates (`refloor()`); nil:
     /// the window's own safe area bottom.
     private var screenFloorY: CGFloat?
+    /// The screen's ceiling, in `appWindow`'s coordinates: the foot of its
+    /// navigation bar — top toasts hang below the bar's buttons, not on them
+    /// (#955: "Offline" sat on the wallet pill). Nil: the status band's foot.
+    private var screenCeilingY: CGFloat?
     /// What the floor is measured from: the composer the latest toast was
     /// told to stand on, and the screen it was fired from — both weak: once
     /// they leave the window, the screen now on top is the floor.
@@ -131,6 +135,7 @@ final class ToastOverlay {
         action: ToastView.Action? = nil,
         undoable: ToastView.Undoable? = nil,
         id: String? = nil,
+        isCondition: Bool = false,
         position: ToastPosition,
         from host: UIViewController?,
         above floor: UIView?,
@@ -138,17 +143,21 @@ final class ToastOverlay {
         interfaceStyle: UIUserInterfaceStyle = .unspecified
     ) -> ToastView {
         if let appWindow { wearTraits(of: appWindow, style: interfaceStyle) }
-        floorHost = host
+        // The screen that shows, not its container: a stack's safe area holds
+        // neither its navigation bar nor the tab accessory (a toast fired
+        // from a tab shell sat on the inbox's wallet pill).
+        floorHost = host.map(Self.visibleScreen(in:))
         floorView = floor
         self.keyboardTopY = keyboardTopY
         screenFloorY = measuredFloorY()
+        screenCeilingY = measuredCeilingY()
         placeBand()
         followFloor()
         window.isHidden = false
         window.layoutIfNeeded()
         let toast = ToastView.present(
             message, detail: detail, symbol: symbol, style: style, action: action, undoable: undoable,
-            id: id, position: position, in: container,
+            id: id, isCondition: isCondition, position: position, in: container,
             edge: position.isTop ? container.topAnchor : container.bottomAnchor
         )
         toast.onRemoved = { [weak self] in self?.hideIfEmpty() }
@@ -186,9 +195,10 @@ final class ToastOverlay {
     /// The band's frame in the app window's coordinates: from the foot of the
     /// status band to the floor (`ToastOverlay` doc).
     static func band(
-        in bounds: CGRect, safeArea: UIEdgeInsets, screenFloorY: CGFloat?, keyboardTopY: CGFloat?
+        in bounds: CGRect, safeArea: UIEdgeInsets, screenFloorY: CGFloat?, keyboardTopY: CGFloat?,
+        screenCeilingY: CGFloat? = nil
     ) -> CGRect {
-        let top = bounds.minY + safeArea.top
+        let top = max(bounds.minY + safeArea.top, screenCeilingY ?? -.infinity)
         var floor = screenFloorY ?? (bounds.maxY - safeArea.bottom)
         if let keyboardTopY { floor = min(floor, keyboardTopY) }
         floor = min(max(floor, top), bounds.maxY)
@@ -200,7 +210,7 @@ final class ToastOverlay {
         guard let appWindow else { return nil }
         let band = Self.band(
             in: appWindow.bounds, safeArea: appWindow.safeAreaInsets,
-            screenFloorY: screenFloorY, keyboardTopY: keyboardTopY
+            screenFloorY: screenFloorY, keyboardTopY: keyboardTopY, screenCeilingY: screenCeilingY
         )
         // Both windows share the scene's coordinate space.
         return band.offsetBy(dx: appWindow.frame.minX, dy: appWindow.frame.minY)
@@ -217,6 +227,7 @@ final class ToastOverlay {
         floorLink?.invalidate()
         floorLink = nil
         screenFloorY = nil
+        screenCeilingY = nil
     }
 
     // MARK: - The floor
@@ -239,6 +250,23 @@ final class ToastOverlay {
         return Feedback.floorY(of: top, above: nil, in: appWindow)
     }
 
+    /// The ceiling now: under the navigation bar of the screen the floor is
+    /// measured from (`measuredFloorY` settles which) — its safe area top, or
+    /// the bar's own foot when that is lower: a screen that runs its content
+    /// under a bare bar (the inbox) does not count the bar in its safe area.
+    func measuredCeilingY() -> CGFloat? {
+        guard let appWindow, let host = floorHost, let view = host.viewIfLoaded, view.window === appWindow else {
+            return nil
+        }
+        var ceiling = view.convert(view.safeAreaLayoutGuide.layoutFrame, to: appWindow).minY
+        if let stack = host.navigationController, !stack.isNavigationBarHidden,
+           stack.navigationBar.window === appWindow, !stack.navigationBar.isHidden {
+            let bar = stack.navigationBar
+            ceiling = max(ceiling, bar.convert(bar.bounds, to: appWindow).maxY)
+        }
+        return ceiling
+    }
+
     /// The screen a container shows: a stack's top, a tab shell's selected
     /// tab, all the way down — the one whose safe area holds that screen's
     /// own chrome (a tab accessory belongs to it, not to its stack).
@@ -249,10 +277,34 @@ final class ToastOverlay {
                 screen = top
             } else if let tabs = screen as? UITabBarController, let selected = tabs.selectedViewController {
                 screen = selected
+            } else if let child = largestVisibleChild(of: screen) {
+                // Any other container — the notifications drawer's, around
+                // the tab shell: into the child that fills the screen.
+                screen = child
             } else {
                 return screen
             }
         }
+    }
+
+    /// The child of a custom container covering most of its window, if any
+    /// covers most of the container — a leaf screen's own small children
+    /// (a pager's page, a header) are not "the screen".
+    private static func largestVisibleChild(of container: UIViewController) -> UIViewController? {
+        guard let window = container.viewIfLoaded?.window else { return nil }
+        let containerArea = area(of: container.view, in: window)
+        guard containerArea > 0 else { return nil }
+        let best = container.children
+            .filter { $0.viewIfLoaded?.window === window && !$0.view.isHidden }
+            .map { ($0, area(of: $0.view, in: window)) }
+            .max { $0.1 < $1.1 }
+        guard let best, best.1 >= containerArea * 0.9 else { return nil }
+        return best.0
+    }
+
+    private static func area(of view: UIView, in window: UIWindow) -> CGFloat {
+        let visible = view.convert(view.bounds, to: window).intersection(window.bounds)
+        return visible.isNull ? 0 : visible.width * visible.height
     }
 
     /// Measures the floor again and moves the band if it moved — or if the
@@ -262,6 +314,7 @@ final class ToastOverlay {
     /// area would drop the toasts onto the tab bar for a frame.
     func refloor(animated: Bool = true) {
         if let floor = measuredFloorY() { screenFloorY = floor }
+        if let ceiling = measuredCeilingY() { screenCeilingY = ceiling }
         guard let target = bandFrame(), abs(target.minY - window.frame.minY) > 0.5
             || abs(target.height - window.frame.height) > 0.5 || abs(target.width - window.frame.width) > 0.5
         else { return }

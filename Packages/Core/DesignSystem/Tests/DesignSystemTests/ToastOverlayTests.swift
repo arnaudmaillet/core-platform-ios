@@ -65,6 +65,19 @@ struct ToastOverlayTests {
         #expect(below.maxY == 500)
     }
 
+    /// Under a navigation bar the band starts at its foot, so a top toast
+    /// hangs below the bar's buttons (#955); never above the status band.
+    @Test func theBandStartsUnderTheScreensBar() {
+        let band = ToastOverlay.band(
+            in: bounds, safeArea: safeArea, screenFloorY: 780, keyboardTopY: nil, screenCeilingY: 116
+        )
+        #expect(band.minY == 116)
+        let above = ToastOverlay.band(
+            in: bounds, safeArea: safeArea, screenFloorY: 780, keyboardTopY: nil, screenCeilingY: 20
+        )
+        #expect(above.minY == 62)
+    }
+
     /// A floor above the status band never makes a negative band.
     @Test func aFloorNeverRisesAboveTheTop() {
         let band = ToastOverlay.band(in: bounds, safeArea: safeArea, screenFloorY: 10, keyboardTopY: nil)
@@ -137,6 +150,26 @@ struct ToastOverlayTests {
             overlay.refloor(animated: false)
             #expect(overlay.window.frame.width == 874)
             #expect(overlay.window.frame.maxY == Feedback.floorY(of: screen, above: nil, in: window))
+        }
+    }
+
+    /// Fired from the app's root, a custom container around the screens
+    /// (the notifications drawer's), the toast stands on the screen that
+    /// shows inside it — under its bar, over its accessory (#955).
+    @Test func aCustomContainerIsLookedThrough() {
+        let screen = UIViewController()
+        screen.additionalSafeAreaInsets = UIEdgeInsets(top: 54, left: 0, bottom: 120, right: 0)
+        let container = UIViewController()
+        hosting(container) { window, overlay in
+            container.addChild(screen)
+            screen.view.frame = container.view.bounds
+            container.view.addSubview(screen.view)
+            screen.didMove(toParent: container)
+            window.layoutIfNeeded()
+            _ = Feedback.info("Offline", from: container, at: .top)
+            let safe = screen.view.convert(screen.view.safeAreaLayoutGuide.layoutFrame, to: window)
+            #expect(overlay.window.frame.minY == safe.minY)
+            #expect(overlay.window.frame.maxY == safe.maxY)
         }
     }
 

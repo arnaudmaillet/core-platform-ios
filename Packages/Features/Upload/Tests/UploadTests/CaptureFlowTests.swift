@@ -321,6 +321,8 @@ struct CaptureFlowTests {
         try await settle { !screen.camera.isRecording }
         try #require(!screen.camera.isRecording)
         #expect(screen.camera.debugLastToast == "The clip could not be recorded")
+        // A failure (#955): it stays until closed.
+        #expect(screen.camera.debugLastToastView?.style == .failure)
     }
 
     /// Each clip is handed exactly what the take has left — the source's hard
@@ -922,22 +924,23 @@ struct CaptureFlowTests {
         #expect(!screen.folder.files.contains { $0.pathExtension == "jpg" }, "its file went too")
     }
 
-    /// ⚠️ Under Reduce Motion the focus ring and the toast fade without
-    /// scaling; with motion they spring from a scale.
-    @Test func reduceMotionFadesTheFocusRingAndTheToastWithoutScaling() async throws {
+    /// ⚠️ Under Reduce Motion the focus ring fades without scaling; with
+    /// motion it springs from a scale. The toast is the app's own (#955): at
+    /// the top, never moved by a transform — its Reduce Motion handling is
+    /// the component's (`ToastBehaviourTests.reduceMotionRemovesTheSlide`).
+    @Test func reduceMotionFadesTheFocusRingWithoutScalingAndTheToastIsTheAppsOwn() async throws {
         let still = try await open()
         still.camera.debugTapPreview(at: CGPoint(x: 100, y: 200))
         #expect(still.camera.debugFocusRingStart == .identity)
         try await record(still, seconds: 0.6)
         still.camera.debugSelector.debugTap(CaptureOption.ratio.rawValue)
-        #expect(still.camera.debugToastStart == .identity)
+        let toast = try #require(still.camera.debugLastToastView)
+        #expect(toast.position == .top)
+        #expect(toast.transform == .identity)
 
         let moving = try await open(motion: true)
         moving.camera.debugTapPreview(at: CGPoint(x: 100, y: 200))
         #expect(moving.camera.debugFocusRingStart != .identity)
-        try await record(moving, seconds: 0.6)
-        moving.camera.debugSelector.debugTap(CaptureOption.ratio.rawValue)
-        #expect(moving.camera.debugToastStart != .identity)
     }
 
     // MARK: - Accessibility
