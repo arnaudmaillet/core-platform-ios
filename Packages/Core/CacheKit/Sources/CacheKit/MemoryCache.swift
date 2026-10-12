@@ -111,9 +111,17 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
     ///
     /// - Parameter expiresAt: an absolute expiry on top of the speculative
     ///   one, e.g. a signed URL's `url_expires_at`.
-    /// - Returns: `false` when the entry cannot fit (bigger than the budget,
-    ///   or the room is held by leases or higher tiers); an existing entry is
-    ///   then left as it was.
+    /// - Returns: `false` when admissions are paused (the app is in the
+    ///   background, `setAdmissionsPaused`) and the entry is unleased and
+    ///   below `retained`: nothing moves. Or when the entry cannot fit, and
+    ///   then:
+    ///   - bigger than the budget (or a speculative entry bigger than the
+    ///     speculative cap): refused before anything moves, and an existing
+    ///     entry is left as it was;
+    ///   - small enough, but the room is held by leases or higher tiers: the
+    ///     eviction pass refuses it AFTER it replaced the existing value, so
+    ///     the key is left EMPTY (never the stale value a caller just tried to
+    ///     update), and what the pass evicted meanwhile stays evicted.
     @discardableResult
     public func insert(_ value: Value, for key: Key, cost: Int, tier: CacheTier = .recent, expiresAt: Date? = nil) -> Bool {
         store(value, for: key, cost: cost, tier: tier, expiresAt: expiresAt, leasing: false) != nil
@@ -255,6 +263,12 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
 
     public var statistics: CacheStatistics { state.withLock { $0.statistics } }
 
+    public func setAdmissionsPaused(_ paused: Bool) {
+        state.withLock { $0.admissionsPaused = paused }
+    }
+
+    public var areAdmissionsPaused: Bool { state.withLock { $0.admissionsPaused } }
+
     /// Unleased keys of `tier`, least recently used first.
     func orderedKeys(in tier: CacheTier) -> [Key] {
         state.withLock { $0.lru.list(tier).ordered }
@@ -270,6 +284,7 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
             let existing = state.entries[key]
             let leasedAfter = leasing || (existing?.leases ?? 0) > 0
             let storedTier = max(existing?.tier ?? tier, tier)
+            if !leasedAfter, state.admissionsPaused, storedTier < .retained { return nil }
             if !leasedAfter {
                 if cost > state.limits.bytes { return nil }
                 if storedTier == .speculative, cost > state.limits.speculativeBytes { return nil }
@@ -390,6 +405,8 @@ public final class MemoryCache<Key: Hashable & Sendable, Value: Sendable>: Manag
         var limits: CacheLimits
         var nextID: UInt64 = 0
         var statistics = CacheStatistics()
+        /// Set while the app is in the background (`setAdmissionsPaused`).
+        var admissionsPaused = false
         /// Values removed during the current mutation, released after the lock.
         var evicted: [Value] = []
 

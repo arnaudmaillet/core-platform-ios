@@ -229,6 +229,41 @@ struct ChatMediaTests {
         #expect(notices.isEmpty)
     }
 
+    /// #898: a clip's exported file is owned by the bubble. A failed send
+    /// keeps it for the retry; the delivered message lets it go, and the file
+    /// goes with its owner (`UploadMediaFile`).
+    @Test func aVideoBubbleHoldsItsFileThroughARetryAndLetsGoOnceSent() async throws {
+        final class Owner: Sendable {}
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: MediaStubProvider(failures: 1))
+        var phases: [ConversationViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        viewModel.viewDidLoad()
+        #expect(await settle { if case .content = phases.last { true } else { false } })
+
+        weak var watched: Owner?
+        do {
+            let owner = Owner()
+            watched = owner
+            viewModel.send(media: [.video(ChatVideoUpload(
+                fileURL: URL(filePath: "/tmp/UploadMedia/export-test.mp4"), poster: Self.solid(),
+                pixelWidth: 40, pixelHeight: 30, duration: 1, fileOwner: owner
+            ))])
+        }
+        guard case .content(let pending) = phases.last, let bubble = pending.last else {
+            Issue.record("no pending bubble"); return
+        }
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .failed } else { false }
+        })
+        #expect(watched != nil, "a failed bubble let go of the file its retry needs")
+
+        viewModel.retry(bubble.id)
+        #expect(await settle {
+            if case .content(let models) = phases.last { models.last?.delivery == .sent } else { false }
+        })
+        #expect(await settle { watched == nil }, "the sent message still holds its exported file")
+    }
+
     /// ⚠️ A RETRIED PHOTO GOES UP UNDER THE KEY ITS BUBBLE WAS SENT WITH
     /// (#795). A key minted per attempt let a retry after a lost answer store
     /// the picture twice; and two photos sent together are two intents, so

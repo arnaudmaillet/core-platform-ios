@@ -85,13 +85,26 @@ public final class UIAssetCaches: Sendable {
 
     /// The app's UI assets disk namespace, opened on first touch and announced
     /// to `shared`. Opening reads the index and reconciles it with the files:
-    /// touch it off the main thread first. Nil only if the folder cannot be
-    /// created; every asset is then simply rebuilt.
+    /// touch it off the main thread first (the app does, in
+    /// `startCacheCoordinator()`). Nil only if the folder cannot be created;
+    /// every asset is then simply rebuilt.
     public static let disk: DiskStore? = {
-        guard let store = try? openDisk() else { return nil }
-        shared.adopt(store)
+        let store = try? openDisk()
+        if let store { shared.adopt(store) }
+        diskOpened.store(true, ordering: .releasing)
         return store
     }()
+
+    /// Whether `disk` has finished opening, by any caller: what the main
+    /// thread asks before it reads `disk` (#898, from #986's review). Reading
+    /// `disk` before then would open it there, or wait there for the open in
+    /// flight, since a lazy static blocks its readers.
+    public static var isDiskOpen: Bool { diskOpened.load(ordering: .acquiring) }
+
+    /// `disk` once open; nil while it is not (never opens it).
+    public static var diskIfOpen: DiskStore? { isDiskOpen ? disk : nil }
+
+    private static let diskOpened = Atomic<Bool>(false)
 
     // MARK: - Registry
 

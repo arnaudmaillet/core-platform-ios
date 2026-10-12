@@ -1113,6 +1113,20 @@ public final class VideoPlaybackController {
         for entry in released { retire(entry) }
     }
 
+    /// Memory pressure or the background (#898, the device cache's memory
+    /// signals): drops what the pool can build again, and keeps every player
+    /// a surface is showing. The idle players go (the next loan mints one),
+    /// with their renderers; so do the scrubber's frame generators (each holds
+    /// an open reader) and the return players (a close then lands on a still).
+    public func releaseIdleMemory() {
+        releaseAllReturnPlaybacks()
+        frameGenerators.removeAll()
+        for player in idlePlayers {
+            renderers.removeValue(forKey: ObjectIdentifier(player))
+        }
+        idlePlayers.removeAll()
+    }
+
     private func retire(_ entry: ReturnPlayback) {
         entry.holder?.detach(reason: "returnReleased")
         // Every surface still joined to it (a card that never landed) is

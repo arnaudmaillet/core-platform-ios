@@ -1,3 +1,4 @@
+import CacheKit
 import Foundation
 import Lottie
 import UIKit
@@ -81,8 +82,8 @@ public enum StickerCatalog {
         size: CGSize,
         completion: @escaping (UIImage?) -> Void
     ) {
-        let key = "\(sticker.id)@\(Int(size.width))x\(Int(size.height))" as NSString
-        if let cached = frameCache.object(forKey: key) {
+        let key = "\(sticker.id)@\(Int(size.width))x\(Int(size.height))"
+        if let cached = frameCache.value(for: key) {
             completion(cached)
             return
         }
@@ -93,13 +94,25 @@ public enum StickerCatalog {
             }
             let image = StickerFrameDrawer(file: file, size: size)
                 .image(atSeconds: 0, format: .preferred())
-            frameCache.setObject(image, forKey: key)
+            frameCache.insert(image, for: key, cost: Self.cost(of: image))
             completion(image)
         }
     }
 
-    /// Main-actor isolated, matching `firstFrame`: the cache is only ever read
-    /// or written from the render path, so it needs no locking of its own.
-    @MainActor
-    private static let frameCache = NSCache<NSString, UIImage>()
+    /// The first frames, in the UI assets class (#898): a memory cache the
+    /// app's coordinator budgets and trims with the sticker strips, where an
+    /// `NSCache` answered to no signal of the device cache and to no budget.
+    static let frameCache: MemoryCache<String, UIImage> = {
+        let cache: MemoryCache<String, UIImage> = UIAssetCaches.memoryCache("UIAssets.stickerFrames", budget: frameBudget)
+        UIAssetCaches.shared.adopt(cache)
+        return cache
+    }()
+
+    /// A chat strip's dozen frames many times over: a 64 pt frame at 3x is 150 KB.
+    static let frameBudget = MemoryBudget.fixed(bytes: 8 * CacheBytes.mebibyte)
+
+    static func cost(of image: UIImage) -> Int {
+        guard let cgImage = image.cgImage else { return 0 }
+        return cgImage.bytesPerRow * cgImage.height
+    }
 }

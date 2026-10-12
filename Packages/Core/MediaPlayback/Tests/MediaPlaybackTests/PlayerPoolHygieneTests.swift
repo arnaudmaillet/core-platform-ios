@@ -286,6 +286,36 @@ struct PlayerPoolHygieneTests {
         #expect(controller.idlePlayerCount == 2)
     }
 
+    // MARK: - Memory signals (#898)
+
+    /// The device cache's memory signals reach the pool (the app wires
+    /// `CacheCoordinator.observeMemoryPressure` to this): idle players and
+    /// return players go, the players on screen stay, and the next loan mints
+    /// a fresh player.
+    @Test func aMemoryReleaseDropsIdleAndReturnPlayersAndKeepsThoseOnScreen() async {
+        let controller = pool()
+        let shown = VideoRenderView()
+        let gone = (0..<3).map { _ in VideoRenderView() }
+        await controller.play(URL(string: "mock://video/shown")!, in: shown)
+        for (index, view) in gone.enumerated() {
+            await controller.play(URL(string: "mock://video/gone-\(index)")!, in: view)
+        }
+        for view in gone { controller.stop(view) }
+        #expect(await controller.parkReturnPlayback(of: URL(string: "mock://video/return")!, scope: "post", at: 0))
+        #expect(controller.idlePlayerCount == 2, "one idle player went out again for the return player")
+        #expect(controller.returnPlaybackCount == 1)
+
+        controller.releaseIdleMemory()
+        #expect(controller.idlePlayerCount == 0)
+        #expect(controller.returnPlaybackCount == 0)
+        #expect(controller.activePlayerCount == 1, "the player on screen is kept")
+        #expect(players(controller, on: URL(string: "mock://video/shown")!) == 1)
+
+        let next = VideoRenderView()
+        await controller.play(URL(string: "mock://video/next")!, in: next)
+        #expect(controller.activePlayerCount == 2, "the next loan mints a player")
+    }
+
     // MARK: - The pool's size (#702)
 
     /// Settings' player pool resizes a live pool: the budget and the idle

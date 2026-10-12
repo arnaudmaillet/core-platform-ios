@@ -24,6 +24,21 @@ struct MemoryCacheTests {
         #expect(cache.usage.bytes == 10)
     }
 
+    /// #900's review: the doc said a refused store always left the existing
+    /// entry, which only holds for a refusal before the eviction pass. A
+    /// value refused BY the pass (the room is leased) has already replaced the
+    /// old one: the key is left empty, never stale.
+    @Test func aStoreRefusedByTheEvictionPassLeavesTheKeyEmptyNotStale() {
+        let cache = memoryCache(limit: 20)
+        cache.insert("old", for: "x", cost: 5)
+        let pinned = cache.insertLeased("on screen", for: "pinned", cost: 15)
+        #expect(!cache.insert("new", for: "x", cost: 10), "fits the budget, but the room is leased")
+        #expect(cache.peek("x") == nil, "neither the new value nor the stale one")
+        #expect(cache.peek("pinned") == "on screen")
+        #expect(cache.usage.bytes == 15)
+        pinned.release()
+    }
+
     @Test func evictionOrderIsSpeculativeThenRecentThenRetained() {
         let cache = memoryCache(limit: 40)
         cache.insert("a", for: "retained", cost: 10, tier: .retained)

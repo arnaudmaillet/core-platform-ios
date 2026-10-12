@@ -109,6 +109,9 @@ final class EmoteCacheClassTests {
             budget: DiskBudget(pool: .images), root: root
         )
         coordinator.register(images)
+        // Registered on the main thread, disk budgets land on the
+        // coordinator's queue (#898).
+        coordinator.waitForDiskWork()
         #expect(store.limits.bytes == 64 * CacheBytes.megabyte)
         #expect(images.limits.bytes == 8 * CacheBytes.megabyte)
 

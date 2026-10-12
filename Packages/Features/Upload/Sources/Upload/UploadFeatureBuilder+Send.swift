@@ -28,6 +28,8 @@ extension UploadFeatureBuilder {
         completion: @escaping @MainActor ([PickedSendMedia]) -> Void
     ) -> UIViewController {
         let root: UIViewController
+        // Exports a process that died mid-send left behind (#898).
+        UploadMediaFile.sweepOrphans()
         switch source {
         case .library:
             let library = Self.makeSendLibrary()

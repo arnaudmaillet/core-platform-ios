@@ -52,6 +52,8 @@ public final class DiskStore: ManagedCache {
     private let speculativeLifetime: TimeInterval
     private let idleLifetime: TimeInterval?
     private let flushThreshold: Int
+    /// Appended to every new file's name (`.mp4`), or empty.
+    private let fileSuffix: String
     private let state: Mutex<State>
     /// Serialises index writes so an older snapshot never lands after a newer
     /// one. Always taken BEFORE `state`, never inside it.
@@ -76,6 +78,9 @@ public final class DiskStore: ManagedCache {
     ///   - idleLifetime: when set, an entry nobody used for that long expires,
     ///     whatever its tier (UI assets: 30 days, #971).
     ///   - flushThreshold: index changes between automatic flushes.
+    ///   - fileExtension: given to every file the store writes, for a
+    ///     reader that goes by it (`AVURLAsset` reads a file's type from its
+    ///     extension: a published clip, #898). Nil by default: bare names.
     public init(
         namespace: CacheNamespace,
         version: Int = 1,
@@ -85,7 +90,8 @@ public final class DiskStore: ManagedCache {
         clock: any CacheClock = SystemCacheClock(),
         speculativeLifetime: TimeInterval = CacheTier.speculativeLifetime,
         idleLifetime: TimeInterval? = nil,
-        flushThreshold: Int = 32
+        flushThreshold: Int = 32,
+        fileExtension: String? = nil
     ) throws {
         guard Self.isValidName(namespace.name) else { throw StoreError.invalidNamespaceName(namespace.name) }
         let fileManager = FileManager.default
@@ -129,6 +135,7 @@ public final class DiskStore: ManagedCache {
         self.speculativeLifetime = speculativeLifetime
         self.idleLifetime = idleLifetime
         self.flushThreshold = max(1, flushThreshold)
+        self.fileSuffix = fileExtension.map { ".\($0)" } ?? ""
 
         let recovered = Self.recover(indexURL: indexURL, objects: objects, now: clock.now, idle: idleLifetime)
         state = Mutex(State(limits: limits, records: recovered.records, nextOrder: recovered.nextOrder))
@@ -186,7 +193,7 @@ public final class DiskStore: ManagedCache {
     @discardableResult
     public func write(_ data: Data, for key: String, tier: CacheTier = .recent, expiresAt: Date? = nil) throws -> Bool {
         guard admits(size: data.count, key: key, tier: tier) else { return false }
-        let file = UUID().uuidString
+        let file = UUID().uuidString + fileSuffix
         let staged = incoming.appending(path: file)
         try data.write(to: staged)
         return try commit(staged: staged, file: file, size: data.count, key: key, tier: tier, expiresAt: expiresAt)
@@ -202,7 +209,7 @@ public final class DiskStore: ManagedCache {
             try? FileManager.default.removeItem(at: source)
             return false
         }
-        let file = UUID().uuidString
+        let file = UUID().uuidString + fileSuffix
         let staged = incoming.appending(path: file)
         try FileManager.default.moveItem(at: source, to: staged)
         return try commit(staged: staged, file: file, size: size, key: key, tier: tier, expiresAt: expiresAt)
