@@ -26,9 +26,17 @@ import Synchronization
 /// Open ONE store per namespace per process: start-up cleans the folder, so a
 /// second instance would delete the first one's staged writes.
 ///
+/// - **A wipe returns at once** (`removeAll`, #898): the index is emptied and
+///   the `objects` folder is renamed to a `trash-<uuid>` folder under the
+///   lock, so nothing is served afterwards, and the files are deleted on a
+///   utility queue. A logout or a profile switch posts on the main thread;
+///   the wipe never does disk I/O there beyond a few renames. Trash a crash
+///   left behind is deleted at the next start-up, off the caller's thread too.
+///
 /// Thread-safe behind a `Mutex` (see `MemoryCache` for why not an actor).
-/// File reads and writes run outside the lock; only renames and the index
-/// bookkeeping run under it.
+/// File reads and writes run outside the lock; only renames (a write's commit
+/// into `objects`, a wipe's swap of the folder) and the index bookkeeping run
+/// under it, so a wipe and a commit never interleave.
 public final class DiskStore: ManagedCache {
     public let namespace: CacheNamespace
     public let diskBudget: DiskBudget
@@ -48,6 +56,12 @@ public final class DiskStore: ManagedCache {
     /// Serialises index writes so an older snapshot never lands after a newer
     /// one. Always taken BEFORE `state`, never inside it.
     private let flushGate = Mutex(())
+
+    /// Deletes wiped files and start-up trash, off every caller's thread.
+    static let janitor = DispatchQueue(label: "CacheKit.DiskStore.janitor", qos: .utility)
+
+    /// The prefix of a wiped `objects` folder waiting for the janitor.
+    static let trashPrefix = "trash-"
 
     public enum StoreError: Error, Equatable {
         /// The name must be a plain folder name: letters, digits, `.`, `-`, `_`.
@@ -91,6 +105,16 @@ public final class DiskStore: ManagedCache {
             try? fileManager.removeItem(at: namespaceFolder.appending(path: item))
         }
         try? fileManager.removeItem(at: incoming)
+        // A wipe's trash the janitor never reached (the app was killed first):
+        // not one of ours any more, deleted in the background.
+        let leftovers = ((try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? [])
+            .filter { $0.hasPrefix(Self.trashPrefix) }
+            .map { directory.appending(path: $0, directoryHint: .isDirectory) }
+        if !leftovers.isEmpty {
+            Self.janitor.async {
+                for folder in leftovers { try? FileManager.default.removeItem(at: folder) }
+            }
+        }
         try fileManager.createDirectory(at: objects, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: incoming, withIntermediateDirectories: true)
 
@@ -241,17 +265,48 @@ public final class DiskStore: ManagedCache {
 
     // MARK: - ManagedCache
 
+    /// Empties the namespace and returns at once: nothing is served after
+    /// this call, and the files are deleted on a utility queue. A leased file
+    /// stays readable at its path until its last lease ends. A write that
+    /// commits after the wipe lands in the fresh folder and is kept.
     public func removeAll() {
-        let garbage = state.withLock { state -> [String] in
+        let fileManager = FileManager.default
+        let trash = directory.appending(path: Self.trashPrefix + UUID().uuidString, directoryHint: .isDirectory)
+        let objectsFolder = self.objects
+        let outcome: (swapped: Bool, garbage: [String]) = state.withLock { state in
             var garbage: [String] = []
             for key in Array(state.records.keys) {
                 garbage += state.remove(key)
             }
             state.markChanged(structural: true)
-            return garbage
+            // One rename hides every file; commits take this lock to move a
+            // file in, so none lands in the folder being thrown away.
+            guard (try? fileManager.moveItem(at: objectsFolder, to: trash)) != nil else {
+                // No folder to swap (iOS purged `Caches`): the files go one by
+                // one in the background, and commits get their folder back.
+                try? fileManager.createDirectory(at: objectsFolder, withIntermediateDirectories: true)
+                return (false, garbage)
+            }
+            try? fileManager.createDirectory(at: objectsFolder, withIntermediateDirectories: true)
+            // Files a player still reads by path come back (a handful at most).
+            for file in state.doomed.keys {
+                try? fileManager.moveItem(at: trash.appending(path: file), to: objectsFolder.appending(path: file))
+            }
+            return (true, [])
         }
-        delete(garbage)
-        flush()
+        Self.janitor.async { [weak self] in
+            if outcome.swapped {
+                try? fileManager.removeItem(at: trash)
+            } else {
+                for file in outcome.garbage { try? fileManager.removeItem(at: objectsFolder.appending(path: file)) }
+            }
+            self?.flush()
+        }
+    }
+
+    /// Waits for the deletions a wipe or a start-up queued. Tests only.
+    static func drainJanitor() {
+        janitor.sync {}
     }
 
     public func setLimits(_ limits: CacheLimits) {
@@ -364,19 +419,22 @@ public final class DiskStore: ManagedCache {
 
     private func commit(staged: URL, file: String, size: Int, key: String, tier: CacheTier, expiresAt: Date?) throws -> Bool {
         let final = objectURL(file)
-        do {
-            try FileManager.default.moveItem(at: staged, to: final)
-        } catch {
-            try? FileManager.default.removeItem(at: staged)
-            throw error
-        }
         let now = clock.now
         let lifetime = speculativeLifetime
+        var moveError: (any Error)?
         let outcome: (kept: Bool, garbage: [String]) = state.withLock { state in
             let existing = state.records[key]
             let storedTier = max(existing?.tier ?? tier, tier)
             if size > state.limits.bytes || (storedTier == .speculative && size > state.limits.speculativeBytes) {
-                return (false, [file])
+                return (false, [])
+            }
+            // The rename runs under the lock, so a wipe's swap of `objects`
+            // can never fall between the file landing and its record.
+            do {
+                try FileManager.default.moveItem(at: staged, to: final)
+            } catch {
+                moveError = error
+                return (false, [])
             }
             // The old file goes, or waits for its leases (a player reading it).
             let garbage = state.remove(key)
@@ -391,6 +449,14 @@ public final class DiskStore: ManagedCache {
             state.markChanged(structural: true)
             let evicted = state.enforceLimits(protecting: key, ceiling: storedTier == .speculative ? .recent : .retained)
             return (state.records[key]?.file == file, garbage + evicted)
+        }
+        if let moveError {
+            try? FileManager.default.removeItem(at: staged)
+            throw moveError
+        }
+        if !outcome.kept, FileManager.default.fileExists(atPath: staged.path) {
+            // Refused before the move.
+            try? FileManager.default.removeItem(at: staged)
         }
         delete(outcome.garbage)
         flushIfNeeded()

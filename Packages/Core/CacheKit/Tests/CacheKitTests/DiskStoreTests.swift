@@ -271,6 +271,71 @@ final class DiskStoreTests {
         #expect(store.usage.bytes == 0)
     }
 
+    // MARK: - Wipes off the caller's thread (#898)
+
+    private func trashFolders(_ name: String = "media", version: Int = 1) -> [String] {
+        folder.files(in: "\(name)/v\(version)").filter { $0.hasPrefix(DiskStore.trashPrefix) }
+    }
+
+    @Test func aWipeReturnsAtOnceAndServesNothingAfterwards() throws {
+        let store = try open()
+        try store.write(bytes(10), for: "a")
+        try store.write(bytes(10), for: "b")
+
+        store.removeAll()
+
+        #expect(!store.contains("a") && !store.contains("b"))
+        #expect(store.data(for: "a") == nil && store.fileURL(for: "b") == nil)
+        #expect(objectFiles().isEmpty, "the folder is swapped out before the call returns")
+        #expect(store.usage.bytes == 0 && store.usage.count == 0)
+        DiskStore.drainJanitor()
+    }
+
+    @Test func theWipedFilesAreEventuallyDeleted() throws {
+        let store = try open()
+        try store.write(bytes(10), for: "a")
+        store.flush()
+
+        store.removeAll()
+        DiskStore.drainJanitor()
+
+        #expect(trashFolders().isEmpty)
+        #expect(objectFiles().isEmpty)
+        let reopened = try open()
+        #expect(!reopened.contains("a"), "the flushed index forgot it too")
+    }
+
+    @Test func aWriteThatLandsDuringABackgroundWipeSurvives() throws {
+        let store = try open()
+        try store.write(bytes(10, 1), for: "old")
+        // Holds the janitor, so the wipe's deletion is still pending while
+        // the next write commits.
+        let held = DispatchSemaphore(value: 0)
+        DiskStore.janitor.async { held.wait() }
+
+        store.removeAll()
+        #expect(try store.write(bytes(12, 2), for: "new"))
+        held.signal()
+        DiskStore.drainJanitor()
+
+        #expect(store.data(for: "new") == bytes(12, 2))
+        #expect(!store.contains("old"))
+        #expect(objectFiles().count == 1)
+    }
+
+    @Test func trashLeftByACrashIsDeletedAtStartUp() throws {
+        _ = try open()
+        let trash = folder.url.appending(path: "media/v1/\(DiskStore.trashPrefix)crashed", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
+        try bytes(10).write(to: trash.appending(path: "orphan"))
+
+        let store = try open()
+        DiskStore.drainJanitor()
+
+        #expect(trashFolders().isEmpty)
+        #expect(store.usage.count == 0)
+    }
+
     @Test func replacingALeasedEntryKeepsTheOldFileUntilRelease() throws {
         let store = try open()
         try store.write(bytes(10, 1), for: "a")
