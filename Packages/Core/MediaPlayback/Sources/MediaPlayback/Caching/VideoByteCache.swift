@@ -44,6 +44,12 @@ import Synchronization
 /// local proxy that rewrites the manifest (what player SDKs ship), the
 /// follow-up when the backend serves manifests.
 ///
+/// **Sounds too.** Songs and sound previews (MP3, M4A, or a clip played for
+/// its sound) open through the same loader and the same namespaces
+/// (`VideoPlaybackController.soundItem(for:)`), with the same tiers: a sound
+/// is a progressive file like a clip, and a post's original sound IS its
+/// clip, so one copy serves both. They count as Videos in Settings → Storage.
+///
 /// ## Preload
 ///
 /// `preloadHead(of:priority:owner:)` writes a file's head range to disk as a
@@ -68,12 +74,12 @@ public final class VideoByteCache: Sendable {
     /// their stores open.
     private let publicDisk: DeferredVideoDisk
     private let signedDisk: DeferredVideoDisk
-    private let opening: VideoStoreOpening
+    let opening: VideoStoreOpening
     let statistics = VideoCacheStatistics()
     private let fetcher: any VideoRangeFetching
     private let heads: CacheFills<String, Void>
     private let coordinator: CacheCoordinator?
-    private let chunkSize: Int64
+    let chunkSize: Int64
     private let cancelGrace: TimeInterval
     /// The resource loaders' delegate queue, shared by every cached asset.
     let queue = DispatchQueue(label: "MediaPlayback.VideoByteCache", qos: .userInitiated)

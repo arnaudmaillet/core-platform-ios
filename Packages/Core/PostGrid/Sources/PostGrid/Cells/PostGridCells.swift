@@ -2735,6 +2735,11 @@ public final class PostGridTileCell: UICollectionViewCell {
         loadedVideoRenderView?.setPoster(image)
     }
 
+    public func showReturnStill(_ image: UIImage) {
+        imageView.image = image
+        loadedVideoRenderView?.setPoster(image)
+    }
+
     /// Fired when the cover lands from an async load.
     ///
     /// Autoplay is gated on the cover being present, and the gate is evaluated

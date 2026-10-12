@@ -495,6 +495,11 @@ final class SoundSheetTileCell: UICollectionViewCell {
         loadedVideoRenderView?.setPoster(image)
     }
 
+    func showReturnStill(_ image: UIImage) {
+        imageView.image = image
+        loadedVideoRenderView?.setPoster(image)
+    }
+
     func makeVideoRenderViewIfNeeded() -> VideoRenderView {
         if let loadedVideoRenderView { return loadedVideoRenderView }
         let view = VideoRenderView()

@@ -41,6 +41,12 @@ public protocol GridPlaybackCell: UIView {
     /// Puts a cover on immediately, ahead of any load already in flight.
     func applyCover(_ image: UIImage)
 
+    /// Makes `image`, the frame a return player was parked on (#895), the
+    /// cover, REPLACING the one shown: a close whose player went lands on the
+    /// picture the viewer left, not on the thumbnail. A cell that cannot
+    /// replace its cover (a collection's carousel) keeps `applyCover`'s rule.
+    func showReturnStill(_ image: UIImage)
+
     /// Fired when a cover lands from an async load, so the gate above can be
     /// re-run. Without it a cell whose cover arrives while the surface is
     /// stationary fails the gate once and is never asked again.
@@ -125,6 +131,8 @@ public protocol GridPlaybackCell: UIView {
 }
 
 public extension GridPlaybackCell {
+    func showReturnStill(_ image: UIImage) { applyCover(image) }
+
     /// A cell that draws one attachment holds one surface, and there is nothing
     /// for a window to choose between.
     var retainedPlaybackSurfaces: [VideoRenderView] {

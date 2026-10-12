@@ -23,4 +23,16 @@ enum VideoStillCapture {
         guard let rendered = context.createCGImage(source, from: source.extent) else { return nil }
         return UIImage(cgImage: rendered)
     }
+
+    /// The same, scaled down so its longest side is at most `maxPixels`: a
+    /// picture to keep, not to show once.
+    static func image(from buffer: CVPixelBuffer, maxPixels: CGFloat) -> UIImage? {
+        let source = CIImage(cvPixelBuffer: buffer)
+        let longest = max(source.extent.width, source.extent.height)
+        guard longest > 0 else { return nil }
+        let scale = min(1, maxPixels / longest)
+        let scaled = scale < 1 ? source.transformed(by: CGAffineTransform(scaleX: scale, y: scale)) : source
+        guard let rendered = context.createCGImage(scaled, from: scaled.extent.integral) else { return nil }
+        return UIImage(cgImage: rendered)
+    }
 }

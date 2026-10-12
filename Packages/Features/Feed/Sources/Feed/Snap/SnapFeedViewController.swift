@@ -291,7 +291,8 @@ final class SnapFeedViewController: UIViewController {
     /// The surface THIS screen last made audible, so leaving only clears its own.
     private weak var ownAudibleSurface: VideoRenderView?
     private var isAudioYielded = false
-    private let songPlayer = FeedSongPlayer()
+    /// Through the pool's byte cache when there is one (#895).
+    private lazy var songPlayer = FeedSongPlayer(playback: videoPlayback)
     private var coverSpinTimer: Timer?
     private var isForeground = true
     /// Background Play (#483): this screen's clip went on playing when the

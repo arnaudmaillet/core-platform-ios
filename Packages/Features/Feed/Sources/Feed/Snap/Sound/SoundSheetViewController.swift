@@ -1733,7 +1733,7 @@ final class SoundSheetViewController: UIViewController {
     private func startPreview() {
         guard let url = sound.previewURL else { return }
         if preview == nil {
-            let player = AVPlayer(url: url)
+            let player = makePreviewPlayer(for: url)
             player.actionAtItemEnd = .pause
             previewEndObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
@@ -1760,6 +1760,13 @@ final class SoundSheetViewController: UIViewController {
         header?.setPlaying(true)
         preview?.play()
         HapticImpact(style: .light).impactOccurred()
+    }
+
+    /// The preview's player: through the pool's byte cache when there is one
+    /// (#895), so a sound previewed twice, or a clip's original sound whose
+    /// clip already played, is not fetched again.
+    func makePreviewPlayer(for url: URL) -> AVPlayer {
+        AVPlayer(playerItem: videoPlayback?.soundItem(for: url) ?? AVPlayerItem(url: url))
     }
 
     private func stopPreview(rewinding: Bool = false) {
