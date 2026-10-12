@@ -120,12 +120,20 @@ extension SnapFeedViewController {
            let asked = Int(arguments[index + 1]), asked > 0 {
             steps = asked
         }
+        // `-snap-fling-dwell S`: seconds on each page before the next fling
+        // (1.5 by default) — long enough, say 6, for the video lookahead to
+        // warm +1 and preload the heads ahead (#895, read with `-cache-audit`).
+        var dwell = 1.5
+        if let index = arguments.firstIndex(of: "-snap-fling-dwell"), index + 1 < arguments.count,
+           let asked = Double(arguments[index + 1]), asked > 0 {
+            dwell = asked
+        }
         print("[fling] begin from=\(Int(start)) to=\(Int(target))")
         func step(_ index: Int) {
             guard index <= steps else {
                 self.scrollViewDidEndDecelerating(self.collectionView)
                 print("[fling] settle offsetY=\(Int(self.collectionView.contentOffset.y))")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                DispatchQueue.main.asyncAfter(deadline: .now() + dwell) { [weak self] in
                     self?.debugFlingPages(remaining - 1)
                 }
                 return

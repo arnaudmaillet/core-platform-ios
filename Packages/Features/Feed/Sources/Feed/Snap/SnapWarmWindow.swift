@@ -63,4 +63,16 @@ enum SnapWarmWindow {
     static func players(around active: Int, count: Int) -> [Int] {
         indices(around: active, count: count, ahead: playersEitherSide, behind: playersEitherSide)
     }
+
+    /// Pages of video planned ahead by the byte cache's lookahead (#895): +1
+    /// warmed, +2 and +3 head ranges only. The policy may plan fewer.
+    static let videoAhead = 3
+
+    /// The video lookahead's window: the pages after the active one, +1
+    /// first (as far as the feed goes), and the page before it.
+    static func videoLookahead(around active: Int, count: Int) -> (ahead: [Int], behind: Int?) {
+        guard count > 0, active >= 0, active < count else { return ([], nil) }
+        let ahead = Array((active + 1)..<min(count, active + 1 + videoAhead))
+        return (ahead, active > 0 ? active - 1 : nil)
+    }
 }

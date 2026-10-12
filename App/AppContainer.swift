@@ -513,12 +513,67 @@ final class AppContainer {
     }
 
     private(set) lazy var videoPlayback: VideoPlaybackController = {
-        let source: any VideoSource = switch environment {
-        case .mock: PlaceholderVideoFetcher(bundledClip: { MockClipCatalog.shared.fileURL(forVideo: $0) })
-        case .localFleet: PassthroughVideoSource()
-        }
-        return Self.sizedToPreference(VideoPlaybackController(source: source))
+        Self.sizedToPreference(VideoPlaybackController(source: makeVideoSource(), byteCache: videoByteCache))
     }()
+
+    /// The device cache's video bytes (#895): progressive files read through
+    /// it from disk, gaps fetched and written back, and the vertical feed's
+    /// head preloads. Its two namespaces (public and signed) join
+    /// `cacheCoordinator` in the `.video` pool (500 MB in Automatic); the
+    /// signed one is wiped on every viewer change. Shared by both playback
+    /// pools: one store per namespace per process. Nil only when its folder
+    /// cannot be opened: players then stream as they did before.
+    private lazy var videoByteCache: VideoByteCache? = {
+        do {
+            return try VideoByteCache(coordinator: cacheCoordinator)
+        } catch {
+            Logger(subsystem: "cn.wynn.core-platform-ios", category: "video-cache")
+                .error("video cache unavailable: \(String(describing: error), privacy: .public)")
+            return nil
+        }
+    }()
+
+    private func makeVideoSource() -> any VideoSource {
+        switch environment {
+        case .mock:
+            #if DEBUG
+            if Self.servesRemoteClips {
+                return PlaceholderVideoFetcher(bundledClip: { Self.remoteClip(for: $0) })
+            }
+            #endif
+            return PlaceholderVideoFetcher(bundledClip: { MockClipCatalog.shared.fileURL(forVideo: $0) })
+        case .localFleet:
+            return PassthroughVideoSource()
+        }
+    }
+
+    #if DEBUG
+    /// `-video-cache-remote`: mock mode plays every clip from a public MP4
+    /// over HTTP instead of the bundled file, so the video byte cache and the
+    /// feed's preload (#895) run in the simulator without a fleet. Each post
+    /// gets its own `qa` query item, so two posts never share a cache key.
+    /// Needs network; pair it with `-cache-audit` to read the cache's log.
+    static let servesRemoteClips = ProcessInfo.processInfo.arguments.contains("-video-cache-remote")
+
+    /// Verified with a ranged GET (206, `video/mp4`), as `DebugMediaLibrary`'s
+    /// real clips are.
+    private nonisolated static let remoteClips = [
+        "https://media.w3.org/2010/05/sintel/trailer.mp4",
+        "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/720/Big_Buck_Bunny_720_10s_1MB.mp4",
+        "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4"
+    ]
+
+    private nonisolated static func remoteClip(for url: URL) -> URL? {
+        // FNV-1a: stable across launches, unlike `Hasher`.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in url.absoluteString.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01B3
+        }
+        let base = remoteClips[Int(hash % UInt64(remoteClips.count))]
+        return URL(string: base + "?qa=" + String(hash, radix: 16))
+    }
+    #endif
 
     /// A playback pool sized by Settings' player pool (#702), and resized
     /// live when it changes.
@@ -860,11 +915,7 @@ final class AppContainer {
     #endif
 
     private lazy var mapsVideoPlayback: VideoPlaybackController = {
-        let source: any VideoSource = switch environment {
-        case .mock: PlaceholderVideoFetcher(bundledClip: { MockClipCatalog.shared.fileURL(forVideo: $0) })
-        case .localFleet: PassthroughVideoSource()
-        }
-        return Self.sizedToPreference(VideoPlaybackController(source: source))
+        Self.sizedToPreference(VideoPlaybackController(source: makeVideoSource(), byteCache: videoByteCache))
     }()
 
     /// The account's unlocked countries — the map shows only their posts.
