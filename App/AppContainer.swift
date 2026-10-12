@@ -322,6 +322,10 @@ final class AppContainer {
         guard !cacheSignalsStarted else { return }
         cacheSignalsStarted = true
         cacheCoordinator.startObserving(AppCacheSignals.sources())
+        // UI assets (#971): the emote sheets, sticker strips, animated icons
+        // and flag palette the kits announced, now and later, join the
+        // coordinator as its longest-kept class.
+        UIAssetCaches.shared.attach(to: cacheCoordinator)
     }
 
     private var cacheSignalsStarted = false
@@ -900,7 +904,10 @@ final class AppContainer {
         // icon's 0.07 — a shared budget would let the dear one evict the cheap
         // one on every pan. Nineteen previews is 51.5 MB, so this is sized to
         // hold the measured field rather than to a round number.
-        memoryBudgetMB: 64
+        memoryBudgetMB: 64,
+        // Cut from posts' clips: feed media, not a UI asset (#971). Goes with
+        // the feed under memory pressure, ahead of the icons.
+        priorityClass: .standard
     )
 
     private static func mockPreviewSheets(

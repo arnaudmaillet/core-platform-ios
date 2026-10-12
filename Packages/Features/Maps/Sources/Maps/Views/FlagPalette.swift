@@ -1,3 +1,5 @@
+import CacheKit
+import Synchronization
 import UIKit
 
 /// A country's flag as the map wears it: the ROUND flag as a picture (the
@@ -22,7 +24,9 @@ import UIKit
 /// The round flags are flat artwork, so their colours are the flag's own, not
 /// an emoji's shaded ones.
 ///
-/// Loaded once per country and cached for the life of the process.
+/// Loaded once per country and kept in the device cache's UI assets class
+/// (#971, `UIAssetCaches`): through memory warnings and the background, and
+/// rendered again only after a CRITICAL warning.
 ///
 /// ⚠️ **WARMED OFF THE MAIN THREAD.** One flag is a few hundred microseconds,
 /// but the world zoom realises a disc for every country without posts at
@@ -30,7 +34,7 @@ import UIKit
 /// `CountryLayer` warms every country on a background queue as soon as the
 /// atlas is decoded (`warm`), so the map only ever reads the cache. Thread-safe
 /// for that reason: `UIImage(named:in:compatibleWith:)`, UIKit's image renderer
-/// and string drawing are, and the cache sits behind a lock.
+/// and string drawing are, and so is the cache.
 enum FlagPalette {
     /// The colours a border wears, ordered along `axis`, and the flag picture.
     struct Entry: @unchecked Sendable {
@@ -45,6 +49,12 @@ enum FlagPalette {
         /// fill a circle — rather than the rectangular emoji, which sits inside
         /// one.
         let isRound: Bool
+
+        /// What the entry keeps resident: its decoded picture.
+        var byteCost: Int {
+            guard let cgImage = image?.cgImage else { return 256 }
+            return cgImage.bytesPerRow * cgImage.height
+        }
     }
 
     enum Axis: Equatable {
@@ -56,38 +66,37 @@ enum FlagPalette {
 
     /// The rendered flags, and how many renders it took — the cache's own
     /// probe.
-    private final class Cache: @unchecked Sendable {
-        private let lock = NSLock()
-        private var entries: [String: Entry] = [:]
-        private(set) var renders = 0
+    private final class Cache: Sendable {
+        /// 24 MB: every atlas flag at 3x is about 14 MB (120 px square), with
+        /// room for the emoji fallbacks.
+        static let budget = MemoryBudget.fixed(bytes: 24 * CacheBytes.mebibyte)
+
+        let entries: MemoryCache<String, Entry> = UIAssetCaches.memoryCache("UIAssets.flags", budget: Cache.budget)
+        private let renders = Mutex(0)
+
+        init() {
+            UIAssetCaches.shared.adopt(entries)
+        }
 
         func entry(for key: String, render: (String) -> Entry) -> Entry {
-            lock.lock()
-            if let cached = entries[key] {
-                lock.unlock()
-                return cached
-            }
-            lock.unlock()
-            // Rendered OUTSIDE the lock: a warm-up on a background queue must
+            if let cached = entries.value(for: key) { return cached }
+            // Rendered OUTSIDE any lock: a warm-up on a background queue must
             // never hold the main thread's read. Two racing renders of one
             // flag are identical; the first stored wins.
             let rendered = render(key)
-            lock.lock()
-            defer { lock.unlock() }
-            renders += 1
-            if let raced = entries[key] { return raced }
-            entries[key] = rendered
+            renders.withLock { $0 += 1 }
+            if let raced = entries.peek(key) { return raced }
+            entries.insert(rendered, for: key, cost: rendered.byteCost)
             return rendered
         }
 
-        var renderCount: Int {
-            lock.lock()
-            defer { lock.unlock() }
-            return renders
-        }
+        var renderCount: Int { renders.withLock { $0 } }
     }
 
     private static let cache = Cache()
+
+    /// The palette's cache, for the tests that check its class.
+    static var managedCache: MemoryCache<String, Entry> { cache.entries }
 
     #if DEBUG
     /// How many flags were actually rendered.

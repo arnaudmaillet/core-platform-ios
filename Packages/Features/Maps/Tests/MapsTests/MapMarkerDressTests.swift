@@ -1,3 +1,4 @@
+import CacheKit
 import CoreModels
 import DesignSystem
 import Foundation
@@ -767,6 +768,19 @@ struct FlagPaletteTests {
         let second = FlagPalette.entry(for: "br")
         #expect(FlagPalette.renderCount == count, "the second ask was a cache hit")
         #expect(first.image === second.image)
+    }
+
+    /// The palette is a UI asset (#971): kept longest, kept on logout, and
+    /// announced to the registry the app's coordinator attaches to.
+    @Test func thePaletteLivesInTheUIAssetsClass() {
+        _ = FlagPalette.entry(for: "IT")
+        let cache = FlagPalette.managedCache
+        #expect(cache.namespace == UIAssetCaches.namespace("UIAssets.flags"))
+        #expect(!cache.namespace.isWipedOnViewerChange)
+        #expect(cache.peek("IT") != nil)
+        #expect(UIAssetCaches.shared.caches.contains { $0 === cache })
+        // Every atlas flag fits: 237 at 120 px square is about 14 MB.
+        #expect(cache.limits.bytes >= 237 * 120 * 120 * 4)
     }
 
     /// Every country the atlas draws gets a border of at least two colours

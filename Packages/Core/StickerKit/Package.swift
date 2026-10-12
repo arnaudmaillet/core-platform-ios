@@ -13,6 +13,9 @@ let package = Package(
         // — MediaPlayback depends on no local package, and it must never learn
         // about Lottie, which renders on the main actor alone.
         .package(path: "../MediaPlayback"),
+        // The device cache (#891): baked strips live in its UI assets class
+        // (#971).
+        .package(path: "../CacheKit"),
         // Stickers are dotLottie (.lottie) files — a zipped bundle of Bodymovin
         // JSON — so a real player is required. The same declaration as Chat's,
         // so the two resolve to one checkout.
@@ -23,6 +26,7 @@ let package = Package(
             name: "StickerKit",
             dependencies: [
                 "MediaPlayback",
+                "CacheKit",
                 .product(name: "Lottie", package: "lottie-ios")
             ],
             // .copy, not .process: the sticker folder keeps its structure in
@@ -35,6 +39,7 @@ let package = Package(
             dependencies: [
                 "StickerKit",
                 "MediaPlayback",
+                "CacheKit",
                 .product(name: "Lottie", package: "lottie-ios")
             ]
         )

@@ -1,3 +1,4 @@
+import CacheKit
 import Foundation
 import Lottie
 import MediaCore
@@ -11,6 +12,8 @@ import UIKit
 /// - **Lottie emotes** (Noto emoji, StickerKit stickers) are BAKED: drawn once
 ///   into a small sprite sheet at a text-size bucket (`pixelBuckets`), OFF the
 ///   main thread (`EmoteBakeQueue`), then kept in memory and on disk.
+/// - **The most used emotes** ship already baked at the text bucket
+///   (`EmoteSeeds`), so their first frame needs no bake at all.
 /// - **Map icons** are already baked by `Tools/IconBaker`; they come straight
 ///   from the app's `AnimatedIconCatalog`.
 ///
@@ -18,6 +21,14 @@ import UIKit
 /// `AnimatedIconView`: a `CAKeyframeAnimation` on `contentsRect`, run by the
 /// render server. Once an emote is on screen the app's main thread never
 /// wakes for it again.
+///
+/// ## Where art is kept
+///
+/// In the UI assets class of the device cache (`UIAssetCaches`, #971), the
+/// one kept longest: sheets in memory survive a memory warning and the
+/// background, and leave only on a CRITICAL warning (after feed media and
+/// avatars), and sheets on disk live in a 64 MB reserved namespace that other
+/// caches never reclaim. A logout keeps both: the art is the same for anyone.
 ///
 /// ## Requests
 ///
@@ -27,7 +38,16 @@ import UIKit
 /// background work.
 @MainActor
 public final class EmoteEngine {
-    public static let shared = EmoteEngine()
+    public static let shared = EmoteEngine(seeds: .bundled, registry: .shared)
+
+    /// Resident sheets: 1% of physical memory, clamped to 32–64 MB. One
+    /// keyboard screen bakes about 50 MB of sheets (#926), which the old flat
+    /// 32 MB could not hold: a 6 GB device now holds it, a 3 GB one keeps the
+    /// old figure. A BYTE budget: a 64 px sheet is about a megabyte, so a
+    /// count limit would never bind.
+    nonisolated static let memoryBudget = MemoryBudget.physicalMemoryFraction(
+        0.01, minimum: 32 * CacheBytes.mebibyte, maximum: 64 * CacheBytes.mebibyte
+    )
 
     /// Whether art is a whole loop or its first frame alone.
     public enum Motion: Sendable, Hashable {
@@ -72,6 +92,8 @@ public final class EmoteEngine {
         public internal(set) var bakesFinished = 0
         public internal(set) var bakesCancelled = 0
         public internal(set) var diskHits = 0
+        /// Sheets read from the bundled seed set (`EmoteSeeds`).
+        public internal(set) var seedHits = 0
         public internal(set) var memoryHits = 0
         /// Milliseconds the most recent bake spent drawing — on the bake
         /// queue, never on the main thread.
@@ -94,26 +116,35 @@ public final class EmoteEngine {
     typealias ArtProvider = @MainActor (Emote, Int, Motion) async -> AnimatedIconArt?
     var artProvider: ArtProvider?
 
-    private let cache = NSCache<NSString, ArtBox>()
+    /// Resident sheets, in the UI assets class (`UIAssetCaches`).
+    let memory: MemoryCache<String, AnimatedIconArt>
     private let diskCache: EmoteDiskCache?
+    private let seeds: EmoteSeeds?
     private var pending: [String: Pending] = [:]
     private var nextToken = 0
     private(set) var animatedCount = 0
     private(set) var playingTileCount = 0
     private let waitingForPlayback = NSHashTable<AnyObject>.weakObjects()
 
-    /// - Parameter memoryBudgetMB: a BYTE budget for resident sheets — a 64 px
-    ///   sheet is about a megabyte, so a count limit would never bind.
+    /// - Parameters:
+    ///   - seeds: the pre-baked sheets to read before baking. Only the shared
+    ///     engine reads the bundled set, so a test's cold engine still bakes.
+    ///   - registry: where the memory cache is announced, so the app's
+    ///     coordinator budgets and trims it. Only the shared engine's is.
     init(
         catalog: EmoteCatalog = .shared,
         diskCache: EmoteDiskCache? = .standard(),
-        memoryBudgetMB: Int = 32,
+        seeds: EmoteSeeds? = nil,
+        memory: MemoryCache<String, AnimatedIconArt> = UIAssetCaches.memoryCache("UIAssets.emotes", budget: EmoteEngine.memoryBudget),
+        registry: UIAssetCaches? = nil,
         animationProvider: AnimationProvider? = nil
     ) {
         self.catalog = catalog
         self.diskCache = diskCache
+        self.seeds = seeds
+        self.memory = memory
         self.animationProvider = animationProvider ?? { emote in await EmoteEngine.bundledAnimation(for: emote) }
-        cache.totalCostLimit = memoryBudgetMB * 1024 * 1024
+        registry?.adopt(memory)
     }
 
     // MARK: - Sizes
@@ -130,9 +161,9 @@ public final class EmoteEngine {
     /// installs in the same layout pass, with no flash.
     public func cachedArt(for emote: Emote, pixelSide: Int, motion: Motion) -> AnimatedIconArt? {
         let key = Self.key(emote, pixelSide: pixelSide, motion: motion)
-        if let box = cache.object(forKey: key as NSString) {
+        if let art = memory.value(for: key) {
             stats.memoryHits += 1
-            return box.art
+            return art
         }
         return nil
     }
@@ -193,13 +224,12 @@ public final class EmoteEngine {
 
     /// Puts `art` in the memory cache as if it had been baked — a test seam.
     func insert(_ art: AnimatedIconArt, for emote: Emote, pixelSide: Int, motion: Motion) {
-        cache.setObject(ArtBox(art), forKey: Self.key(emote, pixelSide: pixelSide, motion: motion) as NSString,
-                        cost: art.byteCost)
+        memory.insert(art, for: Self.key(emote, pixelSide: pixelSide, motion: motion), cost: art.byteCost)
     }
 
     /// Drops every resident sheet (the disk copies stay).
     public func purgeMemory() {
-        cache.removeAllObjects()
+        memory.removeAll()
     }
 
     fileprivate func cancel(key: String, token: Int) -> Bool {
@@ -214,7 +244,9 @@ public final class EmoteEngine {
 
     private func finish(key: String, job: Pending, art: AnimatedIconArt?) {
         if let art {
-            cache.setObject(ArtBox(art), forKey: key as NSString, cost: art.byteCost)
+            // `recent`: asked for by something on screen. Kept through a memory
+            // warning and the background; a critical warning takes it.
+            memory.insert(art, for: key, cost: art.byteCost)
         }
         // A job cancelled while it drew may still finish; its art is kept, but
         // a NEWER job for the same key must not be answered or removed by it.
@@ -231,6 +263,18 @@ public final class EmoteEngine {
             guard let art = try? await iconCatalog?.art(for: id) else { return nil }
             // The map's sheets are drawn on white paper (`EmoteIconMatte`).
             return await Task.detached(priority: .userInitiated) { EmoteIconMatte.matted(art) }.value
+        }
+        if let seeds, seeds.covers(emote, pixelSide: pixelSide, motion: motion) {
+            let seeded = await Task.detached(priority: .userInitiated) {
+                seeds.art(for: emote, pixelSide: pixelSide, motion: motion)
+            }.value
+            if let seeded {
+                stats.seedHits += 1
+                #if DEBUG
+                print("[emote] seeded \(emote.id)@\(pixelSide) from the bundle, no bake")
+                #endif
+                return seeded
+            }
         }
         let stem = EmoteDiskCache.fileStem(emoteID: emote.id, side: pixelSide, still: motion == .still)
         if let diskCache {
@@ -372,11 +416,6 @@ private final class AwaitedRequest {
         request?.cancel()
         resume(nil)
     }
-}
-
-private final class ArtBox {
-    let art: AnimatedIconArt
-    init(_ art: AnimatedIconArt) { self.art = art }
 }
 
 @MainActor

@@ -1,3 +1,4 @@
+import CacheKit
 import Foundation
 import Lottie
 import MediaCore
@@ -73,9 +74,12 @@ struct EmoteEngineTests {
         try #require(catalog.emote(id: id))
     }
 
-    private func scratchDisk() -> EmoteDiskCache {
-        EmoteDiskCache(directory: FileManager.default.temporaryDirectory
-            .appendingPathComponent("emote-tests-\(UUID().uuidString)", isDirectory: true))
+    /// A UI assets namespace of the test's own, in a folder of its own.
+    private func scratchDisk() throws -> (EmoteDiskCache, URL) {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("emote-tests-\(UUID().uuidString)", isDirectory: true)
+        let store = try UIAssetCaches.openDisk(root: root)
+        return (EmoteDiskCache { store }, root)
     }
 
     @Test func aNotoEmojiBakesIntoAMovingSheet() async throws {
@@ -176,18 +180,17 @@ struct EmoteEngineTests {
     /// A sheet is baked once per install and size: a new engine (a new
     /// launch) reads it back from disk.
     @Test func sheetsSurviveOnDisk() async throws {
-        let disk = scratchDisk()
-        defer { disk.removeAll() }
+        let (disk, root) = try scratchDisk()
+        defer { try? FileManager.default.removeItem(at: root) }
         let heart = try emote("noto:2764_fe0f")
         let first = EmoteEngine(diskCache: disk)
         let baked = try #require(await first.art(for: heart, pixelSide: 48))
-        // The write is fire-and-forget; the JSON lands after the PNG, so it
-        // means both are there. ⚠️ Required, on a look budget: 200 looks of
-        // 10 ms gave up silently under a loaded runner while the PNG was still
+        // The write is fire-and-forget; the entry is indexed only once its
+        // file is in place. ⚠️ Required, on a look budget: 200 looks of 10 ms
+        // gave up silently under a loaded runner while the PNG was still
         // encoding, and the second engine baked instead of reading.
         let stem = EmoteDiskCache.fileStem(emoteID: heart.id, side: 48, still: false)
-        let json = disk.directory.appendingPathComponent(stem + ".json").path
-        try #require(await settle { FileManager.default.fileExists(atPath: json) }, "the sheet reached the disk")
+        try #require(await settle { disk.contains(stem: stem) }, "the sheet reached the disk")
         let second = EmoteEngine(diskCache: disk)
         let loaded = try #require(await second.art(for: heart, pixelSide: 48))
         #expect(second.stats.diskHits == 1)
