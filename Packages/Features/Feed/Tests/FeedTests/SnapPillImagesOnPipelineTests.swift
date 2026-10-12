@@ -2,9 +2,62 @@ import CoreModels
 import DesignSystem
 import Foundation
 import MediaCore
+import Synchronization
 import Testing
 import UIKit
 @testable import Feed
+
+/// Synthesizes like `PlaceholderImageFetcher`, counts fetches per URL, and
+/// lets a test await one beginning: the view's own load then decodes on the
+/// pool, which a loaded runner can delay past any clock (#1059), so the test
+/// awaits that load instead of timing it.
+private final class CountingFetcher: ImageFetching {
+    private struct State {
+        var fetches: [String: Int] = [:]
+        var waiters: [(url: String, continuation: CheckedContinuation<Void, Never>)] = []
+    }
+
+    private let synthesized = PlaceholderImageFetcher()
+    private let state = Mutex(State())
+
+    func fetchCount(for url: URL) -> Int { state.withLock { $0.fetches[url.absoluteString] ?? 0 } }
+
+    /// Returns once a fetch of `url` has begun.
+    func fetchBegan(of url: URL) async {
+        let key = url.absoluteString
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let hasBegun = state.withLock { state -> Bool in
+                guard state.fetches[key, default: 0] == 0 else { return true }
+                state.waiters.append((key, continuation))
+                return false
+            }
+            if hasBegun { continuation.resume() }
+        }
+    }
+
+    func fetchImageData(for url: URL) async throws -> Data {
+        let key = url.absoluteString
+        let starters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.fetches[key, default: 0] += 1
+            let ready = state.waiters.filter { $0.url == key }.map(\.continuation)
+            state.waiters.removeAll { $0.url == key }
+            return ready
+        }
+        for waiter in starters { waiter.resume() }
+        return try await synthesized.fetchImageData(for: url)
+    }
+}
+
+/// Waits for the load the view started for `url`: once its fetch has begun,
+/// a visible load of the same image JOINS that decode (one fill per image and
+/// bucket) and returns when it lands, however late. The fetch count then
+/// shows the view's load was the only one.
+@MainActor
+private func viewsLoadLanded(_ url: URL, size: ImageBucket, fetcher: CountingFetcher, pipeline: ImagePipeline) async -> Bool {
+    await fetcher.fetchBegan(of: url)
+    _ = try? await pipeline.image(for: url, size: size)
+    return fetcher.fetchCount(for: url) == 1 && pipeline.isDecoded(url, size: size)
+}
 
 /// THE SNAP PILLS KEEP NO PICTURES OF THEIR OWN (#894).
 ///
@@ -17,6 +70,11 @@ import UIKit
 struct SnapPillImagesOnPipelineTests {
     private static func pipeline() -> ImagePipeline {
         ImagePipeline(fetcher: PlaceholderImageFetcher())
+    }
+
+    private static func counted() -> (CountingFetcher, ImagePipeline) {
+        let fetcher = CountingFetcher()
+        return (fetcher, ImagePipeline(fetcher: fetcher))
     }
 
     /// A large picture: decoded at full it would be 1200 px on its long side.
@@ -33,16 +91,15 @@ struct SnapPillImagesOnPipelineTests {
         )
     }
 
-    /// Generous: the full scheme runs ~190 suites in parallel, where a test
-    /// that hops main → pool → main can wait over half a minute (measured: a
-    /// fetched face landed after more than 30 s there, in under a second
-    /// alone). Returns as soon as `done`.
-    private static func settle(timeout: Duration = .seconds(120), until done: () -> Bool) async {
-        let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: timeout)
-        while !done(), clock.now < deadline {
+    /// A look budget, not a deadline (#1059): only for the main-actor hop
+    /// from a landed load to the view drawing it. The load itself is awaited
+    /// (`viewsLoadLanded`): a 120 s clock on it went red on a loaded runner.
+    private static func settle(until done: () -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            if done() { return true }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return done()
     }
 
     private static func longSide(_ image: UIImage?) -> Int {
@@ -56,11 +113,12 @@ struct SnapPillImagesOnPipelineTests {
     /// bucket — never at full size, which the blurred stills would have to
     /// scale on the main thread.
     @Test func warmingAFaceDecodesItInThePipelineAtTheAvatarBucket() async {
-        let pipeline = Self.pipeline()
+        let (fetcher, pipeline) = Self.counted()
         let url = Self.url("face-warm")
 
         SnapAuthorIdentityView.warmFace(url, pipeline: pipeline)
-        await Self.settle { pipeline.isDecoded(url, size: SnapAuthorIdentityView.faceBucket) }
+        #expect(await viewsLoadLanded(url, size: SnapAuthorIdentityView.faceBucket, fetcher: fetcher, pipeline: pipeline),
+                "the warm's own load did not land")
 
         #expect(pipeline.isDecoded(url, size: .avatar), "the warmed face is not in the pipeline's memory")
         #expect(!pipeline.isDecoded(url, size: .full), "the face was decoded at full size")
@@ -86,15 +144,16 @@ struct SnapPillImagesOnPipelineTests {
     /// A face not decoded yet is fetched through the pipeline at the avatar
     /// bucket and lands on the disc.
     @Test func aMissingFaceIsFetchedThroughThePipeline() async {
-        let pipeline = Self.pipeline()
+        let (fetcher, pipeline) = Self.counted()
         let url = Self.url("face-fetch")
         let pill = SnapAuthorIdentityView()
 
         pill.setAuthor(Self.model(id: "2", avatarURL: url), pipeline: pipeline, animated: false)
         #expect(pill.debugFaceImage == nil, "guard: nothing to draw before the fetch")
-        await Self.settle { pill.debugFaceImage != nil }
+        #expect(await viewsLoadLanded(url, size: SnapAuthorIdentityView.faceBucket, fetcher: fetcher, pipeline: pipeline),
+                "the pill's own load did not land")
 
-        #expect(pill.debugFaceImage != nil, "the fetched face never landed")
+        #expect(await Self.settle { pill.debugFaceImage != nil }, "the fetched face never landed on the pill")
         #expect(pipeline.isDecoded(url, size: .avatar) && !pipeline.isDecoded(url, size: .full),
                 "the face was not decoded in the pipeline at the avatar bucket")
     }
@@ -102,20 +161,18 @@ struct SnapPillImagesOnPipelineTests {
     // MARK: - Attribution pill and sound bubble
 
     /// Warming the next cover decodes it in the pipeline at the cover bucket.
-    @Test func warmingACoverDecodesItInThePipeline() async {
-        let pipeline = Self.pipeline()
+    @Test func warmingACoverDecodesItInThePipeline() async throws {
+        let (fetcher, pipeline) = Self.counted()
         let url = Self.url("cover-warm")
         let model = Self.model(id: "3", avatarURL: nil, thumbnailURL: url)
-        let coverURL = SnapMediaAttributionView.coverURL(for: model, cover: .post)
+        let coverURL = try #require(SnapMediaAttributionView.coverURL(for: model, cover: .post), "guard: the post has a cover")
 
         SnapMediaAttributionView.warmCover(for: model, cover: .post, pipeline: pipeline)
-        if let coverURL {
-            await Self.settle { pipeline.isDecoded(coverURL, size: SnapMediaAttributionView.coverBucket) }
-        }
+        #expect(await viewsLoadLanded(coverURL, size: SnapMediaAttributionView.coverBucket, fetcher: fetcher, pipeline: pipeline),
+                "the warm's own load did not land")
 
-        #expect(coverURL != nil, "guard: the post has a cover")
-        #expect(coverURL.map { pipeline.isDecoded($0, size: .avatar) } == true, "the warmed cover is not in the pipeline")
-        #expect(coverURL.map { pipeline.isDecoded($0, size: .full) } == false, "the cover was decoded at full size")
+        #expect(pipeline.isDecoded(coverURL, size: .avatar), "the warmed cover is not in the pipeline")
+        #expect(!pipeline.isDecoded(coverURL, size: .full), "the cover was decoded at full size")
     }
 
     /// A cover the pipeline holds is drawn by the attribution pill on this
