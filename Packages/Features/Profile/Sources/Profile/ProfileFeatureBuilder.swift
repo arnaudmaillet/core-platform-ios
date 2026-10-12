@@ -2,6 +2,7 @@ import MediaCore
 import CoreModels
 import CoreNavigation
 import FeedInterface
+import LocalStore
 import MapsInterface
 import MediaPlayback
 import CoreStorage
@@ -34,8 +35,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// the only place it has ever lived. See `PostBookmarkStore`.
     private let bookmarks = PostBookmarkStore()
     /// Last-known profiles, shared by every profile screen so a switch to one
-    /// already seen renders instantly. One per app, like the preferences.
-    private let cache = ProfileCache()
+    /// already seen renders instantly. One per app, like the preferences;
+    /// backed by the device store when the app hands one in (#893).
+    private let cache: ProfileCache
     private let imagePipeline: ImagePipeline
     private let router: (any Router)?
     /// Reads the viewer's account for the settings screen (own profile only).
@@ -64,8 +66,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         switching: (any ProfileSwitching)? = nil,
         accountSessions: (any AccountSessionsManaging)? = nil,
         accountStatus: (any AccountStatusProviding)? = nil,
-        notificationPreferences: (any NotificationPreferencesManaging)? = nil
+        notificationPreferences: (any NotificationPreferencesManaging)? = nil,
+        /// The device store (#893): the viewer's own profile and the profiles
+        /// they visited open on their last content at a cold start. Nil keeps
+        /// the profile cache in memory.
+        localStore: LocalStore? = nil
     ) {
+        self.cache = ProfileCache(store: localStore)
         self.repository = repository
         self.reporting = reporting
         self.shareTargeting = shareTargeting

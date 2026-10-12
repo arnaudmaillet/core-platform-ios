@@ -409,3 +409,48 @@ final class ForYouColdStartTests {
         #expect(discoverIDs(frameZero.following) == ["f2"])
     }
 }
+
+// MARK: - Comments
+
+/// A post opened in an earlier session opens its comments on the last first
+/// page, before any request (#893).
+final class CommentsColdStartTests {
+    private let folder = StoreFolder()
+    private let viewer = ViewerBox()
+
+    private func makeRepository() throws -> CommentsRepository {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockSocialServices(dataset: dataset).register(on: bff)
+        MockCommentService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        let box = viewer
+        return CommentsRepository(
+            commentClient: Comment_V1_CommentServiceClient(client: client),
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            authSession: ColdStartSession(),
+            localStore: try LocalStore(directory: folder.url, viewer: { box.viewer })
+        )
+    }
+
+    @Test func aPostsFirstCommentPageOpensFromTheDeviceAfterAColdStart() async throws {
+        let session = try makeRepository()
+        let loaded = try await session.loadCommentsPage(for: PostID("post-0001"), after: nil).entries
+        try #require(!loaded.isEmpty)
+        session.waitForDeviceWrites()
+
+        let relaunched = try makeRepository()
+        #expect(relaunched.cachedTopComments(for: PostID("post-0001")) == loaded, "synchronously, before any request")
+        #expect(relaunched.cachedTopComments(for: PostID("post-0002")) == nil)
+    }
+
+    @Test func anotherViewerOpensOnNoComments() async throws {
+        let session = try makeRepository()
+        _ = try await session.loadCommentsPage(for: PostID("post-0001"), after: nil)
+        session.waitForDeviceWrites()
+
+        viewer.viewer = .member(account: "acct-2", profile: "prof-9")
+        let relaunched = try makeRepository()
+        #expect(relaunched.cachedTopComments(for: PostID("post-0001")) == nil)
+    }
+}

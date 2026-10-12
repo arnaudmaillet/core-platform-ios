@@ -144,7 +144,14 @@ final class ProfileGalleryStore {
         authored authoredPage: GalleryPage?, authoredFailure: NetworkFailure?,
         tagged taggedPage: GalleryPage?, taggedFailure: NetworkFailure?
     ) {
-        if authoredHasLaterPages, let shown = authored {
+        // ⚠️ A FAILED REVALIDATION KEEPS WHAT IS SHOWN (#893). A corpus is
+        // only non-nil here when it was restored or loaded before (a load
+        // that starts over resets it first); replacing it with a failure blanked
+        // a profile opened offline on its last posts, whenever those posts fit
+        // one page.
+        if authoredPage == nil, authored != nil {
+            self.authoredFailure = authoredFailure
+        } else if authoredHasLaterPages, let shown = authored {
             if let authoredPage { authored = Self.mergingGallery(firstPage: authoredPage.posts, over: shown) }
         } else {
             authored = authoredPage?.posts
@@ -152,7 +159,9 @@ final class ProfileGalleryStore {
             self.authoredFailure = authoredFailure
             authoredToken = authoredPage?.nextPageToken
         }
-        if taggedHasLaterPages, let shown = tagged {
+        if taggedPage == nil, tagged != nil {
+            self.taggedFailure = taggedFailure
+        } else if taggedHasLaterPages, let shown = tagged {
             if let taggedPage { tagged = Self.mergingGallery(firstPage: taggedPage.posts, over: shown) }
         } else {
             tagged = taggedPage?.posts

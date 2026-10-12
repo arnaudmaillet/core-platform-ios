@@ -658,7 +658,8 @@ final class AppContainer {
             commentClient: Comment_V1_CommentServiceClient(client: authenticatedRPCClient),
             profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
             authSession: sessionManager,
-            viewer: viewerSession
+            viewer: viewerSession,
+            localStore: localStore
         )
         // The shared viewer already carries the switch; this only drops the
         // composer's cached face the moment a switch is announced, without
@@ -1138,7 +1139,8 @@ final class AppContainer {
             switching: profileRepository,
             accountSessions: accountSessionsRepository,
             accountStatus: accountStatusRepository,
-            notificationPreferences: notificationPreferencesRepository
+            notificationPreferences: notificationPreferencesRepository,
+            localStore: localStore
         )
         // The one place that can see both features, which is the whole reason
         // this is injected rather than reached for: Profile describes where a

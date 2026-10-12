@@ -581,7 +581,14 @@ public final class ProfileViewModel {
         // seen seconds before. Seeded, the fetch REFRESHES: the phase moves
         // only if something changed, and the gallery revalidates in place
         // rather than resetting to its bones.
-        if case .profile(let id) = source, let cached = cache?.profile(for: id) {
+        // The viewer's own profile too, at a cold start (#893): its id comes
+        // from the device, since the network may not be there to say it.
+        let seedID: ProfileID? = switch source {
+        case .profile(let id): id
+        case .currentUser: cache?.currentUserID()
+        case .lookup: nil
+        }
+        if let seedID, let cached = cache?.profile(for: seedID) {
             profile = cached
             phase = .content(ProfileDisplayModel(profile: cached))
             // ⚠️ AND THE GRID OPENS ON ITS LAST PAGES (#887). It used to
@@ -590,7 +597,7 @@ public final class ProfileViewModel {
             // render on this frame; the first pages fetched now revalidate
             // them in place (merged over the later pages), and a revalidation
             // that agrees publishes nothing. A first visit has none: bones.
-            if let pages = cache?.gallery(for: id) {
+            if let pages = cache?.gallery(for: seedID) {
                 galleryStore.restore(pages)
                 loadGallery(for: cached, reset: false)
             } else {
@@ -1377,6 +1384,7 @@ public final class ProfileViewModel {
             do {
                 let profile = try await self.fetch()
                 self.cache?.store(profile)
+                if self.source == .currentUser { self.cache?.storeCurrentUser(profile.id) }
                 // Revalidation that agrees with what is already on screen
                 // publishes NOTHING. Re-emitting an identical model would run
                 // the header's switch transition a second time over unchanged
