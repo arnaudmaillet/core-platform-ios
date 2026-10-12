@@ -1058,7 +1058,10 @@ final class AppContainer {
         stakePacks: stakePacks,
         // A guest has no people: no favourites dock, no Friends / Following.
         isMember: { [unowned self] in self.memberGate.isMember },
-        locator: currentCountry
+        locator: currentCountry,
+        // The pins of the last viewports, so a cold start opens the map on
+        // its markers (#893).
+        localStore: localStore
     )
 
     #if DEBUG
@@ -1405,7 +1408,9 @@ final class AppContainer {
         // one claim countdown — and the sheet is the shell's, so it crosses as
         // a closure. Same wiring as the two pushed hosts in Feed.
         wallet: walletStore,
-        makeWalletSheet: { [unowned self] in self.makeWalletSheet() }
+        makeWalletSheet: { [unowned self] in self.makeWalletSheet() },
+        // The trending people, so a cold start opens Search on them (#893).
+        localStore: localStore
     )
 
     // MARK: - Notifications

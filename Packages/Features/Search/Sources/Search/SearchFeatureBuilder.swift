@@ -1,5 +1,6 @@
 import CoreNavigation
 import CoreStorage
+import LocalStore
 import MediaCore
 import SearchInterface
 import UIKit
@@ -23,7 +24,13 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     /// The shell owns the claim sheet (`WalletClaimViewController` lives in
     /// App/Shell), so it arrives as a closure rather than a type.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    /// The trending people on the device (#893), one for the app's lifetime:
+    /// every search screen opens on the same stored list.
+    private let localCache: SearchLocalCache?
 
+    /// - Parameter localStore: the device store (#893): the resting screen's
+    ///   trending people open on their last list at a cold start. Nil keeps
+    ///   them in memory only.
     public init(
         repository: any SearchProviding,
         recentSearches: RecentSearchStore? = nil,
@@ -33,7 +40,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         router: (any Router)? = nil,
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
         wallet: WalletStore? = nil,
-        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        localStore: LocalStore? = nil
     ) {
         self.repository = repository
         self.recentSearches = recentSearches
@@ -44,6 +52,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         self.postSurfaces = postSurfaces
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.localCache = localStore.map(SearchLocalCache.init(store:))
     }
 
     public func makeSearchViewController() -> UIViewController {
@@ -53,7 +62,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
                 router: router,
                 recentSearches: recentSearches,
                 explore: explore,
-                metadata: metadata
+                metadata: metadata,
+                localCache: localCache
             ),
             imagePipeline: imagePipeline,
             postSurfaces: postSurfaces,

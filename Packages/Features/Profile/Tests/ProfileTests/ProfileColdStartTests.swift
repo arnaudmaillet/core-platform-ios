@@ -62,7 +62,11 @@ private actor ColdGallery: ProfileGalleryProviding {
 
     func goOffline() { offline = true }
 
+    /// First pages asked for (a load or a revalidation of the grid).
+    private(set) var firstPageFetches = 0
+
     func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
+        if pageToken == nil { firstPageFetches += 1 }
         if offline { throw URLError(.notConnectedToInternet) }
         return pages[pageToken] ?? GalleryPage(posts: [], nextPageToken: nil)
     }
@@ -93,9 +97,17 @@ private actor ColdProfiles: ProfileProviding {
         if offline { throw URLError(.notConnectedToInternet) }
     }
 
-    func currentUserProfile() async throws -> UserProfile { try check(); return own }
-    func profile(id: ProfileID) async throws -> UserProfile { try check(); return other }
-    func relationship(for profileID: ProfileID) async throws -> ProfileRelationship { try check(); return answer }
+    /// Profile reads asked for, offline ones included.
+    private(set) var profileFetches = 0
+    private(set) var relationshipReads = 0
+
+    func currentUserProfile() async throws -> UserProfile { profileFetches += 1; try check(); return own }
+    func profile(id: ProfileID) async throws -> UserProfile { profileFetches += 1; try check(); return other }
+    func relationship(for profileID: ProfileID) async throws -> ProfileRelationship {
+        relationshipReads += 1
+        try check()
+        return answer
+    }
     func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {}
     func setBlocked(_ blocked: Bool, for profileID: ProfileID) async throws {}
     func blockAccount(behind profileID: ProfileID) async throws -> [ProfileID] { [profileID] }
@@ -116,10 +128,19 @@ final class ProfileColdStartTests {
         var buttons: [ProfileViewModel.FollowButton] = []
     }
 
-    /// One launch's cache, over a new store on the same file.
-    private func launchCache() throws -> ProfileCache {
+    /// One launch's cache, over a new store on the same file. `later`: how
+    /// long after the previous session it launches, as its clock sees it.
+    private func launchCache(later: TimeInterval = 0) throws -> ProfileCache {
         let box = viewer
-        return ProfileCache(center: center, store: try LocalStore(directory: folder.url, viewer: { box.viewer }))
+        return ProfileCache(
+            center: center, store: try LocalStore(directory: folder.url, viewer: { box.viewer }),
+            now: { Date().addingTimeInterval(later) }
+        )
+    }
+
+    /// A launch past the profile screen's freshness window: it revalidates.
+    private func staleLaunchCache() throws -> ProfileCache {
+        try launchCache(later: LocalStorePolicy.profileScreenRevalidation + 60)
     }
 
     private func gallery() -> ColdGallery {
@@ -203,7 +224,7 @@ final class ProfileColdStartTests {
         await profiles.goOffline()
         let offlineGallery = gallery()
         await offlineGallery.goOffline()
-        let (viewModel, shown) = open(.profile(ProfileID("prof-1")), cache: try launchCache(), profiles: profiles, gallery: offlineGallery)
+        let (viewModel, shown) = open(.profile(ProfileID("prof-1")), cache: try staleLaunchCache(), profiles: profiles, gallery: offlineGallery)
 
         // Before any await: the header, the button and the pages.
         #expect(isContent(shown.phases.last))
@@ -223,7 +244,7 @@ final class ProfileColdStartTests {
         await profiles.goOffline()
         let offlineGallery = gallery()
         await offlineGallery.goOffline()
-        let cache = try launchCache()
+        let cache = try staleLaunchCache()
         #expect(cache.currentUserID() == ProfileID("me"))
         let (viewModel, shown) = open(.currentUser, cache: cache, profiles: profiles, gallery: offlineGallery)
 
@@ -248,7 +269,7 @@ final class ProfileColdStartTests {
         let profiles = ColdProfiles()
         await profiles.goOffline()
         await onePage.goOffline()
-        let (viewModel, shown) = open(.currentUser, cache: try launchCache(), profiles: profiles, gallery: onePage)
+        let (viewModel, shown) = open(.currentUser, cache: try staleLaunchCache(), profiles: profiles, gallery: onePage)
         #expect(ids(shown.snapshots.first?.activity) == ["a", "b"])
         try? await Task.sleep(for: .milliseconds(150))
         #expect(ids(shown.snapshots.last?.activity) == ["a", "b"], "the failed revalidation blanked the grid")
@@ -283,5 +304,105 @@ final class ProfileColdStartTests {
         #expect(cache.gallery(for: id) == nil)
         #expect(try launchCache().gallery(for: id) == nil, "the device copy no longer holds the posts")
         #expect(try launchCache().relationship(for: id) == .other(isFollowing: false, isBlocked: false))
+    }
+
+    // MARK: - Freshness (#893)
+
+    /// What a test moves the cache's clock with.
+    private final class Clock {
+        var offset: TimeInterval = 0
+        var now: Date { Date().addingTimeInterval(offset) }
+    }
+
+    /// A first visit online, on `cache`, settled: header, button, grid.
+    private func firstVisit(cache: ProfileCache, profiles: ColdProfiles, gallery: ColdGallery) async throws -> ProfileViewModel {
+        let (viewModel, shown) = open(.profile(ProfileID("prof-1")), cache: cache, profiles: profiles, gallery: gallery)
+        try #require(await settle { ids(shown.snapshots.last?.activity) == ["a", "b"] })
+        try #require(await settle { shown.buttons.last == .following })
+        return viewModel
+    }
+
+    @Test func aProfileSeenSecondsAgoIsNotRefetchedOnARevisit() async throws {
+        let clock = Clock()
+        let cache = ProfileCache(center: center, now: { clock.now })
+        let profiles = ColdProfiles()
+        let pages = gallery()
+        let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
+        try #require(await profiles.profileFetches == 1)
+        try #require(await pages.firstPageFetches == 1)
+
+        clock.offset = 30
+        let (revisit, shown) = open(.profile(ProfileID("prof-1")), cache: cache, profiles: profiles, gallery: pages)
+        #expect(isContent(shown.phases.last))
+        #expect(ids(shown.snapshots.last?.activity) == ["a", "b"])
+        // The relationship is still read; the header and the grid are not.
+        #expect(await settle { await profiles.relationshipReads == 2 })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await profiles.profileFetches == 1, "a profile fetched 30 s ago was fetched again")
+        #expect(await pages.firstPageFetches == 1, "a grid fetched 30 s ago was fetched again")
+        #expect(shown.buttons.last == .following)
+        withExtendedLifetime((first, revisit)) {}
+    }
+
+    @Test func aRevisitPastTheWindowRevalidates() async throws {
+        let clock = Clock()
+        let cache = ProfileCache(center: center, now: { clock.now })
+        let profiles = ColdProfiles()
+        let pages = gallery()
+        let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
+
+        clock.offset = LocalStorePolicy.profileScreenRevalidation + 1
+        let (revisit, shown) = open(.profile(ProfileID("prof-1")), cache: cache, profiles: profiles, gallery: pages)
+        #expect(isContent(shown.phases.last), "a stale revisit still opens on the cached profile")
+        #expect(await settle { await profiles.profileFetches == 2 })
+        #expect(await settle { await pages.firstPageFetches == 2 })
+        withExtendedLifetime((first, revisit)) {}
+    }
+
+    @Test func pullToRefreshRefetchesInsideTheWindow() async throws {
+        let clock = Clock()
+        let cache = ProfileCache(center: center, now: { clock.now })
+        let profiles = ColdProfiles()
+        let pages = gallery()
+        let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
+
+        clock.offset = 5
+        let (revisit, _) = open(.profile(ProfileID("prof-1")), cache: cache, profiles: profiles, gallery: pages)
+        revisit.refresh()
+        #expect(await settle { await profiles.profileFetches == 2 }, "pull-to-refresh skipped the network")
+        #expect(await settle { await pages.firstPageFetches == 2 })
+        withExtendedLifetime((first, revisit)) {}
+    }
+
+    @Test func aColdStartInsideTheWindowSkipsTheFetchToo() async throws {
+        try await previousSession(.profile(ProfileID("prof-1")))
+
+        let profiles = ColdProfiles()
+        let pages = gallery()
+        let (viewModel, shown) = open(.profile(ProfileID("prof-1")), cache: try launchCache(later: 20), profiles: profiles, gallery: pages)
+        #expect(isContent(shown.phases.last))
+        #expect(ids(shown.snapshots.first?.activity) == ["a", "b", "c"])
+        #expect(await settle { await profiles.relationshipReads == 1 })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await profiles.profileFetches == 0, "the device's fetch time did not survive the relaunch")
+        #expect(await pages.firstPageFetches == 0)
+        // And paging goes on from where the stored grid stops.
+        #expect(await viewModel.galleryPostIDs(after: PostID("a")) == [PostID("b"), PostID("c")])
+        withExtendedLifetime(viewModel) {}
+    }
+
+    @Test func aRevisitMissingACorpusRevalidates() async throws {
+        let cache = ProfileCache(center: center)
+        let id = ProfileID("prof-1")
+        cache.store(person("prof-1"))
+        // Only the authored posts are known: the tagged ones never loaded.
+        cache.store(ProfileGalleryStore.Corpora(
+            authored: ProfileGalleryStore.Corpus(posts: [tile("a", at: 1)], nextToken: nil, hasLaterPages: false), tagged: nil
+        ), for: id)
+        #expect(!cache.isFresh(id))
+        let profiles = ColdProfiles()
+        let (viewModel, _) = open(.profile(id), cache: cache, profiles: profiles, gallery: gallery())
+        #expect(await settle { await profiles.profileFetches == 1 })
+        withExtendedLifetime(viewModel) {}
     }
 }
