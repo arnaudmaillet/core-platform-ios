@@ -53,15 +53,22 @@ private actor PagedInbox: ChatProviding {
 
 @MainActor
 struct InboxPagingTests {
-    /// A ceiling, not a pace: returns as soon as `condition` holds.
-    private func settle(until condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while !(await condition()), ContinuousClock.now < deadline {
+    /// A look budget, not a deadline (#1028): every positive wait here stops
+    /// as soon as its condition holds, so the budget only matters on a starved
+    /// runner, where a wall-clock deadline ran out silently and the assertions
+    /// then read a stale catalog. It answers, so a timeout fails at the wait.
+    private static let looks = 6_000
+
+    private func settle(until condition: () async -> Bool) async -> Bool {
+        for _ in 0..<Self.looks {
+            if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return await condition()
     }
 
-    /// Grace for "nothing more should happen".
+    /// A fixed grace, kept only where a test asserts that NOTHING more happens:
+    /// there is no positive condition to wait for.
     private func settle() async {
         try? await Task.sleep(for: .milliseconds(100))
     }
@@ -69,7 +76,7 @@ struct InboxPagingTests {
     private func loaded(_ provider: PagedInbox) async -> InboxCatalog {
         let catalog = InboxCatalog(repository: provider)
         catalog.reload()
-        await settle { catalog.snapshot.phase == .loaded }
+        #expect(await settle { catalog.snapshot.phase == .loaded })
         return catalog
     }
 
@@ -86,7 +93,7 @@ struct InboxPagingTests {
 
         catalog.loadMore(.inbox)
         catalog.loadMore(.inbox) // the same approach, reported twice
-        await settle { catalog.snapshot.active.count == 4 }
+        #expect(await settle { catalog.snapshot.active.count == 4 })
         #expect(ids(catalog.snapshot.active) == ["a", "b", "c", "d"])
         #expect(catalog.snapshot.hasMore.isEmpty)
 
@@ -112,8 +119,7 @@ struct InboxPagingTests {
         }
 
         catalog.loadMore(.inbox)
-        await settle { catalog.snapshot.active.count == 3 }
-
+        #expect(await settle { catalog.snapshot.active.count == 3 })
         #expect(ids(catalog.snapshot.active) == ["a", "b", "c"])
         #expect(await provider.asks(for: .inbox) == [nil, "p2", "p3"])
         _ = token
@@ -132,8 +138,7 @@ struct InboxPagingTests {
 
         catalog.loadMore(.inbox) // no more there: no ask
         catalog.loadMore(.requests)
-        await settle { catalog.snapshot.requests.count == 2 }
-
+        #expect(await settle { catalog.snapshot.requests.count == 2 })
         #expect(ids(catalog.snapshot.requests) == ["r1", "r2"])
         #expect(ids(catalog.snapshot.active) == ["a"])
         #expect(await provider.asks(for: .inbox) == [nil])
@@ -148,8 +153,7 @@ struct InboxPagingTests {
         let catalog = await loaded(provider)
 
         catalog.loadMore(.inbox)
-        await settle { catalog.snapshot.active.count == 2 }
-
+        #expect(await settle { catalog.snapshot.active.count == 2 })
         #expect(ids(catalog.snapshot.active) == ["a", "b"])
         #expect(await provider.asks(for: .inbox) == [nil, "p2", "p3"])
     }
@@ -163,13 +167,13 @@ struct InboxPagingTests {
         let catalog = await loaded(provider)
 
         catalog.loadMore(.inbox)
-        await settle { await provider.asks(for: .inbox).count == 2 }
+        #expect(await settle { await provider.asks(for: .inbox).count == 2 })
         await settle()
         #expect(ids(catalog.snapshot.active) == ["a"])
         #expect(catalog.snapshot.hasMore == [.inbox])
 
         catalog.loadMore(.inbox)
-        await settle { catalog.snapshot.active.count == 2 }
+        #expect(await settle { catalog.snapshot.active.count == 2 })
         #expect(ids(catalog.snapshot.active) == ["a", "b"])
     }
 
@@ -182,15 +186,13 @@ struct InboxPagingTests {
         ])
         let catalog = await loaded(provider)
         catalog.loadMore(.inbox)
-        await settle { catalog.snapshot.active.count == 4 }
-
+        #expect(await settle { catalog.snapshot.active.count == 4 })
         await provider.setPage(
             InboxPage(conversations: [row("new", at: 50), row("a", at: 40)], nextPageToken: "p2"),
             of: .inbox, for: nil
         )
         catalog.reload()
-        await settle { catalog.snapshot.active.first?.id == ConversationID("new") }
-
+        #expect(await settle { catalog.snapshot.active.first?.id == ConversationID("new") })
         #expect(ids(catalog.snapshot.active) == ["new", "a", "b", "c", "d"])
         // The cursor past the last page loaded stands: the end stays the end.
         #expect(catalog.snapshot.hasMore.isEmpty)
@@ -205,8 +207,7 @@ struct InboxPagingTests {
         let catalog = await loaded(provider)
 
         catalog.loadMore(.inbox)
-        await settle { catalog.snapshot.active.count == 3 }
-
+        #expect(await settle { catalog.snapshot.active.count == 3 })
         #expect(ids(catalog.snapshot.active) == ["a", "b", "c"])
     }
 
@@ -219,8 +220,7 @@ struct InboxPagingTests {
         ])
         let catalog = await loaded(provider)
         catalog.loadMore(.inbox)
-        await settle { catalog.snapshot.active.count == 3 }
-
+        #expect(await settle { catalog.snapshot.active.count == 3 })
         catalog.recordSentMessage(
             ChatMessage(id: "m", senderID: ProfileID("me"), body: "hey", createdAt: Date(timeIntervalSince1970: 60), isMine: true),
             in: ConversationID("c")
@@ -240,11 +240,9 @@ struct InboxPagingTests {
         var hasMoreChanges: [Bool] = []
         viewModel.onHasMoreChange = { hasMoreChanges.append($0) }
         catalog.reload()
-        await settle { viewModel.hasMore }
-
+        #expect(await settle { viewModel.hasMore })
         viewModel.loadMore()
-        await settle { !viewModel.hasMore }
-
+        #expect(await settle { !viewModel.hasMore })
         #expect(ids(catalog.snapshot.active) == ["a", "b"])
         #expect(hasMoreChanges == [true, false])
     }
