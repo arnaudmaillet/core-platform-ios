@@ -169,7 +169,7 @@ struct ToastUndoTests {
     /// it commits when it leaves, not on a timer.
     @Test func underVoiceOverItWaits() {
         #expect(ToastView.duration(
-            for: .confirmation, message: "Unfollowed", detail: nil, hasAction: true, isUndoable: true,
+            for: .confirmation, message: "Unfollowed", hasAction: true, isUndoable: true,
             assistiveTechnologyRunning: true
         ) == nil)
     }

@@ -46,38 +46,38 @@ struct ToastBehaviourTests {
     }
 
     private func toast(
-        _ message: String = "Saved", detail: String? = nil, style: ToastView.Style = .confirmation,
+        _ message: String = "Saved", style: ToastView.Style = .confirmation,
         action: ToastView.Action? = nil, position: ToastPosition = .bottom, in container: UIView
     ) -> ToastView {
         ToastView.present(
-            message, detail: detail, symbol: nil, style: style, action: action, position: position, in: container
+            message, symbol: nil, style: style, action: action, position: position, in: container
         )
     }
 
     // MARK: - How long
 
     @Test func aShortConfirmationStaysFourSeconds() {
-        #expect(ToastView.duration(for: .confirmation, message: "Copied", detail: nil, hasAction: false, assistiveTechnologyRunning: false) == 4)
+        #expect(ToastView.duration(for: .confirmation, message: "Copied", hasAction: false, assistiveTechnologyRunning: false) == 4)
     }
 
     /// 2 s + 0.3 s a word, once that is past the 4 s floor.
     @Test func aLongerMessageStaysLonger() {
         let message = "one two three four five six seven eight nine ten"
-        let duration = ToastView.duration(for: .warning, message: message, detail: "and two", hasAction: false, assistiveTechnologyRunning: false)
-        #expect(abs((duration ?? 0) - (2 + 0.3 * 12)) < 0.001)
+        let duration = ToastView.duration(for: .warning, message: message, hasAction: false, assistiveTechnologyRunning: false)
+        #expect(abs((duration ?? 0) - (2 + 0.3 * 10)) < 0.001)
     }
 
     /// A failure stays until closed, acted on or replaced.
     @Test func aFailureNeverLeavesOnItsOwn() {
-        #expect(ToastView.duration(for: .failure, message: "Couldn't copy", detail: nil, hasAction: false, assistiveTechnologyRunning: false) == nil)
+        #expect(ToastView.duration(for: .failure, message: "Couldn't copy", hasAction: false, assistiveTechnologyRunning: false) == nil)
     }
 
     /// WCAG 2.2.1: with VoiceOver or Switch Control, an action does not time
     /// out.
     @Test func anActionWaitsForAssistiveTechnology() {
-        #expect(ToastView.duration(for: .confirmation, message: "Sent", detail: nil, hasAction: true, assistiveTechnologyRunning: true) == nil)
-        #expect(ToastView.duration(for: .confirmation, message: "Sent", detail: nil, hasAction: true, assistiveTechnologyRunning: false) == 4)
-        #expect(ToastView.duration(for: .confirmation, message: "Sent", detail: nil, hasAction: false, assistiveTechnologyRunning: true) == 4)
+        #expect(ToastView.duration(for: .confirmation, message: "Sent", hasAction: true, assistiveTechnologyRunning: true) == nil)
+        #expect(ToastView.duration(for: .confirmation, message: "Sent", hasAction: true, assistiveTechnologyRunning: false) == 4)
+        #expect(ToastView.duration(for: .confirmation, message: "Sent", hasAction: false, assistiveTechnologyRunning: true) == 4)
     }
 
     // MARK: - The countdown
@@ -202,9 +202,9 @@ struct ToastBehaviourTests {
     /// One element: the text, the action, a way to dismiss.
     @Test func itIsOneAccessibilityElement() {
         hosting { container, _ in
-            let shown = toast("Couldn't send", detail: "No connection", style: .failure, action: .init("Retry") {}, in: container)
+            let shown = toast("Couldn't send", style: .failure, action: .init("Retry") {}, in: container)
             #expect(shown.isAccessibilityElement)
-            #expect(shown.accessibilityLabel == "Couldn't send, No connection")
+            #expect(shown.accessibilityLabel == "Couldn't send")
             #expect(shown.accessibilityCustomActions?.map(\.name) == ["Retry", "Dismiss"])
         }
     }

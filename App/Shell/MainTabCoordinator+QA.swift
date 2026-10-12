@@ -64,8 +64,8 @@ extension MainTabCoordinator {
         // screen).
         if let index = arguments.firstIndex(of: "-toast-demo") {
             let mode = index + 1 < arguments.count ? arguments[index + 1] : ""
-            // `-toast-demo kinds`: one of each kind, once — a success with a
-            // detail line, a failure with Retry (it stays), a warning, an info.
+            // `-toast-demo kinds`: one of each kind, once — a success, a
+            // failure with Retry (it stays), a warning, an info.
             if mode == "kinds" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                     self?.debugToastKinds()
@@ -506,10 +506,10 @@ extension MainTabCoordinator {
     fileprivate func debugToastKinds() {
         guard let stack = tabBarController.selectedViewController as? UINavigationController,
               let top = stack.topViewController else { return }
-        Feedback.success("Saved to your profile", detail: "Only your friends can see it", from: top, at: .topLeading)
+        Feedback.success("Saved to your profile", from: top, at: .topLeading)
         Feedback.warning("Posted without its sound", from: top, at: .top)
         Feedback.info("Hidden from this feed", from: top, at: .bottomTrailing)
-        Feedback.failure("Couldn't send", detail: "No connection", from: top, action: ToastView.Action("Retry") {
+        Feedback.failure("Couldn't send", from: top, action: ToastView.Action("Retry") {
             Feedback.success("Sent", from: top)
         })
     }

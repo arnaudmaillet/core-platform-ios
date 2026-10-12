@@ -129,7 +129,6 @@ final class ToastOverlay {
     /// bottom toast stands on.
     func present(
         _ message: String,
-        detail: String? = nil,
         symbol: String?,
         style: ToastView.Style,
         action: ToastView.Action? = nil,
@@ -156,7 +155,7 @@ final class ToastOverlay {
         window.isHidden = false
         window.layoutIfNeeded()
         let toast = ToastView.present(
-            message, detail: detail, symbol: symbol, style: style, action: action, undoable: undoable,
+            message, symbol: symbol, style: style, action: action, undoable: undoable,
             id: id, isCondition: isCondition, position: position, in: container,
             edge: position.isTop ? container.topAnchor : container.bottomAnchor
         )

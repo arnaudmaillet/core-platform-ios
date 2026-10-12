@@ -73,7 +73,6 @@ public enum Feedback {
     /// The action happened: a confirmation toast and a success haptic.
     ///
     /// - Parameters:
-    ///   - detail: an optional second line (#954).
     ///   - source: the screen the action was taken on. The toast goes to the
     ///     topmost presented screen over it, or to `source` itself when
     ///     nothing covers it (see `host(for:)`).
@@ -87,7 +86,6 @@ public enum Feedback {
     @discardableResult
     public static func success(
         _ message: String,
-        detail: String? = nil,
         symbol: String? = Kind.success.defaultSymbol,
         from source: UIViewController,
         above floor: UIView? = nil,
@@ -95,7 +93,7 @@ public enum Feedback {
         action: ToastView.Action? = nil,
         id: String? = nil
     ) -> ToastView {
-        show(.success, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
+        show(.success, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
     }
 
     /// The action did not happen: a failure-style toast and an error haptic.
@@ -103,7 +101,6 @@ public enum Feedback {
     @discardableResult
     public static func failure(
         _ message: String,
-        detail: String? = nil,
         symbol: String? = Kind.failure.defaultSymbol,
         from source: UIViewController,
         above floor: UIView? = nil,
@@ -111,14 +108,13 @@ public enum Feedback {
         action: ToastView.Action? = nil,
         id: String? = nil
     ) -> ToastView {
-        show(.failure, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
+        show(.failure, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
     }
 
     /// It happened, with a catch: a warning-style toast and a warning haptic.
     @discardableResult
     public static func warning(
         _ message: String,
-        detail: String? = nil,
         symbol: String? = Kind.warning.defaultSymbol,
         from source: UIViewController,
         above floor: UIView? = nil,
@@ -126,7 +122,7 @@ public enum Feedback {
         action: ToastView.Action? = nil,
         id: String? = nil
     ) -> ToastView {
-        show(.warning, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
+        show(.warning, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
     }
 
     /// An action the viewer can take back (#954): a confirmation toast with
@@ -139,7 +135,6 @@ public enum Feedback {
     @discardableResult
     public static func undoable(
         _ message: String,
-        detail: String? = nil,
         symbol: String? = Kind.success.defaultSymbol,
         from source: UIViewController,
         above floor: UIView? = nil,
@@ -150,7 +145,7 @@ public enum Feedback {
         undo: @escaping @MainActor () -> Void
     ) -> ToastView {
         show(
-            .success, message, detail: detail, symbol: symbol, from: source, above: floor, at: position,
+            .success, message, symbol: symbol, from: source, above: floor, at: position,
             action: nil, undoable: ToastView.Undoable(commit: commit, undo: undo), id: id,
             playsHaptic: playsHaptic
         )
@@ -163,13 +158,12 @@ public enum Feedback {
     @discardableResult
     public static func condition(
         _ message: String,
-        detail: String? = nil,
         symbol: String? = Kind.info.defaultSymbol,
         id: String,
         from source: UIViewController,
         at position: ToastPosition = .top
     ) -> ToastView {
-        show(.info, message, detail: detail, symbol: symbol, from: source, above: nil, at: position, action: nil, id: id, isCondition: true)
+        show(.info, message, symbol: symbol, from: source, above: nil, at: position, action: nil, id: id, isCondition: true)
     }
 
     /// Something is under way ("Posting…"): a spinner, no haptic, and no
@@ -178,20 +172,18 @@ public enum Feedback {
     @discardableResult
     public static func loading(
         _ message: String,
-        detail: String? = nil,
         id: String,
         from source: UIViewController,
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom
     ) -> ToastView {
-        show(.loading, message, detail: detail, symbol: nil, from: source, above: floor, at: position, action: nil, id: id)
+        show(.loading, message, symbol: nil, from: source, above: floor, at: position, action: nil, id: id)
     }
 
     /// A neutral notice: a confirmation-style toast, no haptic.
     @discardableResult
     public static func info(
         _ message: String,
-        detail: String? = nil,
         symbol: String? = Kind.info.defaultSymbol,
         from source: UIViewController,
         above floor: UIView? = nil,
@@ -199,7 +191,7 @@ public enum Feedback {
         action: ToastView.Action? = nil,
         id: String? = nil
     ) -> ToastView {
-        show(.info, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
+        show(.info, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
     }
 
     /// A state that shows on the control itself — a bookmark filling — was
@@ -231,7 +223,6 @@ public enum Feedback {
     private static func show(
         _ kind: Kind,
         _ message: String,
-        detail: String?,
         symbol: String?,
         from source: UIViewController,
         above floor: UIView?,
@@ -248,7 +239,7 @@ public enum Feedback {
         if let window = host.viewIfLoaded?.window, let overlay = ToastOverlay.overlay(for: window) {
             // The scene's overlay (#954): the toast outlives the screen.
             toast = overlay.present(
-                message, detail: detail, symbol: symbol, style: kind.style, action: action, undoable: undoable,
+                message, symbol: symbol, style: kind.style, action: action, undoable: undoable,
                 id: id, isCondition: isCondition, position: position,
                 from: host, above: floor,
                 keyboardTopY: keyboardTopY(of: host, in: window),
@@ -257,7 +248,7 @@ public enum Feedback {
         } else {
             // No scene to draw over (a package test host): in the screen.
             toast = ToastView.present(
-                message, detail: detail, symbol: symbol, style: kind.style, action: action, undoable: undoable,
+                message, symbol: symbol, style: kind.style, action: action, undoable: undoable,
                 id: id, isCondition: isCondition, position: position, in: host.view,
                 edge: position.isTop ? nil : floor?.topAnchor
             )

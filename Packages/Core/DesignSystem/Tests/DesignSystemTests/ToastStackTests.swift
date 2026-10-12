@@ -75,10 +75,11 @@ struct ToastStackTests {
     /// runs out while the viewer reads them; collapsing lets time run again.
     @Test func aSpreadStackIsReadableAndHoldsItsTime() {
         hosting { container, advance in
-            // Taller than the front one: spread, it must not overlap it.
+            // Taller than the front one (an action: 48 pt against 44):
+            // spread, it must not overlap it.
             let older = ToastView.present(
-                "Saved to your profile", detail: "Only your friends can see it", symbol: nil,
-                style: .confirmation, position: .bottom, in: container
+                "Saved to your profile", symbol: nil, style: .confirmation,
+                action: .init("View") {}, position: .bottom, in: container
             )
             let newer = toast("Copied", in: container)
             ToastView.setSpread(true, at: .bottom, in: container)

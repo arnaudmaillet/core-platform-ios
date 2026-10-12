@@ -1,7 +1,7 @@
 import Foundation
 
 /// An action the viewer can still take back (#957), as a view model hands it
-/// to its screen: the words the undo toast shows, and the two ends of it —
+/// to its screen: the one line the undo toast shows, and the two ends of it —
 /// `commit` when the countdown runs out (or the toast leaves any other way),
 /// `undo` when the viewer taps Undo. Exactly one of them runs, once
 /// (`Feedback.undoable`, #954).
@@ -13,7 +13,6 @@ import Foundation
 @MainActor
 struct UndoableAction {
     let message: String
-    var detail: String?
     let symbol: String
     let commit: @MainActor () -> Void
     let undo: @MainActor () -> Void

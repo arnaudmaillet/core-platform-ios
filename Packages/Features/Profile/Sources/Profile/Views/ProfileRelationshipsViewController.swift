@@ -141,7 +141,7 @@ final class ProfileRelationshipsViewController: UIViewController {
         viewModel.onUndoable = { [weak self] action in
             guard let self else { return }
             Feedback.undoable(
-                action.message, detail: action.detail, symbol: action.symbol, from: self,
+                action.message, symbol: action.symbol, from: self,
                 commit: action.commit, undo: action.undo
             )
         }
