@@ -209,6 +209,24 @@ struct ToastOverlayTests {
         }
     }
 
+    /// Retry fires the next toast at the same position, from its action: the
+    /// next toast shows, in the overlay, with the window up.
+    @Test func anActionCanFireTheNextToast() throws {
+        let screen = UIViewController()
+        try hosting(screen) { _, overlay in
+            var next: ToastView?
+            let failure = Feedback.failure("Couldn't send", from: screen, action: ToastView.Action("Retry") {
+                next = Feedback.success("Sent", from: screen)
+            })
+            try #require(failure.actionButton).sendActions(for: .primaryActionTriggered)
+            let sent = try #require(next)
+            #expect(sent.superview === overlay.container)
+            #expect(!sent.isDismissing)
+            #expect(!overlay.window.isHidden)
+            #expect(overlay.toasts.map(\.message) == ["Sent"])
+        }
+    }
+
     /// The window is up only while it holds a toast.
     @Test func theWindowHidesWithItsLastToast() {
         let screen = UIViewController()
@@ -238,6 +256,12 @@ struct ToastOverlayTests {
         root.view.addSubview(toast)
         #expect(window.hitTest(CGPoint(x: 150, y: 120), with: nil) === toast)
         #expect(window.hitTest(CGPoint(x: 20, y: 400), with: nil) == nil)
+    }
+
+    /// ⚠️ A tap on a toast must not make the overlay the key window: the
+    /// app's would stop being it, and the next toast would miss the overlay.
+    @Test func theOverlayNeverBecomesKey() {
+        #expect(!ToastOverlayWindow(frame: bounds).canBecomeKey)
     }
 
     // MARK: - Appearance
