@@ -45,8 +45,16 @@ struct SnapCommentTickerViewTests {
     }
 
     /// A ticker with `itemCount` comments, in `window` (nil: in none).
+    ///
+    /// Its clock is PINNED (#993): a flight grabbed before its first committed
+    /// frame — every flight in a synchronous test — is frozen at its start
+    /// minus speed × elapsed, and on a starved runner the time between
+    /// `setActive` and `beginScrub` carried the train out of the band a test
+    /// reads. Pinned, the freeze lands exactly where the flight departed.
     private func makeTicker(itemCount: Int = 12, in window: UIWindow?) -> SnapCommentTickerView {
         let ticker = SnapCommentTickerView(frame: CGRect(x: 0, y: 0, width: bandWidth, height: 69))
+        let now = CACurrentMediaTime()
+        ticker.clock = { now }
         ticker.setComments((0..<itemCount).map { TickerCommentModel(id: "r\($0)", text: "GG 🔥 \($0)") })
         window?.addSubview(ticker)
         return ticker
