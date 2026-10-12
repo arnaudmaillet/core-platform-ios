@@ -386,7 +386,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             trayPlacement: trayPlacement
         )
         controller.feedHero = openFeedHero
-        controller.staking = wallet.map(PostCardStaking.init)
+        controller.staking = makeCardStaking?() ?? wallet.map(PostCardStaking.init)
         return controller
     }
 
@@ -404,6 +404,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// The wallet the gallery cards' like chips stake from — the app's one
     /// instance. Nil leaves the chips counters.
     public var wallet: WalletStore?
+    /// Builds a gallery's card staking with the app's live post counts
+    /// (#896): a like in the feed shows on the profile's cards. Nil: the
+    /// cards stake from `wallet` and keep the counts they loaded.
+    public var makeCardStaking: (@MainActor () -> PostCardStaking?)?
     /// The app's one follow-change channel: the header's Follow button and
     /// the followers lists keep agreeing with a follow made anywhere else.
     /// Nil leaves each screen with the answer it loaded.
@@ -482,7 +486,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             identityStub: identityStub
         )
         controller.feedHero = openFeedHero
-        controller.staking = wallet.map(PostCardStaking.init)
+        controller.staking = makeCardStaking?() ?? wallet.map(PostCardStaking.init)
         return controller
     }
 

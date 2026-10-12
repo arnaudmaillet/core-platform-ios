@@ -542,6 +542,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// face. Set at configure (from the wallet's ledger) and again after
     /// each confirmed spend; chrome reset returns it to 0 on reuse.
     func setBoostTotal(_ total: Int, animated: Bool = false) { chrome.setBoostTotal(total, animated: animated) }
+    /// The post's live like count — see `SnapChromeView.setPostLikeCount`.
+    func setPostLikeCount(_ count: Int64?) { chrome.setPostLikeCount(count) }
     /// The sound bubble's face (#671) — see `SnapChromeView.setSoundFace`.
     func setSoundFace(_ face: SnapSoundFace?) { chrome.setSoundFace(face) }
     /// Turns the sound bubble's cover while the post plays (#671).

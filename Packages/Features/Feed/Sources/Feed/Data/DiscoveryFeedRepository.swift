@@ -80,6 +80,10 @@ public actor DiscoveryFeedRepository: FeedProviding {
         try await base.loadPost(id)
     }
 
+    /// Hydrated through `base.loadPost`, whose cache keeps a count as it was
+    /// fetched.
+    public nonisolated var pagesCarryFreshCounts: Bool { false }
+
     public func prewarm(_ ids: [PostID]) async {
         await base.prewarm(ids)
     }

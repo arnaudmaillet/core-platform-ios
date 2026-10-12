@@ -161,7 +161,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 commentsProvider: commentsProvider,
                 realtime: realtime,
                 composedPosts: composedPosts,
-                router: router
+                router: router,
+                entities: entities
             )
         )
     }
@@ -329,7 +330,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             wallet: wallet,
             // The sheet the balance opens on every screen For You pushes —
             // the shell's, the same one the root header's badge presents.
-            makeWalletSheet: makeWalletSheet
+            makeWalletSheet: makeWalletSheet,
+            entities: entities
         )
         forYou.onTabPresentationChange = onTabPresentationChange
         return forYou
@@ -662,6 +664,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // `WalletStore`'s change post is scoped to the instance.
             wallet: wallet,
             makeWalletSheet: makeWalletSheet,
+            entities: entities,
             loadPosts: {
                 // One hydration over the same provider shape the feed above
                 // uses, so every member is a cache hit. Unranked: the
@@ -1264,7 +1267,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 ),
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
-                router: router
+                router: router,
+                entities: entities
             )
         )
         (feed as? SnapFeedViewController)?.zoomOwnsInteractiveDismissal = ownsInteractiveDismissal
@@ -1344,7 +1348,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                     repository: repository,
                     engagementProvider: engagementProvider,
                     commentsProvider: commentsProvider,
-                    router: router
+                    router: router,
+                    entities: entities
                 ),
                 threadChrome: threadChrome,
                 imagePipeline: imagePipeline,
@@ -1437,7 +1442,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 repository: repository,
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
-                router: router
+                router: router,
+                entities: entities
             ),
             threadChrome: true,
             imagePipeline: imagePipeline,
@@ -1471,7 +1477,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 repository: repository,
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
-                router: router
+                router: router,
+                entities: entities
             ),
             imagePipeline: imagePipeline,
             mode: mode,

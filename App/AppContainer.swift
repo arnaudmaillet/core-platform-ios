@@ -28,6 +28,7 @@ import MapsInterface
 import Notifications
 import NotificationsInterface
 import OSLog
+import PostGrid
 import Profile
 import ProfileInterface
 import Search
@@ -360,11 +361,16 @@ final class AppContainer {
         entityFollowSubscription = followGraphEvents.subscribe { [store] change in
             store.applyFollowChange(change)
         }
+        // Every point the viewer stakes, from any surface, moves the post's
+        // count (and every undo or refund moves it back).
+        walletStakeLikes = WalletStakeLikes(wallet: walletStore, entities: store)
         return store
     }()
 
     /// Keeps `entityStore` hearing the follow channel for the app's life.
     private var entityFollowSubscription: FollowGraphSubscription?
+    /// Keeps `entityStore`'s counts moving with the wallet's stakes.
+    private var walletStakeLikes: WalletStakeLikes?
 
     // MARK: - Media
 
@@ -1205,6 +1211,10 @@ final class AppContainer {
         builder.videoPlayback = videoPlayback
         // The gallery cards' like chips stake from the app's one wallet.
         builder.wallet = walletStore
+        // …and draw their posts' live counts (#896).
+        builder.makeCardStaking = { [unowned self] in
+            PostCardStaking(wallet: self.walletStore, entities: self.entityStore)
+        }
         // A follow made on another surface (a feed's "+", a card's Unfollow)
         // reaches the profile screens and their followers lists.
         builder.followEvents = followGraphEvents

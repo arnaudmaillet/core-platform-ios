@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import CoreNetworking
+import EntityStore
 import Foundation
 
 /// The comments stream's sort orders (the engaged toolbar's selector).
@@ -181,7 +182,14 @@ public final class PostDetailViewModel {
     private var phase: Phase = .loading {
         didSet { onPhaseChange?(phase) }
     }
+    /// The viewer's own like, and the count the post was loaded with — the
+    /// fallback for a post the store no longer holds.
     private var engagement = EngagementState(likeCount: 0, isLiked: false)
+    /// The post's live count (#896): a like placed in the feed, on a card or
+    /// in this page's own comments bar, and every realtime tick, all reach
+    /// this page through it.
+    private let entities: EntityStore
+    private var entityObservation: EntityObservation?
     private var likeInFlight = false
     private var authorID: ProfileID?
     /// The loaded author's identity slice — attached to the `.profile` route
@@ -223,6 +231,7 @@ public final class PostDetailViewModel {
         engagementProvider: (any EngagementProviding)? = nil,
         commentsProvider: (any CommentsProviding)? = nil,
         router: (any Router)? = nil,
+        entities: EntityStore? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.postID = postID
@@ -230,7 +239,9 @@ public final class PostDetailViewModel {
         self.engagementProvider = engagementProvider
         self.commentsProvider = commentsProvider
         self.router = router
+        self.entities = entities ?? EntityStore()
         self.now = now
+        observeEntity(postID)
     }
 
     /// A post that does not exist yet: the "+" menu's Text Post. It fetches
@@ -243,6 +254,7 @@ public final class PostDetailViewModel {
         engagementProvider: (any EngagementProviding)? = nil,
         commentsProvider: (any CommentsProviding)? = nil,
         router: (any Router)? = nil,
+        entities: EntityStore? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.postID = nil
@@ -251,7 +263,17 @@ public final class PostDetailViewModel {
         self.engagementProvider = engagementProvider
         self.commentsProvider = commentsProvider
         self.router = router
+        self.entities = entities ?? EntityStore()
         self.now = now
+    }
+
+    /// Re-draws the like whenever the post's count moves in the store —
+    /// whoever moved it.
+    private func observeEntity(_ id: PostID) {
+        entityObservation = entities.observePost(id) { [weak self] changed in
+            guard let self, changed == self.postID else { return }
+            self.onEngagementChange?(self.engagementState)
+        }
     }
 
     // MARK: - Inputs
@@ -316,18 +338,28 @@ public final class PostDetailViewModel {
         loadComments()
     }
 
-    public var engagementState: EngagementState { engagement }
+    /// The post's live count — the store's, else the one it was loaded with.
+    public var engagementState: EngagementState {
+        var state = engagement
+        if let postID, let live = entities.post(postID)?.likeCount { state.likeCount = live }
+        return state
+    }
 
     /// Optimistic like: one point on the post (#676), shown at once, taken
     /// back if it does not land. Final — there is no unlike. One in flight
-    /// at a time.
+    /// at a time. The point goes on the store's count, so every screen
+    /// showing the post shows it (#896); the store's change re-draws this one.
     public func like() {
         guard let engagementProvider, let postID, !likeInFlight else { return }
         let wasLiked = engagement.isLiked
+        let before = engagementState.likeCount
         engagement.isLiked = true
-        engagement.likeCount += 1
         likeInFlight = true
-        onEngagementChange?(engagement)
+        if entities.post(postID)?.likeCount == nil {
+            entities.setLikeCount(before + 1, for: postID)
+        } else {
+            entities.addLikes(1, to: postID)
+        }
 
         Task { [weak self] in
             guard let self else { return }
@@ -335,8 +367,7 @@ public final class PostDetailViewModel {
                 try await engagementProvider.like(postID)
             } catch {
                 self.engagement.isLiked = wasLiked
-                self.engagement.likeCount = max(0, self.engagement.likeCount - 1)
-                self.onEngagementChange?(self.engagement)
+                self.entities.addLikes(-1, to: postID)
             }
             self.likeInFlight = false
         }
@@ -440,11 +471,13 @@ public final class PostDetailViewModel {
         authorID = entry.author.id
         authorStub = ProfileIdentityStub(handle: entry.author.handle, displayName: entry.author.displayName)
         engagement = EngagementState(likeCount: entry.likeCount, isLiked: false, countHidden: entry.post.likeCountsHidden)
+        observeEntity(entry.post.id)
+        entities.upsert([entry])
         phase = .content(PostDetailDisplayModel(entry: entry, now: now()))
         comments = []
         resetPaging()
         emitComments()
-        onEngagementChange?(engagement)
+        onEngagementChange?(engagementState)
         onPublished?(entry)
         // Refreshed as any post's comments are, but WITHOUT a skeleton: the
         // empty stream on screen is already the answer, and the refresh only
@@ -531,8 +564,11 @@ public final class PostDetailViewModel {
             displayName: entry.author.displayName
         )
         engagement = EngagementState(likeCount: entry.likeCount, isLiked: false, countHidden: entry.post.likeCountsHidden)
+        // The repository's copy may be older than the store's count (its
+        // cache keeps a post as it was fetched): it only fills one.
+        entities.upsert([entry], counts: .ifUnknown)
         phase = .content(PostDetailDisplayModel(entry: entry, now: now()))
-        onEngagementChange?(engagement)
+        onEngagementChange?(engagementState)
     }
 
     /// Comments are best-effort: a failure never fails the whole post. It

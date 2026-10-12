@@ -54,12 +54,18 @@ public protocol FeedProviding: Sendable {
     /// then render "Couldn't load this post" over text the viewer can see they
     /// wrote.
     func remember(_ entry: FeedEntry) async
+    /// Whether a page's like counts were read for it (the timeline's batched
+    /// counter read) rather than taken from a copy — a post cache keeps each
+    /// post as it was fetched. A fresh count replaces the app's live one
+    /// (`EntityStore`, #896); a copy only fills one it does not know.
+    nonisolated var pagesCarryFreshCounts: Bool { get }
 }
 
 public extension FeedProviding {
     /// Most providers have no synchronous cache; a miss just means the
     /// caller falls back to the async path it already has.
     nonisolated func peekPost(_ id: PostID) -> FeedEntry? { nil }
+    nonisolated var pagesCarryFreshCounts: Bool { true }
 }
 
 public extension FeedProviding {

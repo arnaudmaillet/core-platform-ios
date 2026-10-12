@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import EntityStore
 import FeedInterface
 import MediaCore
 import MediaPlayback
@@ -206,7 +207,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
         wallet: WalletStore? = nil,
-        makeWalletSheet: (@MainActor () -> UIViewController)? = nil
+        makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        entities: EntityStore? = nil
     ) {
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
@@ -222,7 +224,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.socialGraph = socialGraph
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
         rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
-        staking = wallet.map(PostCardStaking.init)
+        // The cards' counts are the posts' live ones (#896): a like in the
+        // vertical feed is on the tile it opened from.
+        staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
         rails.staking = staking

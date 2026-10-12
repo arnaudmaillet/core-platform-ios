@@ -2848,8 +2848,10 @@ final class ForYouGridPage: UIView {
 
     /// The post behind an id, for a flight card that must configure itself
     /// from the model rather than from a cell that may not be realized.
+    /// With its live like count (#896): what the flight, the close's
+    /// stand-in and a seeded feed draw is what the bound card draws.
     func post(for postID: PostID) -> GalleryPost? {
-        posts.first { $0.id == postID }
+        posts.first { $0.id == postID }.map { staking?.liveCopy(of: $0) ?? $0 }
     }
 
     /// The posts `new` adds to `old`, or nil when this is not an addition.
