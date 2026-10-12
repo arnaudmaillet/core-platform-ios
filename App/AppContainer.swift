@@ -1,6 +1,7 @@
 import UIKit
 import Auth
 import AuthInterface
+import CacheKit
 import Chat
 import ChatInterface
 import Connect
@@ -299,6 +300,31 @@ final class AppContainer {
         #endif
         return AppleSignInProvider()
     }
+
+    // MARK: - Device cache
+
+    /// The one owner of every cache budget in the process (epic #890). Every
+    /// memory and disk namespace registers here (`register(_:)`): images
+    /// (#894), video (#895), the LocalStore (#893), UI assets (#971). It turns
+    /// each namespace's budget rule into bytes from the device and the
+    /// Settings limit, and releases memory and disk on the signals
+    /// `startCacheCoordinator()` wires.
+    ///
+    /// `.automatic` (images 300 MB, video 500 MB, LocalStore 100 MB) until
+    /// Settings → Storage offers the choice (#899).
+    let cacheCoordinator = CacheCoordinator(storageLimit: .automatic)
+
+    /// Starts the coordinator's signal sources: memory warning and critical
+    /// pressure, background and foreground, Low Power, thermal, the network
+    /// path, and the viewer's transitions (`AppCacheSignals`). Called once at
+    /// launch, before any cache is filled.
+    func startCacheCoordinator() {
+        guard !cacheSignalsStarted else { return }
+        cacheSignalsStarted = true
+        cacheCoordinator.startObserving(AppCacheSignals.sources())
+    }
+
+    private var cacheSignalsStarted = false
 
     // MARK: - Media
 

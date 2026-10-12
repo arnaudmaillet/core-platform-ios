@@ -26,6 +26,9 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
             setvbuf(stdout, nil, _IONBF, 0)
         }
         #endif
+        // Before any cache fills: every release signal reaches the one
+        // device cache from the first frame (#890).
+        AppContainer.shared.startCacheCoordinator()
         AppContainer.configureEmotes()
         // Before returning: a tap on a notification that launched the app is
         // delivered to the delegate this installs (#651).
