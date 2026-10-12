@@ -160,9 +160,62 @@ public struct LocalList: Sendable, Equatable {
     public let fetchedAt: Date
 }
 
+/// One item of a transcript (a message), to store or as stored.
+public struct LocalTranscriptItem: Sendable, Equatable {
+    /// Its server id: an item stored twice (a live copy, then the page that
+    /// carries it) is one row, the later copy's.
+    public var id: String
+    /// Its time in milliseconds: the transcript's order, `id` breaking ties.
+    public var sortKey: Int64
+    public var payload: Data
+    /// The payload's encoding, chosen by the type's owner. A reader that does
+    /// not know a format treats the item as unreadable.
+    public var format: Int
+
+    public init(id: String, sortKey: Int64, payload: Data, format: Int = 1) {
+        self.id = id
+        self.sortKey = sortKey
+        self.payload = payload
+        self.format = format
+    }
+}
+
+/// One network page of a transcript: items in any order, and the cursor that
+/// fetches the items older than its oldest.
+public struct LocalTranscriptPage: Sendable {
+    public var items: [LocalTranscriptItem]
+    /// Nil when nothing is older: the page reaches the transcript's start.
+    public var olderCursor: String?
+
+    public init(items: [LocalTranscriptItem], olderCursor: String?) {
+        self.items = items
+        self.olderCursor = olderCursor
+    }
+}
+
+/// A stored transcript, read back: its newest items, oldest first, and where
+/// paging goes on past the oldest.
+public struct LocalTranscript: Sendable, Equatable {
+    public let key: String
+    public let items: [LocalTranscriptItem]
+    /// The cursor for the items older than the oldest stored one; nil when
+    /// the stored items reach the transcript's start.
+    public let olderCursor: String?
+    /// When the newest page was last written.
+    public let fetchedAt: Date
+}
+
 /// The freshness rules of §4.2 in the device cache report (#890). Writers
 /// pass these lifetimes; readers revalidate from `fetchedAt`.
 public enum LocalStorePolicy {
+    /// The last conversations kept on the device, and the newest messages of
+    /// each (decided 2026-10-11, epic #890: 50 × 200). Older messages page
+    /// from the network.
+    public static let transcriptCount = 50
+    public static let transcriptLength = 200
+    /// A transcript is shown for 30 days after its newest page was written:
+    /// the viewer's own conversations, readable offline long after a feed is.
+    public static let transcriptLifetime: TimeInterval = 30 * 24 * 60 * 60
     /// A post may be shown for 7 days; revalidated on display after an hour.
     public static let postLifetime: TimeInterval = 7 * 24 * 60 * 60
     public static let postRevalidation: TimeInterval = 60 * 60

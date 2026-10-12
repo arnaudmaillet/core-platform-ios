@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreNetworking
 import Foundation
+import LocalStore
 import UIKit
 
 /// What thread a screen is showing.
@@ -113,6 +114,12 @@ public final class ConversationViewModel {
     /// The monitor whose recoveries reload this store — the shared one; a
     /// test hands its own (the shared one is process-wide).
     var connectivity: ConnectivityMonitor = .shared
+    /// The conversation's last messages on the device (#897): the thread
+    /// opens on them, offline included, and every page the network answers
+    /// (and every message sent) is written back. Nil keeps them in memory.
+    var deviceCache: ChatLocalCache?
+    /// The messages shown are the device's and no load has answered since.
+    private var showsDeviceMessages = false
     /// The text sends, chained: each waits for the one before it, so texts
     /// typed back to back land in the order sent while the composer stays
     /// free for the next one (#886).
@@ -202,6 +209,7 @@ public final class ConversationViewModel {
         loadTitle()
         switch target {
         case .existing:
+            restoreFromDevice()
             reload()
         case .draft:
             // Stay on the skeleton until the resolution answers. Publishing an
@@ -226,8 +234,22 @@ public final class ConversationViewModel {
     }
 
     private func recoverFromOutage() {
-        guard case .failed = phase else { return }
+        // A failed thread, or one still on the device's messages.
+        if case .failed = phase {} else if !showsDeviceMessages { return }
         refresh()
+    }
+
+    /// The conversation's last messages as the device stored them (#897),
+    /// shown at once (inside `viewDidLoad`, so before the push's first frame)
+    /// with the cursor past the oldest, and revalidated by the load that
+    /// follows. Only on an empty transcript.
+    private func restoreFromDevice() {
+        guard let conversationID, messages.isEmpty,
+              let stored = deviceCache?.transcript(of: conversationID) else { return }
+        messages = stored.messages
+        olderPageToken = stored.olderCursor
+        showsDeviceMessages = true
+        emit()
     }
 
     public func refresh() {
@@ -282,9 +304,11 @@ public final class ConversationViewModel {
         // The origin may not have known who this is (a deep link, a map pin);
         // now that there is a conversation, its summary can say.
         if peerName.isEmpty { loadTitle() }
-        // Adopt whatever history the peer already had. Failures stay silent —
-        // `reload` only reports one when there is no content, and the empty
-        // transcript published at load counts.
+        // Adopt whatever history the peer already had — what the device holds
+        // at once. Failures stay silent — `reload` only reports one when
+        // there is no content, and the empty transcript published at load
+        // counts.
+        restoreFromDevice()
         reload()
     }
 
@@ -369,6 +393,7 @@ public final class ConversationViewModel {
             markFailed(pendingID)
             return
         }
+        let writer = deviceCache?.viewer
         do {
             let message: ChatMessage
             switch pending.payload {
@@ -393,6 +418,9 @@ public final class ConversationViewModel {
             // the retry under the same key is answered with that same id. A
             // second row with it would crash the diffable snapshot.
             if !messages.contains(where: { $0.id == message.id }) { messages.append(message) }
+            // On the device too, once per id: the next load's copy of it
+            // replaces this one (#897).
+            deviceCache?.storeSent(message, in: id, as: writer)
             emit()
             onDidSendMessage?(id, message)
             await markRead(id, upTo: message.id)
@@ -510,12 +538,18 @@ public final class ConversationViewModel {
     private func reload() {
         guard let conversationID else { return }
         load?.cancel()
+        // Whose messages these are, asked before the fetch (#897).
+        let writer = deviceCache?.viewer
         load = Task { [weak self] in
             guard let self else { return }
             do {
                 let page = try await self.repository.loadMessagesPage(in: conversationID, before: nil)
                 let loaded = page.messages
-                if self.hasOlderPages {
+                self.deviceCache?.storeNewest(page, in: conversationID, as: writer)
+                if self.showsDeviceMessages {
+                    self.showsDeviceMessages = false
+                    self.adoptOverDevice(page)
+                } else if self.hasOlderPages {
                     // Older pages are on screen: the fresh newest page goes
                     // over the old one and everything older stays, so a
                     // refresh never yanks the reader out of the past.
@@ -542,20 +576,40 @@ public final class ConversationViewModel {
         }
     }
 
+    /// The first newest page over the device's messages (#897), as the
+    /// device merges it: overlapping them, it replaces every message at least
+    /// as recent as its oldest and the older ones stay with the stored cursor,
+    /// so paging goes on from there; with a gap behind it (more new messages
+    /// than a page) or reaching the conversation's start, it replaces them.
+    private func adoptOverDevice(_ page: MessagePage) {
+        let shown = Set(messages.map(\.id))
+        if page.olderPageToken != nil, page.messages.contains(where: { shown.contains($0.id) }) {
+            messages = Self.merging(newestPage: page.messages, over: messages)
+            hasOlderPages = true
+        } else {
+            messages = page.messages
+            olderPageToken = page.olderPageToken
+            hasOlderPages = false
+        }
+    }
+
     /// The reader neared the top of the thread: the page of history before
     /// the oldest message shown, if there is one and none is on its way
     /// (#600). Prepended — the thread reads downward — and a failure is
     /// retried on the next approach.
     public func loadOlder() {
         guard olderLoad == nil, let conversationID, let token = olderPageToken else { return }
+        let writer = deviceCache?.viewer
         olderLoad = Task { [weak self] in
-            await self?.prependOlder(in: conversationID, before: token)
+            await self?.prependOlder(in: conversationID, before: token, as: writer)
         }
         onLoadingOlderChange?(true)
     }
 
-    private func prependOlder(in conversationID: ConversationID, before token: String) async {
+    private func prependOlder(in conversationID: ConversationID, before token: String, as writer: LocalStoreViewer?) async {
         let page = try? await repository.loadMessagesPage(in: conversationID, before: token)
+        // Below the stored messages, where it follows them (#897).
+        if let page { deviceCache?.storeOlder(page, in: conversationID, after: token, as: writer) }
         // ⚠️ The slot frees BEFORE the rows render: a page that lands wholly
         // on screen asks for the next one while it renders (#596).
         olderLoad = nil

@@ -1368,7 +1368,9 @@ final class AppContainer {
     private(set) lazy var notificationsFeature: any NotificationsFeatureBuilding = NotificationsFeatureBuilder(
         repository: notificationsRepository,
         router: routeResolver,
-        imagePipeline: imagePipeline
+        imagePipeline: imagePipeline,
+        // The drawer's last 100 notifications (#897).
+        localStore: localStore
     )
 
     // MARK: - Chat
@@ -1454,6 +1456,8 @@ final class AppContainer {
         // the search screen, and the other way round.
         recentSearches: recentSearchStore,
         mediaPicker: chatMediaPicker,
+        // The inbox and the last 50 conversations × 200 messages (#897).
+        localStore: localStore,
         // A conversation is drawn by the feed's text-post screen. Lazy, like
         // every feature here: the feed builder reaches the router, and the
         // router reaches this.

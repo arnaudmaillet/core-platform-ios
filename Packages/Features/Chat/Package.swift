@@ -18,6 +18,9 @@ let package = Package(
         // inbox reads and writes the SAME store, so a query typed in one is
         // recent in the other.
         .package(path: "../../Core/CoreStorage"),
+        // The inbox and the last conversations on the device (#897).
+        .package(path: "../../Core/CacheKit"),
+        .package(path: "../../Core/LocalStore"),
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/MediaCore"),
@@ -37,6 +40,8 @@ let package = Package(
                 "CoreNavigation",
                 "CoreNetworking",
                 "CoreStorage",
+                "CacheKit",
+                "LocalStore",
                 "DesignSystem",
                 "EmoteKit",
                 "FeedInterface",
@@ -52,6 +57,9 @@ let package = Package(
                 "FeedInterface",
                 // `ChatMediaTests` builds an uploader and a transport (#681).
                 "MediaCore",
+                // `ChatLocalCacheTests` opens a store in a temporary folder.
+                "CacheKit",
+                "LocalStore",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

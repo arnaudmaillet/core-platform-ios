@@ -15,7 +15,10 @@ let package = Package(
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/DesignSystem"),
-        .package(path: "../../Core/MediaCore")
+        .package(path: "../../Core/MediaCore"),
+        // The drawer's last notifications on the device (#897).
+        .package(path: "../../Core/CacheKit"),
+        .package(path: "../../Core/LocalStore")
     ],
     targets: [
         .target(
@@ -28,7 +31,9 @@ let package = Package(
                 "CoreNavigation",
                 "CoreNetworking",
                 "DesignSystem",
-                "MediaCore"
+                "MediaCore",
+                "CacheKit",
+                "LocalStore"
             ]
         ),
         .testTarget(
@@ -38,6 +43,9 @@ let package = Package(
                 "AuthInterface",
                 "CoreNavigation",
                 "CoreNetworking",
+                // `NotificationsLocalCacheTests` opens a store in a temporary folder.
+                "CacheKit",
+                "LocalStore",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )
