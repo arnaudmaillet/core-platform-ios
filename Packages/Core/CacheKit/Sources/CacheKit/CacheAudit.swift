@@ -146,82 +146,121 @@ public final class CacheAudit: Sendable {
         conditions: CacheConditions
     ) -> [String] {
         let speculative = report.speculative()
-        var header = [
-            "t=" + String(format: "%.1f", uptime),
-            "trigger=" + trigger,
-            "limit=" + name(of: limit),
-            "diskPressure=" + name(of: pressure),
-            "policy=" + name(of: PrefetchPolicy(conditions: conditions).level),
-            "network=" + conditions.network.rawValue + (conditions.isNetworkExpensive ? "(expensive)" : "")
-                + (conditions.isNetworkConstrained ? "(constrained)" : "")
-                + (conditions.usesLessCellularData ? "(lessCellularData)" : ""),
-            "memory=" + megabytes(report.totalBytes(medium: .memory)),
-            "disk=" + megabytes(report.totalBytes(medium: .disk))
+        // ⚠️ Typed locals and single interpolations throughout: one array
+        // literal of `+` chains timed out Xcode 26's type checker on CI.
+        let expensive: String = conditions.isNetworkExpensive ? "(expensive)" : ""
+        let constrained: String = conditions.isNetworkConstrained ? "(constrained)" : ""
+        let lessCellular: String = conditions.usesLessCellularData ? "(lessCellularData)" : ""
+        let policy: String = name(of: PrefetchPolicy(conditions: conditions).level)
+        let memory: String = megabytes(report.totalBytes(medium: .memory))
+        let disk: String = megabytes(report.totalBytes(medium: .disk))
+        let wasteRatio: String = percent(speculative.wasteRatio)
+        let wasted: String = megabytes(speculative.wastedBytes)
+        let spent: String = megabytes(speculative.usedBytes + speculative.wastedBytes)
+        let header: [String] = [
+            "t=\(String(format: "%.1f", uptime))",
+            "trigger=\(trigger)",
+            "limit=\(name(of: limit))",
+            "diskPressure=\(name(of: pressure))",
+            "policy=\(policy)",
+            "network=\(conditions.network.rawValue)\(expensive)\(constrained)\(lessCellular)",
+            "memory=\(memory)",
+            "disk=\(disk)",
+            "waste=\(wasteRatio)(\(wasted) of \(spent))"
         ]
-        header.append("waste=" + percent(speculative.wasteRatio)
-            + "(\(megabytes(speculative.wastedBytes)) of \(megabytes(speculative.usedBytes + speculative.wastedBytes)))")
-        var lines = ["\(prefix) " + header.joined(separator: " ")]
+        let headerText: String = header.joined(separator: " ")
+        var lines: [String] = ["\(prefix) \(headerText)"]
         let ordered = report.lines.sorted {
             ($0.medium.rawValue, $0.namespace.name) < ($1.medium.rawValue, $1.namespace.name)
         }
         for line in ordered {
-            lines.append("\(prefix)   " + namespaceLine(line))
+            let text: String = namespaceLine(line)
+            lines.append("\(prefix)   \(text)")
         }
-        lines.append("\(prefix)   " + prefetchLine(prefetch))
+        let prefetchText: String = prefetchLine(prefetch)
+        lines.append("\(prefix)   \(prefetchText)")
         return lines
     }
 
     static func namespaceLine(_ line: CacheUsageReport.Line) -> String {
         let usage = line.usage
         let statistics = line.statistics
-        let budget = usage.byteLimit == .max
-            ? "unlimited"
-            : megabytes(usage.byteLimit) + "(" + percent(usage.byteLimit > 0 ? Double(usage.bytes) / Double(usage.byteLimit) : nil) + ")"
-        let tiers = CacheTier.allCases.map { "\($0.rawValue):" + megabytes(usage.bytesByTier[$0, default: 0]) }
-        let removed = CacheEvictionReason.allCases.compactMap { reason -> String? in
+        let budget: String
+        if usage.byteLimit == .max {
+            budget = "unlimited"
+        } else {
+            let share: Double? = usage.byteLimit > 0 ? Double(usage.bytes) / Double(usage.byteLimit) : nil
+            let limitText: String = megabytes(usage.byteLimit)
+            let shareText: String = percent(share)
+            budget = "\(limitText)(\(shareText))"
+        }
+        let tiers: [String] = CacheTier.allCases.map { tier -> String in
+            let bytes: String = megabytes(usage.bytesByTier[tier, default: 0])
+            return "\(tier.rawValue):\(bytes)"
+        }
+        let removals: [String] = CacheEvictionReason.allCases.compactMap { reason -> String? in
             let count = statistics.removals[reason, default: 0]
             guard count > 0 else { return nil }
-            return "\(reason.rawValue):\(count)/" + megabytes(statistics.removedBytes[reason, default: 0])
+            let bytes: String = megabytes(statistics.removedBytes[reason, default: 0])
+            return "\(reason.rawValue):\(count)/\(bytes)"
         }
+        let removedText: String = removals.isEmpty ? "none" : removals.joined(separator: ",")
+        let tiersText: String = tiers.joined(separator: ",")
         let fates = statistics.speculative
-        return [
-            "ns=" + line.namespace.name,
-            "medium=" + line.medium.rawValue,
-            "class=" + name(of: line.namespace.priorityClass),
-            "scope=" + line.namespace.scope.rawValue,
-            "bytes=" + megabytes(usage.bytes) + "/" + budget,
+        let storedBytes: String = megabytes(fates.storedBytes)
+        let usedBytes: String = megabytes(fates.usedBytes)
+        let wastedBytes: String = megabytes(fates.wastedBytes)
+        let discardedBytes: String = megabytes(fates.discardedBytes)
+        let speculativeText: String = "stored:\(fates.stored)/\(storedBytes),used:\(fates.used)/\(usedBytes),wasted:\(fates.wasted)/\(wastedBytes),discarded:\(fates.discarded)/\(discardedBytes)"
+        let usedText: String = megabytes(usage.bytes)
+        let pinnedText: String = megabytes(usage.pinnedBytes)
+        let classText: String = name(of: line.namespace.priorityClass)
+        let hitRateText: String = percent(statistics.hitRate)
+        let wasteText: String = percent(fates.wasteRatio)
+        let fields: [String] = [
+            "ns=\(line.namespace.name)",
+            "medium=\(line.medium.rawValue)",
+            "class=\(classText)",
+            "scope=\(line.namespace.scope.rawValue)",
+            "bytes=\(usedText)/\(budget)",
             "entries=\(usage.count)",
-            "pinned=" + megabytes(usage.pinnedBytes),
-            "tiers=" + tiers.joined(separator: ","),
+            "pinned=\(pinnedText)",
+            "tiers=\(tiersText)",
             "hits=\(statistics.hits)",
             "misses=\(statistics.misses)",
-            "hitRate=" + percent(statistics.hitRate),
-            "removed=" + (removed.isEmpty ? "none" : removed.joined(separator: ",")),
-            "speculative=stored:\(fates.stored)/\(megabytes(fates.storedBytes))"
-                + ",used:\(fates.used)/\(megabytes(fates.usedBytes))"
-                + ",wasted:\(fates.wasted)/\(megabytes(fates.wastedBytes))"
-                + ",discarded:\(fates.discarded)/\(megabytes(fates.discardedBytes))",
-            "waste=" + percent(fates.wasteRatio)
-        ].joined(separator: " ")
+            "hitRate=\(hitRateText)",
+            "removed=\(removedText)",
+            "speculative=\(speculativeText)",
+            "waste=\(wasteText)"
+        ]
+        return fields.joined(separator: " ")
     }
 
     static func prefetchLine(_ snapshot: CachePrefetchCounters.Snapshot) -> String {
-        var fields = ["prefetch"]
+        var fields: [String] = ["prefetch"]
         for category in CacheCategory.allCases {
             guard let arrivals = snapshot.arrivals[category], arrivals.total > 0 else { continue }
-            fields.append("\(category.rawValue)=ready:\(arrivals.ready),inFlight:\(arrivals.inFlight),missed:\(arrivals.missed)"
-                + ",hitRate:" + percent(arrivals.hitRate))
+            let hitRate: String = percent(arrivals.hitRate)
+            fields.append("\(category.rawValue)=ready:\(arrivals.ready),inFlight:\(arrivals.inFlight),missed:\(arrivals.missed),hitRate:\(hitRate)")
         }
-        let starts = snapshot.nextVideoFirstRangeHits + snapshot.nextVideoFirstRangeMisses
-        fields.append("nextVideoFirstRange=\(snapshot.nextVideoFirstRangeHits)/\(starts)(" + percent(snapshot.nextVideoFirstRangeHitRate) + ")")
+        let starts: Int = snapshot.nextVideoFirstRangeHits + snapshot.nextVideoFirstRangeMisses
+        let firstRangeRate: String = percent(snapshot.nextVideoFirstRangeHitRate)
+        fields.append("nextVideoFirstRange=\(snapshot.nextVideoFirstRangeHits)/\(starts)(\(firstRangeRate))")
         let frames = snapshot.firstFrame
-        fields.append("timeToFirstFrame=n:\(frames.count),p50:" + milliseconds(frames.percentile(0.5))
-            + ",p90:" + milliseconds(frames.percentile(0.9)) + ",max:" + milliseconds(frames.count > 0 ? frames.maximum : nil))
-        let priorities = CacheFillPriority.allCases.reversed().map { priority -> String in
-            "\(name(of: priority)):" + megabytes(snapshot.otherBytes[priority, default: 0] + snapshot.cellularBytes[priority, default: 0])
+        let p50: String = milliseconds(frames.percentile(0.5))
+        let p90: String = milliseconds(frames.percentile(0.9))
+        let longest: Double? = frames.count > 0 ? frames.maximum : nil
+        let maximum: String = milliseconds(longest)
+        fields.append("timeToFirstFrame=n:\(frames.count),p50:\(p50),p90:\(p90),max:\(maximum)")
+        let priorities: [String] = CacheFillPriority.allCases.reversed().map { priority -> String in
+            let bytes: Int = snapshot.otherBytes[priority, default: 0] + snapshot.cellularBytes[priority, default: 0]
+            let size: String = megabytes(bytes)
+            return "\(name(of: priority)):\(size)"
         }
-        fields.append("fetched=" + priorities.joined(separator: ","))
-        fields.append("p2Cellular=" + megabytes(snapshot.speculativeCellularBytes))
+        let fetched: String = priorities.joined(separator: ",")
+        fields.append("fetched=\(fetched)")
+        let cellular: String = megabytes(snapshot.speculativeCellularBytes)
+        fields.append("p2Cellular=\(cellular)")
         return fields.joined(separator: " ")
     }
 
