@@ -98,6 +98,11 @@ struct ProfileDiskRecord: Codable, Equatable {
     var profile: Header?
     var relationship: Relationship?
     var gallery: Gallery?
+    /// When the header was last fetched: what a revisit's freshness is
+    /// judged by (#893). Not the row's write time, which a relationship or a
+    /// gallery change also moves. Absent in records written before it (read
+    /// as stale).
+    var fetchedAt: Date? = nil
 
     struct Header: Codable, Equatable {
         var id: String

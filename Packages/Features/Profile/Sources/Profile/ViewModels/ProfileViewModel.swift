@@ -571,12 +571,32 @@ public final class ProfileViewModel {
 
     public func viewDidLoad() {
         armRecovery()
-        seedFromCache()
-        reload()
+        if seedFromCache() {
+            revalidateRelationshipOnly()
+        } else {
+            reload()
+        }
+    }
+
+    /// A screen opened again inside its freshness window (#893): the header
+    /// and the grid are the ones fetched moments ago, so neither is asked
+    /// for. The relationship still is: it is cheap, it is the one answer a
+    /// follow, block or mute made elsewhere moves, and the mute and restrict
+    /// states ride on it. Pull-to-refresh always refetches everything.
+    private func revalidateRelationshipOnly() {
+        guard let profile else { return }
+        relationshipLoad?.cancel()
+        loadRelationship(for: profile.id)
+        onLoadSettled?()
     }
 
     /// Puts what the cache knows about a routed profile on screen at once.
-    private func seedFromCache() {
+    ///
+    /// - Returns: whether what it put there is fresh enough that the screen
+    ///   need not ask the network for the profile or its grid
+    ///   (`ProfileCache.isFresh`, #893).
+    @discardableResult
+    private func seedFromCache() -> Bool {
         // ⚠️ A REVISIT RENDERS THE CACHED PROFILE AT FRAME 0 (charter P7). The
         // cache used to be read on an account switch alone; a second visit to
         // a profile opened on a skeleton and re-revealed a page the viewer had
@@ -590,22 +610,30 @@ public final class ProfileViewModel {
         case .currentUser: cache?.currentUserID()
         case .lookup: nil
         }
+        var fresh = false
         if let seedID, let cached = cache?.profile(for: seedID) {
             profile = cached
             phase = .content(ProfileDisplayModel(profile: cached))
+            fresh = cache?.isFresh(seedID) ?? false
             // ⚠️ AND THE GRID OPENS ON ITS LAST PAGES (#887). It used to
             // reset here, so a profile revisited seconds later showed its
             // posts as bones every time. The pages the last visit loaded
             // render on this frame; the first pages fetched now revalidate
             // them in place (merged over the later pages), and a revalidation
             // that agrees publishes nothing. A first visit has none: bones.
+            // Inside the freshness window nothing is fetched: the pages are
+            // the answer (#893).
             if let pages = cache?.gallery(for: seedID) {
                 galleryStore.restore(pages)
-                loadGallery(for: cached, reset: false)
+                if fresh {
+                    renderGallery()
+                } else {
+                    loadGallery(for: cached, reset: false)
+                }
             } else {
                 loadGallery(for: cached, reset: true)
             }
-            galleryWasSeeded = true
+            galleryWasSeeded = !fresh
         }
         // The relationship is seeded the same way, and for the same reason:
         // a revisit that knew "Following" a minute ago must not open on a
@@ -613,6 +641,7 @@ public final class ProfileViewModel {
         if case .profile(let id) = source, let relationship = cache?.relationship(for: id) {
             apply(relationship)
         }
+        return fresh
     }
 
     /// True between a cache seed and the fetch that confirms it, so that

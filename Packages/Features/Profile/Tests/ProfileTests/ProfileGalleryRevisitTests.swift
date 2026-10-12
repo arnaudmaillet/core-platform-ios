@@ -1,11 +1,25 @@
 import AuthInterface
 import CoreModels
 import Foundation
+import LocalStore
 import PostGrid
 import Testing
 @testable import Profile
 
 // A revisited profile opens its posts at frame 0 (#887).
+
+/// A cache whose clock jumps past the screen's freshness window once the
+/// first visit is done, so the revisit revalidates (#893).
+@MainActor
+private final class StaleRevisit {
+    private var offset: TimeInterval = 0
+    /// Moves only when the test says so, never with the wall (#1042).
+    private(set) lazy var cache = ProfileCache(now: { [unowned self] in
+        Date(timeIntervalSinceReferenceDate: 800_000_000).addingTimeInterval(self.offset)
+    })
+
+    func pastTheWindow() { offset = LocalStorePolicy.profileScreenRevalidation + 1 }
+}
 
 private func post(_ id: String, at ms: Int64) -> GalleryPost {
     GalleryPost(id: PostID(id), kind: .photo, isRepost: false, thumbnailURL: nil, caption: id, publishedAtMS: ms)
@@ -127,9 +141,11 @@ struct ProfileGalleryRevisitTests {
     }
 
     @Test func aRevisitRendersTheLoadedPagesAtFrameZero() async throws {
-        let cache = ProfileCache()
+        let clock = StaleRevisit()
+        let cache = clock.cache
         let gallery = twoPages()
         try await firstVisit(gallery, cache: cache)
+        clock.pastTheWindow()
 
         let (viewModel, shown) = visit(gallery, cache: cache)
 
@@ -145,9 +161,11 @@ struct ProfileGalleryRevisitTests {
     }
 
     @Test func aRevisitRevalidatesInPlace() async throws {
-        let cache = ProfileCache()
+        let clock = StaleRevisit()
+        let cache = clock.cache
         let gallery = twoPages()
         try await firstVisit(gallery, cache: cache)
+        clock.pastTheWindow()
         await gallery.setAuthored(
             GalleryPage(posts: [post("new", at: 70), post("a", at: 60), post("b", at: 50)], nextPageToken: "a2"),
             for: nil

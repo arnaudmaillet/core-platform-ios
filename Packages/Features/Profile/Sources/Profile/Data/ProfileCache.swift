@@ -41,8 +41,12 @@ public final class ProfileCache {
         /// The posts gallery as far as it was loaded (#887): a revisit opens
         /// its grid on them instead of on skeletons, then revalidates.
         var gallery: ProfileGalleryStore.Corpora?
+        /// When the profile was last fetched (`store(_:)`), for `isFresh`.
+        var fetchedAt: Date?
     }
     private var entries: [ProfileID: Entry] = [:]
+    /// The clock freshness is judged by.
+    private let now: () -> Date
     /// Ids in least-recently-used order.
     private var recency: [ProfileID] = []
     /// Keeps cached relationships agreeing with a follow made anywhere else
@@ -66,8 +70,13 @@ public final class ProfileCache {
     /// `center` is where viewer changes are heard: the default one; a test
     /// hands its own, since posting on the shared one reaches every suite.
     /// `store` is the device tier (#893); nil keeps the cache in memory.
-    public init(limit: Int = 16, center: NotificationCenter = .default, store: LocalStore? = nil) {
+    /// `now` is the clock a revisit's freshness is judged by.
+    public init(
+        limit: Int = 16, center: NotificationCenter = .default, store: LocalStore? = nil,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.limit = limit
+        self.now = now
         disk = store.map(ProfileDiskTier.init(store:))
         viewerObserver = center.addObserver(
             forName: .viewerDidChange, object: nil, queue: .main
@@ -94,10 +103,26 @@ public final class ProfileCache {
         return profile
     }
 
+    /// Keeps a profile the network just answered: its fetch time is now.
     public func store(_ profile: UserProfile) {
         entries[profile.id, default: Entry()].profile = profile
+        entries[profile.id]?.fetchedAt = now()
         touch(profile.id)
         persist(profile.id)
+    }
+
+    /// Whether `id`'s screen may open again WITHOUT asking the network
+    /// (#893): its profile was fetched within
+    /// `LocalStorePolicy.profileScreenRevalidation`, and both of its gallery
+    /// corpora are held, so nothing on the screen is older or missing. Past
+    /// the window (or with a corpus missing) the screen revalidates.
+    func isFresh(_ id: ProfileID) -> Bool {
+        loadFromDisk(id)
+        guard let entry = entries[id], entry.profile != nil, let fetchedAt = entry.fetchedAt,
+              entry.gallery?.authored != nil, entry.gallery?.tagged != nil else { return false }
+        return LocalStorePolicy.isFresh(
+            fetchedAt: fetchedAt, window: LocalStorePolicy.profileScreenRevalidation, now: now()
+        )
     }
 
     /// Which profile is the viewer's own, as last loaded: what the viewer's
@@ -228,7 +253,8 @@ public final class ProfileCache {
         entries[id] = Entry(
             profile: record.profile?.userProfile,
             relationship: record.relationship?.relationship,
-            gallery: record.gallery?.corpora
+            gallery: record.gallery?.corpora,
+            fetchedAt: record.fetchedAt
         )
         touch(id)
     }
@@ -260,7 +286,8 @@ public final class ProfileCache {
             records[id] = ProfileDiskRecord(
                 profile: entry.profile.map(ProfileDiskRecord.Header.init),
                 relationship: entry.relationship.map(ProfileDiskRecord.Relationship.init),
-                gallery: entry.gallery.map(ProfileDiskRecord.Gallery.init)
+                gallery: entry.gallery.map(ProfileDiskRecord.Gallery.init),
+                fetchedAt: entry.fetchedAt
             )
         }
         disk.save(records, currentUser: currentUser.flatMap { ids.contains($0) ? $0 : nil }, as: viewer)
