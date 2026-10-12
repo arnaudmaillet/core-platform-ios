@@ -85,19 +85,27 @@ struct ImagePipelineConcurrencyTests {
         // still retiring entries from it — without starting any new task, which
         // would hand the sanitizer a happens-before edge and hide the race.
         let stray = URL(string: "mock://race/stray")!
-        let landed = await settle {
+        for _ in 0..<5 where pipeline.inFlightCount > 0 {
             for _ in 0..<2_000 { view.drop([stray]) }
-            return kept.allSatisfy(view.isCached)
+            await Task.yield()
+        }
+        // The kept prefetches are P1 decodes at utility QoS: awaited, never
+        // polled under a look budget a loaded runner outlasts (#1049).
+        var landed = true
+        for url in kept {
+            let decoded = await pipeline.prefetchLanded(url, window: .display)
+            landed = landed && decoded
         }
         #expect(landed, "every kept prefetch lands")
+        #expect(kept.allSatisfy(view.isCached))
         #expect(await settle { view.lookahead.activeInterestCount == 0 }, "and none is left pending")
     }
 
     /// A look budget, not a wall-clock deadline: every wait here is positive
     /// and stops as soon as its condition holds, so the budget only matters on
     /// a starved runner, where each look stretches (#966, #980). It answers,
-    /// so a timeout fails at the wait. The 2,400 kept decodes ran past the
-    /// old 20-second deadline on a starved CI lane.
+    /// so a timeout fails at the wait. Never for a prefetch's fill, which runs
+    /// at utility QoS and can outlast any budget (#1049): those are awaited.
     private static let looks = 12_000
 
     private func settle(_ condition: () async -> Bool) async -> Bool {
@@ -121,7 +129,7 @@ struct ImagePipelineConcurrencyTests {
 
         // The visible load first, so it is surely waiting before the cancel.
         let visible = Task { try await pipeline.image(for: url) }
-        #expect(await settle { await fetcher.fetchCount == 1 })
+        await fetcher.fetchesBegan()
         view.warm([url])
         view.drop([url])
         view.warm([url])
@@ -143,7 +151,7 @@ struct ImagePipelineConcurrencyTests {
         let url = URL(string: "mock://race/abandoned")!
 
         view.warm([url])
-        #expect(await settle { await fetcher.fetchCount == 1 })
+        await fetcher.fetchesBegan()
         view.drop([url])
 
         #expect(view.lookahead.activeInterestCount == 0)
@@ -156,7 +164,15 @@ struct ImagePipelineConcurrencyTests {
 private actor GatedFetcher: ImageFetching {
     private var isOpen = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var fetchWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
     private(set) var fetchCount = 0
+
+    /// Returns once `count` fetches have begun: a prefetch's fill runs at
+    /// utility QoS, so a test awaits its fetch instead of polling (#1049).
+    func fetchesBegan(_ count: Int = 1) async {
+        guard fetchCount < count else { return }
+        await withCheckedContinuation { fetchWaiters.append((count, $0)) }
+    }
 
     func open() {
         isOpen = true
@@ -166,6 +182,9 @@ private actor GatedFetcher: ImageFetching {
 
     func fetchImageData(for url: URL) async throws -> Data {
         fetchCount += 1
+        let began = fetchWaiters.filter { fetchCount >= $0.count }
+        fetchWaiters.removeAll { fetchCount >= $0.count }
+        began.forEach { $0.continuation.resume() }
         if !isOpen {
             await withCheckedContinuation { waiters.append($0) }
         }

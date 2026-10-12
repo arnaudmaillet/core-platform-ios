@@ -9,10 +9,36 @@ import UIKit
 
 /// Counts fetches and holds every one until `open()`; serves a small PNG.
 private final class HeldFetcher: ImageFetching {
+    private struct FetchWaiter {
+        let url: String?
+        let count: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
     private struct State {
         var fetches: [String: Int] = [:]
         var isHeld: Bool
         var waiters: [CheckedContinuation<Void, Never>] = []
+        var fetchWaiters: [FetchWaiter] = []
+
+        func count(of url: String?) -> Int {
+            url.map { fetches[$0] ?? 0 } ?? fetches.values.reduce(0, +)
+        }
+
+        /// Takes out the waiters whose count is reached.
+        mutating func reached() -> [CheckedContinuation<Void, Never>] {
+            var ready: [CheckedContinuation<Void, Never>] = []
+            var waiting: [FetchWaiter] = []
+            for waiter in fetchWaiters {
+                if count(of: waiter.url) >= waiter.count {
+                    ready.append(waiter.continuation)
+                } else {
+                    waiting.append(waiter)
+                }
+            }
+            fetchWaiters = waiting
+            return ready
+        }
     }
 
     private let state: Mutex<State>
@@ -25,6 +51,22 @@ private final class HeldFetcher: ImageFetching {
 
     func fetchCount(for url: URL) -> Int { state.withLock { $0.fetches[url.absoluteString] ?? 0 } }
 
+    /// Returns once `count` fetches of `url` (of any image when `nil`) have
+    /// begun. A prefetch's fill runs at utility QoS and can start long after
+    /// any look budget on a loaded runner (#1049): a test awaits its fetch
+    /// instead of polling for it.
+    func fetchesBegan(_ count: Int = 1, of url: URL? = nil) async {
+        let key = url?.absoluteString
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let isReached = state.withLock { state -> Bool in
+                guard state.count(of: key) < count else { return true }
+                state.fetchWaiters.append(FetchWaiter(url: key, count: count, continuation: continuation))
+                return false
+            }
+            if isReached { continuation.resume() }
+        }
+    }
+
     func open() {
         let waiters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
             state.isHeld = false
@@ -36,7 +78,11 @@ private final class HeldFetcher: ImageFetching {
     }
 
     func fetchImageData(for url: URL) async throws -> Data {
-        state.withLock { $0.fetches[url.absoluteString, default: 0] += 1 }
+        let began = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.fetches[url.absoluteString, default: 0] += 1
+            return state.reached()
+        }
+        for waiter in began { waiter.resume() }
         await withCheckedContinuation { continuation in
             let resumeNow = state.withLock { state -> Bool in
                 guard state.isHeld else { return true }
@@ -144,13 +190,16 @@ struct SharedLookaheadTests {
         let feed = ImageLookahead(pipeline: pipeline, name: "feed")
         let shared = image(1, list: "shared")
 
-        // The grid wants it on disk (P2), the vertical feed decoded (P1).
-        grid.update(display: [], preload: [shared])
-        #expect(await eventually { fetcher.fetchCount == 1 })
-        #expect(pipeline.downloadPriority(for: shared.url) == .speculative)
+        // The vertical feed wants it decoded (P1), the grid on disk (P2). The
+        // feed first: its decode reaching the download is awaited at the
+        // fetch, never polled under a budget (#1049); the grid's P2 interest
+        // then joins the running download synchronously.
         feed.update(display: [shared], preload: [])
+        await fetcher.fetchesBegan()
+        #expect(pipeline.downloadPriority(for: shared.url) == .next)
+        grid.update(display: [], preload: [shared])
 
-        #expect(await eventually { pipeline.downloadPriority(for: shared.url) == .next },
+        #expect(pipeline.downloadPriority(for: shared.url) == .next,
                 "the one download runs at the highest priority among its owners")
         feed.revoke()
         #expect(await eventually { pipeline.downloadPriority(for: shared.url) == .speculative },
@@ -178,7 +227,8 @@ struct SharedLookaheadTests {
         cards.scrollViewDidScroll()
         let mine = image(5, list: "grid")
         let shared = image(1, list: "shared")
-        #expect(await eventually { fetcher.fetchCount(for: mine.url) == 1 && fetcher.fetchCount(for: shared.url) == 1 })
+        await fetcher.fetchesBegan(of: mine.url)
+        await fetcher.fetchesBegan(of: shared.url)
 
         grid.setOnScreen(false)
 
@@ -186,7 +236,7 @@ struct SharedLookaheadTests {
         #expect(await eventually { pipeline.downloadPriority(for: mine.url) == nil }, "only the grid wanted it: cancelled")
         #expect(pipeline.downloadPriority(for: shared.url) != nil, "the card list still wants it")
         fetcher.open()
-        #expect(await eventually { pipeline.isDecoded(shared.url) })
+        #expect(await pipeline.prefetchLanded(shared.url, window: .display))
         #expect(fetcher.fetchCount(for: shared.url) == 1)
         cards.setOnScreen(false)
     }
@@ -299,7 +349,7 @@ struct ListLookaheadWindowTests {
 
         coordinator.updateConditions { $0.isInBackground = false }
         #expect(await eventually { !grid.planned.display.isEmpty }, "back in the foreground: planned afresh")
-        #expect(await eventually { fetcher.fetchCount > 0 })
+        await fetcher.fetchesBegan()
         grid.setOnScreen(false)
     }
 

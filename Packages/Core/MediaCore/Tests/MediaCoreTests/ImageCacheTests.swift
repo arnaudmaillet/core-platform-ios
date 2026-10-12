@@ -20,11 +20,37 @@ private func png(width: Int, height: Int) -> Data {
 /// Serves a PNG sized by the URL's `w`/`h` (256 by default), counts fetches,
 /// and can fail, or hold every fetch until `open()`.
 private final class ScriptedFetcher: ImageFetching {
+    private struct FetchWaiter {
+        let url: String?
+        let count: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
     private struct State {
         var fetches: [String: Int] = [:]
         var failure: URLError?
         var isHeld = false
         var waiters: [CheckedContinuation<Void, Never>] = []
+        var fetchWaiters: [FetchWaiter] = []
+
+        func count(of url: String?) -> Int {
+            url.map { fetches[$0] ?? 0 } ?? fetches.values.reduce(0, +)
+        }
+
+        /// Takes out the waiters whose count is reached.
+        mutating func reached() -> [CheckedContinuation<Void, Never>] {
+            var ready: [CheckedContinuation<Void, Never>] = []
+            var waiting: [FetchWaiter] = []
+            for waiter in fetchWaiters {
+                if count(of: waiter.url) >= waiter.count {
+                    ready.append(waiter.continuation)
+                } else {
+                    waiting.append(waiter)
+                }
+            }
+            fetchWaiters = waiting
+            return ready
+        }
     }
 
     private let state = Mutex(State())
@@ -42,6 +68,22 @@ private final class ScriptedFetcher: ImageFetching {
 
     func setFailure(_ failure: URLError?) { state.withLock { $0.failure = failure } }
 
+    /// Returns once `count` fetches of `url` (of any image when `nil`) have
+    /// begun. A prefetch's fill runs at utility QoS and can start long after
+    /// any look budget on a loaded runner (#1049): a test awaits its fetch
+    /// instead of polling for it.
+    func fetchesBegan(_ count: Int = 1, of url: URL? = nil) async {
+        let key = url?.absoluteString
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let isReached = state.withLock { state -> Bool in
+                guard state.count(of: key) < count else { return true }
+                state.fetchWaiters.append(FetchWaiter(url: key, count: count, continuation: continuation))
+                return false
+            }
+            if isReached { continuation.resume() }
+        }
+    }
+
     func open() {
         let waiters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
             state.isHeld = false
@@ -53,7 +95,11 @@ private final class ScriptedFetcher: ImageFetching {
     }
 
     func fetchImageData(for url: URL) async throws -> Data {
-        state.withLock { $0.fetches[url.absoluteString, default: 0] += 1 }
+        let began = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.fetches[url.absoluteString, default: 0] += 1
+            return state.reached()
+        }
+        for waiter in began { waiter.resume() }
         await withCheckedContinuation { continuation in
             let resumeNow = state.withLock { state -> Bool in
                 guard state.isHeld else { return true }
@@ -398,9 +444,10 @@ struct ImagePrefetchTests {
         let interest = pipeline.prefetch(url, size: .px256, window: .display, owner: owner)
 
         #expect(interest != nil)
-        #expect(await eventually { pipeline.isDecoded(url, size: .px256) })
+        #expect(await pipeline.prefetchLanded(url, size: .px256, window: .display))
         #expect(!pipeline.isDecoded(url), "decoded at its bucket only")
         #expect(pipeline.prefetch(url, size: .px256, window: .display, owner: owner) == nil, "already there")
+        withExtendedLifetime((owner, interest)) {}
     }
 
     @Test func aPreloadWindowPrefetchWritesBytesWithoutDecoding() async throws {
@@ -408,11 +455,12 @@ struct ImagePrefetchTests {
         let owner = CacheOwner("grid")
         let url = try #require(URL(string: "https://cdn.test/photo/18.png"))
 
-        pipeline.prefetch(url, window: .preload, owner: owner)
+        let interest = pipeline.prefetch(url, window: .preload, owner: owner)
 
-        #expect(await eventually { pipeline.isOnDisk(url) })
+        #expect(await pipeline.prefetchLanded(url, window: .preload))
         #expect(!pipeline.isDecoded(url, size: .px64), "no decode in the preload window")
         #expect(pipeline.prefetch(url, window: .preload, owner: owner) == nil)
+        withExtendedLifetime((owner, interest)) {}
     }
 
     @Test func aPreloadWaitsForASpeculativeSlotAndAVisibleLoadPromotesIt() async throws {
@@ -425,15 +473,16 @@ struct ImagePrefetchTests {
         // A playing video is under-buffered: no P2 starts anywhere.
         coordinator.setPlaybackUnderBuffered(true)
 
-        pipeline.prefetch(preloaded, window: .preload, owner: owner)
-        pipeline.prefetch(displayed, window: .display, owner: owner)
+        let waiting = pipeline.prefetch(preloaded, window: .preload, owner: owner)
+        let next = pipeline.prefetch(displayed, window: .display, owner: owner)
 
-        #expect(await eventually { pipeline.isDecoded(displayed) }, "P1 never waits for a slot")
+        #expect(await pipeline.prefetchLanded(displayed, window: .display), "P1 never waits for a slot")
         #expect(fetcher.fetchCount(for: preloaded) == 0, "P2 waits")
 
         _ = try await pipeline.image(for: preloaded)
         #expect(fetcher.fetchCount(for: preloaded) == 1, "a visible load joins and starts it")
         coordinator.setPlaybackUnderBuffered(false)
+        withExtendedLifetime((owner, waiting, next)) {}
     }
 
     @Test func aVisibleLoadAndAPrefetchShareOneFetch() async throws {
@@ -444,7 +493,7 @@ struct ImagePrefetchTests {
 
         // The visible load first, so it is surely waiting before the revoke.
         let visible = Task { try await pipeline.image(for: url) }
-        #expect(await eventually { fetcher.fetchCount == 1 })
+        await fetcher.fetchesBegan()
         pipeline.prefetch(url, window: .display, owner: owner)
         owner.revoke()
         fetcher.open()
@@ -460,7 +509,7 @@ struct ImagePrefetchTests {
         let url = try #require(URL(string: "mock://photo/22"))
 
         pipeline.prefetch(url, window: .display, owner: owner)
-        #expect(await eventually { fetcher.fetchCount == 1 })
+        await fetcher.fetchesBegan()
         owner.revoke()
 
         #expect(pipeline.inFlightCount == 0)
@@ -480,7 +529,7 @@ struct ImageLookaheadTests {
 
         feed.update(display: [], preload: [request])
         grid.update(display: [], preload: [request])
-        #expect(await eventually { fetcher.fetchCount == 1 })
+        await fetcher.fetchesBegan()
 
         feed.revoke()
         #expect(pipeline.inFlightCount == 1, "still wanted by the grid")
@@ -500,14 +549,14 @@ struct ImageLookaheadTests {
         // The display window, so neither waits for a speculative slot.
         feed.update(display: [mine, shared], preload: [])
         grid.update(display: [shared], preload: [])
-        #expect(await eventually { fetcher.fetchCount == 2 })
+        await fetcher.fetchesBegan(2)
 
         feed.update(display: [], preload: [])
 
         #expect(feed.window(of: mine) == nil)
         #expect(pipeline.inFlightCount == 2, "the grid's decode and its download are left")
         fetcher.open()
-        #expect(await eventually { pipeline.isDecoded(shared.url) })
+        #expect(await pipeline.prefetchLanded(shared.url, window: .display))
         #expect(!pipeline.isDecoded(mine.url))
         grid.revoke()
     }
@@ -520,12 +569,12 @@ struct ImageLookaheadTests {
         grid.setFlinging(true)
         grid.update(display: [request], preload: [])
         #expect(grid.window(of: request) == .preload)
-        #expect(await eventually { pipeline.isOnDisk(request.url) })
+        #expect(await pipeline.prefetchLanded(request.url, window: .preload))
         #expect(!pipeline.isDecoded(request.url, size: .px256))
 
         grid.setFlinging(false)
         #expect(grid.window(of: request) == .display)
-        #expect(await eventually { pipeline.isDecoded(request.url, size: .px256) })
+        #expect(await pipeline.prefetchLanded(request.url, size: .px256, window: .display))
         #expect(ImageLookahead.isFling(velocity: 4_000, viewportLength: 800))
         #expect(!ImageLookahead.isFling(velocity: 1_000, viewportLength: 800))
     }
@@ -537,11 +586,11 @@ struct ImageLookaheadTests {
         let request = try ImageRequest(url: #require(URL(string: "https://cdn.test/near/27.png")))
 
         grid.update(display: [], preload: [request])
-        #expect(await eventually { fetcher.fetchCount == 1 })
+        await fetcher.fetchesBegan()
         grid.update(display: [request], preload: [])
         fetcher.open()
 
-        #expect(await eventually { pipeline.isDecoded(request.url) })
+        #expect(await pipeline.prefetchLanded(request.url, window: .display))
         #expect(fetcher.fetchCount == 1, "the decode joined the download in flight")
         grid.revoke()
     }
@@ -561,7 +610,7 @@ struct ImageLookaheadTests {
         try await Task.sleep(for: .milliseconds(50))
         #expect(fetcher.fetchCount == 0, "P2 at most: it waits like any speculative fill")
         coordinator.setPlaybackUnderBuffered(false)
-        #expect(await eventually { pipeline.isOnDisk(request.url) })
+        #expect(await pipeline.prefetchLanded(request.url, window: .preload))
         grid.revoke()
     }
 
@@ -598,17 +647,23 @@ struct ImageAuditCounterTests {
         let cold = try #require(URL(string: "mock://photo/42"))
         let prefetched = try #require(URL(string: "mock://photo/43"))
 
-        pipeline.prefetch(joined, window: .display, owner: owner)
-        #expect(await eventually { fetcher.fetchCount(for: joined) == 1 })
+        // Two display prefetches (P1, utility QoS): awaited, never polled
+        // under a look budget a loaded runner outlasts (#1049).
+        let joinedInterest = pipeline.prefetch(joined, window: .display, owner: owner)
+        let prefetchedInterest = pipeline.prefetch(prefetched, window: .display, owner: owner)
+        await fetcher.fetchesBegan(of: joined)
+        await fetcher.fetchesBegan(of: prefetched)
         let joining = Task { try await pipeline.image(for: joined) }
         let missing = Task { try await pipeline.image(for: cold) }
-        #expect(await eventually { fetcher.fetchCount(for: cold) == 1 })
+        await fetcher.fetchesBegan(of: cold)
+        // The visible load counts on arrival, while the prefetch is still out.
+        #expect(await eventually { coordinator.prefetchCounters.snapshot.arrivals[.images]?.inFlight == 1 })
         fetcher.open()
         _ = try await joining.value
         _ = try await missing.value
 
-        pipeline.prefetch(prefetched, window: .display, owner: owner)
-        #expect(await eventually { pipeline.isDecoded(prefetched) })
+        #expect(await pipeline.prefetchLanded(prefetched, window: .display))
+        #expect(fetcher.fetchCount(for: prefetched) == 1, "decoded by the prefetch's own fetch")
         #expect(pipeline.cachedImage(for: prefetched) != nil)
         // The same images again, by both paths: still one arrival each.
         #expect(pipeline.cachedImage(for: cold) != nil)
@@ -618,6 +673,7 @@ struct ImageAuditCounterTests {
         #expect(arrivals.ready == 1)
         #expect(arrivals.inFlight == 1)
         #expect(arrivals.missed == 1)
+        withExtendedLifetime((owner, joinedInterest, prefetchedInterest)) {}
     }
 
     @Test func networkBytesAreCountedPerPriorityAndNetwork() async throws {
@@ -630,8 +686,9 @@ struct ImageAuditCounterTests {
         _ = try await pipeline.image(for: shown)
         coordinator.handle(.network(.cellular, isConstrained: false, isExpensive: true))
         let owner = CacheOwner("feed")
-        pipeline.prefetch(preloaded, window: .preload, owner: owner)
-        #expect(await eventually { pipeline.isOnDisk(preloaded) })
+        let interest = pipeline.prefetch(preloaded, window: .preload, owner: owner)
+        #expect(await pipeline.prefetchLanded(preloaded, window: .preload))
+        withExtendedLifetime(interest) {}
         owner.revoke()
 
         let snapshot = coordinator.prefetchCounters.snapshot
@@ -723,14 +780,15 @@ struct ImageReleasePathTests {
         let pipeline = ImagePipeline(fetcher: fetcher, coordinator: coordinator)
         let owner = CacheOwner("feed")
         let next = try #require(URL(string: "mock://photo/release-40"))
-        pipeline.prefetch(next, window: .display, owner: owner)
-        #expect(await eventually { pipeline.isDecoded(next) }, "Low Power keeps the next item")
+        let interest = pipeline.prefetch(next, window: .display, owner: owner)
+        #expect(await pipeline.prefetchLanded(next, window: .display), "Low Power keeps the next item")
 
         coordinator.handle(.thermalState(.critical))
         let ahead = try #require(URL(string: "mock://photo/release-41"))
         #expect(pipeline.prefetch(ahead, window: .display, owner: owner) == nil)
         try await Task.sleep(for: .milliseconds(50))
         #expect(fetcher.fetchCount(for: ahead) == 0, "a critical thermal state prefetches nothing")
+        withExtendedLifetime((owner, interest)) {}
     }
 
     /// Low Data Mode, then Low Power, give P2 no slot: a preload fetches
@@ -742,15 +800,15 @@ struct ImageReleasePathTests {
         let owner = CacheOwner("grid")
         let preloaded = try #require(URL(string: "https://cdn.test/photo/release-50.png"))
 
-        pipeline.prefetch(preloaded, window: .preload, owner: owner)
+        let interest = pipeline.prefetch(preloaded, window: .preload, owner: owner)
         coordinator.handle(.lowPowerMode(true))
         coordinator.handle(.network(.wifi, isConstrained: false, isExpensive: false))
         try await Task.sleep(for: .milliseconds(50))
         #expect(fetcher.fetchCount(for: preloaded) == 0, "P2 waited through Low Data Mode, then Low Power")
 
         coordinator.handle(.lowPowerMode(false))
-        #expect(await eventually { pipeline.isOnDisk(preloaded) }, "and runs once both are gone")
-        withExtendedLifetime(owner) {}
+        #expect(await pipeline.prefetchLanded(preloaded, window: .preload), "and runs once both are gone")
+        withExtendedLifetime((owner, interest)) {}
     }
 
     /// Every P2 request refuses a constrained network, so a path that turns
@@ -765,13 +823,13 @@ struct ImageReleasePathTests {
         let preloaded = try #require(URL(string: "https://cdn.test/photo/constrained-p2.png"))
         let shown = try #require(URL(string: "https://cdn.test/photo/constrained-p0.png"))
 
-        pipeline.prefetch(preloaded, window: .preload, owner: owner)
-        #expect(await eventually { pipeline.isOnDisk(preloaded) })
+        let interest = pipeline.prefetch(preloaded, window: .preload, owner: owner)
+        #expect(await pipeline.prefetchLanded(preloaded, window: .preload))
         _ = try await pipeline.image(for: shown)
 
         let allowed = ConstrainedRecordingProtocol.allowed.withLock { $0 }
         #expect(allowed["constrained-p2.png"] == false)
         #expect(allowed["constrained-p0.png"] == true)
-        withExtendedLifetime(owner) {}
+        withExtendedLifetime((owner, interest)) {}
     }
 }
