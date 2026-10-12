@@ -322,6 +322,12 @@ public final class ForYouViewModel {
         loadFirstPage(reset: true)
     }
 
+    /// A list about to display `id`: its page, fetched ahead, was shown
+    /// (#970).
+    public func didShow(_ id: PostID) {
+        repository.didShow(id)
+    }
+
     /// The ordering modifier: recomputes every surface locally, no round trip.
     public func setSource(_ source: DiscoverySource) {
         guard self.source != source else { return }

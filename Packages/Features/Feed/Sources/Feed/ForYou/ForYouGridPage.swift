@@ -117,6 +117,9 @@ final class ForYouGridPage: UIView {
     var onWarmRequested: (([GalleryPost]) -> Void)?
     /// The page scrolled near its end and wants another page.
     var onNearEnd: (() -> Void)?
+    /// A post's cell is about to display: its page, fetched ahead of the
+    /// viewer, was shown (#970).
+    var onWillDisplayPost: ((PostID) -> Void)?
     var onRefresh: (() -> Void)?
     /// Fired when a drag ends, with how far the page was pulled past its top
     /// — the pull of a page whose host draws the indicator and owns the
@@ -3443,6 +3446,15 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateAutoplay()
         lookahead.scrollViewDidEndScrolling()
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath
+    ) {
+        guard !showsSkeleton, let onWillDisplayPost else { return }
+        let index = flatIndex(for: indexPath)
+        guard posts.indices.contains(index) else { return }
+        onWillDisplayPost(posts[index].id)
     }
 
     /// A recycled cell hands its player back immediately rather than waiting

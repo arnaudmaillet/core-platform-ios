@@ -388,17 +388,14 @@ public final class LocalStore: ManagedCache {
             if list == nil { $0.statistics.misses += 1 } else { $0.statistics.hits += 1 }
         }
         if let through = answer?.through {
-            pool.asyncWriteWithoutTransaction { db in
-                try? db.execute(
-                    sql: """
-                        UPDATE list SET accessed_at = ? WHERE key = ?;
-                        UPDATE list_page SET tier = ? WHERE list_key = ? AND tier = ? AND page_index <= ?;
-                        """,
-                    arguments: [
-                        now.timeIntervalSince1970, key,
-                        CacheTier.recent.storedRank, key, CacheTier.speculative.storedRank, through
-                    ]
-                )
+            pool.asyncWriteWithoutTransaction { [weak self] db in
+                try? db.inTransaction {
+                    try db.execute(
+                        sql: "UPDATE list SET accessed_at = ? WHERE key = ?", arguments: [now.timeIntervalSince1970, key]
+                    )
+                    try self?.promotePrefetchedPages(of: key, through: through, in: db)
+                    return .commit
+                }
             }
         }
         return list
@@ -421,6 +418,33 @@ public final class LocalStore: ManagedCache {
                 arguments: [type, now.timeIntervalSince1970, limit]
             ).map(Self.entity(from:))
         }) ?? []
+    }
+
+    /// The viewer was SHOWN `entry` of list `key` (#970): the prefetched
+    /// pages up to the one carrying it become `recent`, as a read makes them.
+    /// They leave the speculative cap and count as used, so the waste ratio
+    /// covers data. A list's next page is fetched ahead of the viewer
+    /// (`LookaheadPaging`) and stored `speculative`; this is its first display.
+    ///
+    /// Returns at once, on any thread (a cell about to display calls it on
+    /// main): the promotion runs on the writer's queue. Nothing for an entry
+    /// on no prefetched page.
+    public func markShown(_ entry: LocalEntityKey, in key: String) {
+        guard admitsRead() else { return }
+        pool.asyncWriteWithoutTransaction { [weak self] db in
+            guard let self else { return }
+            try? db.inTransaction {
+                let located = try Int.fetchOne(
+                    db.cachedStatement(sql: """
+                        SELECT page_index FROM list_item
+                        WHERE list_key = ? AND role = ? AND entity_type = ? AND entity_id = ?
+                        """),
+                    arguments: [key, Self.entryRole, entry.type, entry.id]
+                )
+                if let located { try promotePrefetchedPages(of: key, through: located, in: db) }
+                return .commit
+            }
+        }
     }
 
     /// The stored entities among `keys` (missing and expired ones left out).
@@ -501,13 +525,14 @@ public final class LocalStore: ManagedCache {
         try write(as: writer) { db, now in
             // The old pages go first, with the entities only they held; those
             // the new page carries again are written back just below.
-            try deletePages(of: key, from: 0, in: db)
+            try deletePages(of: key, from: 0, in: db, prefetchedFate: .discarded)
             try upsert(page.entities, in: db, now: now, tier: .speculative)
             try db.execute(
                 sql: "INSERT INTO list (key, fetched_at, expires_at, accessed_at) VALUES (?, ?, ?, ?)",
                 arguments: [key, now.timeIntervalSince1970, now.addingTimeInterval(lifetime).timeIntervalSince1970, now.timeIntervalSince1970]
             )
             try insertPage(page, index: 0, tier: page.tier, firstPosition: 0, list: key, in: db, now: now)
+            recordPrefetched(.stored, try prefetchedPageBytes(of: key, from: 0, through: 0, in: db))
             return Footprint(page: (key, 0), tier: page.tier)
         }
     }
@@ -549,6 +574,8 @@ public final class LocalStore: ManagedCache {
             let tier = min(page.tier, CacheTier(storedRank: last[2]))
             let index = (last[0] as Int) + 1
             try insertPage(page, index: index, tier: tier, firstPosition: (last[3] as Int) + 1, list: key, in: db, now: now)
+            // A prefetched page (#970): counted until it is shown or goes.
+            recordPrefetched(.stored, try prefetchedPageBytes(of: key, from: index, through: index, in: db))
             return Footprint(page: (key, index), tier: tier)
         }
     }
@@ -578,7 +605,7 @@ public final class LocalStore: ManagedCache {
 
     public func removeList(_ key: String) throws {
         try pool.write { db in
-            try deletePages(of: key, from: 0, in: db)
+            try deletePages(of: key, from: 0, in: db, prefetchedFate: .discarded)
         }
     }
 
@@ -774,6 +801,7 @@ public final class LocalStore: ManagedCache {
     // MARK: - Maintenance
 
     private func deleteEverything(_ db: Database) throws {
+        recordPrefetched(.discarded, try prefetchedPageBytes(in: db))
         try db.execute(sql: """
             DELETE FROM list_item;
             DELETE FROM list_page;
