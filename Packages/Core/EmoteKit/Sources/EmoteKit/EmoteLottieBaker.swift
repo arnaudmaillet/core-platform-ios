@@ -71,6 +71,9 @@ final class EmoteBakeQueue: Sendable {
     var pendingJobs: Int { queued.load(ordering: .relaxed) }
     /// Jobs drawing their frames right now — a test seam.
     var drawingJobs: Int { drawing.load(ordering: .relaxed) }
+    /// This queue's commits and its waits for the main thread — a test seam,
+    /// counted per queue so a test never reads another suite's bakes.
+    var parks: EmoteParkCounters { thread.counters }
 
     /// Draws `plan`'s frames of `animation` into one sheet. Nil when the
     /// calling task was cancelled first (the job stops at its next frame), or
@@ -110,8 +113,18 @@ final class EmoteBakeQueue: Sendable {
 final class EmoteBakeThread: Sendable {
     private static let marker = "EmoteKit.bake"
 
+    private static let countersKey = "EmoteKit.bake.parks"
+
     /// Whether the caller runs on a bake thread.
     static var isCurrent: Bool { Thread.current.threadDictionary[marker] != nil }
+
+    /// The calling bake thread's commit counters; nil off a bake thread.
+    static var currentCounters: EmoteParkCounters? {
+        Thread.current.threadDictionary[countersKey] as? EmoteParkCounters
+    }
+
+    /// This thread's commits, counted apart from every other thread's.
+    let counters = EmoteParkCounters()
 
     /// What the thread and its owner share — never the owner itself, so the
     /// owner can go.
@@ -139,8 +152,10 @@ final class EmoteBakeThread: Sendable {
 
     init() {
         let shared = self.inbox
+        let ownCounters = self.counters
         let thread = Thread {
             Thread.current.threadDictionary[Self.marker] = true
+            Thread.current.threadDictionary[Self.countersKey] = ownCounters
             while case .run(let job) = shared.next() {
                 autoreleasepool { job() }
             }
@@ -282,22 +297,7 @@ enum EmoteMainPark {
     /// request for good, and every bake after it still runs.
     static let retryInterval = DispatchTimeInterval.milliseconds(500)
 
-    private static let parked = Atomic<Int>(0)
-    private static let waiting = Atomic<Int>(0)
-    private static let retried = Atomic<Int>(0)
-    private static let capped = Atomic<Int>(0)
     private static let cappedLogged = Atomic<Bool>(false)
-
-    /// Commits made while the main thread was parked — a test seam.
-    static var parkedCommits: Int { parked.load(ordering: .relaxed) }
-    /// Threads waiting for the main thread to park — a test seam.
-    static var waitingCommits: Int { waiting.load(ordering: .relaxed) }
-    /// Requests withdrawn after `retryInterval` and made again — a test seam.
-    static var retries: Int { retried.load(ordering: .relaxed) }
-    /// Times the main thread stopped waiting after `longestWait` while a
-    /// commit was still running: the one path on which a bake's commit can
-    /// meet the main thread's layout again (#1011). Logged once in DEBUG.
-    static var cappedWaits: Int { capped.load(ordering: .relaxed) }
 
     /// Commits the calling thread's transaction: at once on the main thread,
     /// and off it once the main thread is parked.
@@ -317,6 +317,8 @@ enum EmoteMainPark {
         let state = Atomic<Int>(Request.pending)
         let arrived = DispatchSemaphore(value: 0)
         let released = DispatchSemaphore(value: 0)
+        let counters: EmoteParkCounters
+        init(counters: EmoteParkCounters) { self.counters = counters }
     }
 
     /// Runs `body` on the calling (background) thread while the main thread
@@ -338,15 +340,16 @@ enum EmoteMainPark {
         let previous = qos_class_self()
         pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
         defer { pthread_set_qos_class_self_np(previous, 0) }
-        waiting.add(1, ordering: .relaxed)
-        var request = Request()
+        let counters = EmoteBakeThread.currentCounters ?? EmoteParkCounters()
+        counters.waiting.add(1, ordering: .relaxed)
+        var request = Request(counters: counters)
         while !park(request) {
-            retried.add(1, ordering: .relaxed)
-            request = Request()
+            counters.retried.add(1, ordering: .relaxed)
+            request = Request(counters: counters)
         }
-        waiting.subtract(1, ordering: .relaxed)
+        counters.waiting.subtract(1, ordering: .relaxed)
         body()
-        parked.add(1, ordering: .relaxed)
+        counters.committed.add(1, ordering: .relaxed)
         request.released.signal()
     }
 
@@ -361,7 +364,7 @@ enum EmoteMainPark {
             ).exchanged else { return }
             request.arrived.signal()
             if request.released.wait(timeout: .now() + longestWait) == .timedOut {
-                noteCappedWait()
+                noteCappedWait(request.counters)
             }
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
@@ -378,14 +381,36 @@ enum EmoteMainPark {
         return true
     }
 
-    private static func noteCappedWait() {
-        capped.add(1, ordering: .relaxed)
+    private static func noteCappedWait(_ counters: EmoteParkCounters) {
+        counters.capped.add(1, ordering: .relaxed)
         #if DEBUG
         if !cappedLogged.exchange(true, ordering: .relaxed) {
-            print("[emote] the main thread waited its 250 ms cap for a bake's commit and went on; counted in EmoteMainPark.cappedWaits (logged once)")
+            print("[emote] the main thread waited its 250 ms cap for a bake's commit and went on; counted in EmoteParkCounters.cappedWaits (logged once)")
         }
         #endif
     }
+}
+
+/// What one bake thread's commits did (#1038) — a test seam, kept per thread
+/// (`EmoteBakeThread.counters`, read through `EmoteBakeQueue.parks`) so a test
+/// reads its own queue's numbers, never those of the bakes of a suite running
+/// beside it.
+final class EmoteParkCounters: Sendable {
+    fileprivate let committed = Atomic<Int>(0)
+    fileprivate let waiting = Atomic<Int>(0)
+    fileprivate let retried = Atomic<Int>(0)
+    fileprivate let capped = Atomic<Int>(0)
+
+    /// Commits made while the main thread was parked.
+    var commits: Int { committed.load(ordering: .relaxed) }
+    /// Commits waiting for the main thread to park.
+    var waitingCommits: Int { waiting.load(ordering: .relaxed) }
+    /// Requests withdrawn after `EmoteMainPark.retryInterval` and made again.
+    var retries: Int { retried.load(ordering: .relaxed) }
+    /// Times the main thread stopped waiting after `EmoteMainPark.longestWait`
+    /// while a commit was still running: the one path on which a bake's commit
+    /// can meet the main thread's layout again (#1011). Logged once in DEBUG.
+    var cappedWaits: Int { capped.load(ordering: .relaxed) }
 }
 
 /// A detached `.mainThread`-engine Lottie layer tree that draws one animation
