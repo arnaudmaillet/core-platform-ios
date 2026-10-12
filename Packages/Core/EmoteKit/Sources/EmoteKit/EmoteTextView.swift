@@ -12,9 +12,10 @@ import UIKit
 /// Every emote in the field is ONE character: a TextKit 2 attachment
 /// (`EmoteAttachment`) sized like the emoji glyph on its line, which UIKit
 /// lays out, wraps, scrolls and moves the caret around like any character.
-/// Its view (`EmoteAttachmentView`, through `NSTextAttachmentViewProvider`)
-/// shows the still glyph at once and plays the art on top once it is baked
-/// and a playback slot is free — never a blank. The budgets are the label's:
+/// Its view (`EmoteAttachmentView`, overlaid where TextKit put it) holds a
+/// skeleton while the art is on its way (`EmoteSkeleton`, #987) and plays
+/// the art once it lands and a playback slot is free; the still glyph shows
+/// only when no art can be had, or motion is off. The budgets are the label's:
 /// the app-wide `EmoteEngine.maxAnimatedEmotes`, and stills under Reduce
 /// Motion, Power Saving, idle calm or thermal pressure (`EmoteMotion`).
 ///
@@ -504,8 +505,10 @@ final class EmoteAttachment: NSTextAttachment {
 
 // MARK: - The view
 
-/// What TextKit places for one emote: the still glyph at once, the art over
-/// it once baked and a slot is free. Plays only while in a window.
+/// What TextKit places for one emote: a skeleton while its art is on its way
+/// (#987), the art once it lands — playing if a slot is free, on its poster
+/// frame if not — and the still glyph only when there is no art to be had or
+/// motion is off. Plays only while in a window.
 @MainActor
 final class EmoteAttachmentView: UIView {
     let emote: Emote
@@ -516,6 +519,8 @@ final class EmoteAttachmentView: UIView {
     private var holdsSlot = false
     private var waitingArt: AnimatedIconArt?
     private(set) var isShowingArt = false
+    /// What holds the square while the art is on its way (#987).
+    let skeleton = EmoteSkeleton()
 
     init(emote: Emote, engine: EmoteEngine, still image: UIImage?, side: CGFloat) {
         self.emote = emote
@@ -553,6 +558,11 @@ final class EmoteAttachmentView: UIView {
         if window == nil { stop() } else { start() }
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        skeleton.frame = bounds
+    }
+
     private var motion: EmoteEngine.Motion {
         EmoteMotion.policy == .still ? .still : .loop
     }
@@ -570,7 +580,8 @@ final class EmoteAttachmentView: UIView {
             guard let self else { return }
             self.request = nil
             guard let art, self.window != nil else {
-                // No art after all: the glyph is all there is.
+                // No art after all: the glyph is all there is (#987).
+                self.skeleton.hide(fading: true)
                 self.still.isHidden = false
                 return
             }
@@ -578,10 +589,17 @@ final class EmoteAttachmentView: UIView {
             if !answeredAtOnce { self.bounceIn() }
         }
         answeredAtOnce = false
-        // ⚠️ NOTHING BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): while the art
-        // is being made the emote's place stays empty — no still glyph — and
-        // the art bounces in when it lands.
-        if !answered, motion == .loop { still.isHidden = true }
+        guard !answered else { return }
+        // ⚠️ NO GLYPH BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): while the art
+        // is being made the emote's place holds a skeleton (#987) — no still
+        // glyph, which would flash between the two — and the art bounces in
+        // over it when it lands.
+        still.isHidden = true
+        skeleton.frame = bounds
+        skeleton.show(
+            in: self, below: player,
+            after: engine.skeletonDelay(for: emote, pixelSide: side, motion: motion), engine: engine
+        )
     }
 
     private func present(_ art: AnimatedIconArt) {
@@ -594,6 +612,7 @@ final class EmoteAttachmentView: UIView {
                 player.setArt(art, phase: art.posterFrame(), paused: true)
                 player.isHidden = false
                 still.isHidden = true
+                skeleton.hide(fading: true)
                 return
             }
             holdsSlot = true
@@ -603,6 +622,7 @@ final class EmoteAttachmentView: UIView {
         player.isHidden = false
         still.isHidden = true
         isShowingArt = true
+        skeleton.hide(fading: true)
     }
 
     /// The art landing after the emote showed: from nothing, past its size
@@ -632,6 +652,7 @@ final class EmoteAttachmentView: UIView {
     private func stop() {
         request?.cancel()
         request = nil
+        skeleton.hide()
         waitingArt = nil
         player.setArt(nil)
         player.isHidden = true
@@ -661,11 +682,14 @@ final class EmoteAttachmentView: UIView {
     // MARK: - Test seams
 
     var showsStill: Bool { !still.isHidden }
+    /// Whether a skeleton holds the square (#987).
+    var showsSkeleton: Bool { skeleton.isShowing }
     /// The art on show, held on its poster frame for want of a slot (#731).
     var showsPosterArt: Bool { waitingArt != nil && !player.isHidden }
     /// What the view holds, in a word each — for a test's failure message.
     var debugState: String {
-        "still=\(showsStill) art=\(isShowingArt) poster=\(showsPosterArt) pending=\(request != nil) "
+        "still=\(showsStill) art=\(isShowingArt) poster=\(showsPosterArt) skeleton=\(showsSkeleton) "
+            + "pending=\(request != nil) "
             + "window=\(window != nil) slot=\(holdsSlot) bounces=\(bounceInCount) size=\(bounds.size)"
     }
 }

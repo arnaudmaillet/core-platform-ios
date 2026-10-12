@@ -129,9 +129,12 @@ public final class SkeletonBoneView: UIView {
 
     private static let sweepKey = "skeleton.sweep"
 
-    /// Whether decoration is still — a seam for tests (the real answer is
-    /// process-wide).
-    var stillsMotion: () -> Bool = { MotionPreference.stillsDecoration }
+    /// Whether decoration is still: `MotionPreference.stillsDecoration`
+    /// unless the host says otherwise. Read whenever the sweep is installed
+    /// (entering a window, and on every motion change the bone observes). A
+    /// seam for tests, here and in packages that host bones (EmoteKit), since
+    /// the real answer is process-wide.
+    public var stillsMotion: () -> Bool = { MotionPreference.stillsDecoration }
 
     private func installSweep() {
         gradient.removeAnimation(forKey: Self.sweepKey)
@@ -159,6 +162,6 @@ public final class SkeletonBoneView: UIView {
     }
 
     /// Whether the sweep is running, and whether its band shows. Tests.
-    var isSweeping: Bool { gradient.animation(forKey: Self.sweepKey) != nil }
-    var showsBand: Bool { !gradient.isHidden }
+    public var isSweeping: Bool { gradient.animation(forKey: Self.sweepKey) != nil }
+    public var showsBand: Bool { !gradient.isHidden }
 }

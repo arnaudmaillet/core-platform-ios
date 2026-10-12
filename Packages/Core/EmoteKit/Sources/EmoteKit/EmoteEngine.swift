@@ -38,7 +38,13 @@ import UIKit
 /// background work.
 @MainActor
 public final class EmoteEngine {
-    public static let shared = EmoteEngine(seeds: .bundled, registry: .shared)
+    public static let shared: EmoteEngine = {
+        let engine = EmoteEngine(seeds: .bundled, registry: .shared)
+        // The disk's index, read off the main thread before the first emote
+        // asks: it says which sheets are a read away (`skeletonDelay`).
+        engine.openDiskInBackground()
+        return engine
+    }()
 
     /// Resident sheets: 1% of physical memory, clamped to 32–64 MB. One
     /// keyboard screen bakes about 50 MB of sheets (#926), which the old flat
@@ -85,6 +91,18 @@ public final class EmoteEngine {
     /// How long a bake waits before starting, so a request cancelled within it
     /// (a page swiped past) never loads or draws anything.
     var bakeDelay = Duration.milliseconds(150)
+
+    /// How long a place waiting on art that is only READ (a seed, a sheet on
+    /// disk, a map icon) stays empty before its skeleton shows (#987). A read
+    /// lands in a few frames, which a skeleton would only flash through; one
+    /// that is late, or falls through to a bake (a sheet gone from disk),
+    /// still gets its skeleton.
+    var localArtGrace: TimeInterval = 0.4
+
+    /// What stills the skeletons' shimmer (`EmoteSkeleton`). Per engine, so a
+    /// test sets it without flipping process-wide settings under the suites
+    /// running beside it.
+    var skeletonConditions: @MainActor () -> EmoteSkeleton.Conditions = { .current }
 
     /// What the engine has done, for tests and the debug log.
     public struct Stats: Equatable, Sendable {
@@ -215,6 +233,32 @@ public final class EmoteEngine {
         } onCancel: {
             Task { @MainActor in holder.cancel() }
         }
+    }
+
+    /// How long a place waiting on this art stays empty before its skeleton
+    /// shows (#987), when the art is not in memory: at once for art that
+    /// must be baked — the bake delay alone outlasts a glance — and
+    /// `localArtGrace` for art a read away (`isLocal`).
+    func skeletonDelay(for emote: Emote, pixelSide: Int, motion: Motion) -> TimeInterval {
+        isLocal(emote, pixelSide: pixelSide, motion: motion) ? localArtGrace : 0
+    }
+
+    /// Whether the art is a READ away, not a bake: a map icon (baked by the
+    /// tool), a bundled seed, or a sheet the disk's index holds. Cheap, on
+    /// the main actor: no I/O, and the disk is asked only once its index is
+    /// open (`openDiskInBackground`).
+    func isLocal(_ emote: Emote, pixelSide: Int, motion: Motion) -> Bool {
+        if case .icon = emote.source { return true }
+        if let seeds, seeds.covers(emote, pixelSide: pixelSide, motion: motion) { return true }
+        let stem = EmoteDiskCache.fileStem(emoteID: emote.id, side: pixelSide, still: motion == .still)
+        return diskCache?.containsIfOpen(stem: stem) ?? false
+    }
+
+    /// Opens the disk store on a background task, so the main actor can ask
+    /// its index (`isLocal`) without ever opening it there.
+    func openDiskInBackground() {
+        guard let diskCache else { return }
+        Task.detached(priority: .utility) { diskCache.open() }
     }
 
     /// Whether a bake for this emote is running.
