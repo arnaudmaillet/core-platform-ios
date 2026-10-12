@@ -2,6 +2,7 @@ import AVFoundation
 import CacheKit
 import Foundation
 import ObjectiveC
+import Synchronization
 
 /// The device cache's video bytes (#895, epic #890): progressive MP4 ranges
 /// on disk, served to `AVPlayer` through a resource loader, and the head
@@ -20,6 +21,15 @@ import ObjectiveC
 ///
 /// Both are keyed by `CacheKey.media(url)` (the URL minus its signature), cut
 /// into 1 MB chunks (`VideoRangeLoader`): chunk 0 is the head range.
+///
+/// ⚠️ **OPENED OFF THE CALLER'S THREAD** (#1018). Opening a store reads its
+/// index and lists its files, and the app creates this cache on main with its
+/// first playback pool. The stores open on the cache's own serial queue, the
+/// one every resource loader runs on, so a load enqueued after the open waits
+/// for it by construction. Until then a synchronous check (`hasHead`) answers
+/// "not cached". Both namespaces join the coordinator at once, through
+/// `DeferredVideoDisk`, so a logout or a clear during the open is applied when
+/// the stores attach.
 ///
 /// ## Playback
 ///
@@ -54,8 +64,11 @@ public final class VideoByteCache: Sendable {
     static let publicDiskBudget = DiskBudget(pool: .video, weight: 3)
     static let signedDiskBudget = DiskBudget(pool: .video, weight: 1)
 
-    let publicStore: DiskStore
-    let signedStore: DiskStore
+    /// The two namespaces as the coordinator sees them, registered before
+    /// their stores open.
+    private let publicDisk: DeferredVideoDisk
+    private let signedDisk: DeferredVideoDisk
+    private let opening: VideoStoreOpening
     let statistics = VideoCacheStatistics()
     private let fetcher: any VideoRangeFetching
     private let heads: CacheFills<String, Void>
@@ -69,10 +82,14 @@ public final class VideoByteCache: Sendable {
     /// with `coordinator`, which sets their budgets, wipes the signed one on
     /// every viewer change, and arbitrates head preloads. Open ONE per
     /// process (`DiskStore`).
-    public convenience init(coordinator: CacheCoordinator) throws {
-        try self.init(coordinator: coordinator, root: nil)
+    ///
+    /// Returns at once: the stores open on the cache's queue (#1018).
+    public convenience init(coordinator: CacheCoordinator) {
+        self.init(coordinator: coordinator, root: nil)
     }
 
+    /// - Parameter beforeOpen: runs on the cache's queue just before the
+    ///   stores open. Tests hold the open there.
     init(
         coordinator: CacheCoordinator?,
         root: URL?,
@@ -80,25 +97,33 @@ public final class VideoByteCache: Sendable {
         clock: any CacheClock = SystemCacheClock(),
         slots: CacheFillSlots? = nil,
         chunkSize: Int64 = VideoByteCache.chunkSize,
-        cancelGrace: TimeInterval = VideoRangeLoader.defaultCancelGrace
-    ) throws {
-        // Until the coordinator sets them: the Automatic split.
-        let shares = DiskBudget.split(DiskPool.video.automaticBytes, among: [Self.publicDiskBudget, Self.signedDiskBudget])
-        publicStore = try DiskStore(
-            namespace: Self.publicNamespace, version: Self.diskVersion, budget: Self.publicDiskBudget, root: root,
-            limits: CacheLimits(bytes: shares[0], speculativeShare: CacheCoordinator.speculativeShare), clock: clock
-        )
-        signedStore = try DiskStore(
-            namespace: Self.signedNamespace, version: Self.diskVersion, budget: Self.signedDiskBudget, root: root,
-            limits: CacheLimits(bytes: shares[1], speculativeShare: CacheCoordinator.speculativeShare), clock: clock
-        )
+        cancelGrace: TimeInterval = VideoRangeLoader.defaultCancelGrace,
+        beforeOpen: (@Sendable () -> Void)? = nil
+    ) {
+        let publicDisk = DeferredVideoDisk(namespace: Self.publicNamespace, budget: Self.publicDiskBudget)
+        let signedDisk = DeferredVideoDisk(namespace: Self.signedNamespace, budget: Self.signedDiskBudget)
+        let storeOpening = VideoStoreOpening()
+        opening = storeOpening
+        self.publicDisk = publicDisk
+        self.signedDisk = signedDisk
         self.fetcher = fetcher
         self.coordinator = coordinator
         self.chunkSize = chunkSize
         self.cancelGrace = cancelGrace
         heads = CacheFills(slots: slots ?? coordinator?.fillSlots ?? CacheFillSlots())
-        coordinator?.register(publicStore)
-        coordinator?.register(signedStore)
+        // Registered now, before the stores exist: budgets, a logout and a
+        // clear reach the namespaces from the first instant.
+        coordinator?.register(publicDisk)
+        coordinator?.register(signedDisk)
+        queue.async {
+            beforeOpen?()
+            let stores = VideoStores(root: root, clock: clock)
+            if let stores {
+                publicDisk.attach(stores.common)
+                signedDisk.attach(stores.signed)
+            }
+            storeOpening.finish(stores)
+        }
     }
 
     // MARK: - Policy
@@ -110,9 +135,35 @@ public final class VideoByteCache: Sendable {
         return url.pathExtension.lowercased() != "m3u8"
     }
 
-    func store(for url: URL) -> DiskStore {
-        CacheKey.isSigned(url) ? signedStore : publicStore
+    /// The store `url`'s bytes live in, once the stores are open; `nil` while
+    /// they open (or if they could not).
+    func store(for url: URL) -> DiskStore? {
+        opening.stores?.store(for: url)
     }
+
+    /// Waits until the stores are open (or failed to). Tests and the audit;
+    /// a load never needs to, it runs after the open on the same queue.
+    public func waitUntilStoresAreOpen() async {
+        let queue = queue
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            queue.async { continuation.resume() }
+        }
+    }
+
+    /// Whether the stores were opened on the main thread (never), for tests;
+    /// `nil` until they are open.
+    var storesOpenedOnMainThread: Bool? { opening.stores?.openedOnMainThread }
+
+    /// The stores, waiting for the open. Tests only: never on `queue`, never
+    /// on main in the app.
+    private var openedStores: VideoStores {
+        queue.sync {}
+        guard let stores = opening.stores else { preconditionFailure("the video stores could not open") }
+        return stores
+    }
+
+    var publicStore: DiskStore { openedStores.common }
+    var signedStore: DiskStore { openedStores.signed }
 
     /// The coordinator's current prefetch policy: `.full` without one.
     public var prefetchPolicy: PrefetchPolicy { coordinator?.prefetchPolicy ?? .full }
@@ -162,8 +213,11 @@ public final class VideoByteCache: Sendable {
 
     func makeLoader(for url: URL, mode: VideoRangeLoader.Mode, priority: CacheFillPriority) -> VideoRangeLoader {
         let counters = coordinator?.prefetchCounters
+        let storeOpening = opening
+        // Resolved on `queue`, at the loader's first request: by then the
+        // open block, enqueued first, has run.
         return VideoRangeLoader(
-            remote: url, store: store(for: url), fetcher: fetcher, queue: queue, mode: mode,
+            remote: url, store: { storeOpening.stores?.store(for: url) }, fetcher: fetcher, queue: queue, mode: mode,
             priority: priority.urlSessionTaskPriority, statistics: statistics, chunkSize: chunkSize,
             cancelGrace: cancelGrace,
             onFirstRange: { hit in counters?.recordNextVideoStart(firstRangeHit: hit) }
@@ -180,8 +234,9 @@ public final class VideoByteCache: Sendable {
 
     /// Whether `url`'s head range and content information are on disk.
     public func hasHead(of url: URL) -> Bool {
+        // Not open yet: not cached, as far as anyone may wait to know.
+        guard let namespace = store(for: url) else { return false }
         let key = CacheKey.media(url)
-        let namespace = store(for: url)
         return namespace.contains(VideoCacheKeys.info(key)) && namespace.contains(VideoCacheKeys.chunk(key, 0))
     }
 
@@ -284,5 +339,55 @@ enum VideoCacheAudit {
         let text: String = line()
         print("[cache-audit] video \(text)")
         #endif
+    }
+}
+
+/// The video cache's two disk stores, opened together.
+struct VideoStores: Sendable {
+    let common: DiskStore
+    let signed: DiskStore
+    /// Never `true` in the app: the cache opens them on its queue (#1018).
+    let openedOnMainThread: Bool
+
+    init?(root: URL?, clock: any CacheClock) {
+        openedOnMainThread = Thread.isMainThread
+        // Until the coordinator's limits reach them: the Automatic split.
+        let shares = DiskBudget.split(
+            DiskPool.video.automaticBytes, among: [VideoByteCache.publicDiskBudget, VideoByteCache.signedDiskBudget]
+        )
+        do {
+            common = try DiskStore(
+                namespace: VideoByteCache.publicNamespace, version: VideoByteCache.diskVersion,
+                budget: VideoByteCache.publicDiskBudget, root: root,
+                limits: CacheLimits(bytes: shares[0], speculativeShare: CacheCoordinator.speculativeShare), clock: clock
+            )
+            signed = try DiskStore(
+                namespace: VideoByteCache.signedNamespace, version: VideoByteCache.diskVersion,
+                budget: VideoByteCache.signedDiskBudget, root: root,
+                limits: CacheLimits(bytes: shares[1], speculativeShare: CacheCoordinator.speculativeShare), clock: clock
+            )
+        } catch {
+            #if DEBUG
+            print("[video] disk cache unavailable, streaming only: \(error)")
+            #endif
+            return nil
+        }
+    }
+
+    func store(for url: URL) -> DiskStore {
+        CacheKey.isSigned(url) ? signed : common
+    }
+}
+
+/// Where the open stands: opening, then the stores (or `nil` if they could
+/// not open).
+final class VideoStoreOpening: Sendable {
+    private let state = Mutex<(done: Bool, stores: VideoStores?)>((false, nil))
+
+    var stores: VideoStores? { state.withLock { $0.stores } }
+    var isDone: Bool { state.withLock { $0.done } }
+
+    func finish(_ stores: VideoStores?) {
+        state.withLock { $0 = (true, stores) }
     }
 }
