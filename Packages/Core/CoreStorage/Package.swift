@@ -12,6 +12,6 @@ let package = Package(
     ],
     targets: [
         .target(name: "CoreStorage", dependencies: ["CoreModels"]),
-        .testTarget(name: "CoreStorageTests", dependencies: ["CoreStorage"])
+        .testTarget(name: "CoreStorageTests", dependencies: ["CoreStorage", "CoreModels"])
     ]
 )

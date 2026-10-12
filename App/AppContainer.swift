@@ -403,6 +403,9 @@ final class AppContainer {
     private(set) lazy var entityStore: EntityStore = {
         let store = EntityStore()
         store.register(with: cacheCoordinator)
+        // The app's saved pile writes its fact here, and every save glyph
+        // reads and observes it.
+        PostBookmarkStore.shared.facts = store
         entityFollowSubscription = followGraphEvents.subscribe { [store] change in
             store.applyFollowChange(change)
         }

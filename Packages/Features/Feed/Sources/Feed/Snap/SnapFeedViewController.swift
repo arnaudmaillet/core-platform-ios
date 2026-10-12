@@ -109,7 +109,7 @@ final class SnapFeedViewController: UIViewController {
     /// still exposes no save API — but the profile now has a Saved tab, and two
     /// surfaces reading one list is precisely what a store is for. See
     /// `PostBookmarkStore` for what a client-owned list can and cannot claim.
-    private let bookmarks = PostBookmarkStore()
+    private let bookmarks = PostBookmarkStore.shared
 
     /// The viewer's point balance, spent by the rail's boost anchor.
     ///

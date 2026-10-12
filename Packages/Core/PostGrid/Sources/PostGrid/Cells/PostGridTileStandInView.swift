@@ -130,5 +130,7 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
     #if DEBUG
     /// Whether the tile's heart is the points' red.
     var debugIsStaked: Bool { tile.debugIsStaked }
+    /// The count the twin draws, as drawn.
+    public var debugCounterText: String? { tile.debugCounterText }
     #endif
 }

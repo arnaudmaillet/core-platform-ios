@@ -1,5 +1,6 @@
 import CacheKit
 import CoreModels
+import CoreStorage
 import Foundation
 import Testing
 @testable import EntityStore
@@ -292,6 +293,33 @@ struct EntityStoreTests {
         )
         store.upsert([FeedEntry(post: hidden, author: author("a1"), likeCount: 10)])
         #expect(store.post(PostID("p1"))?.visibleLikeCount == nil)
+    }
+
+    // MARK: - Saves (#896)
+
+    /// The app's saved pile writes the store's fact: a save made on one
+    /// screen reaches every screen observing the post, and a viewer change
+    /// forgets it (the pile, per profile, answers again).
+    @Test func aSaveMadeOnOneScreenReachesEveryScreen() {
+        let store = EntityStore()
+        let name = "entity-store-saves-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        defaults.removePersistentDomain(forName: name)
+        let pile = PostBookmarkStore(defaults: defaults, scope: StorageScope(owner: .member(account: "A", profile: "P1")))
+        pile.facts = store
+        var glyph: [Bool] = []
+        let card = store.observePost(PostID("p1")) { id in glyph.append(pile.isSaved(id.rawValue)) }
+
+        // Saved from the vertical feed's bookmark.
+        pile.toggle("p1")
+
+        #expect(glyph == [true], "the card re-draws its glyph")
+        #expect(store.isSaved(PostID("p1")) == true)
+
+        store.viewerDidChange()
+        #expect(store.isSaved(PostID("p1")) == nil, "the fact is the viewer's: wiped")
+        #expect(glyph == [true, true], "told, and the pile still answers for the same profile")
+        withExtendedLifetime(card) {}
     }
 
     // MARK: - Fixtures

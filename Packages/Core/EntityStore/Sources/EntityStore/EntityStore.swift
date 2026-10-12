@@ -281,6 +281,8 @@ public final class EntityStore: Sendable {
         saved.cache.value(for: id)
     }
 
+    /// What the viewer saved, as `PostBookmarkStore` writes it (its pile is
+    /// the persistence; this is what every screen observes).
     public func setSaved(_ isSaved: Bool, for id: PostID) {
         let changed = writes.withLock { _ -> Bool in
             guard saved.cache.peek(id) != isSaved else { return false }

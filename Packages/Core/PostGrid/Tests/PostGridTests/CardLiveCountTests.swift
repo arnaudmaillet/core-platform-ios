@@ -126,6 +126,74 @@ struct CardLiveCountTests {
         #expect(cell.debugCounterText == "7")
     }
 
+    // MARK: - Bare tiles, saves (#896)
+
+    /// A profile's bare tile (its media mosaic) draws a count and no stake:
+    /// the count is the live one, the heart stays as drawn — while a tile
+    /// wearing its words, bound beside it, reads the stake.
+    @Test func aBareTileDrawsTheLiveCountButNotTheStake() async throws {
+        let scope = StorageScope(owner: .unscoped)
+        let wallet = WalletStore(defaults: Self.defaults(), scope: scope)
+        let entities = EntityStore()
+        let bridge = WalletStakeLikes(wallet: wallet, entities: entities, scope: scope)
+        let staking = PostCardStaking(wallet: wallet, entities: entities)
+        let bare = tile(Self.post("p1", likes: 40))
+        let worded = tile(Self.post("p1", likes: 40))
+        staking.bindCount(bare, to: PostID("p1"))
+        staking.bindReadout(worded, to: PostID("p1"))
+
+        // A like from the feed, then a stake from a card elsewhere.
+        entities.addLikes(1, to: PostID("p1"))
+        #expect(bare.debugCounterText == "41")
+        _ = wallet.stake(.points(2), on: "p1")
+        // The wallet's change is delivered on the main queue.
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(bare.debugCounterText == "43")
+        #expect(worded.debugIsStaked, "the control: a worded tile reads the stake")
+        #expect(!bare.debugIsStaked, "a bare tile never wears it")
+        withExtendedLifetime(bridge) {}
+    }
+
+    /// A cell bound with its words, recycled bare: it leaves the stake's
+    /// binding (and the other way round).
+    @Test func aCellReboundForItsCountAloneLeavesTheStake() async throws {
+        let scope = StorageScope(owner: .unscoped)
+        let wallet = WalletStore(defaults: Self.defaults(), scope: scope)
+        let entities = EntityStore()
+        let staking = PostCardStaking(wallet: wallet, entities: entities)
+        let cell = tile(Self.post("p1", likes: 40))
+        let control = tile(Self.post("p1", likes: 40))
+        staking.bindReadout(cell, to: PostID("p1"))
+        staking.bindReadout(control, to: PostID("p1"))
+        staking.bindCount(cell, to: PostID("p1"))
+
+        _ = wallet.stake(.points(2), on: "p1")
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(control.debugIsStaked)
+        #expect(!cell.debugIsStaked)
+    }
+
+    /// The save glyph: the app's one pile writes the store's fact, so a save
+    /// made in the feed (or on another surface's card) re-draws every bound
+    /// row's glyph.
+    @Test func aSaveMadeElsewhereRedrawsABoundCardsGlyph() {
+        let entities = EntityStore()
+        let pile = PostBookmarkStore(defaults: Self.defaults(), scope: StorageScope(owner: .member(account: "A", profile: "P1")))
+        pile.facts = entities
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()), entities: entities, saves: pile)
+        let card = row(Self.post("p1", likes: 40))
+        staking.bind(card, to: PostID("p1"))
+        #expect(!card.isBookmarked)
+
+        // Saved from the vertical feed's bookmark.
+        pile.toggle("p1")
+        #expect(card.isBookmarked)
+        pile.toggle("p1")
+        #expect(!card.isBookmarked)
+    }
+
     /// Without a store a card keeps what it loaded, as before.
     @Test func withoutAStoreTheCardKeepsItsCount() {
         let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()))

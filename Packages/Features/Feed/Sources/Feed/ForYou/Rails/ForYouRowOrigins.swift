@@ -202,8 +202,10 @@ enum ForYouRowOrigins {
         // tap stands in for a close that finds the card out of its row.
         let tappedSize = rails.cardFrame(for: id, in: rails)?.size
         return SnapFeedHeroOrigin(
-            post: tapped,
-            stream: stream,
+            // With their live counts (#896): the flight's card draws the
+            // number the card it leaves draws.
+            post: rails.livePost(tapped),
+            stream: stream.map(rails.livePost),
             hasHero: hasMedia && rails.cardFrame(for: id, in: host) != nil,
             cover: cover,
             style: .listMedia,
@@ -242,7 +244,7 @@ enum ForYouRowOrigins {
             restingOverlay: hasMedia ? { [weak rails] in
                 let size = rails.flatMap { $0.cardFrame(for: id, in: $0)?.size } ?? tappedSize
                 return ForYouFollowingCardCell.makeOverlay(
-                    for: tapped, restingSize: size, imagePipeline: rails?.imagePipeline,
+                    for: rails?.livePost(tapped) ?? tapped, restingSize: size, imagePipeline: rails?.imagePipeline,
                     viewerStake: rails?.cardStake(for: tapped) ?? 0
                 )
             } : nil,
@@ -273,8 +275,10 @@ enum ForYouRowOrigins {
             // The picture the card is showing NOW, or the one it showed at the
             // tap for a cell that has not drawn it again yet.
             let picture = rails.cardCover(for: id) ?? cover
+            // Drawn as it rests: the live count, a like made in the feed
+            // included (#896).
             return ForYouFollowingCardCell.makeStandIn(
-                for: post, cover: picture, size: size, imagePipeline: rails.imagePipeline,
+                for: rails.livePost(post), cover: picture, size: size, imagePipeline: rails.imagePipeline,
                 viewerStake: rails.cardStake(for: post)
             )
         }

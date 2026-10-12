@@ -26,7 +26,10 @@ let package = Package(
         .package(path: "../../Core/EmoteKit"),
         .package(path: "../../Core/MediaPlayback"),
         .package(path: "../../Core/PostGrid"),
-        .package(path: "../../Core/ShareSheet")
+        .package(path: "../../Core/ShareSheet"),
+        // Tests only: the live-count suite drives the app's EntityStore
+        // (#896); the target reaches it through PostGrid's card staking.
+        .package(path: "../../Core/EntityStore")
     ],
     targets: [
         .target(
@@ -84,6 +87,7 @@ let package = Package(
                 // and the video byte cache's namespaces.
                 "MediaCore",
                 "MediaPlayback",
+                "EntityStore",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

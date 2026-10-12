@@ -31,10 +31,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// One store for every profile screen: the gallery filter is a GLOBAL
     /// user preference, so all view models read and write the same place.
     private let galleryPreferences = GalleryPreferences()
-    /// The viewer's saved pile. Built here rather than injected because there is
-    /// nothing to inject it from: no service owns this list, so the device is
-    /// the only place it has ever lived. See `PostBookmarkStore`.
-    private let bookmarks = PostBookmarkStore()
+    /// The viewer's saved pile: the app's one, a view over the EntityStore's
+    /// saved fact (#896), so a save made in a feed is on the gallery's cards.
+    /// See `PostBookmarkStore`.
+    private let bookmarks = PostBookmarkStore.shared
     /// Last-known profiles, shared by every profile screen so a switch to one
     /// already seen renders instantly. One per app, like the preferences;
     /// backed by the device store when the app hands one in (#893).

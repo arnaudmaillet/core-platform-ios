@@ -71,6 +71,17 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// is appended to (#579).
     private var shownPosts: [GalleryPost] = []
 
+    /// The cards' like chips and live counts (#896): For You's own binding,
+    /// so a post liked in the feed opened from a search result shows the
+    /// same count on the result, and a like on a result's card is the
+    /// rail's stake. Nil: the cards keep the counts they loaded.
+    var staking: PostCardStaking? {
+        didSet {
+            page.staking = staking
+            rails?.staking = staking
+        }
+    }
+
     /// See `PostSetSurface.onNearEnd`.
     var onNearEnd: (() -> Void)?
     /// See `PostSetSurface.onRetry`.
@@ -386,8 +397,10 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         guard posts.indices.contains(index), let openPost,
               navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
         else { return }
-        let tapped = posts[index]
-        let stream = Array(posts[index...].prefix(Self.seedWindow))
+        // With their live counts (#896, `ForYouGridPage.post(for:)`): the
+        // flight's card draws the number the tile it leaves draws.
+        let tapped = page.post(for: posts[index].id) ?? posts[index]
+        let stream = posts[index...].prefix(Self.seedWindow).map { page.post(for: $0.id) ?? $0 }
         let hero = page.hero(for: tapped.id, in: view)
         let appearance = page.heroAppearance(for: tapped.id)
 
@@ -603,6 +616,13 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         PushedListJumpTrace.mark("search did-appear", page: page, host: view)
         #endif
         closeOpeningRoundTrip()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // The screen left: what its like chips staked is final now — For
+        // You's rule (`ForYouViewController.viewDidDisappear`).
+        staking?.endSession()
     }
 
     func setPlaybackActive(_ active: Bool) {

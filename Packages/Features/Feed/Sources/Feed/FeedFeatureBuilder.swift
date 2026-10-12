@@ -593,6 +593,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     public func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface {
         let base = repository
         let counterClient = counterClient
+        let entities = entities
         let surface = PostSetSurfaceViewController(
             style: style,
             imagePipeline: imagePipeline,
@@ -605,8 +606,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 // Three surfaces asking three different ways is how they come to
                 // disagree — see `makeClusterGallery`'s note.
                 let provider = FixedPostsFeedProvider(base: base, ids: ids)
-                guard let posts = try? await ForYouRepository(feed: provider).firstPage().posts
+                // A post deleted in this session is no result, whatever the
+                // index still answers (#896).
+                guard let hydrated = try? await ForYouRepository(feed: provider).firstPage().posts
                 else { return [] }
+                let posts = hydrated.filter { !entities.isDeleted($0.id) }
                 guard let counterClient else { return posts }
                 let byPostID = await PostCounterReader.counters(
                     forPostIDs: posts.map(\.id.rawValue), using: counterClient
@@ -629,12 +633,18 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         surface.openPost = { [self] presenter, origin, ids in
             presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
         }
+        // The results draw their posts' live counts, and their like chips
+        // stake from the app's one wallet (#896) — For You's cards' binding.
+        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
+        surface.staking = staking
         // "View all" on a discover page: For You's own media gallery, with the
         // header For You's pushed screens wear (#629).
         surface.makeGallery = { [self] in
             DiscoverGalleryViewController(
                 imagePipeline: imagePipeline, videoPlayback: videoPlayback,
                 header: PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router),
+                // The same binding as the results it was pushed from.
+                staking: staking,
                 openPost: { [self] presenter, origin, ids in
                     presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
                 }

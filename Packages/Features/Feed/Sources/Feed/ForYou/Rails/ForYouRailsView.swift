@@ -212,13 +212,20 @@ final class ForYouRailsView: UIView {
     }
     /// The saved pile a text card's save control reads and writes — the one
     /// the list's cards, the post page and the profile's Saved tab share.
-    private let bookmarks = PostBookmarkStore()
+    private let bookmarks = PostBookmarkStore.shared
     /// The rows changed which of them are drawn — the host re-sizes its header.
     var onHeightChange: (() -> Void)?
     /// Where a card's like reads the viewer's stake — For You's, shared with
     /// the list. A media card's heart is a readout; a TEXT card's like is the
     /// list's own chip, and stakes (`PostCardStaking.bind`).
     var staking: PostCardStaking?
+
+    /// `post` with its live like count (#896) — for a Following card's
+    /// flight, its stand-ins and its resting overlay, which must draw the
+    /// number the bound card draws, a like made in the feed included.
+    func livePost(_ post: GalleryPost) -> GalleryPost {
+        staking?.liveCopy(of: post) ?? post
+    }
 
     /// What the viewer has staked on `post` — what a COPY of its card (a
     /// flight's furniture, a close's stand-in) draws its heart from.
@@ -916,7 +923,7 @@ final class ForYouRailsView: UIView {
     /// landing swaps it for the card without a word or a control changing.
     /// Nil while the card has no size to measure.
     func makeTextCardStandIn(for id: PostID) -> UIView? {
-        guard let post = cards.first(where: { $0.id == id }) else { return nil }
+        guard let post = cards.first(where: { $0.id == id }).map(livePost) else { return nil }
         let cell = textCardCell(for: id)
         // The realized card's size, else the row's — every text card in the
         // row is the same size.
