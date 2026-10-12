@@ -12,9 +12,25 @@ struct SnapSoundFace: Equatable {
     var isAvailable: Bool
     /// The feed's sound is off (`FeedSound`).
     var isMuted: Bool
+    /// Where a remote cover is read from on this turn (#894): the feed's
+    /// pipeline, whose memory the attribution pill fills too. Nil reads files
+    /// only. Not part of what the face IS: two faces that draw the same
+    /// cover are equal whoever holds the pipeline.
+    var pipeline: ImagePipeline?
+
+    init(coverURL: URL?, isAvailable: Bool, isMuted: Bool, pipeline: ImagePipeline? = nil) {
+        self.coverURL = coverURL
+        self.isAvailable = isAvailable
+        self.isMuted = isMuted
+        self.pipeline = pipeline
+    }
+
+    static func == (lhs: SnapSoundFace, rhs: SnapSoundFace) -> Bool {
+        lhs.coverURL == rhs.coverURL && lhs.isAvailable == rhs.isAvailable && lhs.isMuted == rhs.isMuted
+    }
 
     /// The cover as it can be drawn on THIS turn: the note, a picture already
-    /// fetched (`SnapAttributionCoverCache`), or a FILE read here.
+    /// decoded in the pipeline's memory, or a FILE read here.
     ///
     /// ⚠️ A FILE IS READ, NEVER FETCHED (#680). Mock posters and local covers
     /// are file URLs, and the image pipeline paints a flat colour for any URL
@@ -25,9 +41,9 @@ struct SnapSoundFace: Equatable {
     @MainActor var cachedCover: UIImage? {
         guard isAvailable else { return Self.noSoundImage }
         guard let coverURL else { return SnapMediaAttributionView.noteImage }
-        if let hit = SnapAttributionCoverCache.cover(for: coverURL) { return hit }
+        if let hit = pipeline?.cachedImage(for: coverURL, size: SnapMediaAttributionView.coverBucket) { return hit }
         guard coverURL.isFileURL, let image = UIImage(contentsOfFile: coverURL.path) else { return nil }
-        SnapAttributionCoverCache.store(image, for: coverURL)
+        pipeline?.store(image, for: coverURL)
         return image
     }
 
@@ -48,14 +64,12 @@ struct SnapSoundFace: Equatable {
     }()
     static let noSoundSymbol = "music.note.slash"
 
-    /// Fetches a remote cover into the cache, for a host that has to redraw
-    /// once it lands (the composer's slot). Nil for a file, the note, or a
-    /// fetch that fails — `cachedCover` already answers the first two.
+    /// Fetches a remote cover into the pipeline, for a host that has to
+    /// redraw once it lands (the composer's slot). Nil for a file, the note,
+    /// or a fetch that fails — `cachedCover` already answers the first two.
     @MainActor static func fetchCover(_ url: URL, pipeline: ImagePipeline) async -> UIImage? {
         guard !url.isFileURL else { return nil }
-        guard let image = try? await pipeline.image(for: url) else { return nil }
-        SnapAttributionCoverCache.store(image, for: url)
-        return image
+        return try? await pipeline.image(for: url, size: SnapMediaAttributionView.coverBucket)
     }
 
     /// The cover as a disc of `side` points, drawn once — what a glass

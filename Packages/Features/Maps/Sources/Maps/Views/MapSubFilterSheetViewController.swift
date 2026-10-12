@@ -132,8 +132,6 @@ final class MapSubFilterSheetViewController: UIViewController {
         title: "Cancel",
         primaryAction: UIAction { [weak self] _ in self?.cancelAndDismiss() }
     )
-    /// Resolved avatars, keyed by profile — cache-hot from the pill row.
-    private var avatarCache: [ProfileID: UIImage] = [:]
     private var avatarTasks: [Task<Void, Never>] = []
     private var query = ""
 
@@ -293,7 +291,9 @@ final class MapSubFilterSheetViewController: UIViewController {
             let isActiveSection = section(of: subFilter) == .active
             cell.configure(
                 option: option,
-                avatar: option.favorite.flatMap { self.avatarCache[$0.profileID] },
+                avatar: option.favorite?.avatarURL.flatMap {
+                    self.imagePipeline?.cachedImage(for: $0, size: MapSubFilterBarView.avatarBucket)
+                },
                 // Which verb this row's edit accessory carries: ⊖ for a row
                 // that is in the bar, ⊕ for one that could be.
                 isInActiveSection: isActiveSection,
@@ -558,16 +558,18 @@ final class MapSubFilterSheetViewController: UIViewController {
 
     // MARK: - Avatars
 
+    /// The faces come from the pipeline's memory — hot from the pill row,
+    /// which decodes them at the same size (#894); only the missing ones are
+    /// fetched.
     private func loadAvatars() {
         guard let imagePipeline else { return }
         for option in sections.active + sections.available {
-            guard let favorite = option.favorite, let url = favorite.avatarURL,
-                  avatarCache[favorite.profileID] == nil else { continue }
+            guard let url = option.favorite?.avatarURL,
+                  !imagePipeline.isDecoded(url, size: MapSubFilterBarView.avatarBucket) else { continue }
             let subFilter = option.subFilter
             avatarTasks.append(Task { [weak self] in
-                guard let image = try? await imagePipeline.image(for: url),
+                guard (try? await imagePipeline.image(for: url, size: MapSubFilterBarView.avatarBucket)) != nil,
                       let self, !Task.isCancelled else { return }
-                self.avatarCache[favorite.profileID] = image
                 var snapshot = self.dataSource.snapshot()
                 guard snapshot.itemIdentifiers.contains(subFilter) else { return }
                 snapshot.reconfigureItems([subFilter])

@@ -345,7 +345,7 @@ final class SnapAuthorIdentityView: UIView {
             contentTransition.perform(animated: animated) { self.metaLabel.text = meta }
             return
         }
-        let cached = model.avatarURL.flatMap(SnapAuthorFaceCache.face(for:))
+        let cached = model.avatarURL.flatMap { pipeline.cachedImage(for: $0, size: Self.faceBucket) }
         contentTransition.perform(animated: animated) {
             self.setRedacted(false)
             self.nameLabel.text = model.authorName
@@ -366,9 +366,7 @@ final class SnapAuthorIdentityView: UIView {
         #endif
         let id = model.authorID
         avatarTask = Task { [weak self] in
-            guard let fetched = try? await pipeline.image(for: url) else { return }
-            let image = await SnapAuthorFaceCache.prepared(fetched)
-            SnapAuthorFaceCache.store(image, for: url)
+            guard let image = try? await pipeline.image(for: url, size: Self.faceBucket) else { return }
             guard let self, self.authorID == id else { return }
             // Onto the NEW author's content: mid-blur, the old one is still
             // what the live views draw.
@@ -396,13 +394,24 @@ final class SnapAuthorIdentityView: UIView {
     /// The author on the pill, if one has been set with `setAuthor`.
     var shownAuthor: FeedItemDisplayModel? { renderedModel }
 
-    /// Fetches `url`'s face into the pill's cache ahead of need — the next
-    /// page's author — so the pill's swap to them is drawn with it.
+    /// The bucket the pill's face is decoded at: the pipeline's avatar size,
+    /// a small bitmap decoded off the main thread (#894).
+    ///
+    /// ⚠️ Never the full-size picture. The pill is also drawn by
+    /// `CALayer.render` — the blurred stills of `BarItemContentTransition` —
+    /// and that CPU path scales whatever the disc holds, on the main thread,
+    /// on a frame of the scroll: a full-size face cost 22–40ms per first still
+    /// on the iPhone 18 Pro simulator (`-pill-probe`), the same pill 3–7ms
+    /// with a small one. The pipeline's memory answers synchronously, so a
+    /// swap made on this turn draws the new author already wearing the face.
+    static let faceBucket = ImageBucket.avatar
+
+    /// Decodes `url`'s face into the pipeline ahead of need — the next page's
+    /// author — so the pill's swap to them is drawn with it.
     static func warmFace(_ url: URL, pipeline: ImagePipeline) {
-        guard SnapAuthorFaceCache.face(for: url) == nil else { return }
+        guard !pipeline.isDecoded(url, size: faceBucket) else { return }
         Task { @MainActor in
-            guard let image = try? await pipeline.image(for: url) else { return }
-            SnapAuthorFaceCache.store(await SnapAuthorFaceCache.prepared(image), for: url)
+            _ = try? await pipeline.image(for: url, size: faceBucket)
         }
     }
 
@@ -455,7 +464,7 @@ final class SnapAuthorIdentityView: UIView {
             return
         }
         avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let image = try? await pipeline.image(for: url, size: Self.faceBucket) else { return }
             guard let self, self.personAvatarURL == url else { return }
             self.showFace(image)
         }
@@ -807,69 +816,11 @@ enum SnapNavControls {
     }
 }
 
-/// The faces the author pill has drawn lately, readable SYNCHRONOUSLY.
-///
-/// A swap made on this turn must draw the new author already wearing the
-/// right face — otherwise they blur in with their initials and pop to the
-/// picture once the blur has landed. The pipeline's cache answers
-/// synchronously too, but with the full-size picture; this one holds the
-/// pill's own small, already-decoded bitmap (`prepared(_:)`), which is what
-/// keeps the swap's still from paying a decode on a frame of the scroll.
-@MainActor
-enum SnapAuthorFaceCache {
-    /// A few pages either way is all paging ever asks for.
-    static let capacity = 24
-    private static var faces: [URL: UIImage] = [:]
-    /// Least recently stored first.
-    private static var order: [URL] = []
-
-    static func face(for url: URL) -> UIImage? { faces[url] }
-
-    /// `image` as the pill draws it: a small, already-DECODED square bitmap,
-    /// made off the main thread.
-    ///
-    /// ⚠️ Because the pill is also drawn by `CALayer.render` — the blurred
-    /// stills of `BarItemContentTransition` — and that CPU path decodes and
-    /// scales a full-size picture itself, on the main thread, on a frame of
-    /// the scroll: the first still of each new face cost 22–40ms on the
-    /// iPhone 18 Pro simulator (`-pill-probe`), the same pill 3–7ms once the
-    /// face had been drawn.
-    static func prepared(_ image: UIImage) async -> UIImage {
-        let side = AvatarImageView.barDiameter
-        return await Task.detached(priority: .userInitiated) {
-            let size = image.size
-            guard size.width > 0, size.height > 0 else { return image }
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 3
-            format.opaque = false
-            // Aspect FILL into the disc's square, as the avatar view draws it.
-            let fill = max(side / size.width, side / size.height)
-            let drawn = CGSize(width: size.width * fill, height: size.height * fill)
-            return UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format).image { _ in
-                image.draw(in: CGRect(x: (side - drawn.width) / 2, y: (side - drawn.height) / 2,
-                                      width: drawn.width, height: drawn.height))
-            }
-        }.value
-    }
-
-    static func store(_ image: UIImage, for url: URL) {
-        if faces.updateValue(image, forKey: url) != nil {
-            order.removeAll { $0 == url }
-        }
-        order.append(url)
-        while order.count > capacity {
-            faces[order.removeFirst()] = nil
-        }
-    }
-
-    static func removeAll() {
-        faces.removeAll()
-        order.removeAll()
-    }
-}
-
 #if DEBUG
 extension SnapAuthorIdentityView {
+    /// The picture on the disc now; nil while the initials show.
+    var debugFaceImage: UIImage? { avatarView.image }
+
     /// `-pill-probe`: what the pill's disc actually is at this instant — its
     /// frame in the window, its corner and mask, every transformed ancestor up
     /// to the bar, and any OTHER view in the window drawing the same initials.

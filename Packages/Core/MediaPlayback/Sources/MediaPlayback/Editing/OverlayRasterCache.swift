@@ -1,3 +1,4 @@
+import CacheKit
 import CoreGraphics
 import Synchronization
 
@@ -11,7 +12,7 @@ import Synchronization
 /// size. Sticker frames are NOT kept here: they change with time, and their
 /// strip keeps its own decoded frame.
 ///
-/// ⚠️ **A `Mutex` FOR THE BOOKS, AND THE DRAWING HAPPENS OUTSIDE IT.** The
+/// ⚠️ **A LOCK FOR THE BOOKS, AND THE DRAWING HAPPENS OUTSIDE IT.** The
 /// compositor's queue, a detached photo bake and the editor's overlay views can
 /// all ask at once. Holding the lock while a paragraph is drawn would make each
 /// of them wait for the others' typesetting; drawing outside it means two
@@ -46,38 +47,51 @@ final class OverlayRasterCache: Sendable {
     /// RGBA is 256 MB — a twelfth of an iPhone SE's memory spent on text. A
     /// paragraph at 1080p export size is about a fifth of a megapixel, so 64 MB
     /// still holds some three hundred of them.
-    static let shared = OverlayRasterCache(budget: 64 * 1024 * 1024)
+    ///
+    /// Announced to the device cache (#894): its budget and trims are the
+    /// coordinator's, so a memory warning frees these pictures as it frees
+    /// the feed's, and a logout drops the previous viewer's texts.
+    static let shared: OverlayRasterCache = {
+        let cache = OverlayRasterCache(budget: 64 * 1024 * 1024)
+        UIAssetCaches.shared.adopt(cache.entries)
+        return cache
+    }()
 
-    private struct Entry {
-        let raster: OverlayRasterizer.Raster
-        let cost: Int
-        var lastUse: UInt64
-    }
+    /// The device cache's name for these pictures. `viewer`: they spell the
+    /// viewer's own drafts, so a logout or a switch drops them.
+    ///
+    /// ⚠️ `persistent`, the UI assets' class, NOT `standard`. An export goes on
+    /// in the background, and the background pauses a `standard` memory
+    /// cache's admissions and empties it: every frame of the export would then
+    /// lay its paragraph out again, the cost this cache exists to remove. The
+    /// class gives up only what was never drawn on a warning or the background,
+    /// and the rest on a CRITICAL warning.
+    static let namespace = CacheNamespace("editing.overlays", category: .other, scope: .viewer, priorityClass: .persistent)
 
-    private struct Books {
-        var entries: [Key: Entry] = [:]
-        var cost = 0
-        var clock: UInt64 = 0
-        var renders = 0
-    }
-
-    /// The most bytes of pixels kept at once.
+    /// The most bytes of pixels kept at once, until a coordinator sets its own.
     let budget: Int
-    private let books = Mutex(Books())
+    /// The pictures, least recently used dropped first past the budget.
+    let entries: MemoryCache<Key, OverlayRasterizer.Raster>
+    private let drawings = Mutex(0)
 
     init(budget: Int) {
         self.budget = budget
+        entries = MemoryCache(
+            namespace: Self.namespace,
+            budget: .fixed(bytes: budget),
+            limits: CacheLimits(bytes: budget, speculativeShare: CacheCoordinator.speculativeShare)
+        )
     }
 
     /// How many times this cache has had a picture drawn — every miss, whether
     /// the drawing produced a picture or not.
     var renders: Int {
-        books.withLock { $0.renders }
+        drawings.withLock { $0 }
     }
 
     /// How many bytes of pixels are kept now.
     var cost: Int {
-        books.withLock { $0.cost }
+        entries.usage.bytes
     }
 
     /// The picture for `key`: the kept one, or what `render` draws — which is
@@ -85,33 +99,11 @@ final class OverlayRasterCache: Sendable {
     func raster(
         for key: Key, render: () -> OverlayRasterizer.Raster?
     ) -> OverlayRasterizer.Raster? {
-        let kept = books.withLock { books -> OverlayRasterizer.Raster? in
-            guard var entry = books.entries[key] else { return nil }
-            books.clock += 1
-            entry.lastUse = books.clock
-            books.entries[key] = entry
-            return entry.raster
-        }
-        if let kept { return kept }
-
+        if let kept = entries.value(for: key) { return kept }
         let drawn = render()
-        books.withLock { books in
-            books.renders += 1
-            guard let drawn else { return }
-            let cost = drawn.image.bytesPerRow * drawn.image.height
-            guard cost <= budget else { return }
-            books.clock += 1
-            if let previous = books.entries[key] { books.cost -= previous.cost }
-            books.entries[key] = Entry(raster: drawn, cost: cost, lastUse: books.clock)
-            books.cost += cost
-            // ⚠️ A SCAN, NOT A LINKED LIST. The cache holds tens of pictures,
-            // rarely hundreds, and an eviction is rare next to a hit.
-            while books.cost > budget,
-                  let oldest = books.entries.min(by: { $0.value.lastUse < $1.value.lastUse }) {
-                books.entries[oldest.key] = nil
-                books.cost -= oldest.value.cost
-            }
-        }
+        drawings.withLock { $0 += 1 }
+        guard let drawn else { return nil }
+        entries.insert(drawn, for: key, cost: drawn.image.bytesPerRow * drawn.image.height)
         return drawn
     }
 }
