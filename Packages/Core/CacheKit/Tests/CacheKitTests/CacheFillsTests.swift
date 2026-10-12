@@ -321,6 +321,165 @@ struct CacheFillsTests {
     }
 }
 
+// MARK: - Escalation of a raised fill (#1052)
+
+/// A one-shot signal a test awaits: nothing here is polled, since a fill
+/// that is never raised runs at utility QoS and can start late (#1049).
+private final class Signal: Sendable {
+    private struct State {
+        var isFired = false
+        var waiters: [CheckedContinuation<Void, Never>] = []
+    }
+
+    private let state = Mutex(State())
+
+    func fire() {
+        let waiters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.isFired = true
+            defer { state.waiters = [] }
+            return state.waiters
+        }
+        for waiter in waiters { waiter.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let isFired = state.withLock { state -> Bool in
+                if !state.isFired { state.waiters.append(continuation) }
+                return state.isFired
+            }
+            if isFired { continuation.resume() }
+        }
+    }
+}
+
+/// A fill that records its task's priority when it starts, then waits for
+/// its context to reach `raisedTo` and records it again, then holds until
+/// the test lets it finish.
+private final class PriorityProbe: Sendable {
+    private struct Readings {
+        var atStart: TaskPriority?
+        var afterRaise: TaskPriority?
+    }
+
+    private let readings = Mutex(Readings())
+    let started = Signal()
+    let raised = Signal()
+    let finish = Signal()
+    let raisedTo: CacheFillPriority
+
+    init(raisedTo: CacheFillPriority = .visible) {
+        self.raisedTo = raisedTo
+    }
+
+    var atStart: TaskPriority? { readings.withLock { $0.atStart } }
+    var afterRaise: TaskPriority? { readings.withLock { $0.afterRaise } }
+
+    func fill<Value: Sendable>(returning value: Value) -> CacheFills<String, Value>.Fill {
+        { [self] context in
+            let changes = AsyncStream<CacheFillPriority>.makeStream()
+            context.onPriorityChange { changes.continuation.yield($0) }
+            readings.withLock { $0.atStart = Task.currentPriority }
+            started.fire()
+            if context.priority != raisedTo {
+                for await priority in changes.stream where priority == raisedTo { break }
+            }
+            readings.withLock { $0.afterRaise = Task.currentPriority }
+            raised.fire()
+            await finish.wait()
+            return value
+        }
+    }
+}
+
+/// A shared fill runs at the highest priority still wanted: a running
+/// prefetch raised to `.visible` has its TASK escalated, not only its
+/// context (#1052). Before, it kept decoding at utility QoS while the viewer
+/// waited for it.
+struct CacheFillEscalationTests {
+    @Test func aPrefetchJoinedByAVisibleLoadRunsAtUserInitiatedFromThenOn() async throws {
+        let fills = CacheFills<String, String>(slots: CacheFillSlots(limit: 2))
+        let owner = CacheOwner("grid")
+        let probe = PriorityProbe()
+        let interest = fills.request("k", priority: .next, owner: owner, fill: probe.fill(returning: "a"))
+        await probe.started.wait()
+        #expect(probe.atStart == .utility, "a P1 prefetch starts at utility")
+
+        let visible = Task { try await fills.value(for: "k", priority: .visible) { _ in "unused" } }
+        await probe.raised.wait()
+
+        let raised = try #require(probe.afterRaise)
+        #expect(raised >= .userInitiated, "joined by a P0 load: user-initiated from then on (\(raised))")
+        probe.finish.fire()
+        #expect(try await visible.value == "a", "the P0 load rides the prefetch's fill")
+        withExtendedLifetime((owner, interest)) {}
+    }
+
+    @Test func anInterestRaisedToVisibleEscalatesItsRunningFill() async throws {
+        let fills = CacheFills<String, String>(slots: CacheFillSlots(limit: 2))
+        let owner = CacheOwner("grid")
+        let probe = PriorityProbe()
+        let interest = fills.request("k", priority: .speculative, owner: owner, fill: probe.fill(returning: "a"))
+        await probe.started.wait()
+        #expect(probe.atStart == .utility, "a P2 preload starts at utility")
+
+        interest.setPriority(.visible)
+        await probe.raised.wait()
+
+        let raised = try #require(probe.afterRaise)
+        #expect(raised >= .userInitiated, "scrolled on screen: user-initiated from then on (\(raised))")
+        probe.finish.fire()
+        withExtendedLifetime(owner) {}
+    }
+
+    @Test func aRaiseThatStaysBelowVisibleLeavesTheFillAtUtility() async throws {
+        let slots = CacheFillSlots(limit: 2)
+        let fills = CacheFills<String, String>(slots: slots)
+        let owner = CacheOwner("grid")
+        let probe = PriorityProbe(raisedTo: .next)
+        let interest = fills.request("k", priority: .speculative, owner: owner, fill: probe.fill(returning: "a"))
+        #expect(slots.runningCount == 1, "P2 still takes a speculative slot")
+        await probe.started.wait()
+
+        interest.setPriority(.next)
+        await probe.raised.wait()
+
+        #expect(probe.afterRaise == .utility, "P2 to P1 is no reason to escalate")
+        probe.finish.fire()
+        withExtendedLifetime(owner) {}
+    }
+
+    /// An image's decode waits on its download through `value(for:)`: the
+    /// download follows the decode, so the bytes the viewer waits for are
+    /// fetched at user-initiated too, network hint included.
+    @Test func aWaiterFollowingItsParentFillRaisesTheFillItWaitsOn() async throws {
+        let slots = CacheFillSlots(limit: 2)
+        let decodes = CacheFills<String, String>(slots: slots)
+        let downloads = CacheFills<String, Int>(slots: slots)
+        let owner = CacheOwner("grid")
+        let download = PriorityProbe()
+        let interest = decodes.request("photo", priority: .next, owner: owner) { context in
+            let bytes = try await downloads.value(for: "photo", priority: .next, following: context, fill: download.fill(returning: 42))
+            return "decoded \(bytes)"
+        }
+        await download.started.wait()
+        #expect(downloads.priority(of: "photo") == .next)
+        #expect(download.atStart == .utility)
+
+        interest.setPriority(.visible)
+        await download.raised.wait()
+
+        #expect(downloads.priority(of: "photo") == .visible, "the download follows its decode")
+        let raised = try #require(download.afterRaise)
+        #expect(raised >= .userInitiated, "and runs at user-initiated (\(raised))")
+
+        interest.setPriority(.next)
+        #expect(downloads.priority(of: "photo") == .next, "lowered with it, never below its own floor")
+        download.finish.fire()
+        withExtendedLifetime(owner) {}
+    }
+}
+
 /// The signal sources, driven through a private `NotificationCenter` and
 /// injected readers: nothing process-wide is posted or flipped.
 struct CacheSignalSourceTests {
