@@ -68,6 +68,7 @@ final class FakeRangeFetcher: VideoRangeFetching, @unchecked Sendable {
     private let lock = NSLock()
     private var files: [URL: (data: Data, mime: String)] = [:]
     private var tasks: [Task] = []
+    private var arrivalWaiters: [(count: Int, continuation: CheckedContinuation<Void, Never>)] = []
     // At the cache queue's QoS: a fake answering below it is the first thing
     // a loaded host starves, and the test then waits on the fake, not the code.
     private let queue = DispatchQueue(label: "FakeRangeFetcher", qos: .userInitiated)
@@ -88,6 +89,21 @@ final class FakeRangeFetcher: VideoRangeFetching, @unchecked Sendable {
     func goOffline() { lock.withLock { isOffline = true } }
 
     var requests: [Request] { lock.withLock { tasks.map(\.request) } }
+
+    /// Returns once `count` fetches have arrived. A head preload is a P2
+    /// fill at utility QoS: on a loaded runner it can reach the fetcher long
+    /// after any look budget, so a test awaits its fetch instead of polling
+    /// for it (#1053, as #1049).
+    func requestsArrived(_ count: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let hasArrived = lock.withLock { () -> Bool in
+                guard tasks.count < count else { return true }
+                arrivalWaiters.append((count, continuation))
+                return false
+            }
+            if hasArrived { continuation.resume() }
+        }
+    }
     var cancelledCount: Int { lock.withLock { tasks.filter(\.isCancelled).count } }
     /// The `index`-th fetch, or nil (recorded as an issue, never a trap) when
     /// fewer arrived: a miss must fail its test, not crash the test process.
@@ -104,7 +120,14 @@ final class FakeRangeFetcher: VideoRangeFetching, @unchecked Sendable {
         events: VideoRangeFetchEvents
     ) -> any VideoRangeTask {
         let task = Task(request: Request(url: url, offset: offset, end: end, speculative: speculative), events: events)
-        let offline = lock.withLock { tasks.append(task); return isOffline }
+        let (offline, arrived) = lock.withLock { () -> (Bool, [CheckedContinuation<Void, Never>]) in
+            tasks.append(task)
+            let arrivedCount = tasks.count
+            let ready = arrivalWaiters.filter { $0.count <= arrivedCount }.map(\.continuation)
+            arrivalWaiters.removeAll { $0.count <= arrivedCount }
+            return (isOffline, ready)
+        }
+        for waiter in arrived { waiter.resume() }
         if offline {
             queue.async { events.finish(VideoRangeFetchFailure(URLError(.notConnectedToInternet))) }
         } else if !holds {

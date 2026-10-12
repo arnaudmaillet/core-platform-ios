@@ -268,6 +268,25 @@ public final class VideoByteCache: Sendable {
         heads.isInFlight(CacheKey.media(url))
     }
 
+    /// Waits for `url`'s head preload in flight to end, and returns whether
+    /// its head is on disk, for tests.
+    ///
+    /// ⚠️ A head preload is a P2 fill at utility QoS: on a loaded runner it
+    /// can land long after any look budget a test polls it with (#1053, as
+    /// #1049). This joins it at P2, which raises nothing, and returns when it
+    /// ends, however late. It never starts work of its own: with nothing in
+    /// flight it only reports what is already on disk.
+    func headPreloadLanded(of url: URL) async -> Bool {
+        let key = CacheKey.media(url)
+        if heads.isInFlight(key) {
+            // Only runs if the preload ended between the check and the join.
+            _ = try? await heads.value(for: key, priority: .speculative) { [weak self] _ in
+                guard self?.hasHead(of: url) == true else { throw CancellationError() }
+            }
+        }
+        return hasHead(of: url)
+    }
+
     /// Fetches the head through a speculative loader, as a request for
     /// `[0, chunkSize)` that keeps no bytes in memory.
     private func fetchHead(of url: URL, context: CacheFillContext) async throws {
