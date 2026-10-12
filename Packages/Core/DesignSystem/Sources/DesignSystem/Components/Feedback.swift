@@ -65,14 +65,16 @@ public enum Feedback {
     ///     top of a composer resting there (#729). Only used when the toast
     ///     lands on `source` itself: on a sheet above it, the floor belongs to
     ///     a screen that is no longer in view.
+    ///   - position: one of six places (#954); the bottom centre by default.
     @discardableResult
     public static func success(
         _ message: String,
         symbol: String? = Kind.success.defaultSymbol,
         from source: UIViewController,
-        above floor: NSLayoutYAxisAnchor? = nil
+        above floor: UIView? = nil,
+        at position: ToastPosition = .bottom
     ) -> ToastView {
-        show(.success, message, symbol: symbol, from: source, above: floor)
+        show(.success, message, symbol: symbol, from: source, above: floor, at: position)
     }
 
     /// The action did not happen: a failure-style toast and an error haptic.
@@ -81,9 +83,10 @@ public enum Feedback {
         _ message: String,
         symbol: String? = Kind.failure.defaultSymbol,
         from source: UIViewController,
-        above floor: NSLayoutYAxisAnchor? = nil
+        above floor: UIView? = nil,
+        at position: ToastPosition = .bottom
     ) -> ToastView {
-        show(.failure, message, symbol: symbol, from: source, above: floor)
+        show(.failure, message, symbol: symbol, from: source, above: floor, at: position)
     }
 
     /// A neutral notice: a confirmation-style toast, no haptic.
@@ -92,9 +95,10 @@ public enum Feedback {
         _ message: String,
         symbol: String? = Kind.info.defaultSymbol,
         from source: UIViewController,
-        above floor: NSLayoutYAxisAnchor? = nil
+        above floor: UIView? = nil,
+        at position: ToastPosition = .bottom
     ) -> ToastView {
-        show(.info, message, symbol: symbol, from: source, above: floor)
+        show(.info, message, symbol: symbol, from: source, above: floor, at: position)
     }
 
     /// A state that shows on the control itself — a bookmark filling — was
@@ -128,18 +132,63 @@ public enum Feedback {
         _ message: String,
         symbol: String?,
         from source: UIViewController,
-        above floor: NSLayoutYAxisAnchor?
+        above floor: UIView?,
+        at position: ToastPosition
     ) -> ToastView {
         let host = host(for: source)
-        let toast = ToastView.present(
-            message,
-            symbol: symbol,
-            in: host.view,
-            above: host === source ? floor : nil,
-            style: kind.style
-        )
+        let floor = host === source && floor?.window != nil ? floor : nil
+        let toast: ToastView
+        if let window = host.viewIfLoaded?.window, let overlay = ToastOverlay.overlay(for: window) {
+            // The scene's overlay (#954): the toast outlives the screen.
+            toast = overlay.present(
+                message, symbol: symbol, style: kind.style, position: position,
+                from: host, above: floor,
+                keyboardTopY: keyboardTopY(of: host, in: window),
+                interfaceStyle: pinnedStyle(of: host)
+            )
+        } else {
+            // No scene to draw over (a package test host): in the screen.
+            toast = ToastView.present(
+                message, symbol: symbol, style: kind.style, position: position, in: host.view,
+                edge: position.isTop ? nil : floor?.topAnchor
+            )
+        }
         if let haptic = kind.haptic { playHaptic(haptic) }
         return toast
+    }
+
+    /// The style `host` pins — its own override or its nearest parent's —
+    /// or unspecified: the window's. Read from the overrides rather than the
+    /// trait collection, which a just-changed override has not reached yet.
+    static func pinnedStyle(of host: UIViewController) -> UIUserInterfaceStyle {
+        var controller: UIViewController? = host
+        while let current = controller {
+            if current.overrideUserInterfaceStyle != .unspecified { return current.overrideUserInterfaceStyle }
+            controller = current.parent
+        }
+        return .unspecified
+    }
+
+    /// Where a bottom toast from `host` stands, in `window`'s coordinates:
+    /// the top of `floor` (a composer), or else the host's safe area bottom —
+    /// which clears its tab bar, toolbar and tab accessory. The keyboard is
+    /// the overlay's to follow (`keyboardTopY(of:in:)`).
+    static func floorY(of host: UIViewController?, above floor: UIView?, in window: UIWindow) -> CGFloat {
+        if let floor {
+            return floor.convert(floor.bounds, to: window).minY
+        }
+        guard let view = host?.viewIfLoaded else { return window.bounds.maxY - window.safeAreaInsets.bottom }
+        return view.convert(view.safeAreaLayoutGuide.layoutFrame, to: window).maxY
+    }
+
+    /// The keyboard's top in `window`'s coordinates while it is up over
+    /// `host`, else nil — the overlay's starting point; it follows the
+    /// keyboard's moves from there.
+    static func keyboardTopY(of host: UIViewController, in window: UIWindow) -> CGFloat? {
+        let view = host.view!
+        let safe = view.convert(view.safeAreaLayoutGuide.layoutFrame, to: window).maxY
+        let keyboard = view.convert(view.keyboardLayoutGuide.layoutFrame, to: window).minY
+        return keyboard < safe - 1 ? keyboard : nil
     }
 
     /// Where a toast from `source` is drawn.

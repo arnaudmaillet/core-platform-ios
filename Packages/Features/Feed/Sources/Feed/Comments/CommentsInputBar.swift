@@ -872,6 +872,10 @@ final class CommentsInputBar: UIView {
     /// stake bubble floats in, and which rides the keyboard with the row).
     var inputRowTopAnchor: NSLayoutYAxisAnchor { field.topAnchor }
 
+    /// The view whose top is `inputRowTopAnchor`: what a toast stands on over
+    /// the composer (`Feedback`'s `above:`, #729).
+    var inputRowView: UIView { field }
+
     /// Whether the field holds the keyboard. A row tap on the stream then
     /// retires it instead of doing the row's own work — see the hosts'
     /// reply taps.
