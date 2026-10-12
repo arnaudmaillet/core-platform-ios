@@ -85,6 +85,22 @@ struct GridReturnStillTests {
         #expect(abs(start - 2.5) < 0.01)
     }
 
+    /// A caller that lands every close through `adoptAttachedSurface` (For
+    /// You's rails) lands the frame the same way, and adopts no clip: the
+    /// card then waits on its cover, which is the frame.
+    @Test func theRailsLandingRouteWearsTheFrameAndAdoptsNoClip() async throws {
+        let pool = makePool()
+        let tapped = candidate(0)
+        let frame = picture(.green)
+        let grid = await gridWhoseReturnPlayerWent(pool: pool, tapped: tapped, frame: frame)
+        tapped.cell.applyCover(picture(.red))
+        let arriving = try #require(grid.makeReturnSurface(for: tapped.id))
+        #expect(!grid.adoptAttachedSurface(for: tapped.id, url: tapped.url, cell: tapped.cell, drawnBy: arriving))
+        #expect(tapped.cell.renderedCover === frame)
+        #expect(pool.activePlayerCount == 0, "a frame was taken for a clip")
+        #expect(pool.debugFiledStart(of: tapped.url, scope: tapped.id.rawValue) != nil)
+    }
+
     /// The owner's release (the scope ended with no close from another post)
     /// drops the frame: the next close has nothing stale to show.
     @Test func aReleasedScopeLeavesNoFrameBehind() async {

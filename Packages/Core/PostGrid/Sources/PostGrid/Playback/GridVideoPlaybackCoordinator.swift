@@ -1015,9 +1015,7 @@ public final class GridVideoPlaybackCoordinator {
     public func landReturnPlayback(
         _ view: VideoRenderView, for id: PostID, cell: any GridPlaybackCell
     ) -> Bool {
-        if let still = returnStillSurface, still.id == id, still.view === view {
-            return landReturnStill(still, from: view, cell: cell)
-        }
+        if landsReturnStill(view, for: id, cell: cell) { return true }
         guard let url = returnURLs[id],
               adoptAttachedSurface(for: id, url: url, cell: cell, drawnBy: view)
         else { return false }
@@ -1049,6 +1047,13 @@ public final class GridVideoPlaybackCoordinator {
         }
         guard let cell, hasThumbnail else { return true }
         return cell.renderedCover != nil
+    }
+
+    /// Lands `view` as `id`'s parked frame if it is the one
+    /// `makeReturnSurface` handed out. False for any other surface.
+    private func landsReturnStill(_ view: VideoRenderView, for id: PostID, cell: any GridPlaybackCell) -> Bool {
+        guard let still = returnStillSurface, still.id == id, still.view === view else { return false }
+        return landReturnStill(still, from: view, cell: cell)
     }
 
     /// A close landing on its parked frame: the tile takes it as its cover,
@@ -1091,6 +1096,9 @@ public final class GridVideoPlaybackCoordinator {
         for id: PostID, url: URL, cell: any GridPlaybackCell,
         drawnBy flightSurface: VideoRenderView? = nil
     ) -> Bool {
+        // A parked frame (#895), from a caller that lands every close here
+        // (the rails): the tile wears it, and no clip was adopted.
+        if let flightSurface, landsReturnStill(flightSurface, for: id, cell: cell) { return false }
         let view = cell.makeVideoRenderViewIfNeeded()
         #if DEBUG
         view.debugLabel = "tile"
@@ -1170,6 +1178,8 @@ public final class GridVideoPlaybackCoordinator {
     /// the player parked behind it, so the tile keeps rendering the frame the
     /// card was showing.
     public func adoptLiveSurface(_ view: VideoRenderView, for id: PostID, url: URL, cell: any GridPlaybackCell) {
+        // A parked frame (#895) is a picture, not a surface to install.
+        if landsReturnStill(view, for: id, cell: cell) { return }
         cell.adoptVideoRenderView(view)
         cell.beginVideoPreview()
         guard pool.unparkPlayback(to: view, mediaURL: url) else { return }
