@@ -3,6 +3,7 @@ import CoreContracts
 import CoreModels
 import CoreNetworking
 import CoreStorage
+import EntityStore
 import ProfileInterface
 import CoreNavigation
 import FeedInterface
@@ -57,6 +58,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// follow or unfollow made on any other surface. Nil: each feed keeps the
     /// answers it asked for, and re-asks on a return.
     private let followEvents: FollowGraphEvents?
+    /// The app's one post and profile per id (#896): every snap feed reads
+    /// the viewer's relation to an author from it, so a follow on one feed
+    /// is the badge of all of them.
+    private let entities: EntityStore
     /// The Text Post page's drafts. The app hands in its one store (built
     /// once in `AppContainer`, charter P4); a test hands in one of its own.
     /// Nil is the fallback for a caller that has neither, and it costs a file
@@ -98,8 +103,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         discovery: (any FeedProviding)? = nil,
         /// For You's corpora on the device (#893): the tab opens on the last
         /// session's pages, then revalidates. Nil: it opens on skeletons.
-        localCache: FeedLocalCache? = nil
+        localCache: FeedLocalCache? = nil,
+        /// The app's entity store. Nil: this builder's screens share one of
+        /// their own.
+        entities: EntityStore? = nil
     ) {
+        self.entities = entities ?? EntityStore()
         self.discovery = discovery
         self.localCache = localCache
         self.postDrafts = postDrafts
@@ -1366,6 +1375,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             socialGraph: socialGraph,
             followRelations: followRelations,
             followEvents: followEvents,
+            entities: entities,
             soundProvider: soundProvider,
             useSound: useSound,
             // The sound sheet's grid opens a NEW feed of the posts with that

@@ -1,4 +1,5 @@
 import CoreModels
+import EntityStore
 import Foundation
 import Testing
 @testable import Feed
@@ -60,7 +61,7 @@ struct SnapAuthorFollowStoreTests {
         let sent = store.follow(ava, onRefused: {})
         #expect(sent == false)
         store.resolve(for: bo)
-        #expect(store.relationsByAuthor[bo] == nil)
+        #expect(store.relation(for: bo) == nil)
     }
 
     // MARK: - Lookups
@@ -74,7 +75,7 @@ struct SnapAuthorFollowStoreTests {
         #expect(graph.lookups == [ava])
 
         graph.answerLookup(.notFollowing)
-        await Self.settle { store.relationsByAuthor[ava] != nil }
+        await Self.settle { store.relation(for: ava) != nil }
         #expect(store.badge(for: ava) == .follow)
 
         store.resolve(for: ava)
@@ -91,7 +92,7 @@ struct SnapAuthorFollowStoreTests {
         #expect(store.badge(for: ava) == .follow, "the cached answer keeps drawing")
 
         graph.answerLookup(.following)
-        await Self.settle { store.relationsByAuthor[ava] == .following }
+        await Self.settle { store.relation(for: ava) == .following }
         #expect(store.badge(for: ava) == .following)
     }
 
@@ -106,7 +107,7 @@ struct SnapAuthorFollowStoreTests {
 
         graph.answerLookup(.notFollowing)
         await Self.settle { store.lookupsInFlight.isEmpty }
-        #expect(store.relationsByAuthor[ava] == .following, "the late answer is dropped")
+        #expect(store.relation(for: ava) == .following, "the late answer is dropped")
 
         graph.answerFollow(accepting: true)
         await Self.settle { store.followsInFlight.isEmpty }
@@ -130,7 +131,7 @@ struct SnapAuthorFollowStoreTests {
         #expect(graph.follows == [ava])
         graph.answerFollow(accepting: true)
         await Self.settle { store.followsInFlight.isEmpty }
-        #expect(store.relationsByAuthor[ava] == .following)
+        #expect(store.relation(for: ava) == .following)
         #expect(changed == [ava], "an accepted follow changes nothing more")
     }
 
@@ -148,7 +149,7 @@ struct SnapAuthorFollowStoreTests {
         await Self.settle { graph.pendingFollows == 1 }
         graph.answerFollow(accepting: true)
         await Self.settle { store.followsInFlight.isEmpty }
-        #expect(store.relationsByAuthor[ava] == .requested)
+        #expect(store.relation(for: ava) == .requested)
         #expect(store.badge(for: ava) == .pending)
         #expect(!store.offersFollow(to: ava))
         #expect(!refused, "a request is not a refusal")
@@ -178,7 +179,7 @@ struct SnapAuthorFollowStoreTests {
         await Self.settle { refusals > 0 }
 
         #expect(refusals == 1)
-        #expect(store.relationsByAuthor[ava] == .notFollowing)
+        #expect(store.relation(for: ava) == .notFollowing)
         #expect(store.offersFollow(to: ava), "the \"+\" comes back")
         #expect(store.followsInFlight.isEmpty)
     }
@@ -196,7 +197,7 @@ struct SnapAuthorFollowStoreTests {
         // An echo from elsewhere and a refresh both wait for the tap.
         store.graphDidChange(FollowChange(profileID: ava, isFollowing: false))
         store.resolve(for: ava, refresh: true)
-        #expect(store.relationsByAuthor[ava] == .following)
+        #expect(store.relation(for: ava) == .following)
 
         graph.answerFollow(accepting: true)
         await Self.settle { store.followsInFlight.isEmpty }
@@ -233,9 +234,9 @@ struct SnapAuthorFollowStoreTests {
         let store = Self.store(GatedGraph())
         store.setRelation(.mutual, for: ava)
         store.graphDidChange(FollowChange(profileID: ava, isFollowing: false))
-        #expect(store.relationsByAuthor[ava] == .followedBy, "a friend unfollowed still follows back")
+        #expect(store.relation(for: ava) == .followedBy, "a friend unfollowed still follows back")
         store.graphDidChange(FollowChange(profileID: bo, isFollowing: true))
-        #expect(store.relationsByAuthor[bo] == .following, "an unknown author reads as not followed")
+        #expect(store.relation(for: bo) == .following, "an unknown author reads as not followed")
     }
 
     @Test func anUnfollowElsewhereLeavesTheViewerAndTheBlockedAlone() {
@@ -244,8 +245,8 @@ struct SnapAuthorFollowStoreTests {
         store.setRelation(.blocked, for: bo)
         store.graphDidChange(FollowChange(profileID: ava, isFollowing: false))
         store.graphDidChange(FollowChange(profileID: bo, isFollowing: false))
-        #expect(store.relationsByAuthor[ava] == .viewer)
-        #expect(store.relationsByAuthor[bo] == .blocked)
+        #expect(store.relation(for: ava) == .viewer)
+        #expect(store.relation(for: bo) == .blocked)
     }
 
     @Test func anUnchangedAnswerIsNotReported() {
@@ -255,6 +256,66 @@ struct SnapAuthorFollowStoreTests {
         store.setRelation(.following, for: ava)
         store.setRelation(.following, for: ava)
         #expect(changes == 1)
+    }
+
+    // MARK: - One answer per author, for every feed (#896)
+
+    /// Two snap feeds — For You's vertical feed and a pushed Following feed —
+    /// read one `EntityStore`: the "+" tapped on one is the followed mark on
+    /// the other, at once, and the other never asks the graph again.
+    @Test func aFollowOnOneFeedIsTheBadgeOfAnother() async {
+        let entities = EntityStore()
+        let graph = GatedGraph()
+        let forYou = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities)
+        let following = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities)
+        forYou.setRelation(.followedBy, for: ava)
+        #expect(following.badge(for: ava) == .follow, "one answer, asked once")
+        var heard: [ProfileID] = []
+        following.onRelationChange = { heard.append($0) }
+
+        forYou.follow(ava, onRefused: {})
+
+        #expect(following.badge(for: ava) == .friends, "the optimistic mark reaches the other feed")
+        #expect(heard == [ava])
+        await Self.settle { graph.pendingFollows == 1 }
+        graph.answerFollow(accepting: true)
+        await Self.settle { forYou.followsInFlight.isEmpty }
+        following.resolve(for: ava)
+        #expect(graph.lookups.isEmpty, "a known answer is not asked again")
+    }
+
+    /// A summary the store writes for an author (a list loaded them) is not a
+    /// change of answer: the badge is not re-drawn.
+    @Test func aProfileWriteThatKeepsTheAnswerIsNotReported() {
+        let entities = EntityStore()
+        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities)
+        store.setRelation(.following, for: ava)
+        var changes = 0
+        store.onRelationChange = { _ in changes += 1 }
+        entities.upsert(AuthorSummary(id: ava, handle: "ava", displayName: "Ava", avatarURL: nil))
+        #expect(changes == 0)
+    }
+
+    /// Another account, or another profile: every answer was the previous
+    /// viewer's. Each drawn badge is re-drawn — empty until the new viewer's
+    /// answer is asked for.
+    @Test func aViewerChangeForgetsEveryAnswer() async {
+        let entities = EntityStore()
+        let graph = GatedGraph()
+        let store = SnapAuthorFollowStore(writer: graph, reader: graph, entities: entities)
+        store.setRelation(.following, for: ava)
+        store.setRelation(.notFollowing, for: bo)
+        var changed: Set<ProfileID> = []
+        store.onRelationChange = { changed.insert($0) }
+
+        entities.viewerDidChange()
+
+        #expect(changed == [ava, bo])
+        #expect(store.badge(for: ava) == .none)
+        #expect(store.badge(for: bo) == .none)
+        store.resolve(for: ava)
+        await Self.settle { graph.pendingLookups == 1 }
+        #expect(graph.lookups == [ava], "the new viewer's answer is asked for")
     }
 }
 
