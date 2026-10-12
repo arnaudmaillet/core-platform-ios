@@ -107,6 +107,12 @@ public final class AnimatedIconView: UIView {
     /// `SkeletonBoneView` pins every bone to a fixed epoch for the same reason.
     private static let epoch: CFTimeInterval = CACurrentMediaTime()
 
+    /// The media clock the loop's position is READ from (`displayedFrame`,
+    /// `remainingLoopTime`, `resume`). The animations themselves run on Core
+    /// Animation's; this is the same clock, swappable so a test can stand
+    /// at any point of a loop instead of wherever the wall clock is (#1030).
+    static var mediaTime: () -> CFTimeInterval = { CACurrentMediaTime() }
+
     /// ⚠️ VIEWS, not bare layers positioned in `layoutSubviews`.
     ///
     /// The obvious implementation is two `CALayer`s re-framed on every layout
@@ -269,7 +275,7 @@ public final class AnimatedIconView: UIView {
         guard let art, art.frameCount > 1, isAnimating, !isPaused else { return nil }
         let (_, keys, keyDuration) = keying(art)
         let loop = keyDuration * CFTimeInterval(keys)
-        var elapsed = (sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch + clockShift)
+        var elapsed = (sheetView.layer.convertTime(Self.mediaTime(), from: nil) - Self.epoch + clockShift)
             .truncatingRemainder(dividingBy: loop)
         if elapsed < 0 { elapsed += loop }
         return loop - elapsed
@@ -331,7 +337,7 @@ public final class AnimatedIconView: UIView {
         let (step, keys, keyDuration) = keying(art)
         let rotation = ((phase % count) + count) % count
         let key = ((frame - rotation + count) % count) / step
-        let now = sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch
+        let now = sheetView.layer.convertTime(Self.mediaTime(), from: nil) - Self.epoch
         let loop = keyDuration * CFTimeInterval(keys)
         var shift = (CFTimeInterval(key) - (now / keyDuration).rounded(.down)) * keyDuration
         shift = shift.truncatingRemainder(dividingBy: loop)
@@ -379,7 +385,7 @@ public final class AnimatedIconView: UIView {
         guard count > 1, isAnimating else { return rotation }
         let (step, keys, keyDuration) = keying(art)
         let loop = keyDuration * CFTimeInterval(keys)
-        var elapsed = (sheetView.layer.convertTime(CACurrentMediaTime(), from: nil) - Self.epoch + clockShift)
+        var elapsed = (sheetView.layer.convertTime(Self.mediaTime(), from: nil) - Self.epoch + clockShift)
             .truncatingRemainder(dividingBy: loop)
         if elapsed < 0 { elapsed += loop }
         let key = min(keys - 1, Int(elapsed / keyDuration))

@@ -123,18 +123,64 @@ struct AnimatedIconViewPauseTests {
 
     /// A loop longer than `maxFinishWait` is not waited for: it holds where
     /// it is at once, as a stop always did.
+    ///
+    /// ⚠️ AT A POSITION THE TEST CHOOSES (#1030). Read off the wall clock,
+    /// this ran wherever the shared 10 s loop happened to be, and failed the
+    /// ~15% of runs that landed in its last 1.5 s. The clock now stands at
+    /// the start of the loop (mid-key: never on a grid edge).
     @Test func aLongLoopHoldsAtOnce() throws {
+        try atLoopTime(0.05, of: 10) { view in
+            let remaining = try #require(view.remainingLoopTime)
+            #expect(remaining > AnimatedIconView.maxFinishWait)
+            var finished = false
+            view.finishLoop { finished = true }
+            #expect(finished, "completed at once")
+            #expect(view.isPaused)
+            #expect(!view.isFinishingLoop)
+        }
+    }
+
+    /// Over the whole cycle of a 10 s loop: with more than `maxFinishWait`
+    /// left it holds at once; with less it plays out the loop first.
+    @Test func aLongLoopFinishesByWhatIsLeftAcrossItsCycle() throws {
+        for tenth in 0..<100 {
+            let time = CFTimeInterval(tenth) / 10 + 0.05 // mid-key: no grid edge
+            try atLoopTime(time, of: 10) { view in
+                let remaining = try #require(view.remainingLoopTime)
+                #expect(abs(remaining - (10 - time)) < 0.001, "at \(time) s: \(remaining) left")
+                var finished = false
+                view.finishLoop { finished = true }
+                if remaining > AnimatedIconView.maxFinishWait {
+                    #expect(finished && view.isPaused, "at \(time) s: held at once")
+                } else {
+                    #expect(!finished && view.isFinishingLoop, "at \(time) s: plays out its \(remaining) s")
+                    view.cancelFinish()
+                }
+            }
+        }
+    }
+
+    /// A playing `loop`-second icon (100 frames) with the media clock
+    /// standing `time` seconds into its loop. The clock is put back before
+    /// returning, with no `await` in between: other suites read it.
+    private func atLoopTime(
+        _ time: CFTimeInterval, of loop: CFTimeInterval, _ body: (AnimatedIconView) throws -> Void
+    ) throws {
         AnimatedIconView.forcedPolicy = .full
-        defer { AnimatedIconView.forcedPolicy = nil }
+        let previous = AnimatedIconView.mediaTime
+        defer {
+            AnimatedIconView.mediaTime = previous
+            AnimatedIconView.forcedPolicy = nil
+        }
         let view = AnimatedIconView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
-        view.setArt(art(frames: 100, step: 0.1), phase: 0) // a 10 s loop
-        let remaining = try #require(view.remainingLoopTime)
-        try #require(remaining > AnimatedIconView.maxFinishWait, "this run sits early enough in the loop")
-        var finished = false
-        view.finishLoop { finished = true }
-        #expect(finished, "completed at once")
-        #expect(view.isPaused)
-        #expect(!view.isFinishingLoop)
+        view.setArt(art(frames: 100, step: loop / 100), phase: 0)
+        // Frozen now, then moved on by what is left of the loop — to its
+        // next start — plus `time`.
+        let now = previous()
+        AnimatedIconView.mediaTime = { now }
+        let left = try #require(view.remainingLoopTime)
+        AnimatedIconView.mediaTime = { now + left + time }
+        try body(view)
     }
 
     /// Nothing playing: the finish completes at once.
