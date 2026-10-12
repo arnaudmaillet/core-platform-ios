@@ -17,13 +17,24 @@ struct MapAnnotationHoldTests {
         let pop = MapAnnotationPopChoreographer(mapView: mapView)
         defer { withExtendedLifetime(mapView) {} }
         let view = MKAnnotationView(annotation: nil, reuseIdentifier: nil)
+        // Armed right after the recycled view's first hold, with the same
+        // deadline: once it is let in, that first deadline has run too.
+        let witness = MKAnnotationView(annotation: nil, reuseIdentifier: nil)
 
         pop.hold([view], deadline: 0.2)
+        pop.hold([witness], deadline: 0.2)
         pop.release(view)
-        pop.hold([view], deadline: 5)
+        // Far beyond any stall of a loaded host (#1041): a 5 s deadline ran out
+        // on a starved runner, and that correct release read as the bug.
+        pop.hold([view], deadline: 600)
         #expect(pop.isHolding(view), "guard: held again for its new annotation")
 
-        try await Task.sleep(for: .milliseconds(450))
+        // Looks, not a clock: until the old deadline has had its turn.
+        for _ in 0..<6_000 where pop.isHolding(witness) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!pop.isHolding(witness), "guard: the first hold's deadline never ran")
+        await Task.yield()
 
         #expect(pop.isHolding(view), "the previous hold's deadline let the recycled view in")
     }
