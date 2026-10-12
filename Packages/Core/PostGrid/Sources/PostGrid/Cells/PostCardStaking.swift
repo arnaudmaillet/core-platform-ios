@@ -49,6 +49,9 @@ public final class PostCardStaking {
     private let countCells = NSMapTable<UIView, NSString>.weakToStrongObjects()
     /// What this surface staked since its session opened, per post.
     private var session: [String: Int] = [:]
+    /// The stake toast up for one of those bursts (#957), and its post.
+    private weak var stakeToast: ToastView?
+    private var stakeToastKey: String?
     private var observer: NSObjectProtocol?
 
     /// Each card keeps the count its post was configured with.
@@ -185,6 +188,7 @@ public final class PostCardStaking {
         // Moving on commits the session's taps now (#676).
         for postID in session.keys { wallet.commitStakes(on: postID) }
         session.removeAll()
+        closeStakeToast()
     }
 
     // MARK: - Spending
@@ -224,6 +228,7 @@ public final class PostCardStaking {
                 cell.setViewerStake(targetTotal)
                 cell.playStakeConfirmation(amount: spent)
             }
+            showStakeToast(on: key, from: cell)
         case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
             HapticNotification().notificationOccurred(.error)
             if isBound(cell, to: key) { cell.playStakeDenied() }
@@ -234,11 +239,46 @@ public final class PostCardStaking {
         guard let amount = session[key], amount > 0,
               let result = wallet.undoBoost(targetID: key, amount: amount) else { return }
         session[key] = nil
+        if stakeToastKey == key { closeStakeToast() }
         HapticImpact(style: .light).impactOccurred()
         if let cell, isBound(cell, to: key) {
             cell.setViewerStake(result.targetTotal)
             cell.playStakeRefund(amount: amount)
         }
+    }
+
+    /// The burst so far on `key`, with Undo for all of it (#957), fired from
+    /// the screen showing `cell`. Its Undo reaches whichever row shows the
+    /// post by then.
+    private func showStakeToast(on key: String, from cell: UIView) {
+        guard let screen = Self.screen(of: cell), let amount = session[key] else { return }
+        stakeToastKey = key
+        stakeToast = StakeMenu.undoToast(staked: amount, on: key, from: screen) { [weak self] in
+            self?.undo(on: key, cell: self?.boundRow(for: key))
+        }
+    }
+
+    private func closeStakeToast() {
+        StakeMenu.closeUndoToast(stakeToast)
+        stakeToast = nil
+        stakeToastKey = nil
+    }
+
+    private static func screen(of view: UIView) -> UIViewController? {
+        var responder: UIResponder? = view
+        while let current = responder {
+            if let controller = current as? UIViewController { return controller }
+            responder = current.next
+        }
+        return nil
+    }
+
+    private func boundRow(for key: String) -> PostGridListRowCell? {
+        let enumerator = cells.keyEnumerator()
+        while let cell = enumerator.nextObject() as? PostGridListRowCell {
+            if isBound(cell, to: key) { return cell }
+        }
+        return nil
     }
 
     /// Whether `cell` still shows `key` — a row can be recycled between the

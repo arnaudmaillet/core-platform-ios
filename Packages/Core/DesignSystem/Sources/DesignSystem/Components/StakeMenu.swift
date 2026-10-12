@@ -169,6 +169,47 @@ public enum StakeMenu {
         amount == 1 ? "1 point" : "\(amount) points"
     }
 
+    // MARK: - The undo toast (#957)
+
+    /// "Staked 15 points" — the burst so far on one post.
+    public nonisolated static func stakedToastMessage(_ amount: Int) -> String {
+        "Staked \(points(amount))"
+    }
+
+    /// The toast a stake shows (#957), with Undo for the WHOLE burst: every
+    /// tap on the same post updates the one toast in place (its id) — the
+    /// amount, and the countdown restarted — rather than stacking one per
+    /// tap; one per surface, whose tally it shows. The countdown running out
+    /// commits nothing: the points are in
+    /// the wallet already, and the burst stays undoable from the menu until
+    /// the surface closes its undo window — when it closes this toast too
+    /// (`closeUndoToast`), so an Undo never outlives what it can take back.
+    /// No haptic of its own: each tap already played one.
+    @discardableResult
+    public static func undoToast(
+        staked amount: Int,
+        on targetID: String,
+        from source: UIViewController,
+        above floor: UIView? = nil,
+        undo: @escaping @MainActor () -> Void
+    ) -> ToastView {
+        Feedback.undoable(
+            stakedToastMessage(amount), symbol: PointsSymbol.glyph, from: source, above: floor,
+            // Per surface too: each keeps its own tally, and a burst on the
+            // same post from another surface is its own toast (the one undo
+            // slot settles the other).
+            id: "stake-\(ObjectIdentifier(source).hashValue)-\(targetID)",
+            playsHaptic: false, commit: {}, undo: undo
+        )
+    }
+
+    /// Closes a stake's undo toast: the burst can no longer be taken back
+    /// (the surface moved on, or the menu's Undo already did it).
+    public static func closeUndoToast(_ toast: ToastView?) {
+        guard let toast, !toast.isDismissing else { return }
+        toast.dismiss(animated: true)
+    }
+
     /// The whole menu, titled.
     public static func menu(
         for state: State,

@@ -283,6 +283,8 @@ final class PostDetailViewController: UIViewController {
     /// comments panel is torn down when the page changes, and the pushed
     /// screen when it pops — either way, moving on finalizes the spend.
     private var sessionBoostAmount = 0
+    /// The stake toast up for that spend (#957), closed with the window.
+    private weak var stakeToast: ToastView?
 
     init(
         viewModel: PostDetailViewModel,
@@ -310,11 +312,31 @@ final class PostDetailViewController: UIViewController {
         for task in imageTasks { task.cancel() }
     }
 
+    /// Takes back everything this bar spent while the screen stayed up — the
+    /// menu's Undo entry and the stake toast's (#957).
+    private func undoSessionBoost() {
+        guard let wallet, sessionBoostAmount > 0, let postID = viewModel.postID,
+              let result = wallet.undoBoost(targetID: postID.rawValue, amount: sessionBoostAmount)
+        else { return }
+        let refunded = sessionBoostAmount
+        sessionBoostAmount = 0
+        HapticImpact(style: .light).impactOccurred()
+        composeBar.setBoostTotal(result.targetTotal, animated: true)
+        composeBar.playBoostRefund(amount: refunded)
+        refreshComposeBarBoostState()
+        StakeMenu.closeUndoToast(stakeToast)
+    }
+
     /// Leaving the post commits its likes now, rather than 10 s after the
     /// last tap (#676).
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         if let postID = viewModel.postID { wallet?.commitStakes(on: postID.rawValue) }
+        // Leaving for good closes the undo window, and the toast's Undo with
+        // it (#957): the tally it would take back dies with this screen.
+        if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true {
+            StakeMenu.closeUndoToast(stakeToast)
+        }
     }
 
     /// Rows re-measure on a genuine WIDTH change — rotation, iPad size
@@ -868,6 +890,11 @@ final class PostDetailViewController: UIViewController {
                     // its number face, then the "+N" float rises off it.
                     self.composeBar.setBoostTotal(targetTotal, animated: true)
                     self.composeBar.playBoostConfirmation(amount: spent)
+                    // The burst so far, with Undo for all of it (#957).
+                    self.stakeToast = StakeMenu.undoToast(
+                        staked: self.sessionBoostAmount, on: postID.rawValue, from: self,
+                        above: self.composeBar.inputRowView
+                    ) { [weak self] in self?.undoSessionBoost() }
                 case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
                     HapticNotification().notificationOccurred(.error)
                     self.composeBar.playBoostDenied()
@@ -878,20 +905,7 @@ final class PostDetailViewController: UIViewController {
         // The menu's Undo entry: takes back everything this bar spent while
         // the screen stayed up. Session-scoped by construction — the tally
         // lives on this controller, and this controller dies with the visit.
-        composeBar.onBoostUndo = { [weak self] in
-            guard let self, let wallet = self.wallet, self.sessionBoostAmount > 0,
-                  let postID = self.viewModel.postID,
-                  let result = wallet.undoBoost(
-                      targetID: postID.rawValue, amount: self.sessionBoostAmount
-                  )
-            else { return }
-            let refunded = self.sessionBoostAmount
-            self.sessionBoostAmount = 0
-            HapticImpact(style: .light).impactOccurred()
-            self.composeBar.setBoostTotal(result.targetTotal, animated: true)
-            self.composeBar.playBoostRefund(amount: refunded)
-            self.refreshComposeBarBoostState()
-        }
+        composeBar.onBoostUndo = { [weak self] in self?.undoSessionBoost() }
         // The button's opening face: this viewer's spend so far on this
         // post, from the wallet's ledger — a boosted post greets its
         // booster with the receipt, not the invitation. The observer keeps

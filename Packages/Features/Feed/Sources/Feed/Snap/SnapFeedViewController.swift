@@ -1253,6 +1253,7 @@ final class SnapFeedViewController: UIViewController {
         // Leaving the screen finalizes the session's boosts, same as paging
         // away (`SnapBoostController.finalize`).
         boost.finalize()
+        closeStakeToastIfSettled()
     }
 
     // MARK: - Setup
@@ -2561,6 +2562,14 @@ final class SnapFeedViewController: UIViewController {
             feedbackCell?.setBoostTotal(targetTotal, animated: true)
             feedbackCell?.playBoostConfirmation(amount: spent)
             refreshVisibleBoostControls()
+            // The burst so far, with Undo for all of it (#957): one toast
+            // per post, updated by every tap.
+            stakeToastPostID = id
+            stakeToast = StakeMenu.undoToast(staked: boost.undoable(on: id), on: id.rawValue, from: self) {
+                [weak self] in
+                guard let self else { return }
+                performBoostUndo(on: id, feedbackCell: snapCell(for: id))
+            }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
                 print("[wallet] boosted post=\(id.rawValue) requested=\(spend) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance) shots=\(wallet.stakeShots)")
@@ -2592,11 +2601,31 @@ final class SnapFeedViewController: UIViewController {
         feedbackCell?.setBoostTotal(refund.targetTotal, animated: true)
         feedbackCell?.playBoostRefund(amount: refund.refunded)
         refreshVisibleBoostControls()
+        closeStakeToastIfSettled()
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
             print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refund.refunded) targetTotal=\(refund.targetTotal) balance=\(refund.newBalance)")
         }
         #endif
+    }
+
+    /// The stake toast up (#957), and the post its burst is on.
+    private weak var stakeToast: ToastView?
+    private var stakeToastPostID: PostID?
+
+    /// Closes the stake toast once its burst can no longer be taken back —
+    /// undone from the menu, or finalized by paging away or leaving — so its
+    /// Undo never outlives the session tally it would take back.
+    private func closeStakeToastIfSettled() {
+        guard let id = stakeToastPostID, boost.undoable(on: id) == 0 else { return }
+        StakeMenu.closeUndoToast(stakeToast)
+        stakeToast = nil
+        stakeToastPostID = nil
+    }
+
+    private func snapCell(for id: PostID) -> SnapFeedCell? {
+        guard let indexPath = dataSource.indexPath(for: id) else { return nil }
+        return collectionView.cellForItem(at: indexPath) as? SnapFeedCell
     }
 
     /// Renders one wallet snapshot onto the header badge — balance in the
@@ -4176,6 +4205,7 @@ final class SnapFeedViewController: UIViewController {
             // its taps (#676).
             if orderedIDs.indices.contains(resign) {
                 boost.pageResigned(orderedIDs[resign])
+                closeStakeToastIfSettled()
             }
             // An engagement is PAGE-SCOPED: the engaged page resigning
             // retires it instantly (a belt for interrupted teardowns —
