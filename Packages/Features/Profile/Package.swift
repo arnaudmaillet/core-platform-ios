@@ -18,7 +18,8 @@ let package = Package(
         .package(path: "../../Core/CoreNavigation"),
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreStorage"),
-        // The profile screens' last content on the device (#893).
+        // The profile screens' last content on the device (#893), and
+        // Settings → Storage's coordinated caches (#894).
         .package(path: "../../Core/CacheKit"),
         .package(path: "../../Core/LocalStore"),
         .package(path: "../../Core/DesignSystem"),
@@ -40,6 +41,9 @@ let package = Package(
                 "MediaCore",
                 "CoreNavigation",
                 "CoreStorage",
+                // The LocalStore's registration (#893), and Settings → Storage
+                // measuring and clearing the coordinated caches (images, #894)
+                // through the app's `CacheCoordinator`.
                 "CacheKit",
                 "LocalStore",
                 "DesignSystem",
@@ -76,6 +80,8 @@ let package = Package(
                 "DesignSystem",
                 "CoreNetworking",
                 "PostGrid",
+                // The Storage suite drives a real coordinator and image pipeline.
+                "MediaCore",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

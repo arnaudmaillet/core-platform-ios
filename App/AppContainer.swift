@@ -1183,6 +1183,9 @@ final class AppContainer {
         // A follow made on another surface (a feed's "+", a card's Unfollow)
         // reaches the profile screens and their followers lists.
         builder.followEvents = followGraphEvents
+        // Settings → Storage measures and clears the images (#894) through
+        // the coordinator that owns their stores.
+        builder.cacheCoordinator = cacheCoordinator
         // What You See → Your Interests (#413).
         builder.interestTags = InterestTagsRepository(
             timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),
