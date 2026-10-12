@@ -25,7 +25,7 @@ public enum AppCacheSignals {
         center: NotificationCenter = .default,
         observesSystemMonitors: Bool = true
     ) -> [any CacheSignalSource] {
-        [
+        var sources: [any CacheSignalSource] = [
             SystemCacheSignals(
                 center: center,
                 observesMemoryPressure: observesSystemMonitors,
@@ -33,5 +33,11 @@ public enum AppCacheSignals {
             ),
             NotificationCacheSignals(center: center, .viewerDidChange, signal: .viewerChanged)
         ]
+        #if DEBUG
+        // `-cache-signal <name>@<seconds>`: a release signal on cue, for the
+        // `-cache-audit` instrument (#898). Nothing without the argument.
+        if observesSystemMonitors { sources.append(DebugCacheSignals(center: center)) }
+        #endif
+        return sources
     }
 }

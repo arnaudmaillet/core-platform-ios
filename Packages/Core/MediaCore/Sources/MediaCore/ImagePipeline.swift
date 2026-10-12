@@ -394,7 +394,13 @@ public final class ImagePipeline: Sendable {
     /// images are stored as seen (`recent`), since the grids prefetch what
     /// they are about to show (For You's autoplay covers) and a speculative
     /// entry could be pushed out by the 20% cap before the cell reads it.
+    ///
+    /// The callers prefetch the next items (the snap feed's neighbours, the
+    /// covers around the visible tiles), what the policy's `reduced` level
+    /// still allows; under `off` (a critical thermal state, offline, the app
+    /// in the background) nothing is prefetched at all (#898).
     public func prefetch(_ urls: [URL]) {
+        guard prefetchPolicy.level > .off else { return }
         for url in urls {
             let pending = state.withLock { $0.legacyPrefetches[url] }
             if let pending, pending.isActive { continue }
@@ -431,9 +437,9 @@ public final class ImagePipeline: Sendable {
 
     // MARK: - Lookahead signals (#970)
 
-    /// The coordinator's prefetch policy (Low Data, Low Power, thermal state,
-    /// network), `.full` for a pipeline no coordinator manages. A list's
-    /// lookahead sizes its windows from it.
+    /// The coordinator's prefetch policy (Low Data Mode, Low Power, thermal
+    /// state, the network, the background), `.full` for a pipeline no
+    /// coordinator manages. A list's lookahead sizes its windows from it.
     public var prefetchPolicy: PrefetchPolicy { coordinator?.prefetchPolicy ?? .full }
 
     /// Calls `handler` after every change of the coordinator's conditions, on
@@ -541,6 +547,12 @@ public final class ImagePipeline: Sendable {
             throw error
         }
         guard result.isCacheable else { return image }
+        // In the background the caller gets its picture, but memory keeps
+        // nothing new (#898): what the background trim released does not
+        // grow back from a fill that lands after it, or from a list still
+        // laying out cells. The bytes are on disk; the foreground decodes
+        // again what it shows.
+        if coordinator?.conditions.isInBackground == true { return image }
         // A visible load is a use; a display-window decode is speculative
         // until the cell that shows it reads it (`value(for:)` promotes it).
         let tier: CacheTier = context.priority == .visible ? .recent : .speculative

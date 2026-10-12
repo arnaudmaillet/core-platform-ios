@@ -34,6 +34,12 @@ public protocol ManagedCache: AnyObject, Sendable {
     func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason)
     func trim(_ depth: TrimDepth, reason: CacheEvictionReason)
     func removeAll(reason: CacheEvictionReason)
+    /// While paused, the cache admits no new unleased entry below `retained`
+    /// (#898): the coordinator pauses the memory namespaces the background
+    /// cut to `retained`, so what that trim released does not grow back
+    /// before the foreground. Leased and retained stores still land. A no-op
+    /// by default.
+    func setAdmissionsPaused(_ paused: Bool)
 }
 
 extension ManagedCache {
@@ -43,6 +49,7 @@ extension ManagedCache {
     public func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason) { setLimits(limits) }
     public func trim(_ depth: TrimDepth, reason: CacheEvictionReason) { trim(depth) }
     public func removeAll(reason: CacheEvictionReason) { removeAll() }
+    public func setAdmissionsPaused(_ paused: Bool) {}
 }
 
 /// The time CacheKit reads for last access and expiry. Injected, so a test

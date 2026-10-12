@@ -160,7 +160,7 @@ struct TransitionCompositionTests {
 
     @Test func theFadeTilesTheWholeCompositionAndExports() async throws {
         let file = try await ColourClipWriter.clip()
-        let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).export(
+        let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).exportAnswering(
             VideoExportPlan(sourceURL: file, segments: cut(.dipToBlack))
         )
         defer { try? FileManager.default.removeItem(at: exported.fileURL) }
@@ -203,7 +203,7 @@ struct TransitionCompositionTests {
                 "the windows cross: \(arrangement.windows)")
 
         let file = try await ColourClipWriter.clip()
-        let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).export(
+        let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).exportAnswering(
             VideoExportPlan(sourceURL: file, segments: segments)
         )
         try? FileManager.default.removeItem(at: exported.fileURL)
@@ -211,7 +211,7 @@ struct TransitionCompositionTests {
 
     @Test func aPassthroughPlanStillFades() async throws {
         let file = try await ColourClipWriter.clip()
-        let exported = try await VideoExporter().export(
+        let exported = try await VideoExporter().exportAnswering(
             VideoExportPlan(sourceURL: file, segments: cut(.dipToBlack), preset: AVAssetExportPresetPassthrough)
         )
         defer { try? FileManager.default.removeItem(at: exported.fileURL) }
@@ -429,7 +429,7 @@ struct TransitionCompositionTests {
 
     @Test func aRotatedSourceIsComposedUpright() async throws {
         let file = try await ColourClipWriter.clip(rotated: true)
-        let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).export(
+        let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).exportAnswering(
             VideoExportPlan(sourceURL: file, segments: cut(.dipToBlack))
         )
         defer { try? FileManager.default.removeItem(at: exported.fileURL) }
@@ -525,7 +525,7 @@ struct TransitionCompositionTests {
     /// tenth of the way in).
     @Test func aPosterIsNeverTakenInsideATransition() async throws {
         let file = try await ColourClipWriter.clip()
-        let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).export(
+        let exported = try await VideoExporter(preset: AVAssetExportPresetHighestQuality).exportAnswering(
             VideoExportPlan(sourceURL: file, segments: [
                 VideoExportSegment(start: 0, end: 0.5, transitionOut: .dipToBlack),
                 VideoExportSegment(start: 1, end: 4)

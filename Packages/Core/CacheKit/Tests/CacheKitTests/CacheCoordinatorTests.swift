@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import CacheKit
 
@@ -328,6 +329,135 @@ final class CacheCoordinatorTests {
         #expect(feed.contains("s"), "nothing after stopObserving")
     }
 
+    // MARK: - Release paths (#898)
+
+    /// The background turns prefetching off until the foreground: no P2 slot,
+    /// a policy of `off` the lookaheads and the image pipeline read.
+    @Test func theBackgroundStopsPrefetchingUntilTheForeground() {
+        let coordinator = makeCoordinator()
+        coordinator.handle(.didEnterBackground)
+        #expect(coordinator.conditions.isInBackground)
+        #expect(coordinator.prefetchPolicy == .off)
+        #expect(coordinator.prefetchPolicy.videoPreloadDepth == 0)
+        #expect(coordinator.fillSlots.limit == 0)
+
+        coordinator.handle(.willEnterForeground)
+        #expect(!coordinator.conditions.isInBackground)
+        #expect(coordinator.prefetchPolicy == .full)
+        #expect(coordinator.fillSlots.limit == PrefetchPolicy.full.maxConcurrentSpeculativeFills)
+    }
+
+    /// #900's review saw decoded images grow back after the background trim.
+    /// What the background cut to `retained` (feed media: expendable and
+    /// standard) admits nothing new below it until the foreground; leased and
+    /// retained stores still land, and the classes it cuts less deep keep
+    /// filling.
+    @Test func theBackgroundHoldsWhatItCutUntilTheForeground() {
+        let coordinator = makeCoordinator()
+        let feed = memory("feed")
+        let avatars = memory("avatars", priorityClass: .preferred)
+        let emotes = memory("emotes", priorityClass: .persistent)
+        for cache in [feed, avatars, emotes] as [any ManagedCache] { coordinator.register(cache) }
+
+        coordinator.handle(.didEnterBackground)
+        #expect(!feed.insert("late", for: "late", cost: 1), "a fill landing in the background is not kept")
+        #expect(!feed.contains("late"))
+        #expect(feed.insert("own", for: "own", cost: 1, tier: .retained), "the viewer's own content still lands")
+        let shown = feed.insertLeased("shown", for: "shown", cost: 1)
+        #expect(feed.contains("shown"), "and so does what is on screen")
+        #expect(avatars.insert("face", for: "face", cost: 1))
+        #expect(emotes.insert("sheet", for: "sheet", cost: 1))
+        let registeredLate = memory("late-feed")
+        coordinator.register(registeredLate)
+        #expect(!registeredLate.insert("x", for: "x", cost: 1), "a namespace registered in the background is held too")
+
+        coordinator.handle(.willEnterForeground)
+        #expect(feed.insert("late", for: "late", cost: 1))
+        #expect(registeredLate.insert("x", for: "x", cost: 1))
+        shown.release()
+    }
+
+    /// Prefetch depth by signal: Wi-Fi 3, cellular 2; Low Data Mode, Use Less
+    /// Cellular Data on cellular, Low Power or a serious thermal state 1 with
+    /// no P2; a critical thermal state, offline or the background 0.
+    @Test(arguments: [
+        (CacheConditions(), 3, 2),
+        (CacheConditions(network: .cellular, isNetworkExpensive: true), 2, 2),
+        (CacheConditions(isNetworkConstrained: true), 1, 0),
+        (CacheConditions(network: .cellular, usesLessCellularData: true), 1, 0),
+        (CacheConditions(isLowPowerModeEnabled: true), 1, 0),
+        (CacheConditions(thermalState: .serious), 1, 0),
+        (CacheConditions(thermalState: .critical), 0, 0),
+        (CacheConditions(network: .offline), 0, 0),
+        (CacheConditions(isInBackground: true), 0, 0)
+    ])
+    func prefetchDepthFollowsEachSignal(conditions: CacheConditions, depth: Int, speculativeFills: Int) {
+        let coordinator = makeCoordinator(conditions: conditions)
+        #expect(coordinator.prefetchPolicy.videoPreloadDepth == depth)
+        #expect(coordinator.fillSlots.limit == speculativeFills, "P2 fills app-wide")
+    }
+
+    /// Free disk is measured again on the way to the background too (a long
+    /// recording can fill the disk while the app is in use).
+    @Test func theBackgroundMeasuresFreeDiskAgain() throws {
+        let coordinator = makeCoordinator()
+        let video = try disk("video", DiskBudget(pool: .video), category: .videos)
+        coordinator.register(video)
+        fake.setFreeDisk(4 * Int64(CacheBytes.gigabyte))
+        coordinator.handle(.didEnterBackground)
+        #expect(coordinator.diskPressure == .low)
+        #expect(video.limits.bytes == 250 * megabyte)
+    }
+
+    /// ⚠️ No disk work on the main thread: UIKit posts the lifecycle signals
+    /// there, and the app makes its coordinator there. Memory is trimmed in
+    /// place at once; whatever a signal asks of a
+    /// disk cache (a sweep, a flush, budgets that delete files, the free-space
+    /// measure) runs on the coordinator's queue.
+    @MainActor
+    @Test func diskCachesAreNeverCalledOnTheMainThread() {
+        let measuredOnMain = FlagBox()
+        let device = CacheDevice(physicalMemory: { 4 << 30 }, availableDiskCapacity: { [fake] in
+            if Thread.isMainThread { measuredOnMain.set() }
+            return fake.device.availableDiskCapacity()
+        })
+        let coordinator = CacheCoordinator(device: device)
+        let recorder = RecordingDiskCache()
+        let feed = memory("feed")
+        coordinator.register(recorder)
+        coordinator.register(feed)
+        feed.insert("r", for: "r", cost: 1)
+
+        coordinator.handle(.didEnterBackground)
+        #expect(!feed.contains("r"), "memory is trimmed in place, at once")
+        fake.setFreeDisk(Int64(CacheBytes.gigabyte) / 2)
+        coordinator.handle(.willEnterForeground)
+        coordinator.setStorageLimit(.halfGigabyte)
+        coordinator.flush()
+        coordinator.waitForDiskWork()
+
+        let calls = recorder.calls
+        #expect(calls.contains { $0.name == "trim" } && calls.contains { $0.name == "flush" })
+        #expect(calls.contains { $0.name == "setLimits" })
+        #expect(coordinator.diskPressure == .critical, "the foreground measured, off the main thread")
+        #expect(calls.allSatisfy { !$0.onMainThread }, "called on main: \(calls.filter(\.onMainThread).map(\.name))")
+        #expect(!measuredOnMain.value, "free disk was measured on the main thread")
+    }
+
+    @Test func aMemorySignalReachesThePressureObserversAndNothingElseDoes() {
+        let coordinator = makeCoordinator()
+        let heard = Mutex<[MemoryPressure]>([])
+        let observation = coordinator.observeMemoryPressure { pressure in heard.withLock { $0.append(pressure) } }
+        coordinator.trim(.memoryWarning)
+        coordinator.trim(.background)
+        coordinator.trim(.memoryCritical)
+        coordinator.trim(.lowDisk(.low))
+        coordinator.trim(.viewerChanged)
+        coordinator.trim(.clear(nil))
+        #expect(heard.withLock { $0 } == [.warning, .background, .critical])
+        observation.cancel()
+    }
+
     @Test func conditionObserversHearEveryPolicyChange() {
         let coordinator = makeCoordinator()
         let recorder = SignalRecorder()
@@ -376,4 +506,37 @@ final class CacheCoordinatorTests {
         coordinator.setPlaybackUnderBuffered(false)
         #expect(!coordinator.fillSlots.isPaused)
     }
+}
+
+
+/// A disk cache that records each call the coordinator makes, and on which
+/// thread.
+private final class RecordingDiskCache: ManagedCache {
+    struct Call: Sendable {
+        let name: String
+        let onMainThread: Bool
+    }
+
+    private let recorded = Mutex<[Call]>([])
+    var calls: [Call] { recorded.withLock { $0 } }
+
+    let namespace = CacheNamespace("recorded", category: .images, scope: .public)
+    let budget = CacheBudget.disk(DiskBudget(pool: .images))
+    var usage: CacheUsage { CacheUsage() }
+
+    private func record(_ name: String) {
+        let call = Call(name: name, onMainThread: Thread.isMainThread)
+        recorded.withLock { $0.append(call) }
+    }
+
+    func setLimits(_ limits: CacheLimits) { record("setLimits") }
+    func trim(_ depth: TrimDepth) { record("trim") }
+    func removeAll() { record("removeAll") }
+    func flush() { record("flush") }
+}
+
+private final class FlagBox: Sendable {
+    private let flag = Mutex(false)
+    var value: Bool { flag.withLock { $0 } }
+    func set() { flag.withLock { $0 = true } }
 }

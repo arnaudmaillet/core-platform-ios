@@ -55,6 +55,9 @@ public struct UploadFeatureBuilder {
         // handed a library of its own would be asking for pictures that library
         // has never fetched, and would draw nothing at all.
         let library = Self.makeLibrary()
+        // Exports and flattened clips a process that died mid-flow left in
+        // `tmp/UploadMedia` (#898); files a live flow holds are spared.
+        UploadMediaFile.sweepOrphans()
         // ⚠️ **ONE DRAFT PER PRESENTATION, AND IT MUST BE BORN HERE.** The
         // finalisation screen is rebuilt on every "Next" — the closure below
         // constructs a fresh `NewPostViewController` each time — so a caption
@@ -110,6 +113,7 @@ public struct UploadFeatureBuilder {
         // Captures left by a process that died with a camera sheet up — this
         // draft's own folder is already registered, so it is spared.
         CaptureFolder.sweepOrphans()
+        UploadMediaFile.sweepOrphans()
         let captures = CapturedMediaLibrary()
         let recents = Self.makeLibrary()
         let composer = self.composer

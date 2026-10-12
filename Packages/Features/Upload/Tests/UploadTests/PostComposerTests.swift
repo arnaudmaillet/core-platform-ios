@@ -1,3 +1,4 @@
+import AVFoundation
 import AuthInterface
 import CoreContracts
 import MediaCore
@@ -58,7 +59,9 @@ struct PostComposerTests {
     private func makeHarness(
         posterFrame: (@Sendable (ExportedVideo) async -> UIImage?)? = nil,
         authSession: any AuthSessionProviding = ViewerSessionStub(),
-        viewer: (any ViewerProviding)? = nil
+        viewer: (any ViewerProviding)? = nil,
+        videoExporter: VideoExporter = VideoExporter(),
+        publishedVideos: PublishedVideoFiles = .shared
     ) -> Harness {
         let bff = MockBFF()
         let blobStore = MockBlobStore()
@@ -80,7 +83,9 @@ struct PostComposerTests {
             uploadTransport: MockMediaUploadTransport(store: blobStore),
             imagePipeline: pipeline,
             composedChannel: channel,
-            posterFrame: posterFrame ?? { await VideoExporter().posterImage(for: $0) }
+            videoExporter: videoExporter,
+            posterFrame: posterFrame ?? { await VideoExporter().posterImage(for: $0) },
+            publishedVideos: publishedVideos
         )
         return Harness(
             composer: composer, bff: bff, channel: channel, postStore: postStore, pipeline: pipeline
@@ -201,6 +206,34 @@ struct PostComposerTests {
         let harness = makeHarness()
         try await harness.composer.publish(media: .image(PickedImage(solidImage())), caption: "one")
         #expect(harness.ticketCount == 1)
+    }
+
+    /// #898: after publishing a video, no export is left in the temporary
+    /// directory. The entry still plays the author's own clip from a local
+    /// file, now in the device cache's `video.published` namespace, a Videos
+    /// namespace the coordinator budgets and wipes with the viewer.
+    @Test func aPublishedClipLeavesNoExportBehindAndPlaysFromTheDeviceCache() async throws {
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PostComposerTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let exports = scratch.appendingPathComponent("UploadMedia", isDirectory: true)
+        let published = PublishedVideoFiles(root: scratch.appendingPathComponent("Caches", isDirectory: true))
+        let harness = makeHarness(videoExporter: VideoExporter(folder: exports), publishedVideos: published)
+        let entries = await harness.channel.entries()
+        let source = try await PlaceholderVideoFetcher(durationSeconds: 1.0)
+            .playableURL(for: URL(string: "mock://video/kept?w=240&h=320")!)
+
+        try await harness.composer.publish(media: .video(PickedVideo(sourceURL: source)), caption: "kept")
+
+        var iterator = entries.makeAsyncIterator()
+        let entry = try #require(await iterator.next())
+        let clip = try #require(entry.post.attachments.first?.url)
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: exports.path)) ?? []
+        #expect(leftovers.isEmpty, "exports left in tmp: \(leftovers)")
+        #expect(clip.isFileURL)
+        let store = try #require(published.directory)
+        #expect(clip.standardizedFileURL.path.hasPrefix(store.standardizedFileURL.path), "not in the device cache: \(clip.path)")
+        #expect(try await AVURLAsset(url: clip).loadTracks(withMediaType: .video).isEmpty == false)
     }
 
     /// ⚠️ **A DECORATION MUST NEVER LOSE THE AUTHOR'S VIDEO.** The poster is

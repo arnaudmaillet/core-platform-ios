@@ -111,7 +111,7 @@ struct TransitionSyncTests {
             )
             return (pictures, try await lanes(of: arranged.asset))
         case .file:
-            let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+            let exported = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: file, segments: segments))
             defer { try? FileManager.default.removeItem(at: exported.fileURL) }
             let asset = AVURLAsset(url: exported.fileURL)
             let pictures = try await TransitionVisibilityTests.read(

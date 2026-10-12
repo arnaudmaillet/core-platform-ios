@@ -213,7 +213,7 @@ struct TransitionVisibilityTests {
     static func exported(
         _ segments: [VideoExportSegment], file: URL, from: Double, to: Double
     ) async throws -> [Frame] {
-        let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+        let exported = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: file, segments: segments))
         defer { try? FileManager.default.removeItem(at: exported.fileURL) }
         return try await read(AVURLAsset(url: exported.fileURL), composition: nil, from: from, to: to)
     }
@@ -546,7 +546,7 @@ struct TransitionVisibilityTests {
         #expect(try blue(standard, at: 1.25) <= 12, "guard: \(route) the standard window blends at 1.25s")
 
         if route == .export {
-            let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: pieces(1)))
+            let exported = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: file, segments: pieces(1)))
             defer { try? FileManager.default.removeItem(at: exported.fileURL) }
             #expect(exported.transitionWindows == [1.0...2.0], "the file says it drew at \(exported.transitionWindows)")
         }
@@ -557,7 +557,11 @@ struct TransitionVisibilityTests {
 /// The rules `TransitionVisibilityTests` reads off the pixels, asked of the
 /// functions that make them — the default lane only, as it is: an export
 /// does not depend on the canvas's layer.
-@Suite(.enabled(if: VideoRenderFlags.usesSampleBufferLayer))
+///
+/// `.exclusiveMediaWork`: it exports, and an export run beside the other
+/// suites' exports and composed reads is starved of the same render surfaces
+/// (#1012).
+@Suite(.enabled(if: VideoRenderFlags.usesSampleBufferLayer), .exclusiveMediaWork)
 struct TransitionLengthTests {
     /// ⚠️ **NEVER MORE THAN THE SHORTER NEIGHBOUR CAN GIVE.** Two seconds asked
     /// between a 0.6s piece and a 1.5s one: each gives at most half of itself,
@@ -619,7 +623,7 @@ struct TransitionLengthTests {
         #expect(duration == CMTime(value: 1440, timescale: 600), "the arrangement lasts \(duration.seconds)s, not 2.4s")
         #expect(arranged.windows == [0.5...1.0, 1.2...1.5], "drew at \(arranged.windows)")
 
-        let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+        let exported = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: file, segments: segments))
         defer { try? FileManager.default.removeItem(at: exported.fileURL) }
         let pictures = try #require(try await AVURLAsset(url: exported.fileURL).loadTracks(withMediaType: .video).first)
         let drawn = try await pictures.load(.timeRange).duration.seconds
@@ -650,7 +654,7 @@ struct TransitionLengthTests {
                 of: AVURLAsset(url: file), cut: segments, orientation: .whenComposited
             )
             let planned = try await arranged.asset.load(.duration).seconds
-            let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: file, segments: segments))
+            let exported = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: file, segments: segments))
             defer { try? FileManager.default.removeItem(at: exported.fileURL) }
             let pictures = try #require(try await AVURLAsset(url: exported.fileURL).loadTracks(withMediaType: .video).first)
             let drawn = try await pictures.load(.timeRange).duration.seconds

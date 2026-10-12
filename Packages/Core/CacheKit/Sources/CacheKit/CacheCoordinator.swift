@@ -28,7 +28,8 @@ public enum TrimReason: Sendable, Equatable {
     case memoryWarning
     /// Only leased entries stay (persistent namespaces keep `retained`).
     case memoryCritical
-    /// Memory down to retained + leased; disk indexes flushed, expired entries swept.
+    /// Memory down to retained + leased; disk indexes flushed, expired entries
+    /// swept, free disk measured again.
     case background
     /// Disk budgets recomputed for this pressure (`.normal` restores them).
     case lowDisk(DiskPressure)
@@ -38,6 +39,18 @@ public enum TrimReason: Sendable, Equatable {
     /// Settings → Storage → Clear: one category, or everything (`nil`), memory
     /// and disk together, persistent namespaces included.
     case clear(CacheCategory?)
+
+    /// The memory signal behind this trim; nil for a disk, session or Settings
+    /// trim. What a holder of memory outside any `ManagedCache` (idle players,
+    /// frame generators) reacts to, through `observeMemoryPressure`.
+    public var memoryPressure: MemoryPressure? {
+        switch self {
+        case .memoryWarning: .warning
+        case .memoryCritical: .critical
+        case .background: .background
+        case .lowDisk, .viewerChanged, .clear: nil
+        }
+    }
 }
 
 /// What every managed cache holds, for Settings → Storage (#899) and the
@@ -96,6 +109,18 @@ public struct CacheUsageReport: Sendable {
 /// Signals arrive through injected `CacheSignalSource`s (`SystemCacheSignals`
 /// in the app); every entry point can also be called directly. Thread-safe
 /// behind a `Mutex`; caches are always called OUTSIDE the coordinator's lock.
+///
+/// ⚠️ **No disk work on the main thread (#898).** UIKit posts the lifecycle
+/// signals there, and the composition root registers caches there. Whatever a
+/// call asks of a DISK cache (budgets that evict files, the background sweep
+/// and index flush, the free-space measure) then runs on the coordinator's
+/// own utility queue, in order; memory caches are trimmed in place, at once.
+/// Called off the main thread (Settings, a test), everything runs in place,
+/// so the caller sees it done when the call returns. One exception, by
+/// design: a wipe (`.viewerChanged`, `.clear`) reaches every cache in place,
+/// since nothing may be served to the next viewer; `DiskStore.removeAll`
+/// then does one folder rename there and deletes on its janitor queue, and
+/// the LocalStore deletes on its writer's queue.
 public final class CacheCoordinator: Sendable {
     /// The share of each namespace's budget that unleased speculative entries
     /// may use, so prefetching never crowds out what was seen (#970's
@@ -126,12 +151,21 @@ public final class CacheCoordinator: Sendable {
     /// Serialises budget applications so a stale computation never lands last.
     /// Taken before `state`, never inside it.
     private let budgetGate = Mutex(())
+    /// Where disk work asked for on the main thread runs (see the type's note).
+    private let diskQueue = DispatchQueue(label: "CacheKit.CacheCoordinator.disk", qos: .utility)
 
+    /// Measures free disk at once, off the main thread; made on it (the app's
+    /// composition root), the coordinator starts at `.normal` and measures on
+    /// its queue, which shrinks the disk budgets moments later if it must.
     public init(device: CacheDevice = .current, storageLimit: CacheStorageLimit = .automatic, conditions: CacheConditions = CacheConditions()) {
         self.device = device
-        let pressure = DiskPressure(availableCapacity: device.availableDiskCapacity())
+        let onMain = Thread.isMainThread
+        let pressure = onMain ? DiskPressure.normal : DiskPressure(availableCapacity: device.availableDiskCapacity())
         state = Mutex(State(limit: storageLimit, pressure: pressure, conditions: conditions))
         fillSlots = CacheFillSlots(limit: PrefetchPolicy(conditions: conditions).maxConcurrentSpeculativeFills)
+        if onMain {
+            diskQueue.async { [weak self] in self?.refreshDiskSpace() }
+        }
     }
 
     // MARK: - Registry
@@ -139,10 +173,12 @@ public final class CacheCoordinator: Sendable {
     /// Registers `cache` and applies its budget at once. A cache with the same
     /// name and medium replaces the previous one.
     public func register(_ cache: any ManagedCache) {
-        state.withLock { state in
+        let inBackground = state.withLock { state -> Bool in
             state.caches.removeAll { $0.namespace.name == cache.namespace.name && $0.medium == cache.medium }
             state.caches.append(cache)
+            return state.conditions.isInBackground
         }
+        if inBackground, Self.isHeldInBackground(cache) { cache.setAdmissionsPaused(true) }
         applyBudgets(reason: .budget)
     }
 
@@ -179,8 +215,9 @@ public final class CacheCoordinator: Sendable {
     }
 
     /// Measures free disk space and, if the pressure level changed, applies
-    /// the new disk budgets. The initializer measures once; every return to
-    /// the foreground measures again.
+    /// the new disk budgets. The initializer measures once; every trip to the
+    /// background and back measures again, off the main thread (the measure
+    /// itself can take a while: the system counts purgeable space).
     @discardableResult
     public func refreshDiskSpace() -> DiskPressure {
         let measured = DiskPressure(availableCapacity: device.availableDiskCapacity())
@@ -252,10 +289,22 @@ public final class CacheCoordinator: Sendable {
         fillSlots.setPaused(underBuffered)
     }
 
+    /// Calls `handler` after every memory trim (a warning, the background,
+    /// critical pressure), on the thread that applied it: for memory held
+    /// outside any `ManagedCache` (idle players, frame generators), which
+    /// releases itself at the depth the pressure calls for. Keep the returned
+    /// token; the observation ends when it is cancelled or deallocated.
+    public func observeMemoryPressure(_ handler: @escaping @Sendable (MemoryPressure) -> Void) -> CacheObservation {
+        observeTrims { reason in
+            if let pressure = reason.memoryPressure { handler(pressure) }
+        }
+    }
+
     // MARK: - Signals
 
     /// Releases memory or disk for `reason`. Caches are visited lowest
-    /// priority class first.
+    /// priority class first. Disk work asked for on the main thread runs on
+    /// the coordinator's queue (see the type's note).
     public func trim(_ reason: TrimReason) {
         switch reason {
         case .memoryWarning:
@@ -264,9 +313,13 @@ public final class CacheCoordinator: Sendable {
             trimMemory(.critical)
         case .background:
             trimMemory(.background)
-            for cache in caches(.disk) {
-                cache.trim(.expired, reason: .background)
-                cache.flush()
+            offMainThread { [weak self] in
+                guard let self else { return }
+                for cache in caches(.disk) {
+                    cache.trim(.expired, reason: .background)
+                    cache.flush()
+                }
+                refreshDiskSpace()
             }
         case .lowDisk(let pressure):
             state.withLock { $0.pressure = pressure }
@@ -284,9 +337,18 @@ public final class CacheCoordinator: Sendable {
         for observer in observers { observer(reason) }
     }
 
-    /// Persists every disk index.
+    /// Persists every disk index (off the main thread).
     public func flush() {
-        for cache in caches(.disk) { cache.flush() }
+        offMainThread { [weak self] in
+            guard let self else { return }
+            for cache in caches(.disk) { cache.flush() }
+        }
+    }
+
+    /// Waits until the disk work queued from the main thread so far has run.
+    /// Tests, and the audit; the app never needs to.
+    public func waitForDiskWork() {
+        diskQueue.sync {}
     }
 
     public func usage() -> CacheUsageReport {
@@ -323,9 +385,15 @@ public final class CacheCoordinator: Sendable {
         case .memoryCritical:
             trim(.memoryCritical)
         case .didEnterBackground:
+            // First: a fill that lands after the trim keeps nothing in memory
+            // and no prefetch starts.
+            updateConditions { $0.isInBackground = true }
+            holdBackgroundCut(true)
             trim(.background)
         case .willEnterForeground:
-            refreshDiskSpace()
+            updateConditions { $0.isInBackground = false }
+            holdBackgroundCut(false)
+            offMainThread { [weak self] in self?.refreshDiskSpace() }
         case .lowPowerMode(let enabled):
             updateConditions { $0.isLowPowerModeEnabled = enabled }
         case .thermalState(let thermal):
@@ -349,6 +417,21 @@ public final class CacheCoordinator: Sendable {
             .sorted { $0.namespace.priorityClass < $1.namespace.priorityClass }
     }
 
+    /// The memory namespaces the background cuts to `retained` (the
+    /// expendable and standard classes: feed media) admit nothing new below
+    /// it until the foreground (#898): the trim's release holds, whatever a
+    /// list still lays out or a fill delivers in the meantime. Avatars and UI
+    /// assets, which the background cuts less deep, keep filling.
+    private func holdBackgroundCut(_ held: Bool) {
+        for cache in caches(.memory) where !held || Self.isHeldInBackground(cache) {
+            cache.setAdmissionsPaused(held)
+        }
+    }
+
+    private static func isHeldInBackground(_ cache: any ManagedCache) -> Bool {
+        cache.medium == .memory && cache.namespace.priorityClass.depth(for: .background) >= .belowRetained
+    }
+
     private func trimMemory(_ pressure: MemoryPressure) {
         let reason: CacheEvictionReason = switch pressure {
         case .warning: .memoryWarning
@@ -360,12 +443,28 @@ public final class CacheCoordinator: Sendable {
         }
     }
 
+    /// Memory limits in place; disk limits (which may delete files) off the
+    /// main thread.
     private func applyBudgets(reason: CacheEvictionReason) {
+        applyBudgets(reason: reason, medium: .memory)
+        offMainThread { [weak self] in self?.applyBudgets(reason: reason, medium: .disk) }
+    }
+
+    private func applyBudgets(reason: CacheEvictionReason, medium: CacheMedium) {
         budgetGate.withLock { _ in
             let snapshot = state.withLock { $0 }
-            for assignment in computeLimits(snapshot) {
+            for assignment in computeLimits(snapshot) where assignment.cache.medium == medium {
                 assignment.cache.setLimits(assignment.limits, reason: reason)
             }
+        }
+    }
+
+    /// Runs `work` in place off the main thread, or on `diskQueue` from it.
+    private func offMainThread(_ work: @escaping @Sendable () -> Void) {
+        if Thread.isMainThread {
+            diskQueue.async(execute: work)
+        } else {
+            work()
         }
     }
 

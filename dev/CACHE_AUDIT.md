@@ -20,6 +20,16 @@ capture greps them out. On stdout only, the image pipeline (#894) adds one
 `[cache-audit] image <disk|network> <bucket> <media>` line per image it loads
 from disk or the network.
 
+Release signals on cue (#898), since a simulator cannot turn on Low Power or
+Low Data Mode and has no scriptable memory warning:
+`-cache-signal <name>@<seconds after launch>`, repeatable, with `name` one of
+`memoryWarning` (UIKit's notification, to every observer), `memoryCritical`,
+`lowPower`/`lowPowerOff`, `lowData`/`lowDataOff`,
+`thermalSerious`/`thermalCritical`/`thermalNominal`. Each prints
+`[cache-audit] debug signal <name>` when it fires. Background and foreground
+are the real thing: open another app (`xcrun simctl launch $UDID
+com.apple.Preferences`) and come back.
+
 ## When it logs
 
 - `trigger=start`: once, when the app's coordinator starts.
@@ -31,7 +41,7 @@ from disk or the network.
 ## What a block says
 
 ```
-[cache-audit] t=42.0 trigger=interval limit=automatic diskPressure=normal policy=full network=wifi memory=96.4MB disk=31.2MB waste=6%(12.9MB of 214.3MB)
+[cache-audit] t=42.0 trigger=interval limit=automatic diskPressure=normal policy=full network=wifi device=- memory=96.4MB disk=31.2MB waste=6%(12.9MB of 214.3MB)
 [cache-audit]   ns=images medium=disk class=standard scope=public bytes=28.1MB/203.0MB(14%) entries=212 pinned=0.0MB tiers=speculative:3.2MB,recent:24.9MB,retained:0.0MB hits=180 misses=212 hitRate=46% removed=none speculative=stored:40/4.1MB,used:6/0.9MB,wasted:0/0.0MB,discarded:0/0.0MB waste=0%
 [cache-audit]   ns=images.decoded medium=memory class=standard scope=public bytes=88.0MB/214.7MB(41%) entries=104 pinned=12.6MB tiers=... removed=budget:12/10.3MB,memoryWarning:4/3.4MB ...
 [cache-audit]   prefetch images=ready:120,inFlight:8,missed:14,hitRate:85% nextVideoFirstRange=0/0(-) timeToFirstFrame=n:0,p50:-,p90:-,max:- fetched=P0:12.0MB,P1:30.1MB,P2:8.2MB p2Cellular=0.0MB
@@ -46,6 +56,7 @@ from disk or the network.
 | `limit` | The Settings → Storage limit (`automatic`, or a total). |
 | `diskPressure` | `normal`, `low` (< 5 GB free, every pool halved), `critical` (< 1 GB). |
 | `policy`, `network` | The prefetch policy (`full`, `cellular`, `reduced`, `off`) and the network path it follows, flagged `(expensive)`, `(constrained)` (Low Data Mode) or `(lessCellularData)` (Settings → Storage → Use Less Cellular Data, #899). |
+| `device` | What else the policy follows (#898): `background` (no prefetch, no new decode kept in memory), `lowPower`, `thermal:<state>` when not nominal; `-` for none. |
 | `memory`, `disk` | Bytes held in every memory and every disk namespace. |
 | `waste` | The app's waste ratio: speculative bytes evicted or expired unused, over the speculative bytes whose fate is known (used or wasted). |
 

@@ -161,10 +161,16 @@ public struct ChatVideoUpload: Sendable {
     public let pixelWidth: Int
     public let pixelHeight: Int
     public let duration: TimeInterval
+    /// What keeps `fileURL` on disk (#898): the upload flow's exported clip
+    /// is deleted with its owner. Held as long as this value is — by the
+    /// pending bubble, through its retries — and let go with it once the
+    /// message is sent or discarded.
+    let fileOwner: (any AnyObject & Sendable)?
 
     public init(
         fileURL: URL, mimeType: String = "video/mp4", poster: UIImage?,
-        pixelWidth: Int, pixelHeight: Int, duration: TimeInterval
+        pixelWidth: Int, pixelHeight: Int, duration: TimeInterval,
+        fileOwner: (any AnyObject & Sendable)? = nil
     ) {
         self.fileURL = fileURL
         self.mimeType = mimeType
@@ -172,6 +178,7 @@ public struct ChatVideoUpload: Sendable {
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
         self.duration = duration
+        self.fileOwner = fileOwner
     }
 
     /// The file's size and SHA-256, read in chunks.

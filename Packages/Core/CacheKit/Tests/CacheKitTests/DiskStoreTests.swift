@@ -42,6 +42,28 @@ final class DiskStoreTests {
         #expect(store.directory.lastPathComponent == "v1")
     }
 
+    /// A store whose reader goes by the extension (a player, #898) names
+    /// every file with it, across a relaunch.
+    @Test func aFileExtensionIsGivenToEveryFileAndSurvivesARelaunch() throws {
+        func clips() throws -> DiskStore {
+            try DiskStore(namespace: namespace("clips"), budget: DiskBudget(pool: .video), root: folder.url, clock: clock, fileExtension: "mp4")
+        }
+        var store: DiskStore? = try clips()
+        try store?.write(bytes(10), for: "written")
+        let source = folder.url.appending(path: "moved.tmp")
+        try bytes(12).write(to: source)
+        try store?.moveItem(at: source, for: "moved")
+        #expect(store?.fileURL(for: "written")?.pathExtension == "mp4")
+        #expect(store?.fileURL(for: "moved")?.pathExtension == "mp4")
+        store?.flush()
+        store = nil
+
+        let relaunched = try clips()
+        #expect(relaunched.data(for: "written") == bytes(10))
+        #expect(relaunched.data(for: "moved") == bytes(12))
+        #expect(folder.files(in: "clips/v1/objects").allSatisfy { $0.hasSuffix(".mp4") })
+    }
+
     @Test func writesAreAtomicAndLeaveNoStagedFile() throws {
         let store = try open()
         try store.write(bytes(10), for: "a")

@@ -1,4 +1,5 @@
 import Foundation
+@testable import MediaPlayback
 
 /// Real-time assertions that a hosted CI runner cannot fail by scheduling
 /// alone (#599), while a real regression still does.
@@ -33,6 +34,39 @@ enum TimingTolerance {
         }
         return condition()
     }
+
+    /// Runs `body` until it succeeds, at most `attempts` times; rethrows the
+    /// last failure (#1012).
+    ///
+    /// ⚠️ **FOR WORK THE MACHINE CAN REFUSE, NOT FOR WORK THE CODE GETS WRONG.**
+    /// An export renders every frame through `VideoCompositor`, and one
+    /// refused request fails the whole session (`.exportFailed`): a render
+    /// context that hands out no pixel buffer, a media server busy with
+    /// another process's exports and decoders. Seen on a host loaded with CPU
+    /// hogs and a second MediaPlayback run (Fig err -12900): plans that export
+    /// every time alone failed there. A retry is an attempt that answers; an
+    /// exporter that is broken fails every attempt and the test still fails,
+    /// and what a test asserts is always checked on a file that was written.
+    static func retrying<T>(
+        attempts: Int, isolation: isolated (any Actor)? = #isolation, _ body: () async throws -> T
+    ) async throws -> T {
+        var lastError: (any Error)?
+        for attempt in 1...max(1, attempts) {
+            do {
+                return try await body()
+            } catch {
+                lastError = error
+                // Said in the log every time, so a refusal is never silent:
+                // the exporter logs its session's own error beside it.
+                let described = String(describing: error)
+                print("[retrying] attempt \(attempt) of \(attempts) refused: \(described)")
+            }
+        }
+        throw lastError ?? CancellationError()
+    }
+
+    /// How many times an export may be refused before its test fails.
+    static let exportAttempts = 3
 
     /// Polls `answer` up to `looks` times; the first non-nil answer.
     static func firstAnswer<T>(
@@ -132,5 +166,19 @@ enum TimingTolerance {
             candidate += period
         }
         return false
+    }
+}
+
+extension VideoExporter {
+    /// `export(_:)`, tried again when the machine refuses it (#1012): see
+    /// `TimingTolerance.retrying`. Every test export goes through here, so a
+    /// refused session never reads as a defect, and a broken exporter, which
+    /// fails every attempt, still does.
+    func exportAnswering(_ plan: VideoExportPlan) async throws -> ExportedVideo {
+        try await TimingTolerance.retrying(attempts: TimingTolerance.exportAttempts) { try await export(plan) }
+    }
+
+    func exportAnswering(_ sourceURL: URL) async throws -> ExportedVideo {
+        try await TimingTolerance.retrying(attempts: TimingTolerance.exportAttempts) { try await export(sourceURL) }
     }
 }

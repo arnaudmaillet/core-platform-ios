@@ -239,6 +239,8 @@ public actor PostComposer: PostComposing {
     /// unreachable through the normal seam — and an unreachable fallback is one
     /// nobody has ever seen run.
     private let posterFrame: @Sendable (ExportedVideo) async -> UIImage?
+    /// Where a published clip goes for the author's own playback (#898).
+    private let publishedVideos: PublishedVideoFiles
     private let uploader: MediaAssetUploader
     private let now: @Sendable () -> Date
     /// The waits before a keyed CreatePost asks again while its first call
@@ -268,6 +270,7 @@ public actor PostComposer: PostComposing {
         posterFrame: @escaping @Sendable (ExportedVideo) async -> UIImage? = {
             await VideoExporter().posterImage(for: $0)
         },
+        publishedVideos: PublishedVideoFiles = .shared,
         resolveMaxAttempts: Int = 6,
         resolvePollSeconds: Double = 1,
         now: @escaping @Sendable () -> Date = { Date() },
@@ -288,6 +291,7 @@ public actor PostComposer: PostComposing {
         self.encoder = encoder
         self.videoExporter = videoExporter
         self.posterFrame = posterFrame
+        self.publishedVideos = publishedVideos
         self.uploader = MediaAssetUploader(
             mediaClient: mediaClient, transport: uploadTransport,
             resolveMaxAttempts: resolveMaxAttempts, resolvePollSeconds: resolvePollSeconds
@@ -317,6 +321,9 @@ public actor PostComposer: PostComposing {
         var serverAttachments: [MediaAttachment] = []
         var optimisticAttachments: [MediaAttachment] = []
         var imageSeeds: [(image: UIImage, url: URL)] = []
+        // Each clip's export, by its index in the carousel: what the entry
+        // plays once the post is out (`keepPublishedClips`).
+        var exports: [Int: ExportedVideo] = [:]
 
         // ⚠️ **IN ORDER, AND ONE AT A TIME.** The array's order IS the carousel's
         // order — `post.v1` has no per-attachment index — so these cannot be
@@ -332,8 +339,9 @@ public actor PostComposer: PostComposing {
                 if let url = attachment.url { imageSeeds.append((picked.image, url)) }
             case .video(let picked):
                 let uploaded = try await uploadVideo(picked, ownerID: viewer.accountID)
+                exports[serverAttachments.count] = uploaded.exported
                 serverAttachments.append(uploaded.server)
-                optimisticAttachments.append(uploaded.optimistic)
+                optimisticAttachments.append(uploaded.server)
                 // A video's face is seeded exactly like a photograph's, so the
                 // author's own post draws its poster at once rather than after a
                 // round trip.
@@ -350,6 +358,7 @@ public actor PostComposer: PostComposing {
             idempotencyKey: idempotencyKey
         )
         try await publishDraft(postID: postID, profileID: viewer.author.id)
+        keepPublishedClips(exports, in: &optimisticAttachments)
 
         let entry = FeedEntry(
             post: Post(
@@ -399,7 +408,7 @@ public actor PostComposer: PostComposing {
         _ picked: PickedVideo,
         ownerID: AccountID
     ) async throws -> (
-        server: MediaAttachment, optimistic: MediaAttachment, posterSeed: (image: UIImage, url: URL)?
+        server: MediaAttachment, exported: ExportedVideo, posterSeed: (image: UIImage, url: URL)?
     ) {
         let exported: ExportedVideo
         do {
@@ -425,17 +434,33 @@ public actor PostComposer: PostComposing {
             pixelWidth: exported.pixelWidth,
             pixelHeight: exported.pixelHeight
         )
-        // Optimistic entry plays the exported local file directly, and wears the
-        // poster's CDN URL so the face it asks for is the one the seed below
-        // puts in the pipeline — the same trick the image path uses.
-        let optimistic = MediaAttachment(
-            url: exported.fileURL,
-            thumbnailURL: poster?.url ?? exported.fileURL,
-            mimeType: exported.mimeType,
-            pixelWidth: exported.pixelWidth,
-            pixelHeight: exported.pixelHeight
-        )
-        return (server, optimistic, poster)
+        return (server, exported, poster)
+    }
+
+    /// The post is out: each clip's export becomes what the entry plays.
+    ///
+    /// The optimistic entry plays the exported file itself, so the author's
+    /// clip starts at once, before any fetch, and wears the poster's CDN URL
+    /// so the face it asks for is the one the seed puts in the pipeline (the
+    /// image path's trick). ⚠️ **MOVED, NOT LEFT IN THE TEMPORARY DIRECTORY
+    /// (#898).** The export used to stay in `tmp` for good; it now goes into
+    /// the device cache (`PublishedVideoFiles`), and its temporary file is
+    /// gone. A clip the cache cannot take (a nearly full disk) plays from its
+    /// delivery URL, and the export is deleted with its last copy. A publish
+    /// that fails never gets here: its exports are deleted on the way out,
+    /// and a retry exports again.
+    private func keepPublishedClips(_ exports: [Int: ExportedVideo], in attachments: inout [MediaAttachment]) {
+        for (index, exported) in exports where attachments.indices.contains(index) {
+            let server = attachments[index]
+            guard let delivery = server.url, let kept = publishedVideos.keep(exported, for: delivery) else { continue }
+            attachments[index] = MediaAttachment(
+                url: kept,
+                thumbnailURL: server.thumbnailURL == delivery ? kept : server.thumbnailURL,
+                mimeType: server.mimeType,
+                pixelWidth: server.pixelWidth,
+                pixelHeight: server.pixelHeight
+            )
+        }
     }
 
     /// A still frame for `thumbnail_url`, uploaded as its own image asset.
