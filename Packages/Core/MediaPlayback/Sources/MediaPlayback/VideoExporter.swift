@@ -6,8 +6,14 @@ import UIKit
 
 /// An exported, upload-ready video plus the metadata the media.v1 upload-ticket
 /// flow needs (declared mime/size + a content SHA-256), mirroring
-/// `MediaCore.EncodedImage` for video. The file lives in the temp directory;
-/// the caller uploads it and may delete it after.
+/// `MediaCore.EncodedImage` for video.
+///
+/// ⚠️ **THE VALUE OWNS ITS FILE (#898).** It lives in `tmp/UploadMedia`
+/// (`UploadMediaFile`) for as long as a copy of this value does, and is
+/// deleted with the last one: keep the value, not just `fileURL`, while the
+/// file is needed (an upload, a retry, a message bubble). A caller that keeps
+/// the clip longer moves it out first (a published post's clip goes into the
+/// device cache).
 public struct ExportedVideo: Sendable, Equatable {
     public let fileURL: URL
     public let mimeType: String
@@ -19,9 +25,24 @@ public struct ExportedVideo: Sendable, Equatable {
     /// Where the file's transitions draw, in seconds of the file.
     public let transitionWindows: [ClosedRange<Double>]
 
+    /// What keeps `fileURL` on disk.
+    public let file: UploadMediaFile?
+
     /// The moment the poster is taken from — never inside a transition.
     public var posterSeconds: Double {
         VideoExporter.posterSeconds(duration: durationSeconds, avoiding: transitionWindows)
+    }
+
+    /// The same clip: its owner is not part of what it is.
+    public static func == (lhs: ExportedVideo, rhs: ExportedVideo) -> Bool {
+        // One condition each: a long `&&` chain is what Xcode 26's type
+        // checker times out on.
+        guard lhs.fileURL == rhs.fileURL, lhs.mimeType == rhs.mimeType,
+              lhs.pixelWidth == rhs.pixelWidth, lhs.pixelHeight == rhs.pixelHeight,
+              lhs.durationSeconds == rhs.durationSeconds, lhs.byteSize == rhs.byteSize,
+              lhs.sha256Hex == rhs.sha256Hex, lhs.transitionWindows == rhs.transitionWindows
+        else { return false }
+        return true
     }
 }
 
@@ -214,10 +235,15 @@ public enum VideoExportError: Error, Equatable {
 /// (Phase 3); this pass just bounds the upload size and normalizes the codec.
 public struct VideoExporter: Sendable {
     private let preset: String
+    /// Where exports are written (`UploadMediaFile`).
+    private let folder: URL
 
     /// `AVAssetExportPreset1280x720` by default — a sensible upload cap.
-    public init(preset: String = AVAssetExportPreset1280x720) {
+    /// `folder` is where the files go, `tmp/UploadMedia` unless a test keeps
+    /// its own.
+    public init(preset: String = AVAssetExportPreset1280x720, folder: URL = UploadMediaFile.folder) {
         self.preset = preset
+        self.folder = folder
     }
 
     /// Whether a plan can be served by a `timeRange` alone.
@@ -944,8 +970,10 @@ public struct VideoExporter: Sendable {
             throw VideoExportError.noVideoTrack
         }
 
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("export-\(UUID().uuidString).mp4")
+        // Owned (#898): deleted with the returned value, or now if the export
+        // fails, instead of staying in the temporary directory for good.
+        let outputFile = UploadMediaFile(prefix: "export", pathExtension: "mp4", folder: folder)
+        let outputURL = outputFile.url
 
         // ⚠️ **ONE PIECE AT 1x NEVER BUILDS A COMPOSITION.** A `timeRange` on
         // the session is what a trim has always been, and a composition would be
@@ -1037,7 +1065,8 @@ public struct VideoExporter: Sendable {
             durationSeconds: duration.seconds.isFinite ? duration.seconds : 0,
             byteSize: byteSize,
             sha256Hex: try Self.sha256Hex(of: outputURL),
-            transitionWindows: arranged?.windows ?? []
+            transitionWindows: arranged?.windows ?? [],
+            file: outputFile
         )
     }
 

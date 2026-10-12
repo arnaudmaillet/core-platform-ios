@@ -230,6 +230,9 @@ struct ImageDiskCacheTests {
             let first = ImagePipeline(fetcher: ScriptedFetcher(), disk: .folder(folder.url), coordinator: coordinator)
             _ = try await first.image(for: url)
             coordinator.trim(.background)
+            // Asked on the main thread, the background's index flush runs on
+            // the coordinator's queue (#898).
+            coordinator.waitForDiskWork()
         }
 
         // Built, and read first, on the main thread.
@@ -651,5 +654,124 @@ struct ImageAuditCounterTests {
         #expect(line.statistics.removals[.viewerChanged] == 1)
         let decoded = try #require(coordinator.usage().lines.first { $0.namespace == ImagePipeline.Namespaces.decoded })
         #expect(decoded.statistics.misses >= 1, "the decoded namespace reports its own lookups")
+    }
+}
+
+// MARK: - Release paths (#898)
+
+/// Answers every request with a PNG, and records whether each was allowed on
+/// a constrained network (Low Data Mode).
+private final class ConstrainedRecordingProtocol: URLProtocol {
+    static let allowed = Mutex<[String: Bool]>([:])
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let current = self.request
+        guard let url = current.url,
+              let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
+        else { return }
+        let allowsConstrained = current.allowsConstrainedNetworkAccess
+        Self.allowed.withLock { $0[url.lastPathComponent] = allowsConstrained }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: png(width: 8, height: 8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+struct ImageReleasePathTests {
+    private let folder = Folder()
+
+    /// #900's review saw decoded memory grow back after a background trim
+    /// (22.5 → 57 MB in 5 s under `-foryou-scroll-demo`): a list kept laying
+    /// out cells, and fills landed, while the app was in the background. Now
+    /// a decode there is served to its caller and kept nowhere in memory, and
+    /// nothing is prefetched, until the foreground.
+    @Test func inTheBackgroundNothingGrowsBackInMemory() async throws {
+        let coordinator = CacheCoordinator(device: device())
+        let fetcher = ScriptedFetcher()
+        let pipeline = ImagePipeline(fetcher: fetcher, coordinator: coordinator)
+        let seen = try #require(URL(string: "mock://photo/release-30"))
+        _ = try await pipeline.image(for: seen)
+        #expect(pipeline.isDecoded(seen))
+
+        coordinator.handle(.didEnterBackground)
+        #expect(!pipeline.isDecoded(seen), "the background trim took it")
+        let late = try #require(URL(string: "mock://photo/release-31"))
+        let image = try await pipeline.image(for: late)
+        #expect(pixels(image).width > 0, "the caller still gets its picture")
+        #expect(!pipeline.isDecoded(late), "but memory keeps nothing new")
+        #expect(pipeline.decodedUsage.bytes == 0)
+        let prefetched = try #require(URL(string: "mock://photo/release-32"))
+        pipeline.prefetch([prefetched])
+        #expect(pipeline.pendingPrefetchCount == 0)
+        #expect(fetcher.fetchCount(for: prefetched) == 0, "no prefetch in the background")
+
+        coordinator.handle(.willEnterForeground)
+        _ = try await pipeline.image(for: late)
+        #expect(pipeline.isDecoded(late), "the foreground keeps what it shows again")
+    }
+
+    /// The grids' and the snap feed's prefetch of the next items: still run
+    /// under `reduced` (Low Power, Low Data Mode: the next item is allowed),
+    /// never under `off` (a critical thermal state, offline).
+    @Test func theNextItemsPrefetchStopsWhenThePolicyIsOff() async throws {
+        let coordinator = CacheCoordinator(device: device(), conditions: CacheConditions(isLowPowerModeEnabled: true))
+        let fetcher = ScriptedFetcher()
+        let pipeline = ImagePipeline(fetcher: fetcher, coordinator: coordinator)
+        let next = try #require(URL(string: "mock://photo/release-40"))
+        pipeline.prefetch([next])
+        #expect(await eventually { pipeline.isDecoded(next) }, "Low Power keeps the next item")
+
+        coordinator.handle(.thermalState(.critical))
+        let ahead = try #require(URL(string: "mock://photo/release-41"))
+        pipeline.prefetch([ahead])
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(fetcher.fetchCount(for: ahead) == 0, "a critical thermal state prefetches nothing")
+    }
+
+    /// Low Data Mode, then Low Power, give P2 no slot: a preload fetches
+    /// nothing until both are gone.
+    @Test func lowDataModeOrLowPowerFetchesNoSpeculativeImage() async throws {
+        let coordinator = CacheCoordinator(device: device(), conditions: CacheConditions(isNetworkConstrained: true))
+        let fetcher = ScriptedFetcher()
+        let pipeline = ImagePipeline(fetcher: fetcher, disk: .folder(folder.url), coordinator: coordinator)
+        let owner = CacheOwner("grid")
+        let preloaded = try #require(URL(string: "https://cdn.test/photo/release-50.png"))
+
+        pipeline.prefetch(preloaded, window: .preload, owner: owner)
+        coordinator.handle(.lowPowerMode(true))
+        coordinator.handle(.network(.wifi, isConstrained: false, isExpensive: false))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(fetcher.fetchCount(for: preloaded) == 0, "P2 waited through Low Data Mode, then Low Power")
+
+        coordinator.handle(.lowPowerMode(false))
+        #expect(await eventually { pipeline.isOnDisk(preloaded) }, "and runs once both are gone")
+        withExtendedLifetime(owner) {}
+    }
+
+    /// Every P2 request refuses a constrained network, so a path that turns
+    /// constrained mid-fill never spends the viewer's data on a prefetch; a
+    /// visible load is allowed.
+    @Test func aSpeculativeRequestRefusesConstrainedNetworksAndAVisibleOneDoesNot() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ConstrainedRecordingProtocol.self]
+        let fetcher = URLSessionImageFetcher(session: URLSession(configuration: configuration))
+        let pipeline = ImagePipeline(fetcher: fetcher, disk: .folder(folder.url), coordinator: CacheCoordinator(device: device()))
+        let owner = CacheOwner("grid")
+        let preloaded = try #require(URL(string: "https://cdn.test/photo/constrained-p2.png"))
+        let shown = try #require(URL(string: "https://cdn.test/photo/constrained-p0.png"))
+
+        pipeline.prefetch(preloaded, window: .preload, owner: owner)
+        #expect(await eventually { pipeline.isOnDisk(preloaded) })
+        _ = try await pipeline.image(for: shown)
+
+        let allowed = ConstrainedRecordingProtocol.allowed.withLock { $0 }
+        #expect(allowed["constrained-p2.png"] == false)
+        #expect(allowed["constrained-p0.png"] == true)
+        withExtendedLifetime(owner) {}
     }
 }

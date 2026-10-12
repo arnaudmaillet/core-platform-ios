@@ -324,7 +324,19 @@ final class CacheAuditTests {
             pressure: .low,
             conditions: CacheConditions(network: .cellular, usesLessCellularData: true)
         )
-        #expect(lessCellular[0].contains("limit=1000.0MB diskPressure=low policy=reduced network=cellular(lessCellularData)"))
+        #expect(lessCellular[0].contains("limit=1000.0MB diskPressure=low policy=reduced network=cellular(lessCellularData) device=-"))
+
+        // #898: the device state the policy follows is named.
+        let backgrounded = CacheAudit.lines(
+            trigger: "trim:background",
+            uptime: 0,
+            report: coordinator.usage(),
+            prefetch: coordinator.prefetchCounters.snapshot,
+            limit: .automatic,
+            pressure: .normal,
+            conditions: CacheConditions(isLowPowerModeEnabled: true, thermalState: .serious, isInBackground: true)
+        )
+        #expect(backgrounded[0].contains("policy=off network=wifi device=background,lowPower,thermal:serious memory="))
     }
 
     @Test func theAuditLogsAtStartAndAfterEachTrim() async {
@@ -352,5 +364,20 @@ final class CacheAuditTests {
     @Test func theAuditStartsOnlyWhenTheLaunchArgumentAsksForIt() {
         let coordinator = makeCoordinator()
         #expect(CacheAudit.startIfRequested(coordinator, arguments: ["app", "-media-audit"]) == nil)
+    }
+
+    /// `-cache-signal <name>@<seconds>` (#898): what the simulator cannot do
+    /// (Low Power, Low Data Mode, a scripted memory warning), on cue.
+    @Test func debugSignalsAreReadFromTheLaunchArguments() {
+        let parsed = DebugCacheSignals.parse([
+            "app", "-cache-signal", "lowPower@12", "-cache-audit", "-cache-signal", "memoryWarning@3.5",
+            "-cache-signal", "nonsense@1", "-cache-signal", "lowData"
+        ])
+        #expect(parsed == [
+            .init(name: "lowPower", delay: 12), .init(name: "memoryWarning", delay: 3.5), .init(name: "lowData", delay: 0)
+        ])
+        #expect(DebugCacheSignals.signal(named: "lowPower") == .lowPowerMode(true))
+        #expect(DebugCacheSignals.signal(named: "lowData") == .network(.wifi, isConstrained: true, isExpensive: false))
+        #expect(DebugCacheSignals.signal(named: "thermalSerious") == .thermalState(.serious))
     }
 }

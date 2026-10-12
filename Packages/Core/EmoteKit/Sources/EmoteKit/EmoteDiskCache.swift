@@ -1,6 +1,5 @@
 import CacheKit
 import ImageIO
-import Synchronization
 import MediaCore
 import UIKit
 import UniformTypeIdentifiers
@@ -58,16 +57,13 @@ struct EmoteDiskCache: Sendable {
         EmoteDiskCache(
             store: {
                 _ = removeLegacyFolderOnce
-                let store = UIAssetCaches.disk
-                standardOpened.store(true, ordering: .releasing)
-                return store
+                return UIAssetCaches.disk
             },
-            isOpen: { standardOpened.load(ordering: .acquiring) }
+            // Open by anyone: the app's start-up warm-up opens it before the
+            // first emote asks (#898).
+            isOpen: { UIAssetCaches.isDiskOpen }
         )
     }
-
-    /// Whether the UI assets namespace has been opened, by any cache.
-    private static let standardOpened = Atomic<Bool>(false)
 
     /// Before #971 the sheets lived in `Caches/EmoteKit` as PNG + JSON pairs
     /// no index knew about. Removed once per launch, on the first disk use.

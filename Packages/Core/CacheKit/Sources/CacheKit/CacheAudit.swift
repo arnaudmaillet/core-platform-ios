@@ -157,6 +157,7 @@ public final class CacheAudit: Sendable {
         let wasteRatio: String = percent(speculative.wasteRatio)
         let wasted: String = megabytes(speculative.wastedBytes)
         let spent: String = megabytes(speculative.usedBytes + speculative.wastedBytes)
+        let device: String = deviceFlags(conditions)
         let header: [String] = [
             "t=\(String(format: "%.1f", uptime))",
             "trigger=\(trigger)",
@@ -164,6 +165,7 @@ public final class CacheAudit: Sendable {
             "diskPressure=\(name(of: pressure))",
             "policy=\(policy)",
             "network=\(conditions.network.rawValue)\(expensive)\(constrained)\(lessCellular)",
+            "device=\(device)",
             "memory=\(memory)",
             "disk=\(disk)",
             "waste=\(wasteRatio)(\(wasted) of \(spent))"
@@ -262,6 +264,23 @@ public final class CacheAudit: Sendable {
         let cellular: String = megabytes(snapshot.speculativeCellularBytes)
         fields.append("p2Cellular=\(cellular)")
         return fields.joined(separator: " ")
+    }
+
+    /// What else the policy follows (#898): `background`, `lowPower`, and
+    /// the thermal state when it is not nominal; `-` for none.
+    static func deviceFlags(_ conditions: CacheConditions) -> String {
+        var flags: [String] = []
+        if conditions.isInBackground { flags.append("background") }
+        if conditions.isLowPowerModeEnabled { flags.append("lowPower") }
+        let thermal: String? = switch conditions.thermalState {
+        case .nominal: nil
+        case .fair: "thermal:fair"
+        case .serious: "thermal:serious"
+        case .critical: "thermal:critical"
+        @unknown default: "thermal:unknown"
+        }
+        if let thermal { flags.append(thermal) }
+        return flags.isEmpty ? "-" : flags.joined(separator: ",")
     }
 
     // MARK: - Names

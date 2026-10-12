@@ -337,6 +337,19 @@ final class AppContainer {
         // and flag palette the kits announced, now and later, join the
         // coordinator as its longest-kept class.
         UIAssetCaches.shared.attach(to: cacheCoordinator)
+        // The author's just-published clips (#898): a Videos namespace once
+        // the first one is kept.
+        PublishedVideoFiles.shared.attach(to: cacheCoordinator)
+        // What the coordinator's namespaces cannot hold (#898): every memory
+        // signal also releases the playback pools' idle players, frame
+        // generators and return players; the background sweeps the upload
+        // files a dead flow left behind.
+        releaseObservation = cacheCoordinator.observeTrims { reason in
+            if reason.memoryPressure != nil {
+                Task { @MainActor in AppContainer.releasePlaybackMemory() }
+            }
+            if reason == .background { UploadMediaFile.sweepOrphans() }
+        }
         // Every disk store opens (index read, files reconciled) off the main
         // thread, before the first screen asks. The UI assets store is a lazy
         // static: touched here first, a main-thread reader meanwhile waits for
@@ -354,6 +367,15 @@ final class AppContainer {
     }
 
     private var cacheSignalsStarted = false
+    private var releaseObservation: CacheObservation?
+
+    /// Every playback pool made so far, held weakly (`sizedToPreference`), so
+    /// a memory signal reaches them without making the ones not yet needed.
+    private static let playbackPools = NSHashTable<VideoPlaybackController>.weakObjects()
+
+    private static func releasePlaybackMemory() {
+        for pool in playbackPools.allObjects { pool.releaseIdleMemory() }
+    }
     #if DEBUG
     private var cacheAudit: CacheAudit?
     #endif
@@ -578,6 +600,7 @@ final class AppContainer {
     /// A playback pool sized by Settings' player pool (#702), and resized
     /// live when it changes.
     private static func sizedToPreference(_ pool: VideoPlaybackController) -> VideoPlaybackController {
+        playbackPools.add(pool)
         let store = MediaPlaybackPreferencesStore.standard
         pool.resize(to: store.preferences.playerPool.size)
         NotificationCenter.default.addObserver(
@@ -1457,7 +1480,9 @@ final class AppContainer {
             .video(ChatVideoUpload(
                 fileURL: exported.fileURL, mimeType: exported.mimeType, poster: poster,
                 pixelWidth: exported.pixelWidth, pixelHeight: exported.pixelHeight,
-                duration: exported.durationSeconds
+                duration: exported.durationSeconds,
+                // The bubble owns the export: deleted once sent or discarded (#898).
+                fileOwner: exported.file
             ))
         }
     }

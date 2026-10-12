@@ -24,6 +24,10 @@ public struct CacheConditions: Sendable, Equatable {
     /// Settings → Storage → Use Less Cellular Data (#899, Instagram's
     /// pattern): on cellular, prefetching drops to `reduced`.
     public var usesLessCellularData: Bool
+    /// Between `didEnterBackground` and `willEnterForeground` (#898): nothing
+    /// is prefetched, and the image pipeline keeps no new decode in memory, so
+    /// what the background trim released does not grow back.
+    public var isInBackground: Bool
 
     public init(
         isLowPowerModeEnabled: Bool = false,
@@ -31,7 +35,8 @@ public struct CacheConditions: Sendable, Equatable {
         network: CacheNetworkInterface = .wifi,
         isNetworkConstrained: Bool = false,
         isNetworkExpensive: Bool = false,
-        usesLessCellularData: Bool = false
+        usesLessCellularData: Bool = false,
+        isInBackground: Bool = false
     ) {
         self.isLowPowerModeEnabled = isLowPowerModeEnabled
         self.thermalState = thermalState
@@ -39,6 +44,7 @@ public struct CacheConditions: Sendable, Equatable {
         self.isNetworkConstrained = isNetworkConstrained
         self.isNetworkExpensive = isNetworkExpensive
         self.usesLessCellularData = usesLessCellularData
+        self.isInBackground = isInBackground
     }
 
 }
@@ -50,7 +56,8 @@ public struct CacheConditions: Sendable, Equatable {
 /// are meant to be tuned with the `-cache-audit` instrument (#900).
 public struct PrefetchPolicy: Sendable, Equatable {
     public enum Level: Int, Sendable, Comparable {
-        /// Critical thermal state or offline: P0 only.
+        /// Critical thermal state, offline, or the app in the background: P0
+        /// only.
         case off
         /// Low Data Mode, Low Power Mode, a serious thermal state, or
         /// cellular with Use Less Cellular Data on: P0 and P1 (the next
@@ -65,7 +72,11 @@ public struct PrefetchPolicy: Sendable, Equatable {
     }
 
     public var level: Level
-    /// Videos ahead of the playing one that are warmed (+1) or head-preloaded (+2...).
+    /// Videos ahead of the playing one that are warmed (+1) or head-preloaded
+    /// (+2...): the prefetch depth by signal (#898). Wi-Fi 3, cellular 2; Low
+    /// Data Mode, Use Less Cellular Data on cellular, Low Power or a serious
+    /// thermal state 1 (the next item, no P2); a critical thermal state,
+    /// offline or the background 0.
     public var videoPreloadDepth: Int
     /// Screens ahead whose images are fetched to disk without decoding (P2).
     public var preloadScreens: Double
@@ -88,7 +99,7 @@ public struct PrefetchPolicy: Sendable, Equatable {
     }
 
     public init(conditions: CacheConditions) {
-        if conditions.thermalState == .critical || conditions.network == .offline {
+        if conditions.thermalState == .critical || conditions.network == .offline || conditions.isInBackground {
             self = .off
         } else if conditions.isNetworkConstrained || conditions.isLowPowerModeEnabled || conditions.thermalState == .serious {
             self = .reduced

@@ -424,6 +424,19 @@ struct EmoteSkeletonTests {
         #expect(!opened.value, "the store was opened to answer")
     }
 
+    /// #986's review, closed in #898: the app opens the UI assets disk off
+    /// the main thread at start-up (`startCacheCoordinator()`), and the emotes'
+    /// cache counts that open as its own. It used to know only of opens it
+    /// made itself, so a sheet on disk read as "not local" until then.
+    @Test func theAppsOffMainOpenCountsForTheEmotesDisk() async throws {
+        let store = try #require(await Task.detached { UIAssetCaches.disk }.value)
+        #expect(UIAssetCaches.isDiskOpen)
+        let stem = "warm-up-\(UUID().uuidString)"
+        try store.write(Data([1, 2, 3]), for: EmoteDiskCache.key(stem: stem))
+        defer { store.removeValue(for: EmoteDiskCache.key(stem: stem)) }
+        #expect(try #require(EmoteDiskCache.standard()).containsIfOpen(stem: stem))
+    }
+
     /// The safety net: a read that is LATE — it fell through to a bake, or
     /// the device is starved — still gets its skeleton after the grace.
     @Test func aLateReadGetsItsSkeletonAfterTheGrace() async throws {

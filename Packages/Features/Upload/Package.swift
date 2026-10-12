@@ -24,7 +24,9 @@ let package = Package(
         .package(path: "../../Core/StickerKit"),
         // The caption field's emote panel and `:query` suggestions.
         .package(path: "../../Core/EmoteKit"),
-        .package(path: "../../Core/CoreNetworking")
+        .package(path: "../../Core/CoreNetworking"),
+        // A published clip moves into the device cache (#898).
+        .package(path: "../../Core/CacheKit")
     ],
     targets: [
         .target(
@@ -39,7 +41,8 @@ let package = Package(
                 "MediaCore",
                 "MediaPlayback",
                 "StickerKit",
-                "EmoteKit"
+                "EmoteKit",
+                "CacheKit"
             ],
             // The photograph a VIDEO's look cards are drawn from, read back
             // through `Bundle.module` by `MediaLookReference`.

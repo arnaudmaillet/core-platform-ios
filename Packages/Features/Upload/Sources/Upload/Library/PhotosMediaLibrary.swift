@@ -1,6 +1,8 @@
 // `AVURLAsset`, `AVAssetExportPresetPassthrough` — what a picked video is
 // flattened into a file with. Photos re-exports neither.
 import AVFoundation
+// `UploadMediaFile`: what a flattened clip is written into, and owned by (#898).
+import MediaPlayback
 import Photos
 // ⚠️ `presentLimitedLibraryPicker(from:)` IS PhotosUI, NOT Photos. It reads like
 // a `PHPhotoLibrary` method and is spelled like one, but the framework that
@@ -39,6 +41,13 @@ final class PhotosMediaLibrary: MediaLibraryReading {
     /// and clearing this on each album change would blank exactly those. The
     /// entries are lightweight handles into Photos, not images.
     private var assetsByID: [String: PHAsset] = [:]
+
+    /// The files non-file videos were flattened into, one per item (#898):
+    /// asked again by the editor, the publish and the preview, a clip is
+    /// flattened once, and every file goes with this library (the sheet), or
+    /// with the sweep at the next camera or library opening if the process
+    /// dies first (`UploadMediaFile`).
+    private var flattenedByID: [String: Task<UploadMediaFile?, Never>] = [:]
 
     /// Photos and videos, newest first — the one shape every fetch here wants.
     nonisolated private static var contents: PHFetchOptions {
@@ -321,7 +330,13 @@ final class PhotosMediaLibrary: MediaLibraryReading {
             return file
         }
 
-        return await flattened(asset, options: options)
+        if let running = flattenedByID[item] {
+            if let file = await running.value { return file.url }
+            // A failed flatten is tried again on the next ask.
+        }
+        let flattening = Task { await self.flattened(asset, options: options) }
+        flattenedByID[item] = flattening
+        return await flattening.value?.url
     }
 
     /// Writes a non-file asset out as one, unchanged.
@@ -330,9 +345,13 @@ final class PhotosMediaLibrary: MediaLibraryReading {
     /// quality is spent here, and `VideoExporter` does the real transcode later
     /// on its way to the upload. `.mov` for the same reason — the container is
     /// an intermediate nobody but `VideoExporter` will open.
-    private func flattened(_ asset: PHAsset, options: PHVideoRequestOptions) async -> URL? {
-        let output = FileManager.default.temporaryDirectory
-            .appendingPathComponent("picked-\(UUID().uuidString).mov")
+    private func flattened(_ asset: PHAsset, options: PHVideoRequestOptions) async -> UploadMediaFile? {
+        // Owned (#898): the file goes with this library, never stays in `tmp`.
+        // Made off the main actor: making it creates its folder.
+        let file = await Task.detached(priority: .userInitiated) {
+            UploadMediaFile(prefix: "picked", pathExtension: "mov")
+        }.value
+        let output = file.url
 
         return await withCheckedContinuation { continuation in
             let once = ResumeOnce()
@@ -356,7 +375,7 @@ final class PhotosMediaLibrary: MediaLibraryReading {
                 Task {
                     do {
                         try await held.export(to: output, as: .mov)
-                        once.run { continuation.resume(returning: output) }
+                        once.run { continuation.resume(returning: file) }
                     } catch {
                         once.run { continuation.resume(returning: nil) }
                     }

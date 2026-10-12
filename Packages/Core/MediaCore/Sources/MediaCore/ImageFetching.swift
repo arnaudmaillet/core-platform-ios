@@ -90,6 +90,25 @@ public struct URLSessionImageFetcher: ImageFetching {
                 request.setValue(hostHeader, forHTTPHeaderField: "Host")
             }
         }
+        // ⚠️ A P2 FETCH NEVER RUNS ON A CONSTRAINED NETWORK (#898). Low Data
+        // Mode already stops P2 at the coordinator (no slot), but a path can
+        // turn constrained while a fill runs: the system then refuses the
+        // request instead of spending the viewer's data on a picture nobody
+        // asked to see (`allowsConstrainedNetworkAccess`, WWDC19).
+        let speculative = context?.priority == .speculative
+        request.allowsConstrainedNetworkAccess = !speculative
+        do {
+            return try await load(request, context: context)
+        } catch let error as URLError where speculative && error.networkUnavailableReason == .constrained {
+            // Refused as P2, but raised since (the prefetched cell came on
+            // screen): asked again as what it now is.
+            guard let context, context.priority > .speculative else { throw error }
+            request.allowsConstrainedNetworkAccess = true
+            return try await load(request, context: context)
+        }
+    }
+
+    private func load(_ request: URLRequest, context: CacheFillContext?) async throws -> Data {
         let (data, response) = try await session.data(for: request, delegate: context.map(TaskPriorityFollower.init))
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw URLError(.badServerResponse)
