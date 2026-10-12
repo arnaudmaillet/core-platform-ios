@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNetworking
 import Foundation
+import LocalStore
 
 extension Conversation {
     /// This conversation as it reads once the viewer's own message lands: new
@@ -41,6 +42,11 @@ extension Conversation {
 /// contract `ConversationListViewModel` shipped with: `chat.v1` has no plane
 /// for any of them yet. When it grows one these become optimistic mirrors of
 /// server calls and survive relaunch; the UI contract above them is final.
+///
+/// The folders' rows and cursors are on the device too (#897,
+/// `deviceCache`): the first load after a launch opens on what the device
+/// stored for this viewer, offline included, and the network answer
+/// revalidates it in place. The choices above are not stored.
 @MainActor
 final class InboxCatalog {
     enum Phase: Equatable {
@@ -92,6 +98,14 @@ final class InboxCatalog {
 
     private let repository: any ChatProviding
     private let directory: ConversationDirectory?
+    /// The folders on the device (#897); nil keeps them in memory.
+    private let deviceCache: ChatLocalCache?
+    /// The device's rows were shown, a load landed, or the viewer changed:
+    /// the device is asked only until the launch's first rows are here.
+    private var restoredFromDevice = false
+    /// The rows shown are the device's and no load has answered since: a
+    /// recovery from an outage revalidates them.
+    private(set) var showsDeviceRows = false
 
     /// The INBOX folder's rows, the REQUESTS folder's and the HIDDEN
     /// REQUESTS folder's, as loaded.
@@ -135,9 +149,10 @@ final class InboxCatalog {
     private var accepted: Set<ConversationID> = []
     private var declined: Set<ConversationID> = []
 
-    init(repository: any ChatProviding, directory: ConversationDirectory? = nil) {
+    init(repository: any ChatProviding, directory: ConversationDirectory? = nil, deviceCache: ChatLocalCache? = nil) {
         self.repository = repository
         self.directory = directory
+        self.deviceCache = deviceCache
     }
 
     // MARK: - Observation
@@ -145,6 +160,9 @@ final class InboxCatalog {
     func observe(_ handler: @escaping (Snapshot) -> Void) -> ObservationToken {
         let id = UUID()
         observers[id] = handler
+        // A surface mounting before any load answered opens on the device's
+        // rows, in its first frame.
+        restoreFromDevice()
         handler(snapshot)
         // `deinit` carries no isolation guarantee, so the removal hops to the
         // main actor rather than touching the dictionary where it lands.
@@ -161,19 +179,50 @@ final class InboxCatalog {
     private func armRecovery() {
         guard recovery == nil else { return }
         recovery = connectivity.onRecovery { [weak self] in
-            // Only a failed inbox: a reload replaces an in-flight one, and the
-            // rows on screen are already the answer.
-            guard let self, case .failed = self.snapshot.phase else { return }
+            // Only a failed inbox, or one still on the device's rows: a reload
+            // replaces an in-flight one, and rows the network answered are
+            // already the answer.
+            guard let self else { return }
+            if case .failed = self.snapshot.phase {} else if !self.showsDeviceRows { return }
             self.reload()
         }
+    }
+
+    /// The folders as the device last stored them for this viewer (#897):
+    /// rows, cursors and whether later pages are stored, shown at once and
+    /// revalidated by the load that follows. Only while nothing has loaded
+    /// (a failed load included: offline, the device is all there is): once
+    /// rows from the network are here, the device has nothing newer. A miss
+    /// (nothing stored, or nobody known yet) asks again next time.
+    private func restoreFromDevice() {
+        guard !restoredFromDevice, snapshot.phase != .loaded, let deviceCache,
+              let inbox = deviceCache.folder(.inbox) else { return }
+        restoredFromDevice = true
+        var seen: Set<ConversationID> = []
+        for (folder, stored) in [(InboxFolder.inbox, inbox), (.requests, deviceCache.folder(.requests)),
+                                 (.hiddenRequests, deviceCache.folder(.hiddenRequests))] {
+            guard let stored else { continue }
+            // A conversation that moved folders between two stored pages is
+            // shown once, where it was stored first.
+            setRows(stored.rows.filter { seen.insert($0.id).inserted }, of: folder)
+            nextTokens[folder] = stored.nextCursor
+            if stored.pageCount > 1 { hasLaterPages.insert(folder) }
+        }
+        directory?.remember(allRows)
+        showsDeviceRows = true
+        snapshot.phase = .loaded
+        emit()
     }
 
     /// Reloads unconditionally, superseding any in-flight load.
     func reload() {
         armRecovery()
+        restoreFromDevice()
         load?.cancel()
         loadGeneration += 1
         let generation = loadGeneration
+        // Whose pages these are, asked before the fetch (#897).
+        let writer = deviceCache?.viewer
         load = Task { [weak self] in
             guard let self else { return }
             // Only the CURRENT load may clear the handle: a superseded task
@@ -213,6 +262,12 @@ final class InboxCatalog {
                 self.adopt(firstPage: inboxPage, of: .inbox)
                 if let requestPage { self.adopt(firstPage: requestPage, of: .requests) }
                 if let hiddenPage { self.adopt(firstPage: hiddenPage, of: .hiddenRequests) }
+                // The device keeps what the server answered, not the merge.
+                self.restoredFromDevice = true
+                self.showsDeviceRows = false
+                self.deviceCache?.storeFirstPage(inboxPage, of: .inbox, as: writer)
+                if let requestPage { self.deviceCache?.storeFirstPage(requestPage, of: .requests, as: writer) }
+                if let hiddenPage { self.deviceCache?.storeFirstPage(hiddenPage, of: .hiddenRequests, as: writer) }
                 let loaded = self.allRows
                 // Retire the bridge for every conversation the server now
                 // agrees is read; keep it only where it is still catching up.
@@ -253,6 +308,11 @@ final class InboxCatalog {
         conversations = []
         requestRows = []
         hiddenRequestRows = []
+        // ⚠️ NOT asked again for the next viewer: the device's wipe on this
+        // same change may not have run yet, and who `StorageScope` says is
+        // here can lag a profile switch. The network answers for them.
+        restoredFromDevice = true
+        showsDeviceRows = false
         pinned = []
         muted = []
         // A mute still on its way belongs to the previous viewer: its answer
@@ -293,12 +353,15 @@ final class InboxCatalog {
     func loadMore(_ folder: InboxFolder) {
         guard pageLoads[folder] == nil, let token = nextTokens[folder] else { return }
         let generation = loadGeneration
+        let writer = deviceCache?.viewer
         pageLoads[folder] = Task { [weak self] in
-            await self?.appendPages(of: folder, after: token, generation: generation)
+            await self?.appendPages(of: folder, after: token, generation: generation, as: writer)
         }
     }
 
-    private func appendPages(of folder: InboxFolder, after token: String, generation: Int) async {
+    private func appendPages(
+        of folder: InboxFolder, after token: String, generation: Int, as writer: LocalStoreViewer?
+    ) async {
         var token = token
         var fresh: [Conversation] = []
         for _ in 0..<Self.maxEmptyPagesInARow {
@@ -310,6 +373,9 @@ final class InboxCatalog {
                 if loadGeneration == generation { pageLoads[folder] = nil }
                 return
             }
+            // Stored only where it follows the stored pages (the device
+            // checks the cursor), up to the folder's bound.
+            deviceCache?.storeNextPage(page, of: folder, after: token, as: writer)
             nextTokens[folder] = page.nextPageToken
             // A conversation can sit on both sides of a page boundary, or
             // have moved folders since the first page.

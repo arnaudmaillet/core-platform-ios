@@ -4,6 +4,7 @@ import CoreNavigation
 import CoreNetworking
 import DesignSystem
 import Foundation
+import LocalStore
 
 /// The notifications list: loads, splits into "New" and "Earlier", holds the
 /// "Show more" state, marks the new rows seen, and routes a tap.
@@ -81,6 +82,12 @@ public final class NotificationsViewModel {
     /// own, since posting on the shared one reaches every suite at once.
     var notificationCenter: NotificationCenter = .default
     private var viewerObserver: NSObjectProtocol?
+    /// The drawer's last 100 rows on the device (#897): the list opens on
+    /// them, offline included, and every page the network answers is written
+    /// back. Nil keeps them in memory.
+    var deviceCache: NotificationsLocalCache?
+    /// The rows shown are the device's and no load has answered since.
+    private var showsDeviceRows = false
 
     public init(
         repository: any NotificationsProviding,
@@ -99,7 +106,20 @@ public final class NotificationsViewModel {
     public func viewDidLoad() {
         armRecovery()
         observeViewer()
+        restoreFromDevice()
         reload()
+    }
+
+    /// The rows the device stored for this viewer (#897), shown at once with
+    /// the cursor past them, and revalidated by the load that follows. Only
+    /// on an empty list.
+    private func restoreFromDevice() {
+        guard items.isEmpty, let stored = deviceCache?.stored(), !stored.items.isEmpty else { return }
+        items = stored.items
+        nextPageToken = stored.nextCursor
+        showsDeviceRows = true
+        updatePageFooter()
+        emitContent()
     }
 
     /// ⚠️ THE LIST IS THE VIEWER'S (#892). The drawer lives as long as the
@@ -126,8 +146,11 @@ public final class NotificationsViewModel {
         pageFailed = false
         isNewExpanded = false
         hasMarkedThisVisit = false
+        showsDeviceRows = false
         updatePageFooter()
         phase = .loading
+        // Not from the device: the wipe it gets on this same change may not
+        // have run yet. The network answers for the new viewer.
         reload()
     }
 
@@ -168,9 +191,11 @@ public final class NotificationsViewModel {
     }
 
     private func recoverFromOutage() {
-        // Only what failed: a refresh replaces the list with its first page,
-        // collapsing a viewer three pages deep.
+        // Only what failed, or rows still the device's: a refresh replaces the
+        // list with its first page, collapsing a viewer three pages deep.
         if case .failed = phase {
+            refresh()
+        } else if showsDeviceRows {
             refresh()
         } else if pageFailed {
             retryPage()
@@ -227,11 +252,15 @@ public final class NotificationsViewModel {
         // still on its way belongs to the list being replaced.
         pageLoad?.cancel()
         pageLoad = nil
+        // Whose rows these are, asked before the fetch (#897).
+        let writer = deviceCache?.viewer
         load = Task { [weak self] in
             guard let self else { return }
             do {
                 let page = try await self.repository.loadNotifications(limit: self.pageSize, after: nil)
                 let loaded = page.items
+                self.deviceCache?.storeFirstPage(page, as: writer)
+                self.showsDeviceRows = false
                 self.items = loaded
                 self.nextPageToken = page.nextPageToken
                 self.pageFailed = false
@@ -262,6 +291,7 @@ public final class NotificationsViewModel {
     /// already loaded leaves nothing on screen to ask again, so the one after
     /// it is asked at once (at most `maxEmptyPagesInARow`).
     private func loadPages(after token: String) {
+        let writer = deviceCache?.viewer
         pageLoad = Task { [weak self] in
             guard let self else { return }
             var token = token
@@ -279,6 +309,8 @@ public final class NotificationsViewModel {
                     return
                 }
                 guard !Task.isCancelled else { return }
+                // Stored where it follows the stored pages, up to the last 100.
+                self.deviceCache?.storeNextPage(page, after: token, as: writer)
                 self.nextPageToken = page.nextPageToken
                 let known = Set(self.items.map(\.id))
                 fresh = page.items.filter { !known.contains($0.id) }

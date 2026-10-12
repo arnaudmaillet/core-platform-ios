@@ -8,13 +8,14 @@ import GRDB
 /// know (an app downgraded, a TestFlight build rolled back) is deleted and
 /// recreated, never read blindly (`LocalStore.open`).
 ///
-/// Messages (#897) and anything else that needs tables of its own add a
-/// migration here (e.g. `"v2-messages"`) rather than a second database: one
-/// file, one budget, one wipe.
+/// Anything that needs tables of its own adds a migration here rather than a
+/// second database: one file, one budget, one wipe. Conversations' messages
+/// did (`v2`, #897).
 enum LocalStoreSchema {
     static func migrator(extra: [(String, @Sendable (Database) throws -> Void)] = []) -> DatabaseMigrator {
         var migrator = DatabaseMigrator()
         migrator.registerMigration("v1-entities-and-lists", migrate: v1)
+        migrator.registerMigration("v2-transcripts", migrate: v2)
         // Tests append migrations to prove an upgrade keeps the data.
         for (identifier, migrate) in extra {
             migrator.registerMigration(identifier, migrate: migrate)
@@ -87,6 +88,41 @@ enum LocalStoreSchema {
             ) WITHOUT ROWID;
             CREATE INDEX list_item_entity ON list_item(entity_type, entity_id);
             CREATE UNIQUE INDEX list_item_once ON list_item(list_key, entity_type, entity_id);
+            """)
+    }
+
+    /// Transcripts (#897): the newest items of a time-ordered collection (a
+    /// conversation's messages), at most `LocalStorePolicy.transcriptLength`
+    /// of them, for at most `LocalStorePolicy.transcriptCount` collections.
+    ///
+    /// - `transcript`: one row per collection; `accessed_at` orders the LRU
+    ///   that keeps the last ones.
+    /// - `transcript_item`: an item's bytes, ordered by `sort_key` (its time,
+    ///   in ms) then `id`. An item that was the OLDEST of the network page
+    ///   that brought it is a `boundary`, with the cursor that page answered
+    ///   (`older_cursor`; NULL: nothing older exists). The stored items always
+    ///   end at a boundary, so the oldest one's cursor is where paging goes on.
+    static func v2(_ db: Database) throws {
+        try db.execute(sql: """
+            CREATE TABLE transcript (
+                key TEXT PRIMARY KEY NOT NULL,
+                fetched_at REAL NOT NULL,
+                expires_at REAL NOT NULL,
+                accessed_at REAL NOT NULL
+            ) WITHOUT ROWID;
+
+            CREATE TABLE transcript_item (
+                transcript_key TEXT NOT NULL REFERENCES transcript(key) ON DELETE CASCADE,
+                id TEXT NOT NULL,
+                sort_key INTEGER NOT NULL,
+                format INTEGER NOT NULL,
+                payload BLOB NOT NULL,
+                size INTEGER NOT NULL,
+                boundary INTEGER NOT NULL,
+                older_cursor TEXT,
+                PRIMARY KEY (transcript_key, id)
+            ) WITHOUT ROWID;
+            CREATE INDEX transcript_item_order ON transcript_item(transcript_key, sort_key, id);
             """)
     }
 }

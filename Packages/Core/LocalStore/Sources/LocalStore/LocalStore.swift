@@ -57,13 +57,13 @@ public final class LocalStore: ManagedCache {
     /// `<directory>/store.sqlite`.
     public let fileURL: URL
 
-    private let pool: DatabasePool
+    let pool: DatabasePool
     private let viewer: @Sendable () -> LocalStoreViewer?
-    private let clock: any CacheClock
-    private let state: Mutex<State>
+    let clock: any CacheClock
+    let state: Mutex<State>
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "local-store")
 
-    private struct State {
+    struct State {
         /// Whose rows the file holds; nil when it holds none.
         var owner: LocalStoreViewer?
         var limits: CacheLimits
@@ -212,7 +212,7 @@ public final class LocalStore: ManagedCache {
 
     /// Whether the rows may be read by whoever is here now. A store holding
     /// someone else's rows answers no, and wipes them in the background.
-    private func admitsRead() -> Bool {
+    func admitsRead() -> Bool {
         guard let current = viewer() else { return false }
         guard let owner = state.withLock({ $0.owner }) else { return false }
         if owner.isSamePerson(as: current) { return true }
@@ -259,8 +259,12 @@ public final class LocalStore: ManagedCache {
         /// The page written, kept over everything else of its tier or below:
         /// a write never evicts what it just wrote unless nothing else can go.
         var page: (list: String, index: Int)?
+        /// The transcript written, kept the same way.
+        var transcript: String?
         /// A write never displaces content of a higher tier.
         var tier: CacheTier
+        /// Rows the write itself evicted (a transcript's bounds).
+        var evicted = 0
     }
 
     /// Runs `body` in one write transaction if `writer` may write, then
@@ -269,14 +273,17 @@ public final class LocalStore: ManagedCache {
     /// - Returns: whether what `body` wrote is in the store: false when the
     ///   write was dropped, when `body` wrote nothing (nil), or when it did
     ///   not fit the budget and went again.
-    private func write(as writer: LocalStoreViewer?, _ body: (Database, Date) throws -> Footprint?) throws -> Bool {
+    func write(as writer: LocalStoreViewer?, _ body: (Database, Date) throws -> Footprint?) throws -> Bool {
         let now = clock.now
         let currentLimits = state.withLock { $0.limits }
         let outcome: (owner: LocalStoreViewer, evicted: Int, kept: Bool)? = try pool.write { db in
             guard let owner = try admitWrite(db, as: writer) else { return nil }
             guard let footprint = try body(db, now) else { return (owner, 0, false) }
-            let budget = try enforce(db, limits: currentLimits, now: now, protecting: footprint.page, ceiling: footprint.tier)
-            return (owner, budget.evicted, budget.fits)
+            let budget = try enforce(
+                db, limits: currentLimits, now: now,
+                protecting: footprint.page, transcript: footprint.transcript, ceiling: footprint.tier
+            )
+            return (owner, footprint.evicted + budget.evicted, budget.fits)
         }
         guard let outcome else { return false }
         state.withLock {
@@ -491,19 +498,29 @@ public final class LocalStore: ManagedCache {
     ///   longer the one after its last page, so this page does not follow what
     ///   is stored; or for the reasons `replaceList` gives. The list's cursor
     ///   is then still where its stored pages stop.
+    ///
+    /// - Parameter maxEntries: the list's bound (the last 100 notifications,
+    ///   the last 50 conversations): a page is stored while the list holds
+    ///   fewer entries, and stored whole, so its cursor stays where paging
+    ///   goes on. Nil: no bound but the budget.
     @discardableResult
-    public func appendPage(_ page: LocalListPage, to key: String, after cursor: String, as writer: LocalStoreViewer?) throws -> Bool {
+    public func appendPage(
+        _ page: LocalListPage, to key: String, after cursor: String, as writer: LocalStoreViewer?,
+        maxEntries: Int? = nil
+    ) throws -> Bool {
         try write(as: writer) { db, now in
             guard let last = try Row.fetchOne(
                 db.cachedStatement(sql: """
                     SELECT p.page_index, p.next_cursor, p.tier,
-                           (SELECT IFNULL(MAX(position), -1) FROM list_item WHERE list_key = p.list_key)
+                           (SELECT IFNULL(MAX(position), -1) FROM list_item WHERE list_key = p.list_key),
+                           (SELECT COUNT(*) FROM list_item WHERE list_key = p.list_key AND role = \(Self.entryRole))
                     FROM list_page p JOIN list l ON l.key = p.list_key
                     WHERE p.list_key = ? AND l.expires_at > ?
                     ORDER BY p.page_index DESC LIMIT 1
                     """),
                 arguments: [key, now.timeIntervalSince1970]
             ), (last[1] as String?) == cursor else { return nil }
+            if let maxEntries, (last[4] as Int) >= maxEntries { return nil }
             try upsert(page.entities, in: db, now: now, tier: .speculative)
             // Never above the page before it, so evicting a list from its tail
             // always keeps what is left contiguous.
@@ -625,6 +642,11 @@ public final class LocalStore: ManagedCache {
             for row in try Row.fetchAll(db, sql: "SELECT tier, SUM(\(Self.pageCostSQL("list_page"))) FROM list_page GROUP BY tier") {
                 byTier[CacheTier(storedRank: row[0]), default: 0] += row[1] as Int
             }
+            // Transcripts are the last open conversations: `retained`.
+            if let transcripts = try Row.fetchOne(db, sql: "SELECT \(Self.transcriptBytesSQL), (SELECT COUNT(*) FROM transcript_item)") {
+                byTier[.retained, default: 0] += transcripts[0] as Int
+                count += transcripts[1] as Int
+            }
             let bytes = byTier.values.reduce(0, +)
             return CacheUsage(bytes: bytes, count: count, pinnedBytes: 0, bytesByTier: byTier.filter { $0.value > 0 }, byteLimit: limit)
         }
@@ -654,7 +676,7 @@ public final class LocalStore: ManagedCache {
             do {
                 var evicted = 0
                 try db.inTransaction {
-                    evicted = try enforce(db, limits: limits, now: now, protecting: nil, ceiling: .retained).evicted
+                    evicted = try enforce(db, limits: limits, now: now, protecting: nil, transcript: nil, ceiling: .retained).evicted
                     return .commit
                 }
                 state.withLock { $0.statistics.recordRemoval(reason, count: evicted) }
@@ -735,6 +757,8 @@ public final class LocalStore: ManagedCache {
             DELETE FROM list_page;
             DELETE FROM list;
             DELETE FROM entity;
+            DELETE FROM transcript_item;
+            DELETE FROM transcript;
             DELETE FROM meta WHERE key = 'owner';
             """)
     }
@@ -748,7 +772,7 @@ public final class LocalStore: ManagedCache {
         }
     }
 
-    private func compactLater() {
+    func compactLater() {
         pool.asyncWriteWithoutTransaction { [weak self] db in
             try? self?.compact(db, truncatingLog: false)
         }

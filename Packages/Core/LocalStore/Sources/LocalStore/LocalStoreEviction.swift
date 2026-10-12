@@ -10,6 +10,9 @@ import GRDB
 ///   page k-1's (paging resumes exactly where the stored pages stop). The
 ///   entities only those pages held go with them.
 /// - entities no list holds (written on their own), by their own tier.
+/// - a transcript (a conversation's newest messages), whole. Transcripts are
+///   `retained` (the last open conversations), so only a budget takes one,
+///   least recently opened first.
 ///
 /// Pages never outrank the page before them (`appendPage`), so the order
 /// above always takes a list from its tail.
@@ -23,6 +26,17 @@ extension LocalStore {
         enum Kind {
             case page(list: String, index: Int)
             case entity(LocalEntityKey)
+            case transcript(String)
+
+            /// Within a tier and an age: loose entities, then transcripts,
+            /// then pages.
+            var rank: Int {
+                switch self {
+                case .entity: 0
+                case .transcript: 1
+                case .page: 2
+                }
+            }
         }
 
         let kind: Kind
@@ -36,10 +50,10 @@ extension LocalStore {
             if lhs.tier != rhs.tier { return lhs.tier < rhs.tier }
             if lhs.accessedAt != rhs.accessedAt { return lhs.accessedAt < rhs.accessedAt }
             switch (lhs.kind, rhs.kind) {
-            case (.entity, .page): return true
-            case (.page, .entity): return false
             case let (.page(_, left), .page(_, right)): return left > right
             case let (.entity(left), .entity(right)): return (left.type, left.id) < (right.type, right.id)
+            case let (.transcript(left), .transcript(right)): return left < right
+            default: return lhs.kind.rank < rhs.kind.rank
             }
         }
     }
@@ -48,11 +62,12 @@ extension LocalStore {
 
     /// Evicts until the store fits `limits` (and its speculative pages fit
     /// their cap), never above `ceiling`, and the pages of `protecting`'s list
-    /// last: if nothing else can go, the page just written goes (with the
-    /// pages after it), and the write did not fit.
+    /// (or the `transcript` written) last: if nothing else can go, the page
+    /// just written goes (with the pages after it), or the transcript, and
+    /// the write did not fit.
     func enforce(
         _ db: Database, limits: CacheLimits, now: Date,
-        protecting written: (list: String, index: Int)?, ceiling: CacheTier
+        protecting written: (list: String, index: Int)?, transcript writtenTranscript: String?, ceiling: CacheTier
     ) throws -> (evicted: Int, fits: Bool) {
         var evicted = 0
         // A few rounds: a page shares entities with other lists, so what a
@@ -77,6 +92,7 @@ extension LocalStore {
                     if let first = gone[list], index >= first { continue }
                     gone[list] = min(gone[list] ?? .max, index)
                 }
+                if case .transcript(let key) = victim.kind, key == writtenTranscript { continue }
                 try delete(victim, in: db)
                 freedTotal += victim.bytes
                 if victim.tier == .speculative { freedSpeculative += victim.bytes }
@@ -86,17 +102,30 @@ extension LocalStore {
             guard progress else { break }
         }
         let fits = try totalBytes(db) <= limits.bytes && speculativeBytes(db) <= limits.speculativeBytes
-        guard !fits, let written else { return (evicted, fits) }
-        try deletePages(of: written.list, from: written.index, in: db)
-        return (evicted + 1, false)
+        guard !fits else { return (evicted, fits) }
+        if let written {
+            try deletePages(of: written.list, from: written.index, in: db)
+            return (evicted + 1, false)
+        }
+        if let writtenTranscript {
+            try deleteTranscript(writtenTranscript, in: db)
+            return (evicted + 1, false)
+        }
+        return (evicted, fits)
     }
 
     func totalBytes(_ db: Database) throws -> Int {
         try Int.fetchOne(db, sql: """
             SELECT IFNULL((SELECT SUM(size) FROM entity), 0)
                  + IFNULL((SELECT SUM(\(Self.pageCostSQL("list_page"))) FROM list_page), 0)
+                 + \(Self.transcriptBytesSQL)
             """) ?? 0
     }
+
+    /// Every transcript's cost, as SQL: its items and its own row.
+    static let transcriptBytesSQL = """
+        (IFNULL((SELECT SUM(size) FROM transcript_item), 0) + (SELECT COUNT(*) FROM transcript) * \(transcriptOverhead))
+        """
 
     /// Bytes of prefetched pages nobody read yet: their own cost and the
     /// entities only they hold.
@@ -142,6 +171,16 @@ extension LocalStore {
                 tier: CacheTier(storedRank: row[2]), accessedAt: row[3], bytes: row[4]
             ))
         }
+        if maximumTier >= .retained {
+            let transcripts = try Row.fetchAll(db, sql: """
+                SELECT t.key, t.accessed_at,
+                       IFNULL((SELECT SUM(size) FROM transcript_item WHERE transcript_key = t.key), 0) + \(Self.transcriptOverhead)
+                FROM transcript t
+                """)
+            for row in transcripts {
+                victims.append(Victim(kind: .transcript(row[0]), tier: .retained, accessedAt: row[1], bytes: row[2]))
+            }
+        }
         return victims.sorted(by: Victim.evictionOrder)
     }
 
@@ -151,7 +190,14 @@ extension LocalStore {
             try db.execute(sql: "DELETE FROM entity WHERE type = ? AND id = ?", arguments: [key.type, key.id])
         case .page(let list, let index):
             try deletePages(of: list, from: index, in: db)
+        case .transcript(let key):
+            try deleteTranscript(key, in: db)
         }
+    }
+
+    /// A transcript and its items.
+    func deleteTranscript(_ key: String, in db: Database) throws {
+        try db.execute(sql: "DELETE FROM transcript WHERE key = ?", arguments: [key])
     }
 
     /// Deletes pages `index...` of `list` (the whole list from 0) and the
@@ -200,8 +246,10 @@ extension LocalStore {
         case .belowRetained:
             evicted = try evict(try victims(db, maximumTier: .recent), in: db)
         case .allButPinned:
-            evicted = try Int.fetchOne(db, sql: "SELECT (SELECT COUNT(*) FROM entity) + (SELECT COUNT(*) FROM list_page)") ?? 0
-            try db.execute(sql: "DELETE FROM list; DELETE FROM entity;")
+            evicted = try Int.fetchOne(db, sql: """
+                SELECT (SELECT COUNT(*) FROM entity) + (SELECT COUNT(*) FROM list_page) + (SELECT COUNT(*) FROM transcript)
+                """) ?? 0
+            try db.execute(sql: "DELETE FROM list; DELETE FROM entity; DELETE FROM transcript;")
         }
         return (expired, evicted)
     }
@@ -220,14 +268,17 @@ extension LocalStore {
         return count
     }
 
-    /// Lists past their lifetime (with the entities only they held), and
-    /// entities past theirs. Returns how many rows went.
+    /// Lists past their lifetime (with the entities only they held),
+    /// entities past theirs, and transcripts past theirs. Returns how many
+    /// rows went.
     private func sweepExpired(_ db: Database, now: Date) throws -> Int {
         let lists = try String.fetchAll(db, sql: "SELECT key FROM list WHERE expires_at <= ?", arguments: [now.timeIntervalSince1970])
         for list in lists {
             try deletePages(of: list, from: 0, in: db)
         }
         try db.execute(sql: "DELETE FROM entity WHERE expires_at <= ?", arguments: [now.timeIntervalSince1970])
-        return lists.count + db.changesCount
+        let entities = db.changesCount
+        try db.execute(sql: "DELETE FROM transcript WHERE expires_at <= ?", arguments: [now.timeIntervalSince1970])
+        return lists.count + entities + db.changesCount
     }
 }

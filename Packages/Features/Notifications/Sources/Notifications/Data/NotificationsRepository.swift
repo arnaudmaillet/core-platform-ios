@@ -166,9 +166,17 @@ public actor NotificationsRepository: NotificationsProviding {
     /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
     private let viewer: any ViewerProviding
     /// Absence is cached with presence: a profile that could not be read is
-    /// not asked for again on the next load.
-    private var actorCache: [ProfileID: NotificationActor?] = [:]
-    private var previewCache: [PostID: NotificationSubjectPreview?] = [:]
+    /// not asked for again on the next load — for `failedLookupLifetime`,
+    /// then it is (#897). Both caches are bounded.
+    private var actorCache: LookupCache<ProfileID, NotificationActor>
+    private var previewCache: LookupCache<PostID, NotificationSubjectPreview>
+    private let now: @Sendable () -> Date
+
+    /// The people and posts kept between loads: a drawer's worth many times
+    /// over (100 stored rows, two faces and one post each).
+    public static let lookupCapacity = 500
+    /// How long a failed lookup is believed.
+    static let failedLookupLifetime: TimeInterval = 5 * 60
 
     /// The longest excerpt a text post contributes — two lines of a drawer
     /// row, with room for the ellipsis the label adds.
@@ -179,8 +187,13 @@ public actor NotificationsRepository: NotificationsProviding {
         profileClient: any Profile_V1_ProfileServiceClientInterface,
         postClient: (any Post_V1_PostServiceClientInterface)? = nil,
         authSession: any AuthSessionProviding,
-        viewer: (any ViewerProviding)? = nil
+        viewer: (any ViewerProviding)? = nil,
+        lookupCapacity: Int = NotificationsRepository.lookupCapacity,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.actorCache = LookupCache(capacity: lookupCapacity, failureLifetime: Self.failedLookupLifetime)
+        self.previewCache = LookupCache(capacity: lookupCapacity, failureLifetime: Self.failedLookupLifetime)
+        self.now = now
         self.notificationClient = notificationClient
         self.profileClient = profileClient
         self.postClient = postClient
@@ -250,7 +263,8 @@ public actor NotificationsRepository: NotificationsProviding {
             wanted.insert(ProfileID(view.senderProfileID))
             if let second = Self.sampledOthers(of: view).first { wanted.insert(second) }
         }
-        let missing = wanted.filter { actorCache[$0] == nil && !$0.rawValue.isEmpty }
+        let asked = now()
+        let missing = wanted.filter { !actorCache.isKnown($0, now: asked) && !$0.rawValue.isEmpty }
         guard !missing.isEmpty else { return }
 
         let client = profileClient
@@ -270,8 +284,9 @@ public actor NotificationsRepository: NotificationsProviding {
             }
             return await group.reduce(into: [(ProfileID, NotificationActor?)]()) { $0.append($1) }
         }
+        let answered = now()
         for (id, actor) in fetched {
-            actorCache[id] = .some(actor)
+            actorCache.record(actor, for: id, now: answered)
         }
     }
 
@@ -283,7 +298,8 @@ public actor NotificationsRepository: NotificationsProviding {
         let subjects = views
             .filter { $0.subjectKind == .post && !$0.subjectID.isEmpty }
             .map { PostID($0.subjectID) }
-        let missing = Set(subjects).filter { previewCache[$0] == nil }
+        let asked = now()
+        let missing = Set(subjects).filter { !previewCache.isKnown($0, now: asked) }
         guard !missing.isEmpty else { return }
 
         let fetched = await withTaskGroup(of: (PostID, NotificationSubjectPreview?).self) { group in
@@ -298,8 +314,9 @@ public actor NotificationsRepository: NotificationsProviding {
             }
             return await group.reduce(into: [(PostID, NotificationSubjectPreview?)]()) { $0.append($1) }
         }
+        let answered = now()
         for (id, preview) in fetched {
-            previewCache[id] = .some(preview)
+            previewCache.record(preview, for: id, now: answered)
         }
     }
 
@@ -334,9 +351,9 @@ public actor NotificationsRepository: NotificationsProviding {
 
     private func makeItem(from view: Notification_V1_NotificationView) -> NotificationItem {
         let senderID = ProfileID(view.senderProfileID)
-        let sender = actorCache[senderID] ?? nil
+        let sender = actorCache.value(for: senderID)
         let postSubjectID: PostID? = view.subjectKind == .post ? PostID(view.subjectID) : nil
-        let samples = Self.sampledOthers(of: view).compactMap { actorCache[$0] ?? nil }
+        let samples = Self.sampledOthers(of: view).compactMap { actorCache.value(for: $0) }
         return NotificationItem(
             id: view.notificationID,
             action: Self.action(from: view.kind),
@@ -346,7 +363,7 @@ public actor NotificationsRepository: NotificationsProviding {
             otherSenderCount: max(0, Int(view.senderCount) - 1),
             sampleSenders: samples,
             postSubjectID: postSubjectID,
-            subjectPreview: postSubjectID.flatMap { previewCache[$0] ?? nil },
+            subjectPreview: postSubjectID.flatMap { previewCache.value(for: $0) },
             isRead: view.isRead,
             createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000)
         )

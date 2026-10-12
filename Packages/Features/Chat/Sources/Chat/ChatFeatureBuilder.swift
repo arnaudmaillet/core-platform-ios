@@ -3,6 +3,7 @@ import CoreModels
 import CoreStorage
 import CoreNavigation
 import FeedInterface
+import LocalStore
 import MediaCore
 import UIKit
 
@@ -35,7 +36,12 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
     private let threadScreens: () -> any ConversationThreadScreenBuilding
     /// The thread's camera and library (#681); nil sends text only.
     private let mediaPicker: ChatMediaPickerFactory?
+    /// The inbox and the last conversations on the device (#897).
+    private let deviceCache: ChatLocalCache?
 
+    /// `localStore`: the inbox opens on its last rows and a conversation on
+    /// its last 200 messages, offline and at a cold start (#897). Nil keeps
+    /// them in memory.
     public init(
         repository: any ChatProviding,
         connections: (any SuggestionsProviding)? = nil,
@@ -44,13 +50,16 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         router: (any Router)? = nil,
         recentSearches: RecentSearchStore? = nil,
         mediaPicker: ChatMediaPickerFactory? = nil,
+        localStore: LocalStore? = nil,
         threadScreens: @escaping () -> any ConversationThreadScreenBuilding
     ) {
         self.threadScreens = threadScreens
         self.mediaPicker = mediaPicker
         let directory = ConversationDirectory()
         self.directory = directory
-        catalog = InboxCatalog(repository: repository, directory: directory)
+        let deviceCache = localStore.map(ChatLocalCache.init(store:))
+        self.deviceCache = deviceCache
+        catalog = InboxCatalog(repository: repository, directory: directory, deviceCache: deviceCache)
         self.repository = repository
         self.connections = connections
         self.people = people
@@ -93,16 +102,14 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
         // The peek's view model is built WITHOUT the inbox callbacks: a peek
         // is not a read.
         let makeThreadPreview: (ConversationID) -> UIViewController = { [self] id in
-            makeThreadScreen(
-                ConversationViewModel(
-                    conversationID: id,
-                    repository: repository,
-                    directory: directory,
-                    router: router
-                ),
-                mode: .preview,
-                prefill: ""
+            let viewModel = ConversationViewModel(
+                conversationID: id,
+                repository: repository,
+                directory: directory,
+                router: router
             )
+            viewModel.deviceCache = deviceCache
+            return makeThreadScreen(viewModel, mode: .preview, prefill: "")
         }
         conversations.threadPreviewProvider = makeThreadPreview
 
@@ -179,6 +186,7 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
             directory: directory,
             router: router
         )
+        viewModel.deviceCache = deviceCache
         // Reading a thread is an inbox event, not just a thread event: the row
         // has to leave Unread. Applied immediately — before the server write —
         // so the list underneath is already correct during the back swipe,

@@ -57,6 +57,15 @@ struct ChatViewModelTests {
         try? await Task.sleep(for: .milliseconds(50))
     }
 
+    /// A ceiling, not a pace: a send hops through several tasks, which a
+    /// busy parallel run can hold past any fixed wait.
+    private func settle(until condition: () async -> Bool) async {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
+        while !(await condition()), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     // MARK: - Conversation list
 
     @Test func listLoadsIntoContent() async {
@@ -294,7 +303,7 @@ struct ChatViewModelTests {
         #expect(drafts.last??.snippet == "m1") // body used as the excerpt
 
         viewModel.send("on it")
-        await settle()
+        await settle { await !provider.sentReplyTos.isEmpty }
 
         #expect(await provider.sentReplyTos == ["m1"]) // reply reference threaded through
         #expect(drafts.last == .some(nil))             // reply state cleared on send
@@ -365,7 +374,10 @@ struct ChatViewModelTests {
         await settle()
 
         viewModel.send("  hello  ")
-        await settle()
+        await settle {
+            guard case .content(let models) = last else { return false }
+            return models.last?.id == "sent"
+        }
 
         #expect(await provider.sentBodies == ["hello"]) // trimmed
         guard case .content(let models) = last else {
