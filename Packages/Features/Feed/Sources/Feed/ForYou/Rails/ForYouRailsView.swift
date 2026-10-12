@@ -282,6 +282,60 @@ final class ForYouRailsView: UIView {
     /// list under it subtracts from the pool's budget.
     private(set) var claimedPlayers = 0
 
+    /// The rows' lookaheads (#970): each row its own list and its own owner,
+    /// along its horizontal axis — a screen width ahead decoded, two and a
+    /// half on disk. A row outside the list's display window plans nothing
+    /// (`refreshLookaheadReach`).
+    ///
+    /// The Friends row's faces carry their story's first pictures too: a tap
+    /// flies the face into its first post, and nothing else on this screen
+    /// shows the friends' posts, so a flight asking the cache at the tap
+    /// found it cold every time (`ForYouRowOrigins.storyPictures` rescues a
+    /// late one mid-air; a picture there from the first frame is the
+    /// transition as designed).
+    private lazy var storyLookahead: ScrollLookahead = {
+        let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "foryou.friends", kind: .rail) { [weak self] path in
+            self?.storyImages(at: path) ?? []
+        }
+        lookahead.attach(to: storiesView)
+        return lookahead
+    }()
+
+    private lazy var cardLookahead: ScrollLookahead = {
+        let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "foryou.following", kind: .rail) { [weak self] path in
+            guard let self, let id = mediaSource.itemIdentifier(for: path),
+                  let post = cards.first(where: { $0.id == id }) else { return [] }
+            return post.lookaheadImages
+        }
+        lookahead.attach(to: mediaView)
+        return lookahead
+    }()
+
+    /// How many of a story's posts its face fetches ahead: a story opens on
+    /// its first, and a close leaves from wherever the viewer paged to,
+    /// which is rarely far.
+    static let storyPicturesAhead = 2
+
+    private func storyImages(at path: IndexPath) -> [ImageRequest] {
+        guard let id = storySource.itemIdentifier(for: path),
+              let story = stories.first(where: { $0.authorID == id }) else { return [] }
+        let face: [ImageRequest] = story.avatarURL.map { [ImageRequest(url: $0)] } ?? []
+        let pictures: [ImageRequest] = story.posts.prefix(Self.storyPicturesAhead).flatMap(\.lookaheadImages)
+        return face + pictures
+    }
+
+    private var rowLookaheads: [ScrollLookahead] { [storyLookahead, cardLookahead] }
+
+    /// Whether the rows sit in the list's display window (a screen ahead
+    /// of the viewport, half a screen behind): outside it, a row plans
+    /// nothing (#970).
+    private func refreshLookaheadReach() {
+        guard let window else { return }
+        let reach = LookaheadWindow.display.rect(around: window.bounds, axis: .vertical, forward: true)
+        let inside = !isHidden && convert(bounds, to: window).intersects(reach)
+        for lookahead in rowLookaheads { lookahead.setInParentWindow(inside) }
+    }
+
     private var storySource: UICollectionViewDiffableDataSource<Int, ProfileID>!
     private var mediaSource: UICollectionViewDiffableDataSource<Int, PostID>!
     private var textSource: UICollectionViewDiffableDataSource<Int, PostID>!
@@ -408,9 +462,13 @@ final class ForYouRailsView: UIView {
         friendsHeader.content = .init(title: "Friends", newCount: rails.friendsBadge, isLink: true)
         followingBadge = rails.followingBadge
         followingHeader.content = .init(title: followingTitle, newCount: rails.followingBadge, isLink: true)
-        if storiesChanged { applyStories(animated: window != nil) }
+        if storiesChanged {
+            applyStories(animated: window != nil)
+            storyLookahead.setNeedsPlan()
+        }
         if cardsChanged {
             applyCards()
+            cardLookahead.setNeedsPlan()
             #if DEBUG
             // Which `-foryou-open-card` index opens which row's card.
             let text = cards.indices.filter { ForYouFollowingRows.Row(cards[$0]) == .text }
@@ -485,6 +543,9 @@ final class ForYouRailsView: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         holdStoryOrderIfShown()
+        // A stay on screen per row: a new owner each, revoked when it leaves.
+        for lookahead in rowLookaheads { lookahead.setOnScreen(window != nil) }
+        refreshLookaheadReach()
     }
 
     /// Each row its own posts, in the section's order (`ForYouFollowingRows`).
@@ -620,6 +681,8 @@ final class ForYouRailsView: UIView {
     /// pushed screen, another tab. Nothing plays while it is not.
     func setAutoplayActive(_ active: Bool) {
         isAutoplayActive = active
+        // Covered but alive: the rows drop to the minimum windows (#970).
+        for lookahead in rowLookaheads { lookahead.setHidden(!active) }
         playback?.setSurfaceVisible(active)
         if active { updateAutoplay() }
     }
@@ -632,6 +695,8 @@ final class ForYouRailsView: UIView {
     ///   which reads `claimedPlayers` straight after — telling it to reconcile
     ///   again from inside that reconcile would re-enter it.
     func updateAutoplay(allowingStarts: Bool = true, notifiesClaimChange: Bool = true) {
+        // Called as the LIST scrolls too: the rows' reach follows it.
+        refreshLookaheadReach()
         let before = claimedPlayers
         claimedPlayers = reconcilePlayback(allowingStarts: allowingStarts)
         if notifiesClaimChange, claimedPlayers != before { onPlayerClaimChange?() }
@@ -1212,12 +1277,20 @@ extension ForYouRailsView: UICollectionViewDelegate {
         if let drag, drag.row === scrollView {
             self.drag?.tracker.track(scrollView.contentOffset.x)
         }
+        if scrollView === storiesView { storyLookahead.scrollViewDidScroll() }
+        if scrollView === mediaView { cardLookahead.scrollViewDidScroll() }
         // Only the media row plays; the text row scrolls past nothing to start.
         guard scrollView === mediaView else { return }
         // A horizontal row is short: reconciling on every tick costs a diff
         // of three cards, and a card that comes half into view should start
         // as it arrives, not when the finger lifts.
         updateAutoplay()
+    }
+
+    /// A row came to rest: its fling is over, and its display window decodes.
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        if scrollView === storiesView { storyLookahead.scrollViewDidEndScrolling() }
+        if scrollView === mediaView { cardLookahead.scrollViewDidEndScrolling() }
     }
 
     // MARK: - Snapping

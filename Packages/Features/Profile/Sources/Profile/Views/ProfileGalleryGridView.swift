@@ -57,15 +57,12 @@ final class ProfileGalleryGridView: UIView {
     /// page's.
     var onVerticalScroll: ((CGFloat) -> Void)?
     var onPullToRefresh: (() -> Void)?
-    /// One of the grid's last tiles came on screen: time for the next page
-    /// (#634).
+    /// The grid came within two screens of its end (three on a fling): time
+    /// for the next page (#634, `LookaheadPaging` #970).
     var onNearEnd: (() -> Void)?
     /// "View all" under one of the Discover list's chunks: the profile's
     /// media gallery (#631).
     var onViewAllTapped: (() -> Void)?
-    /// How close to the end a tile has to be for its coming on screen to ask
-    /// for the next page — three rows of tiles.
-    static let nearEndTileCount = 9
     /// The post to bring clear of the chrome once this page is out of sight.
     /// An ID, not an index: the corpus can change while the post is open.
     private var pendingRevealPostID: PostID?
@@ -123,6 +120,47 @@ final class ProfileGalleryGridView: UIView {
     /// The posts in the order they are DRAWN. On Discover that is the
     /// stretches' order, not the corpus's: a chunk pulls media forward.
     private var posts: [GalleryPost] = []
+
+    /// This page's lookahead (#970): covers decoded a screen ahead, bytes on
+    /// disk two and a half ahead, one `CacheOwner` per stay on screen. A tab
+    /// laid out beside the active one is alive but hidden: minimum windows.
+    private lazy var lookahead: ScrollLookahead = {
+        let lookahead = ScrollLookahead(
+            pipeline: imagePipeline, name: "profile.\(tab).\(style)", kind: style == .grid ? .grid : .card
+        ) { [weak self] indexPath in
+            self?.lookaheadImages(at: indexPath) ?? []
+        }
+        lookahead.attach(to: collectionView)
+        return lookahead
+    }()
+
+    private func lookaheadImages(at indexPath: IndexPath) -> [ImageRequest] {
+        guard !showsSkeleton else { return [] }
+        let index = flatIndex(for: indexPath)
+        guard posts.indices.contains(index) else { return [] }
+        return posts[index].lookaheadImages
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        lookahead.setOnScreen(window != nil)
+    }
+
+    /// The content length the next page was last asked at from a scroll.
+    private var nextPageAskedAtLength: CGFloat?
+
+    /// Asks for the next page within two screens of the end, three on a
+    /// fling (#970). From a scroll, once per content length: the view model
+    /// resumes a paging that failed on every ask, and a scroll ticks at the
+    /// display's rate — a failure would be retried at once, over and over.
+    /// A tile coming on screen (`force`) asks as it always did.
+    private func askNextPageIfNearEnd(force: Bool) {
+        guard !showsSkeleton, !posts.isEmpty, lookahead.wantsNextPage else { return }
+        let length = collectionView.contentSize.height
+        guard force || nextPageAskedAtLength != length else { return }
+        nextPageAskedAtLength = length
+        onNearEnd?()
+    }
 
     // MARK: Discover's stretches
 
@@ -432,6 +470,7 @@ final class ProfileGalleryGridView: UIView {
             emptyStateView.isHidden = false
             apply([], skeleton: false)
         }
+        lookahead.setNeedsPlan()
     }
 
     /// Whether `new` is `old` with other counters — the one change a cell can
@@ -1022,6 +1061,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         // it any return player the close did not land (#951). After the
         // landing, which runs before the screen appears.
         if active, playback?.isHandingOff == true { playback?.endHandoff() }
+        lookahead.setHidden(!active)
         playback?.setSurfaceVisible(active)
         guard active else { return }
         // Same reason as the reload above: this can arrive with content
@@ -1458,8 +1498,9 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         willDisplay cell: UICollectionViewCell,
         forItemAt indexPath: IndexPath
     ) {
-        guard !showsSkeleton, flatIndex(for: indexPath) >= posts.count - Self.nearEndTileCount else { return }
-        onNearEnd?()
+        // Also asked here, not only on a scroll: a first page shorter than
+        // two screens never scrolls, and still has to ask for the next.
+        askNextPageIfNearEnd(force: true)
     }
 
     func collectionView(
@@ -1679,14 +1720,21 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
             atVelocity: scrollView.panGestureRecognizer.velocity(in: scrollView).y,
             maximum: Self.maximumStartVelocity
         ))
+        lookahead.scrollViewDidScroll()
+        // Two screens from the end, three on a fling (#970) — not "a tile of
+        // the last three rows came on screen", which on the list was a card
+        // or two of runway. One page in flight is the view model's.
+        askNextPageIfNearEnd(force: false)
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         reconcileAutoplay()
+        lookahead.scrollViewDidEndScrolling()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         reconcileAutoplay()
+        lookahead.scrollViewDidEndScrolling()
     }
 
     /// The finger left the glass. Reports how far past the top the page was
@@ -1727,7 +1775,10 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { reconcileAutoplay() }
+        if !decelerate {
+            reconcileAutoplay()
+            lookahead.scrollViewDidEndScrolling()
+        }
         onPullReleased?(max(0, -verticalOffset))
         if !decelerate, let pendingSnap {
             self.pendingSnap = nil

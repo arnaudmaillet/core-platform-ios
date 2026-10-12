@@ -386,8 +386,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // BEFORE the render it is for: Discover plans its tail on it.
             page.setCorpusComplete(!viewModel.hasMorePages)
             page.render(snapshot.discover)
+            // The stories' pictures are the Friends row's lookahead (#970).
             rails.render(snapshot.rails)
-            prefetchStoryPictures(snapshot.rails.friends)
             lastSnapshot = snapshot
             discoverGallery?.render(snapshot.media)
             followingList?.render(snapshot.following, newPosts: snapshot.followingNew)
@@ -2139,29 +2139,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         rails.setAutoplayActive(false)
         openPostHero(self, origin, story.posts.map(\.id))
     }
-
-    /// Loads the pictures a story's flight dissolves into, before anyone taps.
-    ///
-    /// ⚠️ NOTHING ELSE ON THIS SCREEN WOULD. The Friends row draws faces; the
-    /// friends' posts appear nowhere until a story opens, so a flight asking
-    /// the cache for their picture at the tap found it cold every time, and
-    /// the face grew into the page with no media in the window at either end.
-    /// The flight also loads a missing picture itself and takes it mid-air
-    /// (`ForYouRowOrigins.storyPictures`), but a picture there from the first
-    /// frame is the transition as designed; a late one is only its rescue.
-    ///
-    /// Bounded: the first few posts of each story — a story opens on its
-    /// first, and a close leaves from wherever the viewer paged to, which is
-    /// rarely far.
-    private func prefetchStoryPictures(_ stories: [ForYouViewModel.FriendStory]) {
-        let urls = stories.prefix(Self.storyPicturePrefetch.stories).flatMap {
-            $0.posts.prefix(Self.storyPicturePrefetch.postsPerStory).compactMap(\.thumbnailURL)
-        }
-        guard !urls.isEmpty else { return }
-        imagePipeline.prefetch(urls)
-    }
-
-    private static let storyPicturePrefetch = (stories: 12, postsPerStory: 4)
 
     /// The pipeline's memory, read synchronously — see
     /// `ForYouRowOrigins.StoryPictureSource`.

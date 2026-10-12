@@ -38,6 +38,20 @@ final class SoundSheetGalleryViewController: UIViewController {
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
     private var dataSource: UICollectionViewDiffableDataSource<Int, PostID>!
 
+    /// The grid's lookahead (#970): the tiles' covers a screen ahead decoded,
+    /// two and a half ahead on disk, under this screen's own owner.
+    private lazy var lookahead: ScrollLookahead = {
+        let lookahead = ScrollLookahead(
+            pipeline: imagePipeline, name: "sound-sheet.gallery", kind: .grid
+        ) { [weak self] path in
+            guard let self, let id = dataSource?.itemIdentifier(for: path),
+                  let url = tile(id)?.thumbnailURL else { return [] }
+            return [ImageRequest(url: url)]
+        }
+        lookahead.attach(to: collectionView)
+        return lookahead
+    }()
+
     init(
         kind: SoundSheetSection.Kind,
         ids: [PostID],
@@ -93,6 +107,11 @@ final class SoundSheetGalleryViewController: UIViewController {
         dataSource.apply(snapshot(), animatingDifferences: false)
     }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        lookahead.setOnScreen(true)
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         setAutoplayActive(true)
@@ -102,6 +121,12 @@ final class SoundSheetGalleryViewController: UIViewController {
         super.viewWillDisappear(animated)
         // Popped, or the sheet going: the tiles give their players back now.
         setAutoplayActive(false)
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // The stay is over: what only this grid wanted is cancelled.
+        lookahead.setOnScreen(false)
     }
 
     private func makeLayout() -> UICollectionViewCompositionalLayout {
@@ -126,6 +151,7 @@ final class SoundSheetGalleryViewController: UIViewController {
         snapshot.reconfigureItems(changed.filter { newIDs.contains($0) })
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
         reconcileAutoplay()
+        lookahead.setNeedsPlan()
     }
 
     // MARK: - Autoplay
@@ -134,6 +160,8 @@ final class SoundSheetGalleryViewController: UIViewController {
     /// by a feed opened from one (the sheet says, `SoundSheetViewController
     /// .openFeed`). Inactive, every one gives its player back at once.
     func setAutoplayActive(_ active: Bool) {
+        // Covered by a feed opened from a tile: minimum windows (#970).
+        lookahead.setHidden(!active)
         guard let autoplay else { return }
         autoplay.setActive(active)
         guard active, isViewLoaded else { return }
@@ -184,10 +212,12 @@ extension SoundSheetGalleryViewController: UICollectionViewDelegate {
         reconcileAutoplay(allowingStarts: GridAutoplayRanking.allowsStarts(
             atVelocity: scrollView.panGestureRecognizer.velocity(in: scrollView).y
         ))
+        lookahead.scrollViewDidScroll()
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         reconcileAutoplay()
+        lookahead.scrollViewDidEndScrolling()
     }
 
     func collectionView(

@@ -429,6 +429,33 @@ public final class ImagePipeline: Sendable {
         }
     }
 
+    // MARK: - Lookahead signals (#970)
+
+    /// The coordinator's prefetch policy (Low Data, Low Power, thermal state,
+    /// network), `.full` for a pipeline no coordinator manages. A list's
+    /// lookahead sizes its windows from it.
+    public var prefetchPolicy: PrefetchPolicy { coordinator?.prefetchPolicy ?? .full }
+
+    /// Calls `handler` after every change of the coordinator's conditions, on
+    /// the thread that made it, so a lookahead re-plans its windows. `nil`
+    /// without a coordinator. Keep the token: the observation ends with it.
+    public func observePrefetchPolicy(_ handler: @escaping @Sendable (PrefetchPolicy) -> Void) -> CacheObservation? {
+        coordinator?.observeConditions { _, policy in handler(policy) }
+    }
+
+    /// Calls `handler` after the coordinator trims for a memory warning or
+    /// critical memory pressure, on the thread that trimmed: a hidden list's
+    /// lookahead drops to nothing (Texture's rule). `nil` without a
+    /// coordinator. Keep the token: the observation ends with it.
+    public func observeMemoryPressure(_ handler: @escaping @Sendable () -> Void) -> CacheObservation? {
+        coordinator?.observeTrims { reason in
+            switch reason {
+            case .memoryWarning, .memoryCritical: handler()
+            default: break
+            }
+        }
+    }
+
     // MARK: - Introspection
 
     /// Whether `url` is decoded at `size` or larger, without counting a use.
@@ -451,6 +478,12 @@ public final class ImagePipeline: Sendable {
     /// How many decodes (and prefetches) wait on `url`'s download, for tests.
     func downloadInterestCount(for url: URL) -> Int {
         bytes.interestCount(for: ImageKey(url: url, bucket: .full).media)
+    }
+
+    /// The priority `url`'s download runs at, `nil` when none is in flight:
+    /// the highest any of its owners wants, for tests.
+    func downloadPriority(for url: URL) -> CacheFillPriority? {
+        bytes.priority(of: ImageKey(url: url, bucket: .full).media)
     }
 
     /// Fills in flight (decodes and downloads), for tests and the audit.

@@ -594,6 +594,36 @@ final class ForYouGridPage: UIView {
     /// Internal (not private) only for the +QA hooks.
     let collectionView: UICollectionView
 
+    /// This list's lookahead (#970): its covers decoded one screen ahead and
+    /// half a screen behind, their bytes on disk two and a half ahead, under
+    /// one `CacheOwner` per stay on screen — every list its own, over the
+    /// pipeline's shared fills. Also what decides the next page (2 screens
+    /// from the end, 3 on a fling).
+    private lazy var lookahead: ScrollLookahead = {
+        let lookahead = ScrollLookahead(
+            pipeline: imagePipeline, name: "postgrid.\(style)", kind: style == .grid ? .grid : .card
+        ) { [weak self] indexPath in
+            self?.lookaheadImages(at: indexPath) ?? []
+        }
+        lookahead.attach(to: collectionView)
+        return lookahead
+    }()
+
+    /// What the item at `indexPath` shows, for the lookahead.
+    private func lookaheadImages(at indexPath: IndexPath) -> [ImageRequest] {
+        guard !showsSkeleton else { return [] }
+        let index = flatIndex(for: indexPath)
+        guard posts.indices.contains(index) else { return [] }
+        return posts[index].lookaheadImages
+    }
+
+    /// The page joined or left a window: a new stay with its own owner, or
+    /// the end of one, which cancels what only this list wanted.
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        lookahead.setOnScreen(window != nil)
+    }
+
     /// The scroll view the host names to the bars (`setContentScrollView`) —
     /// their scroll-edge treatment, and the tab bar's minimize on a screen
     /// that arms one (For You does not, since it lost its tabs).
@@ -674,23 +704,6 @@ final class ForYouGridPage: UIView {
     /// only a little over one screenful.
     private var skeletonCount: Int {
         style == .grid ? (sliceLayout?.cellsPerSlice ?? ChaoticSliceEngine.defaultCellsPerSlice) * 2 : 6
-    }
-
-    /// How close to the end a scroll gets before the next page is requested.
-    ///
-    /// ⚠️ MEASURED IN SCREENS, not in points, because a row is not a tile.
-    ///
-    /// A fixed 800pt is roughly three rows of tiles and barely ONE card: on the
-    /// timeline the request went out with a single card of runway left, so a
-    /// flick outran it and the viewer hit the end of the list before the page
-    /// arrived. A screen and a half of lead is the same lead on both shapes,
-    /// which is what "start fetching before they get there" actually means.
-    ///
-    /// The floor keeps the rule honest before first layout, where the viewport
-    /// is zero and a relative distance would ask for the next page only once
-    /// the scroll had already ended.
-    private var prefetchDistance: CGFloat {
-        max(800, collectionView.bounds.height * 1.5)
     }
 
     init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
@@ -987,8 +1000,8 @@ final class ForYouGridPage: UIView {
     /// Shows or hides the next-page spinner beneath the last tile.
     ///
     /// **Why this cannot jump the scroll.** Reserving the band happens when
-    /// pagination fires, which is `prefetchDistance` (a screen and a half)
-    /// before the end —
+    /// pagination fires, which is two screens (three on a fling) before the
+    /// end (`LookaheadPaging`) —
     /// growing the bottom inset never moves `contentOffset`, so there is nothing
     /// to see. Releasing it happens once the page has landed and added a whole
     /// slice of content, by which point the viewer is far from the bottom and
@@ -1106,7 +1119,6 @@ final class ForYouGridPage: UIView {
         }
         let candidates = ForYouGridAutoplayDriver.candidates(from: tiles, in: viewport)
         playback.update(candidates: candidates, allowingStarts: allowingStarts)
-        preloadAutoplayCovers(around: collectionView.indexPathsForVisibleItems)
         #if DEBUG
         logRejectedCandidates(chosen: Set(candidates.map(\.id)))
         auditCarouselPlayback()
@@ -1411,46 +1423,6 @@ final class ForYouGridPage: UIView {
         return true
     }
 
-    /// Fetches cover images for autoplay-capable posts before their tiles need
-    /// them.
-    ///
-    /// An autoplaying tile is the one case where a missing cover is not merely
-    /// a slower thumbnail: the video surface sits over it, so until the first
-    /// frame decodes the cover IS the tile, and a hero flight departing from it
-    /// carries whatever is there. Measured on a cold `-rich-media` grid, covers
-    /// landed ~6.3s after launch and the tiles were empty until then — so the
-    /// first flight of a session flew from, and landed on, nothing.
-    ///
-    /// Restricted to `autoplaysInGrid` posts deliberately. A still tile shows
-    /// its cover directly and is already served by the normal per-cell load;
-    /// prefetching every thumbnail in range would trade this narrow fix for
-    /// bandwidth the grid did not ask for.
-    private func preloadAutoplayCovers(around visible: [IndexPath]) {
-        // FLAT indices, not `item`: on a sectioned page (Discover's stretches,
-        // the list's "New"/"Recent") an item number restarts every section.
-        let flat = visible.map(flatIndex(for:))
-        guard !showsSkeleton, !posts.isEmpty,
-              let range = autoplayDriver.coverRangeToPreload(aroundFlatIndices: flat, postCount: posts.count)
-        else { return }
-
-        let urls = posts[range].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
-        guard !urls.isEmpty else { return }
-        imagePipeline.prefetch(urls)
-    }
-
-    /// The first-load case, where there are no cells yet to be "around".
-    private func preloadLeadingAutoplayCovers() {
-        guard !showsSkeleton, !posts.isEmpty,
-              let range = ForYouGridAutoplayDriver.leadingCoverRange(postCount: posts.count)
-        else { return }
-        let urls = posts[range].filter(\.autoplaysInGrid).compactMap(\.thumbnailURL)
-        guard !urls.isEmpty else { return }
-        // Leaves the driver's `preloadedCoverRange` unset on purpose: the first
-        // real reconcile should still run against the actual visible set rather
-        // than believe this guess already covered it.
-        imagePipeline.prefetch(urls)
-    }
-
     /// Tab left, feed presented over the grid, app backgrounded. `keeping`
     /// exempts the post whose player a hero flight is still carrying.
     /// Opens the handoff scope for a tapped tile. Replaces the old
@@ -1529,6 +1501,9 @@ final class ForYouGridPage: UIView {
         #if DEBUG
         isAudited = active
         #endif
+        // Covered but alive (a feed or a pushed screen over it): the
+        // lookahead drops to the minimum windows, P2 at most (#970).
+        lookahead.setHidden(!active)
         playback?.setSurfaceVisible(active, keeping: kept)
         if active {
             updateAutoplay()
@@ -2574,7 +2549,7 @@ final class ForYouGridPage: UIView {
         }
         // The landing tile is about to be flown onto; give its cover a head
         // start in case the cache does not already hold it.
-        if let url = posts[slot].thumbnailURL { imagePipeline.prefetch([url]) }
+        warmLandingCover(of: posts[slot])
         return true
     }
 
@@ -2600,8 +2575,17 @@ final class ForYouGridPage: UIView {
                 cell.layoutIfNeeded()
             }
         }
-        if let url = post.thumbnailURL { imagePipeline.prefetch([url]) }
+        warmLandingCover(of: post)
         return true
+    }
+
+    /// The cover a close is about to land on, loaded now at the visible
+    /// priority: the tile is on screen the moment the flight ends, which is
+    /// no lookahead's guess. Shared with the cell's own load (one fill).
+    private func warmLandingCover(of post: GalleryPost) {
+        guard let url = post.thumbnailURL, !imagePipeline.isDecoded(url) else { return }
+        let pipeline = imagePipeline
+        Task { _ = try? await pipeline.image(for: url) }
     }
 
     /// Hides the real cell while its twin is flying.
@@ -2924,6 +2908,7 @@ final class ForYouGridPage: UIView {
             emptyState.isHidden = false
             apply([], skeleton: false)
         }
+        lookahead.setNeedsPlan()
     }
 
     private func apply(_ incoming: [GalleryPost], skeleton: Bool) {
@@ -3042,11 +3027,10 @@ final class ForYouGridPage: UIView {
     /// The whole-table path every style ends on when a delivery is not an
     /// append.
     private func reloadAll(dissolving: Bool) {
-        // Kick the leading covers before any cell exists. `preloadAutoplayCovers`
-        // keys off visible index paths, which are empty on a first load — the
-        // one moment the grid is coldest and the fetch has the most latency to
-        // hide.
-        preloadLeadingAutoplayCovers()
+        // The covers are the lookahead's (#970): it plans once the reload has
+        // laid out the new items (`render`'s `setNeedsPlan`), the visible ones
+        // and the screen ahead decoded — the first load included, the moment
+        // the grid is coldest and the fetch has the most latency to hide.
         if dissolving {
             UIView.transition(
                 with: collectionView, duration: 0.35,
@@ -3406,11 +3390,14 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // at the display refresh rate, and reconciling at 120 Hz spends more
         // time diffing than the work is worth.
         throttledAutoplayReconcile(scrollView)
+        lookahead.scrollViewDidScroll()
 
-        guard !showsSkeleton, !posts.isEmpty else { return }
-        let remaining = scrollView.contentSize.height
-            - (scrollView.contentOffset.y + scrollView.bounds.height)
-        guard remaining < prefetchDistance else { return }
+        // ⚠️ MEASURED IN SCREENS, not in points, because a row is not a tile:
+        // a fixed 800pt was barely ONE card of runway on the timeline, and a
+        // flick outran it. Two screens of lead, three on a fling, is the same
+        // lead on every shape (`LookaheadPaging`, #970). One page in flight is
+        // the view model's.
+        guard !showsSkeleton, !posts.isEmpty, lookahead.wantsNextPage else { return }
         onNearEnd?()
     }
 
@@ -3441,16 +3428,21 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     /// A fling that ends without deceleration still needs a final reconcile:
     /// the throttled pass may have been velocity-gated right up to the stop.
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { updateAutoplay() }
+        if !decelerate {
+            updateAutoplay()
+            lookahead.scrollViewDidEndScrolling()
+        }
         onPullReleased?(max(0, -verticalOffset))
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         updateAutoplay()
+        lookahead.scrollViewDidEndScrolling()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         updateAutoplay()
+        lookahead.scrollViewDidEndScrolling()
     }
 
     /// A recycled cell hands its player back immediately rather than waiting

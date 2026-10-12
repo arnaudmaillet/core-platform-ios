@@ -20,8 +20,8 @@ private struct InstantFetcher: ImageFetching {
 
 /// The app's callers, reproduced in their exact shape: a UIKit subclass —
 /// main-actor by INFERENCE, like `ForYouGridPage` — calling the pipeline's
-/// synchronous API from the main thread (`preloadAutoplayCovers`,
-/// `preloadLeadingAutoplayCovers`, every cover gate's `cachedImage`).
+/// synchronous API from the main thread (the grids' old `prefetch(_:)`,
+/// the lookaheads' `prefetch`, every cover gate's `cachedImage`).
 private final class PrefetchingView: UIView {
     let pipeline: ImagePipeline
 

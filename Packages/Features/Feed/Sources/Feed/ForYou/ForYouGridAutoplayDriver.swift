@@ -15,7 +15,7 @@ import UIKit
 /// The rules the profile gallery and the For You rails share — admission,
 /// distance, budget, fling gate — are `GridAutoplayRanking`'s (#861); this
 /// holds For You's own numbers and the state only this page keeps (the
-/// throttle, the cover range).
+/// throttle).
 ///
 /// It owns no player and calls nothing. Every call to
 /// `GridVideoPlaybackCoordinator` stays on the page, in the order it always
@@ -137,41 +137,5 @@ struct ForYouGridAutoplayDriver {
     /// those that still name a post, at most `warmWindow` of them.
     static func warmIndices(visibleFlatIndices: [Int], postCount: Int) -> [Int] {
         Array(visibleFlatIndices.filter((0..<postCount).contains).prefix(warmWindow))
-    }
-
-    // MARK: - Cover lookahead
-
-    /// How far beyond the visible range to pull covers for autoplaying posts.
-    static let autoplayCoverLookahead = 6
-
-    /// The visible range covers were last requested for, so a scroll does not
-    /// rebuild the same URL list 30 times a second.
-    private(set) var preloadedCoverRange: ClosedRange<Int>?
-
-    /// The flat range whose autoplay covers to fetch around the visible flat
-    /// indices — `autoplayCoverLookahead` either side, clamped to the posts —
-    /// or nil when nothing is visible or the range is the one last fetched.
-    /// Remembers what it returns.
-    mutating func coverRangeToPreload(aroundFlatIndices flat: [Int], postCount: Int) -> ClosedRange<Int>? {
-        guard let first = flat.min(),
-              let last = flat.max()
-        else { return nil }
-        let lower = max(0, first - Self.autoplayCoverLookahead)
-        let upper = min(postCount - 1, last + Self.autoplayCoverLookahead)
-        guard lower <= upper else { return nil }
-        let range = lower...upper
-        guard range != preloadedCoverRange else { return nil }
-        preloadedCoverRange = range
-        return range
-    }
-
-    /// The first-load range, where there are no cells yet to be "around".
-    ///
-    /// Leaves `preloadedCoverRange` unset on purpose: the first real
-    /// reconcile should still run against the actual visible set rather than
-    /// believe this guess already covered it.
-    static func leadingCoverRange(postCount: Int) -> ClosedRange<Int>? {
-        guard postCount > 0 else { return nil }
-        return 0...min(postCount - 1, autoplayCoverLookahead * 2)
     }
 }
