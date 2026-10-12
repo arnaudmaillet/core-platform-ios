@@ -125,10 +125,17 @@ struct OwnCommentsSectionTests {
         }
     }
 
-    private func settle(_ condition: () -> Bool) async {
-        for _ in 0..<1_000 where !condition() {
+    /// A look budget, not a deadline: every wait here is positive and stops
+    /// as soon as its condition holds, so the budget only matters on a starved
+    /// runner, where each look stretches (#980). It answers, so a timeout
+    /// fails at the wait rather than at a stale list read after it.
+    private static let looks = 6_000
+
+    private func settle(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<Self.looks where !condition() {
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return condition()
     }
 
     /// The models carry who started each thread, and a comment the viewer
@@ -140,13 +147,13 @@ struct OwnCommentsSectionTests {
         var latest: [CommentDisplayModel] = []
         viewModel.onCommentsChange = { if case .loaded(let models) = $0 { latest = models } }
         viewModel.viewDidLoad()
-        await settle { !latest.isEmpty }
+        #expect(await settle { !latest.isEmpty })
         #expect(latest.prefix(3).map(\.id) == ["m1", "m2", "m2-r1"])
         #expect(latest.filter(\.isOwnThread).map(\.id) == ["m1", "m2"], "only threads the viewer started")
 
         viewModel.setCommentSort(.trending)
         viewModel.submitComment("Mine, newest")
-        await settle { latest.count == Self.mixed.count + 1 }
+        #expect(await settle { latest.count == Self.mixed.count + 1 })
         #expect(latest.first?.body == "Mine, newest")
         #expect(latest.first?.isOwnThread == true)
         #expect(latest.prefix(4).dropFirst().map(\.id) == ["m1", "m2", "m2-r1"])
@@ -172,7 +179,7 @@ struct OwnCommentsSectionTests {
         window.isHidden = false
         controller.seedCaption("A text post", timestamp: "2h", authorName: "Ava Moreau")
         let stream = try #require(Self.firstView(UICollectionView.self, in: controller.view))
-        for _ in 0..<500 where stream.visibleCells.compactMap(PostDetailViewController.commentRow(in:)).isEmpty {
+        for _ in 0..<Self.looks where stream.visibleCells.compactMap(PostDetailViewController.commentRow(in:)).isEmpty {
             try await Task.sleep(for: .milliseconds(10))
         }
         stream.layoutIfNeeded()
@@ -226,7 +233,7 @@ struct OwnCommentsSectionTests {
         #expect(stream.contentOffset.y > 200, "the stream is not long enough to scroll")
 
         viewModel.submitComment("Sent from the bottom")
-        await settle { controller.debugLandingEvents.contains { $0.hasPrefix("arrive:") } }
+        #expect(await settle { controller.debugLandingEvents.contains { $0.hasPrefix("arrive:") } })
         let events = controller.debugLandingEvents.map { $0.split(separator: ":").first.map(String.init) ?? $0 }
         #expect(events == ["scroll", "insert", "arrive"], "\(controller.debugLandingEvents)")
 
@@ -244,7 +251,7 @@ struct OwnCommentsSectionTests {
         let (controller, viewModel, _, window) = try await makeStream(others)
         defer { window.isHidden = true }
         viewModel.submitComment("Sent from the top")
-        await settle { controller.debugLandingEvents.contains { $0.hasPrefix("arrive:") } }
+        #expect(await settle { controller.debugLandingEvents.contains { $0.hasPrefix("arrive:") } })
         let events = controller.debugLandingEvents.map { $0.split(separator: ":").first.map(String.init) ?? $0 }
         #expect(events == ["insert", "arrive"], "\(controller.debugLandingEvents)")
     }
