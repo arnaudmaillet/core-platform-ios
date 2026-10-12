@@ -93,7 +93,8 @@ struct VideoLookaheadTests {
         harness.recorder.status = Self.buffered
         settle(harness, on: 0)
         #expect(await eventually { harness.lookahead.requestedHeads == Set(heads.map(item)) })
-        #expect(await eventually { harness.fetcher.requests.count == heads.count })
+        await harness.fetcher.requestsArrived(heads.count)
+        #expect(harness.fetcher.requests.count == heads.count)
         #expect(Set(harness.fetcher.requests.map(\.url)) == Set(heads.map(remote)))
         #expect(harness.fetcher.requests.allSatisfy { $0.speculative && $0.offset == 0 && $0.end == 1000 })
         let last = harness.recorder.applied.last
@@ -119,7 +120,7 @@ struct VideoLookaheadTests {
         let harness = try makeHarness()
         harness.recorder.status = Self.buffered
         settle(harness, on: 0)
-        #expect(await eventually { harness.fetcher.requests.count == 2 })
+        await harness.fetcher.requestsArrived(2)
         harness.recorder.policy = .reduced
         harness.clock.tick()
         #expect(harness.lookahead.requestedHeads.isEmpty)
@@ -293,7 +294,7 @@ struct VideoLookaheadTests {
         let harness = try makeHarness()
         harness.recorder.status = Self.buffered
         settle(harness, on: 0)
-        #expect(await eventually { harness.fetcher.requests.count == 2 })
+        await harness.fetcher.requestsArrived(2)
         #expect(harness.lookahead.activeHeadInterests == 2)
 
         harness.recorder.status = nil
@@ -315,9 +316,11 @@ struct VideoLookaheadTests {
         let harness = try makeHarness(slots: 1)
         harness.recorder.status = Self.buffered
         settle(harness, on: 0)
-        try #require(await eventually { harness.fetcher.requests.count == 1 })
+        await harness.fetcher.requestsArrived(1)
         #expect(await eventually { harness.slots.waitingCount == 1 })
         harness.fetcher.deliver(0, bytes: .max)
-        #expect(await eventually { harness.fetcher.requests.count == 2 })
+        // The first head's end frees the slot; the second then starts at P2.
+        await harness.fetcher.requestsArrived(2)
+        #expect(harness.fetcher.requests.count == 2)
     }
 }

@@ -199,12 +199,12 @@ struct VideoByteCacheTests {
         let owner = CacheOwner("test")
         let interest = cache.preloadHead(of: url, owner: owner)
         #expect(interest != nil)
-        #expect(await eventually { cache.hasHead(of: url) })
+        #expect(await cache.headPreloadLanded(of: url))
         #expect(fetcher.requests == [.init(url: url, offset: 0, end: 1000, speculative: true)])
         let key = CacheKey.media(url)
         #expect(cache.publicStore.tier(of: VideoCacheKeys.chunk(key, 0)) == .speculative)
         #expect(cache.publicStore.tier(of: VideoCacheKeys.info(key)) == .speculative)
-        #expect(await eventually { cache.statisticsSnapshot.headPreloads == 1 })
+        #expect(cache.statisticsSnapshot.headPreloads == 1, "counted before the preload ends")
         // Nothing to do a second time.
         #expect(cache.preloadHead(of: url, owner: owner) == nil)
 
@@ -226,7 +226,7 @@ struct VideoByteCacheTests {
         let cache = try makeCache(fetcher)
         let owner = CacheOwner("swipe")
         cache.preloadHead(of: url, owner: owner)
-        try #require(await eventually { fetcher.requests.count == 1 })
+        await fetcher.requestsArrived(1)
         owner.revoke()
         #expect(await eventually { fetcher.task(0)?.isCancelled == true })
         #expect(await eventually { !cache.isPreloadingHead(of: url) })
@@ -253,7 +253,8 @@ struct VideoByteCacheTests {
         // Held: an owner revokes itself when it goes.
         let owner = CacheOwner("preload")
         cache.preloadHead(of: preloaded, owner: owner)
-        #expect(await eventually { cache.hasHead(of: preloaded) })
+        #expect(await cache.headPreloadLanded(of: preloaded))
+        withExtendedLifetime(owner) {}
         // The player let go: its chunks are no longer pinned.
         cache.queue.sync { loader.invalidate() }
 
@@ -316,7 +317,9 @@ struct VideoByteCacheTests {
         let owner = CacheOwner("logout")
         cache.preloadHead(of: url, owner: owner)
         cache.preloadHead(of: signed, owner: owner)
-        #expect(await eventually { cache.hasHead(of: url) && cache.hasHead(of: signed) })
+        #expect(await cache.headPreloadLanded(of: url))
+        #expect(await cache.headPreloadLanded(of: signed))
+        withExtendedLifetime(owner) {}
         #expect(cache.signedStore.contains(VideoCacheKeys.chunk(CacheKey.media(signed), 0)))
 
         coordinator.trim(.viewerChanged)
