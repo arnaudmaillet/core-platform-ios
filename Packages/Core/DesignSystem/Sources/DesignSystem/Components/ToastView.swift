@@ -134,6 +134,32 @@ public final class ToastView: UIView {
         }
     }
 
+    /// An action the toast COMMITS when it leaves, unless the viewer undoes
+    /// it first (#954): `commit` and `undo`, exactly one of which runs, once.
+    ///
+    /// Either model fits: a deferred commit (`commit` sends it — nothing has
+    /// gone out yet, like Undo Send) or an optimistic one (it is already done;
+    /// `commit` confirms it and `undo` sends the compensating call).
+    ///
+    /// It commits when its time runs out, when it is closed, swiped away or
+    /// replaced, when another undoable toast arrives (one undo slot), and at
+    /// once when the app goes to the background. Leaving the screen does not
+    /// commit it: the toast is the scene's, not the screen's.
+    public struct Undoable {
+        public let commit: @MainActor () -> Void
+        public let undo: @MainActor () -> Void
+
+        public init(commit: @escaping @MainActor () -> Void, undo: @escaping @MainActor () -> Void) {
+            self.commit = commit
+            self.undo = undo
+        }
+    }
+
+    /// How an undoable toast was settled.
+    enum Resolution: Equatable {
+        case committed, undone
+    }
+
     /// The style this toast was drawn in (read by tests).
     public let style: Style
     /// Its title and detail line.
@@ -144,6 +170,12 @@ public final class ToastView: UIView {
     /// How long it stays up, in seconds; nil: until closed (`duration`).
     public let duration: TimeInterval?
     let action: Action?
+    let undoable: Undoable?
+    /// Once settled, never again.
+    private(set) var resolution: Resolution?
+    /// The undoable toast on screen, if any: a second one commits it (one
+    /// undo slot).
+    private static weak var pendingUndo: ToastView?
 
     /// Called once the toast has left its superview — so the scene overlay
     /// that holds it can hide its window when it holds no more (#954).
@@ -171,6 +203,8 @@ public final class ToastView: UIView {
     private let row = UIStackView()
     let closeButton: UIButton?
     let actionButton: UIButton?
+    /// An undoable toast's trailing control: the ring and "Undo".
+    let undoButton: ToastUndoButton?
     private var isLeaving = false
     private var sceneObservers: [NSObjectProtocol] = []
 
@@ -221,20 +255,24 @@ public final class ToastView: UIView {
         symbol: String?,
         style: Style,
         action: Action? = nil,
+        undoable: Undoable? = nil,
         position: ToastPosition,
         in container: UIView,
         edge: NSLayoutYAxisAnchor? = nil
     ) -> ToastView {
+        // One undo slot: a second undoable action commits the first at once.
+        if undoable != nil { pendingUndo?.dismiss(animated: true) }
         let tag = hostTag + position.rawValue
         container.viewWithTag(tag).flatMap { $0 as? ToastView }?.dismiss(animated: false)
 
         let toast = ToastView(
-            message: message, detail: detail, symbol: symbol, style: style, action: action,
+            message: message, detail: detail, symbol: symbol, style: style, action: action, undoable: undoable,
             duration: duration(
-                for: style, message: message, detail: detail, hasAction: action != nil,
-                assistiveTechnologyRunning: isAssistiveTechnologyRunning()
+                for: style, message: message, detail: detail, hasAction: action != nil || undoable != nil,
+                isUndoable: undoable != nil, assistiveTechnologyRunning: isAssistiveTechnologyRunning()
             )
         )
+        if undoable != nil { pendingUndo = toast }
         toast.tag = tag
         toast.position = position
         let reduces = MotionPreference.reducesMotion
@@ -285,16 +323,20 @@ public final class ToastView: UIView {
     /// on or replaced (see the type doc).
     public static func duration(
         for style: Style, message: String, detail: String?, hasAction: Bool,
-        assistiveTechnologyRunning: Bool
+        isUndoable: Bool = false, assistiveTechnologyRunning: Bool
     ) -> TimeInterval? {
         if style == .failure { return nil }
         if hasAction, assistiveTechnologyRunning { return nil }
+        if isUndoable { return undoDuration }
         let words = ([message] + (detail.map { [$0] } ?? []))
             .joined(separator: " ")
             .split(whereSeparator: \.isWhitespace)
             .count
         return max(4, 2 + 0.3 * Double(words))
     }
+
+    /// How long an undoable toast waits before it commits.
+    public static let undoDuration: TimeInterval = 8
 
     /// VoiceOver or Switch Control. Swappable for tests.
     static var isAssistiveTechnologyRunning: () -> Bool = {
@@ -345,16 +387,20 @@ public final class ToastView: UIView {
 
     private init(
         message: String, detail: String?, symbol: String?, style: Style, action: Action?,
-        duration: TimeInterval?
+        undoable: Undoable?, duration: TimeInterval?
     ) {
         self.style = style
         self.message = message
         self.detail = detail
-        self.action = action
+        self.undoable = undoable
+        // Undo IS the toast's action: the trailing control, a tap anywhere on
+        // the bubble, and VoiceOver's custom action.
+        self.action = undoable != nil ? Action("Undo") {} : action
         self.duration = duration
-        actionButton = action.map { Self.makeActionButton(title: $0.title) }
+        undoButton = undoable != nil ? ToastUndoButton() : nil
+        actionButton = undoable == nil ? action.map { Self.makeActionButton(title: $0.title) } : nil
         // Something has to close a toast that does not leave on its own.
-        closeButton = action == nil && duration == nil ? Self.makeCloseButton() : nil
+        closeButton = self.action == nil && duration == nil ? Self.makeCloseButton() : nil
         super.init(frame: .zero)
         // Announced rather than read on focus: the user's attention is on what
         // they just did.
@@ -405,6 +451,10 @@ public final class ToastView: UIView {
             actionButton.addAction(UIAction { [weak self] _ in self?.runAction() }, for: .primaryActionTriggered)
             arranged.append(actionButton)
         }
+        if let undoButton {
+            undoButton.addAction(UIAction { [weak self] _ in self?.runAction() }, for: .primaryActionTriggered)
+            arranged.append(undoButton)
+        }
         if let closeButton {
             closeButton.addAction(UIAction { [weak self] _ in self?.dismiss(animated: true) }, for: .primaryActionTriggered)
             arranged.append(closeButton)
@@ -417,7 +467,7 @@ public final class ToastView: UIView {
         // Ordinary content, so alpha is the right lever here — the rule the
         // type doc cites is about the effect view, not what rides inside it.
         row.alpha = 0
-        let trailing = actionButton != nil || closeButton != nil ? Spacing.sm : Spacing.lg
+        let trailing = actionButton != nil || closeButton != nil || undoButton != nil ? Spacing.sm : Spacing.lg
         row.constrain(in: backdrop.contentView) { parent in
             row.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.md)
             row.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.md)
@@ -455,7 +505,7 @@ public final class ToastView: UIView {
         accessibilityLabel = [message, detail].compactMap { $0 }.joined(separator: ", ")
         accessibilityTraits = .staticText
         var actions: [UIAccessibilityCustomAction] = []
-        if let action {
+        if let action = self.action {
             actions.append(UIAccessibilityCustomAction(name: action.title) { [weak self] _ in
                 self?.runAction()
                 return true
@@ -469,13 +519,18 @@ public final class ToastView: UIView {
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(swiped(_:)))
         addGestureRecognizer(pan)
-        if action != nil {
+        if self.action != nil {
             addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
         }
 
         if let duration {
             countdown = ToastCountdown(seconds: duration, clock: ToastClock.current) { [weak self] in
                 self?.dismiss(animated: true)
+            }
+            if let undoButton, let countdown {
+                countdown.onChange = { [weak undoButton, weak countdown] running, remaining in
+                    undoButton?.follow(isRunning: running, remaining: remaining, total: countdown?.total ?? 0)
+                }
             }
         }
     }
@@ -562,6 +617,13 @@ public final class ToastView: UIView {
     private func observeScene() {
         guard sceneObservers.isEmpty else { return }
         let center = NotificationCenter.default
+        if undoable != nil {
+            sceneObservers.append(center.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.commitForBackground() }
+            })
+        }
         for (name, inactive) in [
             (UIScene.willDeactivateNotification, true),
             (UIScene.didActivateNotification, false),
@@ -605,8 +667,36 @@ public final class ToastView: UIView {
 
     private func runAction() {
         guard let action, !isLeaving else { return }
-        action.handler()
+        if undoable != nil {
+            resolve(.undone)
+        } else {
+            action.handler()
+        }
         dismiss(animated: true)
+    }
+
+    /// Settles an undoable toast, once: the first of commit and undo wins,
+    /// and undo is refused once the commit has started.
+    func resolve(_ how: Resolution) {
+        guard let undoable, resolution == nil else { return }
+        resolution = how
+        if Self.pendingUndo === self { Self.pendingUndo = nil }
+        switch how {
+        case .committed: undoable.commit()
+        case .undone: undoable.undo()
+        }
+    }
+
+    /// The app is going to the background: an undoable toast commits now,
+    /// inside a background task, and leaves.
+    private func commitForBackground() {
+        guard undoable != nil, resolution == nil else { return }
+        let application = UIApplication.shared
+        var task = UIBackgroundTaskIdentifier.invalid
+        task = application.beginBackgroundTask { application.endBackgroundTask(task) }
+        resolve(.committed)
+        dismiss(animated: false)
+        if task != .invalid { application.endBackgroundTask(task) }
     }
 
     private var isSwiping = false
@@ -738,6 +828,9 @@ public final class ToastView: UIView {
     private func leave(animated: Bool, moving: Bool) {
         guard !isLeaving else { return }
         isLeaving = true
+        // Any way out but Undo commits: time, close, swipe, a replacement,
+        // a second undoable toast, the background.
+        resolve(.committed)
         countdown?.cancel()
         stopObservingScene()
         // The outgoing toast must stop answering `viewWithTag` immediately, or

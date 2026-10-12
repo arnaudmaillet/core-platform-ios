@@ -71,7 +71,20 @@ extension MainTabCoordinator {
                     self?.debugToastKinds()
                 }
             }
-            for round in 0..<14 where mode != "kinds" {
+            // `-toast-demo undo`: an undoable toast; its ring counts down 8 s,
+            // then it commits (or a tap on it undoes). Logged either way.
+            if mode == "undo" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                    guard let stack = self?.tabBarController.selectedViewController as? UINavigationController,
+                          let top = stack.topViewController else { return }
+                    Feedback.undoable(
+                        "Unfollowed @ava.moreau", from: top,
+                        commit: { print("[toast-demo] committed") },
+                        undo: { print("[toast-demo] undone") }
+                    )
+                }
+            }
+            for round in 0..<14 where mode != "kinds" && mode != "undo" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 1.5) { [weak self] in
                     self?.debugToastDemo(pops: mode == "pop")
                 }

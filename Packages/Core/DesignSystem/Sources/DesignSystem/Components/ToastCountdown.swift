@@ -21,6 +21,12 @@ final class ToastCountdown {
 
     /// What is left, in seconds.
     private(set) var remaining: TimeInterval
+    /// The whole time it started with.
+    let total: TimeInterval
+    /// Told whenever it starts running or stops: whether it runs now, and
+    /// what was left at that moment — what an on-screen countdown (the undo
+    /// ring) animates from.
+    var onChange: ((_ isRunning: Bool, _ remaining: TimeInterval) -> Void)?
     private(set) var holds: Set<Hold> = []
     private(set) var hasExpired = false
     private let clock: ToastClock
@@ -31,6 +37,7 @@ final class ToastCountdown {
 
     init(seconds: TimeInterval, clock: ToastClock, onExpire: @escaping @MainActor () -> Void) {
         remaining = max(0, seconds)
+        total = max(0, seconds)
         self.clock = clock
         self.onExpire = onExpire
     }
@@ -43,6 +50,7 @@ final class ToastCountdown {
         runStart = clock.now()
         let left = remaining
         pending = clock.schedule(after: left) { [weak self] in self?.expire() }
+        onChange?(true, left)
     }
 
     func hold(_ reason: Hold) {
@@ -71,6 +79,7 @@ final class ToastCountdown {
         runStart = nil
         pending?.cancel()
         pending = nil
+        onChange?(false, remaining)
     }
 
     private func expire() {

@@ -122,6 +122,27 @@ public enum Feedback {
         show(.warning, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
     }
 
+    /// An action the viewer can take back (#954): a confirmation toast with
+    /// Undo and a ring counting down `ToastView.undoDuration`, and a success
+    /// haptic. Exactly one of `commit` and `undo` runs, once — see
+    /// `ToastView.Undoable` for when it commits.
+    @discardableResult
+    public static func undoable(
+        _ message: String,
+        detail: String? = nil,
+        symbol: String? = Kind.success.defaultSymbol,
+        from source: UIViewController,
+        above floor: UIView? = nil,
+        at position: ToastPosition = .bottom,
+        commit: @escaping @MainActor () -> Void,
+        undo: @escaping @MainActor () -> Void
+    ) -> ToastView {
+        show(
+            .success, message, detail: detail, symbol: symbol, from: source, above: floor, at: position,
+            action: nil, undoable: ToastView.Undoable(commit: commit, undo: undo)
+        )
+    }
+
     /// A neutral notice: a confirmation-style toast, no haptic.
     @discardableResult
     public static func info(
@@ -170,7 +191,8 @@ public enum Feedback {
         from source: UIViewController,
         above floor: UIView?,
         at position: ToastPosition,
-        action: ToastView.Action?
+        action: ToastView.Action?,
+        undoable: ToastView.Undoable? = nil
     ) -> ToastView {
         let host = host(for: source)
         let floor = host === source && floor?.window != nil ? floor : nil
@@ -178,7 +200,8 @@ public enum Feedback {
         if let window = host.viewIfLoaded?.window, let overlay = ToastOverlay.overlay(for: window) {
             // The scene's overlay (#954): the toast outlives the screen.
             toast = overlay.present(
-                message, detail: detail, symbol: symbol, style: kind.style, action: action, position: position,
+                message, detail: detail, symbol: symbol, style: kind.style, action: action, undoable: undoable,
+                position: position,
                 from: host, above: floor,
                 keyboardTopY: keyboardTopY(of: host, in: window),
                 interfaceStyle: pinnedStyle(of: host)
@@ -186,7 +209,7 @@ public enum Feedback {
         } else {
             // No scene to draw over (a package test host): in the screen.
             toast = ToastView.present(
-                message, detail: detail, symbol: symbol, style: kind.style, action: action,
+                message, detail: detail, symbol: symbol, style: kind.style, action: action, undoable: undoable,
                 position: position, in: host.view,
                 edge: position.isTop ? nil : floor?.topAnchor
             )
