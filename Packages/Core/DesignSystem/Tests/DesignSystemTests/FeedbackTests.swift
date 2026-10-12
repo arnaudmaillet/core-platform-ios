@@ -224,15 +224,28 @@ struct FeedbackTests {
         #expect(queued == true)
     }
 
-    /// A second toast replaces the first rather than stacking.
-    @Test func aSecondToastReplacesTheFirst() {
+    /// A failure takes the place of the confirmation before it (#954: a
+    /// failure preempts info) — a fast double-tap still cannot build a tower.
+    @Test func aFailurePreemptsTheConfirmationBeforeIt() {
         let (root, screen) = shell()
         hosting(root) {
             _ = recordingHaptics {
                 Feedback.success("Copied", from: screen)
                 Feedback.failure("Couldn't copy", from: screen)
             }
-            #expect(screen.view.subviews.filter { $0 is ToastView }.count == 1)
+            #expect(ToastView.stack(at: .bottom, in: screen.view).map(\.message) == ["Couldn't copy"])
+        }
+    }
+
+    /// The same toast twice is one toast (#954): its time restarts.
+    @Test func theSameToastTwiceIsOne() {
+        let (root, screen) = shell()
+        hosting(root) {
+            _ = recordingHaptics {
+                Feedback.success("Copied", from: screen)
+                Feedback.success("Copied", from: screen)
+            }
+            #expect(ToastView.stack(at: .bottom, in: screen.view).count == 1)
         }
     }
 

@@ -36,12 +36,15 @@ public enum Feedback {
         /// It happened with a catch the viewer should know (#954): an orange
         /// glyph and a warning haptic.
         case warning
+        /// Under way (#954): a spinner, until the same `id` says how it ended.
+        case loading
 
         var style: ToastView.Style {
             switch self {
             case .success, .info: .confirmation
             case .failure: .failure
             case .warning: .warning
+            case .loading: .loading
             }
         }
 
@@ -50,7 +53,7 @@ public enum Feedback {
             switch self {
             case .success: .success
             case .failure: .error
-            case .info: nil
+            case .info, .loading: nil
             case .warning: .warning
             }
         }
@@ -62,6 +65,7 @@ public enum Feedback {
             case .failure: "exclamationmark.triangle.fill"
             case .info: "info.circle.fill"
             case .warning: "exclamationmark.circle.fill"
+            case .loading: "ellipsis"
             }
         }
     }
@@ -88,9 +92,10 @@ public enum Feedback {
         from source: UIViewController,
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom,
-        action: ToastView.Action? = nil
+        action: ToastView.Action? = nil,
+        id: String? = nil
     ) -> ToastView {
-        show(.success, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
+        show(.success, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
     }
 
     /// The action did not happen: a failure-style toast and an error haptic.
@@ -103,9 +108,10 @@ public enum Feedback {
         from source: UIViewController,
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom,
-        action: ToastView.Action? = nil
+        action: ToastView.Action? = nil,
+        id: String? = nil
     ) -> ToastView {
-        show(.failure, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
+        show(.failure, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
     }
 
     /// It happened, with a catch: a warning-style toast and a warning haptic.
@@ -117,9 +123,10 @@ public enum Feedback {
         from source: UIViewController,
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom,
-        action: ToastView.Action? = nil
+        action: ToastView.Action? = nil,
+        id: String? = nil
     ) -> ToastView {
-        show(.warning, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
+        show(.warning, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
     }
 
     /// An action the viewer can take back (#954): a confirmation toast with
@@ -134,13 +141,29 @@ public enum Feedback {
         from source: UIViewController,
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom,
+        id: String? = nil,
         commit: @escaping @MainActor () -> Void,
         undo: @escaping @MainActor () -> Void
     ) -> ToastView {
         show(
             .success, message, detail: detail, symbol: symbol, from: source, above: floor, at: position,
-            action: nil, undoable: ToastView.Undoable(commit: commit, undo: undo)
+            action: nil, undoable: ToastView.Undoable(commit: commit, undo: undo), id: id
         )
+    }
+
+    /// Something is under way ("Posting…"): a spinner, no haptic, and no
+    /// timer — it stays until a toast with the same `id` (success, failure…)
+    /// replaces it in place (#954).
+    @discardableResult
+    public static func loading(
+        _ message: String,
+        detail: String? = nil,
+        id: String,
+        from source: UIViewController,
+        above floor: UIView? = nil,
+        at position: ToastPosition = .bottom
+    ) -> ToastView {
+        show(.loading, message, detail: detail, symbol: nil, from: source, above: floor, at: position, action: nil, id: id)
     }
 
     /// A neutral notice: a confirmation-style toast, no haptic.
@@ -152,9 +175,10 @@ public enum Feedback {
         from source: UIViewController,
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom,
-        action: ToastView.Action? = nil
+        action: ToastView.Action? = nil,
+        id: String? = nil
     ) -> ToastView {
-        show(.info, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action)
+        show(.info, message, detail: detail, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
     }
 
     /// A state that shows on the control itself — a bookmark filling — was
@@ -192,7 +216,8 @@ public enum Feedback {
         above floor: UIView?,
         at position: ToastPosition,
         action: ToastView.Action?,
-        undoable: ToastView.Undoable? = nil
+        undoable: ToastView.Undoable? = nil,
+        id: String? = nil
     ) -> ToastView {
         let host = host(for: source)
         let floor = host === source && floor?.window != nil ? floor : nil
@@ -201,7 +226,7 @@ public enum Feedback {
             // The scene's overlay (#954): the toast outlives the screen.
             toast = overlay.present(
                 message, detail: detail, symbol: symbol, style: kind.style, action: action, undoable: undoable,
-                position: position,
+                id: id, position: position,
                 from: host, above: floor,
                 keyboardTopY: keyboardTopY(of: host, in: window),
                 interfaceStyle: pinnedStyle(of: host)
@@ -210,7 +235,7 @@ public enum Feedback {
             // No scene to draw over (a package test host): in the screen.
             toast = ToastView.present(
                 message, detail: detail, symbol: symbol, style: kind.style, action: action, undoable: undoable,
-                position: position, in: host.view,
+                id: id, position: position, in: host.view,
                 edge: position.isTop ? nil : floor?.topAnchor
             )
         }

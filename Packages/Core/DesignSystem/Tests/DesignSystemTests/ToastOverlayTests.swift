@@ -126,6 +126,20 @@ struct ToastOverlayTests {
         }
     }
 
+    /// A rotation re-places the band: as wide as the window, standing on
+    /// the new floor.
+    @Test func aRotationReplacesTheBand() {
+        let screen = UIViewController()
+        hosting(screen) { window, overlay in
+            _ = Feedback.info("Saved", from: screen)
+            window.frame = CGRect(x: 0, y: 0, width: 874, height: 402)
+            window.layoutIfNeeded()
+            overlay.refloor(animated: false)
+            #expect(overlay.window.frame.width == 874)
+            #expect(overlay.window.frame.maxY == Feedback.floorY(of: screen, above: nil, in: window))
+        }
+    }
+
     /// A composer's top is the floor when the screen names it.
     @Test func aComposerIsTheFloor() {
         let screen = UIViewController()
@@ -182,23 +196,20 @@ struct ToastOverlayTests {
         }
     }
 
-    /// One toast per position: a second replaces the first there, and leaves
-    /// the other positions alone.
-    @Test func aSecondToastReplacesTheFirstAtItsPositionOnly() {
+    /// A position stacks its toasts and leaves the other positions alone.
+    @Test func toastsStackAtTheirOwnPosition() {
         let screen = UIViewController()
         hosting(screen) { _, overlay in
             let first = Feedback.info("One", from: screen)
             let top = Feedback.info("Top", from: screen, at: .top)
             let second = Feedback.info("Two", from: screen)
-            #expect(first.superview == nil)
-            #expect(top.superview === overlay.container)
-            #expect(second.superview === overlay.container)
-            #expect(overlay.toasts.count == 2)
+            #expect(ToastView.stack(at: .bottom, in: overlay.container) == [first, second])
+            #expect(ToastView.stack(at: .top, in: overlay.container) == [top])
         }
     }
 
-    /// ⚠️ A toast that replaces another at its position keeps the window up:
-    /// the one it replaced leaves first, and an empty window hides itself.
+    /// ⚠️ A toast that takes another's place keeps the window up: the one it
+    /// pushed out leaves first, and an empty window hides itself.
     @Test func aReplacementKeepsTheWindowUp() {
         let screen = UIViewController()
         hosting(screen) { _, overlay in
@@ -223,7 +234,7 @@ struct ToastOverlayTests {
             #expect(sent.superview === overlay.container)
             #expect(!sent.isDismissing)
             #expect(!overlay.window.isHidden)
-            #expect(overlay.toasts.map(\.message) == ["Sent"])
+            #expect(ToastView.stack(at: .bottom, in: overlay.container).map(\.message) == ["Sent"])
         }
     }
 

@@ -130,6 +130,7 @@ final class ToastOverlay {
         style: ToastView.Style,
         action: ToastView.Action? = nil,
         undoable: ToastView.Undoable? = nil,
+        id: String? = nil,
         position: ToastPosition,
         from host: UIViewController?,
         above floor: UIView?,
@@ -147,7 +148,7 @@ final class ToastOverlay {
         window.layoutIfNeeded()
         let toast = ToastView.present(
             message, detail: detail, symbol: symbol, style: style, action: action, undoable: undoable,
-            position: position, in: container,
+            id: id, position: position, in: container,
             edge: position.isTop ? container.topAnchor : container.bottomAnchor
         )
         toast.onRemoved = { [weak self] in self?.hideIfEmpty() }
@@ -194,15 +195,20 @@ final class ToastOverlay {
         return CGRect(x: bounds.minX, y: top, width: bounds.width, height: floor - top)
     }
 
-    private func placeBand() {
-        guard let appWindow else { return }
+    /// Where the band goes now, in the scene's coordinates.
+    private func bandFrame() -> CGRect? {
+        guard let appWindow else { return nil }
         let band = Self.band(
             in: appWindow.bounds, safeArea: appWindow.safeAreaInsets,
             screenFloorY: screenFloorY, keyboardTopY: keyboardTopY
         )
         // Both windows share the scene's coordinate space.
-        let frame = band.offsetBy(dx: appWindow.frame.minX, dy: appWindow.frame.minY)
-        if window.frame != frame { window.frame = frame }
+        return band.offsetBy(dx: appWindow.frame.minX, dy: appWindow.frame.minY)
+    }
+
+    private func placeBand() {
+        guard let frame = bandFrame(), window.frame != frame else { return }
+        window.frame = frame
     }
 
     private func hideIfEmpty() {
@@ -249,13 +255,16 @@ final class ToastOverlay {
         }
     }
 
-    /// Measures the floor again and moves the band to it if it moved. A
-    /// floor that cannot be measured right now — mid-transition, no screen of
-    /// the app's in the window — keeps the last one: falling back to the
-    /// window's safe area would drop the toasts onto the tab bar for a frame.
+    /// Measures the floor again and moves the band if it moved — or if the
+    /// app window itself changed (a rotation, a new safe area). A floor that
+    /// cannot be measured right now — mid-transition, no screen of the app's
+    /// in the window — keeps the last one: falling back to the window's safe
+    /// area would drop the toasts onto the tab bar for a frame.
     func refloor(animated: Bool = true) {
-        guard let floor = measuredFloorY(), abs(floor - (screenFloorY ?? .infinity)) > 0.5 else { return }
-        screenFloorY = floor
+        if let floor = measuredFloorY() { screenFloorY = floor }
+        guard let target = bandFrame(), abs(target.minY - window.frame.minY) > 0.5
+            || abs(target.height - window.frame.height) > 0.5 || abs(target.width - window.frame.width) > 0.5
+        else { return }
         guard animated, !window.isHidden else {
             placeBand()
             return

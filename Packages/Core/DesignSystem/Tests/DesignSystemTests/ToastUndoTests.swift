@@ -147,18 +147,21 @@ struct ToastUndoTests {
         }
     }
 
-    /// Every other way out commits: a swipe or a close, a replacement at the
-    /// same position.
+    /// Every other way out commits: a swipe or a close, being pushed out of
+    /// its stack.
     @Test func leavingAnyOtherWayCommits() {
         hosting { container, _ in
             let dismissed = Ledger()
             undoable(dismissed, in: container).dismiss(animated: false)
             #expect(dismissed.commits == 1)
 
-            let replaced = Ledger()
-            _ = undoable(replaced, position: .top, in: container)
-            _ = ToastView.present("Copied", symbol: nil, style: .confirmation, position: .top, in: container)
-            #expect(replaced.commits == 1)
+            // Pushed out of its stack by three newer toasts.
+            let pushedOut = Ledger()
+            _ = undoable(pushedOut, position: .top, in: container)
+            for word in ["One", "Two", "Three"] {
+                _ = ToastView.present(word, symbol: nil, style: .confirmation, position: .top, in: container)
+            }
+            #expect(pushedOut.commits == 1)
         }
     }
 

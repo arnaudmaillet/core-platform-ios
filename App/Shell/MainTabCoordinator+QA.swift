@@ -84,7 +84,26 @@ extension MainTabCoordinator {
                     )
                 }
             }
-            for round in 0..<14 where mode != "kinds" && mode != "undo" {
+            // `-toast-demo stack`: three toasts at the bottom a beat apart
+            // (they stack, the older collapsed behind), and a top
+            // "Posting…" that becomes "Posted" 4 s later (update by id).
+            if mode == "stack" {
+                let messages = ["Saved to your profile", "Link copied", "Hidden from this feed"]
+                for (index, message) in messages.enumerated() {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(index) * 0.7) { [weak self] in
+                        guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
+                            .topViewController else { return }
+                        Feedback.info(message, from: top)
+                        if index == 0 { Feedback.loading("Posting…", id: "demo-post", from: top, at: .top) }
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6.5) { [weak self] in
+                    guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
+                        .topViewController else { return }
+                    Feedback.success("Posted", from: top, at: .top, id: "demo-post")
+                }
+            }
+            for round in 0..<14 where !["kinds", "undo", "stack"].contains(mode) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 1.5) { [weak self] in
                     self?.debugToastDemo(pops: mode == "pop")
                 }
