@@ -53,6 +53,19 @@ final class StorageSettingsViewController: UIViewController {
         applySnapshot()
         model.onChange = { [weak self] in self?.reconfigureAll() }
         Task { await model.refresh() }
+        #if DEBUG
+        // `-storage-clear-all`: Clear All, as the confirmed sheet runs it, once
+        // the screen has measured (#899). Lets a simulator check clear and
+        // relaunch in one go, so no other run of the app can come in between.
+        if ProcessInfo.processInfo.arguments.contains("-storage-clear-all") {
+            Task { [model] in
+                await model.refresh()
+                print("[storage] clear all from \(model.report?.total ?? -1) bytes")
+                await model.clear(nil)
+                print("[storage] cleared, \(model.report?.total ?? -1) bytes left")
+            }
+        }
+        #endif
     }
 
     // MARK: - Text
