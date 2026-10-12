@@ -4,6 +4,7 @@ import CoreNetworking
 import CoreStorage
 import DesignSystem
 import Foundation
+import LocalStore
 
 @MainActor
 public final class SearchViewModel {
@@ -95,6 +96,24 @@ public final class SearchViewModel {
     /// skeleton back over people they were already looking at.
     private var trending: TrendingState
     private var trendingTask: Task<Void, Never>?
+    /// The trending people on the device (#893): what the screen opens on at
+    /// a cold start, offline included. Nil: memory only (tests, previews).
+    private let localCache: SearchLocalCache?
+    private let now: () -> Date
+    /// The stored list is on screen and its age says to ask again: a fetch
+    /// that answers replaces it; one that fails keeps it.
+    private var trendingRevalidates = false
+    /// Whether `trending` came from the device and no answer replaced it.
+    private var trendingIsStored = false
+    /// Whether this screen fetched the corpus: only then are its rows written
+    /// back (their contexts land a moment later). A stored list inside its
+    /// window is never rewritten, or its age would never grow.
+    private var trendingFetched = false
+    /// What was last written, so an unchanged list is not written again.
+    private var storedTrending: [ExploreCreator]?
+    /// Whose fetched list it is: the viewer captured before the fetch, so a
+    /// list landing after a switch is dropped by the store.
+    private var trendingWriter: LocalStoreViewer?
 
     /// The completions last fetched, and what they were for.
     ///
@@ -110,7 +129,7 @@ public final class SearchViewModel {
     private var resolvedMetadata: [ProfileID: ProfileRowMetadata] = [:]
     private var metadataTask: Task<Void, Never>?
 
-    public init(
+    public convenience init(
         repository: any SearchProviding,
         router: (any Router)? = nil,
         recentSearches: RecentSearchStore? = nil,
@@ -122,6 +141,31 @@ public final class SearchViewModel {
         suggestLimit: Int32 = 8,
         suggestDebounce: Duration = .milliseconds(200)
     ) {
+        self.init(
+            repository: repository, router: router, recentSearches: recentSearches, explore: explore,
+            metadata: metadata, pageSize: pageSize, trendingLimit: trendingLimit, creatorLimit: creatorLimit,
+            suggestLimit: suggestLimit, suggestDebounce: suggestDebounce, localCache: nil
+        )
+    }
+
+    /// `localCache`: the trending people on the device (#893). `now` is the
+    /// clock their freshness is judged by.
+    init(
+        repository: any SearchProviding,
+        router: (any Router)? = nil,
+        recentSearches: RecentSearchStore? = nil,
+        explore: (any ExploreProviding)? = nil,
+        metadata: (any ProfileMetadataProviding)? = nil,
+        pageSize: Int32 = 25,
+        trendingLimit: Int = 30,
+        creatorLimit: Int = 12,
+        suggestLimit: Int32 = 8,
+        suggestDebounce: Duration = .milliseconds(200),
+        localCache: SearchLocalCache?,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.localCache = localCache
+        self.now = now
         self.repository = repository
         self.router = router
         self.recentSearches = recentSearches
@@ -133,6 +177,16 @@ public final class SearchViewModel {
         self.suggestLimit = suggestLimit
         self.suggestDebounce = suggestDebounce
         trending = explore == nil ? .unavailable : .loading
+        // The last trending people, on the first frame (#893). Inside their
+        // window they are not asked for again; past it, they revalidate.
+        if explore != nil, let stored = localCache?.trending() {
+            trending = .loaded(creators: stored.creators)
+            trendingIsStored = true
+            storedTrending = stored.creators
+            trendingRevalidates = !LocalStorePolicy.isFresh(
+                fetchedAt: stored.fetchedAt, window: LocalStorePolicy.trendingRevalidation, now: now()
+            )
+        }
     }
 
     // MARK: - Inputs
@@ -578,6 +632,10 @@ public final class SearchViewModel {
         guard case .loaded(let creators) = state else { return state }
         return .loaded(creators: creators.map { creator in
             guard let known = resolvedMetadata[creator.id] else { return creator }
+            // An answer that says nothing (a failed read: no picture, no
+            // edge, no count) leaves what the row already said, the device's
+            // context offline (#893), rather than blanking it.
+            guard known.avatarURL != nil || known.isFollowed || known.followerCount != nil else { return creator }
             var filled = creator
             filled.context = Self.context(for: known)
             return filled
@@ -618,6 +676,8 @@ public final class SearchViewModel {
             guard let self, !Task.isCancelled, !found.isEmpty else { return }
             self.resolvedMetadata.merge(found) { current, _ in current }
             self.rerenderWithAvatars()
+            // The trending rows' contexts, kept with them for the next launch.
+            self.persistTrending()
         }
     }
 
@@ -671,7 +731,10 @@ public final class SearchViewModel {
     /// Fetches the corpus once. Subsequent calls are no-ops while a fetch is
     /// in flight or once one has landed — see `trending`.
     private func loadTrendingIfNeeded() {
-        guard let explore, trendingTask == nil, trending.isLoading else { return }
+        guard let explore, trendingTask == nil, trending.isLoading || trendingRevalidates else { return }
+        trendingRevalidates = false
+        // Whose list this is, asked before the fetch (#893).
+        let writer = localCache?.viewer
         trendingTask = Task { [weak self] in
             guard let self else { return }
             let limit = self.trendingLimit
@@ -681,11 +744,21 @@ public final class SearchViewModel {
                 self.trending = .loaded(
                     creators: ExploreRanking.creators(from: ranked, limit: self.creatorLimit)
                 )
+                self.trendingIsStored = false
+                self.trendingFetched = true
+                self.trendingWriter = writer
+                // Written even when unchanged: the answer is the list's new age.
+                self.storedTrending = nil
+                self.persistTrending()
             } catch {
                 guard !Task.isCancelled else { return }
                 // The section disappears; the history does not. A screen whose
                 // main job still works should not wear someone else's error.
-                self.trending = .failed
+                // A list from the device stays: the last true answer beats
+                // none, offline above all (#893).
+                if !self.trendingIsStored {
+                    self.trending = .failed
+                }
             }
             // Only if the resting screen is still what is showing. A fetch
             // that lands while the viewer is reading results must not throw
@@ -699,6 +772,17 @@ public final class SearchViewModel {
                 )
             }
         }
+    }
+
+    /// Writes the fetched trending people to the device, with what their
+    /// rows say by now (#893). Only a list this screen fetched: one read
+    /// from the device inside its window is left as it is, so its age grows.
+    private func persistTrending() {
+        guard trendingFetched, let localCache, case .loaded = trending else { return }
+        let creators = withResolvedContext(trending).creators
+        guard creators != storedTrending else { return }
+        storedTrending = creators
+        localCache.storeTrending(creators, as: trendingWriter)
     }
 
     /// How many history matches the typeahead shows above the completions.

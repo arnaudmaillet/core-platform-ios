@@ -25,6 +25,10 @@ public final class MapsViewModel {
     /// root turned it on. Identity by default, which is what tests and the
     /// fleet get: pins exactly as the wire sent them.
     private let decorate: ([MapPin]) -> [MapPin]
+    /// The pins of the last viewports on the device (#893): what a cold
+    /// start puts on the map before the first answer. Nil keeps the map in
+    /// memory only (tests, previews).
+    private let localCache: MapPinsLocalCache?
 
     /// Authoritative id → pin state; the diff is computed against this.
     private var pins: [PostID: MapPin] = [:]
@@ -70,14 +74,36 @@ public final class MapsViewModel {
     /// Whether this run of failures has been reported already.
     private var reportedFailureRun = false
 
-    public init(
+    public convenience init(
         repository: any GeoDiscoveryProviding,
         followedPlaceIDs: @escaping () -> Set<String> = { [] },
         decorate: @escaping ([MapPin]) -> [MapPin] = { $0 }
     ) {
+        self.init(repository: repository, followedPlaceIDs: followedPlaceIDs, decorate: decorate, localCache: nil)
+    }
+
+    init(
+        repository: any GeoDiscoveryProviding,
+        followedPlaceIDs: @escaping () -> Set<String> = { [] },
+        decorate: @escaping ([MapPin]) -> [MapPin] = { $0 },
+        localCache: MapPinsLocalCache?
+    ) {
         self.repository = repository
         self.followedPlaceIDs = followedPlaceIDs
         self.decorate = decorate
+        self.localCache = localCache
+    }
+
+    /// Puts the pins of the last viewports back on the map (#893): what the
+    /// map opens on at a cold start, offline included, before its first
+    /// query answers. That answer then revalidates them in place: the diff
+    /// keeps the pins it confirms, and a failed query keeps them all
+    /// (fail-open). Only on an empty, unfiltered map: a stored pin is the
+    /// unfiltered map's, and never overrules an answer already shown.
+    func restoreStoredPins() {
+        guard pins.isEmpty, activeFilter == nil,
+              let stored = localCache?.stored(), !stored.isEmpty else { return }
+        apply(decorate(stored))
     }
 
     /// The map settled on a new viewport (debounced by the caller). Cancels any
@@ -146,6 +172,10 @@ public final class MapsViewModel {
     private func query(_ viewport: MapViewport) {
         queryTask?.cancel()
         let filter = resolvedFilter
+        // The unfiltered map is what the device keeps (#893), as the viewer
+        // here before the query: an answer for someone who left is dropped.
+        // (No primary means no refinement either.)
+        let writer = filter == nil ? localCache?.viewer : nil
         queryTask = Task { [weak self] in
             guard let self else { return }
             let result: TileResult
@@ -166,6 +196,11 @@ public final class MapsViewModel {
             // is reported afresh.
             self.consecutiveQueryFailures = 0
             self.reportedFailureRun = false
+            // The wire's pins, before any decoration: a restore decorates
+            // them again, as it does any answer.
+            if let writer {
+                self.localCache?.record(result.pins, in: viewport, as: writer)
+            }
             #if DEBUG
             let answered = ContinuousClock.now
             #endif

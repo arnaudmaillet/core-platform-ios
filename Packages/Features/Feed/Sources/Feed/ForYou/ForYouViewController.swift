@@ -372,6 +372,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         }
         page.onWarmRequested = { [weak self] posts in self?.warmVisible(posts) }
         page.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.discover) }
+        page.onWillDisplayPost = { [weak self] id in self?.viewModel.didShow(id) }
         page.onRefresh = { [weak self] in self?.viewModel.refresh() }
         // An ordinary push onto whatever stack this screen is on — the app's
         // one profile destination, reached the way every other author tap
@@ -1156,6 +1157,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             openPost: openPostHero
         )
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.discover) }
+        gallery.onWillDisplayPost = { [weak self] id in self?.viewModel.didShow(id) }
         gallery.hasMore = { [weak self] in self?.viewModel.hasMorePages ?? false }
         gallery.onRefresh = { [weak self] in self?.viewModel.refresh() }
         // What is loaded NOW, so the push shows the mosaic rather than a
@@ -2214,6 +2216,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         )
         // The FOLLOWING timeline's next page, never Discover's (#566).
         list.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.following) }
+        list.onWillDisplayPost = { [weak self] id in self?.viewModel.didShow(id) }
         list.hasMore = { [weak self] in self?.viewModel.hasMoreFollowingPages ?? false }
         list.onRefresh = { [weak self] in self?.viewModel.refresh() }
         list.onAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }

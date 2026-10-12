@@ -37,8 +37,9 @@ import Synchronization
 /// cell, delivered a hop later. The LocalStore is a budgeted cache wiped on
 /// every viewer change, while posts here outlive the viewer; and the viewer's
 /// facts (stakes, saves) are not in its rows. The device copy stays the
-/// LocalStore's job: lists persist their pages there (`FeedLocalCache`) and
-/// restore them through `upsert` at a cold start.
+/// LocalStore's job: lists persist their pages there (`FeedLocalCache`), the
+/// posts it holds are rebuilt here as copies at a cold start, and a delete
+/// reaches it (`EntityDeviceBacking`, in Feed, which owns the codec).
 ///
 /// A `Mutex`, not an actor (the `MemoryCache` reason): UIKit reads it
 /// synchronously, and repositories write it from their own executors.
@@ -207,6 +208,15 @@ public final class EntityStore: Sendable {
             return state.withLock { $0.addTombstone(id) }
         }
         if inserted { notifyPosts(.some([id])) }
+    }
+
+    /// A delete undone (Settings → Recently Deleted): the post may come back
+    /// with the next page that carries it. Nothing is put back now — the
+    /// store forgot the post, and the lists load it again.
+    public func restorePost(_ id: PostID) {
+        writes.withLock { _ in
+            state.withLock { $0.removeTombstone(id) }
+        }
     }
 
     // MARK: - Profiles
@@ -514,6 +524,11 @@ public final class EntityStore: Sendable {
                 tombstones.remove(tombstoneOrder.removeFirst())
             }
             return true
+        }
+
+        mutating func removeTombstone(_ id: PostID) {
+            guard tombstones.remove(id) != nil else { return }
+            tombstoneOrder.removeAll { $0 == id }
         }
     }
 }

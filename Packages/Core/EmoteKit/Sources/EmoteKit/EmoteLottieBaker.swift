@@ -39,7 +39,7 @@ import Synchronization
 /// label shows the system glyph until its sheet lands. One thread keeps the
 /// drawing to one core and below everything the user is waiting on.
 ///
-/// ⚠️ **EVERY COMMIT WAITS FOR THE MAIN THREAD TO PARK (#1001).** The tree
+/// ⚠️ **EVERY COMMIT WAITS FOR THE MAIN THREAD TO SLEEP (#1001).** The tree
 /// needs Core Animation transactions, and a commit, on ANY thread, lays out
 /// every window in the process, not only the layers it changed:
 /// `CA::Context::commit_transaction` walks all contexts and calls
@@ -49,16 +49,16 @@ import Synchronization
 /// that window out on `EmoteKit.bake`: AutoLayout threw ("modifications to the
 /// layout engine must not be performed from a background thread") under the
 /// commit in `EmoteFrameDrawer.init`, now and then in a full Feed test run. So
-/// the bake commits only while the main thread waits in its run loop right
-/// after its own commit (`EmoteMainPark`), when no window has layout in flight.
-/// The main thread's share is the commit itself: 0.07 ms median, 0.3 ms at
-/// the 90th percentile, 2.3 ms at worst (36 commits, Debug, iOS 27 simulator).
+/// the bake commits only while the main thread sleeps in its run loop, after
+/// its own commit and before its next turn (`EmoteMainPark`), when no window
+/// has layout in flight. The main thread is held only if it wakes during a
+/// commit, for what is left of it.
 ///
 /// ⚠️ **A THREAD OF ITS OWN, NEVER A GCD WORKER.** A transaction belongs to a
 /// THREAD, not to the code that opened it. On a GCD worker, which every queue
 /// in the process shares, a transaction another queue left open would nest the
-/// bake's, and the real commit would come later, unparked. And a parked
-/// commit blocks its thread for a main-thread turn, which a shared worker
+/// bake's, and the real commit would come later, outside the main thread's
+/// sleep. And waiting for that sleep blocks the thread, which a shared worker
 /// should not. On `EmoteBakeThread` nothing but a bake ever runs.
 final class EmoteBakeQueue: Sendable {
     static let shared = EmoteBakeQueue()
@@ -71,6 +71,9 @@ final class EmoteBakeQueue: Sendable {
     var pendingJobs: Int { queued.load(ordering: .relaxed) }
     /// Jobs drawing their frames right now — a test seam.
     var drawingJobs: Int { drawing.load(ordering: .relaxed) }
+    /// This queue's commits and its waits for the main thread — a test seam,
+    /// counted per queue so a test never reads another suite's bakes.
+    var parks: EmoteParkCounters { thread.counters }
 
     /// Draws `plan`'s frames of `animation` into one sheet. Nil when the
     /// calling task was cancelled first (the job stops at its next frame), or
@@ -110,8 +113,18 @@ final class EmoteBakeQueue: Sendable {
 final class EmoteBakeThread: Sendable {
     private static let marker = "EmoteKit.bake"
 
+    private static let countersKey = "EmoteKit.bake.parks"
+
     /// Whether the caller runs on a bake thread.
     static var isCurrent: Bool { Thread.current.threadDictionary[marker] != nil }
+
+    /// The calling bake thread's commit counters; nil off a bake thread.
+    static var currentCounters: EmoteParkCounters? {
+        Thread.current.threadDictionary[countersKey] as? EmoteParkCounters
+    }
+
+    /// This thread's commits, counted apart from every other thread's.
+    let counters = EmoteParkCounters()
 
     /// What the thread and its owner share — never the owner itself, so the
     /// owner can go.
@@ -139,8 +152,10 @@ final class EmoteBakeThread: Sendable {
 
     init() {
         let shared = self.inbox
+        let ownCounters = self.counters
         let thread = Thread {
             Thread.current.threadDictionary[Self.marker] = true
+            Thread.current.threadDictionary[Self.countersKey] = ownCounters
             while case .run(let job) = shared.next() {
                 autoreleasepool { job() }
             }
@@ -182,7 +197,7 @@ final class EmoteBakeCancellation: Sendable {
 ///
 /// Built, drawn and let go ON THE BAKE THREAD (`EmoteBakeThread`): every
 /// Core Animation transaction the tree needs is opened there and committed
-/// there while the main thread is parked, and the tree is released inside the
+/// there while the main thread sleeps, and the tree is released inside the
 /// last one, so no other thread is left holding a transaction of the bake's.
 final class EmoteBakeSession: @unchecked Sendable {
     private let drawer: EmoteFrameDrawer
@@ -233,7 +248,7 @@ final class EmoteBakeSession: @unchecked Sendable {
     }
 
     /// Lets the tree go and commits the drawing — while the main thread is
-    /// parked. The one step of a bake that waits for the main thread.
+    /// asleep. The one step of a bake that waits for the main thread.
     func finish() {
         assert(EmoteBakeThread.isCurrent, "a bake finishes on the bake thread")
         drawer.close()
@@ -259,48 +274,43 @@ enum EmoteMainCommit {
     }
 }
 
-/// Core Animation commits made off the main thread while the main thread
-/// waits (#1001).
+/// Core Animation commits made off the main thread only while the main thread
+/// sleeps in its run loop (#1001, #1037).
 ///
 /// A commit on any thread lays out EVERY window in the process (see
 /// `EmoteBakeQueue`), so an off-main commit must not meet a window whose
-/// layout the main thread has in flight. The main thread is parked where it
-/// has none: in its run loop, right after its own commit (the same observer
-/// slot as `EmoteMainCommit`). There it waits, without running anything, while
-/// the bake thread commits, then goes on.
+/// layout the main thread has in flight. The main thread has none between the
+/// LAST `beforeWaiting` observer of a turn (after Core Animation's commit and
+/// UIKit's after-commit work) and the FIRST `afterWaiting` observer of the
+/// next: it is asleep in the kernel, or about to be. Two observers mark that
+/// stretch (`Gate`), and a bake commits only inside it.
+///
+/// ⚠️ **THE MAIN THREAD NEVER WAITS FOR THE BAKE THREAD TO BE SCHEDULED
+/// (#1037).** The first version parked the main thread in an observer and
+/// signalled the bake thread to commit. The main thread then stood still for
+/// the bake thread's wake-up, not for the 0.07 ms commit: 14-70 ms a commit
+/// on a loaded simulator, 100-800 ms beside CPU hogs. Now the bake thread
+/// waits for the main thread to fall asleep and commits while it sleeps. The
+/// main thread waits only when it wakes DURING a commit, for the rest of that
+/// commit (the `afterWaiting` gate), capped at `longestWait`.
 enum EmoteMainPark {
-    /// The longest the main thread waits for one commit. A commit of a
-    /// bake's detached tree takes a few tenths of a millisecond; this only bounds
-    /// a commit that cannot finish while the main thread waits (a run loop
-    /// nested inside a commit of its own, holding what the bake's needs).
-    static let longestWait = DispatchTimeInterval.milliseconds(250)
+    /// The longest the main thread waits, on waking, for a commit in flight.
+    /// A commit of a bake's detached tree takes a few tenths of a millisecond;
+    /// this only bounds a commit that cannot finish while the main thread
+    /// waits (a run loop nested inside a commit of its own, holding what the
+    /// bake's needs).
+    static let longestWait: TimeInterval = 0.25
 
-    /// How long the bake thread waits for the main thread to park before it
-    /// asks again (#1011): the observer is withdrawn, added anew and the main
-    /// thread woken. A main thread busy or in a private run-loop mode for
-    /// longer only delays the commit; the bake thread never waits on one
-    /// request for good, and every bake after it still runs.
-    static let retryInterval = DispatchTimeInterval.milliseconds(500)
+    /// How long the bake thread waits for the main thread to fall asleep
+    /// before it wakes it again (#1011). A main thread busy or in a private
+    /// run-loop mode for longer only delays the commit; the bake thread never
+    /// waits for good, and every bake after it still runs.
+    static let retryInterval: TimeInterval = 0.5
 
-    private static let parked = Atomic<Int>(0)
-    private static let waiting = Atomic<Int>(0)
-    private static let retried = Atomic<Int>(0)
-    private static let capped = Atomic<Int>(0)
     private static let cappedLogged = Atomic<Bool>(false)
 
-    /// Commits made while the main thread was parked — a test seam.
-    static var parkedCommits: Int { parked.load(ordering: .relaxed) }
-    /// Threads waiting for the main thread to park — a test seam.
-    static var waitingCommits: Int { waiting.load(ordering: .relaxed) }
-    /// Requests withdrawn after `retryInterval` and made again — a test seam.
-    static var retries: Int { retried.load(ordering: .relaxed) }
-    /// Times the main thread stopped waiting after `longestWait` while a
-    /// commit was still running: the one path on which a bake's commit can
-    /// meet the main thread's layout again (#1011). Logged once in DEBUG.
-    static var cappedWaits: Int { capped.load(ordering: .relaxed) }
-
     /// Commits the calling thread's transaction: at once on the main thread,
-    /// and off it once the main thread is parked.
+    /// and off it while the main thread sleeps.
     static func commit() {
         guard !Thread.isMainThread else {
             CATransaction.commit()
@@ -309,82 +319,158 @@ enum EmoteMainPark {
         whileParked { CATransaction.commit() }
     }
 
-    /// One request to park the main thread, shared by the observer and the
-    /// thread that made it. Its state decides, once, which of them wins a
-    /// race between the observer firing and the request being withdrawn.
-    private final class Request: Sendable {
-        static let pending = 0, parked = 1, withdrawn = 2
-        let state = Atomic<Int>(Request.pending)
-        let arrived = DispatchSemaphore(value: 0)
-        let released = DispatchSemaphore(value: 0)
-    }
-
     /// Runs `body` on the calling (background) thread while the main thread
-    /// is parked. Blocks the caller until the main thread gets there.
+    /// sleeps. Blocks the caller until it does. Counted in the calling bake
+    /// thread's `EmoteParkCounters`.
     ///
-    /// ⚠️ **AT THE MAIN THREAD'S PRIORITY MEANWHILE.** A semaphore lends no
-    /// priority: a utility thread the main thread waits on could sit behind
-    /// every busier thread while the main thread stands still. The calling
-    /// thread is raised to user-interactive for the wait and the commit, then
-    /// put back (a plain thread, not a GCD worker, so its QoS is its own).
+    /// ⚠️ **THE MAIN THREAD IS NOT WOKEN TO HURRY IT.** A main thread that is
+    /// awake falls asleep at the end of its turn on its own. Woken while
+    /// awake, it would fall asleep and wake again at once — and wake during
+    /// the commit that slipped into that instant, and wait for it. It is woken
+    /// only before it has ever been seen asleep (the observers are new) and
+    /// when a wait runs out (`retryInterval`).
     ///
-    /// ⚠️ **A REQUEST IS WITHDRAWN ONLY IF THE MAIN THREAD HAS NOT TAKEN
-    /// IT.** The observer and the timed-out caller race; each claims the
-    /// request with one compare-and-swap. A main thread that claimed it first
-    /// is parked (or about to be), so the caller commits; one that comes too
-    /// late finds it withdrawn and goes on at once.
+    /// ⚠️ **AT THE MAIN THREAD'S PRIORITY FROM THE WAIT TO THE END OF THE
+    /// COMMIT.** A main thread that wakes during the commit waits for it, and a
+    /// condition lends no priority. So the calling thread runs at
+    /// user-interactive from the moment it waits (it must take the main
+    /// thread's sleep before the sleep ends) until the commit is marked done,
+    /// then is put back (a plain thread, not a GCD worker, so its QoS is its
+    /// own).
     static func whileParked(_ body: () -> Void) {
         dispatchPrecondition(condition: .notOnQueue(.main))
+        let gate = Self.gate
+        let counters = EmoteBakeThread.currentCounters ?? EmoteParkCounters()
         let previous = qos_class_self()
         pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0)
         defer { pthread_set_qos_class_self_np(previous, 0) }
-        waiting.add(1, ordering: .relaxed)
-        var request = Request()
-        while !park(request) {
-            retried.add(1, ordering: .relaxed)
-            request = Request()
+        counters.waiting.add(1, ordering: .relaxed)
+        gate.condition.lock()
+        gate.waitingForSleep += 1
+        var wake = !gate.everAsleep
+        while !gate.mainAsleep || gate.committer != nil {
+            if wake { CFRunLoopWakeUp(CFRunLoopGetMain()) }
+            wake = !gate.condition.wait(until: Date().addingTimeInterval(retryInterval))
+            if wake { counters.retried.add(1, ordering: .relaxed) }
         }
-        waiting.subtract(1, ordering: .relaxed)
+        gate.waitingForSleep -= 1
+        gate.committer = counters
+        gate.condition.unlock()
+        counters.waiting.subtract(1, ordering: .relaxed)
+
         body()
-        parked.add(1, ordering: .relaxed)
-        request.released.signal()
+
+        gate.condition.lock()
+        gate.committer = nil
+        gate.condition.broadcast()
+        gate.condition.unlock()
+        counters.committed.add(1, ordering: .relaxed)
     }
 
-    /// Asks the main thread to park for `request`. True once it is parked;
-    /// false when `retryInterval` passed first and the request was withdrawn.
-    private static func park(_ request: Request) -> Bool {
-        let observer = CFRunLoopObserverCreateWithHandler(
-            kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, false, 2_000_100
+    /// The main thread's sleep as its run loop's observers see it, and the
+    /// commit in flight. Every field is read and written under `condition`.
+    private final class Gate: @unchecked Sendable {
+        let condition = NSCondition()
+        /// Between the last `beforeWaiting` observer and the next
+        /// `afterWaiting` one.
+        var mainAsleep = false
+        /// The counters of the bake thread running `whileParked`'s body; nil
+        /// when no commit is in flight.
+        var committer: EmoteParkCounters?
+        /// Bake threads waiting for the main thread to fall asleep.
+        var waitingForSleep = 0
+        /// Whether the main thread has been seen asleep since the observers
+        /// were installed.
+        var everAsleep = false
+    }
+
+    /// Installed once, the first time a bake commits, in the COMMON modes:
+    /// the sleep mark after every other `beforeWaiting` observer, the gate
+    /// before every other `afterWaiting` one. A turn costs each one a lock.
+    private static let gate: Gate = {
+        let installed = Gate()
+        let falling = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault, CFRunLoopActivity.beforeWaiting.rawValue, true, Int.max
         ) { _, _ in
-            guard request.state.compareExchange(
-                expected: Request.pending, desired: Request.parked, ordering: .acquiringAndReleasing
-            ).exchanged else { return }
-            request.arrived.signal()
-            if request.released.wait(timeout: .now() + longestWait) == .timedOut {
-                noteCappedWait()
+            installed.condition.lock()
+            installed.mainAsleep = true
+            installed.everAsleep = true
+            if installed.waitingForSleep > 0 { installed.condition.broadcast() }
+            installed.condition.unlock()
+        }
+        let waking = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault, CFRunLoopActivity.afterWaiting.rawValue, true, Int.min
+        ) { _, _ in
+            installed.condition.lock()
+            if let committer = installed.committer {
+                let started = ContinuousClock.now
+                let deadline = Date().addingTimeInterval(longestWait)
+                while installed.committer != nil {
+                    if !installed.condition.wait(until: deadline), installed.committer != nil {
+                        noteCappedWait(committer)
+                        break
+                    }
+                }
+                committer.noteHold(ContinuousClock.now - started)
             }
+            installed.mainAsleep = false
+            installed.condition.unlock()
         }
-        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
-        CFRunLoopWakeUp(CFRunLoopGetMain())
-        if request.arrived.wait(timeout: .now() + retryInterval) == .success { return true }
-        if request.state.compareExchange(
-            expected: Request.pending, desired: Request.withdrawn, ordering: .acquiringAndReleasing
-        ).exchanged {
-            CFRunLoopObserverInvalidate(observer)
-            return false
-        }
-        // The main thread claimed it as the wait ran out: it is parking.
-        request.arrived.wait()
-        return true
-    }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), falling, .commonModes)
+        CFRunLoopAddObserver(CFRunLoopGetMain(), waking, .commonModes)
+        return installed
+    }()
 
-    private static func noteCappedWait() {
-        capped.add(1, ordering: .relaxed)
+    private static func noteCappedWait(_ counters: EmoteParkCounters) {
+        counters.capped.add(1, ordering: .relaxed)
         #if DEBUG
         if !cappedLogged.exchange(true, ordering: .relaxed) {
-            print("[emote] the main thread waited its 250 ms cap for a bake's commit and went on; counted in EmoteMainPark.cappedWaits (logged once)")
+            print("[emote] the main thread waited its 250 ms cap for a bake's commit and went on; counted in EmoteParkCounters.cappedWaits (logged once)")
         }
         #endif
+    }
+}
+
+/// What one bake thread's commits did (#1038) — a test seam, kept per thread
+/// (`EmoteBakeThread.counters`, read through `EmoteBakeQueue.parks`) so a test
+/// reads its own queue's numbers, never those of the bakes of a suite running
+/// beside it.
+final class EmoteParkCounters: Sendable {
+    fileprivate let committed = Atomic<Int>(0)
+    fileprivate let waiting = Atomic<Int>(0)
+    fileprivate let retried = Atomic<Int>(0)
+    fileprivate let capped = Atomic<Int>(0)
+    private let heldTimes = Mutex(Holds())
+
+    /// Commits made while the main thread slept.
+    var commits: Int { committed.load(ordering: .relaxed) }
+    /// Commits waiting for the main thread to fall asleep.
+    var waitingCommits: Int { waiting.load(ordering: .relaxed) }
+    /// Waits for the main thread's sleep that ran out after
+    /// `EmoteMainPark.retryInterval` and woke it again.
+    var retries: Int { retried.load(ordering: .relaxed) }
+    /// Times the main thread stopped waiting after `EmoteMainPark.longestWait`
+    /// while a commit was still running: the one path on which a bake's commit
+    /// can meet the main thread's layout again (#1011). Logged once in DEBUG.
+    var cappedWaits: Int { capped.load(ordering: .relaxed) }
+    /// The main thread's time held by these commits: each hold from the
+    /// moment it woke during one to the moment it went on (#1037) — what it
+    /// could not spend on a touch. Only a main thread that wakes mid-commit is
+    /// held.
+    var holds: Holds { heldTimes.withLock { $0 } }
+
+    struct Holds: Sendable {
+        var count = 0
+        var total = Duration.zero
+        var longest = Duration.zero
+    }
+
+    fileprivate func noteHold(_ held: Duration) {
+        heldTimes.withLock { holds in
+            holds.count += 1
+            holds.total += held
+            holds.longest = max(holds.longest, held)
+        }
     }
 }
 

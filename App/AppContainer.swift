@@ -237,7 +237,21 @@ final class AppContainer {
             Task { [weak self] in _ = try? await self?.accountRepository.currentAccount() }
         }
         observeStorageScope()
+        restoreEntitiesFromDevice()
     }
+
+    /// Rebuilds the app's posts from the device store (#896) once per
+    /// launch, as soon as the store knows who is here — the same moment the
+    /// tabs open on their stored lists, which then share these entities.
+    private func restoreEntitiesFromDevice() {
+        guard !didRestoreEntities else { return }
+        didRestoreEntities = true
+        _ = entityStore
+        guard let backing = entityDeviceBacking else { return }
+        Task.detached(priority: .userInitiated) { backing.restore() }
+    }
+
+    private var didRestoreEntities = false
 
     /// The active profile, as the viewer session resolves it or a switch
     /// changes it — the profile half of `StorageScope`.
@@ -395,6 +409,9 @@ final class AppContainer {
         // Every point the viewer stakes, from any surface, moves the post's
         // count (and every undo or refund moves it back).
         walletStakeLikes = WalletStakeLikes(wallet: walletStore, entities: store)
+        // Rebuilt from the device at a cold start, and a delete reaches the
+        // device's lists (`restoreEntitiesFromDevice`).
+        entityDeviceBacking = feedLocalCache.map { EntityDeviceBacking(entities: store, cache: $0) }
         return store
     }()
 
@@ -402,6 +419,8 @@ final class AppContainer {
     private var entityFollowSubscription: FollowGraphSubscription?
     /// Keeps `entityStore`'s counts moving with the wallet's stakes.
     private var walletStakeLikes: WalletStakeLikes?
+    /// `entityStore`'s device half: nil without a device store.
+    private var entityDeviceBacking: EntityDeviceBacking?
 
     // MARK: - Media
 
@@ -1039,7 +1058,10 @@ final class AppContainer {
         stakePacks: stakePacks,
         // A guest has no people: no favourites dock, no Friends / Following.
         isMember: { [unowned self] in self.memberGate.isMember },
-        locator: currentCountry
+        locator: currentCountry,
+        // The pins of the last viewports, so a cold start opens the map on
+        // its markers (#893).
+        localStore: localStore
     )
 
     #if DEBUG
@@ -1291,6 +1313,10 @@ final class AppContainer {
         builder.makeCardStaking = { [unowned self] in
             PostCardStaking(wallet: self.walletStore, entities: self.entityStore)
         }
+        // A post the viewer deleted leaves every feed and For You, and one
+        // restored from Recently Deleted may come back (#896).
+        builder.onPostDeleted = { [unowned self] id in self.entityStore.deletePost(id) }
+        builder.onPostRestored = { [unowned self] id in self.entityStore.restorePost(id) }
         // A follow made on another surface (a feed's "+", a card's Unfollow)
         // reaches the profile screens and their followers lists.
         builder.followEvents = followGraphEvents
@@ -1382,7 +1408,9 @@ final class AppContainer {
         // one claim countdown — and the sheet is the shell's, so it crosses as
         // a closure. Same wiring as the two pushed hosts in Feed.
         wallet: walletStore,
-        makeWalletSheet: { [unowned self] in self.makeWalletSheet() }
+        makeWalletSheet: { [unowned self] in self.makeWalletSheet() },
+        // The trending people, so a cold start opens Search on them (#893).
+        localStore: localStore
     )
 
     // MARK: - Notifications

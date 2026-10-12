@@ -491,6 +491,12 @@ final class MapsViewController: UIViewController {
         loadFavorites()
         prefetchPeople()
         mapView.setRegion(Self.defaultRegion, animated: false)
+        // The pins of the last viewports, on the first frame (#893): offline,
+        // the map is not empty; online, the first query revalidates them in
+        // place. Not under the locked guest veil, which shows no pins.
+        if !isGuestLocked {
+            viewModel.restoreStoredPins()
+        }
         #if DEBUG
         runDebugLaunchHooks()
         #endif

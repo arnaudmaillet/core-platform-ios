@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import FeedInterface
+import LocalStore
 import MapsInterface
 import MediaCore
 import MediaPlayback
@@ -61,6 +62,9 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     private let locator: (any CurrentCountryLocating)?
     private let stakePacks: (any StakePackSelling)?
     private let isMember: @MainActor () -> Bool
+    /// One for the app's lifetime: every map the builder makes reads and
+    /// folds into the same stored pins.
+    private let pinsCache: MapPinsLocalCache?
 
     public init(
         repository: any GeoDiscoveryProviding,
@@ -92,8 +96,12 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         /// Whether the viewer has an account. A guest has no people: no
         /// favourites dock, no Friends / Following rows.
         isMember: @escaping @MainActor () -> Bool = { true },
-        locator: (any CurrentCountryLocating)? = nil
+        locator: (any CurrentCountryLocating)? = nil,
+        /// The device store (#893): the map opens on the pins of its last
+        /// viewports at a cold start. Nil keeps the map in memory only.
+        localStore: LocalStore? = nil
     ) {
+        self.pinsCache = localStore.map(MapPinsLocalCache.init(store:))
         self.isMember = isMember
         self.locator = locator
         self.countryAccess = countryAccess
@@ -193,7 +201,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             viewModel: MapsViewModel(
                 repository: repository,
                 followedPlaceIDs: { placeFollows.followedPlaceIDs },
-                decorate: placeDecoration
+                decorate: placeDecoration,
+                localCache: pinsCache
             ),
             favoritesRepository: favoritesRepository,
             pinService: pinService,

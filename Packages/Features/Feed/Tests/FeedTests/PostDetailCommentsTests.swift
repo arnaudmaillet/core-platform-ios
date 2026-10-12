@@ -117,7 +117,9 @@ private final class StoringCommentsProvider: CommentsProviding, @unchecked Senda
             return true
         }
         if loses { throw CommentsError.transport(message: "the answer was lost") }
-        while lock.withLock({ holding }) {
+        // Bounded (#1046): a hold its test never released must not keep the
+        // view model's send task spinning past the test.
+        for _ in 0..<6_000 where lock.withLock({ holding }) {
             try await Task.sleep(for: .milliseconds(10))
         }
         return entry
@@ -130,23 +132,21 @@ private func comment(_ id: String, _ body: String) -> CommentEntry {
 
 @MainActor
 struct PostDetailCommentsTests {
-    /// Polls until `condition` holds, up to a generous deadline — CI runners
-    /// can starve the cooperative pool far past any fixed sleep (observed: a
-    /// 50ms settle losing the race on a hosted runner and reddening
-    /// build-test; then a 5s deadline losing the same race once the
-    /// shortcut-wheel suite added main-actor UI tests to the parallel
-    /// process; then 20s losing it again on 2026-07-17 runners — the SAME
-    /// test PASSED at 60.8s wall-clock on develop's green run, so a starved
-    /// pool can legitimately take a minute end to end). The deadline is a
-    /// CEILING, not a pace — success returns immediately, so a fast run pays
-    /// nothing (the whole suite is ~1s locally). Returns either way; the
-    /// caller's asserts do the judging.
-    private func settle(until condition: () -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(120))
-        while !condition(), ContinuousClock.now < deadline {
+    /// A look budget, not a deadline (#1046): a wall-clock deadline that
+    /// returned silently let five failed waits add up to the suite's 10-minute
+    /// limit on a crowded host, and the assertions that would have named the
+    /// failing wait never ran. Success returns at once, so a fast run pays
+    /// nothing; a starved runner gets 6,000 looks. It answers, and every
+    /// caller asserts the answer, so a wait that never holds fails right there.
+    private static let looks = 6_000
+
+    private func settle(until condition: () -> Bool) async -> Bool {
+        for _ in 0..<Self.looks {
+            if condition() { return true }
             await Task.yield()
-            try? await Task.sleep(for: .milliseconds(20))
+            try? await Task.sleep(for: .milliseconds(10))
         }
+        return condition()
     }
 
     /// Fixed grace for negative assertions ("nothing should have happened"),
@@ -170,9 +170,9 @@ struct PostDetailCommentsTests {
         viewModel.onCommentsChange = { lastComments = $0 }
 
         viewModel.viewDidLoad()
-        await settle {
+        #expect(await settle {
             if case .loaded = lastComments { return true } else { return false }
-        }
+        })
 
         guard case .loaded(let models) = lastComments else {
             Issue.record("expected loaded comments, got \(String(describing: lastComments))")
@@ -195,15 +195,15 @@ struct PostDetailCommentsTests {
             posted.append((id, shown))
         }
         viewModel.viewDidLoad()
-        await settle {
+        #expect(await settle {
             if case .loaded = lastComments { return true } else { return false }
-        }
+        })
 
         viewModel.submitComment("  my thoughts  ")
-        await settle {
+        #expect(await settle {
             if case .loaded(let models) = lastComments { return models.first?.id == "new" }
             return false
-        }
+        })
 
         #expect(posted.map(\.id) == ["new"])
         #expect(posted.first?.alreadyShown == false, "announced after the stream that holds it")
@@ -229,15 +229,15 @@ struct PostDetailCommentsTests {
         var lastComments: PostDetailViewModel.CommentsState?
         viewModel.onCommentsChange = { lastComments = $0 }
         viewModel.viewDidLoad()
-        await settle {
+        #expect(await settle {
             if case .loaded = lastComments { return true } else { return false }
-        }
+        })
 
         viewModel.submitComment("agreed!", parentID: "c1")
-        await settle {
+        #expect(await settle {
             if case .loaded(let models) = lastComments { return models.contains { $0.id == "new" } }
             return false
-        }
+        })
 
         #expect(await provider.addedParentIDs == ["c1"])
         guard case .loaded(let models) = lastComments else {
@@ -261,17 +261,17 @@ struct PostDetailCommentsTests {
         var lastComments: PostDetailViewModel.CommentsState?
         viewModel.onCommentsChange = { lastComments = $0 }
         viewModel.viewDidLoad()
-        await settle { if case .loaded = lastComments { true } else { false } }
+        #expect(await settle { if case .loaded = lastComments { true } else { false } })
 
         viewModel.submitComment("same words")
-        await settle { failures == 1 }
+        #expect(await settle { failures == 1 })
         viewModel.submitComment("  same words ")
-        await settle { failures == 2 }
+        #expect(await settle { failures == 2 })
         viewModel.submitComment("other words")
-        await settle {
+        #expect(await settle {
             if case .loaded(let models) = lastComments { return !models.isEmpty }
             return false
-        }
+        })
 
         let ids = await provider.sentIDs
         #expect(ids.count == 3, "attempts: \(ids)")
@@ -281,10 +281,10 @@ struct PostDetailCommentsTests {
 
         // Landed, the id is spent: the same words again are a new comment.
         viewModel.submitComment("other words")
-        await settle {
+        #expect(await settle {
             if case .loaded(let models) = lastComments { return models.count == 2 }
             return false
-        }
+        })
         let after = await provider.sentIDs
         #expect(after.count == 4 && after[3] != after[2], "a delivered comment's id was reused: \(after)")
     }
@@ -296,6 +296,7 @@ struct PostDetailCommentsTests {
     @Test(.timeLimit(.minutes(10)))
     func anAnswerAlreadyBroughtInByARefreshIsNotInsertedTwice() async {
         let provider = StoringCommentsProvider(holding: true)
+        defer { provider.release() }
         let viewModel = makeViewModel(provider)
         var lastComments: PostDetailViewModel.CommentsState?
         viewModel.onCommentsChange = { lastComments = $0 }
@@ -304,17 +305,17 @@ struct PostDetailCommentsTests {
         var posted: [String] = []
         viewModel.onCommentPosted = { posted.append($0) }
         viewModel.viewDidLoad()
-        await settle { if case .loaded = lastComments { true } else { false } }
+        #expect(await settle { if case .loaded = lastComments { true } else { false } })
 
         viewModel.submitComment("crossed")
-        await settle { provider.storedIDs.count == 1 }
+        #expect(await settle { provider.storedIDs.count == 1 })
         viewModel.refresh()
-        await settle {
+        #expect(await settle {
             if case .loaded(let models) = lastComments { return models.count == 1 }
             return false
-        }
+        })
         provider.release()
-        await settle { !composing }
+        #expect(await settle { !composing })
 
         guard case .loaded(let models) = lastComments else {
             Issue.record("no stream: \(String(describing: lastComments))")
@@ -338,20 +339,20 @@ struct PostDetailCommentsTests {
         var lastComments: PostDetailViewModel.CommentsState?
         viewModel.onCommentsChange = { lastComments = $0 }
         viewModel.viewDidLoad()
-        await settle { if case .loaded = lastComments { true } else { false } }
+        #expect(await settle { if case .loaded = lastComments { true } else { false } })
 
         viewModel.submitComment("twice on purpose")
-        await settle { failures == 1 }
+        #expect(await settle { failures == 1 })
         viewModel.refresh()
-        await settle {
+        #expect(await settle {
             if case .loaded(let models) = lastComments { return models.count == 1 }
             return false
-        }
+        })
         viewModel.submitComment("twice on purpose")
-        await settle {
+        #expect(await settle {
             if case .loaded(let models) = lastComments { return models.count == 2 }
             return false
-        }
+        })
 
         let ids = provider.storedIDs
         #expect(ids.count == 2 && Set(ids).count == 2, "the second comment was swallowed: \(ids)")
@@ -404,7 +405,7 @@ struct PostDetailCommentsTests {
             if case .loaded(let models) = state { emitted.append(models.map(\.id)) }
         }
         viewModel.viewDidLoad()
-        await settle { !emitted.isEmpty }
+        #expect(await settle { !emitted.isEmpty })
         #expect(emitted.last == ["c1", "c2", "c2-r0"])
 
         let emitsBefore = emitted.count
@@ -437,9 +438,9 @@ struct PostDetailCommentsTests {
         viewModel.onCommentsChange = { states.append($0) }
 
         viewModel.viewDidLoad()
-        await settle {
+        #expect(await settle {
             if case .loaded = states.last { return true } else { return false }
-        }
+        })
 
         #expect(states.contains { if case .loaded(let m) = $0 { return m.isEmpty } else { return false } })
     }
@@ -474,9 +475,9 @@ struct PostDetailCommentsTests {
         var lastComments: PostDetailViewModel.CommentsState?
         viewModel.onCommentsChange = { lastComments = $0 }
         viewModel.viewDidLoad()
-        await settle {
+        #expect(await settle {
             if case .loaded = lastComments { return true } else { return false }
-        }
+        })
 
         viewModel.submitComment("   ")
         await settle() // negative assertion: fixed grace, nothing to poll for

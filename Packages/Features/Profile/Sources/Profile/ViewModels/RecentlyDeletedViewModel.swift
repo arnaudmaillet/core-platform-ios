@@ -26,14 +26,19 @@ final class RecentlyDeletedViewModel {
     private let viewer: any ProfileViewerResolving
     /// A post came back to `author`'s gallery: what the cached gallery hears.
     private let onRestored: ((ProfileID) -> Void)?
+    /// The post itself is back: what the app's `EntityStore` hears, so the
+    /// feeds let it in again (#896).
+    private let onPostRestored: (@MainActor (PostID) -> Void)?
 
     init(
         trash: any PostTrashManaging, viewer: any ProfileViewerResolving,
-        onRestored: ((ProfileID) -> Void)? = nil
+        onRestored: ((ProfileID) -> Void)? = nil,
+        onPostRestored: (@MainActor (PostID) -> Void)? = nil
     ) {
         self.trash = trash
         self.viewer = viewer
         self.onRestored = onRestored
+        self.onPostRestored = onPostRestored
     }
 
     func load() async {
@@ -61,6 +66,7 @@ final class RecentlyDeletedViewModel {
             // Already back: nothing left to do but drop the row.
         }
         onRestored?(author)
+        onPostRestored?(deleted.post.id)
         if case .loaded(let current) = phase {
             phase = .loaded(current.filter { $0.post.id != deleted.post.id })
         }

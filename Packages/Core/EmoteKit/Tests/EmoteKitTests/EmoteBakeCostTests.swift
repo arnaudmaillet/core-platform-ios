@@ -32,22 +32,36 @@ struct EmoteBakeCostTests {
             let engine = EmoteEngine(diskCache: nil)
             engine.bakeDelay = .zero
             let emote = try #require(engine.catalog.emote(id: id))
+            let parks = EmoteBakeQueue.shared.parks
+            let commitsBefore = parks.commits
+            let holdsBefore = parks.holds
             let meter = MainThreadBusyMeter()
             meter.start()
             let art = try #require(await engine.art(for: emote, pixelSide: 64))
             // Work a bake leaves behind (a deferred commit) still counts.
             try await Task.sleep(for: .milliseconds(300))
             let report = meter.stop()
+            // ⚠️ THE MAIN THREAD'S HOLDS FOR THE BAKE'S COMMITS, counted apart
+            // (#1037). The meter books them as busy: a main thread that wakes
+            // while a bake commits waits in its `afterWaiting` gate, inside the
+            // turn the meter times. They are judged on their own bound (each
+            // under the cap) and taken out of the drawing budget.
+            let commits = parks.commits - commitsBefore
+            let holdCount = parks.holds.count - holdsBefore.count
+            let heldMS = (parks.holds.total - holdsBefore.total).milliseconds
+            #expect(heldMS <= Double(holdCount) * (EmoteMainPark.longestWait * 1000 + 50),
+                    "\(emote.glyph): \(holdCount) holds of the main thread took \(heldMS) ms, past their cap")
             // Before the bake moved off the main thread the main thread was
             // busy for MORE than the drawing (deferred redraws on top);
             // after, for about 2% of it. A quarter is slack for a slow CI.
             let background = backgroundShare * report.wallMS
-            #expect(report.busyMS < engine.stats.lastBakeDrawingMS / 4 + 20 + background,
-                    "\(emote.glyph): \(report) background=\(Int(background))ms")
+            #expect(report.busyMS - heldMS < engine.stats.lastBakeDrawingMS / 4 + 20 + background,
+                    "\(emote.glyph): \(report) held=\(Int(heldMS))ms background=\(Int(background))ms")
             lines.append(String(
-                format: "%@ frames=%d %@ mainPerFrame=%.1fms bakeDrawing=%.0fms (%.1fms/frame)",
+                format: "%@ frames=%d %@ mainPerFrame=%.1fms bakeDrawing=%.0fms (%.1fms/frame) commits=%d holds=%d held=%.2fms",
                 emote.glyph, art.frameCount, report.description, report.busyMS / Double(art.frameCount),
-                engine.stats.lastBakeDrawingMS, engine.stats.lastBakeDrawingMS / Double(art.frameCount)
+                engine.stats.lastBakeDrawingMS, engine.stats.lastBakeDrawingMS / Double(art.frameCount),
+                commits, holdCount, heldMS
             ))
         }
         print("[emote-main-cost]\n" + lines.joined(separator: "\n"))

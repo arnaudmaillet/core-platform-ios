@@ -16,7 +16,9 @@ let package = Package(
         .package(path: "../../Core/CoreNetworking"),
         .package(path: "../../Core/CoreStorage"),
         .package(path: "../../Core/DesignSystem"),
-        .package(path: "../../Core/MediaCore")
+        .package(path: "../../Core/MediaCore"),
+        .package(path: "../../Core/LocalStore"),
+        .package(path: "../../Core/CacheKit")
     ],
     targets: [
         .target(
@@ -34,7 +36,9 @@ let package = Package(
                 "CoreNetworking",
                 "CoreStorage",
                 "DesignSystem",
-                "MediaCore"
+                "MediaCore",
+                // The resting screen's trending people, on the device (#893).
+                "LocalStore"
             ]
         ),
         .testTarget(
@@ -46,6 +50,10 @@ let package = Package(
                 "CoreNetworking",
                 "CoreStorage",
                 "MediaCore",
+                "LocalStore",
+                // `ManualCacheClock`: the store and the screens share one
+                // clock in the cold-start tests.
+                "CacheKit",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

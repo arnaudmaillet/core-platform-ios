@@ -18,7 +18,8 @@ let package = Package(
         .package(path: "../../Core/DesignSystem"),
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/MediaPlayback"),
-        .package(path: "../../Core/CacheKit")
+        .package(path: "../../Core/CacheKit"),
+        .package(path: "../../Core/LocalStore")
     ],
     targets: [
         .target(
@@ -38,7 +39,9 @@ let package = Package(
                 "MediaPlayback",
                 // The flag palette lives in the device cache's UI assets class
                 // (#971).
-                "CacheKit"
+                "CacheKit",
+                // The pins of the last viewports, on the device (#893).
+                "LocalStore"
             ],
             // The world's borders (`CountryAtlas`), imported from Natural
             // Earth by `Scripts/import-country-borders.py`; the round flags
@@ -59,6 +62,7 @@ let package = Package(
                 "CoreModels",
                 "CoreNetworking",
                 "CacheKit",
+                "LocalStore",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

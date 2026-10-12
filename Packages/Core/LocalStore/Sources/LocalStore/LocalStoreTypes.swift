@@ -228,4 +228,42 @@ public enum LocalStorePolicy {
     /// A list page set (first page and the pages after it) expires a day
     /// after its first page was fetched.
     public static let listLifetime: TimeInterval = 24 * 60 * 60
+    /// The map's pins of the last viewports: where posts are, which moves no
+    /// faster than the posts themselves.
+    public static let mapPinLifetime: TimeInterval = postLifetime
+
+    // MARK: - Freshness
+
+    // Lifetime says how long a copy may be SHOWN; freshness says how long
+    // opening it again may SKIP the network (#893). Inside its window a
+    // screen opens on the stored copy and asks nothing; past it, it opens on
+    // the copy and revalidates (stale-while-revalidate). Pull-to-refresh
+    // always refetches, whatever the window says.
+    //
+    // A screen's window is the shortest of the types it draws:
+    //
+    // | Content                      | Window | Why                                   |
+    // |------------------------------|--------|---------------------------------------|
+    // | Profile screen (header, grid)| 60 s   | its counts are counters (1 min)       |
+    // | Search's trending people     | 10 min | people rows, a profile's window       |
+    // | For You, Following           | none   | the first page IS the newest ranking  |
+    // | Comments' first page         | none   | a thread grows while it is read       |
+    // | Inbox, notifications         | none   | the viewer's own activity, live       |
+    // | Map pins                     | none   | every settle is a new question        |
+    //
+    // "none": revalidated at every open; the stored copy is frame 0 only.
+
+    /// A profile screen opened again within a minute of its last fetch is not
+    /// refetched: its header carries counters (`counterRevalidation`).
+    public static let profileScreenRevalidation: TimeInterval = counterRevalidation
+    /// Search's trending people (#893): rows of people, so a profile's window.
+    public static let trendingRevalidation: TimeInterval = profileRevalidation
+
+    /// Whether content fetched at `fetchedAt` may still be shown without
+    /// asking the network, under `window`. A date in the future (the clock
+    /// moved back) is not fresh: the copy's age is unknown.
+    public static func isFresh(fetchedAt: Date, window: TimeInterval, now: Date) -> Bool {
+        let age = now.timeIntervalSince(fetchedAt)
+        return age >= 0 && age < window
+    }
 }
