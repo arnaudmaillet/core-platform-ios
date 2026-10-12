@@ -124,12 +124,35 @@ public final class ConversationListViewModel {
     /// Mutes or unmutes from the row's menu, and answers once the server has
     /// (#803, #802): muting from the inbox used to show nothing at all — the
     /// bell glyph lives on the row, under a menu that just closed.
+    ///
+    /// A mute the server took is answered with Undo when the screen offers it
+    /// (#957, `onMuteUndoable`): optimistic + compensating — Undo turns the
+    /// notifications back on, and a refused unmute is said.
     public func toggleMute(_ id: ConversationID) {
         let muting = !catalog.isMuted(id)
         catalog.toggleMute(id) { [weak self] confirmed in
-            self?.onMuteAnswered?(Self.muteAnswer(muting: muting, confirmed: confirmed), muting, confirmed)
+            guard let self else { return }
+            let message = Self.muteAnswer(muting: muting, confirmed: confirmed)
+            if muting, confirmed, let onMuteUndoable {
+                onMuteUndoable(message) { [weak self] in self?.undoMute(id) }
+            } else {
+                onMuteAnswered?(message, muting, confirmed)
+            }
         }
     }
+
+    /// A mute's Undo: the compensating unmute, said only if refused.
+    private func undoMute(_ id: ConversationID) {
+        guard catalog.isMuted(id) else { return }
+        catalog.setMute(id, muted: false, until: nil) { [weak self] confirmed in
+            guard !confirmed else { return }
+            self?.onMuteAnswered?(Self.muteAnswer(muting: false, confirmed: false), false, false)
+        }
+    }
+
+    /// A mute the server took, offered with Undo (#957): the words and the
+    /// undo. Unset, it is answered through `onMuteAnswered` like the rest.
+    public var onMuteUndoable: ((_ message: String, _ undo: @escaping @MainActor () -> Void) -> Void)?
 
     /// A row's mute, answered by the server: the words, whether it was a mute
     /// (or an unmute), and whether it was written (false: refused and put

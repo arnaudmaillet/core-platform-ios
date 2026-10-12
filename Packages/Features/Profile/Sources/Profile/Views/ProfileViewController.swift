@@ -447,6 +447,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         viewModel.onActionResult = { [weak self] result in
             self?.render(result)
         }
+        // Deleting a post, muting, restricting: done at once on screen, with
+        // Undo in the toast; sent when its countdown runs out (#957).
+        viewModel.onUndoable = { [weak self] action in
+            guard let self else { return }
+            Feedback.undoable(
+                action.message, detail: action.detail, symbol: action.symbol, from: self,
+                commit: action.commit, undo: action.undo
+            )
+        }
         viewModel.onDismissRequested = { [weak self] in
             self?.leaveAfterBlock()
         }
@@ -1493,25 +1502,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         ProfileMenuBuilder.galleryMenuActions(
             isViewerPost: viewModel.isViewerPost(by: context.authorID),
             canReport: viewModel.canReportPost(by: context.authorID),
-            onDelete: { [weak self] in self?.confirmDeletePost(context) },
+            // At once, with Undo in the toast (#957) — no confirmation sheet.
+            onDelete: { [weak self] in self?.viewModel.deletePost(context.post.id) },
             onReport: { [weak self] in self?.presentPostReportReasons(for: context) }
         )
-    }
-
-    static let deletePostMessage = "You can restore it from Settings → Your Activity → Recently Deleted for 30 days."
-
-    private func confirmDeletePost(_ context: ProfileGalleryGridView.AuthorMenuContext) {
-        guard viewModel.canDeletePosts else { return }
-        let sheet = UIAlertController(title: "Delete this post?", message: Self.deletePostMessage, preferredStyle: .actionSheet)
-        sheet.addAction(UIAlertAction(title: "Delete", style: .destructive) { [weak self] _ in
-            self?.viewModel.deletePost(context.post.id)
-        })
-        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        if let popover = sheet.popoverPresentationController {
-            popover.sourceView = context.anchor
-            popover.sourceRect = context.anchor.bounds
-        }
-        present(sheet, animated: true)
     }
 
     /// The same question, asked of a post instead of the profile — and asked by
@@ -1569,8 +1563,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 symbol: restricted ? "person.crop.circle.badge.minus" : "person.crop.circle.badge.checkmark",
                 from: self
             )
-        case .postDeleted:
-            Feedback.success("Post deleted", symbol: "trash.fill", from: self)
+        case .commitFailed(let message):
+            // Already put back on screen (#957): say why it came back.
+            Feedback.failure(message, from: self)
         case .reported:
             Feedback.success("Report sent", symbol: "flag.fill", from: self)
         case .followFailed(let message):

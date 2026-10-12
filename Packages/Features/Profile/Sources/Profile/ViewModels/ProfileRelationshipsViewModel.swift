@@ -132,6 +132,8 @@ public final class ProfileRelationshipsViewModel {
     /// follower decrements the viewer's own count.
     public var onSegmentTitlesChange: (([String]) -> Void)?
     public var onActionResult: ((ActionResult) -> Void)?
+    /// Removing a follower, shown with Undo (#957).
+    var onUndoable: ((UndoableAction) -> Void)?
 
     private let subject: Subject
     private let repository: any ProfileRelationshipsProviding
@@ -378,31 +380,68 @@ public final class ProfileRelationshipsViewModel {
         }
     }
 
-    /// Drop someone from the viewer's own follower list.
+    /// Drop someone from the viewer's own follower list, with Undo (#957).
     ///
-    /// NOT optimistic, for the reason `ProfileViewModel.block` isn't: the
-    /// visible consequence is a row disappearing, and a row that vanishes and
-    /// then reappears reads as the app having lost the user's instruction.
+    /// A DEFERRED commit, which keeps the rule this list had when it was not
+    /// optimistic — a row never comes back by itself: the row leaves at
+    /// once and the count with it, and the removal is sent only when the
+    /// toast's countdown runs out. Undo puts the row back at its place and
+    /// the count back up; a refused removal does the same, and says so.
     public func removeFollower(_ profileID: ProfileID) {
         guard subject.isSelf, direction == .followers, repository.supportsFollowerRemoval else { return }
-        guard !mutating.contains(profileID) else { return }
+        guard !mutating.contains(profileID),
+              let index = states[.followers]?.relations.firstIndex(where: { $0.id == profileID }),
+              let relation = states[.followers]?.relations[index] else { return }
         mutating.insert(profileID)
-
-        Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await self.repository.removeFollower(profileID)
-                self.states[.followers]?.relations.removeAll { $0.id == profileID }
-                // The segment title counts this list, so it has to follow the
-                // list down — otherwise "142 Followers" sits above 141 of them.
-                self.counts[.followers] = self.counts[.followers]?.adjusted(by: -1)
-                self.onSegmentTitlesChange?(self.segmentTitles)
-                self.emit()
-            } catch {
-                self.onActionResult?(.failed(message: "Couldn't remove this follower"))
+        removeRow(profileID)
+        let repository = repository
+        let handle = "@" + relation.handle
+        let action = UndoableAction(
+            message: "Removed \(handle)",
+            detail: "They won't be told",
+            symbol: "person.crop.circle.badge.minus",
+            commit: { [weak self] in
+                Task { @MainActor [weak self] in
+                    do {
+                        try await repository.removeFollower(profileID)
+                        self?.mutating.remove(profileID)
+                    } catch {
+                        guard let self else { return }
+                        self.mutating.remove(profileID)
+                        self.putBack(relation, at: index)
+                        self.onActionResult?(.failed(message: "Couldn't remove \(handle)"))
+                    }
+                }
+            },
+            undo: { [weak self] in
+                guard let self else { return }
+                self.mutating.remove(profileID)
+                self.putBack(relation, at: index)
             }
-            self.mutating.remove(profileID)
+        )
+        // No screen to offer Undo (tests, a host that never wired it): sent
+        // now, as before #957 — never left hanging.
+        if let onUndoable { onUndoable(action) } else { action.commit() }
+    }
+
+    private func removeRow(_ profileID: ProfileID) {
+        states[.followers]?.relations.removeAll { $0.id == profileID }
+        // The segment title counts this list, so it has to follow the list
+        // down — otherwise "142 Followers" sits above 141 of them.
+        counts[.followers] = counts[.followers]?.adjusted(by: -1)
+        onSegmentTitlesChange?(segmentTitles)
+        emit()
+    }
+
+    private func putBack(_ relation: ProfileRelation, at index: Int) {
+        guard var relations = states[.followers]?.relations, !relations.contains(where: { $0.id == relation.id }) else {
+            return
         }
+        relations.insert(relation, at: min(index, relations.count))
+        states[.followers]?.relations = relations
+        counts[.followers] = counts[.followers]?.adjusted(by: 1)
+        onSegmentTitlesChange?(segmentTitles)
+        emit()
     }
 
     // MARK: - Loading

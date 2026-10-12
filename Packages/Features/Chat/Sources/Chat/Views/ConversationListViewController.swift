@@ -99,6 +99,10 @@ final class ConversationListViewController: UIViewController {
                 Feedback.failure(message, from: self)
             }
         }
+        viewModel.onMuteUndoable = { [weak self] message, undo in
+            guard let self else { return }
+            Feedback.undoable(message, symbol: "bell.slash.fill", from: self, commit: {}, undo: undo)
+        }
         updatePagingFooter()
         // The view model may have moved past `.loading` before this view was
         // asked for (the catalog replays its snapshot at subscription), so the

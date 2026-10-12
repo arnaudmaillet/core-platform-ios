@@ -609,38 +609,78 @@ struct ProfileRelationshipsViewModelTests {
         #expect(await provider.removeCalls.isEmpty)
     }
 
-    @Test func removeDropsTheRowOnlyAfterTheServerAccepts() async {
+    /// With Undo (#957): the row leaves at once and nothing is sent until the
+    /// countdown runs out — then once.
+    @Test func removeDropsTheRowAtOnceAndSendsOnCommit() async throws {
         let provider = StubRelationshipsProvider(
             followers: [person("ava"), person("kenji")], supportsFollowerRemoval: true
         )
         let viewModel = ProfileRelationshipsViewModel(subject: subject(isSelf: true), repository: provider)
         let phases = phaseRecorder(viewModel)
+        var pending: UndoableAction?
+        viewModel.onUndoable = { pending = $0 }
 
         viewModel.viewDidLoad()
         await settle(until: { rows(phases).count == 2 })
 
         viewModel.removeFollower(ProfileID("ava"))
-        // Not optimistic: the row is still there until the command settles.
-        #expect(rows(phases).count == 2)
-
-        await settle(until: { rows(phases).count == 1 })
         #expect(rows(phases).map(\.id.rawValue) == ["kenji"])
+        await settle()
+        #expect(await provider.removeCalls.isEmpty, "sent before the countdown ran out")
+
+        try #require(pending).commit()
+        for _ in 0..<60 where await provider.removeCalls.isEmpty {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(await provider.removeCalls == [ProfileID("ava")])
     }
 
-    @Test func aFailedRemoveKeepsTheRowAndReports() async {
+    /// Undo brings the row back at its place, the count with it, and nothing
+    /// was sent.
+    @Test func undoBringsTheRowBackAtItsPlace() async throws {
         let provider = StubRelationshipsProvider(
-            followers: [person("ava")], removeError: SampleError(), supportsFollowerRemoval: true
+            followers: [person("ava"), person("kenji"), person("zed")], supportsFollowerRemoval: true
+        )
+        let viewModel = ProfileRelationshipsViewModel(
+            subject: subject(isSelf: true, followerCount: .exact(3)), repository: provider
+        )
+        let phases = phaseRecorder(viewModel)
+        var pending: UndoableAction?
+        viewModel.onUndoable = { pending = $0 }
+
+        viewModel.viewDidLoad()
+        await settle(until: { rows(phases).count == 3 })
+        let before = viewModel.segmentTitles
+        viewModel.removeFollower(ProfileID("kenji"))
+        #expect(rows(phases).map(\.id.rawValue) == ["ava", "zed"])
+        #expect(viewModel.segmentTitles != before)
+
+        try #require(pending).undo()
+        #expect(rows(phases).map(\.id.rawValue) == ["ava", "kenji", "zed"])
+        #expect(viewModel.segmentTitles == before)
+        await settle()
+        #expect(await provider.removeCalls.isEmpty)
+    }
+
+    /// A refused removal puts the row back and says so.
+    @Test func aFailedRemoveBringsTheRowBackAndReports() async throws {
+        let provider = StubRelationshipsProvider(
+            followers: [person("ava"), person("kenji")], removeError: SampleError(), supportsFollowerRemoval: true
         )
         let viewModel = ProfileRelationshipsViewModel(subject: subject(isSelf: true), repository: provider)
         let phases = phaseRecorder(viewModel)
         let actions = actionRecorder(viewModel)
+        var pending: UndoableAction?
+        viewModel.onUndoable = { pending = $0 }
 
         viewModel.viewDidLoad()
-        await settle(until: { !rows(phases).isEmpty })
+        await settle(until: { rows(phases).count == 2 })
         viewModel.removeFollower(ProfileID("ava"))
+        #expect(rows(phases).map(\.id.rawValue) == ["kenji"])
+        try #require(pending).commit()
         await settle(until: { !actions().isEmpty })
 
-        #expect(rows(phases).count == 1)
+        #expect(rows(phases).map(\.id.rawValue) == ["ava", "kenji"])
         #expect(actions().count == 1)
     }
 
@@ -806,7 +846,6 @@ struct ProfileRelationshipsViewModelTests {
         viewModel.viewDidLoad()
         await settle(until: { rows(phases).count == 2 })
         viewModel.removeFollower(ProfileID("ava"))
-        await settle(until: { rows(phases).count == 1 })
 
         #expect(rows(phases).map(\.id.rawValue) == ["kenji"])
     }

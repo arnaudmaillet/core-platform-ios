@@ -136,6 +136,15 @@ final class ProfileRelationshipsViewController: UIViewController {
             self?.tabBar.setTitles(titles)
         }
         viewModel.onActionResult = { [weak self] result in self?.render(result) }
+        // Removing a follower: the row leaves at once, Undo in the toast,
+        // sent when its countdown runs out (#957).
+        viewModel.onUndoable = { [weak self] action in
+            guard let self else { return }
+            Feedback.undoable(
+                action.message, detail: action.detail, symbol: action.symbol, from: self,
+                commit: action.commit, undo: action.undo
+            )
+        }
 
         viewModel.viewDidLoad()
         applySearchAvailability()
