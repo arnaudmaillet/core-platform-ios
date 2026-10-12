@@ -1309,6 +1309,16 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         )
     }
 
+    /// The rows' "..." asked again: on the viewer's own profile, Edit and
+    /// Delete exist only once the relationship says it is theirs, and a row
+    /// configured before that drew no "..." until it was configured again.
+    /// Every realized row — on screen or prepared beside it.
+    func refreshAuthorMenus() {
+        for case let row as PostGridListRowCell in collectionView.subviews {
+            row.refreshAuthorMenu()
+        }
+    }
+
     /// `postID`'s post with its live like count (#896): what a stand-in or a
     /// resting overlay draws is what the bound tile or row draws, so the count
     /// does not change in the landing frame — a like made in the feed it

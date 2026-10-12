@@ -1540,6 +1540,17 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// What a popover-shaped sheet raised from the menu should point at.
     public var authorMenuAnchor: UIView { authorBand.menuAnchor }
 
+    /// Asks `authorMenuActions` again whether the "..." has rows: the
+    /// provider's answer can change after the row was configured.
+    public func refreshAuthorMenu() {
+        authorBand.refreshMenuVisibility()
+    }
+
+    #if DEBUG
+    /// Whether the band's "..." is drawn.
+    public var debugShowsAuthorMenu: Bool { authorBand.debugShowsMenu }
+    #endif
+
     /// The closing row's repost control. Nil HIDES it — visibility tracks the
     /// answer, not the presence of a provider, the same rule the "..." follows.
     public var onRepostTapped: (() -> Void)? {

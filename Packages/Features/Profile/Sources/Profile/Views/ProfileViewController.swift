@@ -383,6 +383,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             HeroScreenCost.measure("landing.relationship") {
                 self.followButtonState = state
                 self.headerView.configureAction(state)
+                // Whose posts these are just changed: on the viewer's own
+                // profile the rows gain Edit and Delete, drawn now rather
+                // than once each row is configured again.
+                self.galleryPager.refreshAuthorMenus()
                 // A bell that has to GO (a handle that turned out to be the
                 // viewer, #800) leaves at rest and unanimated: removing a bar
                 // item mid-push pops it on device (#756).

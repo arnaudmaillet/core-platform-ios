@@ -406,9 +406,7 @@ final class AppContainer {
         // The app's saved pile writes its fact here, and every save glyph
         // reads and observes it.
         PostBookmarkStore.shared.facts = store
-        entityFollowSubscription = followGraphEvents.subscribe { [store] change in
-            store.applyFollowChange(change)
-        }
+        entityFollowSubscription = store.follow(followGraphEvents)
         // Every point the viewer stakes, from any surface, moves the post's
         // count (and every undo or refund moves it back).
         walletStakeLikes = WalletStakeLikes(wallet: walletStore, entities: store)
@@ -1392,9 +1390,17 @@ final class AppContainer {
             // rows rather than a wrong one.
             viewerID: { await profiles.viewerProfileID() }
         )
+        // A follow accepted on any screen reaches the search rows' session
+        // cache (#896), as it reaches the profile header and the feed's "+".
+        profileMetadataFollowSubscription = followGraphEvents.subscribe { change in
+            Task { await repository.applyFollowChange(change) }
+        }
         cachedProfileMetadataRepository = repository
         return repository
     }
+
+    /// Keeps `profileMetadataRepository` hearing the follow channel.
+    private var profileMetadataFollowSubscription: FollowGraphSubscription?
 
     private(set) lazy var searchFeature: any SearchFeatureBuilding = SearchFeatureBuilder(
         repository: searchRepository,
@@ -1413,7 +1419,9 @@ final class AppContainer {
         wallet: walletStore,
         makeWalletSheet: { [unowned self] in self.makeWalletSheet() },
         // The trending people, so a cold start opens Search on them (#893).
-        localStore: localStore
+        localStore: localStore,
+        // The person rows hear a follow made on any screen (#896).
+        followEvents: followGraphEvents
     )
 
     // MARK: - Notifications

@@ -78,6 +78,30 @@ struct EntityStoreTests {
         withExtendedLifetime(observation) {}
     }
 
+    /// The app's follow channel moves the relation every feed's "+" draws:
+    /// a follow accepted on a profile, or from a search result's profile,
+    /// arrives here as it arrives at the profile header and the search rows.
+    @Test func theFollowChannelMovesTheRelationEveryFeedDraws() {
+        let store = EntityStore()
+        let events = FollowGraphEvents()
+        let author = ProfileID("a1")
+        store.setRelation(.notFollowing, for: author)
+        var badges: [FollowRelation?] = []
+        let pill = store.observeProfile(author) { id in badges.append(store.relation(to: id)) }
+        var subscription: FollowGraphSubscription? = store.follow(events)
+
+        events.publish(FollowChange(profileID: author, isFollowing: true))
+        #expect(badges == [.following])
+        events.publish(FollowChange(profileID: author, isFollowing: false))
+        #expect(badges == [.following, .notFollowing])
+
+        // Released: the store no longer hears the channel.
+        subscription = nil
+        events.publish(FollowChange(profileID: author, isFollowing: true))
+        #expect(store.relation(to: author) == .notFollowing)
+        withExtendedLifetime((pill, subscription)) {}
+    }
+
     @Test func anAcceptedFollowLeavesAnUnknownRelationUnknown() {
         let store = EntityStore()
         store.applyFollowChange(FollowChange(profileID: ProfileID("a1"), isFollowing: true))
