@@ -76,7 +76,7 @@ struct VideoExporterTests {
     /// happened, which is why every assertion here is about seconds.
     @Test func aTrimmedExportIsOnlyTheKeptPart() async throws {
         let exported = try await VideoExporter()
-            .export(VideoExportPlan(sourceURL: try await longerClip(), timeRange: 0.5...1.5))
+            .exportAnswering(VideoExportPlan(sourceURL: try await longerClip(), timeRange: 0.5...1.5))
 
         #expect(abs(exported.durationSeconds - 1) < 0.05,
                 "expected about a second, got \(exported.durationSeconds)")
@@ -88,7 +88,7 @@ struct VideoExporterTests {
     /// be silently widened back to the whole clip without anything erroring.
     @Test func aTrimFromTheVeryStartStillCuts() async throws {
         let exported = try await VideoExporter()
-            .export(VideoExportPlan(sourceURL: try await longerClip(), timeRange: 0...1))
+            .exportAnswering(VideoExportPlan(sourceURL: try await longerClip(), timeRange: 0...1))
 
         #expect(abs(exported.durationSeconds - 1) < 0.05,
                 "expected about a second, got \(exported.durationSeconds)")
@@ -99,7 +99,7 @@ struct VideoExporterTests {
         let whole = try await AVURLAsset(url: source).load(.duration).seconds
 
         let exported = try await VideoExporter()
-            .export(VideoExportPlan(sourceURL: source, timeRange: (whole - 1)...whole))
+            .exportAnswering(VideoExportPlan(sourceURL: source, timeRange: (whole - 1)...whole))
 
         #expect(abs(exported.durationSeconds - 1) < 0.05,
                 "expected about a second, got \(exported.durationSeconds)")
@@ -112,7 +112,7 @@ struct VideoExporterTests {
         let source = try await longerClip()
         let whole = try await AVURLAsset(url: source).load(.duration).seconds
 
-        let exported = try await VideoExporter().export(VideoExportPlan(sourceURL: source))
+        let exported = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: source))
 
         #expect(abs(exported.durationSeconds - whole) < 0.05,
                 "expected \(whole), got \(exported.durationSeconds)")
@@ -123,9 +123,9 @@ struct VideoExporterTests {
     /// `CompositorFinishTests`.)
     @Test func aTrimLeavesThePicturesTheSizeTheyWere() async throws {
         let source = try await longerClip()
-        let whole = try await VideoExporter().export(VideoExportPlan(sourceURL: source))
+        let whole = try await VideoExporter().exportAnswering(VideoExportPlan(sourceURL: source))
         let cut = try await VideoExporter()
-            .export(VideoExportPlan(sourceURL: source, timeRange: 0.5...1.5))
+            .exportAnswering(VideoExportPlan(sourceURL: source, timeRange: 0.5...1.5))
 
         #expect(cut.pixelWidth == whole.pixelWidth)
         #expect(cut.pixelHeight == whole.pixelHeight)
@@ -133,7 +133,7 @@ struct VideoExporterTests {
 
     @Test func exportProducesAPlayableMp4WithMetadata() async throws {
         let source = try await sourceClip()
-        let exported = try await VideoExporter().export(source)
+        let exported = try await VideoExporter().exportAnswering(source)
 
         #expect(FileManager.default.fileExists(atPath: exported.fileURL.path))
         #expect(exported.mimeType == "video/mp4")
@@ -170,7 +170,7 @@ struct VideoExporterTests {
     @Test func twoPiecesExportAsTheirSum() async throws {
         let source = try await longerClip()
 
-        let exported = try await VideoExporter().export(VideoExportPlan(
+        let exported = try await VideoExporter().exportAnswering(VideoExportPlan(
             sourceURL: source,
             segments: [
                 VideoExportSegment(start: 0.1, end: 0.7),
@@ -188,7 +188,7 @@ struct VideoExporterTests {
     @Test func thePiecesAreJoined_notSpanned() async throws {
         let source = try await longerClip()
 
-        let spanned = try await VideoExporter().export(VideoExportPlan(
+        let spanned = try await VideoExporter().exportAnswering(VideoExportPlan(
             sourceURL: source, segments: [VideoExportSegment(start: 0.1, end: 2.2)]
         ))
 
@@ -207,10 +207,10 @@ struct VideoExporterTests {
         let early = VideoExportSegment(start: 0, end: 0.6)
         let late = VideoExportSegment(start: 1.8, end: 2.4)
 
-        let asShot = try await VideoExporter().export(
+        let asShot = try await VideoExporter().exportAnswering(
             VideoExportPlan(sourceURL: source, segments: [early, late])
         )
-        let carried = try await VideoExporter().export(
+        let carried = try await VideoExporter().exportAnswering(
             VideoExportPlan(sourceURL: source, segments: [late, early])
         )
 
@@ -228,10 +228,10 @@ struct VideoExporterTests {
     @Test func aFasterPieceExportsShorter() async throws {
         let source = try await longerClip()
 
-        let asShot = try await VideoExporter().export(VideoExportPlan(
+        let asShot = try await VideoExporter().exportAnswering(VideoExportPlan(
             sourceURL: source, segments: [VideoExportSegment(start: 0, end: 2)]
         ))
-        let doubled = try await VideoExporter().export(VideoExportPlan(
+        let doubled = try await VideoExporter().exportAnswering(VideoExportPlan(
             sourceURL: source, segments: [VideoExportSegment(start: 0, end: 2, speed: 2)]
         ))
         #expect(asShot.durationSeconds > 1.7, "guard: the 1x export is a real two seconds")
@@ -243,7 +243,7 @@ struct VideoExporterTests {
     @Test func aSlowerPieceExportsLonger() async throws {
         let source = try await longerClip()
 
-        let halved = try await VideoExporter().export(VideoExportPlan(
+        let halved = try await VideoExporter().exportAnswering(VideoExportPlan(
             sourceURL: source, segments: [VideoExportSegment(start: 0, end: 1, speed: 0.5)]
         ))
 

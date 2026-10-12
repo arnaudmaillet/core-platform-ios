@@ -382,9 +382,17 @@ struct ComposedFrameReaderTests {
         // has settled, and the clock then advances at the pace it plays.
         var answered: [Double] = []
         if let frame = reader.frame(at: time(2.5)) { answered.append(frame.time.seconds) }
-        // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
-        _ = try await TimingTolerance.settle(looks: 1000) { !reader.debugState.reading }
-        #expect(!reader.debugState.reading, "the reader is still reading after the end")
+        // Counted in LOOKS, not wall clock (#599): a descheduled runner spends
+        // none. The reader stops when its decoder reaches the end of the film,
+        // and a starved decoder takes longer to get there than a starved test
+        // does to look (#1012): 1,000 looks ran dry on a loaded host while the
+        // reader was still draining. So the budget is `firstAnswerBudget`'s,
+        // and it answers: a reader that stops is waited on only until it does,
+        // and one that keeps reading spends it all and fails.
+        let stopped = try await TimingTolerance.settle(looks: Int(Self.firstAnswerBudget * 200)) {
+            !reader.debugState.reading
+        }
+        #expect(stopped, "the reader is still reading after the end")
 
         let generation = reader.debugState.generation
         for step in 1...50 {
