@@ -128,13 +128,19 @@ final class ProfileColdStartTests {
         var buttons: [ProfileViewModel.FollowButton] = []
     }
 
+    /// The instant every launch's clock counts from. Fixed, never `Date()`
+    /// read again: a clock that follows the wall moves while a starved runner
+    /// stalls, and a "20 s later" launch becomes 60 s later (#1042).
+    private let epoch = Date(timeIntervalSinceReferenceDate: 800_000_000)
+
     /// One launch's cache, over a new store on the same file. `later`: how
     /// long after the previous session it launches, as its clock sees it.
     private func launchCache(later: TimeInterval = 0) throws -> ProfileCache {
         let box = viewer
+        let launchedAt = epoch.addingTimeInterval(later)
         return ProfileCache(
             center: center, store: try LocalStore(directory: folder.url, viewer: { box.viewer }),
-            now: { Date().addingTimeInterval(later) }
+            now: { launchedAt }
         )
     }
 
@@ -308,10 +314,11 @@ final class ProfileColdStartTests {
 
     // MARK: - Freshness (#893)
 
-    /// What a test moves the cache's clock with.
+    /// What a test moves the cache's clock with. It moves only when the test
+    /// says so, never with the wall: the ages below are exact under any load.
     private final class Clock {
         var offset: TimeInterval = 0
-        var now: Date { Date().addingTimeInterval(offset) }
+        var now: Date { Date(timeIntervalSinceReferenceDate: 800_000_000).addingTimeInterval(offset) }
     }
 
     /// A first visit online, on `cache`, settled: header, button, grid.

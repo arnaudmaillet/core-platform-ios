@@ -13,7 +13,10 @@ import Testing
 @MainActor
 private final class StaleRevisit {
     private var offset: TimeInterval = 0
-    private(set) lazy var cache = ProfileCache(now: { [unowned self] in Date().addingTimeInterval(self.offset) })
+    /// Moves only when the test says so, never with the wall (#1042).
+    private(set) lazy var cache = ProfileCache(now: { [unowned self] in
+        Date(timeIntervalSinceReferenceDate: 800_000_000).addingTimeInterval(self.offset)
+    })
 
     func pastTheWindow() { offset = LocalStorePolicy.profileScreenRevalidation + 1 }
 }

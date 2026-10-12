@@ -1,3 +1,4 @@
+import CacheKit
 import CoreModels
 import CoreStorage
 import DesignSystem
@@ -106,14 +107,19 @@ private func post(_ id: String, reactions: Int64, author: String) -> ExplorePost
 final class SearchColdStartTests {
     private let folder = StoreFolder()
     private let viewer = ViewerBox()
-    /// The store stamps rows with the real clock: the screens' clocks start
-    /// from it.
-    private let start = Date()
+    /// ONE clock for the store and the screens. The store stamps a list's
+    /// `fetchedAt` with its clock and the screen judges freshness with its
+    /// own: when the store ran on the real clock and the screens on dates
+    /// derived from the suite's start, a runner starved for over 30 s before
+    /// the first write made the stored list "from the future", so not fresh
+    /// (CI, #1042). Frozen at `start`, every age below is exact.
+    private let clock = ManualCacheClock()
+    private var start: Date { clock.now }
 
     /// One launch's cache, over a new store on the same file.
     private func launchCache() throws -> SearchLocalCache {
         let box = viewer
-        return SearchLocalCache(store: try LocalStore(directory: folder.url, viewer: { box.viewer }))
+        return SearchLocalCache(store: try LocalStore(directory: folder.url, viewer: { box.viewer }, clock: clock))
     }
 
     private func open(
@@ -171,7 +177,7 @@ final class SearchColdStartTests {
         let offline = corpus()
         offline.offline = true
         // Past the window: the screen asks again, and the network fails.
-        let later = start.addingTimeInterval(LocalStorePolicy.trendingRevalidation + 60)
+        let later = start.addingTimeInterval(LocalStorePolicy.trendingRevalidation + 1)
         let people = People(offline: true)
         let (viewModel, phases) = open(cache: try launchCache(), corpus: offline, people: people, at: later)
 
@@ -207,6 +213,9 @@ final class SearchColdStartTests {
         let soon = start.addingTimeInterval(30)
         let (viewModel, phases) = open(cache: try launchCache(), corpus: fresh, at: soon)
         #expect(trending(phases)?.creators.map(\.handle) == ["grace", "ada"])
+        // A "nothing more happens" grace: the skip is decided synchronously
+        // in `showExplore`, so a fetch, had one been started, would have
+        // reached the corpus by now. It bounds nothing the assertion needs.
         try? await Task.sleep(for: .milliseconds(100))
         #expect(fresh.fetches == 0, "a list fetched 30 s ago was fetched again")
         withExtendedLifetime(viewModel) {}
@@ -216,7 +225,7 @@ final class SearchColdStartTests {
         try await previousSession()
 
         let changed = Corpus([post("c", reactions: 500, author: "linus"), post("b", reactions: 99, author: "grace")])
-        let later = start.addingTimeInterval(LocalStorePolicy.trendingRevalidation + 60)
+        let later = start.addingTimeInterval(LocalStorePolicy.trendingRevalidation + 1)
         let cache = try launchCache()
         let (viewModel, phases) = open(cache: cache, corpus: changed, at: later)
         await settle { trending(phases)?.creators.first?.handle == "linus" }
