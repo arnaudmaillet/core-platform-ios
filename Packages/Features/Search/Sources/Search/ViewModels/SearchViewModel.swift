@@ -128,6 +128,9 @@ public final class SearchViewModel {
     /// they turn up in the history or in a result.
     private var resolvedMetadata: [ProfileID: ProfileRowMetadata] = [:]
     private var metadataTask: Task<Void, Never>?
+    /// The app's follow channel (#896): a follow or an unfollow accepted on any
+    /// screen re-draws the person's row ("Following", or their followers).
+    private var followSubscription: FollowGraphSubscription?
 
     public convenience init(
         repository: any SearchProviding,
@@ -139,12 +142,13 @@ public final class SearchViewModel {
         trendingLimit: Int = 30,
         creatorLimit: Int = 12,
         suggestLimit: Int32 = 8,
-        suggestDebounce: Duration = .milliseconds(200)
+        suggestDebounce: Duration = .milliseconds(200),
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.init(
             repository: repository, router: router, recentSearches: recentSearches, explore: explore,
             metadata: metadata, pageSize: pageSize, trendingLimit: trendingLimit, creatorLimit: creatorLimit,
-            suggestLimit: suggestLimit, suggestDebounce: suggestDebounce, localCache: nil
+            suggestLimit: suggestLimit, suggestDebounce: suggestDebounce, localCache: nil, followEvents: followEvents
         )
     }
 
@@ -162,7 +166,8 @@ public final class SearchViewModel {
         suggestLimit: Int32 = 8,
         suggestDebounce: Duration = .milliseconds(200),
         localCache: SearchLocalCache?,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.localCache = localCache
         self.now = now
@@ -187,6 +192,21 @@ public final class SearchViewModel {
                 fetchedAt: stored.fetchedAt, window: LocalStorePolicy.trendingRevalidation, now: now()
             )
         }
+        // Weak: the channel holds the handler, the handler must not hold this.
+        followSubscription = followEvents?.subscribeOnMain { [weak self] change in
+            self?.applyFollowChange(change)
+        }
+    }
+
+    /// A follow the graph accepted elsewhere (a profile pushed from these
+    /// results, a feed's "+"): the person's row says so at once, and a
+    /// Following scope gains or loses them. A person never resolved stays
+    /// unresolved — their read, when it lands, already includes it
+    /// (`ProfileMetadataRepository.applyFollowChange`).
+    private func applyFollowChange(_ change: FollowChange) {
+        guard let known = resolvedMetadata[change.profileID], known.isFollowed != change.isFollowing else { return }
+        resolvedMetadata[change.profileID] = known.following(change.isFollowing)
+        rerenderWithAvatars()
     }
 
     // MARK: - Inputs

@@ -1,4 +1,16 @@
+import CoreModels
 import Foundation
+
+/// Where every screen reads whether the viewer saved a post, in memory: the
+/// app's `EntityStore` (#896), whose saved fact is viewer-scoped (wiped on a
+/// viewer change) and observed, so a save made on one screen re-draws the
+/// glyph on every other. Declared here because the store depends on this
+/// package, not the other way round.
+public protocol PostSaveFacts: AnyObject, Sendable {
+    /// Whether the viewer saved the post; nil while not known.
+    func isSaved(_ id: PostID) -> Bool?
+    func setSaved(_ isSaved: Bool, for id: PostID)
+}
 
 /// The posts the viewer has saved.
 ///
@@ -19,13 +31,39 @@ import Foundation
 /// Order is preserved and most-recent-first, because a saved list is read as a
 /// pile rather than as a set: the thing you saved a minute ago is the thing you
 /// came back for.
+///
+/// **A view over the EntityStore's saved fact (#896).** One instance in the app
+/// (`shared`), handed the store as its `facts`: a save writes the pile — the
+/// device's record and its order — and then the fact, which every screen
+/// observes; a read asks the fact first, the pile when the fact is unknown.
+/// The pile stays the persistence: the fact is memory, bounded and wiped on a
+/// viewer change. When #837 lands (engagement's SavePost / ListSavedPosts),
+/// this becomes the cache in front of the server that it describes — the
+/// server's list fills the pile and the fact, a toggle writes through — and
+/// the screens keep reading the fact as they do now.
 public final class PostBookmarkStore: @unchecked Sendable {
+    /// The app's one pile: every surface reads and writes it, so the facts it
+    /// writes are the ones every screen observes. The app hands it the
+    /// EntityStore (`facts`) at launch.
+    public static let shared = PostBookmarkStore()
+
     private static let baseKey = "profile.savedPostIDs"
     private let defaults: UserDefaults
     /// Whose pile: the active profile's (`StorageScope`).
     private let scope: StorageScope
     private var key: String { scope.profileKey(Self.baseKey, adoptingLegacyIn: defaults) }
     private let lock = NSLock()
+    /// The in-memory saved fact every screen observes (the app's
+    /// `EntityStore`). Nil: the pile alone answers.
+    private var _facts: (any PostSaveFacts)?
+    /// Whose pile the facts were last written from: a fact written for
+    /// another profile (between a switch and the store's wipe) is never read.
+    private var factsOwner: String?
+
+    public var facts: (any PostSaveFacts)? {
+        get { lock.withLock { _facts } }
+        set { lock.withLock { _facts = newValue; factsOwner = nil } }
+    }
 
     /// Fires after every change, on whatever thread made it — the profile's
     /// Saved tab reloads from this rather than polling.
@@ -60,7 +98,9 @@ public final class PostBookmarkStore: @unchecked Sendable {
     }
 
     public func isSaved(_ id: String) -> Bool {
-        savedPostIDs.contains(id)
+        let (pile, memory, owner) = lock.withLock { (key, _facts, factsOwner) }
+        if owner == pile, let known = memory?.isSaved(PostID(id)) { return known }
+        return lock.withLock { (defaults.array(forKey: pile) as? [String] ?? []).contains(id) }
     }
 
     /// Saves, or unsaves if it was already there, and reports which it did.
@@ -69,18 +109,24 @@ public final class PostBookmarkStore: @unchecked Sendable {
     /// needs it immediately: the glyph flips from it.
     @discardableResult
     public func toggle(_ id: String) -> Bool {
-        let saved: Bool = lock.withLock {
-            var ids = defaults.array(forKey: key) as? [String] ?? []
+        let (saved, memory): (Bool, (any PostSaveFacts)?) = lock.withLock {
+            let pile = key
+            var ids = defaults.array(forKey: pile) as? [String] ?? []
+            let saved: Bool
             if let existing = ids.firstIndex(of: id) {
                 ids.remove(at: existing)
-                defaults.set(ids, forKey: key)
-                return false
+                saved = false
+            } else {
+                // Front, not back: newest first is how the pile reads.
+                ids.insert(id, at: 0)
+                saved = true
             }
-            // Front, not back: newest first is how the pile reads.
-            ids.insert(id, at: 0)
-            defaults.set(ids, forKey: key)
-            return true
+            defaults.set(ids, forKey: pile)
+            factsOwner = pile
+            return (saved, _facts)
         }
+        // Outside the lock: the store calls its observers, which read back.
+        memory?.setSaved(saved, for: PostID(id))
         onChange?()
         return saved
     }

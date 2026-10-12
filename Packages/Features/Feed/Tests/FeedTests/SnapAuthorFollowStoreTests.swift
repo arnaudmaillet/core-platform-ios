@@ -48,6 +48,27 @@ struct SnapAuthorFollowStoreTests {
         #expect(store.offersFollow(to: ava) == (badge == .follow))
     }
 
+    /// "Follow from Search → the feed's '+' agrees" (#896): a follow accepted
+    /// on the profile pushed from a search result reaches the app's follow
+    /// channel; the store hears it (`EntityStore.follow`, as the app wires
+    /// it), and the pill's "+" becomes Following — then back on an unfollow.
+    @Test func aFollowOnTheChannelIsTheFeedsPlus() {
+        let entities = EntityStore()
+        let events = FollowGraphEvents()
+        let subscription = entities.follow(events)
+        let store = SnapAuthorFollowStore(writer: GatedGraph(), reader: GatedGraph(), entities: entities)
+        store.setRelation(.notFollowing, for: ava)
+        #expect(store.offersFollow(to: ava))
+
+        events.publish(FollowChange(profileID: ava, isFollowing: true))
+        #expect(store.badge(for: ava) == .following)
+        #expect(!store.offersFollow(to: ava))
+
+        events.publish(FollowChange(profileID: ava, isFollowing: false))
+        #expect(store.offersFollow(to: ava))
+        withExtendedLifetime(subscription) {}
+    }
+
     @Test func anUnknownAuthorDrawsNoBadge() {
         let store = Self.store(GatedGraph())
         #expect(store.badge(for: ava) == .none)

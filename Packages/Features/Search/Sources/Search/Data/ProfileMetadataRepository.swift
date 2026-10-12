@@ -18,6 +18,13 @@ public struct ProfileRowMetadata: Equatable, Sendable {
         self.isFollowed = isFollowed
         self.followerCount = followerCount
     }
+
+    /// The same person after a follow or an unfollow the graph accepted. The
+    /// follower count is the read's and stays as read: the row shows it only
+    /// while the viewer does not follow them.
+    public func following(_ isFollowed: Bool) -> ProfileRowMetadata {
+        ProfileRowMetadata(avatarURL: avatarURL, isFollowed: isFollowed, followerCount: followerCount)
+    }
 }
 
 /// Resolves people to their pictures and their social context.
@@ -79,6 +86,10 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
     /// Bumped on every viewer change, so a read that left for the previous
     /// viewer and lands after the reset is not filed under the new one.
     private var generation = 0
+    /// Follows and unfollows the graph accepted this session, wherever they
+    /// were made (`applyFollowChange`): newer than any read, so a read in
+    /// flight when one lands answers with it.
+    private var acceptedFollows: [ProfileID: Bool] = [:]
 
     public init(
         profileClient: any Profile_V1_ProfileServiceClientInterface,
@@ -102,7 +113,9 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
 
         let tasks = missing.map { id in (id, task(for: id)) }
         for (id, task) in tasks {
-            found[id] = await task.value
+            // A follow accepted while the read was out is newer than it.
+            let read = await task.value
+            found[id] = acceptedFollows[id].map(read.following) ?? read
         }
         return found
     }
@@ -163,9 +176,27 @@ public actor ProfileMetadataRepository: ProfileMetadataProviding {
         // A failed read is cached as "nothing known" on purpose: retrying it on
         // every re-render would turn one unreachable person into a request per
         // keystroke. The row keeps its initials and says nothing about them.
-        resolved[id] = metadata
+        resolved[id] = acceptedFollows[id].map(metadata.following) ?? metadata
         inFlight[id] = nil
     }
+
+    /// A follow or an unfollow the graph accepted, on any screen — a
+    /// profile's button, a feed's "+", a card's Unfollow (#896). The app
+    /// hands every change on its follow channel (`FollowGraphEvents`), the one
+    /// the profile header and the feed's "+" hear, so a person's row says
+    /// "Following" exactly when they do. A read still in flight answers with
+    /// it too.
+    public func applyFollowChange(_ change: FollowChange) {
+        acceptedFollows[change.profileID] = change.isFollowing
+        if let known = resolved[change.profileID] {
+            resolved[change.profileID] = known.following(change.isFollowing)
+        }
+    }
+
+    #if DEBUG
+    /// What the session cache holds about `id`. Tests only.
+    func debugCached(_ id: ProfileID) -> ProfileRowMetadata? { resolved[id] }
+    #endif
 }
 
 extension ProfileMetadataRepository: ViewerScoped {
@@ -178,5 +209,6 @@ extension ProfileMetadataRepository: ViewerScoped {
         generation += 1
         resolved.removeAll()
         inFlight.removeAll()
+        acceptedFollows.removeAll()
     }
 }

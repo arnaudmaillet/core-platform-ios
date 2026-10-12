@@ -151,6 +151,21 @@ public final class PostAuthorBandView: UIView {
         }
     }
 
+    /// Asks the provider again whether the "..." has rows — for a host whose
+    /// answer changed after the band was configured (a profile learning it
+    /// is the viewer's own, which turns Edit and Delete on).
+    public func refreshMenuVisibility() {
+        let shows = !(menuActions?().isEmpty ?? true)
+        guard menuButton.isHidden == shows else { return }
+        menuButton.isHidden = !shows
+        syncShape()
+    }
+
+    #if DEBUG
+    /// Whether the "..." is drawn.
+    var debugShowsMenu: Bool { !menuButton.isHidden }
+    #endif
+
     /// What the band is currently drawing.
     public private(set) var model: Model?
 

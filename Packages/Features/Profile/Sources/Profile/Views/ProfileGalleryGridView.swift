@@ -910,7 +910,12 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         cell.cornerRadius = cornerRadius
         cell.configure(with: post, imagePipeline: imagePipeline, showsInfo: showsInfo)
         // The count's heart reads the viewer's stake, as For You's tiles do.
-        if showsInfo { staking?.bindReadout(cell, to: post.id) }
+        // A bare tile's count is live too (#896), its heart left as drawn.
+        if showsInfo {
+            staking?.bindReadout(cell, to: post.id)
+        } else {
+            staking?.bindCount(cell, to: post.id)
+        }
         cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
         // Re-applied per configure — see the row's concealment.
         cell.isHidden = post.id == heroFlyingPostID
@@ -1243,7 +1248,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// tile. Filmed as the old default post card appearing mid-close. The
     /// tile's own twin is what the window lands as now.
     func makeDismissStandIn(for postID: PostID) -> UIView? {
-        guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        guard let post = livePost(postID) else { return nil }
         if drawsAsTile(postID) { return makeTileStandIn(for: post) }
         // The realized row's width when there is one, the list's own otherwise:
         // a row scrolled out still has to produce a card, and the width is a
@@ -1304,6 +1309,24 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         )
     }
 
+    /// The rows' "..." asked again: on the viewer's own profile, Edit and
+    /// Delete exist only once the relationship says it is theirs, and a row
+    /// configured before that drew no "..." until it was configured again.
+    /// Every realized row — on screen or prepared beside it.
+    func refreshAuthorMenus() {
+        for case let row as PostGridListRowCell in collectionView.subviews {
+            row.refreshAuthorMenu()
+        }
+    }
+
+    /// `postID`'s post with its live like count (#896): what a stand-in or a
+    /// resting overlay draws is what the bound tile or row draws, so the count
+    /// does not change in the landing frame — a like made in the feed it
+    /// opened included.
+    private func livePost(_ postID: PostID) -> GalleryPost? {
+        posts.first { $0.id == postID }.map { staking?.liveCopy(of: $0) ?? $0 }
+    }
+
     /// The size the layout gives `postID`'s slot.
     private func slotSize(of postID: PostID) -> CGSize? {
         guard let index = posts.firstIndex(where: { $0.id == postID }) else { return nil }
@@ -1353,7 +1376,7 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
     /// likes and caption appearing half a second after the landing. Worn by
     /// the card, they fade in as it shrinks and are whole on the landed frame.
     func restingOverlay(for postID: PostID) -> UIView? {
-        guard tileShowsInfo(postID), let post = posts.first(where: { $0.id == postID }),
+        guard tileShowsInfo(postID), let post = livePost(postID),
               let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID),
               size.width > 0, size.height > 0
         else { return nil }

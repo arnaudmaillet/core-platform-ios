@@ -81,7 +81,7 @@ final class TextPostComposerViewController: UIViewController {
     private let walletBadge = WalletBadgeButton()
     private var walletBadgeItem: UIBarButtonItem?
     private let walletObservers = NotificationObserverTokenBag()
-    private let bookmarks = PostBookmarkStore()
+    private let bookmarks = PostBookmarkStore.shared
     private let bookmarkButton = SnapFooterToolbar.makeSaveButton()
 
     init(

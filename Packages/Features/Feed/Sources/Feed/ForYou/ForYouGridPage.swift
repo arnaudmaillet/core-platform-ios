@@ -26,9 +26,9 @@ private final class WeakPageBox {
 }
 
 final class ForYouGridPage: UIView {
-    /// The saved-posts pile, shared with the post page and the profile's Saved
-    /// tab through `UserDefaults` — see `PostBookmarkStore`.
-    private let bookmarks = PostBookmarkStore()
+    /// The saved-posts pile, the app's one, shared with the post page and the
+    /// profile's Saved tab — see `PostBookmarkStore`.
+    private let bookmarks = PostBookmarkStore.shared
 
     /// The viewer asked to repost. UNSET today — there is no client path that
     /// publishes a repost yet — so no card draws the control (#801): see the

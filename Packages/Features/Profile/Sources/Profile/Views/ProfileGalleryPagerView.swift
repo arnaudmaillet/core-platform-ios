@@ -42,6 +42,12 @@ final class ProfileGalleryPagerView: UIView {
     var staking: PostCardStaking? {
         didSet { allPages.forEach { $0.staking = staking } }
     }
+
+    /// Every page's rows ask their "..." again — see
+    /// `ProfileGalleryGridView.refreshAuthorMenus`.
+    func refreshAuthorMenus() {
+        allPages.forEach { $0.refreshAuthorMenus() }
+    }
     /// Fired when a swipe settles on a page (not for programmatic paging) —
     /// the selector mirrors it.
     var onPageSettled: ((ProfileTab) -> Void)?

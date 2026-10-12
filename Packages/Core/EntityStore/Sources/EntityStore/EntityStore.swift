@@ -276,11 +276,21 @@ public final class EntityStore: Sendable {
         if changed { notifyProfiles(.some([change.profileID])) }
     }
 
+    /// Hears the app's follow channel for as long as the subscription lives:
+    /// every follow or unfollow the graph accepts, from any writer, moves the
+    /// relation the feeds' "+" draws (`applyFollowChange`) — the same channel
+    /// the profile header and the search rows hear, so they agree.
+    public func follow(_ events: FollowGraphEvents) -> FollowGraphSubscription {
+        events.subscribe { [weak self] change in self?.applyFollowChange(change) }
+    }
+
     /// Whether the viewer saved the post; nil while not known.
     public func isSaved(_ id: PostID) -> Bool? {
         saved.cache.value(for: id)
     }
 
+    /// What the viewer saved, as `PostBookmarkStore` writes it (its pile is
+    /// the persistence; this is what every screen observes).
     public func setSaved(_ isSaved: Bool, for id: PostID) {
         let changed = writes.withLock { _ -> Bool in
             guard saved.cache.peek(id) != isSaved else { return false }

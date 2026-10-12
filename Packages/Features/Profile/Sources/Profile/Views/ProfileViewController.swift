@@ -383,6 +383,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             HeroScreenCost.measure("landing.relationship") {
                 self.followButtonState = state
                 self.headerView.configureAction(state)
+                // Whose posts these are just changed: on the viewer's own
+                // profile the rows gain Edit and Delete, drawn now rather
+                // than once each row is configured again.
+                self.galleryPager.refreshAuthorMenus()
                 // A bell that has to GO (a handle that turned out to be the
                 // viewer, #800) leaves at rest and unanimated: removing a bar
                 // item mid-push pops it on device (#756).
@@ -2892,9 +2896,12 @@ extension ProfileViewController {
         // close that pages on and comes home to it (#951). The scope ends
         // when this screen is the viewer's again (`setAutoplayActive(true)`).
         galleryPager.beginReturnHandoff(of: post.id)
+        // With their live counts (#896): the flight's card draws the number
+        // the tile it leaves draws.
+        let liveWindow = window.map { staking?.liveCopy(of: $0) ?? $0 }
         let origin = SnapFeedHeroOrigin(
-            post: post,
-            stream: window,
+            post: staking?.liveCopy(of: post) ?? post,
+            stream: liveWindow,
             hasHero: geometry != nil,
             cover: geometry?.cover,
             style: geometry?.isTile == true ? .tile : .listMedia,

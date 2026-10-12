@@ -1,3 +1,4 @@
+import CoreModels
 import CoreNavigation
 import CoreStorage
 import LocalStore
@@ -27,6 +28,9 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     /// The trending people on the device (#893), one for the app's lifetime:
     /// every search screen opens on the same stored list.
     private let localCache: SearchLocalCache?
+    /// The app's follow channel: the person rows hear a follow made on any
+    /// screen (#896). Nil: each row keeps the answer it read.
+    private let followEvents: FollowGraphEvents?
 
     /// - Parameter localStore: the device store (#893): the resting screen's
     ///   trending people open on their last list at a cold start. Nil keeps
@@ -41,7 +45,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
-        localStore: LocalStore? = nil
+        localStore: LocalStore? = nil,
+        followEvents: FollowGraphEvents? = nil
     ) {
         self.repository = repository
         self.recentSearches = recentSearches
@@ -53,6 +58,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
         self.localCache = localStore.map(SearchLocalCache.init(store:))
+        self.followEvents = followEvents
     }
 
     public func makeSearchViewController() -> UIViewController {
@@ -63,7 +69,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
                 recentSearches: recentSearches,
                 explore: explore,
                 metadata: metadata,
-                localCache: localCache
+                localCache: localCache,
+                followEvents: followEvents
             ),
             imagePipeline: imagePipeline,
             postSurfaces: postSurfaces,

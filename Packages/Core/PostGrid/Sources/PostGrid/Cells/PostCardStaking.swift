@@ -26,16 +26,27 @@ import CoreNavigation
 /// The COUNT too, from the app's `EntityStore` (#896): every bound card draws
 /// its post's live count — a stake from any surface (`WalletStakeLikes`), a
 /// realtime tick or a fresher read the feed made — and tells the store the
-/// count its own post carried, for a post no feed has loaded yet.
+/// count its own post carried, for a post no feed has loaded yet. A bare
+/// tile, which draws a count but no heart, binds its count alone
+/// (`bindCount`).
+///
+/// And the SAVE glyph of every bound row: the store's saved fact is written
+/// by the app's one `PostBookmarkStore`, so a save made in the feed, on
+/// another surface's card or on the post page re-draws the row's glyph here.
 @MainActor
 public final class PostCardStaking {
     private let wallet: WalletStore
     private let entities: EntityStore?
+    /// Where a bound row's save glyph reads its answer back.
+    private let saves: PostBookmarkStore
     private var entityObservation: EntityObservation?
     /// Which post each bound row shows — keyed by the CELL, weakly: a row is
     /// recycled onto another post, and keyed by post it would stay listed
     /// under the one it no longer draws.
     private let cells = NSMapTable<UIView, NSString>.weakToStrongObjects()
+    /// The readouts bound for their count alone (`bindCount`): a bare tile,
+    /// whose heart never shows the viewer's stake.
+    private let countCells = NSMapTable<UIView, NSString>.weakToStrongObjects()
     /// What this surface staked since its session opened, per post.
     private var session: [String: Int] = [:]
     private var observer: NSObjectProtocol?
@@ -47,9 +58,12 @@ public final class PostCardStaking {
 
     /// - Parameter entities: where the cards' counts come from. Nil: each
     ///   card keeps the count its post was configured with.
-    public init(wallet: WalletStore, entities: EntityStore?) {
+    /// - Parameter saves: the pile whose answers a bound row's save glyph
+    ///   draws again when the store says a save changed.
+    public init(wallet: WalletStore, entities: EntityStore?, saves: PostBookmarkStore = .shared) {
         self.wallet = wallet
         self.entities = entities
+        self.saves = saves
         observer = NotificationCenter.default.addObserver(
             forName: WalletStore.didChangeNotification, object: wallet, queue: .main
         ) { [weak self] _ in
@@ -64,6 +78,7 @@ public final class PostCardStaking {
     /// `configure(with:)`.
     public func bind(_ cell: PostGridListRowCell, to postID: PostID) {
         let key = postID.rawValue
+        countCells.removeObject(forKey: cell)
         cells.setObject(key as NSString, forKey: cell)
         cell.stakeTapAmount = WalletStore.Policy.defaultStakeAmount
         cell.onStake = { [weak self, weak cell] amount in
@@ -93,7 +108,7 @@ public final class PostCardStaking {
             )
         }
         cell.setViewerStake(wallet.boostTotal(forTarget: key))
-        bindCount(cell, to: postID)
+        showLiveCount(on: cell, for: postID)
     }
 
     /// Keeps `readout`'s heart on what the viewer has staked on `postID` —
@@ -103,15 +118,26 @@ public final class PostCardStaking {
     /// tile's count). Call after `configure(with:)`.
     public func bindReadout(_ readout: any PostCardLikeReadout, to postID: PostID) {
         let key = postID.rawValue
+        countCells.removeObject(forKey: readout)
         cells.setObject(key as NSString, forKey: readout)
         readout.setViewerStake(wallet.boostTotal(forTarget: key))
-        bindCount(readout, to: postID)
+        showLiveCount(on: readout, for: postID)
+    }
+
+    /// Keeps `readout`'s COUNT on its post's live one, and nothing else: a
+    /// bare tile (a profile's media mosaic) draws a count without wearing the
+    /// viewer's stake, so its heart stays as `configure` drew it. Call after
+    /// `configure(with:)`.
+    public func bindCount(_ readout: any PostCardLikeReadout, to postID: PostID) {
+        cells.removeObject(forKey: readout)
+        countCells.setObject(postID.rawValue as NSString, forKey: readout)
+        showLiveCount(on: readout, for: postID)
     }
 
     /// The post's live count, on a card just configured with its post's:
     /// the store learns the card's count if it knew none, and the card
     /// draws the store's.
-    private func bindCount(_ readout: any PostCardLikeReadout, to postID: PostID) {
+    private func showLiveCount(on readout: any PostCardLikeReadout, for postID: PostID) {
         guard let entities else { return }
         if let carried = readout.postLikeCount {
             entities.mergeCounts([postID: PostCounts(likes: carried)], freshness: .ifUnknown)
@@ -119,15 +145,20 @@ public final class PostCardStaking {
         if let live = entities.post(postID)?.likeCount { readout.showLikeCount(live) }
     }
 
-    /// The store moved: every bound card of a changed post draws its count.
+    /// The store moved: every bound card of a changed post draws its count,
+    /// and every bound row its save glyph (a viewer change, `.everything`,
+    /// re-reads them all).
     private func refreshCounts(_ change: EntityChange<PostID>) {
         guard let entities else { return }
-        let enumerator = cells.keyEnumerator()
-        while let cell = enumerator.nextObject() as? any PostCardLikeReadout {
-            guard let key = cells.object(forKey: cell) as String? else { continue }
-            let postID = PostID(key)
-            guard change.contains(postID), let live = entities.post(postID)?.likeCount else { continue }
-            cell.showLikeCount(live)
+        for table in [cells, countCells] {
+            let enumerator = table.keyEnumerator()
+            while let cell = enumerator.nextObject() as? any PostCardLikeReadout {
+                guard let key = table.object(forKey: cell) as String? else { continue }
+                let postID = PostID(key)
+                guard change.contains(postID) else { continue }
+                if let live = entities.post(postID)?.likeCount { cell.showLikeCount(live) }
+                if let row = cell as? PostGridListRowCell { row.isBookmarked = saves.isSaved(key) }
+            }
         }
     }
 
