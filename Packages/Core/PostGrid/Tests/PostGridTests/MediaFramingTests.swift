@@ -65,6 +65,22 @@ struct MediaFramingTests {
         #expect(MediaBackdrop.blurred(picture) === MediaBackdrop.blurred(picture))
     }
 
+    /// The blur is kept only as long as its picture (#894): the backdrop memo
+    /// never holds the picture itself, whose memory is the image pipeline's to
+    /// budget. An `NSCache` keyed by the picture kept up to 48 full-size photos
+    /// alive after the pipeline had let them go.
+    @Test func theBackdropNeverKeepsItsPictureAlive() {
+        weak var released: UIImage?
+        var blurred: UIImage?
+        autoreleasepool {
+            let picture = Self.solid(.purple, CGSize(width: 1200, height: 1600))
+            released = picture
+            blurred = MediaBackdrop.blurred(picture)
+        }
+        #expect(blurred != nil, "guard: the picture was blurred")
+        #expect(released == nil, "the backdrop memo kept the full-size picture alive")
+    }
+
     // MARK: - The carousel's pages
 
     @Test func aCardCarouselFillsEveryPageWhateverItsShape() {

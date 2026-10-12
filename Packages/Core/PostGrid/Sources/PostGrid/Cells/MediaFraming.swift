@@ -72,13 +72,18 @@ public enum MediaBackdrop {
     /// band reads as a black band with a tint.
     nonisolated static let darkening: CGFloat = 0.2
 
-    private static let cache: NSCache<UIImage, UIImage> = {
-        let cache = NSCache<UIImage, UIImage>()
-        cache.countLimit = 48
-        return cache
-    }()
+    /// The blurs made so far, each kept exactly as long as the picture it was
+    /// made from (#894): the key is held WEAKLY.
+    ///
+    /// ⚠️ Not an `NSCache` keyed by the picture: that held its KEYS strongly,
+    /// so up to 48 full-size photos stayed resident after the image pipeline,
+    /// whose budget they belong to, had let them go. Here the pipeline's
+    /// memory (or the view showing the picture) decides how long a picture
+    /// lives. Its blur — a 40 px bitmap, a few kilobytes — is no longer found
+    /// once the picture is gone, and the table drops it as it purges dead keys.
+    private static let cache = NSMapTable<UIImage, UIImage>(keyOptions: .weakMemory, valueOptions: .strongMemory)
 
-    /// The backdrop for `image`, cached per image object. Nil for an image
+    /// The backdrop for `image`, kept while `image` lives. Nil for an image
     /// with no pixels.
     ///
     /// Synchronous by design: a hero builds its window in the turn the tap

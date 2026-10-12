@@ -1,3 +1,4 @@
+import CacheKit
 import CoreGraphics
 import CoreImage
 import CoreText
@@ -585,6 +586,32 @@ struct OverlayRasterizerTests {
             OverlayRasterizer.Raster(image: Self.square(side: 40, top: Self.red), density: 1)
         }
         #expect(cache.cost <= 1000, "a picture bigger than the budget is handed out, not kept")
+    }
+
+    /// The pictures are the device cache's (#894): a `MemoryCache` in the
+    /// viewer's scope, announced to the shared registry, so the coordinator's
+    /// trims and a logout reach them. A trim empties it, and the next ask
+    /// draws again.
+    @Test func theCacheIsTheDeviceCaches() {
+        let shared = OverlayRasterCache.shared
+        #expect(shared.entries.namespace == OverlayRasterCache.namespace)
+        #expect(OverlayRasterCache.namespace.scope == .viewer, "a draft's text outlived its viewer")
+        #expect(OverlayRasterCache.namespace.priorityClass == .persistent,
+                "a background export would lay its text out on every frame")
+        #expect(UIAssetCaches.shared.caches.contains { $0 === shared.entries },
+                "the overlay pictures are not announced to the device cache")
+
+        let cache = OverlayRasterCache(budget: 64 << 20)
+        let raster = OverlayRasterizer.Raster(image: Self.square(side: 10, top: Self.red), density: 1)
+        let key = OverlayRasterCache.Key(.emoji("trim"), size: 10)
+        _ = cache.raster(for: key) { raster }
+        _ = cache.raster(for: key) { raster }
+        #expect(cache.renders == 1 && cache.cost == 400, "guard: drawn once and kept")
+
+        cache.entries.removeAll()
+        #expect(cache.cost == 0, "a clear left \(cache.cost) bytes")
+        _ = cache.raster(for: key) { raster }
+        #expect(cache.renders == 2, "a cleared picture was still served")
     }
 
     /// Every typeface resolves to a face of its own on this system — a name

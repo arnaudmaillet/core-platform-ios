@@ -184,4 +184,25 @@ final class EmoteCacheClassTests {
         #expect(await second.art(for: heart, pixelSide: 48) == nil, "cleared, and nothing to bake from")
         #expect(second.stats.diskHits == 0)
     }
+
+    /// The glyph stills a text view draws before the art are a UI asset cache
+    /// too (#894): a byte-budgeted `MemoryCache` of the class, announced to the
+    /// shared registry, so the coordinator trims them instead of `NSCache`'s
+    /// own guesses. A still is drawn once per glyph and size.
+    @Test func glyphStillsAreAUIAssetCache() throws {
+        let stills = EmoteAttachment.stills
+        #expect(stills.namespace.priorityClass == .persistent)
+        #expect(stills.namespace.scope == .public)
+        #expect(stills.memoryBudget == EmoteAttachment.stillsBudget)
+        #expect(UIAssetCaches.shared.caches.contains { $0 === stills }, "the stills are not announced to the registry")
+
+        let heart = try #require(EmoteCatalog.shared.emote(id: "noto:2764_fe0f"))
+        let side: CGFloat = 23.25
+        let first = EmoteAttachment.still(of: heart, side: side)
+        #expect(stills.usage.bytes > 0)
+        #expect(EmoteAttachment.still(of: heart, side: side) === first, "the same still was drawn twice")
+
+        stills.removeAll()
+        #expect(EmoteAttachment.still(of: heart, side: side) !== first, "a cleared still was still served")
+    }
 }

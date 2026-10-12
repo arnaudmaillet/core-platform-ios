@@ -1,3 +1,4 @@
+import CacheKit
 import DesignSystem
 import MediaCore
 import UIKit
@@ -473,8 +474,8 @@ final class EmoteAttachment: NSTextAttachment {
     /// The emote's glyph, drawn to fill `side` — the still shown before the
     /// art, and instead of it when motion is off.
     static func still(of emote: Emote, side: CGFloat) -> UIImage {
-        let key = "\(emote.glyph)@\(side)" as NSString
-        if let cached = stills.object(forKey: key) { return cached }
+        let key = "\(emote.glyph)@\(side)"
+        if let cached = stills.value(for: key) { return cached }
         let size = CGSize(width: side, height: side)
         let image = UIGraphicsImageRenderer(size: size).image { _ in
             // An emoji's ink is about its point size wide.
@@ -486,21 +487,35 @@ final class EmoteAttachment: NSTextAttachment {
                 withAttributes: [.font: font]
             )
         }
-        stills.setObject(image, forKey: key)
+        keep(image, for: key)
         return image
     }
 
     /// A transparent square: what TextKit draws for the emote.
     static func blank(side: CGFloat) -> UIImage {
-        let key = "blank@\(side)" as NSString
-        if let cached = stills.object(forKey: key) { return cached }
+        let key = "blank@\(side)"
+        if let cached = stills.value(for: key) { return cached }
         let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { _ in }
-        stills.setObject(image, forKey: key)
+        keep(image, for: key)
         return image
     }
 
-    // NSCache is thread-safe.
-    nonisolated(unsafe) private static let stills = NSCache<NSString, UIImage>()
+    private static func keep(_ image: UIImage, for key: String) {
+        let cost = image.cgImage.map { $0.bytesPerRow * $0.height } ?? 256
+        stills.insert(image, for: key, cost: cost)
+    }
+
+    /// The glyph stills and blank squares drawn so far, in the UI assets class
+    /// (#971) like the emote sheets: within a budget, and trimmed by the device
+    /// cache rather than by `NSCache`'s own guesses (#894). A glyph at one line
+    /// height is some twenty kilobytes at 3x, so 8 MB holds a few hundred:
+    /// every emote a screen sets, at its sizes. Thread-safe (`MemoryCache`).
+    static let stillsBudget = MemoryBudget.fixed(bytes: 8 * CacheBytes.mebibyte)
+    static let stills: MemoryCache<String, UIImage> = {
+        let cache: MemoryCache<String, UIImage> = UIAssetCaches.memoryCache("UIAssets.emoteStills", budget: stillsBudget)
+        UIAssetCaches.shared.adopt(cache)
+        return cache
+    }()
 }
 
 // MARK: - The view

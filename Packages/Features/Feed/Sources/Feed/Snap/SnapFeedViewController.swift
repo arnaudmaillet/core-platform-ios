@@ -2631,7 +2631,9 @@ final class SnapFeedViewController: UIViewController {
     /// What the sound bubble and the composer's rail slot draw for `model`
     /// (#671) — see `SnapSoundState.face`.
     func soundFace(for model: FeedItemDisplayModel) -> SnapSoundFace? {
-        soundState.face(for: model, playingClip: playingClip(of: model))
+        var face = soundState.face(for: model, playingClip: playingClip(of: model))
+        face.pipeline = imagePipeline
+        return face
     }
 
     /// Every visible sound bubble, and the open panel's rail slot, after the

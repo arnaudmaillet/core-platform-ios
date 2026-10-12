@@ -286,16 +286,15 @@ final class SnapMediaAttributionView: UIView {
     /// `contentKey` of what the pill shows now; nil before its first post.
     private(set) var shownContentKey: String?
 
-    /// Fetches `model`'s cover into the pill's cache ahead of need — the next
+    /// Decodes `model`'s cover into the pipeline ahead of need — the next
     /// page's — so the pill's swap to it is drawn with it.
     static func warmCover(
         for model: FeedItemDisplayModel, cover: Cover, pipeline: ImagePipeline
     ) {
         guard let url = coverURL(for: model, cover: cover),
-              !url.isFileURL, SnapAttributionCoverCache.cover(for: url) == nil else { return }
+              !url.isFileURL, !pipeline.isDecoded(url, size: coverBucket) else { return }
         Task { @MainActor in
-            guard let image = try? await pipeline.image(for: url) else { return }
-            SnapAttributionCoverCache.store(image, for: url)
+            _ = try? await pipeline.image(for: url, size: coverBucket)
         }
     }
 
@@ -323,7 +322,7 @@ final class SnapMediaAttributionView: UIView {
         // the blur's new still pictures it, nothing fades in after the swap.
         let cached: UIImage? = switch cover {
         case .note: Self.noteImage
-        case .artwork, .post: url.flatMap(SnapAttributionCoverCache.cover(for:))
+        case .artwork, .post: url.flatMap { pipeline.cachedImage(for: $0, size: Self.coverBucket) }
         }
 
         contentTransition.perform(animated: animated) {
@@ -349,10 +348,12 @@ final class SnapMediaAttributionView: UIView {
                     UIImage(contentsOfFile: url.path)?.preparingForDisplay()
                 }.value
             } else {
-                try? await pipeline.image(for: url)
+                try? await pipeline.image(for: url, size: Self.coverBucket)
             }
             guard let image else { return }
-            if !url.isFileURL { SnapAttributionCoverCache.store(image, for: url) }
+            // A file is kept in the pipeline's memory too, so the sound bubble
+            // and the next swap read it without touching the disk again.
+            if url.isFileURL { pipeline.store(image, for: url) }
             guard let self, self.postID == id else { return }
             // Onto the NEW post's content: mid-blur, the old cover is still
             // what the live view draws.
@@ -378,6 +379,18 @@ final class SnapMediaAttributionView: UIView {
         coverView.layer.beginTime = 0
     }
 
+    #if DEBUG
+    /// The picture the cover draws now.
+    var debugCoverImage: UIImage? { coverView.image }
+    #endif
+
+    /// The bucket a remote cover is decoded at, for the pill and the sound
+    /// bubble alike (#894): a small disc, so the pipeline's avatar size. Its
+    /// memory answers synchronously, so a swap made on this turn draws the new
+    /// post wearing its cover instead of popping to it once the blur has
+    /// landed. A post's own picture already decoded larger serves it too.
+    static let coverBucket = ImageBucket.avatar
+
     /// A white note on the cover's own dark ground.
     static let noteImage: UIImage = {
         let side: CGFloat = 64
@@ -393,30 +406,4 @@ final class SnapMediaAttributionView: UIView {
         }
     }()
 
-}
-
-/// The covers the attribution pill has drawn lately, readable SYNCHRONOUSLY —
-/// `SnapAuthorFaceCache`'s twin, for the same reason: a swap made on this turn
-/// has to draw the new post wearing its cover, not pop to it once the blur
-/// has landed.
-///
-/// Smaller than the face cache: a cover can be a post's whole thumbnail.
-@MainActor
-enum SnapAttributionCoverCache {
-    static let capacity = 8
-    private static var covers: [URL: UIImage] = [:]
-    /// Least recently stored first.
-    private static var order: [URL] = []
-
-    static func cover(for url: URL) -> UIImage? { covers[url] }
-
-    static func store(_ image: UIImage, for url: URL) {
-        if covers.updateValue(image, forKey: url) != nil {
-            order.removeAll { $0 == url }
-        }
-        order.append(url)
-        while order.count > capacity {
-            covers[order.removeFirst()] = nil
-        }
-    }
 }

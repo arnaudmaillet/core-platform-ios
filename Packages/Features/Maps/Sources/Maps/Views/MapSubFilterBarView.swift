@@ -242,15 +242,15 @@ final class MapSubFilterBarView: UIView {
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var optionsBySubFilter: [MapSubFilter: MapSubFilterOption] = [:]
     private var orderedSubFilters: [MapSubFilter] = []
-    /// Resolved avatars, keyed by profile — survives cell reuse and option
-    /// refreshes (the pipeline's cache makes re-resolution cheap anyway).
-    private var avatarCache: [ProfileID: UIImage] = [:]
     /// Handles already seen for a profile, so an option set that arrives
     /// without one cannot un-name someone the bar has already identified.
     /// See `carryingKnownHandles(_:)`.
     private var handleCache: [ProfileID: String] = [:]
-    /// Menu-header faces, circle-cropped from `avatarCache`.
-    private var headerImageCache: [ProfileID: UIImage] = [:]
+    /// Menu-header faces, circle-cropped from the pipeline's avatar, keyed by
+    /// the avatar's URL. A memo of the bar's own drawing, freed with the bar —
+    /// not a copy of a fetched image: the faces themselves live in the
+    /// pipeline (#894).
+    private var headerImageCache: [URL: UIImage] = [:]
     private var avatarTasks: [Task<Void, Never>] = []
     /// Monotonic token superseding in-flight cross-dissolves: a stale
     /// fade-out completion must never swap content selected later (rapid
@@ -342,8 +342,7 @@ final class MapSubFilterBarView: UIView {
                 // Native pill interaction: tap → selection; long-press → the
                 // entity-aware menu, built fresh at presentation time.
                 cell.onTap = { [weak self] in self?.didTap(subFilter) }
-                cell.setAvatar(self.optionsBySubFilter[subFilter]?.favorite
-                    .flatMap { self.avatarCache[$0.profileID] })
+                cell.setAvatar(self.avatar(for: self.optionsBySubFilter[subFilter]?.favorite))
                 cell.menuProvider = { [weak self] in self?.pillMenu(for: subFilter) }
             }
         }
@@ -384,7 +383,7 @@ final class MapSubFilterBarView: UIView {
     /// belongs to a freshly chosen primary) and the row rewinds to its head.
     /// Structure lands synchronously at final widths, arrival is a pure
     /// cross-dissolve to each cell's resting alpha (the header duck-fade
-    /// decides that); avatars resolve async into the cache and reconfigure.
+    /// decides that); avatars resolve async into the pipeline and reconfigure.
     func setOptions(_ options: [MapSubFilterOption]) {
         // Direct set supersedes any in-flight cross-dissolve…
         transitionGeneration += 1
@@ -549,8 +548,8 @@ final class MapSubFilterBarView: UIView {
         optionsBySubFilter = Dictionary(uniqueKeysWithValues: options.map { ($0.subFilter, $0) })
         // A restack can now ADD people (someone favorited from their profile
         // while this row was on screen), and an added pill has never had its
-        // avatar resolved. Cache-guarded, so the ones already here cost
-        // nothing and do not re-fetch.
+        // avatar resolved. Guarded by the pipeline's memory, so the faces
+        // already decoded cost nothing and do not re-fetch.
         loadAvatars(for: options)
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
         snapshot.appendSections([.main])
@@ -605,17 +604,26 @@ final class MapSubFilterBarView: UIView {
         }
     }
 
+    /// The pills' faces are decoded at the pipeline's avatar size and read
+    /// back from its memory (#894): no copy of them is kept here.
+    static let avatarBucket = ImageBucket.avatar
+
+    /// `favorite`'s face if the pipeline holds it decoded; nil draws the glyph.
+    private func avatar(for favorite: MapFavorite?) -> UIImage? {
+        guard let url = favorite?.avatarURL else { return nil }
+        return imagePipeline?.cachedImage(for: url, size: Self.avatarBucket)
+    }
+
     private func loadAvatars(for options: [MapSubFilterOption]) {
         guard let imagePipeline else { return }
         for option in options {
             guard let favorite = option.favorite, let url = favorite.avatarURL,
-                  avatarCache[favorite.profileID] == nil else { continue }
+                  !imagePipeline.isDecoded(url, size: Self.avatarBucket) else { continue }
             let subFilter = option.subFilter
             avatarTasks.append(Task { [weak self] in
-                guard let image = try? await imagePipeline.image(for: url),
+                guard let image = try? await imagePipeline.image(for: url, size: Self.avatarBucket),
                       let self, !Task.isCancelled else { return }
-                self.avatarCache[favorite.profileID] = image
-                self.headerImageCache[favorite.profileID] = nil
+                self.headerImageCache[url] = nil
                 // Atomic content refresh — no width animation on arrival.
                 UIView.performWithoutAnimation {
                     if let indexPath = self.dataSource.indexPath(for: .subFilter(subFilter)) {
@@ -756,17 +764,17 @@ final class MapSubFilterBarView: UIView {
     /// square because every other place this photo appears is a circle, and a
     /// menu row is the one place UIKit will not round it for us.
     private func headerImage(for option: MapSubFilterOption) -> UIImage? {
-        guard let profileID = option.favorite?.profileID,
-              let avatar = avatarCache[profileID]
+        guard let url = option.favorite?.avatarURL,
+              let face = avatar(for: option.favorite)
         else { return UIImage(systemName: "person.crop.circle") }
-        if let cropped = headerImageCache[profileID] { return cropped }
+        if let cropped = headerImageCache[url] { return cropped }
         // Cropping is a render pass, and the menu is now built whenever a
         // cell is configured rather than when one is opened — so this runs
         // for every visible pill on every restack. Cached against the avatar
         // that produced it (`loadAvatars` drops the entry when a new one
         // resolves).
-        let cropped = avatar.mapMenuHeaderAvatar()
-        headerImageCache[profileID] = cropped
+        let cropped = face.mapMenuHeaderAvatar()
+        headerImageCache[url] = cropped
         return cropped
     }
 
@@ -812,7 +820,7 @@ final class MapSubFilterBarView: UIView {
                 cell.configure(content: content, height: Self.pillHeight, selected: selected)
                 if case .subFilter(let subFilter) = item,
                    let favorite = optionsBySubFilter[subFilter]?.favorite {
-                    cell.setAvatar(avatarCache[favorite.profileID])
+                    cell.setAvatar(avatar(for: favorite))
                 }
             }
         }
