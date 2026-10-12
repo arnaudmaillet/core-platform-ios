@@ -34,7 +34,7 @@ struct SearchPeopleAvatarRecyclingTests {
         await landed.next { await fetcher.release(grace) }
 
         #expect(landed.images.count == 1)
-        #expect(landed.images.first === pipeline.cachedImage(for: grace))
+        #expect(landed.images.first === pipeline.cachedImage(for: grace, size: .avatar))
     }
 }
 

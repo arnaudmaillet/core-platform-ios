@@ -25,6 +25,15 @@ public enum CacheKey {
         return components.url?.absoluteString ?? url.absoluteString
     }
 
+    /// Whether `url` carries signing query items: a URL only this viewer was
+    /// allowed to fetch, whose cached copy is wiped with the viewer
+    /// (`CacheScope.signed`).
+    public static func isSigned(_ url: URL) -> Bool {
+        guard url.query != nil,
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return false }
+        return items.contains { isSigningParameter($0.name) }
+    }
+
     private static let signingNames: Set<String> = ["expires", "signature", "key-pair-id", "policy"]
 
     static func isSigningParameter(_ name: String) -> Bool {

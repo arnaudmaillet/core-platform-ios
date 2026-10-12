@@ -29,12 +29,13 @@ final class RowAvatarLoads {
         let key = ObjectIdentifier(row)
         tasks.removeValue(forKey: key)?.cancel()
         guard let url, let pipeline else { return }
-        if let cached = pipeline.cachedImage(for: url) {
+        // A row's avatar: decoded at its bucket, not at 1200 px (#894).
+        if let cached = pipeline.cachedImage(for: url, size: .avatar) {
             apply(cached)
             return
         }
         tasks[key] = Task { [weak self] in
-            let image = try? await pipeline.image(for: url)
+            let image = try? await pipeline.image(for: url, size: .avatar)
             // Cancelled means the row moved on, and its slot already belongs
             // to the next load.
             guard !Task.isCancelled else { return }

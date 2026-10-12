@@ -39,7 +39,7 @@ struct ModerationAvatarRecyclingTests {
         await onRecycled.next { await fetcher.release(grace) }
 
         #expect(onRecycled.images.count == 1)
-        #expect(onRecycled.images.first === pipeline.cachedImage(for: grace))
+        #expect(onRecycled.images.first === pipeline.cachedImage(for: grace, size: .avatar))
         #expect(onNoPicture.images.isEmpty)
     }
 }

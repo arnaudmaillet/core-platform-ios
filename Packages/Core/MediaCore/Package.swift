@@ -12,7 +12,8 @@ let package = Package(
         // honour alongside the iOS setting (#468).
         .package(path: "../DesignSystem"),
         // The device cache (#891): resident animated icons live in its UI
-        // assets class (#971).
+        // assets class (#971); the image pipeline's memory and disk caches,
+        // fills and budgets (#894).
         .package(path: "../CacheKit")
     ],
     targets: [

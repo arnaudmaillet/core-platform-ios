@@ -126,4 +126,13 @@ struct CacheKeyTests {
         let large = try #require(URL(string: "https://cdn.example.com/a.jpg?size=large"))
         #expect(CacheKey.media(small) != CacheKey.media(large))
     }
+
+    @Test func aURLWithSigningItemsIsSigned() throws {
+        let signed = try #require(URL(string: "https://cdn.example.com/a.jpg?w=1&X-Amz-Signature=x"))
+        let cloudFront = try #require(URL(string: "https://d.example.net/a.jpg?Expires=1&Signature=x"))
+        let rendition = try #require(URL(string: "https://cdn.example.com/a.jpg?size=small"))
+        let bare = try #require(URL(string: "https://cdn.example.com/a.jpg"))
+        #expect(CacheKey.isSigned(signed) && CacheKey.isSigned(cloudFront))
+        #expect(!CacheKey.isSigned(rendition) && !CacheKey.isSigned(bare))
+    }
 }

@@ -344,7 +344,8 @@ public final class PostAuthorBandView: UIView {
         avatar.setMonogram(model.monogram)
 
         guard showsIdentity, let url = model.avatarURL, let imagePipeline else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
+        // Decoded at the avatar's bucket, not at 1200 px (#894).
+        if let cached = imagePipeline.cachedImage(for: url, size: .avatar) {
             avatarImage.image = cached
             avatarImage.isHidden = false
             return
@@ -353,7 +354,7 @@ public final class PostAuthorBandView: UIView {
         // task is dropped in `prepareForReuse`, so a picture cannot arrive for
         // a post this band has stopped representing.
         avatarTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url),
+            guard let image = try? await imagePipeline.image(for: url, size: .avatar),
                   !Task.isCancelled, let self
             else { return }
             self.avatarImage.image = image
