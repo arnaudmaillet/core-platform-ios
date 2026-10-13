@@ -64,11 +64,16 @@ struct ProfileGalleryStoreTests {
         #expect(snapshot.media == .empty(message: "No media in posts yet."))
     }
 
-    @Test func savedIsShownOnlyOnYourOwnProfile() {
+    /// The viewer's pile is theirs alone; someone else's Saved is the list
+    /// the server gave for them (#837).
+    @Test func savedIsThePileOnYourOwnProfileAndTheirListOnAnothers() {
         let store = loadedStore()
         store.saved = .content([post("s1", at: 1)])
         #expect(store.snapshot(isOwnProfile: true).saved == .content([post("s1", at: 1)]))
         #expect(store.snapshot(isOwnProfile: false).saved == .empty(message: ""))
+        store.othersSaved = .content([post("o1", at: 2)])
+        #expect(store.snapshot(isOwnProfile: false).saved == .content([post("o1", at: 2)]))
+        #expect(store.snapshot(isOwnProfile: true).saved == .content([post("s1", at: 1)]))
     }
 
     @Test func everyPageLoadsUntilItsFirstPageAnswers() {

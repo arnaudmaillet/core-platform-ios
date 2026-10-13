@@ -86,6 +86,12 @@ public struct MockBackend: Sendable {
         // A like is a point staked in the wallet (#676).
         MockWalletService(store: counterStore, dataset: dataset).register(on: bff)
         MockCounterService(store: counterStore).register(on: bff)
+        // The Liked tab (#411): the posts the account staked on, hidden from
+        // others when its owner turns the tab off.
+        MockLikesByProfileService(
+            store: counterStore, dataset: dataset,
+            showsLikes: { socialServices.tabSettings(of: $0).showLikes }
+        ).register(on: bff)
         MockMediaService(store: blobStore).register(on: bff)
         // A post mentioning someone outside their "Who Can Mention" is
         // refused (#397), as a comment outside "Who Can Comment" is.

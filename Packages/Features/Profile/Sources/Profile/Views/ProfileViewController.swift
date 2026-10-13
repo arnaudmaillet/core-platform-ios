@@ -299,7 +299,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         self.videoPlayback = videoPlayback
         self.shareTargeting = shareTargeting
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
-        let allTabs = viewModel.isOwnProfile ? ProfileTab.ownTabs : ProfileTab.publicTabs
+        // Every profile can carry Saved and Liked (#411, #837): someone
+        // else's only when its owner shows them — the server answers empty
+        // otherwise, and an empty source is no tab (#742).
+        let allTabs = ProfileTab.ownTabs
         self.allTabs = allTabs
         // Posts alone until the other sources answer (#742): a source shows
         // up only with something in it.

@@ -57,6 +57,12 @@ final class ProfileGalleryStore {
     /// while the screen is up (a post unsaved from the feed underneath) and the
     /// snapshot is rebuilt from parts.
     var saved: PageState = .empty(message: "Nothing saved yet.")
+    /// The posts the profile liked (#411): engagement's `ListLikesByProfile`,
+    /// read with the grid's first pages and kept nowhere else.
+    var reactions: PageState = .empty(message: "")
+    /// What ANOTHER profile saved (#837): the server's list, empty unless its
+    /// owner shows the tab. Apart from `saved`, the viewer's own pile.
+    var othersSaved: PageState = .empty(message: "")
 
     private struct TileKey: Hashable {
         let format: GalleryFilter.Format
@@ -315,7 +321,10 @@ final class ProfileGalleryStore {
             activity: page(.activity, .posts, emptyMessage: "Posts will appear here."),
             media: page(.media, pageSource),
             isComplete: isComplete(.posts),
-            saved: isOwnProfile ? saved : .empty(message: ""),
+            // Someone else's Saved is the server's list, empty unless its
+            // owner shows the tab (#837); the viewer's own is their pile.
+            saved: isOwnProfile ? saved : othersSaved,
+            reactions: reactions,
             reposts: page(.activity, .reposts, emptyMessage: ""),
             tagged: page(.activity, .tagged, emptyMessage: ""),
             repostsComplete: isComplete(.reposts),

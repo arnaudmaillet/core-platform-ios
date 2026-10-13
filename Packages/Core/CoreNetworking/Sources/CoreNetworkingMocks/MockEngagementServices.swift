@@ -59,6 +59,14 @@ public final class MockCounterStore: @unchecked Sendable {
     private var stakes: [String: [String: Int64]] = [:]
     /// A comment's like count: the sum of its points (comments have no seed).
     private var commentLikes: [String: Int64] = [:]
+    /// The posts each account first staked on, newest last (#411).
+    private var likedPostsInOrder: [String: [String]] = [:]
+
+    /// The posts `account` liked, newest first: what `ListLikesByProfile`
+    /// lists (#411).
+    public func likedPosts(by account: String) -> [String] {
+        lock.withLock { (likedPostsInOrder[account] ?? []).reversed() }
+    }
 
     /// The account's points on the target.
     public func myLikes(account: String, target: String) -> Int64 {
@@ -81,6 +89,7 @@ public final class MockCounterStore: @unchecked Sendable {
             stakes[target, default: [:]][account] = mine
             if target.hasPrefix("post:") {
                 let id = String(target.dropFirst(5))
+                if mine == points, points > 0 { likedPostsInOrder[account, default: []].append(id) }
                 likeCounts[id] = (likeCounts[id] ?? 0) + points
             } else {
                 let id = String(target.dropFirst(8))

@@ -39,6 +39,14 @@ public protocol ProfileGalleryProviding: Sendable {
     func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage
     /// A page of the posts by others that mention `handle`, newest first.
     func taggedPage(for profileID: ProfileID, handle: String, after pageToken: String?) async throws -> GalleryPage
+    /// The posts the profile liked, newest first (engagement
+    /// `ListLikesByProfile`, #411): the Liked tab. Empty for anyone but the
+    /// owner while the owner hides the tab — the server's rule.
+    func likedPosts(of profileID: ProfileID) async throws -> [GalleryPost]
+    /// The posts ANOTHER profile saved (engagement `ListSavedPosts`, #837):
+    /// its Saved tab, empty unless its owner shows it. The viewer's own pile
+    /// is `PostBookmarkStore`'s.
+    func savedPosts(of profileID: ProfileID) async throws -> [GalleryPost]
 }
 
 public extension ProfileGalleryProviding {
@@ -52,6 +60,10 @@ public extension ProfileGalleryProviding {
         guard pageToken == nil else { return GalleryPage(posts: [], nextPageToken: nil) }
         return GalleryPage(posts: try await taggedPosts(for: profileID, handle: handle), nextPageToken: nil)
     }
+
+    /// Providers with no engagement reads: nothing liked, nothing saved.
+    func likedPosts(of profileID: ProfileID) async throws -> [GalleryPost] { [] }
+    func savedPosts(of profileID: ProfileID) async throws -> [GalleryPost] { [] }
 }
 
 /// Reads the gallery from post.v1 (listing + hydration) and search.v1 (tagged).
@@ -67,6 +79,8 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     /// root without one still gets a working grid — the tiles simply carry no
     /// author, which is what every tile did before this existed.
     private let profileClient: (any Profile_V1_ProfileServiceClientInterface)?
+    /// The Liked and Saved lists (#411, #837). Nil: both tabs stay empty.
+    private let engagementClient: (any Engagement_V1_EngagementServiceClientInterface)?
     /// Identities already resolved, for the life of this actor.
     ///
     /// Cheap and worth it: the authored pages of a profile are by ONE person,
@@ -84,8 +98,10 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
         searchClient: any Search_V1_SearchServiceClientInterface,
         counterClient: any Counter_V1_CounterServiceClientInterface,
         profileClient: (any Profile_V1_ProfileServiceClientInterface)? = nil,
+        engagementClient: (any Engagement_V1_EngagementServiceClientInterface)? = nil,
         pageLimit: Int32 = 30
     ) {
+        self.engagementClient = engagementClient
         self.postClient = postClient
         self.searchClient = searchClient
         self.counterClient = counterClient
@@ -148,6 +164,58 @@ public actor ProfileGalleryRepository: ProfileGalleryProviding {
     public func posts(ids: [String]) async throws -> [GalleryPost] {
         guard !ids.isEmpty else { return [] }
         return await withCounters(withAuthors(hydrate(postIDs: ids)))
+    }
+
+    /// The Liked and Saved tabs arrive whole, like the viewer's own pile: at
+    /// most this many pages are followed (each id is a `GetPost`).
+    static let listPagesRead = 3
+
+    public func likedPosts(of profileID: ProfileID) async throws -> [GalleryPost] {
+        guard let engagementClient else { return [] }
+        let ids = try await Self.collect { token in
+            var request = Engagement_V1_ListLikesByProfileRequest()
+            request.profileID = profileID.rawValue
+            request.limit = 100
+            request.pageToken = token
+            let response = await engagementClient.listLikesByProfile(request: request, headers: [:])
+            if let error = response.error {
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            }
+            return (response.message?.postIds ?? [], response.message?.nextPageToken ?? "")
+        }
+        return try await posts(ids: ids)
+    }
+
+    public func savedPosts(of profileID: ProfileID) async throws -> [GalleryPost] {
+        guard let engagementClient else { return [] }
+        let ids = try await Self.collect { token in
+            var request = Engagement_V1_ListSavedPostsRequest()
+            request.profileID = profileID.rawValue
+            request.limit = 100
+            request.pageToken = token
+            let response = await engagementClient.listSavedPosts(request: request, headers: [:])
+            if let error = response.error {
+                throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            }
+            return (response.message?.posts.map(\.postID) ?? [], response.message?.nextPageToken ?? "")
+        }
+        return try await posts(ids: ids)
+    }
+
+    /// Every id of a paged list, up to `listPagesRead` pages, without twins.
+    private static func collect(
+        _ page: (String) async throws -> (ids: [String], next: String)
+    ) async throws -> [String] {
+        var ids: [String] = []
+        var token = ""
+        for _ in 0..<listPagesRead {
+            let answer = try await page(token)
+            ids += answer.ids
+            token = answer.next
+            if token.isEmpty { break }
+        }
+        var seen = Set<String>()
+        return ids.filter { seen.insert($0).inserted }
     }
 
     /// Attaches the person each tile belongs to.

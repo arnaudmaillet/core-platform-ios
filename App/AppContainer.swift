@@ -1275,6 +1275,8 @@ final class AppContainer {
         // and without this that page arrives with an anonymous author capsule
         // until its own fetch answers.
         profileClient: Profile_V1_ProfileServiceClient(client: authenticatedRPCClient),
+        // The Liked tab and another profile's Saved tab (#411, #837).
+        engagementClient: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient),
         pageLimit: Self.galleryPageSize
     )
 
