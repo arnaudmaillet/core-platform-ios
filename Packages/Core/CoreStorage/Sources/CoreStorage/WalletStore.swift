@@ -26,6 +26,51 @@ public struct WalletSnapshot: Equatable, Sendable {
     /// Shots left in the viewer's ×100 cartridge pack (`Policy.StakePack`);
     /// 0 when no pack is active.
     public let stakeShots: Int
+    /// The balance a claim never takes past — the server's (`Wallet.points_cap`,
+    /// #1098); nil while the wallet is the local mock's.
+    public var pointsCap: Int? = nil
+}
+
+/// The viewer's wallet as the server holds it (wallet.v1 `GetWallet`, and the
+/// `Wallet` every `ClaimReward` answers with, #1098): the points and the
+/// hourly claim. The server is the clock — availability and the countdown
+/// are its answer, never decided on the device.
+public struct WalletServerState: Codable, Equatable, Sendable {
+    public var points: Int
+    public var claimAvailable: Bool
+    /// When the next claim opens; nil while available, and nil at the
+    /// points cap, where no wait opens it — only spending does.
+    public var nextClaimAt: Date?
+    public var claimAmount: Int
+    public var claimedToday: Int
+    public var dailyClaimCap: Int
+    public var streakDays: Int
+    public var pointsCap: Int
+
+    public init(
+        points: Int, claimAvailable: Bool, nextClaimAt: Date?, claimAmount: Int,
+        claimedToday: Int, dailyClaimCap: Int, streakDays: Int, pointsCap: Int
+    ) {
+        self.points = points
+        self.claimAvailable = claimAvailable
+        self.nextClaimAt = nextClaimAt
+        self.claimAmount = claimAmount
+        self.claimedToday = claimedToday
+        self.dailyClaimCap = dailyClaimCap
+        self.streakDays = streakDays
+        self.pointsCap = pointsCap
+    }
+}
+
+/// Where a member's wallet is read and claimed (#1098): wallet.v1, as the
+/// signed-in account. The app hands its one to `WalletStore.server`; a
+/// store without one (tests, previews, a guest's) keeps the local mock.
+public protocol WalletServer: Sendable {
+    func wallet() async throws -> WalletServerState
+    /// One claim. `idempotencyKey` (8–64 of `[A-Za-z0-9_-]`) is minted once
+    /// per tap and sent again with every retry of it: the server credits a
+    /// key at most once. Refusals are outcomes, with the wallet as it is.
+    func claim(idempotencyKey: String) async throws -> (outcome: WalletClaimOutcome, wallet: WalletServerState)
 }
 
 /// A stake of points (the charter's currency A) on a post or comment, and
@@ -86,6 +131,12 @@ public enum WalletClaimOutcome: Equatable, Sendable {
     case claimed(awarded: Int)
     case tooEarly(nextClaimAt: Date)
     case dailyCapReached
+    /// The balance is at the points cap (#901): nothing was credited, and
+    /// only spending points opens the claim again.
+    case balanceFull
+    /// The server could not be asked (offline, or it failed): nothing
+    /// changed, and the same key goes again with the retry.
+    case unavailable
 }
 
 /// What a gems spend did.
@@ -241,6 +292,8 @@ public final class WalletStore: @unchecked Sendable {
 
     private enum Key {
         static let balance = "wallet.balance"
+        /// The last `WalletServerState` read (#1098), JSON.
+        static let serverState = "wallet.server"
         static let lifetimeEarned = "wallet.lifetimeEarned"
         static let lifetimeSpent = "wallet.lifetimeSpent"
         static let lastClaimAt = "wallet.lastClaimAt"
@@ -281,6 +334,15 @@ public final class WalletStore: @unchecked Sendable {
     /// can only take back taps it has not committed yet — a committed like
     /// is final. Nil (tests, previews): the store stands alone, as before.
     public var likeOutbox: LikeOutbox?
+
+    private var _server: (any WalletServer)?
+    /// Where a member's wallet lives (#1098). Set: the balance and the claim
+    /// are the server's (`refreshFromServer`, `claim(idempotencyKey:)`);
+    /// nil: the local mock, as before.
+    public var server: (any WalletServer)? {
+        get { lock.withLock { _server } }
+        set { lock.withLock { _server = newValue } }
+    }
 
     /// `name`, in the scope's account.
     private func k(_ name: String) -> String { scope.accountKey(name, adoptingLegacyIn: defaults) }
@@ -457,6 +519,64 @@ public final class WalletStore: @unchecked Sendable {
             return true
         }
         if seeded { postDidChange() }
+    }
+
+    // MARK: - The server's wallet (#1098)
+
+    /// Reads the member's wallet from the server and takes it as the truth.
+    /// Nothing for a guest — their likes are the welcome gift's, and every
+    /// wallet RPC refuses a guest — or without a server. A failure leaves
+    /// what was shown. Returns whether the wallet was read.
+    @discardableResult
+    public func refreshFromServer() async -> Bool {
+        guard let server, case .member = scope.owner else { return false }
+        let owner = scope.owner
+        guard let state = try? await server.wallet() else { return false }
+        return apply(state, readAs: owner)
+    }
+
+    /// The hourly claim, through the server: the outcome and the wallet it
+    /// answers with, applied. Without a server, the local mock's claim.
+    public func claim(idempotencyKey: String) async -> WalletClaimOutcome {
+        guard let server, case .member = scope.owner else { return claim() }
+        let owner = scope.owner
+        do {
+            let answer = try await server.claim(idempotencyKey: idempotencyKey)
+            apply(answer.wallet, readAs: owner)
+            return answer.outcome
+        } catch {
+            return .unavailable
+        }
+    }
+
+    /// Takes the server's wallet as the truth, for the account it was read
+    /// as — not for another one the viewer became meanwhile. The balance is
+    /// the server's minus the likes it has not been sent yet (the outbox's),
+    /// which this device already took off.
+    @discardableResult
+    public func apply(_ state: WalletServerState, readAs owner: StorageScope.Owner) -> Bool {
+        guard case .member(let account, _) = owner else { return false }
+        let pending = (likeOutbox?.batches ?? [])
+            .filter { ($0.accountID ?? account) == account }
+            .reduce(0) { $0 + $1.points }
+        let applied: Bool = lock.withLock {
+            guard scope.owner == owner else { return false }
+            defaults.set(max(0, state.points - pending), forKey: k(Key.balance))
+            if let data = try? JSONEncoder().encode(state) {
+                defaults.set(data, forKey: k(Key.serverState))
+            }
+            return true
+        }
+        if applied { postDidChange() }
+        return applied
+    }
+
+    /// The last server wallet read for this account, if any — while a
+    /// server is attached.
+    private func serverStateLocked() -> WalletServerState? {
+        guard _server != nil, case .member = scope.owner,
+              let data = defaults.data(forKey: k(Key.serverState)) else { return nil }
+        return try? JSONDecoder().decode(WalletServerState.self, from: data)
     }
 
     // MARK: - Mutations
@@ -668,6 +788,23 @@ public final class WalletStore: @unchecked Sendable {
     // MARK: - Internals (lock held)
 
     private func snapshotLocked(at moment: Date) -> WalletSnapshot {
+        // The server's wallet, when it has been read (#1098): its claim, its
+        // clock. The balance is the device's view of it (`apply`), moved by
+        // the likes not sent yet.
+        if let server = serverStateLocked() {
+            return WalletSnapshot(
+                balance: defaults.integer(forKey: k(Key.balance)),
+                claimAvailable: server.claimAvailable,
+                nextClaimAt: server.claimAvailable ? nil : server.nextClaimAt,
+                claimAmount: server.claimAmount,
+                claimedToday: server.claimedToday,
+                dailyClaimCap: server.dailyClaimCap,
+                streakDays: server.streakDays,
+                gems: gemsLocked(at: moment),
+                stakeShots: defaults.integer(forKey: k(Key.stakeShots)),
+                pointsCap: server.pointsCap
+            )
+        }
         let today = dayKey(for: moment)
         let claimedToday = claimedTodayLocked(today: today)
         let capped = claimedToday >= Policy.dailyClaimCap

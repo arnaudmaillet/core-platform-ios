@@ -63,11 +63,14 @@ public struct QuietHours: Equatable, Sendable {
     }
 }
 
-/// The profile's push preferences. Every push is on by default; a 13–17
-/// profile starts with quiet hours 22:00–07:00 (backend #725, #742).
+/// The profile's notification preferences. Every push is on and every
+/// email off by default; a 13–17 profile starts with quiet hours
+/// 22:00–07:00 (backend #725, #742).
 public struct NotificationPreferences: Equatable, Sendable {
     /// The categories switched off; everything else pushes.
     public var mutedCategories: Set<NotificationCategory>
+    /// The categories that also send an email (#392); none by default.
+    public var emailCategories: Set<NotificationCategory> = []
     /// A running pause; nil when none.
     public var pausedUntil: Date?
     /// Nil when quiet hours are off.
@@ -81,6 +84,7 @@ public struct NotificationPreferences: Equatable, Sendable {
 
     init(_ proto: Notification_V1_NotificationPreferences, now: Date = Date()) {
         let muted = proto.categories.filter { !$0.push }.compactMap { NotificationCategory($0.category) }
+        let emailed = proto.categories.filter(\.email).compactMap { NotificationCategory($0.category) }
         let paused = proto.pausedUntilMs > 0 ? Date(timeIntervalSince1970: TimeInterval(proto.pausedUntilMs) / 1_000) : nil
         self.init(
             mutedCategories: Set(muted),
@@ -89,12 +93,15 @@ public struct NotificationPreferences: Equatable, Sendable {
                 ? QuietHours(startMinute: Int(proto.quietHours.startMinute), endMinute: Int(proto.quietHours.endMinute))
                 : nil
         )
+        emailCategories = Set(emailed)
     }
 }
 
 /// One change to the preferences; the update is partial on the server.
 public enum NotificationPreferencesChange: Equatable, Sendable {
     case push(NotificationCategory, Bool)
+    /// The category's email (#392).
+    case email(NotificationCategory, Bool)
     /// Nil resumes.
     case pause(until: Date?)
     /// Nil turns quiet hours off.
@@ -112,6 +119,13 @@ public protocol NotificationPreferencesManaging: Sendable {
 public actor NotificationPreferencesRepository: NotificationPreferencesManaging {
     private let notificationClient: any Notification_V1_NotificationServiceClientInterface
     private let viewer: any ProfileViewerResolving
+    /// What the server last answered, and for which profile.
+    ///
+    /// ⚠️ A CATEGORY IS SET WHOLE: the server writes BOTH channels of every
+    /// category a request lists (push and email). A push switch sent alone
+    /// turned that category's email off, and an email switch would turn its
+    /// push off — so each change carries the other channel as last read.
+    private var lastKnown: (profile: String, preferences: NotificationPreferences)?
 
     public init(
         notificationClient: any Notification_V1_NotificationServiceClientInterface,
@@ -131,7 +145,10 @@ public actor NotificationPreferencesRepository: NotificationPreferencesManaging 
         request.profileID = try await profileID()
         let response = await notificationClient.getNotificationPreferences(request: request, headers: [:])
         switch response.result {
-        case .success(let body): return NotificationPreferences(body)
+        case .success(let body):
+            let preferences = NotificationPreferences(body)
+            lastKnown = (request.profileID, preferences)
+            return preferences
         case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }
@@ -142,10 +159,20 @@ public actor NotificationPreferencesRepository: NotificationPreferencesManaging 
         // The zone quiet hours are read in: this iPhone's.
         request.timezone = TimeZone.current.identifier
         switch change {
-        case .push(let category, let isOn):
+        case .push(let category, _), .email(let category, _):
+            // The other channel as last read — the server sets both.
+            let known: NotificationPreferences
+            if let lastKnown, lastKnown.profile == request.profileID {
+                known = lastKnown.preferences
+            } else {
+                known = try await notificationPreferences()
+            }
             var channels = Notification_V1_CategoryChannels()
             channels.category = category.proto
-            channels.push = isOn
+            channels.push = !known.mutedCategories.contains(category)
+            channels.email = known.emailCategories.contains(category)
+            if case .push(_, let isOn) = change { channels.push = isOn }
+            if case .email(_, let isOn) = change { channels.email = isOn }
             request.categories = [channels]
         case .pause(let until):
             // At most 8 h on the server; 0 resumes.
@@ -159,7 +186,10 @@ public actor NotificationPreferencesRepository: NotificationPreferencesManaging 
         }
         let response = await notificationClient.updateNotificationPreferences(request: request, headers: [:])
         switch response.result {
-        case .success(let body): return NotificationPreferences(body)
+        case .success(let body):
+            let preferences = NotificationPreferences(body)
+            lastKnown = (request.profileID, preferences)
+            return preferences
         case .failure(let error): throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
     }

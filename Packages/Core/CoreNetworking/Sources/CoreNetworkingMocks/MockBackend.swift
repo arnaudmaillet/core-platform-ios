@@ -60,7 +60,10 @@ public struct MockBackend: Sendable {
         // `-mock-two-step`: the demo account starts with two-step sign-in on
         // (#383), so the sign-in's second step shows without enrolling first.
         let accountLifecycle = MockAccountLifecycle(twoStepOn: ProcessInfo.processInfo.arguments.contains("-mock-two-step"))
-        MockAuthService(lifecycle: accountLifecycle).register(on: bff)
+        let auth = MockAuthService(lifecycle: accountLifecycle)
+        auth.register(on: bff)
+        // Apps and Websites (#485): none unless `-mock-authorized-apps`.
+        MockAuthorizedAppsService().register(on: bff)
         MockAccountService(lifecycle: accountLifecycle).register(on: bff)
         // `-mock-verification pending|rejected|approved` gives the viewer a
         // verification request in that state (#415).
@@ -84,7 +87,23 @@ public struct MockBackend: Sendable {
         // launches as the server keeps them (#837).
         MockEngagementService(store: counterStore, dataset: dataset, persistence: .standard).register(on: bff)
         // A like is a point staked in the wallet (#676).
-        MockWalletService(store: counterStore, dataset: dataset).register(on: bff)
+        // The wallet is the server's (#1098): it opens at the charter's 250
+        // points and keeps across launches, as the fleet's does.
+        let wallet = MockWalletService(
+            store: counterStore, dataset: dataset, startingPoints: 250, persistence: .standard
+        )
+        wallet.register(on: bff)
+        // A guest signing up is credited the welcome gift by the wallet
+        // (#1008), from the device's first launch — the app's own record of
+        // it (`WelcomeGift`'s key), standing in for the server's device row.
+        auth.onGuestUpgraded = { [wallet] account, device, guestSince in
+            let opened = UserDefaults.standard.double(forKey: "welcomeGift.openedAt")
+            wallet.creditWelcomeGift(
+                account: account,
+                device: device.deviceID.isEmpty ? "this-device" : device.deviceID,
+                firstLaunch: opened > 0 ? Date(timeIntervalSince1970: opened) : guestSince
+            )
+        }
         MockCounterService(store: counterStore).register(on: bff)
         // The Liked tab (#411): the posts the account staked on, hidden from
         // others when its owner turns the tab off.

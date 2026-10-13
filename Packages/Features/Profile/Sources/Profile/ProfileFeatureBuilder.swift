@@ -245,6 +245,14 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             },
                                             makeTwoStep: (sessions as? any TwoStepManaging & CredentialStepUp).map { twoStep in
                                                 { TwoStepViewController(account: account, manager: twoStep, stepUp: twoStep) }
+                                            },
+                                            makeAuthorizedApps: (sessions as? any AuthorizedAppsManaging).map { apps in
+                                                { [imagePipeline] in
+                                                    AuthorizedAppsViewController(
+                                                        viewModel: AuthorizedAppsViewModel(manager: apps),
+                                                        imagePipeline: imagePipeline
+                                                    )
+                                                }
                                             }
                                         )
                                     }

@@ -199,6 +199,8 @@ final class WalletClaimViewController: UIViewController {
         buildCollection()
         buildChrome()
         buildBar()
+        // The server's wallet as of now (#1098): its change notice redraws.
+        if guestGift == nil { Task { await wallet.refreshFromServer() } }
 
         walletObservers.tokens = [
             NotificationCenter.default.addObserver(
@@ -768,14 +770,19 @@ final class WalletClaimViewController: UIViewController {
         }
         claimButton.configuration?.image = nil
         claimButton.accessibilityHint = nil
-        claimButton.isEnabled = snapshot.claimAvailable
+        claimButton.isEnabled = snapshot.claimAvailable && pendingClaimKey == nil
         var title: AttributedString
-        if snapshot.claimAvailable {
+        if pendingClaimKey != nil {
+            title = AttributedString("Claiming…")
+        } else if snapshot.claimAvailable {
             title = AttributedString("Claim \(snapshot.claimAmount) points")
         } else if snapshot.claimedToday >= snapshot.dailyClaimCap, let next = snapshot.nextClaimAt {
             title = AttributedString("Daily cap reached — resets in \(Self.countdownString(to: next))")
         } else if let next = snapshot.nextClaimAt {
             title = AttributedString("Next claim in \(Self.countdownString(to: next))")
+        } else if let cap = snapshot.pointsCap, snapshot.balance >= cap {
+            // The points cap (#901): no wait opens it, only spending does.
+            title = AttributedString("Your likes are full — stake some to claim again")
         } else {
             title = AttributedString("Claim")
         }
@@ -801,17 +808,51 @@ final class WalletClaimViewController: UIViewController {
         MemberGates.perform(.claim, from: self) { [weak self] in self?.commitClaim() }
     }
 
+    /// The claim on its way (#1098): its key, minted once for the tap and
+    /// sent again by a retry — the server credits a key at most once — and
+    /// dropped once the server has answered.
+    private var pendingClaimKey: String?
+
     private func commitClaim() {
-        switch wallet.claim() {
-        case .claimed:
-            HapticNotification().notificationOccurred(.success)
-            // Explicit refresh, not the observer's: its queue hop is UIKit's
-            // business, and the pop below must scale the NEW number.
-            refresh()
-            summaryCell?.summary.pointsTile.pop()
-        case .tooEarly, .dailyCapReached:
-            HapticNotification().notificationOccurred(.warning)
-            refresh()
+        guard pendingClaimKey == nil else { return }
+        let key = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        pendingClaimKey = key
+        applyClaimButtonState()
+        send(claimKey: key)
+    }
+
+    private func send(claimKey key: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let outcome = await wallet.claim(idempotencyKey: key)
+            switch outcome {
+            case .claimed:
+                pendingClaimKey = nil
+                HapticNotification().notificationOccurred(.success)
+                // Explicit refresh, not the observer's: its queue hop is UIKit's
+                // business, and the pop below must scale the NEW number.
+                refresh()
+                summaryCell?.summary.pointsTile.pop()
+            case .tooEarly, .dailyCapReached, .balanceFull:
+                pendingClaimKey = nil
+                HapticNotification().notificationOccurred(.warning)
+                refresh()
+            case .unavailable:
+                // Not answered: the same key goes again with the retry, so a
+                // claim whose answer was lost is never paid twice.
+                HapticNotification().notificationOccurred(.error)
+                let alert = UIAlertController(
+                    title: nil, message: "Couldn't reach the server to claim. Try again.", preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+                    self?.pendingClaimKey = nil
+                    self?.refresh()
+                })
+                alert.addAction(UIAlertAction(title: "Retry", style: .default) { [weak self] _ in
+                    self?.send(claimKey: key)
+                })
+                present(alert, animated: true)
+            }
         }
     }
 
