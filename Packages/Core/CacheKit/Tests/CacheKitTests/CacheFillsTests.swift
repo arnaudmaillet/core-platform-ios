@@ -5,13 +5,17 @@ import UIKit
 @testable import CacheKit
 
 /// A fill that runs until the test lets it finish, counting starts and
-/// cancellations.
+/// cancellations. A test AWAITS them (`waitUntilStarted`,
+/// `waitUntilCancelled`): the fill runs at utility QoS when asked as P1/P2,
+/// and can start long after any budget on a loaded runner (#1057).
 private final class FillProbe: Sendable {
     private struct State {
         var started = 0
         var cancelled = 0
         var finished = false
         var priorities: [CacheFillPriority] = []
+        var startWaiters = CountWaiters()
+        var cancelWaiters = CountWaiters()
     }
 
     private let state = Mutex(State())
@@ -27,16 +31,40 @@ private final class FillProbe: Sendable {
 
     func finish() { state.withLock { $0.finished = true } }
 
+    /// Returns once the fill has started `count` times.
+    func waitUntilStarted(_ count: Int = 1) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let isReached = state.withLock { $0.startWaiters.wait(for: count, count: $0.started, continuation) }
+            if isReached { continuation.resume() }
+        }
+    }
+
+    /// Returns once the fill has been cancelled `count` times.
+    func waitUntilCancelled(_ count: Int = 1) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let isReached = state.withLock { $0.cancelWaiters.wait(for: count, count: $0.cancelled, continuation) }
+            if isReached { continuation.resume() }
+        }
+    }
+
     var fill: CacheFills<String, String>.Fill {
         { [self] context in
             context.onPriorityChange { priority in self.state.withLock { $0.priorities.append(priority) } }
-            state.withLock { $0.started += 1 }
+            let starters = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+                state.started += 1
+                return state.startWaiters.reached(state.started)
+            }
+            for waiter in starters { waiter.resume() }
             do {
                 while !state.withLock({ $0.finished }) {
                     try await Task.sleep(for: .milliseconds(2))
                 }
             } catch {
-                state.withLock { $0.cancelled += 1 }
+                let cancels = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+                    state.cancelled += 1
+                    return state.cancelWaiters.reached(state.cancelled)
+                }
+                for waiter in cancels { waiter.resume() }
                 throw error
             }
             return value
@@ -71,7 +99,7 @@ struct CacheFillsTests {
         let second = FillProbe("b")
         fills.request("post-1", priority: .next, owner: feed, fill: first.fill)
         fills.request("post-1", priority: .next, owner: grid, fill: second.fill)
-        #expect(await eventually { first.started == 1 })
+        await first.waitUntilStarted()
         #expect(second.started == 0, "deduplicated by content key")
         #expect(fills.interestCount(for: "post-1") == 2)
 
@@ -83,7 +111,8 @@ struct CacheFillsTests {
 
         grid.revoke()
         #expect(!fills.isInFlight("post-1"))
-        #expect(await eventually { first.cancelled == 1 }, "no owner left: cancelled")
+        await first.waitUntilCancelled()
+        #expect(first.cancelled == 1, "no owner left: cancelled")
     }
 
     @Test func aFillRunsAtTheHighestPriorityStillWanted() async {
@@ -92,7 +121,7 @@ struct CacheFillsTests {
         let grid = CacheOwner("grid")
         let probe = FillProbe("a")
         fills.request("k", priority: .speculative, owner: feed, fill: probe.fill)
-        #expect(await eventually { probe.started == 1 })
+        await probe.waitUntilStarted()
         let visible = fills.request("k", priority: .visible, owner: grid, fill: probe.fill)
         #expect(fills.priority(of: "k") == .visible)
         visible.release()
@@ -127,8 +156,9 @@ struct CacheFillsTests {
         #expect(!gridFills.isRunning("k3"), "two P2 fills at once, app-wide")
 
         one.finish()
-        #expect(await eventually { gridFills.isRunning("k3") }, "a freed slot goes to the waiting fill")
-        #expect(await eventually { three.started == 1 })
+        // One's end (a utility task) frees its slot: awaited at three's start.
+        await three.waitUntilStarted()
+        #expect(gridFills.isRunning("k3"), "a freed slot goes to the waiting fill")
         feed.revoke()
         grid.revoke()
         #expect(await eventually { slots.runningCount == 0 && slots.waitingCount == 0 })
@@ -142,7 +172,7 @@ struct CacheFillsTests {
         #expect(!fills.isRunning("k"))
         interest.setPriority(.visible)
         #expect(fills.isRunning("k"), "on screen: no slot needed")
-        #expect(await eventually { probe.started == 1 })
+        await probe.waitUntilStarted()
         feed.revoke()
     }
 
@@ -185,7 +215,7 @@ struct CacheFillsTests {
         let probe = FillProbe("shared")
         let unused = FillProbe("unused")
         fills.request("k", priority: .speculative, owner: feed, fill: probe.fill)
-        #expect(await eventually { probe.started == 1 })
+        await probe.waitUntilStarted()
         let waiter = Task { try await fills.value(for: "k", fill: unused.fill) }
         #expect(await eventually { fills.interestCount(for: "k") == 2 })
         #expect(fills.priority(of: "k") == .visible)
@@ -214,10 +244,11 @@ struct CacheFillsTests {
         let fills = makeFills()
         let probe = FillProbe("a")
         let waiter = Task { try await fills.value(for: "k", fill: probe.fill) }
-        #expect(await eventually { probe.started == 1 })
+        await probe.waitUntilStarted()
         waiter.cancel()
         await #expect(throws: CancellationError.self) { try await waiter.value }
-        #expect(await eventually { probe.cancelled == 1 })
+        await probe.waitUntilCancelled()
+        #expect(probe.cancelled == 1)
         #expect(!fills.isInFlight("k"))
     }
 

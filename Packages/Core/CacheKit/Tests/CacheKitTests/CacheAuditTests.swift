@@ -342,15 +342,17 @@ final class CacheAuditTests {
     @Test func theAuditLogsAtStartAndAfterEachTrim() async {
         let coordinator = makeCoordinator()
         coordinator.register(memory("feed"))
-        let blocks = Mutex<[[String]]>([])
+        let log = AuditBlockLog()
         let audit = CacheAudit(coordinator: coordinator, interval: 3_600, uptime: { 1 }) { lines in
-            blocks.withLock { $0.append(lines) }
+            log.append(lines)
         }
         audit.start()
-        #expect(await eventually { blocks.withLock { $0.count } == 1 })
+        // The audit writes on its own utility queue: awaited, never polled
+        // against a clock (#1057).
+        await log.blocks(1)
         coordinator.trim(.lowDisk(.low))
-        #expect(await eventually { blocks.withLock { $0.count } == 2 })
-        let triggers = blocks.withLock { $0.map { $0[0] } }
+        await log.blocks(2)
+        let triggers = log.all.map { $0[0] }
         #expect(triggers[0].contains("trigger=start"))
         #expect(triggers[1].contains("trigger=trim:lowDisk(low)"))
         #expect(triggers[1].contains("diskPressure=low"))
@@ -358,7 +360,7 @@ final class CacheAuditTests {
         audit.stop()
         coordinator.trim(.memoryWarning)
         try? await Task.sleep(for: .milliseconds(100))
-        #expect(blocks.withLock { $0.count } == 2, "a stopped audit logs nothing more")
+        #expect(log.all.count == 2, "a stopped audit logs nothing more")
     }
 
     @Test func theAuditStartsOnlyWhenTheLaunchArgumentAsksForIt() {
@@ -379,5 +381,34 @@ final class CacheAuditTests {
         #expect(DebugCacheSignals.signal(named: "lowPower") == .lowPowerMode(true))
         #expect(DebugCacheSignals.signal(named: "lowData") == .network(.wifi, isConstrained: true, isExpensive: false))
         #expect(DebugCacheSignals.signal(named: "thermalSerious") == .thermalState(.serious))
+    }
+}
+
+/// The audit's blocks, and a way to await the n-th one: the audit writes on
+/// its own utility queue (#1057).
+private final class AuditBlockLog: Sendable {
+    private struct State {
+        var blocks: [[String]] = []
+        var waiters = CountWaiters()
+    }
+
+    private let state = Mutex(State())
+
+    var all: [[String]] { state.withLock { $0.blocks } }
+
+    func append(_ lines: [String]) {
+        let ready = state.withLock { state -> [CheckedContinuation<Void, Never>] in
+            state.blocks.append(lines)
+            return state.waiters.reached(state.blocks.count)
+        }
+        for waiter in ready { waiter.resume() }
+    }
+
+    /// Returns once `count` blocks were written.
+    func blocks(_ count: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let isReached = state.withLock { $0.waiters.wait(for: count, count: $0.blocks.count, continuation) }
+            if isReached { continuation.resume() }
+        }
     }
 }

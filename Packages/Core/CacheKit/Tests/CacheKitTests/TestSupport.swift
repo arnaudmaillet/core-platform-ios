@@ -75,14 +75,40 @@ func memoryCache(
 
 func bytes(_ count: Int, _ fill: UInt8 = 7) -> Data { Data(repeating: fill, count: count) }
 
-/// Polls `condition` until it holds or `timeout` passes. For fills that run on
-/// the cooperative pool; touches no process-wide state.
-func eventually(timeout: Duration = .seconds(10), _ condition: @Sendable () -> Bool) async -> Bool {
-    let clock = ContinuousClock()
-    let deadline = clock.now.advanced(by: timeout)
-    while clock.now < deadline {
+/// A look budget, not a deadline (#1057): it counts this test's own polls,
+/// so time a starved runner spends elsewhere costs nothing, and it stops as
+/// soon as `condition` holds. Only for state the test or a running thread
+/// writes next: a P1/P2 fill runs at utility QoS and can start long after
+/// any budget, so its start, end or cancellation is AWAITED (`FillProbe`),
+/// never polled (#1049). Touches no process-wide state.
+func eventually(_ condition: @Sendable () -> Bool) async -> Bool {
+    for _ in 0..<6_000 {
         if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(5))
+        try? await Task.sleep(for: .milliseconds(10))
     }
     return condition()
+}
+
+/// Waiters for a count to reach a target, resumed by whoever moves it.
+struct CountWaiters {
+    private var waiters: [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+
+    /// Queues `continuation` unless `count` already reached `target`; `true`
+    /// when the caller resumes it itself.
+    mutating func wait(for target: Int, count: Int, _ continuation: CheckedContinuation<Void, Never>) -> Bool {
+        guard count < target else { return true }
+        waiters.append((target, continuation))
+        return false
+    }
+
+    /// Takes out the waiters `count` satisfies, to resume outside the lock.
+    mutating func reached(_ count: Int) -> [CheckedContinuation<Void, Never>] {
+        var ready: [CheckedContinuation<Void, Never>] = []
+        var waiting: [(target: Int, continuation: CheckedContinuation<Void, Never>)] = []
+        for waiter in waiters {
+            if count >= waiter.target { ready.append(waiter.continuation) } else { waiting.append(waiter) }
+        }
+        waiters = waiting
+        return ready
+    }
 }
