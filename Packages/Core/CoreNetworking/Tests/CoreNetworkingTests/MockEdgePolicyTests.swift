@@ -35,7 +35,11 @@ struct MockEdgePolicyTests {
         return request
     }
 
-    private var somePostID: String { backend.dataset.posts[0].postID }
+    /// A public author's: a private author's posts are no guest's to read
+    /// (#447).
+    private var somePostID: String {
+        backend.dataset.posts.first { !backend.dataset.isRelationshipsPrivate($0.authorProfileID) }?.postID ?? ""
+    }
 
     @Test func aGuestReadsPublicContent() async {
         var request = Post_V1_GetPostRequest()

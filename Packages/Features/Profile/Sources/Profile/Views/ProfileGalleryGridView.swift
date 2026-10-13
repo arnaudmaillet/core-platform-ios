@@ -456,6 +456,12 @@ final class ProfileGalleryGridView: UIView {
             )
             emptyStateView.isHidden = false
             apply([], skeleton: false)
+        case .restricted(let title, let message):
+            // A private profile's pages: locked, not empty (#447).
+            emptyStateRevision += 1
+            emptyStateView.configure(symbolName: "lock", title: title, subtitle: message)
+            emptyStateView.isHidden = false
+            apply([], skeleton: false)
         case .failed(let message):
             // A failure is NOT an empty state, and saying so is the point of
             // having both: the glyph and the headline have to read as "this did

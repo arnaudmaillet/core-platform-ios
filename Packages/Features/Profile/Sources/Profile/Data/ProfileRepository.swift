@@ -605,6 +605,10 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         switch response.result {
         case .success(let view):
             return view
+        case .failure(let error) where error.code == .notFound:
+            // Hidden, suspended or deleted (backend #689): an answer, not a
+            // failure — and the same answer for one that never existed.
+            throw ProfileError.notFound
         case .failure(let error):
             throw ProfileError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }

@@ -99,7 +99,8 @@ struct AuthEndToEndTests {
             host: "https://mock.bff.local", tokenProvider: manager, httpClient: backend.bff
         )
         var getPost = Post_V1_GetPostRequest()
-        getPost.postID = backend.dataset.posts[0].postID
+        // A public author's: a private author's posts are no guest's (#447).
+        getPost.postID = backend.dataset.posts.first { !backend.dataset.isRelationshipsPrivate($0.authorProfileID) }?.postID ?? ""
 
         let read = await Post_V1_PostServiceClient(client: reads).getPost(request: getPost, headers: [:])
         #expect(read.error == nil)

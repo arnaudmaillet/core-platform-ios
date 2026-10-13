@@ -492,6 +492,19 @@ public final class MockSocialGraphService: @unchecked Sendable {
         follows(follower, followee)
     }
 
+    /// social-graph's `CheckAccess` (backend #690), for the reads that apply
+    /// it: whether `readers` (none for a guest) may see `target`'s content —
+    /// never across a block either way, and, when `privacy` applies, a
+    /// private profile only when one of them follows it. The readers' own
+    /// profiles always open.
+    public func mayAccess(_ target: String, readers: [String], privacy: Bool = true) -> Bool {
+        if readers.contains(target) { return true }
+        if readers.contains(where: { isBlocking(actorID: $0, targetID: target) || isBlocking(actorID: target, targetID: $0) }) {
+            return false
+        }
+        return !privacy || !isPrivate(target) || readers.contains { follows($0, target) }
+    }
+
     private func follows(_ follower: String, _ followee: String) -> Bool {
         let edge = Edge(follower: follower, followee: followee)
         let (added, removed) = lock.withLock { (addedEdges.contains(edge), removedEdges.contains(edge)) }

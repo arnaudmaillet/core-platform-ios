@@ -30,7 +30,12 @@ public final class PostDetailViewModel {
         case loading
         case content(PostDetailDisplayModel)
         case failed(message: String)
+        /// The server no longer shows this post to the viewer (#447): an
+        /// answer, with nothing to try again.
+        case unavailable(message: String)
     }
+
+    nonisolated static let unavailableMessage = "This post isn\u{2019}t available"
 
     public struct EngagementState: Equatable, Sendable {
         public var likeCount: Int64
@@ -603,6 +608,8 @@ public final class PostDetailViewModel {
                 if entry != seeded { self.show(entry) }
             } catch is CancellationError {
                 // Superseded; leave the phase alone.
+            } catch FeedError.notFound {
+                self.phase = .unavailable(message: Self.unavailableMessage)
             } catch {
                 if case .content = self.phase {} else {
                     // "You're offline" when that is why (#794).
