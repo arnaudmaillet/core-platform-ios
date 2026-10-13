@@ -95,6 +95,9 @@ final class MapPillCell: UICollectionViewCell {
         pill?.setAvatar(image)
     }
 
+    /// Whether the pill wears a face rather than its glyph.
+    var showsAvatar: Bool { pill?.showsAvatar ?? false }
+
     private func existingPill(height: CGFloat, initialContent: MapPillButton.Content) -> MapPillButton {
         if let pill { return pill }
         let pill = MapPillButton(content: initialContent, height: height)

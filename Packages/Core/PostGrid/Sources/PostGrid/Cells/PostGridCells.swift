@@ -619,6 +619,23 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         loadedVideoRenderView?.setPoster(image)
     }
 
+    /// The frame a return player was parked on (#895) REPLACES the thumbnail
+    /// on a single-media row, as it does on a tile (#1069): a close whose
+    /// player went lands on the picture the viewer left, not on an older
+    /// one. A thumbnail still loading is dropped, or it would land over the
+    /// frame. A collection keeps `applyCover`'s rule: its pages hold the
+    /// pictures, and the box behind them has none to replace.
+    public func showReturnStill(_ image: UIImage) {
+        guard !showsCarousel else {
+            applyCover(image)
+            return
+        }
+        loadTask?.cancel()
+        loadTask = nil
+        mediaView.image = image
+        loadedVideoRenderView?.setPoster(image)
+    }
+
     /// Fired when the cover lands from an async load, so the autoplay gate is
     /// re-run for a row that arrived faceless.
     public var onCoverLoaded: (() -> Void)?

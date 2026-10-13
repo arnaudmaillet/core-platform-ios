@@ -23,11 +23,13 @@ struct GridReturnStillTests {
         )
     }
 
-    private func candidate(_ index: Int) -> GridVideoPlaybackCoordinator.Candidate {
+    private func candidate(
+        _ index: Int, cell: any GridPlaybackCell = PostGridTileCell(frame: CGRect(x: 0, y: 0, width: 120, height: 120))
+    ) -> GridVideoPlaybackCoordinator.Candidate {
         .init(
             id: PostID("return-still-\(index)"),
             url: URL(string: "mock://video/return-still-\(index)")!,
-            cell: PostGridTileCell(frame: CGRect(x: 0, y: 0, width: 120, height: 120)),
+            cell: cell,
             distanceFromCentre: 0
         )
     }
@@ -81,6 +83,26 @@ struct GridReturnStillTests {
         // knows the tile wears its frame.
         grid.endHandoff()
         #expect(grid.isReturnLandingReady(for: tapped.id, cell: tapped.cell, hasThumbnail: true))
+        let start = try #require(pool.debugFiledStart(of: tapped.url, scope: tapped.id.rawValue))
+        #expect(abs(start - 2.5) < 0.01)
+    }
+
+    /// A LIST ROW TOO (#1069). A row that already shows its thumbnail takes
+    /// the parked frame over it, as a tile does, instead of keeping the
+    /// older picture and then playing on from the parked time.
+    @Test func aListRowWithAThumbnailTakesTheParkedFrame() async throws {
+        let pool = makePool()
+        let row = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 300))
+        let tapped = candidate(0, cell: row)
+        let frame = picture(.blue)
+        let grid = await gridWhoseReturnPlayerWent(pool: pool, tapped: tapped, frame: frame)
+        let thumbnail = picture(.red)
+        row.applyCover(thumbnail)
+        try #require(row.renderedCover === thumbnail, "guard: the row shows its thumbnail")
+
+        let arriving = try #require(grid.makeReturnSurface(for: tapped.id), "no picture for a close whose player went")
+        #expect(grid.landReturnPlayback(arriving, for: tapped.id, cell: row))
+        #expect(row.renderedCover === frame, "the row kept its thumbnail over the parked frame")
         let start = try #require(pool.debugFiledStart(of: tapped.url, scope: tapped.id.rawValue))
         #expect(abs(start - 2.5) < 0.01)
     }
