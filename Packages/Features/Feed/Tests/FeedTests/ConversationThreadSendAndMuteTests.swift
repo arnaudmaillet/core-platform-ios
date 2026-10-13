@@ -244,10 +244,17 @@ struct ConversationThreadSendAndMuteTests {
         #expect(toast.style == .failure)
     }
 
+    /// Looked for from the WINDOW: a screen with a bar shows its toasts as
+    /// that bar's items (#1058), outside the screen's own view.
     private static func firstToast(in view: UIView) -> ToastView? {
+        guard let window = view.window, window !== view else { return firstToast(under: view) }
+        return firstToast(under: window)
+    }
+
+    private static func firstToast(under view: UIView) -> ToastView? {
         if let toast = view as? ToastView { return toast }
         for subview in view.subviews {
-            if let toast = firstToast(in: subview) { return toast }
+            if let toast = firstToast(under: subview) { return toast }
         }
         return nil
     }

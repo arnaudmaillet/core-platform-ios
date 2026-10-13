@@ -1591,7 +1591,7 @@ struct NewPostTests {
 
         NewPostViewController.confirmPublished(on: tabs)
 
-        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        let toast = Self.shownToast(on: feed)
         #expect(toast?.style == .confirmation, "no toast over the author's tab")
         #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
     }
@@ -1615,6 +1615,13 @@ struct NewPostTests {
             }
             throw ComposeError.transport("offline")
         }
+    }
+
+    /// The toast the tab shows: one of its bar's items (#1058) — read from
+    /// the items, the bar may not have drawn yet — or else over the tab.
+    private static func shownToast(on tab: UINavigationController) -> ToastView? {
+        let items = tab.topViewController?.navigationItem.rightBarButtonItems ?? []
+        return items.compactMap { $0.customView as? ToastView }.first ?? toasts(under: tab.view).first
     }
 
     /// Every toast anywhere under `view`.
@@ -1689,7 +1696,7 @@ struct NewPostTests {
 
         NewPostViewController.reportPublishFailure(on: tabs)
 
-        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        let toast = Self.shownToast(on: feed)
         #expect(toast?.style == .failure, "no failure toast over the author's tab")
         #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
     }
@@ -1744,7 +1751,7 @@ struct NewPostTests {
 
         NewPostViewController.reportCopyFailure(on: tabs)
 
-        let toast = feed.view.subviews.compactMap { $0 as? ToastView }.first
+        let toast = Self.shownToast(on: feed)
         #expect(toast?.style == .failure, "no failure toast over the author's tab")
     }
 

@@ -103,6 +103,11 @@ struct FeedbackTests {
         tabs.selectedIndex = 0
         hosting(tabs) {
             #expect(Feedback.host(for: tabs) === first)
+            // The overlay's hosting rule; with a bar the toast goes there
+            // (#1058, `NavigationBarToastsTests`).
+            let previousBar = NavigationBarToasts.isEnabled
+            NavigationBarToasts.isEnabled = false
+            defer { NavigationBarToasts.isEnabled = previousBar }
             _ = recordingHaptics {
                 let toast = Feedback.success("Posted", from: tabs)
                 #expect(toast.superview === first.view)

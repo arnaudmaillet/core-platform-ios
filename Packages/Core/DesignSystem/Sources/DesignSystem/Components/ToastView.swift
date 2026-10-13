@@ -105,6 +105,10 @@ public final class ToastView: UIView {
         /// The content's scale on the way in and out (ordinary content: a
         /// transform is fine there).
         static let contentScale: CGFloat = 0.9
+        /// A bar item toast (#1058): its height inside the bar's platter, and
+        /// its row's leading inset there.
+        static let barHeight: CGFloat = 36
+        static let barInset: CGFloat = 10
         /// Resting shadow strength. Soft and low-contrast: the glass already
         /// separates itself; the shadow only grounds it.
         static let shadowOpacity: Float = 0.22
@@ -244,8 +248,44 @@ public final class ToastView: UIView {
     /// Once settled, never again.
     private(set) var resolution: Resolution?
     /// The undoable toast on screen, if any: a second one commits it (one
-    /// undo slot).
-    private static weak var pendingUndo: ToastView?
+    /// undo slot) — wherever it is drawn (`NavigationBarToasts` too).
+    static weak var pendingUndo: ToastView?
+
+    /// Where the toast is drawn.
+    enum Chrome {
+        /// Its own glass capsule, in the scene's overlay (the default).
+        case capsule
+        /// A navigation bar item's content (#1058, `-toast-in-navbar`): the
+        /// bar's own platter is the glass, so no capsule, shadow, slide or
+        /// swipe; `NavigationBarToasts` places it, sizes it and takes it away.
+        case barItem
+    }
+    let chrome: Chrome
+    /// Bar items only: glyph alone, a perfect bubble, when the bar has no
+    /// room for its text (`NavigationBarToasts`).
+    var isCollapsedInBar = false {
+        didSet {
+            guard isCollapsedInBar != oldValue else { return }
+            row.arrangedSubviews.dropFirst(hasGlyph ? 1 : 0).forEach { $0.isHidden = isCollapsedInBar }
+            // The glyph alone sits at the bubble's exact centre (owner,
+            // #1058), not at the expanded row's leading inset.
+            collapsedCentre.isActive = isCollapsedInBar
+        }
+    }
+    /// Centres the row — the glyph alone — in a collapsed bar item; required,
+    /// over the row's edges (`.required - 1`).
+    private lazy var collapsedCentre = row.centerXAnchor.constraint(equalTo: backdrop.contentView.centerXAnchor)
+    /// Bar items only: what the bar is told — it left, a collapsed one was
+    /// tapped, its content changed (its width may have).
+    var onBarLeave: ((ToastView) -> Void)?
+    var onBarTap: ((ToastView) -> Void)?
+    var onBarContentChange: ((ToastView) -> Void)?
+    /// Left the window while still up: its screen may have been pushed over
+    /// or popped (`NavigationBarToasts` follows the screen on top).
+    var onBarDetached: ((ToastView) -> Void)?
+    /// Bar items only: its row's width with the text on one line.
+    private(set) var barIdealWidth: CGFloat = 0
+    private var hasGlyph = false
 
     /// Called once the toast has left its superview — so the scene overlay
     /// that holds it can hide its window when it holds no more (#954).
@@ -432,6 +472,37 @@ public final class ToastView: UIView {
         return toast
     }
 
+    /// A toast drawn as a navigation bar item's content (#1058), for
+    /// `NavigationBarToasts`.
+    static func makeForBar(_ content: Content) -> ToastView {
+        let toast = ToastView(content: content, chrome: .barItem)
+        // It is at the top of the screen, in its bar.
+        toast.position = .top
+        toast.measureIdealWidth()
+        return toast
+    }
+
+    /// Bar items only: the size the bar gave it, as REQUIRED constraints —
+    /// a frame alone loses to the row's own fitting width, which UIKit reads
+    /// and then sweeps the item into `•••` (#1058). The text gives way.
+    private var barSize: [NSLayoutConstraint] = []
+
+    func sizeInBar(width: CGFloat) {
+        NSLayoutConstraint.deactivate(barSize)
+        barSize = [
+            widthAnchor.constraint(equalToConstant: width),
+            heightAnchor.constraint(equalToConstant: Metrics.barHeight),
+        ]
+        NSLayoutConstraint.activate(barSize)
+        frame = CGRect(x: 0, y: 0, width: width, height: Metrics.barHeight)
+    }
+
+    /// Starts a bar item toast's time — its arrival is the bar's.
+    func startInBar() {
+        hasArrived = true
+        countdown?.start()
+    }
+
     /// Replaces this toast's content in place: a loading toast becomes its
     /// outcome, a repeat restarts its time. Brought to the front of its stack.
     func update(to content: Content) {
@@ -442,11 +513,13 @@ public final class ToastView: UIView {
         resolution = nil
         if Self.pendingUndo === self, content.undoable == nil { Self.pendingUndo = nil }
         if content.undoable != nil { Self.pendingUndo = self }
-        superview?.bringSubviewToFront(self)
+        if chrome == .capsule { superview?.bringSubviewToFront(self) }
         UIView.transition(with: row, duration: 0.25, options: [.transitionCrossDissolve, .allowUserInteraction]) {
             self.apply(content)
         }
-        if let container = superview {
+        if chrome == .barItem {
+            onBarContentChange?(self)
+        } else if let container = superview {
             Self.restack(at: position, in: container, animated: true)
         }
         countdown?.start()
@@ -629,8 +702,9 @@ public final class ToastView: UIView {
 
     // MARK: - Building
 
-    private init(content: Content) {
+    private init(content: Content, chrome: Chrome = .capsule) {
         self.content = content
+        self.chrome = chrome
         super.init(frame: .zero)
 
         // The capsule's shape is driven by the corner CONFIGURATION, not a
@@ -659,7 +733,9 @@ public final class ToastView: UIView {
         let edges = [
             row.topAnchor.constraint(equalTo: backdrop.contentView.topAnchor, constant: Spacing.xs / 2),
             row.bottomAnchor.constraint(equalTo: backdrop.contentView.bottomAnchor, constant: -Spacing.xs / 2),
-            row.leadingAnchor.constraint(equalTo: backdrop.contentView.leadingAnchor, constant: Spacing.lg),
+            row.leadingAnchor.constraint(
+                equalTo: backdrop.contentView.leadingAnchor, constant: chrome == .barItem ? Metrics.barInset : Spacing.lg
+            ),
             trailing,
         ]
         edges.forEach { $0.priority = .required - 1 }
@@ -673,11 +749,17 @@ public final class ToastView: UIView {
         // labels' compression resistance and below the margins — so the text
         // wraps only where the margins stop it.
         idealWidth.priority = .defaultHigh + 10
-        NSLayoutConstraint.activate([
-            minimumHeightConstraint,
-            widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.maximumWidth),
-            idealWidth,
-        ])
+        if chrome == .capsule {
+            NSLayoutConstraint.activate([
+                minimumHeightConstraint,
+                widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.maximumWidth),
+                idealWidth,
+            ])
+        } else {
+            // In the bar from the first frame: no entrance of its own — the
+            // bar's replace transition is the arrival.
+            row.alpha = 1
+        }
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (toast: ToastView, _) in
             toast.measureIdealWidth()
         }
@@ -693,7 +775,9 @@ public final class ToastView: UIView {
         isAccessibilityElement = true
         accessibilityTraits = .staticText
 
-        addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(swiped(_:))))
+        if chrome == .capsule {
+            addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(swiped(_:))))
+        }
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
 
         apply(content)
@@ -726,11 +810,14 @@ public final class ToastView: UIView {
         let texts = title
 
         var arranged: [UIView] = []
+        hasGlyph = false
         if content.style == .loading {
             let spinner = UIActivityIndicatorView(style: .medium)
             spinner.color = .label
             spinner.startAnimating()
             arranged.append(spinner)
+            // The leading mark a collapsed bar item keeps (#1058).
+            hasGlyph = true
         } else if let symbol = content.symbol, let image = UIImage(systemName: symbol) {
             let glyph = UIImageView(image: image)
             glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .medium)
@@ -738,10 +825,12 @@ public final class ToastView: UIView {
             glyph.contentMode = .scaleAspectFit
             glyph.setContentHuggingPriority(.required, for: .horizontal)
             arranged.append(glyph)
+            hasGlyph = true
         }
         arranged.append(texts)
 
         undoButton = content.undoable != nil ? ToastUndoButton() : nil
+        undoButton?.showsTitle = chrome == .capsule
         actionButton = content.undoable == nil ? content.action.map { Self.makeActionButton(title: $0.title) } : nil
         // Something has to close a toast that does not leave on its own — a
         // loading one leaves when its outcome replaces it.
@@ -764,12 +853,19 @@ public final class ToastView: UIView {
         row.setCustomSpacing(Metrics.controlGap, after: texts)
         minimumHeightConstraint.constant = content.action != nil ? Metrics.actionHeight : Metrics.minimumHeight
         textInset?.isActive = false
-        textInset = heightAnchor.constraint(greaterThanOrEqualTo: title.heightAnchor, constant: 2 * Spacing.md)
-        textInset?.priority = .required - 1
-        textInset?.isActive = true
-        let trailing = actionButton != nil || closeButton != nil || undoButton != nil ? Spacing.sm : Spacing.lg
+        if chrome == .capsule {
+            textInset = heightAnchor.constraint(greaterThanOrEqualTo: title.heightAnchor, constant: 2 * Spacing.md)
+            textInset?.priority = .required - 1
+            textInset?.isActive = true
+        }
+        if chrome == .barItem, isCollapsedInBar {
+            arranged.dropFirst(hasGlyph ? 1 : 0).forEach { $0.isHidden = true }
+        }
+        let hasControl = actionButton != nil || closeButton != nil || undoButton != nil
+        let leading = chrome == .barItem ? Metrics.barInset : Spacing.lg
+        let trailing = chrome == .barItem ? (hasControl ? Spacing.xs : Metrics.barInset) : (hasControl ? Spacing.sm : Spacing.lg)
         rowTrailing?.constant = -trailing
-        rowInsets = Spacing.lg + trailing
+        rowInsets = leading + trailing
         textLabels = [title]
         measureIdealWidth()
 
@@ -814,7 +910,9 @@ public final class ToastView: UIView {
         let button = UIButton(configuration: configuration)
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
-        button.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight).isActive = true
+        let floor = button.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight)
+        floor.priority = .required - 1 // a bar item (#1058) is shorter; its platter is the target
+        floor.isActive = true
         return button
     }
 
@@ -841,6 +939,15 @@ public final class ToastView: UIView {
     /// without one, its row with the text on one line.
     private func measureIdealWidth() {
         textLabels.forEach { $0.numberOfLines = textLineCount }
+        if chrome == .barItem {
+            // One line, always: the bar is one line high.
+            textLabels.forEach { $0.numberOfLines = 1 }
+            let collapsed = isCollapsedInBar
+            if collapsed { row.arrangedSubviews.forEach { $0.isHidden = false } }
+            barIdealWidth = ceil(row.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width + rowInsets)
+            if collapsed { row.arrangedSubviews.dropFirst(hasGlyph ? 1 : 0).forEach { $0.isHidden = true } }
+            return
+        }
         if content.action != nil {
             idealWidth.constant = Metrics.maximumWidth
             return
@@ -857,6 +964,7 @@ public final class ToastView: UIView {
         // Built before it had a window: the text size it was measured at may
         // not be the window's (one line, or two at accessibility sizes).
         if window != nil { measureIdealWidth() }
+        if chrome == .barItem, window == nil, !isLeaving { onBarDetached?(self) }
         // Materialized on window attach, never in init: building a real effect
         // off-screen contacts the render server and stalls the main actor for
         // tens of seconds on headless CI simulators (the rule `CommentsInputBar`
@@ -867,7 +975,7 @@ public final class ToastView: UIView {
         // deliberately mid-dissolve.
         guard window != nil else { return }
         observeScene()
-        guard !hasMaterialized else { return }
+        guard !hasMaterialized, chrome == .capsule else { return }
         hasMaterialized = true
         backdrop.effect = Self.makeGlass()
     }
@@ -890,6 +998,7 @@ public final class ToastView: UIView {
         // Trace the shadow onto the capsule the corner configuration actually
         // resolved, rather than assuming height/2 — `.capsule()` clamps itself
         // on very short or very wide bounds.
+        guard chrome == .capsule else { return }
         let radius = backdrop.effectiveRadius(corner: .allCorners)
         layer.shadowPath = UIBezierPath(roundedRect: bounds, cornerRadius: radius).cgPath
     }
@@ -949,6 +1058,11 @@ public final class ToastView: UIView {
     /// it lands on the front toast's action); on a toast with an action, it
     /// runs it; on a spread stack otherwise, it collapses it.
     @objc private func tapped() {
+        if chrome == .barItem {
+            guard !isLeaving else { return }
+            if isCollapsedInBar { onBarTap?(self) } else if action != nil { runAction() }
+            return
+        }
         guard !isLeaving, let container = superview else { return }
         let count = Self.stack(at: position, in: container).count
         let spread = Self.isSpread(at: position, in: container)
@@ -1169,6 +1283,14 @@ public final class ToastView: UIView {
         countdown?.cancel()
         stopObservingScene()
         isUserInteractionEnabled = false
+        if chrome == .barItem {
+            // The bar takes the item away, with its own transition.
+            onBarLeave?(self)
+            let removed = onRemoved
+            onRemoved = nil
+            removed?()
+            return
+        }
         // The ones behind it move up as it leaves (it is out of the stack
         // already: `isLeaving`).
         if let container = superview {
