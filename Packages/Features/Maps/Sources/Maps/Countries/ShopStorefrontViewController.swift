@@ -1122,16 +1122,16 @@ final class ShopCountryCardView: ShopCardView {
         default: nil
         }
         guard let poster else { return }
-        if let cached = images.cachedImage(for: poster, size: .full) {
-            posterView.image = cached
-            return
-        }
-        Task { [weak self] in
-            // A card is ~810 px wide at @3x: the full bucket, not a tile's.
-            guard let image = try? await images.image(for: poster, size: .full) else { return }
-            self?.posterView.image = image
+        // A card is ~810 px wide at @3x: the full bucket, not a tile's. On the
+        // loading ladder's rules (#1085): a warm poster at once, a late one
+        // dissolved in over the card's black.
+        posterLoad.load(poster, using: images) { [weak self] image, transition in
+            guard let self else { return }
+            transition.perform(on: posterView) { self.posterView.image = image }
         }
     }
+
+    private let posterLoad = ImageLoadSlot(size: .full)
 
     /// The preview loop starts: the video fades in over the poster once it has
     /// a picture.

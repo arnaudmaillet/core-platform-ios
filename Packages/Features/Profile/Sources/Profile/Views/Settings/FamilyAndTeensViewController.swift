@@ -77,7 +77,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
     let supervisionList: SupervisionListModel?
     private let imagePipeline: ImagePipeline?
     private let router: (any Router)?
-    private let avatarLoads = RowAvatarLoads()
+    private let avatarLoads = RowImageLoads(size: .avatar)
     /// The supervision a notification asked for (#1106): opened once the
     /// list has it and the page is at rest, then forgotten.
     var pendingSupervisionAccountID: String?
@@ -317,7 +317,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
             ))
             cell.accessories.append(.disclosureIndicator())
             cell.setAvatarImage(nil)
-            self?.avatarLoads.load(profile?.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image in
+            self?.avatarLoads.load(profile?.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image, _ in
                 cell?.setAvatarImage(image)
             }
         }

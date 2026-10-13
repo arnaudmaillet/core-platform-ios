@@ -7,7 +7,7 @@ import UIKit
 
 /// The moderation lists' avatars after a fast scroll (#780): Muted, Blocked,
 /// Restricted and Follow Requests all load a row's picture through
-/// `RowAvatarLoads`, so a cell recycled from one person to the next never
+/// `RowImageLoads` (MediaCore), so a cell recycled from one person to the next never
 /// wears the previous person's face — including a next person who has no
 /// picture at all and keeps their initials.
 ///
@@ -22,16 +22,16 @@ struct ModerationAvatarRecyclingTests {
         let pipeline = ImagePipeline(fetcher: fetcher)
         let ada = try #require(URL(string: "mock://avatar/ada"))
         let grace = try #require(URL(string: "mock://avatar/grace"))
-        let loads = RowAvatarLoads()
+        let loads = RowImageLoads(size: .avatar)
         let recycled = PersonListCell(frame: .zero), recycledToNoPicture = PersonListCell(frame: .zero)
         let onRecycled = LandedAvatars(), onNoPicture = LandedAvatars()
 
         // Both cells were showing Ada. One is recycled for Grace, the other for
         // someone with no avatar, before Ada's picture came.
-        loads.load(ada, using: pipeline, for: recycled) { onRecycled.land($0) }
-        loads.load(ada, using: pipeline, for: recycledToNoPicture) { onNoPicture.land($0) }
-        loads.load(grace, using: pipeline, for: recycled) { onRecycled.land($0) }
-        loads.load(nil, using: pipeline, for: recycledToNoPicture) { onNoPicture.land($0) }
+        loads.load(ada, using: pipeline, for: recycled) { image, _ in onRecycled.land(image) }
+        loads.load(ada, using: pipeline, for: recycledToNoPicture) { image, _ in onNoPicture.land(image) }
+        loads.load(grace, using: pipeline, for: recycled) { image, _ in onRecycled.land(image) }
+        loads.load(nil, using: pipeline, for: recycledToNoPicture) { image, _ in onNoPicture.land(image) }
 
         // Ada's picture arrives first — late, for rows that have moved on.
         await fetcher.release(ada)

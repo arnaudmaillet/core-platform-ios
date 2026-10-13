@@ -39,7 +39,8 @@ final class ForYouPostPreviewViewController: UIViewController {
     let post: GalleryPost
     private let imagePipeline: ImagePipeline
     private let imageView = UIImageView()
-    private var loadTask: Task<Void, Never>?
+    /// The cover's load, on the loading ladder's rules (#1085).
+    private let cover = ImageLoadSlot(size: .full)
 
     /// The shapes a picture previews between: a portrait clip is held at 2:3
     /// (a 9:16 frame would be taller than the space above the menu), a
@@ -69,7 +70,7 @@ final class ForYouPostPreviewViewController: UIViewController {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        loadTask?.cancel()
+        cover.cancel()
     }
 
     override func viewDidLoad() {
@@ -88,17 +89,9 @@ final class ForYouPostPreviewViewController: UIViewController {
         overlay.pin(to: view)
 
         guard !isText, let url = post.thumbnailURL else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
-            imageView.image = cached
-            return
-        }
-        let pipeline = imagePipeline
-        loadTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url), !Task.isCancelled,
-                  let self else { return }
-            UIView.transition(
-                with: imageView, duration: 0.2, options: .transitionCrossDissolve
-            ) { self.imageView.image = image }
+        cover.load(url, using: imagePipeline) { [weak self] image, transition in
+            guard let self else { return }
+            transition.perform(on: imageView) { self.imageView.image = image }
         }
     }
 
