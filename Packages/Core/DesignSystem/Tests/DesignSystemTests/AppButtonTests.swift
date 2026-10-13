@@ -119,6 +119,13 @@ struct AppButtonTests {
         #expect(tapped == 0)
         #expect(!button.events.contains(.haptic(.selection)), "a disabled button plays nothing")
         #expect(button.accessibilityTraits.contains(.notEnabled), "VoiceOver reads it as dimmed")
+        // A touch inside is still the button's, so it never reaches the row.
+        let (window, host) = hosted(button)
+        defer { window.isHidden = true }
+        host.layoutIfNeeded()
+        let centre = CGPoint(x: button.bounds.midX, y: button.bounds.midY)
+        #expect(button.hitTest(centre, with: nil) === button, "a disabled button lets the finger through to its row")
+        #expect(host.hitTest(button.convert(centre, to: host), with: nil) === button)
     }
 
     @Test func loadingHoldsTheWidthIgnoresTapsAndStaysFocusable() {

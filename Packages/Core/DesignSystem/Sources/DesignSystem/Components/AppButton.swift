@@ -339,6 +339,19 @@ open class AppButton: UIButton {
         hitRegion.contains(point)
     }
 
+    /// ⚠️ **A TOUCH INSIDE STAYS THE BUTTON'S, EVEN WHILE IT TAKES NO TAP.**
+    /// UIKit skips a disabled control in hit-testing, and the finger lands on
+    /// whatever is under it: a greyed price SELECTED ITS ROW, which closed the
+    /// shop and flew the map to the country (filmed on the simulator, #935;
+    /// a no-op recogniser on the button did not stop it, as the touch never
+    /// reached it). Returned here, the touch meets `touchesBegan`, which
+    /// swallows it as it does for a placeholder or a load.
+    override open func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let view = super.hitTest(point, with: event) { return view }
+        guard isUserInteractionEnabled, !isHidden, alpha > 0.01, self.point(inside: point, with: event) else { return nil }
+        return self
+    }
+
     /// The region a touch counts in: the bounds, grown to at least 44×44.
     public var hitRegion: CGRect {
         let dx = max(0, (Metrics.minimumHitSide - bounds.width) / 2)
@@ -517,6 +530,9 @@ open class AppButton: UIButton {
         }
     }
 
+    /// Disabled: greyed, `.notEnabled`, no press, no action, no feedback —
+    /// and still the target of a touch inside it (`hitTest`), so the finger
+    /// never reaches what is under it.
     override open var isEnabled: Bool {
         didSet {
             guard isEnabled != oldValue else { return }
@@ -1005,6 +1021,7 @@ open class AppButton: UIButton {
     public var debugHeldSize: CGSize? { heldSize }
     public var debugHasBone: Bool { bone != nil }
     public var debugHoldRecognizer: UILongPressGestureRecognizer? { hold }
+
     public var debugVeilIsShown: Bool { !veil.isHidden }
     public var debugMaterialIsShown: Bool { !materialGround.isHidden }
     /// The tap a finger would make, through the same gate.
