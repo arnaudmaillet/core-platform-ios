@@ -111,9 +111,9 @@ public final class AppButtonGalleryViewController: UIViewController {
     private func buildAspects() {
         for size in AppButton.Size.allCases {
             header("\(size)".capitalized)
-            let content = content(for: size)
-            row([make(.pill(.prominent), size, content), make(.pill(.quiet), size, content), make(.pill(.tinted), size, content)])
-            row([make(.pill(.material), size, content), make(.bare, size, content)], over: true)
+            let sample = content(for: size)
+            row([make(.pill(.prominent), size, sample), make(.pill(.quiet), size, sample), make(.pill(.tinted), size, sample)])
+            row([make(.pill(.material), size, sample), make(.bare, size, sample)], over: true)
         }
         header("Card shape")
         row([
