@@ -166,6 +166,32 @@ final class PlaceProfileViewController: UIViewController {
     private let postIDs: [PostID]
     private let imagePipeline: ImagePipeline
     private let loadPosts: () async throws -> [GalleryPost]
+
+    // MARK: The place's posts past the pins (#643)
+
+    /// The place's next page — geo_discovery.v1 `ListPlacePosts`, past the
+    /// map's pins. Nil: the pins are the whole page, as before.
+    private let loadMore: ((String?) async throws -> PlacePostsPage)?
+    /// The posts those pages brought, in the server's order, after the
+    /// ranked pins: appended, so no tile on screen ever moves for one.
+    private var extraPosts: [GalleryPost] = []
+    private enum MoreCursor: Equatable { case start, token(String), exhausted }
+    private var moreCursor: MoreCursor = .start
+    private var moreLoad: Task<Void, Never>?
+    /// Pages in a row that brought nothing new (a POPULAR page re-reads the
+    /// ranking and can repeat): this many are walked before waiting for the
+    /// next approach.
+    private var emptyPagesInARow = 0
+    static let maxEmptyPagesInARow = 5
+    /// The grid a feed was opened from, whose order its continuation follows.
+    private weak var continuationGrid: ForYouGridPage?
+    private lazy var feedContinuation = GridFeedContinuation(
+        ids: { [weak self] in self?.continuationGrid?.posts.map(\.id) ?? [] },
+        hasMore: { [weak self] in self?.hasMorePosts ?? false },
+        askMore: { [weak self] in self?.loadMorePosts() }
+    )
+    /// Whether the place has posts past those shown.
+    private var hasMorePosts: Bool { loadMore != nil && moreCursor != .exhausted }
     /// Opens a tapped tile's post over this profile — wired by the builder to
     /// `presentSnapFeedHero`, so a tile-opened post gets the full hero pair
     /// (flight up, grab back to this very tile) with no new machinery.
@@ -743,8 +769,10 @@ final class PlaceProfileViewController: UIViewController {
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
         entities: EntityStore? = nil,
         loadPosts: @escaping () async throws -> [GalleryPost],
+        loadMore: ((String?) async throws -> PlacePostsPage)? = nil,
         openPost: @escaping (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void
     ) {
+        self.loadMore = loadMore
         self.postIDs = postIDs
         self.placeName = placeName
         self.rank = rank
@@ -781,6 +809,7 @@ final class PlaceProfileViewController: UIViewController {
 
     deinit {
         loadTask?.cancel()
+        moreLoad?.cancel()
         bannerTask?.cancel()
     }
 
@@ -796,6 +825,11 @@ final class PlaceProfileViewController: UIViewController {
         // feeds both (`render`). The pull is the indicator's — `configureTabs`.
         page.onRefresh = { [weak self] in self?.refresh() }
         activityPage.onRefresh = { [weak self] in self?.refresh() }
+        // Near either list's end: the place's next page (#643).
+        if loadMore != nil {
+            page.onNearEnd = { [weak self] in self?.loadMorePosts() }
+            activityPage.onNearEnd = { [weak self] in self?.loadMorePosts() }
+        }
         page.handPullToHost()
         activityPage.handPullToHost()
         installPullIndicator()
@@ -1648,35 +1682,99 @@ final class PlaceProfileViewController: UIViewController {
         // them at the tail — so a new post more popular than everything on
         // screen landed last (caught by `aRefreshThatBringsNewPostsLandsThemInPlace`).
         // For You says the same on a corpus reset (`onCorpusReset`).
-        if renderedMembers != nil {
+        let isRefresh = renderedMembers != nil
+        renderedMembers = members
+        renders += 1
+        // The place's later pages stay (#643): a refresh is the pins again,
+        // and a pin a page had brought is the pin's now.
+        let pinned = Set(members.map(\.id))
+        extraPosts.removeAll { pinned.contains($0.id) }
+        renderCorpus(reset: isRefresh)
+        renderBanner(for: Self.bannerPost(in: Self.gallery(members)))
+    }
+
+    /// The pins, ranked, then the place's later pages in the server's order
+    /// (#643), fanned out to both tabs and the counters.
+    ///
+    /// ⚠️ THE TWO TABS NO LONGER SHOW THE SAME POSTS, only the same place.
+    /// Discover is a GRID of covers and drops what has none; Activity is a
+    /// column of cards and keeps everything. One hydration still fans out to
+    /// both, so they can only disagree about what this line says they
+    /// disagree about.
+    private func renderCorpus(reset: Bool) {
+        let members = renderedMembers ?? []
+        if reset {
             page.invalidateIncrementalUpdates()
             activityPage.invalidateIncrementalUpdates()
         }
-        renderedMembers = members
-        renders += 1
-        // ⚠️ THE TWO TABS NO LONGER SHOW THE SAME POSTS, only the same place.
-        // Discover is a GRID of covers and drops what has none; Activity is a
-        // column of cards and keeps everything. One hydration still fans out to
-        // both, so they can only disagree about what this line says they
-        // disagree about.
-        let gallery = Self.gallery(members)
+        if loadMore != nil {
+            // The last stretch of tiles is planned whole only once the place
+            // has no page left.
+            page.setCorpusComplete(!hasMorePosts)
+            activityPage.setCorpusComplete(!hasMorePosts)
+        }
+        let gallery = Self.gallery(members) + extraPosts.filter { $0.kind != .text }
         page.render(gallery.isEmpty
             ? .empty(.init(title: "No photos or videos here yet"))
             : .content(gallery))
-        let activity = Self.activity(members)
+        let activity = Self.activity(members) + extraPosts
         activityPage.render(activity.isEmpty
             ? .empty(.init(title: "Nothing has happened here yet"))
             : .content(activity))
         // ⚠️ THE WHOLE CORPUS, not the gallery's. These are the PLACE's
         // numbers, and a check-in with no photograph is still something that
         // happened here — dropping it from a total because a grid cannot draw
-        // it would make the place look quieter than it is.
-        likesTotal = Self.aggregatedLikes(of: members)
+        // it would make the place look quieter than it is. As many as are
+        // loaded: the pins, and the pages read so far.
+        let corpus = members + extraPosts
+        likesTotal = Self.aggregatedLikes(of: corpus)
         identityView.setCounters([
             .init(value: CountFormatter.compactString(for: likesTotal), caption: "Likes"),
-            .init(value: "\(members.count)", caption: members.count == 1 ? "Post" : "Posts"),
+            .init(value: "\(corpus.count)", caption: corpus.count == 1 ? "Post" : "Posts"),
         ])
-        renderBanner(for: Self.bannerPost(in: gallery))
+    }
+
+    /// The place's next page, once the pins have landed, one at a time: its
+    /// new posts appended in place, a failure retried on the next approach.
+    /// Internal, not private, for the tests that page a place.
+    func loadMorePosts() {
+        guard let loadMore, moreLoad == nil, renderedMembers != nil else { return }
+        let token: String?
+        switch moreCursor {
+        case .exhausted: return
+        case .start: token = nil
+        case .token(let next): token = next
+        }
+        page.setPaging(true)
+        activityPage.setPaging(true)
+        moreLoad = Task { [weak self] in
+            let answer = try? await loadMore(token)
+            guard let self, !Task.isCancelled else { return }
+            moreLoad = nil
+            page.setPaging(false)
+            activityPage.setPaging(false)
+            // Whatever the answer, a feed waiting on the next page hears it.
+            defer { feedContinuation.answered() }
+            guard let answer else { return }
+            moreCursor = answer.nextPageToken.map(MoreCursor.token) ?? .exhausted
+            let known = Set((renderedMembers ?? []).map(\.id) + extraPosts.map(\.id))
+            var seen = known
+            let fresh = answer.posts.filter { seen.insert($0.id).inserted }
+            extraPosts += fresh
+            if fresh.isEmpty {
+                emptyPagesInARow += 1
+            } else {
+                emptyPagesInARow = 0
+            }
+            // A page that ended the place re-plans the tail; one that brought
+            // posts appends them. Neither moves a tile already shown.
+            if !fresh.isEmpty || !hasMorePosts { renderCorpus(reset: false) }
+            // Nothing new but more behind: no row reaches the end to ask, so
+            // the next page is asked now — a few times, not forever.
+            if fresh.isEmpty, hasMorePosts, emptyPagesInARow < Self.maxEmptyPagesInARow {
+                loadMorePosts()
+            }
+        }
     }
 
     /// The hero banner wears the TOP post's cover. A coverless top post (a
@@ -1933,6 +2031,12 @@ final class PlaceProfileViewController: UIViewController {
         // clip is parked for a close that pages on and comes home (#951).
         // Closed by `viewDidAppear`'s `endPlaybackHandoff`.
         grid.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
+        // On past the window into the place's next pages (#643); nil when
+        // the pins are the whole place.
+        var continuation: SnapFeedContinuation?
+        if loadMore != nil {
+            continuation = { [weak self] after in await self?.feedContinuation.postIDs(after: after) }
+        }
         let origin = SnapFeedHeroOrigin(
             post: tapped,
             stream: stream,
@@ -1973,8 +2077,10 @@ final class PlaceProfileViewController: UIViewController {
             returnLiveMedia: { [weak grid] in grid?.returnFlightSurface(for: tapped.id) },
             pauseReturnLiveMedia: { [weak grid] in grid?.pauseReturnPlayback(for: tapped.id) },
             adoptReturnLiveMedia: { [weak grid] view in grid?.landReturnPlayback(view, for: tapped.id) },
-            returnLandingIsReady: { [weak grid] in grid?.isReturnLandingReady(for: tapped.id) ?? true }
+            returnLandingIsReady: { [weak grid] in grid?.isReturnLandingReady(for: tapped.id) ?? true },
+            continuation: continuation
         )
+        continuationGrid = grid
         // Remembered for the CLOSE. A flight opened from this page has a tile
         // to go home to, which is exactly what tells that close apart from the
         // map's Case B — see `cardCloseGeometry`. Cleared when this page is the

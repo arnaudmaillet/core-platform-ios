@@ -101,10 +101,12 @@ final class MapsViewController: UIViewController {
     /// just its `galleryTitle`) so the builder can wire the header's follow
     /// toggle to this place's identity; the country code (ISO alpha-2, "" at
     /// sea) is the marker's — the one its flag border wears — for the page's
-    /// flag and subtitle; the last argument stages the page's OWN dismissal
-    /// back to the cluster marker (`makeMapReturnSource`).
+    /// flag and subtitle; the marker's centre names a city to the server,
+    /// whose posts the page lists past the pins (#643); the last argument
+    /// stages the page's OWN dismissal back to the cluster marker
+    /// (`makeMapReturnSource`).
     private let makeClusterGallery: (
-        [PostID], MapPlace, String, UIViewController,
+        [PostID], MapPlace, String, CLLocationCoordinate2D, UIViewController,
         @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
         ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController
@@ -407,7 +409,7 @@ final class MapsViewController: UIViewController {
         makeRevealGeometry: @escaping
             (UIViewController, TextRevealOrigin, (() -> Void)?) -> RevealGeometry,
         makeClusterGallery: @escaping (
-            [PostID], MapPlace, String, UIViewController,
+            [PostID], MapPlace, String, CLLocationCoordinate2D, UIViewController,
         @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
             ((UIViewController) -> RevealGeometry?)?
         ) -> UIViewController,
@@ -2879,8 +2881,9 @@ extension MapsViewController: MKMapViewDelegate {
                 let mapReturn = makeMapReturnSource(for: annotation)
                 let markerClose = makeMarkerClose(for: annotation)
                 let country = countryCode(of: annotation)
+                let centre = annotation.coordinate
                 return { [makeClusterGallery] feed in
-                    makeClusterGallery(postIDs, place, country, feed, mapReturn, markerClose)
+                    makeClusterGallery(postIDs, place, country, centre, feed, mapReturn, markerClose)
                 }
             }
             #if DEBUG
@@ -3173,7 +3176,8 @@ extension MapsViewController: MKMapViewDelegate {
         var gallery: UIViewController?
         if let place = Self.hierarchyPlace(of: annotation) {
             let built = makeClusterGallery(
-                postIDs, place, countryCode(of: annotation), feedVC, makeMapReturnSource(for: annotation),
+                postIDs, place, countryCode(of: annotation), annotation.coordinate, feedVC,
+                makeMapReturnSource(for: annotation),
                 makeMarkerClose(for: annotation)
             )
             gallery = built

@@ -356,12 +356,25 @@ public struct PlaceIdentity {
     /// The place's public web address — what its QR code carries. Nil: the
     /// page draws no QR button.
     public let shareURL: URL?
+    /// Which place the server lists the posts of (#643) — past the map's
+    /// pins, page by page. Nil: the page shows the pins it was handed.
+    public let query: PlaceQuery?
 
-    public init(flag: UIImage?, subtitle: String?, shareURL: URL? = nil) {
+    public init(flag: UIImage?, subtitle: String?, shareURL: URL? = nil, query: PlaceQuery? = nil) {
         self.flag = flag
         self.subtitle = subtitle
         self.shareURL = shareURL
+        self.query = query
     }
+}
+
+/// A place as geo_discovery.v1 `ListPlacePosts` names one (#643): a country
+/// by its ISO code, a city by the point at its centre.
+public enum PlaceQuery: Equatable, Sendable {
+    /// ISO 3166-1 alpha-2.
+    case country(String)
+    /// The city cell around this point.
+    case city(latitude: Double, longitude: Double)
 }
 
 /// A post's page player started ahead of its open (#646).

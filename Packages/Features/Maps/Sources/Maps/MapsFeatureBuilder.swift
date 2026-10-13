@@ -1,3 +1,4 @@
+import CoreLocation
 import CoreModels
 import CoreNavigation
 import FeedInterface
@@ -246,12 +247,12 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             // built by the Feed feature because the grid, the flight card and
             // the retarget wiring are all its internals. `mapReturn` rides
             // through so the page's own dismissal can fly home to the marker.
-            makeClusterGallery: { postIDs, place, countryCode, feed, mapReturn, markerClose in
+            makeClusterGallery: { postIDs, place, countryCode, centre, feed, mapReturn, markerClose in
                 feedFeature().makeClusterGallery(
                     postIDs: postIDs,
                     title: place.galleryTitle,
                     rank: place.rankBadge,
-                    identity: Self.placeIdentity(of: place, countryCode: countryCode),
+                    identity: Self.placeIdentity(of: place, countryCode: countryCode, centre: centre),
                     // The header's follow toggle, bound to THIS place's
                     // identity in the map's own store — which is also what
                     // the Favorites sub-filter reads, so the button and the
@@ -286,13 +287,27 @@ extension MapsFeatureBuilder {
     /// LARGE (a city wears its country's, as its marker's border does), and
     /// its subtitle — a country's continent, a city's country; neither for a
     /// place in no country (at sea) — and its share link, for its QR code.
-    static func placeIdentity(of place: MapPlace, countryCode: String) -> PlaceIdentity? {
+    static func placeIdentity(
+        of place: MapPlace, countryCode: String, centre: CLLocationCoordinate2D? = nil
+    ) -> PlaceIdentity? {
         let country = CountryAtlas.shared.country(code: countryCode)
         return PlaceIdentity(
             flag: country.flatMap { FlagPalette.largeRoundFlag(for: $0.code) ?? FlagPalette.image(for: $0.code) },
             subtitle: country.map { place.kind == .country ? $0.continent : $0.name },
-            shareURL: shareURL(of: place)
+            shareURL: shareURL(of: place),
+            query: placeQuery(of: place, countryCode: countryCode, centre: centre)
         )
+    }
+
+    /// The place as the server lists its posts (#643): a country by its code,
+    /// a city by its marker's centre. Nil when neither is known (at sea).
+    static func placeQuery(of place: MapPlace, countryCode: String, centre: CLLocationCoordinate2D?) -> PlaceQuery? {
+        switch place.kind {
+        case .country:
+            return countryCode.isEmpty ? nil : .country(countryCode)
+        case .city:
+            return centre.map { .city(latitude: $0.latitude, longitude: $0.longitude) }
+        }
     }
 
     /// A place's public web address: `https://<AppRoute.webHost>/place/<id>`.

@@ -33,7 +33,8 @@ public struct MockBackend: Sendable {
         conditions: SimulatedConditions = .none,
         mediaCatalog: MockSocialDataset.MediaCatalog = .synthetic,
         seedsMapHierarchy: Bool = false,
-        enforcesEdgePolicy: Bool = false
+        enforcesEdgePolicy: Bool = false,
+        countryOf: (@Sendable (Double, Double) -> String?)? = nil
     ) {
         // The world beyond France (`MockWorldSeed`) rides the same decision
         // as the European seed: it is what the map's places are for.
@@ -155,7 +156,10 @@ public struct MockBackend: Sendable {
             socialServices.messageAudience(of: recipient) != .noOne
         }).register(on: bff)
         socialGraph.register(on: bff)
-        let geoDiscovery = MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
+        let geoDiscovery = MockGeoDiscoveryService(
+            dataset: dataset, spreadsHierarchy: seedsMapHierarchy,
+            likeCount: { counterStore.likeCount(for: $0) }, countryOf: countryOf
+        )
         geoDiscovery.register(on: bff)
         moderationService.register(on: bff)
 

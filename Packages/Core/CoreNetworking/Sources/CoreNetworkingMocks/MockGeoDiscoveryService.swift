@@ -32,6 +32,12 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// directly keep the historical Paris-only scatter their fixtures are
     /// calibrated against.
     private let spreadsHierarchy: Bool
+    /// A post's likes, for a place's POPULAR order (#643).
+    private let likeCount: @Sendable (String) -> Int64
+    /// The country that owns a coordinate, for a place asked by country code:
+    /// the app's borders (`CountryAtlas`), which this package can't see.
+    /// Without it, a country lists nothing.
+    private let countryOf: (@Sendable (Double, Double) -> String?)?
 
     /// Central Paris — the map's default region centers here.
     private static let baseLat = 48.8566
@@ -53,9 +59,16 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// country whose posts never arrive is a country with no marker).
     private static let topK = 400
 
-    public init(dataset: MockSocialDataset, spreadsHierarchy: Bool = false) {
+    public init(
+        dataset: MockSocialDataset,
+        spreadsHierarchy: Bool = false,
+        likeCount: @escaping @Sendable (String) -> Int64 = { _ in 0 },
+        countryOf: (@Sendable (Double, Double) -> String?)? = nil
+    ) {
         self.dataset = dataset
         self.spreadsHierarchy = spreadsHierarchy
+        self.likeCount = likeCount
+        self.countryOf = countryOf
         self.venues = Self.venueAssignments(for: dataset.posts)
     }
 
@@ -458,6 +471,64 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
         bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/QueryTile") { [self] (request: GeoDiscovery_V1_QueryTileRequest, headers: Headers) in
             queryTile(request, filter: headers[Self.filterHeader]?.first)
         }
+        bff.register(path: "/geo_discovery.v1.GeoDiscoveryService/ListPlacePosts") { [self] (request: GeoDiscovery_V1_ListPlacePostsRequest) in
+            listPlacePosts(request)
+        }
+    }
+
+    // MARK: - Place posts
+
+    /// One place's posts, a page at a time (#643): a country by its code, a
+    /// city by the posts within `spread` of its marker's centre (the reach of
+    /// the scatter, so central Paris is one city). POPULAR ranks by likes,
+    /// newest first between equals; RECENT is newest first. The token is the
+    /// next page's offset. A raw H3 cell is not modelled: nothing.
+    func listPlacePosts(
+        _ request: GeoDiscovery_V1_ListPlacePostsRequest
+    ) -> Result<GeoDiscovery_V1_ListPlacePostsResponse, ConnectError> {
+        let member: (Double, Double) -> Bool
+        switch request.place {
+        case .countryCode(let code)?:
+            let code = code.uppercased()
+            member = { [countryOf] lat, lng in countryOf?(lat, lng) == code }
+        case .point(let point)?:
+            member = { lat, lng in abs(lat - point.lat) <= Self.spread && abs(lng - point.lng) <= Self.spread }
+        case .h3Cell?:
+            member = { _, _ in false }
+        case nil:
+            return .failure(ConnectError(code: .invalidArgument, message: "a place is required"))
+        }
+        let posts = dataset.posts.enumerated().compactMap { index, post -> MockSocialDataset.PostRecord? in
+            let (lat, lng) = position(of: post, at: index)
+            return member(lat, lng) ? post : nil
+        }
+        let ranked: [MockSocialDataset.PostRecord]
+        if request.sort == .popular {
+            let likes = Dictionary(uniqueKeysWithValues: posts.map { ($0.postID, likeCount($0.postID)) })
+            ranked = posts.sorted {
+                let (left, right) = (likes[$0.postID] ?? 0, likes[$1.postID] ?? 0)
+                return left != right ? left > right : $0.publishedAtMS > $1.publishedAtMS
+            }
+        } else {
+            ranked = posts.sorted { $0.publishedAtMS > $1.publishedAtMS }
+        }
+        let limit = request.limit <= 0 ? 20 : Int(min(request.limit, 50))
+        let start = min(Int(request.pageToken) ?? 0, ranked.count)
+        let end = min(start + limit, ranked.count)
+        var response = GeoDiscovery_V1_ListPlacePostsResponse()
+        response.cards = ranked[start..<end].map { post in
+            var card = GeoDiscovery_V1_MapPostCard()
+            card.postID = post.postID
+            card.authorID = post.authorProfileID
+            card.publishedAtMs = post.publishedAtMS
+            card.caption = post.caption
+            card.thumbnailURL = post.media.map {
+                Self.pinURL(forMediaURL: $0.url, catalog: dataset.mediaCatalog)
+            } ?? ""
+            return card
+        }
+        response.nextPageToken = end < ranked.count ? String(end) : ""
+        return .success(response)
     }
 
     /// The Phase-1 map-filter side channel: `QueryTileRequest` has no filter

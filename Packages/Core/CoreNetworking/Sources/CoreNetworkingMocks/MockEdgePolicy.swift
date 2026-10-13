@@ -72,6 +72,8 @@ public enum MockEdgePolicy {
         "/social_graph.v1.SocialGraphService/ListFollowers",
         "/social_graph.v1.SocialGraphService/ListFollowing",
         "/geo_discovery.v1.GeoDiscoveryService/QueryTile",
+        // A place page's posts beyond the map's pins (#643).
+        "/geo_discovery.v1.GeoDiscoveryService/ListPlacePosts",
         // Which country location opens — guests too (B10).
         "/geo_discovery.v1.GeoDiscoveryService/GetCountryAccess",
         // For You's Discover, the same pool for guests and members (B3).
