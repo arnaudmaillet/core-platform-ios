@@ -10,16 +10,20 @@ import Synchronization
 ///
 /// ## Storage
 ///
-/// Two `DiskStore` namespaces in the `.video` pool (500 MB in Automatic),
-/// class `standard`, shared 3:1 as the images pool is (#894):
+/// Four `DiskStore` namespaces in the `.video` pool (500 MB in Automatic),
+/// class `standard`. Clips and sounds each split public 3 : signed 1, as the
+/// images pool does (#894), and clips take four parts of the pool's shared
+/// bytes for every one the sounds take (12 : 4 : 3 : 1):
 ///
-/// - `video` (`public`): files at a URL that carries no signature. Kept on
-///   logout: the same bytes for every viewer.
-/// - `video.signed` (`signed`): files behind a presigned URL (`X-Amz-*`, …,
-///   `CacheKey.isSigned`). Only this viewer was allowed to fetch them: wiped
-///   with the viewer.
+/// - `video` (`public`, Videos): clip files at a URL that carries no
+///   signature. Kept on logout: the same bytes for every viewer.
+/// - `video.signed` (`signed`, Videos): clip files behind a presigned URL
+///   (`X-Amz-*`, …, `CacheKey.isSigned`). Only this viewer was allowed to
+///   fetch them: wiped with the viewer.
+/// - `sound` and `sound.signed` (Music & Sounds, #1068): songs and sound
+///   previews, by the same rule.
 ///
-/// Both are keyed by `CacheKey.media(url)` (the URL minus its signature), cut
+/// All are keyed by `CacheKey.media(url)` (the URL minus its signature), cut
 /// into 1 MB chunks (`VideoRangeLoader`): chunk 0 is the head range.
 ///
 /// ⚠️ **OPENED OFF THE CALLER'S THREAD** (#1018). Opening a store reads its
@@ -27,7 +31,7 @@ import Synchronization
 /// first playback pool. The stores open on the cache's own serial queue, the
 /// one every resource loader runs on, so a load enqueued after the open waits
 /// for it by construction. Until then a synchronous check (`hasHead`) answers
-/// "not cached". Both namespaces join the coordinator at once, through
+/// "not cached". Every namespace joins the coordinator at once, through
 /// `DeferredVideoDisk`, so a logout or a clear during the open is applied when
 /// the stores attach.
 ///
@@ -45,10 +49,13 @@ import Synchronization
 /// follow-up when the backend serves manifests.
 ///
 /// **Sounds too.** Songs and sound previews (MP3, M4A, or a clip played for
-/// its sound) open through the same loader and the same namespaces
-/// (`VideoPlaybackController.soundItem(for:)`), with the same tiers: a sound
-/// is a progressive file like a clip, and a post's original sound IS its
-/// clip, so one copy serves both. They count as Videos in Settings → Storage.
+/// its sound) open through the same loader (`asset(for:priority:content:)`,
+/// from `VideoPlaybackController.soundItem(for:)`), with the same chunks,
+/// tiers and leases, but into the sound namespaces, so Settings → Storage
+/// counts and clears them as Music & Sounds, not Videos (#1068). One
+/// exception keeps one copy of a file: a post's original sound IS its clip,
+/// and when the clip namespace already holds that file (the clip played), the
+/// sound reads the clip's copy instead of fetching a second one.
 ///
 /// ## Preload
 ///
@@ -66,14 +73,33 @@ public final class VideoByteCache: Sendable {
 
     public static let publicNamespace = CacheNamespace("video", category: .videos, scope: .public, priorityClass: .standard)
     public static let signedNamespace = CacheNamespace("video.signed", category: .videos, scope: .signed, priorityClass: .standard)
-    /// Public media 3, signed media 1: the images pool's split (#894).
-    static let publicDiskBudget = DiskBudget(pool: .video, weight: 3)
-    static let signedDiskBudget = DiskBudget(pool: .video, weight: 1)
+    /// Songs and sound previews (#1068): the clips' class and scopes, counted
+    /// as their own category.
+    public static let soundNamespace = CacheNamespace("sound", category: .sounds, scope: .public, priorityClass: .standard)
+    public static let signedSoundNamespace = CacheNamespace("sound.signed", category: .sounds, scope: .signed, priorityClass: .standard)
+    /// Public media 3, signed media 1: the images pool's split (#894). Sounds
+    /// take a fifth of the pool's shared bytes: a song is a few MB at most, a
+    /// clip many more.
+    static let publicDiskBudget = DiskBudget(pool: .video, weight: 12)
+    static let signedDiskBudget = DiskBudget(pool: .video, weight: 4)
+    static let soundDiskBudget = DiskBudget(pool: .video, weight: 3)
+    static let signedSoundDiskBudget = DiskBudget(pool: .video, weight: 1)
 
-    /// The two namespaces as the coordinator sees them, registered before
-    /// their stores open.
+    /// What a player reads a file for, which decides its namespaces.
+    public enum Content: Sendable {
+        /// A clip: `video` / `video.signed`, counted as Videos.
+        case clip
+        /// A song or a sound preview: `sound` / `sound.signed`, counted as
+        /// Music & Sounds (#1068).
+        case sound
+    }
+
+    /// The namespaces as the coordinator sees them, registered before their
+    /// stores open.
     private let publicDisk: DeferredVideoDisk
     private let signedDisk: DeferredVideoDisk
+    private let soundDisk: DeferredVideoDisk
+    private let signedSoundDisk: DeferredVideoDisk
     let opening: VideoStoreOpening
     let statistics = VideoCacheStatistics()
     private let fetcher: any VideoRangeFetching
@@ -108,10 +134,14 @@ public final class VideoByteCache: Sendable {
     ) {
         let publicDisk = DeferredVideoDisk(namespace: Self.publicNamespace, budget: Self.publicDiskBudget)
         let signedDisk = DeferredVideoDisk(namespace: Self.signedNamespace, budget: Self.signedDiskBudget)
+        let soundDisk = DeferredVideoDisk(namespace: Self.soundNamespace, budget: Self.soundDiskBudget)
+        let signedSoundDisk = DeferredVideoDisk(namespace: Self.signedSoundNamespace, budget: Self.signedSoundDiskBudget)
         let storeOpening = VideoStoreOpening()
         opening = storeOpening
         self.publicDisk = publicDisk
         self.signedDisk = signedDisk
+        self.soundDisk = soundDisk
+        self.signedSoundDisk = signedSoundDisk
         self.fetcher = fetcher
         self.coordinator = coordinator
         self.chunkSize = chunkSize
@@ -121,12 +151,16 @@ public final class VideoByteCache: Sendable {
         // clear reach the namespaces from the first instant.
         coordinator?.register(publicDisk)
         coordinator?.register(signedDisk)
+        coordinator?.register(soundDisk)
+        coordinator?.register(signedSoundDisk)
         queue.async {
             beforeOpen?()
             let stores = VideoStores(root: root, clock: clock)
             if let stores {
                 publicDisk.attach(stores.common)
                 signedDisk.attach(stores.signed)
+                soundDisk.attach(stores.sound)
+                signedSoundDisk.attach(stores.signedSound)
             }
             storeOpening.finish(stores)
         }
@@ -170,6 +204,8 @@ public final class VideoByteCache: Sendable {
 
     var publicStore: DiskStore { openedStores.common }
     var signedStore: DiskStore { openedStores.signed }
+    var soundStore: DiskStore { openedStores.sound }
+    var signedSoundStore: DiskStore { openedStores.signedSound }
 
     /// The coordinator's current prefetch policy: `.full` without one.
     public var prefetchPolicy: PrefetchPolicy { coordinator?.prefetchPolicy ?? .full }
@@ -189,15 +225,15 @@ public final class VideoByteCache: Sendable {
 
     /// The asset a player should open for `url`: on the private scheme with
     /// the cache's resource loader when `url` is cacheable, a plain asset
-    /// otherwise.
-    public func asset(for url: URL, priority: CacheFillPriority = .visible) -> AVURLAsset {
+    /// otherwise. `content` picks the namespaces its bytes go to.
+    public func asset(for url: URL, priority: CacheFillPriority = .visible, content: Content = .clip) -> AVURLAsset {
         guard Self.isCacheable(url), var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let scheme = components.scheme
         else { return AVURLAsset(url: url) }
         components.scheme = Self.schemePrefix + scheme
         guard let privateURL = components.url else { return AVURLAsset(url: url) }
         let asset = AVURLAsset(url: privateURL)
-        let loader = makeLoader(for: url, mode: .playback, priority: priority)
+        let loader = makeLoader(for: url, mode: .playback, priority: priority, content: content)
         let delegate = VideoAssetLoaderDelegate(loader: loader)
         asset.resourceLoader.setDelegate(delegate, queue: queue)
         objc_setAssociatedObject(asset, &Self.delegateKey, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
@@ -217,13 +253,16 @@ public final class VideoByteCache: Sendable {
         objc_getAssociatedObject(asset, &Self.delegateKey) is VideoAssetLoaderDelegate
     }
 
-    func makeLoader(for url: URL, mode: VideoRangeLoader.Mode, priority: CacheFillPriority) -> VideoRangeLoader {
+    func makeLoader(
+        for url: URL, mode: VideoRangeLoader.Mode, priority: CacheFillPriority, content: Content = .clip
+    ) -> VideoRangeLoader {
         let counters = coordinator?.prefetchCounters
         let storeOpening = opening
         // Resolved on `queue`, at the loader's first request: by then the
         // open block, enqueued first, has run.
         return VideoRangeLoader(
-            remote: url, store: { storeOpening.stores?.store(for: url) }, fetcher: fetcher, queue: queue, mode: mode,
+            remote: url, store: { storeOpening.stores?.store(for: url, content: content) }, fetcher: fetcher, queue: queue,
+            mode: mode,
             priority: priority.urlSessionTaskPriority, statistics: statistics, chunkSize: chunkSize,
             cancelGrace: cancelGrace,
             onFirstRange: { hit in counters?.recordNextVideoStart(firstRangeHit: hit) }
@@ -367,30 +406,34 @@ enum VideoCacheAudit {
     }
 }
 
-/// The video cache's two disk stores, opened together.
+/// The video cache's disk stores, opened together: clips and sounds.
 struct VideoStores: Sendable {
     let common: DiskStore
     let signed: DiskStore
+    let sound: DiskStore
+    let signedSound: DiskStore
     /// Never `true` in the app: the cache opens them on its queue (#1018).
     let openedOnMainThread: Bool
 
     init?(root: URL?, clock: any CacheClock) {
         openedOnMainThread = Thread.isMainThread
         // Until the coordinator's limits reach them: the Automatic split.
-        let shares = DiskBudget.split(
-            DiskPool.video.automaticBytes, among: [VideoByteCache.publicDiskBudget, VideoByteCache.signedDiskBudget]
-        )
+        let budgets: [DiskBudget] = [
+            VideoByteCache.publicDiskBudget, VideoByteCache.signedDiskBudget,
+            VideoByteCache.soundDiskBudget, VideoByteCache.signedSoundDiskBudget,
+        ]
+        let shares = DiskBudget.split(DiskPool.video.automaticBytes, among: budgets)
+        func open(_ namespace: CacheNamespace, _ index: Int) throws -> DiskStore {
+            try DiskStore(
+                namespace: namespace, version: VideoByteCache.diskVersion, budget: budgets[index], root: root,
+                limits: CacheLimits(bytes: shares[index], speculativeShare: CacheCoordinator.speculativeShare), clock: clock
+            )
+        }
         do {
-            common = try DiskStore(
-                namespace: VideoByteCache.publicNamespace, version: VideoByteCache.diskVersion,
-                budget: VideoByteCache.publicDiskBudget, root: root,
-                limits: CacheLimits(bytes: shares[0], speculativeShare: CacheCoordinator.speculativeShare), clock: clock
-            )
-            signed = try DiskStore(
-                namespace: VideoByteCache.signedNamespace, version: VideoByteCache.diskVersion,
-                budget: VideoByteCache.signedDiskBudget, root: root,
-                limits: CacheLimits(bytes: shares[1], speculativeShare: CacheCoordinator.speculativeShare), clock: clock
-            )
+            common = try open(VideoByteCache.publicNamespace, 0)
+            signed = try open(VideoByteCache.signedNamespace, 1)
+            sound = try open(VideoByteCache.soundNamespace, 2)
+            signedSound = try open(VideoByteCache.signedSoundNamespace, 3)
         } catch {
             #if DEBUG
             print("[video] disk cache unavailable, streaming only: \(error)")
@@ -399,8 +442,24 @@ struct VideoStores: Sendable {
         }
     }
 
+    /// The clip store for `url`: signed or public.
     func store(for url: URL) -> DiskStore {
         CacheKey.isSigned(url) ? signed : common
+    }
+
+    /// The store `url`'s bytes go to when played as `content`. A sound whose
+    /// file the clip store already holds (a post's original sound, once its
+    /// clip played) reads that copy: one file, one copy, counted where it
+    /// landed first.
+    func store(for url: URL, content: VideoByteCache.Content) -> DiskStore {
+        let clips = store(for: url)
+        switch content {
+        case .clip:
+            return clips
+        case .sound:
+            if clips.contains(VideoCacheKeys.info(CacheKey.media(url))) { return clips }
+            return CacheKey.isSigned(url) ? signedSound : sound
+        }
     }
 }
 

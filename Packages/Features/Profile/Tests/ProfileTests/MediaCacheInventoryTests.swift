@@ -121,6 +121,42 @@ struct MediaCacheInventoryTests {
         #expect(coordinator.usage().bytes(in: .videos) == 0)
         #expect(inventory.report().bytes(in: .videos) == 0)
     }
+
+    /// Songs and sound previews (#1068) share the video byte cache's loader,
+    /// not its namespaces: the inventory counts them as Music & Sounds, never
+    /// as Videos, and each category's clear removes its own bytes only.
+    @Test func songsAreCountedAndClearedAsSoundsNotVideos() throws {
+        let root = try scratch()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let coordinator = CacheCoordinator(device: CacheDevice(
+            physicalMemory: { 4 << 30 }, availableDiskCapacity: { 100 * Int64(CacheBytes.gigabyte) }
+        ))
+        func store(_ namespace: CacheNamespace, bytes: Int) throws -> DiskStore {
+            let store = try DiskStore(namespace: namespace, budget: DiskBudget(pool: .video), root: root)
+            _ = try store.write(Data(count: bytes), for: "https://cdn.example.com/\(namespace.name)#0", tier: .retained)
+            coordinator.register(store)
+            return store
+        }
+        let clips = try store(VideoByteCache.publicNamespace, bytes: 3_000)
+        let signedClips = try store(VideoByteCache.signedNamespace, bytes: 1_000)
+        let songs = try store(VideoByteCache.soundNamespace, bytes: 700)
+        let signedSongs = try store(VideoByteCache.signedSoundNamespace, bytes: 300)
+        let inventory = MediaCacheInventory(locations: { [] }, urlCache: nil, coordinator: coordinator)
+
+        let report = inventory.report()
+        #expect(report.bytes(in: .videos) == 4_000, "a song counted as Videos")
+        #expect(report.bytes(in: .sounds) == 1_000)
+
+        inventory.clear(.videos)
+        #expect(inventory.report().bytes(in: .videos) == 0)
+        #expect(inventory.report().bytes(in: .sounds) == 1_000, "Clear Videos removed the songs")
+
+        _ = try clips.write(Data(count: 3_000), for: "https://cdn.example.com/again#0", tier: .retained)
+        inventory.clear(.sounds)
+        #expect(inventory.report().bytes(in: .sounds) == 0)
+        #expect(inventory.report().bytes(in: .videos) == 3_000, "Clear Music & Sounds removed a clip")
+        withExtendedLifetime([clips, signedClips, songs, signedSongs]) {}
+    }
 }
 
 /// Serves a small PNG for any URL and counts fetches per URL.

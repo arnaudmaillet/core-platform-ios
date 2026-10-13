@@ -21,10 +21,11 @@ struct StorageReport: Equatable, Sendable {
 ///
 /// - **Through the coordinator:** every namespace registered with the app's
 ///   `CacheCoordinator`, memory and disk: images (#894), UI assets and the
-///   LocalStore pages (`.other`, #971, #893), and video and messages as they
-///   join it (#895, #897). Cleared with `trim(.clear(category))`: a leased
-///   entry (on screen, an upload in flight) stops being served at once and
-///   its bytes go when its lease ends.
+///   LocalStore pages (`.other`, #971, #893), video and messages as they
+///   join it (#895, #897), and songs and sound previews (`.sounds`, #1068).
+///   Cleared with `trim(.clear(category))`: a leased entry (on screen, an
+///   upload in flight) stops being served at once and its bytes go when its
+///   lease ends.
 /// - **Named here:** the synthesised video clips (`VideoSourceCache`, Videos)
 ///   and the shared HTTP cache (Other), which no namespace holds yet. Without
 ///   a coordinator, also the UI assets disk namespace (`indexedBytes`).

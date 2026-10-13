@@ -8,7 +8,7 @@ import Foundation
 @MainActor
 final class StorageSettingsModel {
     /// The categories the screen lists, in order.
-    static let categories: [CacheCategory] = [.images, .videos, .messages, .other]
+    static let categories: [CacheCategory] = [.images, .videos, .sounds, .messages, .other]
 
     private let inventory: MediaCacheInventory
     private let coordinator: CacheCoordinator?

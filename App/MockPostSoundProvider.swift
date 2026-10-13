@@ -162,11 +162,47 @@ struct MockPostSoundProvider: PostSoundProviding {
             id: song.id,
             title: song.title,
             artist: song.artist ?? creators[song.id],
-            previewURL: songs.fileURL(songID: song.id),
+            previewURL: Self.previewURL(of: song.id, file: songs.fileURL(songID: song.id)),
             artworkURL: nil,
             duration: song.duration
         )
     }
+
+    private static func previewURL(of songID: String, file: URL?) -> URL? {
+        #if DEBUG
+        if servesRemoteSongs { return remoteSong(for: songID) }
+        #endif
+        return file
+    }
+
+    #if DEBUG
+    /// `-sound-cache-remote`: mock songs play from a public MP3 over HTTP
+    /// instead of the bundled file, so the byte cache's sound namespaces
+    /// (#1068: Music & Sounds in Settings → Storage) fill in the simulator
+    /// without a fleet, as `-video-cache-remote` does for clips. Each song
+    /// gets its own `qa` query item, so two songs never share a cache key.
+    /// Needs network.
+    private static let servesRemoteSongs = ProcessInfo.processInfo.arguments.contains("-sound-cache-remote")
+
+    /// Verified with a ranged GET (206, `audio/mpeg`).
+    private static let remoteSongs = [
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
+        "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3"
+    ]
+
+    private static func remoteSong(for songID: String) -> URL? {
+        // FNV-1a: stable across launches, unlike `Hasher`.
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in songID.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01B3
+        }
+        let base: String = remoteSongs[Int(hash % UInt64(remoteSongs.count))]
+        let tag: String = String(hash, radix: 16)
+        return URL(string: "\(base)?qa=\(tag)")
+    }
+    #endif
 }
 
 // MARK: - Popularity
