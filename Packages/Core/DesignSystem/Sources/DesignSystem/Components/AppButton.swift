@@ -147,7 +147,15 @@ open class AppButton: UIButton {
         public static let shakeAmplitude: CGFloat = 8
         public static let shakeDuration: TimeInterval = 0.4
         /// A long press that holds the screen (the card actions' hold).
-        public static let holdDuration: TimeInterval = ActionAffordance.Metrics.holdDuration
+        /// Shorter than a context menu's own timing, so the held state is
+        /// visible before a menu lifts.
+        public static let holdDuration: TimeInterval = 0.25
+        /// The `.label` wash a card action shows under a finger, then held
+        /// (`washesOnPress`). Measured on a card's fill (227 in light mode):
+        /// 0.08 lands at ~209, 0.16 at ~191 — two steps an eye tells apart
+        /// without either reading as a new colour.
+        public static let pressedWash: CGFloat = 0.08
+        public static let heldWash: CGFloat = 0.16
     }
 
     // MARK: - State
@@ -161,7 +169,9 @@ open class AppButton: UIButton {
     /// The ground while selected. Nil swaps prominent and quiet (Follow →
     /// Following) and keeps the others.
     public var selectedGround: Ground? { didSet { refresh() } }
-    /// A bare button's ink while selected (a liked heart's red). Nil keeps
+    /// A bare button's SYMBOL ink while selected (a liked heart's red). The
+    /// words and the count keep the ink: the heart says "yours", the number
+    /// stays the post's (#934, as the card's like always drew it). Nil keeps
     /// the ink.
     public var selectedTint: UIColor? { didSet { refresh() } }
     /// The ink at rest. Nil: the ground's own.
@@ -189,6 +199,33 @@ open class AppButton: UIButton {
     /// A long press holds the screen: the scroller under the button stops
     /// for as long as the finger stays, and a lift inside still taps.
     public var holdFreezesScrolling = false { didSet { syncHold() } }
+
+    /// ⚠️ **A CARD ACTION'S PRESS (#934): THE CONTRAST STEP, NOT A FADE.** A
+    /// bare button's press is a dim, which on a card's action reads as
+    /// "disabled" as much as "pressed". With this on, a `.label` wash rises
+    /// inside the button's shape instead — one step on the press, a second
+    /// while held (`holdFreezesScrolling`) — darker in light mode, lighter in
+    /// dark, the way the system's highlighted cells go. The ground appears
+    /// only while a finger is on it. Build such a button with `dims: false`.
+    public var washesOnPress = false { didSet { applyWash() } }
+
+    /// A menu raised by holding the button (the like's stake menu), built
+    /// when it lifts so it reads current state; nil for none. The button
+    /// lifts as itself — its capsule, not a rectangle.
+    public var menuProvider: (() -> UIMenu?)? {
+        didSet { isContextMenuInteractionEnabled = menuProvider != nil }
+    }
+
+    /// Draws the symbol at this point size, medium weight, instead of the
+    /// size's text-matched one — a card's actions stand level with its lone
+    /// glyphs (`PostActionPillView.glyphPointSize`). Nil: the size's own.
+    public var symbolPointSize: CGFloat? { didSet { refresh() } }
+
+    /// Whether a finger has held the button past `Metrics.holdDuration`.
+    public private(set) var isHolding = false
+    private var isHeldInside = false
+    private let wash = UIView()
+    private lazy var holdDelegate = HoldDelegate(button: self)
 
     /// Whether motion is reduced — `MotionPreference` unless a test says.
     public var reducesMotion: @MainActor () -> Bool = { MotionPreference.reducesMotion }
@@ -237,6 +274,8 @@ open class AppButton: UIButton {
             to: self, sound: sound, dims: dims ?? (aspect == .bare),
             reducesMotion: { [weak self] in self?.reducesMotion() ?? MotionPreference.reducesMotion }
         )
+        // The wash follows the SAME finger decisions as the press.
+        pressFeedback?.onPressChanged = { [weak self] _ in self?.applyWash() }
         refresh()
     }
 
@@ -244,6 +283,11 @@ open class AppButton: UIButton {
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func setUp() {
+        wash.backgroundColor = .label
+        wash.alpha = 0
+        wash.isUserInteractionEnabled = false
+        insertSubview(wash, at: 0)
+
         materialGround.isUserInteractionEnabled = false
         materialGround.clipsToBounds = true
         insertSubview(materialGround, at: 0)
@@ -285,6 +329,10 @@ open class AppButton: UIButton {
         materialGround.layer.cornerRadius = radius
         materialGround.layer.cornerCurve = .continuous
         sendSubviewToBack(materialGround)
+        wash.frame = bounds
+        wash.layer.cornerRadius = radius
+        wash.layer.cornerCurve = .continuous
+        insertSubview(wash, aboveSubview: materialGround)
         veil.frame = bounds
         veil.layer.cornerRadius = radius
         flash.frame = bounds
@@ -655,8 +703,12 @@ open class AppButton: UIButton {
 
     private func syncHold() {
         if holdFreezesScrolling, hold == nil {
-            let recognizer = UILongPressGestureRecognizer()
+            let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(holdChanged(_:)))
             recognizer.minimumPressDuration = Metrics.holdDuration
+            // Shares the finger with the button's OWN recognisers — its menu's
+            // — and with nothing above: the scrollers, a pager, the back swipe
+            // are exactly what a recognised hold is meant to stop.
+            recognizer.delegate = holdDelegate
             // ⚠️ FALSE: the hold only exists to be RECOGNISED — a recognised
             // long press stops the scroller's pan from ever beginning — while
             // the button keeps tracking the same finger, so its press stays
@@ -669,6 +721,91 @@ open class AppButton: UIButton {
             removeGestureRecognizer(hold)
             self.hold = nil
         }
+    }
+
+    @objc private func holdChanged(_ recognizer: UILongPressGestureRecognizer) {
+        switch recognizer.state {
+        case .began:
+            isHolding = true
+            isHeldInside = true
+            applyWash()
+            // The tick that says "held — the screen is yours". A button with
+            // a menu is about to get the menu's own; two in half a second is
+            // one too many.
+            if menuProvider == nil { HapticImpact(style: .soft).impactOccurred() }
+        case .changed:
+            let inside = point(inside: recognizer.location(in: self), with: nil)
+            guard inside != isHeldInside else { return }
+            isHeldInside = inside
+            applyWash()
+        default:
+            isHolding = false
+            isHeldInside = false
+            applyWash()
+        }
+    }
+
+    /// The wash for the current state: held and inside, pressed, or none.
+    private func applyWash() {
+        let target: CGFloat
+        if !washesOnPress {
+            target = 0
+        } else if isHolding && isHeldInside {
+            target = Metrics.heldWash
+        } else {
+            target = pressFeedback?.isPressed == true ? Metrics.pressedWash : 0
+        }
+        guard wash.alpha != target else { return }
+        UIView.animate(
+            withDuration: PressFeedback.Metrics.response, delay: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]
+        ) {
+            self.wash.alpha = target
+        }
+    }
+
+    // MARK: - Menu
+
+    override open func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction, configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let menuProvider else {
+            return super.contextMenuInteraction(interaction, configurationForMenuAtLocation: location)
+        }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menuProvider() }
+    }
+
+    override open func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemWithIdentifier identifier: any NSCopying
+    ) -> UITargetedPreview? {
+        guard menuProvider != nil else {
+            return super.contextMenuInteraction(
+                interaction, configuration: configuration, highlightPreviewForItemWithIdentifier: identifier
+            )
+        }
+        return shapedPreview()
+    }
+
+    override open func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemWithIdentifier identifier: any NSCopying
+    ) -> UITargetedPreview? {
+        guard menuProvider != nil else {
+            return super.contextMenuInteraction(
+                interaction, configuration: configuration, dismissalPreviewForItemWithIdentifier: identifier
+            )
+        }
+        return shapedPreview()
+    }
+
+    /// The button lifted as its own shape.
+    private func shapedPreview() -> UITargetedPreview? {
+        guard window != nil else { return nil }
+        let parameters = UIPreviewParameters()
+        parameters.visiblePath = UIBezierPath(roundedRect: bounds, cornerRadius: cornerRadius)
+        parameters.backgroundColor = .clear
+        return UITargetedPreview(view: self, parameters: parameters)
     }
 
     // MARK: - Motion
@@ -880,7 +1017,9 @@ open class AppButton: UIButton {
             config.background.backgroundColorTransformer = UIConfigurationColorTransformer { _ in .clear }
         }
         if let inkColor { config.baseForegroundColor = inkColor }
-        if isSelected, case .bare = aspect, let selectedTint { config.baseForegroundColor = selectedTint }
+        if isSelected, case .bare = aspect, let selectedTint {
+            config.imageColorTransformer = UIConfigurationColorTransformer { _ in selectedTint }
+        }
 
         switch shape {
         case .capsule:
@@ -894,7 +1033,9 @@ open class AppButton: UIButton {
         config.contentInsets = Self.insets(for: size)
         config.imagePadding = size == .inline ? Spacing.xs : 6
         config.imagePlacement = content.imagePlacement
-        config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(font: font, scale: size == .icon ? .medium : .small)
+        config.preferredSymbolConfigurationForImage = symbolPointSize.map {
+            UIImage.SymbolConfiguration(pointSize: $0, weight: .medium, scale: .medium)
+        } ?? UIImage.SymbolConfiguration(font: font, scale: size == .icon ? .medium : .small)
         config.image = content.symbol.flatMap { UIImage(systemName: $0) }
         config.titleLineBreakMode = .byTruncatingTail
         if let text = content.text {
@@ -1028,6 +1169,19 @@ open class AppButton: UIButton {
     public var debugHoldRecognizer: UILongPressGestureRecognizer? { hold }
 
     public var debugVeilIsShown: Bool { !veil.isHidden }
+    /// The wash's current target.
+    public var debugWashAlpha: CGFloat { wash.alpha }
+    /// A hold beginning, then lifting inside or outside — the action fires
+    /// on a lift inside, as a finger's would.
+    public func debugHold(liftInside inside: Bool) {
+        isHolding = true
+        isHeldInside = true
+        applyWash()
+        isHolding = false
+        isHeldInside = false
+        applyWash()
+        if inside { debugTap() }
+    }
     public var debugMaterialIsShown: Bool { !materialGround.isHidden }
     /// The tap a finger would make, through the same gate.
     public func debugTap() {
@@ -1035,4 +1189,22 @@ open class AppButton: UIButton {
         sendActions(for: .primaryActionTriggered)
     }
     #endif
+}
+
+/// The hold's delegate: it shares the finger with the button's own
+/// recognisers (its menu's, its press's) and with nothing above it.
+@MainActor
+private final class HoldDelegate: NSObject, UIGestureRecognizerDelegate {
+    weak var button: AppButton?
+
+    init(button: AppButton) {
+        self.button = button
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        guard let button, let view = other.view else { return false }
+        return view.isDescendant(of: button)
+    }
 }

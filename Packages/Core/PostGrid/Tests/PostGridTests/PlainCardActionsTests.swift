@@ -9,7 +9,8 @@ import UIKit
 /// (2026-10-01; two ranks before, the primary pair read too dark) — new glyphs
 /// for comments and repost, and the ink rather than an invisible box on the
 /// line's column (`actionLineInset`). What stays of the capsule is its box: the press region,
-/// the press wash, the hold's menu.
+/// the press wash, the hold's menu — carried by the app's one button since #934
+/// (`PostCardAction`).
 @MainActor
 struct PlainCardActionsTests {
     private static func post(kind: GalleryPost.Kind = .text, reactions: Int64? = 160) -> GalleryPost {
@@ -46,16 +47,14 @@ struct PlainCardActionsTests {
     }
 
     /// The line's actions left to right: save, repost, comments, likes.
-    private func actions(in cell: PostGridListRowCell) -> [PostCardPillView] {
-        walk(cell.contentView, PostCardPillView.self)
+    private func actions(in cell: PostGridListRowCell) -> [AppButton] {
+        walk(cell.contentView, AppButton.self)
             .filter { !$0.isHidden && $0.superviewChainIsVisible }
             .sorted { $0.convert($0.bounds, to: cell.contentView).minX < $1.convert($1.bounds, to: cell.contentView).minX }
     }
 
-    private func glyph(of pill: PostCardPillView) -> String {
-        let images = walk(pill, UIImageView.self).compactMap(\.image)
-            + walk(pill, UIButton.self).compactMap { $0.configuration?.image }
-        return images.map { String(describing: $0) }.joined()
+    private func glyph(of action: AppButton) -> String {
+        action.content.symbol ?? ""
     }
 
     // MARK: - No container
@@ -66,11 +65,10 @@ struct PlainCardActionsTests {
         let cell = row(kind: .photo)
         let line = actions(in: cell)
         #expect(line.count == 4)
-        for pill in line {
-            #expect(pill.contentView.backgroundColor == nil)
-            #expect(pill.backgroundColor == nil)
-            #expect(pill.makeGround() == nil)
-            #expect(pill.effect == nil)
+        for action in line {
+            #expect(action.aspect == .bare)
+            #expect(action.currentGround == nil || action.buttonShapes(), "a ground only for Button Shapes")
+            #expect(action.backgroundColor == nil)
         }
     }
 
@@ -101,19 +99,14 @@ struct PlainCardActionsTests {
         #expect(line.count == 4)
         let (save, repost, comments, likes) = (line[0], line[1], line[2], line[3])
 
-        for secondary in [save, repost] {
-            let button = try #require(walk(secondary, UIButton.self).first)
-            #expect(button.configuration?.baseForegroundColor == .secondaryLabel)
+        for action in [save, repost, comments, likes] {
+            // Glyph and count in one foreground: the configuration's.
+            #expect(action.configuration?.baseForegroundColor == .secondaryLabel)
         }
-        for primary in [comments, likes] {
-            let metric = try #require(walk(primary, PostMetricLabel.self).first)
-            #expect(metric.icon.tintColor == .secondaryLabel)
-            let count = try #require(walk(metric, UILabel.self).first { !$0.isHidden })
-            #expect(count.textColor == .secondaryLabel, "a count wears its glyph's ink")
-            // The rank the colour no longer carries: only the primary pair
-            // has a number, and it is the line's semibold type.
-            #expect(count.font == PostMetaPillView.font)
-        }
+        // The rank the colour no longer carries: only the primary pair has a
+        // number.
+        #expect(save.content.count == nil && repost.content.count == nil)
+        #expect(comments.content.count == 12 && likes.content.count == 160)
     }
 
     /// A staked heart is still the points' red — the line's ink is the
@@ -121,12 +114,14 @@ struct PlainCardActionsTests {
     @Test func aStakedHeartIsStillRed() throws {
         let cell = row()
         let likes = try #require(actions(in: cell).last)
-        let heart = try #require(walk(likes, PostMetricLabel.self).first)
         cell.setViewerStake(10)
-        #expect(heart.icon.tintColor == PointsSymbol.tint)
-        #expect(String(describing: heart.icon.image as Any).contains(PointsSymbol.glyph))
+        #expect(likes.isSelected)
+        #expect(likes.configuration?.imageColorTransformer?(.secondaryLabel) == PointsSymbol.tint)
+        #expect(likes.configuration?.baseForegroundColor == .secondaryLabel, "the count stays the line's ink")
+        #expect(likes.content.symbol == PointsSymbol.glyph)
         cell.setViewerStake(0)
-        #expect(heart.icon.tintColor == .secondaryLabel)
+        #expect(likes.configuration?.baseForegroundColor == .secondaryLabel)
+        #expect(likes.content.symbol == PostGridListRowCell.ActionSymbol.like)
     }
 
     // MARK: - Glyphs
@@ -150,10 +145,10 @@ struct PlainCardActionsTests {
     /// The glyphs asked for on 2026-09-30, by the name the drawn image carries.
     @Test func theLineDrawsTheNewGlyphs() {
         let line = actions(in: row())
-        #expect(glyph(of: line[0]).contains("system: bookmark"))
-        #expect(glyph(of: line[1]).contains("system: arrow.trianglehead.2.clockwise.rotate.90"))
-        #expect(glyph(of: line[2]).contains("system: ellipsis.message"))
-        #expect(glyph(of: line[3]).contains("system: heart"))
+        #expect(glyph(of: line[0]).contains("bookmark"))
+        #expect(glyph(of: line[1]).contains("arrow.trianglehead.2.clockwise.rotate.90"))
+        #expect(glyph(of: line[2]).contains("ellipsis.message"))
+        #expect(glyph(of: line[3]).contains("heart"))
     }
 
     // MARK: - The ink on the column
@@ -168,13 +163,16 @@ struct PlainCardActionsTests {
         for kind in [GalleryPost.Kind.text, .photo] {
             let cell = row(kind: kind)
             let line = actions(in: cell)
-            let save = try #require(walk(line[0], UIButton.self).first?.imageView)
-            let ink = save.convert(save.bounds, to: cell.contentView)
+            // The GLYPH's ink: a symbol's image view reaches past it by the
+            // image's alignment insets, which the button lays the glyph by.
+            let save = try #require(line[0].imageView)
+            let insets = save.image?.alignmentRectInsets ?? .zero
+            let ink = save.convert(save.bounds.inset(by: insets), to: cell.contentView)
             #expect(abs(ink.minX - PostGridListRowCell.actionLineInset) < 1, "\(kind): save ink at \(ink.minX)")
 
-            let count = try #require(walk(line[3], UILabel.self).first { !$0.isHidden })
+            let count = try #require(line[3].titleLabel)
             let text = count.convert(count.bounds, to: cell.contentView)
-            #expect(abs(cell.contentView.bounds.maxX - text.maxX - PostGridListRowCell.actionLineInset) < 0.5)
+            #expect(abs(cell.contentView.bounds.maxX - text.maxX - PostGridListRowCell.actionLineInset) < 1)
         }
     }
 
@@ -223,16 +221,19 @@ struct PlainCardActionsTests {
         }
     }
 
-    /// The press is still `ActionAffordance`'s — wash, hold and, on the like,
-    /// the stake menu — and a press still draws its capsule while held.
+    /// The press survives the move to the app's button (#934) — the wash,
+    /// never a dim, the hold that freezes the list and, on the like, the stake
+    /// menu.
     @Test func thePressAndTheHoldMenuSurvive() throws {
         let cell = row()
-        for pill in actions(in: cell) {
-            let affordance = try #require(ActionAffordance.attached(to: pill))
-            #expect(affordance.debugHoldRecognizer.view === pill)
+        for action in actions(in: cell) {
+            #expect(action.washesOnPress)
+            let hold = try #require(action.debugHoldRecognizer)
+            #expect(hold.view === action)
         }
         let likes = try #require(actions(in: cell).last)
-        #expect(ActionAffordance.attached(to: likes)?.debugHasMenu == true)
+        #expect(likes.menuProvider != nil)
+        #expect(likes.isContextMenuInteractionEnabled)
     }
 
     // MARK: - The flight lands on the same line
@@ -265,28 +266,23 @@ struct PlainCardActionsTests {
             #expect(ink(of: a) == ink(of: b), "the stand-in's ink must be the row's")
         }
         // And that ink is the line's one ink, on the stand-in too.
-        for pill in standInLine {
-            #expect(ink(of: pill).allSatisfy { $0 == PostCardPillView.ink })
+        for action in standInLine {
+            #expect(ink(of: action).allSatisfy { $0 == PostCardPillView.ink })
         }
     }
 
-    /// Every colour an action draws in: a button's foreground, or a counter's
-    /// glyph tint and visible count.
-    private func ink(of pill: PostCardPillView) -> [UIColor] {
-        walk(pill, UIButton.self).compactMap { $0.configuration?.baseForegroundColor }
-            + walk(pill, PostMetricLabel.self).flatMap { metric in
-                [metric.icon.tintColor].compactMap { $0 } + walk(metric, UILabel.self).filter { !$0.isHidden }.compactMap(\.textColor)
-            }
+    /// The colour an action draws in: its configuration's foreground.
+    private func ink(of action: AppButton) -> [UIColor] {
+        [action.configuration?.baseForegroundColor].compactMap { $0 }
     }
 
     /// ⚠️ A STAKED heart flies home red — filmed without this: the stand-in's
     /// heart at rest, the row's red, the colour changing in the landing frame.
     @Test func aStakedHeartFliesHomeRed() throws {
-        func heart(_ view: UIView) throws -> UIImageView {
-            let likes = try #require(walk(view, PostCardPillView.self)
-                .filter { !$0.isHidden && $0.superviewChainIsVisible && !($0 is PostActionPillView) }
-                .max { $0.frame.minX < $1.frame.minX })
-            return try #require(walk(likes, PostMetricLabel.self).first).icon
+        func heart(_ view: UIView) throws -> AppButton {
+            try #require(walk(view, AppButton.self)
+                .filter { !$0.isHidden && $0.superviewChainIsVisible }
+                .max { $0.convert($0.bounds, to: view).minX < $1.convert($1.bounds, to: view).minX })
         }
         let wired = row()
         wired.setViewerStake(10)
@@ -296,8 +292,8 @@ struct PlainCardActionsTests {
             actions: .init(repost: true, bookmark: true, saved: false, stake: 10)
         )
         let card = try #require(view.subviews.first as? PostGridListRowCell)
-        #expect(try heart(card).tintColor == PointsSymbol.tint)
-        #expect(try heart(card).tintColor == heart(wired.contentView).tintColor)
+        #expect(try heart(card).configuration?.imageColorTransformer?(.secondaryLabel) == PointsSymbol.tint)
+        #expect(try heart(card).isSelected == heart(wired.contentView).isSelected)
 
         // And a staking row with no count yet keeps its heart on both.
         let countless = RevealDismissCardView(
@@ -307,6 +303,36 @@ struct PlainCardActionsTests {
         )
         let bare = try #require(countless.subviews.first as? PostGridListRowCell)
         // The line's last VISIBLE action is the heart, not the comments.
-        #expect(try String(describing: heart(bare).image as Any).contains("system: heart"))
+        #expect(try heart(bare).content.symbol == PostGridListRowCell.ActionSymbol.like)
     }
+
+    // MARK: - Motion (#934)
+
+    /// On screen, a stake REPLACES the glyph (UIKit's symbol transition) and
+    /// fades the state tint; a new count ROLLS. The answers that come with
+    /// binding a post land without motion. Reduce Motion takes the fades
+    /// (`AppButtonTests`).
+    @Test func aStakeAndANewCountAnimateOnScreenOnly() async throws {
+        let cell = row()
+        let likes = try #require(actions(in: cell).last)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.addSubview(cell)
+        window.isHidden = false
+        defer {
+            cell.removeFromSuperview()
+            window.isHidden = true
+        }
+        likes.reducesMotion = { false }
+        // The host's first answer for a newly bound post lands as it is.
+        cell.setViewerStake(5)
+        #expect(likes.events.isEmpty, "a newly bound row lands without motion")
+        // A turn of the run loop later, a change is news.
+        try await Task.sleep(for: .milliseconds(20))
+        cell.setViewerStake(0)
+        #expect(likes.events.contains(.symbolReplace))
+        #expect(likes.events.contains(.stateTint))
+        cell.showLikeCount(161)
+        #expect(likes.events.contains(.countRoll(up: true)))
+    }
+
 }

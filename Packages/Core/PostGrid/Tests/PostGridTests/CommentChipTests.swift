@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import MediaCore
 import Testing
@@ -8,8 +9,8 @@ import UIKit
 /// does not.
 @MainActor
 struct CommentChipTests {
-    private func pills(in view: UIView) -> [PostMetaPillView] {
-        if let pill = view as? PostMetaPillView { return [pill] }
+    private func pills(in view: UIView) -> [UIView] {
+        if view is PostMetaPillView || view is AppButton { return [view] }
         return view.subviews.flatMap(pills(in:))
     }
 
@@ -107,22 +108,12 @@ struct CommentChipTests {
         #expect(fired == 0)
     }
 
-    /// ⚠️ A PILL IS FURNITURE UNTIL SOMETHING GIVES IT SOMEWHERE TO SEND A
-    /// TOUCH.
-    ///
-    /// `PostMetaPillView` turns interaction off deliberately — the card's own
-    /// tap opens the post, and chips that swallowed touches for nothing would
-    /// put dead corners on the preview. Asserted in both directions, because
-    /// the fix for "the chip does nothing" is one line from "every chip is a
-    /// hole in the card".
-    @Test func aPillTakesTouchesOnlyWhenItIsWired() {
+    /// ⚠️ A PILL IS FURNITURE: `PostMetaPillView` turns interaction off —
+    /// the card's own tap opens the post, and chips that swallowed touches
+    /// would put dead corners on the preview. The card's actions are buttons
+    /// of their own since #934 (`PostCardAction`).
+    @Test func aPillIsFurniture() {
         let pill = PostMetaPillView(contents: [UILabel()])
-        #expect(pill.isUserInteractionEnabled == false)
-
-        pill.setTapHandler {}
-        #expect(pill.isUserInteractionEnabled)
-
-        pill.setTapHandler(nil)
         #expect(pill.isUserInteractionEnabled == false)
     }
 }

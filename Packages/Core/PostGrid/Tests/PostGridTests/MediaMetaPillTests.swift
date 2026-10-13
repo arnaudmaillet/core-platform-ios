@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import MediaCore
 import UIKit
@@ -48,8 +49,10 @@ private func row(
     return cell
 }
 
-private func pills(in view: UIView) -> [PostMetaPillView] {
-    if let pill = view as? PostMetaPillView { return [pill] }
+/// The line's chips: the page indicator's capsule and the card's actions
+/// (the app's one button since #934).
+private func pills(in view: UIView) -> [UIView] {
+    if view is PostMetaPillView || view is AppButton { return [view] }
     return view.subviews.flatMap(pills(in:))
 }
 
@@ -65,7 +68,7 @@ private func isVisible(_ view: UIView, within root: UIView) -> Bool {
     return true
 }
 
-private func visiblePills(in cell: PostGridListRowCell) -> [PostMetaPillView] {
+private func visiblePills(in cell: PostGridListRowCell) -> [UIView] {
     pills(in: cell.contentView).filter { isVisible($0, within: cell.contentView) }
 }
 
@@ -105,7 +108,7 @@ struct MediaMetaPillPlacementTests {
     @Test func aTextCardWearsTheSameLineInItsOwnColumn() {
         let cell = row(kind: .text)
         let visible = visiblePills(in: cell)
-        let hang = PostCardPillView.plainInsets.trailing
+        let hang = PostCardPillView.plainInsets.trailing // = an action's padding
 
         #expect(cell.mediaHeroRect == nil)
         #expect(visible.count == 2)
@@ -219,7 +222,7 @@ struct MediaMetaPillPlacementTests {
         }
         let chip = try #require(indicators(cell.contentView).first)
         let counter = try #require(visiblePills(in: cell).first { !($0 is MediaPageIndicatorView) })
-        #expect(counter.contentView.backgroundColor == nil)
+        #expect((counter as? AppButton)?.currentGround == nil, "an action draws no ground")
         #expect(chip.contentView.backgroundColor == .tertiarySystemFill)
         func dots(_ view: UIView) -> [UIView] {
             let own = view.subviews.filter { $0.layer.cornerRadius == MediaPageIndicatorView.dotDiameter / 2 && $0.bounds.width > 0 }
@@ -317,7 +320,8 @@ struct MediaMetaPillContentTests {
         #expect(visiblePills(in: cell).count == 3)
         cell.onRepostTapped = {}
         #expect(visiblePills(in: cell).count == 4)
-        #expect(visiblePills(in: cell).filter { $0 is PostActionPillView }.count == 2)
+        // The two glyph-only controls: save and repost.
+        #expect(visiblePills(in: cell).filter { ($0 as? AppButton)?.content.count == nil }.count == 2)
     }
 
     /// The rule, tested where it lives rather than only through a cell.

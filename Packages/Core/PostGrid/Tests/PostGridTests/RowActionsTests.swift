@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import MediaCore
 import UIKit
@@ -41,15 +42,19 @@ struct RowActionsTests {
 
     private func buttons(in view: UIView) -> [UIButton] {
         func walk(_ view: UIView) -> [UIButton] {
+            // The glyph-only controls: the band's "..." and the line's save
+            // and repost (counts are the line's other two buttons).
+            if let button = view as? AppButton { return button.content.count == nil ? [button] : [] }
             if let button = view as? UIButton { return [button] }
             return view.subviews.flatMap(walk)
         }
         return walk(view).filter { !$0.isHidden && $0.superviewChainIsVisible }
     }
 
-    private func pills(in view: UIView) -> [PostMetaPillView] {
-        func walk(_ view: UIView) -> [PostMetaPillView] {
-            if let pill = view as? PostMetaPillView { return [pill] }
+    /// The line's chips: the indicator's capsule and the card's actions.
+    private func pills(in view: UIView) -> [UIView] {
+        func walk(_ view: UIView) -> [UIView] {
+            if view is PostMetaPillView || view is AppButton { return [view] }
             return view.subviews.flatMap(walk)
         }
         return walk(view).filter { !$0.isHidden && $0.superviewChainIsVisible }
@@ -100,24 +105,25 @@ struct RowActionsTests {
             $0.convert($0.bounds, to: cell.contentView).minX < $1.convert($1.bounds, to: cell.contentView).minX
         }
         #expect(ordered.count == 4)
-        #expect(ordered[0] is PostActionPillView)
-        #expect(ordered[1] is PostActionPillView)
-        #expect(ordered[2] is PostCardPillView && !(ordered[2] is PostActionPillView))
-        #expect(ordered[3] is PostCardPillView && !(ordered[3] is PostActionPillView))
+        // Glyph-only controls lead, counters close (all the app's button, #934).
+        let line = ordered.compactMap { $0 as? AppButton }
+        #expect(line.count == 4)
+        #expect(line[0].content.count == nil && line[1].content.count == nil)
+        #expect(line[2].content.count != nil && line[3].content.count != nil)
         let controls = buttons(in: cell.contentView).filter { $0.accessibilityLabel != "More actions" }
             .sorted { $0.convert($0.bounds, to: cell.contentView).minX < $1.convert($1.bounds, to: cell.contentView).minX }
         #expect(controls.map(\.accessibilityLabel) == ["Save", "Repost"])
         // The boxes HANG past the column by the air they leave before their
         // ink (plain actions, 2026-09-30), so the ink is what sits on it —
         // measured on the ink in `PlainCardActionsTests`.
-        let first = try #require(ordered.first as? PostCardPillView)
-        let last = try #require(ordered.last as? PostCardPillView)
+        let first = try #require(ordered.first as? AppButton)
+        let last = try #require(ordered.last as? AppButton)
         let leading = first.convert(first.bounds, to: cell.contentView).minX
         let trailing = cell.contentView.bounds.maxX
             - last.convert(last.bounds, to: cell.contentView).maxX
-        #expect(abs(leading + first.inkLeading - PostGridListRowCell.actionLineInset) < 0.5,
-                "box at \(leading), ink inset \(first.inkLeading), hang \(cell.closingLineHang)")
-        #expect(abs(trailing + last.inkTrailing - PostGridListRowCell.actionLineInset) < 0.5)
+        #expect(abs(leading + PostCardAction.inkLeading(first) - PostGridListRowCell.actionLineInset) < 0.5,
+                "box at \(leading), hang \(cell.closingLineHang)")
+        #expect(abs(trailing + PostCardAction.inkTrailing(last) - PostGridListRowCell.actionLineInset) < 0.5)
         // And the two groups are apart: the slack is between them.
         let gap = ordered[2].convert(ordered[2].bounds, to: cell.contentView).minX
             - ordered[1].convert(ordered[1].bounds, to: cell.contentView).maxX

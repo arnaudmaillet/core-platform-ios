@@ -85,7 +85,7 @@ struct ForYouCardLikesTests {
         _ readout: UIView, in cell: UICollectionViewCell, sourceLocation: SourceLocation = #_sourceLocation
     ) {
         #expect(readout.isUserInteractionEnabled == false, sourceLocation: sourceLocation)
-        #expect(ActionAffordance.attached(to: readout) == nil, "no press", sourceLocation: sourceLocation)
+        #expect(!((readout as UIView) is AppButton), "no press", sourceLocation: sourceLocation)
         let point = readout.convert(CGPoint(x: readout.bounds.midX, y: readout.bounds.midY), to: cell)
         let hit = cell.hitTest(point, with: nil)
         #expect(hit === cell || hit === cell.contentView, "the card takes it: \(String(describing: hit))",
