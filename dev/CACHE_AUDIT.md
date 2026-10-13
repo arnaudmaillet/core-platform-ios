@@ -72,6 +72,7 @@ com.apple.Preferences`) and come back.
 | `removed` | Entries/bytes removed per reason: `budget`, `memoryWarning`, `memoryCritical`, `background`, `lowDisk`, `viewerChanged`, `clear`, `expiry`, and `trim`/`wipe` for calls that named no reason. |
 | `speculative` | What became of prefetched entries: `stored`, then `used` (read, leased or overwritten at a higher tier), `wasted` (evicted or expired unused) or `discarded` (wiped, removed, replaced by another prefetch). |
 | `waste` | The namespace's waste ratio. |
+| `indexWrites` | Disk lines only: index files the store wrote since launch — every `flushThreshold` changes, on background, after a wipe, and a few seconds after the last change (#1079); `delayed` counts the last kind. |
 
 **The prefetch line** (`CachePrefetchCounters`, reported by the consumers)
 

@@ -12,7 +12,11 @@ import Synchronization
 ///   name, then renamed into `v<N>/objects/`. A reader never sees half a file,
 ///   and a crash leaves only debris that the next start-up removes.
 /// - **The index is a cache of the truth, not the truth:** it is flushed every
-///   `flushThreshold` changes and when the app goes to the background. At
+///   `flushThreshold` changes, when the app goes to the background, and
+///   `flushDelay` after the last change (no later than `flushMaxDelay` after
+///   the first unwritten change to the set of files), on the store's own
+///   utility queue — so a foreground crash or a jetsam kill loses seconds of
+///   changes, not up to `flushThreshold - 1` of them (#1079). At
 ///   start-up it is reconciled with the files: an entry whose file is missing
 ///   or has the wrong size is dropped, a file no entry names is deleted, and an
 ///   unreadable index starts the namespace empty. A crash costs cached bytes,
@@ -52,6 +56,16 @@ public final class DiskStore: ManagedCache {
     private let speculativeLifetime: TimeInterval
     private let idleLifetime: TimeInterval?
     private let flushThreshold: Int
+    /// How long after the last change the index is written: long enough that
+    /// a scroll's burst of writes and reads costs one index write, short
+    /// enough that a kill in the foreground loses seconds of changes.
+    private let flushDelay: TimeInterval
+    /// The longest a change to the set of files waits for its index write,
+    /// however busy the store stays (a long scroll never lets it go quiet).
+    /// A use alone (access times) has no such bound: it waits for a pause.
+    private let flushMaxDelay: TimeInterval
+    /// Runs the delayed flush: the store's own utility queue in the app.
+    let flushScheduler: any CacheFlushScheduling
     /// Appended to every new file's name (`.mp4`), or empty.
     private let fileSuffix: String
     private let state: Mutex<State>
@@ -64,6 +78,12 @@ public final class DiskStore: ManagedCache {
 
     /// The prefix of a wiped `objects` folder waiting for the janitor.
     static let trashPrefix = "trash-"
+
+    /// `flushDelay` by default: a burst of changes (a page of images landing,
+    /// a scroll's reads) is one index write.
+    public static let defaultFlushDelay: TimeInterval = 3
+    /// `flushMaxDelay` by default.
+    public static let defaultFlushMaxDelay: TimeInterval = 10
 
     public enum StoreError: Error, Equatable {
         /// The name must be a plain folder name: letters, digits, `.`, `-`, `_`.
@@ -78,6 +98,11 @@ public final class DiskStore: ManagedCache {
     ///   - idleLifetime: when set, an entry nobody used for that long expires,
     ///     whatever its tier (UI assets: 30 days, #971).
     ///   - flushThreshold: index changes between automatic flushes.
+    ///   - flushDelay: the index is written this long after the last change.
+    ///   - flushMaxDelay: and no later than this after the first unwritten
+    ///     change to the set of files.
+    ///   - flushScheduler: runs that delayed flush; the store's own utility
+    ///     queue by default. Tests step it by hand.
     ///   - fileExtension: given to every file the store writes, for a
     ///     reader that goes by it (`AVURLAsset` reads a file's type from its
     ///     extension: a published clip, #898). Nil by default: bare names.
@@ -91,6 +116,9 @@ public final class DiskStore: ManagedCache {
         speculativeLifetime: TimeInterval = CacheTier.speculativeLifetime,
         idleLifetime: TimeInterval? = nil,
         flushThreshold: Int = 32,
+        flushDelay: TimeInterval = DiskStore.defaultFlushDelay,
+        flushMaxDelay: TimeInterval = DiskStore.defaultFlushMaxDelay,
+        flushScheduler: (any CacheFlushScheduling)? = nil,
         fileExtension: String? = nil
     ) throws {
         guard Self.isValidName(namespace.name) else { throw StoreError.invalidNamespaceName(namespace.name) }
@@ -135,6 +163,11 @@ public final class DiskStore: ManagedCache {
         self.speculativeLifetime = speculativeLifetime
         self.idleLifetime = idleLifetime
         self.flushThreshold = max(1, flushThreshold)
+        self.flushDelay = max(0, flushDelay)
+        self.flushMaxDelay = max(self.flushDelay, flushMaxDelay)
+        self.flushScheduler = flushScheduler ?? DispatchFlushScheduler(
+            queue: DispatchQueue(label: "CacheKit.DiskStore.flush.\(namespace.name)", qos: .utility)
+        )
         self.fileSuffix = fileExtension.map { ".\($0)" } ?? ""
 
         let recovered = Self.recover(indexURL: indexURL, objects: objects, now: clock.now, idle: idleLifetime)
@@ -218,7 +251,7 @@ public final class DiskStore: ManagedCache {
     /// Pins `key`'s file. A speculative entry is promoted to `recent`.
     public func lease(_ key: String) -> CacheLease? {
         let now = clock.now
-        let outcome: (file: String?, garbage: [String]) = state.withLock { state in
+        let outcome: (file: String?, garbage: [String]) = mutate { state in
             guard var record = state.records[key] else { return (nil, []) }
             let wasLeased = state.leases[key] != nil
             if !wasLeased {
@@ -248,7 +281,7 @@ public final class DiskStore: ManagedCache {
     public func setTier(_ tier: CacheTier, for key: String) {
         let now = clock.now
         let lifetime = speculativeLifetime
-        let garbage: [String] = state.withLock { state in
+        let garbage: [String] = mutate { state in
             guard var record = state.records[key] else { return [] }
             if record.tier == .speculative, tier != .speculative {
                 state.statistics.speculative.recordUsed(bytes: record.size)
@@ -269,7 +302,7 @@ public final class DiskStore: ManagedCache {
     }
 
     public func removeValue(for key: String) {
-        let garbage = state.withLock { state -> [String] in
+        let garbage = mutate { state -> [String] in
             guard let record = state.records[key] else { return [] }
             if record.tier == .speculative {
                 state.statistics.speculative.recordDiscarded(bytes: record.size)
@@ -295,7 +328,7 @@ public final class DiskStore: ManagedCache {
         let fileManager = FileManager.default
         let trash = directory.appending(path: Self.trashPrefix + UUID().uuidString, directoryHint: .isDirectory)
         let objectsFolder = self.objects
-        let outcome: (swapped: Bool, garbage: [String]) = state.withLock { state in
+        let outcome: (swapped: Bool, garbage: [String]) = mutate { state in
             var garbage: [String] = []
             for (key, record) in state.records {
                 state.statistics.recordRemoval(reason, bytes: record.size, wasSpeculative: record.tier == .speculative)
@@ -337,7 +370,7 @@ public final class DiskStore: ManagedCache {
     }
 
     public func setLimits(_ limits: CacheLimits, reason: CacheEvictionReason) {
-        let garbage = state.withLock { state -> [String] in
+        let garbage = mutate { state -> [String] in
             state.limits = limits
             return state.enforceLimits(protecting: nil, ceiling: .retained, reason: reason)
         }
@@ -351,7 +384,7 @@ public final class DiskStore: ManagedCache {
 
     public func trim(_ depth: TrimDepth, reason: CacheEvictionReason) {
         let now = clock.now
-        let garbage = state.withLock { state -> [String] in
+        let garbage = mutate { state -> [String] in
             let records = state.records
             let victims = state.lru.victims(
                 for: depth,
@@ -374,17 +407,30 @@ public final class DiskStore: ManagedCache {
 
     /// Writes the index if anything changed since the last write.
     public func flush() {
+        flush(delayed: false)
+    }
+
+    /// `delayed`: the armed flush's write (`flushWhenDue`), counted apart so
+    /// `-cache-audit` shows what the delay costs.
+    private func flush(delayed: Bool) {
         flushGate.withLock { _ in
             let snapshot: IndexFile? = state.withLock { state in
                 guard state.dirty else { return nil }
                 state.dirty = false
                 state.changesSinceFlush = 0
+                // Written now: a delayed flush still armed finds nothing to do.
+                state.quietDeadline = nil
+                state.longestDeadline = nil
                 return IndexFile(nextOrder: state.nextOrder, records: Array(state.records.values))
             }
             guard let snapshot else { return }
             do {
                 let data = try JSONEncoder().encode(snapshot)
                 try data.write(to: indexURL, options: .atomic)
+                state.withLock { state in
+                    state.statistics.indexWrites += 1
+                    if delayed { state.statistics.delayedIndexWrites += 1 }
+                }
             } catch {
                 state.withLock { $0.dirty = true }
             }
@@ -406,6 +452,11 @@ public final class DiskStore: ManagedCache {
     public var limits: CacheLimits { state.withLock { $0.limits } }
 
     public var statistics: CacheStatistics { state.withLock { $0.statistics } }
+
+    /// Every key the store holds. Tests only.
+    var storedKeys: Set<String> {
+        state.withLock { Set($0.records.keys) }
+    }
 
     /// Unleased keys of `tier`, least recently used first.
     func orderedKeys(in tier: CacheTier) -> [String] {
@@ -434,6 +485,64 @@ public final class DiskStore: ManagedCache {
         if due { flush() }
     }
 
+    /// Runs `body` on the state, as every path that changes it does — so a
+    /// change of any kind arms the delayed flush (#1079): the index is
+    /// written `flushDelay` after the last change, and a change to the set of
+    /// files waits no longer than `flushMaxDelay`. One flush stays armed at a
+    /// time, however many changes land meanwhile: a burst is one write.
+    private func mutate<Result: Sendable>(_ body: (inout State) -> Result) -> Result {
+        let now = clock.now
+        let quiet = flushDelay
+        let longest = flushMaxDelay
+        let (result, arm): (Result, Bool) = state.withLock { state in
+            let changes = state.changes
+            let structuralChanges = state.structuralChanges
+            let result = body(&state)
+            guard state.changes != changes else { return (result, false) }
+            state.quietDeadline = now.addingTimeInterval(quiet)
+            if state.structuralChanges != structuralChanges, state.longestDeadline == nil {
+                state.longestDeadline = now.addingTimeInterval(longest)
+            }
+            guard !state.isFlushArmed else { return (result, false) }
+            state.isFlushArmed = true
+            return (result, true)
+        }
+        if arm { scheduleFlush(after: quiet) }
+        return result
+    }
+
+    private func scheduleFlush(after delay: TimeInterval) {
+        flushScheduler.schedule(after: delay) { [weak self] in self?.flushWhenDue() }
+    }
+
+    /// The armed flush's turn: writes the index if its deadline came, or
+    /// waits again for a deadline a later change moved.
+    private func flushWhenDue() {
+        let now = clock.now
+        let longest = flushMaxDelay
+        let wait: TimeInterval? = state.withLock { state in
+            // Written meanwhile (the threshold, the background), or nothing
+            // left to write: disarmed, and the next change arms it again.
+            guard state.dirty, let quiet = state.quietDeadline else {
+                state.isFlushArmed = false
+                return nil
+            }
+            let due = min(quiet, state.longestDeadline ?? quiet)
+            // A deadline further away than any change sets one means the
+            // clock went back (the user set the time): written now, not
+            // whenever the wall clock catches up.
+            if due > now, due.timeIntervalSince(now) <= longest { return due.timeIntervalSince(now) }
+            state.isFlushArmed = false
+            return 0
+        }
+        guard let wait else { return }
+        if wait > 0 {
+            scheduleFlush(after: wait)
+        } else {
+            flush(delayed: true)
+        }
+    }
+
     /// A cheap early refusal, so a write that cannot fit costs no I/O. The
     /// authoritative check runs again under the lock in `commit`.
     private func admits(size: Int, key: String, tier: CacheTier) -> Bool {
@@ -450,7 +559,7 @@ public final class DiskStore: ManagedCache {
         let now = clock.now
         let lifetime = speculativeLifetime
         var moveError: (any Error)?
-        let outcome: (kept: Bool, garbage: [String]) = state.withLock { state in
+        let outcome: (kept: Bool, garbage: [String]) = mutate { state in
             let existing = state.records[key]
             let storedTier = max(existing?.tier ?? tier, tier)
             if size > state.limits.bytes || (storedTier == .speculative && size > state.limits.speculativeBytes) {
@@ -506,7 +615,7 @@ public final class DiskStore: ManagedCache {
 
     private func resolve(_ key: String) -> (url: URL, file: String)? {
         let now = clock.now
-        let outcome: (file: String?, garbage: [String]) = state.withLock { state in
+        let outcome: (file: String?, garbage: [String]) = mutate { state in
             guard var record = state.records[key] else {
                 state.statistics.misses += 1
                 return (nil, [])
@@ -536,7 +645,7 @@ public final class DiskStore: ManagedCache {
 
     /// The file was deleted behind the store's back (iOS purging `Caches`).
     private func dropVanished(key: String, file: String) {
-        state.withLock { state in
+        mutate { state in
             guard let record = state.records[key], record.file == file, state.leases[key] == nil else { return }
             if record.tier == .speculative {
                 state.statistics.speculative.recordDiscarded(bytes: record.size)
@@ -547,7 +656,7 @@ public final class DiskStore: ManagedCache {
     }
 
     private func endLease(key: String, file: String) {
-        let garbage: [String] = state.withLock { state in
+        let garbage: [String] = mutate { state in
             if let record = state.records[key], record.file == file, let count = state.leases[key] {
                 if count > 1 {
                     state.leases[key] = count - 1
@@ -682,6 +791,17 @@ public final class DiskStore: ManagedCache {
         var nextOrder: UInt64
         var dirty = false
         var changesSinceFlush = 0
+        /// Every change, and every change to the set of files, ever: how
+        /// `mutate` sees that its body changed the index.
+        var changes: UInt64 = 0
+        var structuralChanges: UInt64 = 0
+        /// A delayed flush is scheduled (`flushWhenDue`).
+        var isFlushArmed = false
+        /// When the delayed flush is due: `flushDelay` after the last change…
+        var quietDeadline: Date?
+        /// …or `flushMaxDelay` after the first unwritten change to the set of
+        /// files, whichever comes first.
+        var longestDeadline: Date?
         var statistics = CacheStatistics()
 
         init(limits: CacheLimits, records: [String: Record], nextOrder: UInt64) {
@@ -707,7 +827,11 @@ public final class DiskStore: ManagedCache {
         /// otherwise only access times did.
         mutating func markChanged(structural: Bool) {
             dirty = true
-            if structural { changesSinceFlush += 1 }
+            changes &+= 1
+            if structural {
+                changesSinceFlush += 1
+                structuralChanges &+= 1
+            }
         }
 
         mutating func link(_ key: String, _ record: Record) {

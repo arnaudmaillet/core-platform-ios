@@ -63,6 +63,27 @@ public struct SystemCacheClock: CacheClock {
     public var now: Date { Date() }
 }
 
+/// Runs work later, off the caller's thread: a `DiskStore`'s delayed index
+/// flush (#1079). Injected, so a test steps it by hand with a
+/// `ManualCacheClock` instead of waiting on the wall clock.
+public protocol CacheFlushScheduling: Sendable {
+    func schedule(after delay: TimeInterval, _ work: @escaping @Sendable () -> Void)
+}
+
+/// Runs the work on a serial dispatch queue: the store's own, at utility
+/// QoS, never the main thread.
+public struct DispatchFlushScheduler: CacheFlushScheduling {
+    let queue: DispatchQueue
+
+    public init(queue: DispatchQueue) {
+        self.queue = queue
+    }
+
+    public func schedule(after delay: TimeInterval, _ work: @escaping @Sendable () -> Void) {
+        queue.asyncAfter(deadline: .now() + max(0, delay), execute: work)
+    }
+}
+
 /// A clock a test moves by hand.
 public final class ManualCacheClock: CacheClock {
     private let current: Mutex<Date>
