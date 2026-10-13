@@ -43,15 +43,20 @@ final class MessageRequestCell: UITableViewCell {
     private let nameLabel = UILabel()
     private let previewLabel = EmoteLabel()
     private let timeLabel = UILabel()
-    /// UIKit's system capsule, shared with every person row (#885); its press
-    /// is the configuration's highlight.
-    private let acceptButton = RowActionButton(frame: .zero)
-    private let dismissButton = RowActionButton(frame: .zero)
+    /// The app's button, shared with every person row (#932), with its one
+    /// press (#866).
+    private let acceptButton = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Accept"))
+    /// A quiet circle carrying only a glyph.
+    private let dismissButton: AppButton = {
+        let button = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("xmark"))
+        button.inkColor = .secondaryLabel
+        return button
+    }()
 
     /// Accept. Internal for tests.
-    var debugAcceptButton: RowActionButton { acceptButton }
+    var debugAcceptButton: AppButton { acceptButton }
     /// Decline. Internal for tests.
-    var debugDismissButton: RowActionButton { dismissButton }
+    var debugDismissButton: AppButton { dismissButton }
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -237,7 +242,6 @@ final class MessageRequestCell: UITableViewCell {
     /// than a glyph because accepting a stranger's message is a decision worth
     /// naming.
     private func configureAcceptButton() {
-        acceptButton.setConfiguration(RowActionButton.configuration(title: "Accept", prominence: .prominent), animated: false)
         acceptButton.addAction(UIAction { [weak self] _ in self?.onAccept?() }, for: .primaryActionTriggered)
         acceptButton.setContentHuggingPriority(.required, for: .horizontal)
         acceptButton.setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -246,15 +250,14 @@ final class MessageRequestCell: UITableViewCell {
     /// Secondary: a tinted circle carrying only a glyph. Quiet enough that the
     /// eye lands on Accept first, present enough to be an obvious target.
     private func configureDismissButton() {
-        var configuration = UIButton.Configuration.gray()
-        configuration.image = UIImage(systemName: "xmark")
-        configuration.cornerStyle = .capsule
-        configuration.buttonSize = .small
-        configuration.baseForegroundColor = .secondaryLabel
-        dismissButton.setConfiguration(configuration, animated: false)
         dismissButton.addAction(UIAction { [weak self] _ in self?.onDismiss?() }, for: .primaryActionTriggered)
+        // ⚠️ Drawn at 36pt, under its 44pt icon size: the size constraints
+        // below win, so the button's own intrinsic 44 must give rather than
+        // resist (a required resistance was an unsatisfiable layout). Its
+        // hit region stays 44×44 (`AppButton.hitRegion`).
         dismissButton.setContentHuggingPriority(.required, for: .horizontal)
-        dismissButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        dismissButton.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        dismissButton.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
         NSLayoutConstraint.activate([
             dismissButton.widthAnchor.constraint(equalToConstant: Metrics.dismissDiameter),
             dismissButton.heightAnchor.constraint(equalToConstant: Metrics.dismissDiameter)

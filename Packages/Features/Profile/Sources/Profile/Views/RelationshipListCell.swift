@@ -32,14 +32,20 @@ final class RelationshipListCell: UICollectionViewListCell {
     /// The host's constant width keeps every row's accessory the same, so
     /// the accessory never has to be resized after it is installed (it
     /// reserves `.actual` width once). The button inside resizes freely —
-    /// easing to its new title's width as the title cross-fades
-    /// (`RowActionButton`, #885) — and every pill keeps one right edge.
+    /// springing to its new title's width as the title blurs over
+    /// (`AppButton`, #931/#932) — and every pill keeps one right edge.
     ///
     /// ⚠️ THE LONGEST OF ALL THE TITLES (#726). The width used to be measured
     /// from "Following" alone; "Follow Back" (#717) is longer, and wrapped onto
     /// two lines inside a host one word too narrow.
     private final class ActionAccessoryView: UIView {
-        let button = RowActionButton(frame: .zero)
+        /// Prominent while it invites (Follow, Follow Back); selected — the
+        /// quiet ground — once it states a fact (Following, Requested).
+        let button: AppButton = {
+            let button = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Follow"))
+            button.isToggle = true
+            return button
+        }()
 
         override var intrinsicContentSize: CGSize {
             CGSize(width: Self.reservedWidth(for: traitCollection), height: UIView.noIntrinsicMetric)
@@ -72,9 +78,9 @@ final class RelationshipListCell: UICollectionViewListCell {
             let actions: [ProfileRelationshipsViewModel.RowAction] = [.follow, .followBack, .following, .requested]
             // ⚠️ TYPED BY HAND: Xcode 26 (CI) inferred the closure's result as
             // Double and would not convert it into the cache's CGFloat tuple.
-            let widths: [CGFloat] = actions.compactMap(RelationshipListCell.buttonConfiguration(for:)).map { configuration in
-                let probe = RowActionButton(configuration: configuration)
-                let fitted: CGFloat = probe.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+            let probe = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Follow"))
+            let widths: [CGFloat] = actions.compactMap(RelationshipListCell.buttonState(for:)).map { state in
+                let fitted: CGFloat = probe.fittingSize(for: .title(state.title)).width
                 return fitted.rounded(.up)
             }
             let width: CGFloat = widths.max() ?? 0
@@ -101,7 +107,7 @@ final class RelationshipListCell: UICollectionViewListCell {
     private var shownAction: ProfileRelationshipsViewModel.RowAction?
 
     /// The trailing button. Internal for tests.
-    var debugActionButton: RowActionButton { actionHost.button }
+    var debugActionButton: AppButton { actionHost.button }
     /// The width every row reserves for its button. Internal for tests.
     var debugReservedActionWidth: CGFloat { ActionAccessoryView.debugReservedWidth(for: traitCollection) }
 
@@ -166,11 +172,11 @@ final class RelationshipListCell: UICollectionViewListCell {
                 maintainsFixedSize: true
             ))
         ]
-        if let action = Self.buttonConfiguration(for: row.action) {
-            // The same person changing state cross-fades (#885); a new
+        if let state = Self.buttonState(for: row.action) {
+            // The same person changing state blurs over (#931); a new
             // person — a reused cell — takes theirs at once.
             let changes = shownProfileID == row.id && shownAction != nil && shownAction != row.action
-            actionHost.button.setConfiguration(action, animated: changes)
+            actionHost.button.setContent(.title(state.title), selected: state.selected, animated: changes)
             actionHost.button.accessibilityLabel = Self.actionLabel(for: row)
             accessories.append(.customView(configuration: .init(
                 customView: actionHost,
@@ -188,19 +194,19 @@ final class RelationshipListCell: UICollectionViewListCell {
             .joined(separator: ", ")
     }
 
-    /// The row's decision as a system capsule (`RowActionButton`, shared with
-    /// the inbox's Requests and Suggestions rows): filled while it is an
-    /// invitation (Follow, Follow Back) and grey once it states a fact
-    /// (Following, Requested).
-    private static func buttonConfiguration(
+    /// The row's decision on the shared button (`AppButton`, as the inbox's
+    /// Requests and Suggestions rows): an invitation (Follow, Follow Back)
+    /// stands on the prominent ground, a fact (Following, Requested) is the
+    /// selected, quiet one. Internal for tests.
+    static func buttonState(
         for action: ProfileRelationshipsViewModel.RowAction
-    ) -> UIButton.Configuration? {
+    ) -> (title: String, selected: Bool)? {
         switch action {
         case .inert: nil
-        case .follow: RowActionButton.configuration(title: "Follow", prominence: .prominent)
-        case .followBack: RowActionButton.configuration(title: "Follow Back", prominence: .prominent)
-        case .following: RowActionButton.configuration(title: "Following", prominence: .secondary)
-        case .requested: RowActionButton.configuration(title: "Requested", prominence: .secondary)
+        case .follow: ("Follow", false)
+        case .followBack: ("Follow Back", false)
+        case .following: ("Following", true)
+        case .requested: ("Requested", true)
         }
     }
 

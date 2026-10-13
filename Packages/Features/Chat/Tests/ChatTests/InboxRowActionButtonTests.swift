@@ -5,11 +5,11 @@ import Testing
 import UIKit
 @testable import Chat
 
-// THE INBOX'S ROW ACTIONS ARE UIKIT'S SYSTEM BUTTON (#885). The Requests
-// rows' Accept and Decline and the Suggestions rows' Follow and ✕ are the
-// shared `RowActionButton`: system capsules, UIKit's own press, Follow ⇄
-// Following cross-faded. These pin the states per tab and that every action
-// still lands through the button, optimistic and rolled back as before.
+// THE INBOX'S ROW ACTIONS ARE THE APP'S BUTTON (#932). The Requests rows'
+// Accept and Decline and the Suggestions rows' Follow and ✕ are `AppButton`:
+// one press each (#866), Follow ⇄ Following blurred over to the quiet ground
+// (#931). These pin the states per tab and that every action still lands
+// through the button, optimistic and rolled back as before.
 
 private struct Refused: Error {}
 
@@ -99,18 +99,14 @@ struct InboxRowActionButtonTests {
         return table.cellForRow(at: rows[row]) as? T
     }
 
-    /// The touch-down handlers wired to a control: one per press effect.
-    private func touchDownHandlers(_ control: UIControl) -> Int {
-        var count = 0
-        control.enumerateEventHandlers { _, _, event, _ in
-            if event.contains(.touchDown) { count += 1 }
-        }
-        return count
-    }
-
-    private func expectUIKitsOwnPress(_ button: UIButton, _ name: String) {
-        #expect(PressFeedback.attached(to: button) == nil, "\(name) carries a custom press")
-        #expect(touchDownHandlers(button) == 0, "\(name) has something wired to touch-down")
+    /// One press per button (#866): the button's own, and a touch-down
+    /// scales it once.
+    private func expectOnePress(_ button: AppButton, _ name: String) {
+        #expect(PressFeedback.attached(to: button) === button.pressFeedback, "\(name) carries a second press")
+        button.sendActions(for: .touchDown)
+        button.sendActions(for: .touchCancel)
+        let presses = button.pressFeedback?.debugEvents.filter { if case .pressed = $0 { true } else { false } }
+        #expect(presses?.count == 1, "\(name) pressed \(presses?.count ?? 0) times")
     }
 
     // MARK: - Suggestions
@@ -122,25 +118,31 @@ struct InboxRowActionButtonTests {
         )
     }
 
-    /// Follow is the filled system capsule, Following the grey one, each
-    /// labelled with the person; the ✕ is the same button.
-    @Test func suggestionRowsShowFollowAndFollowingAsSystemCapsules() {
+    /// Follow stands on the prominent ground, Following on the quiet one
+    /// (selected), each labelled with the person; the ✕ is the same button,
+    /// bare.
+    @Test func suggestionRowsShowFollowAndFollowing() {
         let cell = SuggestionCell(style: .default, reuseIdentifier: nil)
         cell.configure(with: suggestion(following: false), imagePipeline: nil)
-        #expect(cell.debugFollowButton.requestedConfiguration == RowActionButton.configuration(title: "Follow", prominence: .prominent))
+        #expect(cell.debugFollowButton.content.title == "Follow")
+        #expect(cell.debugFollowButton.currentGround == .prominent)
         #expect(cell.debugFollowButton.configuration?.title == "Follow")
         #expect(cell.debugFollowButton.accessibilityLabel == "Follow Name s1")
 
         cell.configure(with: suggestion(following: true), imagePipeline: nil)
-        #expect(cell.debugFollowButton.requestedConfiguration == RowActionButton.configuration(title: "Following", prominence: .secondary))
-        #expect(cell.debugFollowButton.configuration?.title == "Following")
+        #expect(cell.debugFollowButton.content.title == "Following")
+        #expect(cell.debugFollowButton.isSelected)
+        #expect(cell.debugFollowButton.currentGround == .quiet)
         #expect(cell.debugFollowButton.accessibilityLabel == "Unfollow Name s1")
+        #expect(cell.debugFollowButton.accessibilityTraits.contains(.toggleButton))
 
-        expectUIKitsOwnPress(cell.debugFollowButton, "Follow")
-        expectUIKitsOwnPress(cell.debugDismissButton, "the ✕")
+        #expect(cell.debugDismissButton.aspect == .bare)
+        #expect(cell.debugDismissButton.content.symbol == "xmark")
+        expectOnePress(cell.debugFollowButton, "Follow")
+        expectOnePress(cell.debugDismissButton, "the ✕")
     }
 
-    /// The same person flipping cross-fades; a reused row showing someone
+    /// The same person flipping blurs over; a reused row showing someone
     /// else takes their state at once.
     @Test func aSuggestionFlipCrossFadesOnlyForTheSamePerson() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
@@ -148,20 +150,25 @@ struct InboxRowActionButtonTests {
         let cell = SuggestionCell(style: .default, reuseIdentifier: nil)
         cell.frame = CGRect(x: 0, y: 0, width: 390, height: 76)
         window.addSubview(cell)
+        let button = cell.debugFollowButton
+        button.reducesMotion = { false }
         cell.configure(with: suggestion(following: false), imagePipeline: nil)
         cell.layoutIfNeeded()
-        #expect(!cell.debugFollowButton.isTransitioning, "a first state faded in")
+        #expect(button.events.isEmpty, "a first state animated in")
 
         cell.configure(with: suggestion(following: true), imagePipeline: nil)
-        #expect(cell.debugFollowButton.isTransitioning, "Follow → Following did not cross-fade")
+        #expect(button.events.last == .blurMorph, "Follow → Following did not blur over")
+        #expect(button.debugVeilIsShown)
 
         cell.prepareForReuse()
         cell.configure(with: suggestion(following: false, id: "s2"), imagePipeline: nil)
-        #expect(!cell.debugFollowButton.isTransitioning, "a reused row kept the last person's fade")
+        #expect(!button.debugVeilIsShown, "a reused row kept the last person's blur")
         cell.layoutIfNeeded()
+        let morphs = button.events.count
         cell.configure(with: suggestion(following: true, id: "s3"), imagePipeline: nil)
-        #expect(!cell.debugFollowButton.isTransitioning, "a different person's state faded in")
-        #expect(cell.debugFollowButton.configuration?.title == "Following")
+        #expect(button.events.count == morphs, "a different person's state animated in")
+        #expect(button.configuration?.title == "Following")
+        #expect(button.isSelected)
     }
 
     /// Tapping Follow flips the row at once and reaches the server; tapping
@@ -175,22 +182,23 @@ struct InboxRowActionButtonTests {
         screen.surfaceDidBecomeActive()
         try #require(await settle { cell(SuggestionCell.self, row: 0, in: screen) != nil }, "no suggestion row")
 
-        func button() -> RowActionButton? { cell(SuggestionCell.self, row: 0, in: screen)?.debugFollowButton }
-        #expect(button()?.configuration?.title == "Follow")
+        func button() -> AppButton? { cell(SuggestionCell.self, row: 0, in: screen)?.debugFollowButton }
+        #expect(button()?.content.title == "Follow")
 
         button()?.sendActions(for: .primaryActionTriggered)
-        // Before any await: the optimistic row.
-        #expect(button()?.configuration?.title == "Following", "the row waited for the server")
+        // Before any await: the optimistic row (its words land under the blur).
+        #expect(button()?.content.title == "Following", "the row waited for the server")
         #expect(await settle { await repository.followed == [ProfileID("s1")] }, "the follow never left")
 
         button()?.sendActions(for: .primaryActionTriggered)
-        #expect(button()?.configuration?.title == "Follow")
+        #expect(button()?.content.title == "Follow")
         #expect(await settle { await repository.unfollowed == [ProfileID("s1")] }, "the unfollow never left")
 
         await repository.setRefuses(true)
         button()?.sendActions(for: .primaryActionTriggered)
-        #expect(button()?.configuration?.title == "Following")
-        #expect(await settle { button()?.configuration?.title == "Follow" }, "a refused follow kept Following")
+        #expect(button()?.content.title == "Following")
+        #expect(await settle { button()?.content.title == "Follow" }, "a refused follow kept Following")
+        #expect(await settle { button()?.configuration?.title == "Follow" }, "the rollback never landed on screen")
         #expect(!viewModel.isFollowing(ProfileID("s1")))
     }
 
@@ -210,16 +218,18 @@ struct InboxRowActionButtonTests {
 
     // MARK: - Requests
 
-    /// Accept is the filled system capsule, Decline the grey ✕ — both the
-    /// shared button, both with UIKit's own press.
-    @Test func requestRowsShowAcceptAndDeclineAsSystemButtons() {
+    /// Accept stands on the prominent ground, Decline is a quiet ✕ circle —
+    /// both the shared button, one press each.
+    @Test func requestRowsShowAcceptAndDecline() {
         let cell = MessageRequestCell(style: .default, reuseIdentifier: nil)
-        #expect(cell.debugAcceptButton.requestedConfiguration == RowActionButton.configuration(title: "Accept", prominence: .prominent))
-        let decline = cell.debugDismissButton.requestedConfiguration
-        #expect(decline?.image != nil && decline?.title == nil, "Decline is not the ✕")
-        #expect(decline?.cornerStyle == .capsule)
-        expectUIKitsOwnPress(cell.debugAcceptButton, "Accept")
-        expectUIKitsOwnPress(cell.debugDismissButton, "Decline")
+        #expect(cell.debugAcceptButton.content.title == "Accept")
+        #expect(cell.debugAcceptButton.currentGround == .prominent)
+        let decline = cell.debugDismissButton
+        #expect(decline.content.symbol == "xmark" && decline.content.title == nil, "Decline is not the ✕")
+        #expect(decline.currentGround == .quiet)
+        #expect(decline.configuration?.cornerStyle == .capsule)
+        expectOnePress(cell.debugAcceptButton, "Accept")
+        expectOnePress(cell.debugDismissButton, "Decline")
     }
 
     /// Accept on a row moves the request to All; Decline on the next takes it

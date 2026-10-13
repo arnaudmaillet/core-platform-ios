@@ -21,10 +21,19 @@ final class SuggestionCell: UITableViewCell {
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let reasonLabel = UILabel()
-    /// UIKit's system capsule, shared with every person row (#885): Follow ⇄
-    /// Following cross-fades, and its press is the configuration's highlight.
-    private let followButton = RowActionButton(frame: .zero)
-    private let dismissButton = RowActionButton(frame: .zero)
+    /// The app's button, shared with every person row (#932): Follow ⇄
+    /// Following blurs over to the quiet ground, with the one press (#866).
+    private let followButton: AppButton = {
+        let button = AppButton(aspect: .pill(.prominent), size: .row, content: .title("Follow"))
+        button.isToggle = true
+        return button
+    }()
+    /// A bare ✕, quiet enough that the eye lands on Follow.
+    private let dismissButton: AppButton = {
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("xmark"))
+        button.inkColor = .tertiaryLabel
+        return button
+    }()
     /// Who the row shows and whether it said Following: the same person
     /// flipping cross-fades the button, a new person (a reused cell) does not.
     private var shownID: ProfileID?
@@ -74,23 +83,17 @@ final class SuggestionCell: UITableViewCell {
         loadAvatar(model.avatarURL)
     }
 
+    /// Prominent while it invites, selected (quiet) once it states a fact —
+    /// the same two looks as the relationship lists' rows.
     private func applyFollowState(_ isFollowing: Bool, name: String, animated: Bool) {
-        followButton.setConfiguration(Self.followConfiguration(isFollowing: isFollowing), animated: animated)
+        followButton.setContent(.title(isFollowing ? "Following" : "Follow"), selected: isFollowing, animated: animated)
         followButton.accessibilityLabel = isFollowing ? "Unfollow \(name)" : "Follow \(name)"
     }
 
-    /// Filled while it invites, grey once it states a fact — the same two
-    /// looks as the relationship lists' rows.
-    private static func followConfiguration(isFollowing: Bool) -> UIButton.Configuration {
-        isFollowing
-            ? RowActionButton.configuration(title: "Following", prominence: .secondary)
-            : RowActionButton.configuration(title: "Follow", prominence: .prominent)
-    }
-
     /// The follow button. Internal for tests.
-    var debugFollowButton: RowActionButton { followButton }
+    var debugFollowButton: AppButton { followButton }
     /// The ✕. Internal for tests.
-    var debugDismissButton: RowActionButton { dismissButton }
+    var debugDismissButton: AppButton { dismissButton }
     /// The @handle line. Internal for tests.
     var debugHandleLabel: UILabel { handleLabel }
     /// The reason line. Internal for tests.
@@ -146,11 +149,6 @@ final class SuggestionCell: UITableViewCell {
         followButton.setContentHuggingPriority(.required, for: .horizontal)
         followButton.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        var dismissConfiguration = UIButton.Configuration.plain()
-        dismissConfiguration.image = UIImage(systemName: "xmark")
-        dismissConfiguration.baseForegroundColor = .tertiaryLabel
-        dismissConfiguration.buttonSize = .small
-        dismissButton.setConfiguration(dismissConfiguration, animated: false)
         dismissButton.addAction(UIAction { [weak self] _ in self?.onDismiss?() }, for: .primaryActionTriggered)
         dismissButton.setContentHuggingPriority(.required, for: .horizontal)
         dismissButton.setContentCompressionResistancePriority(.required, for: .horizontal)
