@@ -71,4 +71,22 @@ struct ServerWalletTests {
         comment.commentID = "c-1"
         #expect(ServerWallet.stake(comment) == nil)
     }
+
+    /// A history row as the app keeps it (#400); a kind this build does not
+    /// know is kept, as "other".
+    @Test func aTransactionKeepsItsKindAmountAndBalance() {
+        var wire = Wallet_V1_WalletTransaction()
+        wire.transactionID = "tx-9"
+        wire.currency = .gems
+        wire.delta = -50
+        wire.balanceAfter = 130
+        wire.kind = .countryUnlock
+        wire.refID = "FR"
+        let row = ServerWallet.transaction(wire)
+        #expect(row == WalletTransaction(
+            id: "tx-9", currency: .gems, delta: -50, balanceAfter: 130, kind: .countryUnlock, createdAt: nil, reference: "FR"
+        ))
+        wire.kind = .UNRECOGNIZED(42)
+        #expect(ServerWallet.transaction(wire).kind == .other)
+    }
 }

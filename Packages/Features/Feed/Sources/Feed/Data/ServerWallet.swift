@@ -95,6 +95,49 @@ public actor ServerWallet: WalletServer {
         )
     }
 
+    /// A page of the wallet's history (#400), newest first.
+    public func transactions(
+        currency: WalletTransaction.Currency?, after pageToken: String?
+    ) async throws -> WalletTransactionPage {
+        var request = Wallet_V1_ListWalletTransactionsRequest()
+        request.accountID = try await account()
+        request.currency = switch currency {
+        case .points?: .points
+        case .gems?: .gems
+        case nil: .unspecified
+        }
+        request.pageSize = 50
+        request.pageToken = pageToken ?? ""
+        let response = await walletClient.listWalletTransactions(request: request, headers: [:])
+        if let error = response.error { throw NetworkFailureError(NetworkFailure(error)) }
+        guard let page = response.message else { throw NetworkFailureError(.server(code: "empty_response")) }
+        return WalletTransactionPage(
+            transactions: page.transactions.map(Self.transaction),
+            nextPageToken: page.nextPageToken.isEmpty ? nil : page.nextPageToken
+        )
+    }
+
+    static func transaction(_ wire: Wallet_V1_WalletTransaction) -> WalletTransaction {
+        let kind: WalletTransaction.Kind = switch wire.kind {
+        case .claim: .claim
+        case .starterGift: .starterGift
+        case .stakePack: .stakePack
+        case .countryUnlock: .countryUnlock
+        case .stake: .stake
+        case .welcomeGift: .welcomeGift
+        case .unspecified, .UNRECOGNIZED: .other
+        }
+        return WalletTransaction(
+            id: wire.transactionID,
+            currency: wire.currency == .gems ? .gems : .points,
+            delta: Int(clamping: wire.delta),
+            balanceAfter: Int(clamping: wire.balanceAfter),
+            kind: kind,
+            createdAt: wire.hasCreatedAt ? wire.createdAt.date : nil,
+            reference: wire.refID.isEmpty ? nil : wire.refID
+        )
+    }
+
     private func account() async throws -> String {
         guard case .member(let account, _) = await viewer.current() else { throw NotAMember() }
         return account.rawValue

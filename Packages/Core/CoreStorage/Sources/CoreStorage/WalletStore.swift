@@ -74,11 +74,61 @@ public protocol WalletServer: Sendable {
     /// The member's stakes (wallet.v1 `ListMyStakes`, #903): active and
     /// settled, newest first stake first.
     func myStakes() async throws -> [WalletStake]
+    /// A page of the wallet's history (wallet.v1 `ListWalletTransactions`,
+    /// #400), newest first; nil `currency` lists both.
+    func transactions(currency: WalletTransaction.Currency?, after pageToken: String?) async throws -> WalletTransactionPage
 }
 
 public extension WalletServer {
     /// Servers that list no stakes: the device's.
     func myStakes() async throws -> [WalletStake] { [] }
+    /// Servers with no history.
+    func transactions(currency: WalletTransaction.Currency?, after pageToken: String?) async throws -> WalletTransactionPage {
+        WalletTransactionPage(transactions: [], nextPageToken: nil)
+    }
+}
+
+/// One movement of the wallet (#400): a claim, a stake, a gift…
+public struct WalletTransaction: Equatable, Sendable, Identifiable, Hashable {
+    public enum Currency: Equatable, Sendable, Hashable { case points, gems }
+    public enum Kind: Equatable, Sendable, Hashable {
+        case claim, starterGift, stakePack, countryUnlock, stake, welcomeGift
+        /// A kind this build does not know — shown plainly, never hidden.
+        case other
+    }
+
+    public let id: String
+    public let currency: Currency
+    /// Positive: credited; negative: spent.
+    public let delta: Int
+    public let balanceAfter: Int
+    public let kind: Kind
+    public let createdAt: Date?
+    /// What it was for, when it names something (a country's code).
+    public let reference: String?
+
+    public init(
+        id: String, currency: Currency, delta: Int, balanceAfter: Int, kind: Kind, createdAt: Date?, reference: String?
+    ) {
+        self.id = id
+        self.currency = currency
+        self.delta = delta
+        self.balanceAfter = balanceAfter
+        self.kind = kind
+        self.createdAt = createdAt
+        self.reference = reference
+    }
+}
+
+public struct WalletTransactionPage: Equatable, Sendable {
+    public let transactions: [WalletTransaction]
+    /// Nil on the last page.
+    public let nextPageToken: String?
+
+    public init(transactions: [WalletTransaction], nextPageToken: String?) {
+        self.transactions = transactions
+        self.nextPageToken = nextPageToken
+    }
 }
 
 /// A stake of points (the charter's currency A) on a post or comment, and
@@ -612,6 +662,15 @@ public final class WalletStore: @unchecked Sendable {
     /// account they belong to. Memory only: the sheet asks again on opening.
     private var _serverStakes: (owner: StorageScope.Owner, stakes: [WalletStake])?
 
+    /// A page of the member's wallet history (#400); throws without a server
+    /// or for a guest, who has no wallet to list.
+    public func transactions(
+        currency: WalletTransaction.Currency?, after pageToken: String?
+    ) async throws -> WalletTransactionPage {
+        guard let server, case .member = scope.owner else { throw WalletHistoryUnavailable() }
+        return try await server.transactions(currency: currency, after: pageToken)
+    }
+
     /// Lists the member's stakes from the server; the sheet's Active and
     /// Settled read them (`stakes()`). Returns whether it did.
     @discardableResult
@@ -988,4 +1047,9 @@ public final class WalletStore: @unchecked Sendable {
         // test suites (MapFavoritesStore's rule).
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
+}
+
+/// The wallet's history cannot be read: no server, or no member.
+public struct WalletHistoryUnavailable: Error, Equatable {
+    public init() {}
 }

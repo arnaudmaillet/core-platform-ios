@@ -181,4 +181,14 @@ struct WalletServerTests {
         #expect(stakes.last?.outcome == .rewarded)
         #expect(stakes.first?.isSettled == false)
     }
+
+    /// A guest has no wallet history to read (#400).
+    @Test func aGuestHasNoHistory() async {
+        let defaults = UserDefaults(suiteName: "wallet-server-\(UUID().uuidString)")!
+        let store = WalletStore(defaults: defaults, scope: StorageScope(owner: .guest))
+        store.server = FakeWalletServer(serverState(points: 1))
+        await #expect(throws: WalletHistoryUnavailable.self) {
+            _ = try await store.transactions(currency: nil, after: nil)
+        }
+    }
 }

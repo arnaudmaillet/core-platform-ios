@@ -168,4 +168,33 @@ struct MockWalletClaimTests {
         } while !token.isEmpty
         #expect(ids == posts)
     }
+
+    /// ListWalletTransactions (#400): the ledger newest first — a claim, a
+    /// stake, the opening gifts — by currency.
+    @Test func theHistoryListsEveryMovementNewestFirst() async throws {
+        let (client, _) = make()
+        _ = try await claim(client, key: "claim-key-0100")
+        let post = try #require(dataset.posts.first { dataset.accountID(for: $0.authorProfileID) != account }).postID
+        var stake = Wallet_V1_StakeRequest()
+        stake.accountID = account
+        stake.profileID = MockSocialDataset.viewerProfileID
+        stake.postID = post
+        stake.points = 4
+        stake.idempotencyKey = "stake-key-0100"
+        stake.firstTapAt = Google_Protobuf_Timestamp(date: clock.now)
+        _ = await client.stake(request: stake, headers: [:])
+
+        func history(_ currency: Wallet_V1_Currency) async throws -> [Wallet_V1_WalletTransaction] {
+            var request = Wallet_V1_ListWalletTransactionsRequest()
+            request.accountID = account
+            request.currency = currency
+            return try #require(await client.listWalletTransactions(request: request, headers: [:]).message).transactions
+        }
+        let points = try await history(.points)
+        #expect(points.map(\.kind) == [.stake, .claim, .starterGift])
+        #expect(points.map(\.delta) == [-4, 25, 250])
+        #expect(points.first?.balanceAfter == 271)
+        #expect(try await history(.gems).map(\.kind) == [.starterGift])
+        #expect(try await history(.unspecified).count == 4)
+    }
 }

@@ -200,7 +200,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             // profile action, and it is safe at any stack depth.
             makeSettingsViewController: onLogout.flatMap { onLogout in
                 account.map { account in
-                    { [switching, accountSessions, accountStatus, reporting, gallery, notificationPreferences, imagePipeline] in
+                    { [switching, accountSessions, accountStatus, reporting, gallery, notificationPreferences, imagePipeline,
+                       makeWalletSection = self.makeWalletSection] in
                         SettingsViewController(
                             switching: switching,
                             switcher: makeSwitcherFactory(),
@@ -372,6 +373,10 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             try await account.currentAccount().ageBracket.isTeen
                                         })
                                     }
+                                // The wallet's history (#400): the app's screen,
+                                // which reads the server wallet.
+                                case .wallet:
+                                    makeWalletSection?()
                                 default: nil
                                 }
                             },
@@ -404,6 +409,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// The wallet the gallery cards' like chips stake from — the app's one
     /// instance. Nil leaves the chips counters.
     public var wallet: WalletStore?
+    /// Settings → Wallet and Purchases (#400): built by the composition
+    /// root, which can read the server wallet. Nil leaves it coming soon.
+    public var makeWalletSection: (@MainActor () -> UIViewController)?
     /// Builds a gallery's card staking with the app's live post counts
     /// (#896): a like in the feed shows on the profile's cards. Nil: the
     /// cards stake from `wallet` and keep the counts they loaded.

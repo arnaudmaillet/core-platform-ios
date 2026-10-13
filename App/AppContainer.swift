@@ -1362,6 +1362,8 @@ final class AppContainer {
         builder.videoPlayback = videoPlayback
         // The gallery cards' like chips stake from the app's one wallet.
         builder.wallet = walletStore
+        // Settings → Wallet and Purchases: the server wallet's history (#400).
+        builder.makeWalletSection = { [unowned self] in WalletHistoryViewController(wallet: walletStore) }
         // …and draw their posts' live counts (#896).
         builder.makeCardStaking = { [unowned self] in
             PostCardStaking(wallet: self.walletStore, entities: self.entityStore)
