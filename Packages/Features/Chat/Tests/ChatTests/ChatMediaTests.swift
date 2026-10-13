@@ -1,3 +1,4 @@
+import Connect
 import AuthInterface
 import CoreContracts
 import CoreModels
@@ -32,14 +33,19 @@ struct ChatMediaTests {
         }
     }
 
-    private func repository(transport: (any MediaUploadTransport)? = nil) -> ChatRepository {
+    private func repository(
+        transport: (any MediaUploadTransport)? = nil, relay: WireRecorder? = nil
+    ) -> ChatRepository {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         let blobs = MockBlobStore()
         MockSocialServices(dataset: dataset).register(on: bff)
         MockChatService(dataset: dataset).register(on: bff)
         MockMediaService(store: blobs).register(on: bff)
-        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        relay?.bff = bff
+        let client = ConnectClientFactory.makeUnauthenticated(
+            host: "https://mock.bff.local", httpClient: relay.map { $0 as HTTPClientInterface } ?? bff
+        )
         return ChatRepository(
             chatClient: Chat_V1_ChatServiceClient(client: client),
             profileClient: Profile_V1_ProfileServiceClient(client: client),
@@ -91,6 +97,22 @@ struct ChatMediaTests {
         let history = try await repository.loadMessages(in: conversation)
         let echoed = try #require(history.first { $0.id == sent.id }, "the mock dropped the media message")
         #expect(echoed.media == media, "the reference did not come back as sent")
+    }
+
+    /// ⚠️ A CHAT PHOTO IS UPLOADED SIGNED AND THE MESSAGE NAMES ITS ASSET
+    /// (#990, backend #928): the ticket asks SIGNED delivery (a conversation
+    /// is private; the server refuses a still-processing PUBLIC one,
+    /// CHT-2012), and `SendMessage` carries `media_asset_id`.
+    @Test func aPhotoIsUploadedSignedAndTheMessageNamesItsAsset() async throws {
+        let relay = WireRecorder()
+        let repository = repository(relay: relay)
+        let conversation = try await repository.directConversation(with: ProfileID("prof-31"))
+        _ = try await repository.send(
+            media: .image(Self.solid()), caption: "", to: conversation, replyingTo: nil, idempotencyKey: "k-signed"
+        )
+        #expect(relay.ticketVisibilities == [.mediaDeliveryVisibilitySigned])
+        let assetID = try #require(relay.sentMediaAssetIDs.first)
+        #expect(assetID.hasPrefix("asset-"), "no media_asset_id on the message: \(assetID)")
     }
 
     /// A failed upload sends nothing and says so.
@@ -367,4 +389,39 @@ private actor MediaStubProvider: ChatProviding {
     }
     func markRead(_ conversationID: ConversationID, upTo messageID: String) async throws {}
     func directConversation(with profileID: ProfileID) async throws -> ConversationID { ConversationID("c") }
+}
+
+
+/// Sits between the generated clients and the mock BFF and reads what
+/// crosses: each upload ticket's visibility, each message's asset (#990).
+final class WireRecorder: HTTPClientInterface, @unchecked Sendable {
+    var bff: MockBFF?
+    private let lock = NSLock()
+    private var visibilities: [Media_V1_DeliveryVisibility] = []
+    private var assetIDs: [String] = []
+
+    var ticketVisibilities: [Media_V1_DeliveryVisibility] { lock.withLock { visibilities } }
+    var sentMediaAssetIDs: [String] { lock.withLock { assetIDs } }
+
+    @discardableResult
+    func unary(
+        request: HTTPRequest<Data?>,
+        onMetrics: @escaping @Sendable (HTTPMetrics) -> Void,
+        onResponse: @escaping @Sendable (HTTPResponse) -> Void
+    ) -> Cancelable {
+        let body = request.message ?? Data()
+        if request.url.path.hasSuffix("/IssueUploadTicket"),
+           let ticket = try? Media_V1_IssueUploadTicketRequest(serializedBytes: body) {
+            lock.withLock { visibilities.append(ticket.deliveryVisibility) }
+        }
+        if request.url.path.hasSuffix("/SendMessage"),
+           let message = try? Chat_V1_SendMessageRequest(serializedBytes: body) {
+            lock.withLock { assetIDs.append(message.mediaAssetID) }
+        }
+        return bff!.unary(request: request, onMetrics: onMetrics, onResponse: onResponse)
+    }
+
+    func stream(request: HTTPRequest<Data?>, responseCallbacks: ResponseCallbacks) -> RequestCallbacks<Data> {
+        bff!.stream(request: request, responseCallbacks: responseCallbacks)
+    }
 }

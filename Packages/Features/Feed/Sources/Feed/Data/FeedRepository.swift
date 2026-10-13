@@ -487,7 +487,9 @@ public actor FeedRepository: FeedProviding {
                     thumbnailURL: URL(string: attachment.thumbnailURL),
                     mimeType: attachment.mimeType,
                     pixelWidth: Int(attachment.width),
-                    pixelHeight: Int(attachment.height)
+                    pixelHeight: Int(attachment.height),
+                    // The asset behind it (#990): the cache's stable key.
+                    assetID: attachment.assetID.isEmpty ? nil : attachment.assetID
                 )
             },
             publishedAt: Date(timeIntervalSince1970: TimeInterval(view.publishedAtMs) / 1000),

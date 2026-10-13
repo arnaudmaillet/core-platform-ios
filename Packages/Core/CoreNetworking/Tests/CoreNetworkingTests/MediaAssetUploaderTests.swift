@@ -22,10 +22,12 @@ struct MediaAssetUploaderTests {
         private let bff: MockBFF
         private let lock = NSLock()
         private var keys: [String] = []
+        private var visibilities: [Media_V1_DeliveryVisibility] = []
 
         init(_ bff: MockBFF) { self.bff = bff }
 
         var ticketKeys: [String] { lock.withLock { keys } }
+        var ticketVisibilities: [Media_V1_DeliveryVisibility] { lock.withLock { visibilities } }
 
         @discardableResult
         func unary(
@@ -35,7 +37,10 @@ struct MediaAssetUploaderTests {
         ) -> Cancelable {
             if request.url.path.hasSuffix("/IssueUploadTicket"),
                let ticket = try? Media_V1_IssueUploadTicketRequest(serializedBytes: request.message ?? Data()) {
-                lock.withLock { keys.append(ticket.idempotencyKey) }
+                lock.withLock {
+                    keys.append(ticket.idempotencyKey)
+                    visibilities.append(ticket.deliveryVisibility)
+                }
             }
             return bff.unary(request: request, onMetrics: onMetrics, onResponse: onResponse)
         }
@@ -121,4 +126,22 @@ struct MediaAssetUploaderTests {
         #expect(Set(relay.ticketKeys).count == 2, "keys: \(relay.ticketKeys)")
         #expect(blobs.assetCount == 2, "the second content was answered with the first asset")
     }
+
+    /// The asked delivery goes on the ticket (#990): SIGNED for a chat
+    /// photo; left unspecified (the server's PUBLIC) otherwise.
+    @Test func theAskedVisibilityGoesOnTheTicket() async throws {
+        let (uploader, _, relay) = relayedUploader()
+        let bytes = Data(repeating: 3, count: 64)
+        _ = try await uploader.upload(
+            .data(bytes), ownerID: MockAuthService.accountID, mimeType: "image/jpeg",
+            sizeBytes: UInt64(bytes.count), sha256: String(repeating: "c", count: 64), idempotencyKey: "v-1",
+            visibility: .mediaDeliveryVisibilitySigned
+        )
+        _ = try await uploader.upload(
+            .data(bytes), ownerID: MockAuthService.accountID, mimeType: "image/jpeg",
+            sizeBytes: UInt64(bytes.count), sha256: String(repeating: "d", count: 64), idempotencyKey: "v-2"
+        )
+        #expect(relay.ticketVisibilities == [.mediaDeliveryVisibilitySigned, .mediaDeliveryVisibilityUnspecified])
+    }
+
 }
