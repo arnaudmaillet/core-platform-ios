@@ -12,35 +12,44 @@ public protocol PostSaveFacts: AnyObject, Sendable {
     func setSaved(_ isSaved: Bool, for id: PostID)
 }
 
+/// Where a save made on the device goes to the server (#837): engagement's
+/// SavePost / UnsavePost, queued while offline and replayed. The app hands
+/// its one (`SavedPostsSync`) to `PostBookmarkStore.shared` at launch; a store
+/// without one (tests, previews) stays on the device.
+public protocol PostSaveSyncing: AnyObject, Sendable {
+    /// The viewer saved (or unsaved) a post on this device, as `owner`: the
+    /// change is the store's already, the server's to follow.
+    func saveDidChange(postID: String, isSaved: Bool, owner: StorageScope.Owner)
+    /// Whether the active viewer's list lives on the server (a member's
+    /// profile): a guest's pile is the whole truth.
+    var readsServer: Bool { get }
+    /// Brings the pile in line with the server's list for the active
+    /// profile (`replaceSaved`), pushing the device's pile once first.
+    /// Returns when done, or at once when there is nothing to ask.
+    func refreshFromServer() async
+}
+
 /// The posts the viewer has saved.
 ///
-/// **Client-side, and that is the whole truth rather than a stand-in for it.**
-/// No wire contract for saving exists — `engagement.v1` carries reactions,
-/// views and shares and nothing else, and no service anywhere accepts a "saved
-/// by" predicate — so there is no server answer this could disagree with. That
-/// is the same footing `MapFavoritesStore` stands on for the map's pinned
-/// profiles, and this follows its shape deliberately.
-///
-/// ⚠️ It also means what this is NOT. A saved list that lives on the device
-/// does not follow the viewer to another one and does not survive deleting the
-/// app. When a real seam arrives, this becomes a local cache in front of it and
-/// the reconciliation is the interesting part — a post saved here while offline
-/// has to be pushed, and one saved elsewhere has to arrive. Nothing here
-/// pretends that work is done.
+/// **A cache in front of the server's list (#837).** Saves live in
+/// engagement (`SavePost` / `UnsavePost` / `ListSavedPosts`): a toggle writes
+/// the pile at once and hands the change to `sync`, which sends it, or queues
+/// it while offline and replays it; the Saved tab asks `sync` for the
+/// server's list, which then replaces the pile (`replaceSaved`). The pile is
+/// what the device shows offline and what the glyphs read before the server
+/// answers. A guest's pile stays on the device: the server only keeps a
+/// member's saves.
 ///
 /// Order is preserved and most-recent-first, because a saved list is read as a
 /// pile rather than as a set: the thing you saved a minute ago is the thing you
-/// came back for.
+/// came back for. The server's list reads the same way.
 ///
 /// **A view over the EntityStore's saved fact (#896).** One instance in the app
 /// (`shared`), handed the store as its `facts`: a save writes the pile — the
 /// device's record and its order — and then the fact, which every screen
 /// observes; a read asks the fact first, the pile when the fact is unknown.
 /// The pile stays the persistence: the fact is memory, bounded and wiped on a
-/// viewer change. When #837 lands (engagement's SavePost / ListSavedPosts),
-/// this becomes the cache in front of the server that it describes — the
-/// server's list fills the pile and the fact, a toggle writes through — and
-/// the screens keep reading the fact as they do now.
+/// viewer change.
 public final class PostBookmarkStore: @unchecked Sendable {
     /// The app's one pile: every surface reads and writes it, so the facts it
     /// writes are the ones every screen observes. The app hands it the
@@ -68,6 +77,13 @@ public final class PostBookmarkStore: @unchecked Sendable {
     /// Fires after every change, on whatever thread made it — the profile's
     /// Saved tab reloads from this rather than polling.
     public var onChange: (() -> Void)?
+
+    private var _sync: (any PostSaveSyncing)?
+    /// Where a toggle goes to the server (#837); nil: the pile alone.
+    public var sync: (any PostSaveSyncing)? {
+        get { lock.withLock { _sync } }
+        set { lock.withLock { _sync = newValue } }
+    }
 
     public convenience init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
         self.init(defaults: defaults, scope: scope, launchArguments: ProcessInfo.processInfo.arguments)
@@ -107,7 +123,8 @@ public final class PostBookmarkStore: @unchecked Sendable {
     /// needs it immediately: the glyph flips from it.
     @discardableResult
     public func toggle(_ id: String) -> Bool {
-        let (saved, memory): (Bool, (any PostSaveFacts)?) = lock.withLock {
+        typealias Toggled = (Bool, (any PostSaveFacts)?, (any PostSaveSyncing)?, StorageScope.Owner)
+        let (saved, memory, writer, owner): Toggled = lock.withLock {
             let pile = key
             var ids = defaults.array(forKey: pile) as? [String] ?? []
             let saved: Bool
@@ -121,12 +138,44 @@ public final class PostBookmarkStore: @unchecked Sendable {
             }
             defaults.set(ids, forKey: pile)
             factsOwner = pile
-            return (saved, _facts)
+            return (saved, _facts, _sync, scope.owner)
         }
         // Outside the lock: the store calls its observers, which read back.
         memory?.setSaved(saved, for: PostID(id))
         onChange?()
+        writer?.saveDidChange(postID: id, isSaved: saved, owner: owner)
         return saved
+    }
+
+    /// Replaces `owner`'s pile with the server's list (#837), most recent
+    /// first, and says so to every glyph: what left the list reads unsaved,
+    /// what arrived reads saved. Nothing when the active profile is no longer
+    /// `owner` — a list asked for one profile never lands in another's pile.
+    /// Returns false then, true when the pile is `owner`'s (changed or not).
+    @discardableResult
+    public func replaceSaved(with ids: [String], owner: StorageScope.Owner) -> Bool {
+        typealias Change = (before: [String], memory: (any PostSaveFacts)?)
+        var wrote = false
+        let change: Change? = lock.withLock {
+            guard scope.owner == owner else { return nil }
+            wrote = true
+            let pile = key
+            let before = defaults.array(forKey: pile) as? [String] ?? []
+            guard before != ids else { return nil }
+            defaults.set(ids, forKey: pile)
+            factsOwner = pile
+            return (before, _facts)
+        }
+        guard let change else { return wrote }
+        let kept = Set(ids)
+        for id in change.before where !kept.contains(id) {
+            change.memory?.setSaved(false, for: PostID(id))
+        }
+        for id in ids {
+            change.memory?.setSaved(true, for: PostID(id))
+        }
+        onChange?()
+        return true
     }
 
     // MARK: - DEBUG launch hooks

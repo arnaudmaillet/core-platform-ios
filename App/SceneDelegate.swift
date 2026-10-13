@@ -70,6 +70,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
         // Offline / Back online, above every screen (#793).
         AppContainer.shared.startConnectivityMonitoring()
+        AppContainer.shared.startSavedPostsSync()
         offlineIndicator = OfflineIndicator.install(on: window)
 
         let coordinator = AppCoordinator(window: window, container: AppContainer.shared)

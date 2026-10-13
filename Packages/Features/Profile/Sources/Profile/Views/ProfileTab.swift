@@ -14,8 +14,10 @@ import PostGrid
 public enum ProfileTab: Equatable, Sendable {
     /// One of the profile's own published-content pages.
     case format(GalleryFilter.Format)
-    /// Posts the viewer saved. Own profile only — a saved pile is private by
-    /// construction; there is no contract that would let it be otherwise.
+    /// Posts the viewer saved: engagement's `ListSavedPosts` (#837). Own
+    /// profile only — the server lists another profile's only when its owner
+    /// shows the tab (`TabSettings.show_saved`, hidden by default), which no
+    /// screen offers yet.
     case saved
     /// Posts the viewer reacted to. Own profile only, same reason.
     case reactions
