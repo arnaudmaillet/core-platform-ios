@@ -16,7 +16,7 @@ final class NotificationSettingsViewController: UIViewController {
     enum Section: Hashable {
         /// iOS's own permission (#651): asked here, never in a pop-up of its own.
         case system
-        case pause, push, quiet, comingSoon
+        case pause, push, email, quiet, comingSoon
     }
 
     enum Item: Hashable {
@@ -33,6 +33,8 @@ final class NotificationSettingsViewController: UIViewController {
         case allowed
         case pause
         case category(NotificationCategory)
+        /// The category's email (#392).
+        case emailCategory(NotificationCategory)
         case quietSwitch
         case quietStart, quietEnd
         case planned(String)
@@ -45,7 +47,7 @@ final class NotificationSettingsViewController: UIViewController {
     static let pauseChoices: [(title: String, minutes: Int)] = [
         ("15 Minutes", 15), ("1 Hour", 60), ("2 Hours", 120), ("4 Hours", 240), ("8 Hours", 480)
     ]
-    static let planned = ["Email notifications"]
+    static let planned: [String] = []
 
     private let manager: any NotificationPreferencesManaging
     private let now: () -> Date
@@ -153,6 +155,7 @@ final class NotificationSettingsViewController: UIViewController {
         switch section {
         case .system, .pause: nil
         case .push: "Push Notifications"
+        case .email: "Email Notifications"
         case .quiet: "Quiet Hours"
         case .comingSoon: "Coming Soon"
         }
@@ -169,6 +172,8 @@ final class NotificationSettingsViewController: UIViewController {
             return "Stops every push for a while, up to 8 hours."
         case .push:
             return "Applies to this profile."
+        case .email:
+            return "Sent to your account's email address, for this profile. Product news and offers are a consent, under Ads and Data."
         case .quiet:
             return "No pushes between these times, in this iPhone's time zone."
         case .comingSoon:
@@ -236,6 +241,11 @@ final class NotificationSettingsViewController: UIViewController {
                 content.text = category.title
                 cell.accessories = [switchAccessory(isOn: !(preferences?.mutedCategories.contains(category) ?? false)) { [weak self] isOn in
                     self?.apply(.push(category, isOn))
+                }]
+            case .emailCategory(let category):
+                content.text = category.title
+                cell.accessories = [switchAccessory(isOn: preferences?.emailCategories.contains(category) ?? false) { [weak self] isOn in
+                    self?.apply(.email(category, isOn))
                 }]
             case .quietSwitch:
                 content.text = "Quiet Hours"
@@ -340,7 +350,8 @@ final class NotificationSettingsViewController: UIViewController {
         if case .loaded = phase {
             snapshot.reconfigureItems(snapshot.itemIdentifiers)
         }
-        snapshot.reloadSections(snapshot.sectionIdentifiers.filter { $0 != .push })
+        // Not the switch sections: a reload would redraw a switch mid-flip.
+        snapshot.reloadSections(snapshot.sectionIdentifiers.filter { $0 != .push && $0 != .email })
 
         let previousSkeletonCount = skeletonCount
         skeletonCount = layout.flatMap { $0.1 }.filter(Self.isSkeleton).count
@@ -369,8 +380,9 @@ final class NotificationSettingsViewController: UIViewController {
         case .loaded(let preferences):
             layout.append((.pause, [.pause]))
             layout.append((.push, NotificationCategory.allCases.map(Item.category)))
+            layout.append((.email, NotificationCategory.allCases.map(Item.emailCategory)))
             layout.append((.quiet, [.quietSwitch] + (preferences.quietHours == nil ? [] : [.quietStart, .quietEnd])))
-            layout.append((.comingSoon, Self.planned.map(Item.planned)))
+            if !Self.planned.isEmpty { layout.append((.comingSoon, Self.planned.map(Item.planned))) }
         }
         return layout
     }
