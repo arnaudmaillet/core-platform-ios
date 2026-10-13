@@ -44,7 +44,7 @@ final class SearchPeoplePage: UIViewController {
     private let statusView = EmptyStateView()
 
     private var modelsByID: [ProfileID: SearchResultDisplayModel] = [:]
-    private let avatarLoads = RowAvatarLoads()
+    private let avatarLoads = RowImageLoads(size: .avatar)
 
     init(imagePipeline: ImagePipeline) {
         self.imagePipeline = imagePipeline
@@ -272,9 +272,9 @@ final class SearchPeoplePage: UIViewController {
     /// started for the row that was there before must not paint the row that
     /// is there now. Keyed by person, nothing cancelled A's load when its cell
     /// was configured for B, and A's face landed on B's row after a fast
-    /// scroll. See `RowAvatarLoads`.
+    /// scroll. See `RowImageLoads` (MediaCore).
     private func loadAvatar(_ url: URL?, into cell: PersonListCell) {
-        avatarLoads.load(url, using: imagePipeline, for: cell) { [weak cell] image in
+        avatarLoads.load(url, using: imagePipeline, for: cell) { [weak cell] image, _ in
             cell?.setAvatarImage(image)
         }
     }

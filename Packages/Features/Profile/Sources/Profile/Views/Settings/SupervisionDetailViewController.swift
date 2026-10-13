@@ -43,7 +43,7 @@ final class SupervisionDetailViewController: UIViewController {
     private let onEnded: (SupervisionDetailViewController, Supervision, Bool) -> Void
     private var collectionView: UICollectionView!
     private(set) var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
-    private let avatarLoads = RowAvatarLoads()
+    private let avatarLoads = RowImageLoads(size: .avatar)
     private(set) var isEnding = false
     /// Confirms the end; a test hands in its own (an action sheet never
     /// finishes presenting in the test host).
@@ -163,7 +163,7 @@ final class SupervisionDetailViewController: UIViewController {
             ))
             cell.setAvatarImage(nil)
             if self?.router != nil { cell.accessories.append(.disclosureIndicator()) }
-            self?.avatarLoads.load(profile.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image in
+            self?.avatarLoads.load(profile.avatarURL, using: self?.imagePipeline, for: cell) { [weak cell] image, _ in
                 cell?.setAvatarImage(image)
             }
         }

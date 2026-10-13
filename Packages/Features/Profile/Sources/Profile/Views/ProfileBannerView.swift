@@ -53,7 +53,9 @@ final class ProfileBannerView: UIView {
     }
 
     private let imagePipeline: ImagePipeline
-    private var imageTask: Task<Void, Never>?
+    /// The banner's load, on the loading ladder's rules (#1085): cache first
+    /// and drawn at once, else a dissolve the contract picks.
+    private let load = ImageLoadSlot(size: .full)
     private var currentImageURL: URL?
     /// The picture that landed, whatever its route — from the cache before
     /// the first layout, or from a fetch afterwards — so the header can read
@@ -104,47 +106,34 @@ final class ProfileBannerView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    deinit {
-        imageTask?.cancel()
-    }
-
     func setImageURL(_ url: URL?) {
         guard url != currentImageURL || picture.image == nil else { return }
         currentImageURL = url
-        imageTask?.cancel()
         picture.image = nil
 
-        isPictureSettled = true
-        guard let url else { return }
-        let pipeline = imagePipeline
-        // Synchronously from the cache when it can: the shape is read off the
-        // picture, and a shape decided before the first layout is a header
-        // that never jumps. A fetch still decides it, one layout later.
-        if let cached = pipeline.cachedImage(for: url) {
-            picture.image = cached
-            onImageResolved?(cached)
-            return
-        }
-        isPictureSettled = false
-        imageTask = Task { [weak self] in
-            let image = try? await pipeline.image(for: url)
-            guard let self, !Task.isCancelled, self.currentImageURL == url else { return }
+        isPictureSettled = url == nil
+        // Synchronously from the cache when it can (the slot draws a warm hit
+        // in this pass): the shape is read off the picture, and a shape
+        // decided before the first layout is a header that never jumps. A
+        // fetch still decides it, one layout later — dissolved over the
+        // neutral backdrop, the loudest pop on the screen otherwise.
+        load.load(url, using: imagePipeline) { [weak self] image, transition in
+            guard let self else { return }
+            transition.perform(on: picture) { self.picture.image = image }
+            onImageResolved?(image)
+            // A warm hit settles in this pass, with nothing to announce: only
+            // a fetch tells `onPictureSettled`.
+            if transition == .none { isPictureSettled = true } else { settle() }
+        } failed: { [weak self] in
             // A failure settles too: the backdrop is what stays.
-            defer {
-                self.isPictureSettled = true
-                self.onPictureSettled?()
-            }
-            guard let image else { return }
-            // A full-bleed surface landing abruptly is the loudest pop on the
-            // screen; dissolve it over the neutral backdrop.
-            UIView.transition(
-                with: self.picture, duration: 0.25,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                self.picture.image = image
-            }
-            self.onImageResolved?(image)
+            self?.settle()
         }
+    }
+
+    private func settle() {
+        guard !isPictureSettled else { return }
+        isPictureSettled = true
+        onPictureSettled?()
     }
 
     /// Adopts a shape: only a poster fades out on the way up.

@@ -20,13 +20,13 @@ struct SearchPeopleAvatarRecyclingTests {
         let pipeline = ImagePipeline(fetcher: fetcher)
         let ada = try #require(URL(string: "mock://avatar/ada"))
         let grace = try #require(URL(string: "mock://avatar/grace"))
-        let loads = RowAvatarLoads()
+        let loads = RowImageLoads(size: .avatar)
         let cell = PersonListCell(frame: .zero)
         let landed = LandedAvatars()
 
         // Configured for Ada, then recycled for Grace before Ada's picture came.
-        loads.load(ada, using: pipeline, for: cell) { landed.land($0) }
-        loads.load(grace, using: pipeline, for: cell) { landed.land($0) }
+        loads.load(ada, using: pipeline, for: cell) { image, _ in landed.land(image) }
+        loads.load(grace, using: pipeline, for: cell) { image, _ in landed.land(image) }
 
         // Ada's picture arrives first — late, for a row that has moved on.
         await fetcher.release(ada)
