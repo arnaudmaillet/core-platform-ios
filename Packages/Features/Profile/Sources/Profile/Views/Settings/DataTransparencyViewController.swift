@@ -118,11 +118,21 @@ final class DataTransparencyViewController: UIViewController {
             default: .notAsked
             }
         }
+        // Find Friends from Contacts (#412).
+        func contacts() -> PermissionState {
+            switch SystemContactBook().access() {
+            case .authorized: .allowed
+            case .limited: .limited
+            case .denied: .denied
+            case .notDetermined: .notAsked
+            }
+        }
         return [
             Permission(title: "Camera", symbolName: "camera", purpose: purpose("NSCameraUsageDescription"), state: capture(.video)),
             Permission(title: "Microphone", symbolName: "mic", purpose: purpose("NSMicrophoneUsageDescription"), state: capture(.audio)),
             Permission(title: "Photos", symbolName: "photo.on.rectangle", purpose: purpose("NSPhotoLibraryUsageDescription"), state: photos(.readWrite)),
-            Permission(title: "Save to Photos", symbolName: "square.and.arrow.down", purpose: purpose("NSPhotoLibraryAddUsageDescription"), state: photos(.addOnly))
+            Permission(title: "Save to Photos", symbolName: "square.and.arrow.down", purpose: purpose("NSPhotoLibraryAddUsageDescription"), state: photos(.addOnly)),
+            Permission(title: "Contacts", symbolName: "person.crop.circle", purpose: purpose("NSContactsUsageDescription"), state: contacts())
         ]
     }
 

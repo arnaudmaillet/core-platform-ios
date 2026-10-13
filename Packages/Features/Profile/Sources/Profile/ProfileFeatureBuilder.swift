@@ -94,6 +94,22 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         self.profileItems = profileItems
     }
 
+    /// Find Friends from Contacts (#412): the account matches the hashes,
+    /// the profile repository follows on the app's follow channel. Nil
+    /// when either is missing.
+    private func makeContactFriends(account: any AccountProviding) -> (() -> UIViewController)? {
+        guard let finder = account as? any ContactProfileFinding,
+              let following = repository as? any ContactFollowing else { return nil }
+        return { [router, followEvents, imagePipeline] in
+            ContactFriendsViewController(
+                viewModel: ContactFriendsViewModel(
+                    finder: finder, following: following, router: router, followEvents: followEvents
+                ),
+                imagePipeline: imagePipeline
+            )
+        }
+    }
+
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
         switching.map { ProfileSwitcherMenuFactory(switching: $0, imagePipeline: imagePipeline) }
     }
@@ -420,7 +436,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             },
                                             makeDataTransparency: { DataTransparencyViewController() },
                                             makeActivityDiscovery: (repository as? any ActivityDiscoveryManaging).map { manager in
-                                                { ActivityDiscoveryViewController(manager: manager, shareLinks: repository as? any ShareLinkManaging) }
+                                                {
+                                                    ActivityDiscoveryViewController(
+                                                        manager: manager,
+                                                        shareLinks: repository as? any ShareLinkManaging,
+                                                        makeContactFriends: makeContactFriends(account: account)
+                                                    )
+                                                }
                                             },
                                             makeLocationSharing: (repository as? any LocationSharingManaging).map { manager in
                                                 { LocationSharingViewController(manager: manager) }
