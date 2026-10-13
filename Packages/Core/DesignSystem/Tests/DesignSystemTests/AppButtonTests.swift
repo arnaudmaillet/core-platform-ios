@@ -186,6 +186,16 @@ struct AppButtonTests {
         #expect(abs(button.bounds.width - widest) < 0.5, "the answer moved its neighbours: \(reserved) → \(button.bounds.width)")
     }
 
+    /// A caller's label ("Follow Ava") survives every refresh; without one
+    /// the title is the label.
+    @Test func aCallersLabelSurvivesARefresh() {
+        let button = follow()
+        #expect(button.accessibilityLabel == "Follow")
+        button.accessibilityLabel = "Follow Ava"
+        button.setContent(.title("Following"), selected: true, animated: false)
+        #expect(button.accessibilityLabel == "Follow Ava")
+    }
+
     @Test func aGivenReservedWidthWins() {
         let button = follow()
         button.reservedWidth = 120
@@ -291,6 +301,37 @@ struct AppButtonTests {
         button.succeed(showing: "checkmark")
         #expect(button.content.symbol == "checkmark")
         #expect(button.events.contains(.notification(success: true)))
+    }
+
+    /// Follow → Following: the title and the quiet ground swap under the
+    /// same blur — never the ground first and the words a beat later.
+    @Test(arguments: [false, true])
+    func contentAndSelectionSwapTogether(_ reduced: Bool) async {
+        let button = follow(reduced: reduced)
+        let (window, _) = hosted(button)
+        defer { window.isHidden = true }
+        button.setContent(.title("Following"), selected: true, animated: true)
+        #expect(button.events.last == (reduced ? .crossFade : .blurMorph))
+        if !reduced {
+            #expect(!button.isSelected, "the ground changed before the blur covered it")
+        }
+        #expect(await settle { button.isSelected && button.configuration?.title == "Following" && !button.debugVeilIsShown })
+        #expect(button.currentGround == .quiet)
+    }
+
+    /// A reused row's new person lands whole: an immediate change ends a
+    /// morph still running, which must not swap the old answer in later.
+    @Test func anImmediateChangeEndsAMorphInFlight() async {
+        let button = follow()
+        let (window, _) = hosted(button)
+        defer { window.isHidden = true }
+        button.setContent(.title("Following"), selected: true, animated: true)
+        button.setContent(.title("Follow Back"), selected: false, animated: false)
+        #expect(!button.debugVeilIsShown)
+        #expect(button.configuration?.title == "Follow Back")
+        try? await Task.sleep(for: .milliseconds(500))
+        #expect(!button.isSelected, "the cancelled morph swapped its selection in")
+        #expect(button.configuration?.title == "Follow Back")
     }
 
     /// The state tint is a fade, so it is the same on every setting.

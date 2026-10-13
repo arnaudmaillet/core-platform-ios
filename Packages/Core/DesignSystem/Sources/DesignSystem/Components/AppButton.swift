@@ -356,9 +356,7 @@ open class AppButton: UIButton {
         let old = self.content
         self.content = content
         guard animated, window != nil, phase == .content else {
-            refresh()
-            invalidateIntrinsicContentSize()
-            superview?.setNeedsLayout()
+            land()
             return
         }
         let reduced = reducesMotion()
@@ -370,6 +368,40 @@ open class AppButton: UIButton {
         } else {
             morph(reduced: reduced)
         }
+    }
+
+    /// Shows `content` and the selection together — Follow → Following is
+    /// both a new title and a quiet ground — swapped under ONE blur (or one
+    /// cross-fade), so the two never land a beat apart.
+    public func setContent(_ content: Content, selected: Bool, animated: Bool) {
+        guard selected != isSelected else {
+            setContent(content, animated: animated)
+            return
+        }
+        guard content != self.content else {
+            setSelected(selected, animated: animated)
+            return
+        }
+        self.content = content
+        guard animated, window != nil, phase == .content else {
+            isSelected = selected
+            land()
+            return
+        }
+        morph(reduced: reducesMotion()) { self.isSelected = selected }
+    }
+
+    /// An immediate change: the content lands whole, at its own width, and a
+    /// morph still running (a reused row's last person) ends here rather than
+    /// swapping in later.
+    private func land() {
+        morphGeneration += 1
+        veil.layer.removeAllAnimations()
+        veil.effect = nil
+        veil.isHidden = true
+        refresh()
+        invalidateIntrinsicContentSize()
+        superview?.setNeedsLayout()
     }
 
     /// The count's own transition: the digits are pushed up when it grows,
@@ -409,12 +441,13 @@ open class AppButton: UIButton {
 
     /// The old content blurs and fades out, the new one unblurs in; a
     /// cross-fade under Reduce Motion.
-    private func morph(reduced: Bool) {
+    private func morph(reduced: Bool, swap: (() -> Void)? = nil) {
         morphGeneration += 1
         let generation = morphGeneration
         if reduced {
             record(.crossFade)
             UIView.transition(with: self, duration: Metrics.fadeDuration, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+                swap?()
                 self.refresh()
                 self.layoutIfNeeded()
             }
@@ -428,6 +461,7 @@ open class AppButton: UIButton {
             self.veil.effect = UIBlurEffect(style: .systemUltraThinMaterial)
         } completion: { _ in
             guard generation == self.morphGeneration else { return }
+            swap?()
             self.refresh()
             self.resize(reduced: false)
             UIView.animate(withDuration: half, delay: 0.04, options: [.beginFromCurrentState, .curveEaseOut, .allowUserInteraction]) {
@@ -747,10 +781,17 @@ open class AppButton: UIButton {
 
     private var busyText: String { busyLabel ?? "In progress" }
 
+    /// The label a caller gave ("Follow Ava"), which a refresh never
+    /// overwrites; without one, the title, then UIKit's own.
+    private var explicitAccessibilityLabel: String?
+
+    override open var accessibilityLabel: String? {
+        get { explicitAccessibilityLabel ?? content.title ?? super.accessibilityLabel }
+        set { explicitAccessibilityLabel = newValue }
+    }
+
     private func refreshAccessibility() {
         isAccessibilityElement = true
-        // An icon-only button keeps the label its caller gave it.
-        if let title = content.title { accessibilityLabel = title }
         var traits: UIAccessibilityTraits = .button
         if isToggle { traits.insert(.toggleButton) }
         if isSelected { traits.insert(.selected) }
