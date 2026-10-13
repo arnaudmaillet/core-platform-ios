@@ -170,12 +170,13 @@ final class ProfileColdStartTests {
         return (viewModel, shown)
     }
 
-    @discardableResult
+    /// A look budget, 6,000 × 10 ms like the other suites' (#1031): a smaller
+    /// one ran out on a loaded CI runner before a revalidation's fetch landed.
     private func settle(until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<2_000 {
+        for _ in 0..<6_000 {
             await Task.yield()
             if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
+            try? await Task.sleep(for: .milliseconds(10))
         }
         return await condition()
     }

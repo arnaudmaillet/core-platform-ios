@@ -88,13 +88,13 @@ struct ProfileGalleryRevisitTests {
         var snapshots: [ProfileViewModel.GallerySnapshot] = []
     }
 
-    /// Waits for STATE, counted in looks (the pattern of `GalleryPagingTests`).
-    @discardableResult
+    /// Waits for STATE, counted in looks (the pattern of `GalleryPagingTests`):
+    /// 6,000 × 10 ms like the other suites' (#1031).
     private func settle(until condition: () async -> Bool) async -> Bool {
-        for _ in 0..<2_000 {
+        for _ in 0..<6_000 {
             await Task.yield()
             if await condition() { return true }
-            try? await Task.sleep(for: .milliseconds(5))
+            try? await Task.sleep(for: .milliseconds(10))
         }
         return await condition()
     }
