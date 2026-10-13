@@ -81,8 +81,11 @@ final class ProfileHeaderView: UIView {
     static let pageMargin = Metrics.horizontalInset
 
     private let bannerView: ProfileBannerView
+    /// The disc's frame: sized by layout, ringed in the page's tone.
     private let avatarView = CircleAvatarView()
-    private let monogramLabel = UILabel()
+    /// The app's avatar (#943) inside it: the initials, a smaller face
+    /// standing in, then the sharp one — decoded at 512 px, not full (#1086).
+    private let avatar = AvatarView(diameter: Metrics.avatarSize, size: .px512)
     private let nameLabel = UILabel()
     private let verifiedBadge = UIImageView(image: UIImage(systemName: "checkmark.seal.fill"))
     private let handleLabel = UILabel()
@@ -540,15 +543,12 @@ final class ProfileHeaderView: UIView {
     var onRelationshipsTapped: ((RelationshipDirection) -> Void)?
 
     private let imagePipeline: ImagePipeline
-    private var avatarTask: Task<Void, Never>?
-    private var currentAvatarURL: URL?
-    private var isAvatarSettled = true
 
     /// Whether both pictures — the avatar and the banner — have stopped
     /// changing: drawn, absent, or failed. What a push waits for so the
     /// header it shows is the one that stays (no initials that become a face,
     /// no banner shape decided after the slide).
-    var arePicturesSettled: Bool { isAvatarSettled && bannerView.isPictureSettled }
+    var arePicturesSettled: Bool { avatar.isSettled && bannerView.isPictureSettled }
     /// Fires when either picture settles after a fetch.
     var onPicturesSettled: (() -> Void)?
     private var websiteURL: URL?
@@ -577,10 +577,6 @@ final class ProfileHeaderView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    deinit {
-        avatarTask?.cancel()
-    }
-
     // MARK: - Configuration
 
     /// Applies `model`, touching only what differs from the model already on
@@ -608,7 +604,7 @@ final class ProfileHeaderView: UIView {
             guard let old else { return true }
             return old[keyPath: field] != model[keyPath: field]
         }
-        if changed(\.avatarMonogram) { monogramLabel.text = model.avatarMonogram }
+        if changed(\.avatarMonogram) { avatar.setMonogram(model.avatarMonogram) }
         if changed(\.displayName) { nameLabel.text = model.displayName }
         if changed(\.handleLine) { handleLabel.text = model.handleLine }
         if changed(\.isVerified) { verifiedBadge.isHidden = !model.isVerified }
@@ -689,7 +685,7 @@ final class ProfileHeaderView: UIView {
         // Identity first: the banner's colour field and the avatar carry most of
         // the "this is someone else now" signal, and the name says it outright.
         dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge], after: 0, generation: generation) {
-            self.monogramLabel.text = model.avatarMonogram
+            self.avatar.setMonogram(model.avatarMonogram)
             self.nameLabel.text = model.displayName
             self.handleLabel.text = model.handleLine
             self.verifiedBadge.isHidden = !model.isVerified
@@ -863,7 +859,7 @@ final class ProfileHeaderView: UIView {
     }
     var debugFollowButton: AppButton { followButton }
     var debugIsRedacted: Bool { isRedacted }
-    var debugHasAvatarPicture: Bool { avatarView.image != nil }
+    var debugHasAvatarPicture: Bool { avatar.shownPicture != nil }
     #endif
 
     #if DEBUG
@@ -1017,60 +1013,15 @@ final class ProfileHeaderView: UIView {
     /// quiet ground wears (see `HeroTray` for why flat and opaque).
     static let trayFill = HeroTray.fill
 
+    /// The face over the initials. Synchronously from the cache when it can,
+    /// as the banner does: the picture is usually already decoded (the origin
+    /// drew it — a chat pill, a feed row). ⚠️ AT ITS SIZE, NOT FULL (#1086):
+    /// 96 pt is a 512 px decode; the origin's `.avatar` decode stands in (soft
+    /// for a beat, never the initials) while the sharp one decodes, and a push
+    /// does not wait for the sharper one. A fetched face (or its failure)
+    /// tells `onPicturesSettled`.
     private func loadAvatar(_ url: URL?) {
-        guard url != currentAvatarURL || avatarView.image == nil else { return }
-        currentAvatarURL = url
-        avatarTask?.cancel()
-        avatarView.image = nil // fall back to the monogram until (and unless) the image resolves
-        monogramLabel.isHidden = false
-        isAvatarSettled = true
-
-        guard let url else { return }
-        let pipeline = imagePipeline
-        // Synchronously from the cache when it can, as the banner does: the
-        // picture is usually already decoded (the origin drew it — a chat
-        // pill, a feed row), and an await here put the initials on screen for
-        // the frames it took to come back with it.
-        //
-        // ⚠️ AT ITS SIZE, NOT FULL (#1086): 96 pt is a 512 px decode. The
-        // origin's rows decode at the avatar bucket, which this one does not
-        // answer; that face stands in (soft for a beat, never the initials)
-        // while the sharp one decodes.
-        if let cached = pipeline.cachedImage(for: url, size: .px512) {
-            avatarView.image = cached
-            monogramLabel.isHidden = true
-            return
-        }
-        // The face is drawn, so a push does not wait for the sharper one.
-        let standIn = pipeline.cachedImage(for: url, size: .avatar)
-        if let standIn {
-            avatarView.image = standIn
-            monogramLabel.isHidden = true
-        }
-        isAvatarSettled = standIn != nil
-        avatarTask = Task { [weak self] in
-            let image = try? await pipeline.image(for: url, size: .px512)
-            guard let self, !Task.isCancelled, self.currentAvatarURL == url else { return }
-            // A failure settles too: the initials are what stays.
-            defer {
-                self.isAvatarSettled = true
-                self.onPicturesSettled?()
-            }
-            guard let image else { return }
-            // Async arrival dissolves over the monogram instead of popping.
-            UIView.transition(
-                with: self.avatarView, duration: 0.25,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                self.avatarView.image = image
-                // ⚠️ The initials GO when the picture lands. They are a
-                // subview of the image view, so they draw ABOVE it — left
-                // visible, "KT" sat across the photograph for as long as the
-                // profile was on screen. The contract is initials first, then
-                // the picture, not both.
-                self.monogramLabel.isHidden = true
-            }
-        }
+        avatar.setPicture(url, pipeline: imagePipeline)
     }
 
     // MARK: - Layout
@@ -1080,7 +1031,6 @@ final class ProfileHeaderView: UIView {
         // loaded. The ring keeps it defined while it floats over raw banner
         // media, above the fade.
         avatarView.backgroundColor = .tertiarySystemFill
-        avatarView.contentMode = .scaleAspectFill
         avatarView.clipsToBounds = true
         avatarView.layer.borderWidth = Metrics.avatarRingWidth
         // The ring is the page's tone, so the avatar reads as cut from the
@@ -1090,20 +1040,22 @@ final class ProfileHeaderView: UIView {
             self.avatarView.layer.borderColor = Surface.page.resolvedColor(with: self.traitCollection).cgColor
         }
 
-        monogramLabel.font = .systemFont(ofSize: 34, weight: .semibold)
-        monogramLabel.textColor = .secondaryLabel
-        monogramLabel.textAlignment = .center
-        monogramLabel.pin(to: avatarView)
+        avatar.standInSize = .avatar
+        avatar.onSettledAfterLoad = { [weak self] in self?.onPicturesSettled?() }
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatarView.addSubview(avatar)
+        NSLayoutConstraint.activate([
+            avatar.centerXAnchor.constraint(equalTo: avatarView.centerXAnchor),
+            avatar.centerYAnchor.constraint(equalTo: avatarView.centerYAnchor),
+        ])
         // The avatar's side length is resolved by layout (it tracks the
         // identity column), so the monogram scales off the resolved frame —
         // reported by the avatar itself, whose layout pass is the first to
         // see the final size (the header's runs too early for nested stacks).
         avatarView.onSideLengthChange = { [weak self] side in
             guard let self, side > 0 else { return }
-            let monogramSize = (side * 0.4).rounded()
-            if abs(self.monogramLabel.font.pointSize - monogramSize) > 0.5 {
-                self.monogramLabel.font = .systemFont(ofSize: monogramSize, weight: .semibold)
-            }
+            // The disc (initials and face) follows the frame's side.
+            self.avatar.setDiameter(side)
             // The disc's frame is final here — see `placeBannerFade`.
             self.placeBannerFade()
         }
@@ -1494,7 +1446,7 @@ final class ProfileHeaderView: UIView {
 /// it. The rounding must live here — in the bounds' owner — because ancestor
 /// `layoutSubviews` runs before nested stack views hand this view its final
 /// frame, and would round a stale size.
-private final class CircleAvatarView: UIImageView {
+private final class CircleAvatarView: UIView {
     var onSideLengthChange: ((CGFloat) -> Void)?
 
     /// The avatar is sized purely by constraints. A loaded bitmap must not

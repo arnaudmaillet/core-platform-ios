@@ -26,6 +26,9 @@ public final class AvatarView: UIView {
     public let monogram: MonogramAvatarView
     /// The picture, addressable (the ladder's hook 1).
     public let picture = AvatarImageView()
+    /// A smaller decode of the same face standing in while the sharp one
+    /// decodes (`standInSize`): the preview rung.
+    public let standIn = AvatarImageView()
     /// The ladder the avatar runs on.
     public let ladder: LoadingLadder
     private let load: ImageLoadSlot
@@ -46,17 +49,21 @@ public final class AvatarView: UIView {
         monogram.translatesAutoresizingMaskIntoConstraints = false
         addSubview(monogram)
         monogram.pin(to: self)
-        picture.translatesAutoresizingMaskIntoConstraints = false
-        picture.isUserInteractionEnabled = false
-        addSubview(picture)
-        picture.pin(to: monogram)
+        for view in [standIn, picture] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            view.isUserInteractionEnabled = false
+            addSubview(view)
+            view.pin(to: monogram)
+        }
         ladder.setView(monogram, for: .placeholder, drivesAlpha: false, permanent: true)
+        ladder.setView(standIn, for: .preview)
         ladder.setView(picture, for: .content)
         ladder.onSettled = { [weak self] in
             guard let self else { return }
             // Covered once the picture has landed — after its dissolve, so
             // the initials stay opaque behind it while it fades (the fade law).
-            monogram.isCovered = ladder.rung == .content && picture.image != nil
+            monogram.isCovered = (ladder.rung == .content && picture.image != nil)
+                || (ladder.rung == .preview && standIn.image != nil)
         }
         token = ladder.begin(item: nil)
         ladder.show(.placeholder, token: token!, warm: true)
@@ -86,6 +93,16 @@ public final class AvatarView: UIView {
         set { load.size = newValue }
     }
 
+    /// A smaller bucket whose decode, when the pipeline already holds it,
+    /// stands in for the face while `pictureSize` decodes — soft for a beat,
+    /// never the initials (the profile header: the row that opened it drew
+    /// the face at `.avatar`). Nil: none.
+    public var standInSize: ImageBucket?
+
+    /// Told when a picture that had to be fetched has landed or failed — not
+    /// for a warm one, drawn in the configure pass.
+    public var onSettledAfterLoad: (() -> Void)?
+
     /// The initials shown under (or instead of) the picture.
     public func setMonogram(_ text: String) {
         monogram.setMonogram(text)
@@ -101,15 +118,27 @@ public final class AvatarView: UIView {
         let token = ladder.begin(item: url)
         self.token = token
         picture.image = nil
+        standIn.image = nil
         monogram.isCovered = false
         ladder.show(.placeholder, token: token, warm: true)
+        var warm = false
         load.load(url, using: pipeline) { [weak self] image, transition in
             guard let self, ladder.isCurrent(token) else { return }
+            warm = transition == .none
             picture.image = image
-            ladder.show(.content, token: token, warm: transition == .none)
+            ladder.show(.content, token: token, warm: warm)
+            if !warm { onSettledAfterLoad?() }
         } failed: { [weak self] in
             guard let self, ladder.isCurrent(token) else { return }
             ladder.fail(token: token)
+            if url != nil { onSettledAfterLoad?() }
+        }
+        // Missed at its size: a smaller decode already at hand stands in.
+        if !warm, load.isLoading, let url, let standInSize,
+           let face = pipeline?.cachedImage(for: url, size: standInSize) {
+            standIn.image = face
+            ladder.show(.preview, token: token, warm: true)
+            monogram.isCovered = true
         }
     }
 
@@ -120,11 +149,20 @@ public final class AvatarView: UIView {
     }
 
     /// The picture on show, nil while the initials are.
-    public var shownPicture: UIImage? { ladder.rung == .content ? picture.image : nil }
+    public var shownPicture: UIImage? {
+        switch ladder.rung {
+        case .content: picture.image
+        case .preview: standIn.image
+        default: nil
+        }
+    }
 
     /// Whether the avatar has stopped changing: a picture landed, or none is
     /// coming — for a push that waits on its faces.
-    public var isSettled: Bool { ladder.isSettled || (load.url == nil && !load.isLoading) }
+    /// A stand-in counts: the face is drawn, the sharper one only refines it.
+    public var isSettled: Bool {
+        ladder.isSettled || ladder.rung == .preview || (load.url == nil && !load.isLoading)
+    }
 
     #if DEBUG
     public var debugIsLoading: Bool { load.isLoading }
