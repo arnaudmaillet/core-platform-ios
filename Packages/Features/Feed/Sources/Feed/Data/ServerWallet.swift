@@ -47,6 +47,54 @@ public actor ServerWallet: WalletServer {
         return (outcome, state)
     }
 
+    /// Pages followed when listing the stakes (100 each).
+    static let stakePages = 5
+
+    /// Every stake on a post, active and settled, newest first stake first
+    /// (#903). Comment stakes are left out: the sheet lists posts.
+    public func myStakes() async throws -> [WalletStake] {
+        let account = try await account()
+        var stakes: [WalletStake] = []
+        var token = ""
+        for _ in 0..<Self.stakePages {
+            var request = Wallet_V1_ListMyStakesRequest()
+            request.accountID = account
+            request.pageSize = 100
+            request.pageToken = token
+            let response = await walletClient.listMyStakes(request: request, headers: [:])
+            if let error = response.error { throw NetworkFailureError(NetworkFailure(error)) }
+            guard let page = response.message else { break }
+            stakes += page.stakes.compactMap(Self.stake)
+            token = page.nextPageToken
+            if token.isEmpty { break }
+        }
+        return stakes
+    }
+
+    /// The wire's stake, as the sheet lists it: settled with the server's
+    /// verdict alone — no gems while settlement runs in shadow mode.
+    static func stake(_ stake: Wallet_V1_MyStake) -> WalletStake? {
+        guard case .postID(let postID)? = stake.target else { return nil }
+        let outcome: WalletStake.Outcome?
+        if stake.hasSettledAt {
+            outcome = switch stake.verdict {
+            case .rewarded: .rewarded
+            case .notRewarded: .notRewarded
+            case .pending, .unspecified, .UNRECOGNIZED: .pending
+            }
+        } else {
+            outcome = nil
+        }
+        let first = stake.hasFirstAt ? stake.firstAt.date : Date()
+        return WalletStake(
+            targetID: postID,
+            amount: Int(clamping: stake.points),
+            stakedAt: first,
+            settlesAt: stake.hasSettlesAt ? stake.settlesAt.date : first.addingTimeInterval(24 * 3_600),
+            outcome: outcome
+        )
+    }
+
     private func account() async throws -> String {
         guard case .member(let account, _) = await viewer.current() else { throw NotAMember() }
         return account.rawValue

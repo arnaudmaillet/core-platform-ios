@@ -10,6 +10,9 @@ private actor FakeWalletServer: WalletServer {
     var fails = false
     private(set) var reads = 0
     private(set) var claimKeys: [String] = []
+    var listed: [WalletStake] = []
+    func setListed(_ stakes: [WalletStake]) { listed = stakes }
+    func myStakes() async throws -> [WalletStake] { listed }
 
     init(_ state: WalletServerState) { self.state = state }
 
@@ -156,5 +159,26 @@ struct WalletServerTests {
 
         #expect(amount > 0)
         #expect(fixture.store.balance == 100)
+    }
+
+    /// The sheet's stakes are the server's list (#903), with the device's
+    /// taps the server has not been sent yet as active ones on top.
+    @Test func theStakesAreTheServersListWithTheUnsentOnTop() async {
+        let fixture = Fixture(serverState(points: 300))
+        let outbox = LikeOutbox(defaults: fixture.defaults, scope: fixture.scope)
+        fixture.store.likeOutbox = outbox
+        await fixture.store.refreshFromServer()
+        let day = Date(timeIntervalSince1970: 1_790_000_000)
+        await fixture.server.setListed([
+            WalletStake(targetID: "post-old", amount: 9, stakedAt: day, settlesAt: day.addingTimeInterval(86_400), outcome: .rewarded),
+        ])
+        #expect(await fixture.store.refreshStakesFromServer())
+
+        fixture.store.stake(.points(2), on: "post-new")
+
+        let stakes = fixture.store.stakes()
+        #expect(stakes.map(\.targetID) == ["post-new", "post-old"])
+        #expect(stakes.last?.outcome == .rewarded)
+        #expect(stakes.first?.isSettled == false)
     }
 }

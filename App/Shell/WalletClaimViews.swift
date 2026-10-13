@@ -578,12 +578,26 @@ final class WalletStakeCell: UICollectionViewCell {
                 "+\(earned)", glyph: GemSymbol.glyphImage(), font: resultFont, color: GemSymbol.tint
             ))
             detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
-        case .noReward:
+        case .noReward, .notRewarded:
             result.append(NSAttributedString(string: "No reward", attributes: [
                 .font: UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline),
                 .foregroundColor: UIColor.secondaryLabel,
             ]))
             detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
+        // The server's verdicts (#903): the outcome alone, never gems the
+        // balance does not hold while settlement runs in shadow mode.
+        case .rewarded:
+            result.append(NSAttributedString(string: "Rewarded", attributes: [
+                .font: resultFont,
+                .foregroundColor: GemSymbol.tint,
+            ]))
+            detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
+        case .pending:
+            result.append(NSAttributedString(string: "Result tomorrow", attributes: [
+                .font: UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline),
+                .foregroundColor: UIColor.secondaryLabel,
+            ]))
+            detailLabel.text = "\(stake.amount) staked · settled \(walletAgoText(since: stake.settlesAt, now: now))"
         }
         resultLabel.attributedText = result
         accessibilityValue = [resultLabel.text, detailLabel.text].compactMap { $0 }.joined(separator: ", ")

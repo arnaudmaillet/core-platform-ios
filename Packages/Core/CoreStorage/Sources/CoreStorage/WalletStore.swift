@@ -71,6 +71,14 @@ public protocol WalletServer: Sendable {
     /// per tap and sent again with every retry of it: the server credits a
     /// key at most once. Refusals are outcomes, with the wallet as it is.
     func claim(idempotencyKey: String) async throws -> (outcome: WalletClaimOutcome, wallet: WalletServerState)
+    /// The member's stakes (wallet.v1 `ListMyStakes`, #903): active and
+    /// settled, newest first stake first.
+    func myStakes() async throws -> [WalletStake]
+}
+
+public extension WalletServer {
+    /// Servers that list no stakes: the device's.
+    func myStakes() async throws -> [WalletStake] { [] }
 }
 
 /// A stake of points (the charter's currency A) on a post or comment, and
@@ -87,6 +95,14 @@ public struct WalletStake: Equatable, Sendable, Identifiable {
         case gems(Int)
         /// Settled with nothing earned — popularity alone pays nothing.
         case noReward
+        /// The server's verdicts (#903), shown without gems while settlement
+        /// runs in shadow mode — the app never shows gems the balance does
+        /// not hold. Settled, the day's result not computed yet.
+        case pending
+        /// The stake was rewarded (its gems arrive once minting is live).
+        case rewarded
+        /// Settled, not rewarded.
+        case notRewarded
     }
 
     /// The post (or comment) staked on.
@@ -95,6 +111,14 @@ public struct WalletStake: Equatable, Sendable, Identifiable {
     public let amount: Int
     /// When the first of them was placed.
     public let stakedAt: Date
+
+    public init(targetID: String, amount: Int, stakedAt: Date, settlesAt: Date, outcome: Outcome?) {
+        self.targetID = targetID
+        self.amount = amount
+        self.stakedAt = stakedAt
+        self.settlesAt = settlesAt
+        self.outcome = outcome
+    }
     /// When the stake settles.
     public let settlesAt: Date
     /// Nil while the stake is still active.
@@ -487,7 +511,20 @@ public final class WalletStore: @unchecked Sendable {
     /// Every stake, as of `now()`: the ACTIVE ones first, soonest to settle
     /// first; then the SETTLED ones, most recent first.
     public func stakes() -> [WalletStake] {
-        lock.withLock { stakesLocked(at: now()) }
+        // Read before the lock: the outbox has its own.
+        let outboxTargets = Set((likeOutbox?.batches ?? []).map(\.target))
+        return lock.withLock {
+            let local = stakesLocked(at: now())
+            // The server's list, once read for this viewer (#903) — with the
+            // device's stakes it does not know yet (taps not committed) as
+            // active ones on top.
+            guard _server != nil, let server = _serverStakes, server.owner == scope.owner else { return local }
+            let listed = Set(server.stakes.map(\.targetID))
+            let unsent = local.filter {
+                !$0.isSettled && !listed.contains($0.targetID) && outboxTargets.contains(.post($0.targetID))
+            }
+            return unsent + server.stakes
+        }
     }
 
     /// Mock mode's demo ledger: stakes on real posts of the mock corpus, some
@@ -569,6 +606,26 @@ public final class WalletStore: @unchecked Sendable {
         }
         if applied { postDidChange() }
         return applied
+    }
+
+    /// The member's stakes as the server last listed them (#903), with the
+    /// account they belong to. Memory only: the sheet asks again on opening.
+    private var _serverStakes: (owner: StorageScope.Owner, stakes: [WalletStake])?
+
+    /// Lists the member's stakes from the server; the sheet's Active and
+    /// Settled read them (`stakes()`). Returns whether it did.
+    @discardableResult
+    public func refreshStakesFromServer() async -> Bool {
+        guard let server, case .member = scope.owner else { return false }
+        let owner = scope.owner
+        guard let listed = try? await server.myStakes() else { return false }
+        let stored: Bool = lock.withLock {
+            guard scope.owner == owner else { return false }
+            _serverStakes = (owner, listed)
+            return true
+        }
+        if stored { postDidChange() }
+        return stored
     }
 
     /// The last server wallet read for this account, if any — while a

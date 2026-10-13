@@ -46,4 +46,29 @@ struct ServerWalletTests {
         #expect(await store.claim(idempotencyKey: "tap-key-0002") != .claimed(awarded: 25))
         #expect(service.points(of: MockAuthService.accountID) == 275)
     }
+
+    /// A settled stake is the server's verdict alone: no gems in shadow
+    /// mode (#903); a comment stake is left out of the post list.
+    @Test func aSettledStakeIsItsVerdictAlone() {
+        var settled = Wallet_V1_MyStake()
+        settled.postID = "post-1"
+        settled.points = 7
+        settled.firstAt = .init(date: Date(timeIntervalSince1970: 1_000))
+        settled.settlesAt = .init(date: Date(timeIntervalSince1970: 87_400))
+        settled.settledAt = .init(date: Date(timeIntervalSince1970: 87_400))
+        settled.verdict = .rewarded
+        let stake = ServerWallet.stake(settled)
+        #expect(stake?.outcome == .rewarded)
+        #expect(stake?.gems == 0)
+        #expect(stake?.amount == 7)
+
+        var active = settled
+        active.clearSettledAt()
+        active.verdict = .unspecified
+        #expect(ServerWallet.stake(active)?.outcome == nil)
+
+        var comment = Wallet_V1_MyStake()
+        comment.commentID = "c-1"
+        #expect(ServerWallet.stake(comment) == nil)
+    }
 }
