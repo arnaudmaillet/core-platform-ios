@@ -136,6 +136,14 @@ public struct MockBackend: Sendable {
             socialServices.messageAudience(of: recipient) != .noOne
         }).register(on: bff)
         socialGraph.register(on: bff)
+        // Contacts find a profile only through a channel its owner left on,
+        // and never across a block (#412, backend #806).
+        MockContactMatching(
+            dataset: dataset,
+            lifecycle: accountLifecycle,
+            isFindable: { socialServices.isFindableByContact($0, byPhone: $1) },
+            isHidden: { socialGraph.isBlockedEitherWay($0, $1) }
+        ).register(on: bff)
         let geoDiscovery = MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
         geoDiscovery.register(on: bff)
         moderationService.register(on: bff)

@@ -465,6 +465,12 @@ public final class MockSocialGraphService: @unchecked Sendable {
         }
     }
 
+    /// A block either way between two profiles: what hides one from the
+    /// other on every read (`CheckAccess` Hidden).
+    public func isBlockedEitherWay(_ first: String, _ second: String) -> Bool {
+        isBlocking(actorID: first, targetID: second) || isBlocking(actorID: second, targetID: first)
+    }
+
     private func isBlocking(actorID: String, targetID: String) -> Bool {
         lock.withLock { blocksByActorID[actorID]?.contains(targetID) ?? false }
     }
