@@ -1267,6 +1267,15 @@ final class PostDetailViewController: UIViewController {
             // Beneath the composer: its taps are never the empty state's.
             if composerBackdrop.superview === view { view.insertSubview(statusView, belowSubview: composerBackdrop) }
             statusView.isHidden = false
+        case .unavailable(let message):
+            // A draft, a deleted post or one withheld from this viewer
+            // (#447): the same block, without Try Again.
+            spinner.stopAnimating()
+            refreshControl.endRefreshing()
+            collectionView.isHidden = true
+            statusView.configure(symbolName: "eye.slash", title: message)
+            if composerBackdrop.superview === view { view.insertSubview(statusView, belowSubview: composerBackdrop) }
+            statusView.isHidden = false
         }
     }
 

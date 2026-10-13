@@ -97,6 +97,10 @@ public final class ProfileViewModel {
         /// the blank grid reads intentional, not broken.
         case empty(message: String)
         case failed(message: String)
+        /// A private profile the viewer doesn't follow (guests included): its
+        /// posts are its followers' (#447, backend #691), so the server sends
+        /// none — which is not "nothing here".
+        case restricted(title: String, message: String)
     }
 
     /// Every page at once — the pager renders every page (neighbors are
@@ -126,6 +130,15 @@ public final class ProfileViewModel {
         /// follows its own corpus, apart from `isComplete`.
         public var repostsComplete = true
         public var taggedComplete = true
+
+        /// Every page with nothing in it says the profile is private
+        /// instead (#447): the server withholds them from the viewer.
+        mutating func restrictEmptyPages() {
+            let locked = GalleryPageState.restricted(title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage)
+            for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.tagged] {
+                if case .empty = self[keyPath: page] { self[keyPath: page] = locked }
+            }
+        }
 
         public func state(for tab: ProfileTab) -> GalleryPageState {
             switch tab {
@@ -317,7 +330,10 @@ public final class ProfileViewModel {
             loadMapPinState()
         }
     }
-    private var isFollowing = false
+    private var isFollowing = false {
+        // A private profile's pages lock and unlock with the follow (#447).
+        didSet { if isFollowing != oldValue { renderGallery() } }
+    }
     /// Internal for tests: a follow, request or withdrawal still on its way.
     private(set) var followInFlight = false
     /// The viewer's outbound block on this profile, from the relationship read
@@ -1487,7 +1503,8 @@ public final class ProfileViewModel {
     /// funnels here.
     private func renderGallery() {
         guard gallery != nil else { return }
-        let snapshot = galleryStore.snapshot(isOwnProfile: isOwnProfile)
+        var snapshot = galleryStore.snapshot(isOwnProfile: isOwnProfile)
+        if isPrivateToViewer { snapshot.restrictEmptyPages() }
         fillEmptyGalleryTab()
         // The same pages again is no news: a revalidation that agrees with
         // the screen must cost the screen nothing.
@@ -1650,6 +1667,13 @@ public final class ProfileViewModel {
                 self.galleryWasSeeded = false
             } catch is CancellationError {
                 // Superseded by a newer load; leave the phase alone.
+            } catch ProfileError.notFound {
+                // The server shows this profile to no one but its owner any
+                // more (#447, backend #689: hidden, suspended, deleted). An
+                // answer, so no Try Again — and it replaces what was on
+                // screen, cached or loaded, rather than keeping it.
+                if case .profile(let id) = self.source { self.cache?.forget(id) }
+                self.phase = Self.unavailable
             } catch {
                 // Only surface a hard failure when there is nothing on screen;
                 // a failed refresh keeps the last good content.
@@ -1700,6 +1724,18 @@ public final class ProfileViewModel {
             }
         }
     }
+
+    /// Someone else's private profile the viewer doesn't follow — what a
+    /// guest always is (#447). Its pages come back empty from the server.
+    var isPrivateToViewer: Bool {
+        !isOwnProfile && profile?.visibility.isPrivate == true && !isFollowing
+    }
+
+    nonisolated static let restrictedTitle = "This Account Is Private"
+    nonisolated static let restrictedMessage = "Follow this account to see their posts."
+
+    /// What a profile the server no longer shows says (#447).
+    static let unavailable = Phase.notFound(message: "This account isn\u{2019}t available", detail: nil)
 
     /// What a reference that names no one says.
     static func notFound(_ reference: ProfileReference) -> Phase {

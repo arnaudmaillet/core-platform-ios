@@ -181,6 +181,16 @@ public final class ProfileCache {
         persist(id)
     }
 
+    /// Forgets everything about `id`: the server no longer shows it to the
+    /// viewer (#447 — hidden, suspended or deleted), so a revisit must not
+    /// open on what it used to show.
+    func forget(_ id: ProfileID) {
+        loadFromDisk(id)
+        guard entries[id] != nil else { return }
+        entries[id] = Entry()
+        persist(id)
+    }
+
     /// Forgets `id`'s gallery: what it showed may no longer be what the viewer
     /// may see.
     func removeGallery(for id: ProfileID) {

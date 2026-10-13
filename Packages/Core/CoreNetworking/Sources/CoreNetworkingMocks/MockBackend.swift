@@ -81,6 +81,12 @@ public struct MockBackend: Sendable {
             isSuggestible: { socialServices.isSuggestible($0) },
             seedsFollowRequests: ProcessInfo.processInfo.arguments.contains("-mock-follow-requests")
         )
+        // Viewer-aware reads (#447, backend #690/#691): a block either way,
+        // or a private author none of the readers follows, withholds the
+        // author's posts — guests (no profile) follow no one.
+        socialServices.setAudienceGate { readers, author, privacy in
+            socialGraph.mayAccess(author, readers: readers, privacy: privacy)
+        }
         // Saves are kept per profile, the account's own only, and across
         // launches as the server keeps them (#837).
         MockEngagementService(store: counterStore, dataset: dataset, persistence: .standard).register(on: bff)

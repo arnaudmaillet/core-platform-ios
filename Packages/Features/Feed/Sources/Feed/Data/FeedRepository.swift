@@ -14,6 +14,10 @@ public enum FeedError: Error, Equatable, Sendable {
     /// not come from the network. Defaulted, so every `.transport(message:)`
     /// still builds and every `case .transport:` still matches.
     case transport(message: String, failure: NetworkFailure? = nil)
+    /// The server shows this post to no one but its author (#447, backend
+    /// #686/#688/#691): a draft, a deleted or taken-down post, or one its
+    /// author's audience withholds. An answer — retrying changes nothing.
+    case notFound
 }
 
 extension FeedError: NetworkFailureCarrying {
@@ -280,6 +284,7 @@ public actor FeedRepository: FeedProviding {
         var request = Post_V1_GetPostRequest()
         request.postID = id.rawValue
         let response = await postClient.getPost(request: request, headers: [:])
+        if response.error?.code == .notFound { throw FeedError.notFound }
         guard let view = response.message else {
             throw FeedError.transport(message: response.error?.message ?? "post \(id) unavailable", failure: response.error.map { NetworkFailure($0) })
         }

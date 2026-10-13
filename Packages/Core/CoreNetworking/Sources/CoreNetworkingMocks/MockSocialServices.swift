@@ -16,6 +16,12 @@ public final class MockSocialServices: @unchecked Sendable {
 
     private let lock = NSLock()
     private var servedWarmRequest = false
+    /// Whether `readers` may see `author`'s content (backend #690
+    /// `CheckAccess`: a block either way hides it, and so does a private
+    /// author none of them follows when `privacy` applies). Set by the
+    /// composition, which owns the graph; nil lets everyone through.
+    /// Guarded by `lock`.
+    private var audienceGate: (@Sendable (_ readers: [String], _ author: String, _ privacy: Bool) -> Bool)?
 
     /// The viewer's editable profile, mutated by the `UpdateProfile` /
     /// `ChangeHandle` mocks so edits persist for the session (the seed is a
@@ -182,11 +188,11 @@ public final class MockSocialServices: @unchecked Sendable {
             lock.withLock { interests[request.profileID] = [] }
             return .success(Timeline_V1_InterestsResponse())
         }
-        bff.register(path: "/post.v1.PostService/GetPost") { [self] (request: Post_V1_GetPostRequest) in
-            getPost(request)
+        bff.register(path: "/post.v1.PostService/GetPost") { [self] (request: Post_V1_GetPostRequest, headers: Headers) in
+            getPost(request, readers: readers(from: headers))
         }
-        bff.register(path: "/post.v1.PostService/ListPostsByProfile") { [self] (request: Post_V1_ListPostsByProfileRequest) in
-            listPostsByProfile(request)
+        bff.register(path: "/post.v1.PostService/ListPostsByProfile") { [self] (request: Post_V1_ListPostsByProfileRequest, headers: Headers) in
+            listPostsByProfile(request, readers: readers(from: headers))
         }
         bff.register(path: "/post.v1.PostService/DeletePost") { [self] (request: Post_V1_DeletePostRequest) -> Result<Post_V1_CommandResponse, ConnectError> in
             guard let author = author(ofPost: request.postID) else {
@@ -604,7 +610,8 @@ public final class MockSocialServices: @unchecked Sendable {
         response.posts = entries.compactMap { postID, _ in
             var get = Post_V1_GetPostRequest()
             get.postID = postID
-            return try? getPost(get).get()
+            // The author reads their own tombstones.
+            return try? getPost(get, readers: [request.profileID]).get()
         }
         return .success(response)
     }
@@ -716,12 +723,52 @@ public final class MockSocialServices: @unchecked Sendable {
         return dataset.authors.first { $0.handle.lowercased() == handle }?.profileID
     }
 
-    /// A post older than its author's window reads as not found to visitors;
-    /// a deleted post still reads, as the tombstone it is.
-    private func getPost(_ request: Post_V1_GetPostRequest) -> Result<Post_V1_PostView, ConnectError> {
+    /// Sets who may see whose content (`audienceGate`).
+    public func setAudienceGate(_ gate: @escaping @Sendable (_ readers: [String], _ author: String, _ privacy: Bool) -> Bool) {
+        lock.withLock { audienceGate = gate }
+    }
+
+    /// The profiles reading (backend #686 `Viewer`): none for a guest, whose
+    /// token (`gt-…`) holds no profile; the demo account's otherwise —
+    /// unauthenticated calls too, which only tests and previews make (the
+    /// app's edge refuses them).
+    func readers(from headers: Headers) -> [String] {
+        MockEdgePolicy.caller(from: headers) == .guest ? [] : dataset.profileIDs(inAccount: MockAuthService.accountID)
+    }
+
+    /// Whether `readers` may see `author`'s posts: always their own, and
+    /// otherwise what the audience gate says.
+    ///
+    /// ⚠️ `privacy: false` FOR A MEMBER'S `GetPost`. The fleet's feeds never
+    /// carry a private author's posts to a stranger, but the mock's feeds
+    /// do — a third of its authors are private — and hiding them at
+    /// hydration would empty a third of every mock feed. Members' post
+    /// reads honour blocks only; profile listings and guests get the whole
+    /// rule.
+    private func mayRead(_ author: String, readers: [String], privacy: Bool = true) -> Bool {
+        if readers.contains(author) { return true }
+        guard let gate = lock.withLock({ audienceGate }) else { return true }
+        return gate(readers, author, privacy)
+    }
+
+    /// Viewer-aware (backend #686, #691): a draft or a deleted post is its
+    /// author's alone, and a post its author's audience withholds from the
+    /// reader (a block either way; for a guest, a private author too — see
+    /// `mayRead`) reads as not found, so its existence doesn't leak. A post older
+    /// than its author's window reads as not found to visitors; to its
+    /// author a deleted post still reads, as the tombstone it is.
+    private func getPost(_ request: Post_V1_GetPostRequest, readers: [String]) -> Result<Post_V1_PostView, ConnectError> {
+        let notFound = ConnectError(code: .notFound, message: "PST-1001: post \(request.postID) not found")
         var result = windowlessPost(request)
+        if case .success(let view) = result, !readers.contains(view.profileID) {
+            let isDraft = postStore?.record(for: request.postID).map { !$0.published } ?? false
+            let isDeleted = lock.withLock { deletedPosts[request.postID] != nil }
+            if isDraft || isDeleted || !mayRead(view.profileID, readers: readers, privacy: readers.isEmpty) {
+                return .failure(notFound)
+            }
+        }
         if case .success(let view) = result, let start = windowStartMS(for: view.profileID), view.publishedAtMs < start {
-            return .failure(ConnectError(code: .notFound, message: "PST-1001: post \(request.postID) not found"))
+            return .failure(notFound)
         }
         if case .success(var view) = result, let deletedAt = lock.withLock({ deletedPosts[request.postID] }) {
             view.status = .deleted
@@ -780,7 +827,14 @@ public final class MockSocialServices: @unchecked Sendable {
     /// The author's own posts, newest first, with cursor pagination — the
     /// profile gallery's source. Client-authored posts only exist for the
     /// viewer's own profile; seeded authors serve the dataset.
-    private func listPostsByProfile(_ request: Post_V1_ListPostsByProfileRequest) -> Result<Post_V1_ListPostsByProfileResponse, ConnectError> {
+    /// A private author's posts are their followers' alone, and a block
+    /// either way hides them (backend #691): an empty list, not a refusal.
+    private func listPostsByProfile(
+        _ request: Post_V1_ListPostsByProfileRequest, readers: [String]
+    ) -> Result<Post_V1_ListPostsByProfileResponse, ConnectError> {
+        guard mayRead(request.profileID, readers: readers) else {
+            return .success(Post_V1_ListPostsByProfileResponse())
+        }
         let authored = (postStore?.publishedRecords ?? [])
             .filter { $0.profileID == request.profileID }
             .map { (postID: $0.postID, mediaURL: $0.media?.url, createdAtMS: $0.createdAtMS) }
