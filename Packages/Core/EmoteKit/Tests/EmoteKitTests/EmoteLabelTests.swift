@@ -268,19 +268,18 @@ struct EmoteLabelTests {
         #expect(label.coveredMarkIndices == [0, 1], "the still glyphs under the players must go in the same pass")
     }
 
-    /// The ask is made by something that just changed the screen, so it walks
-    /// a resting app too — and still nothing in the background.
-    @Test func aRecheckWalksARestingAppButNotTheBackground() throws {
+    /// The ask is made by something that just changed the screen, so it
+    /// walks — and still nothing in the background.
+    @Test func aRecheckWalksButNotInTheBackground() throws {
         let engine = try warmEngine(["noto:1f525"])
         let (label, window) = hostedLabel("🔥", engine: engine)
         defer { window.isHidden = true }
         let monitor = EmoteVisibilityMonitor()
-        monitor.isResting = { true }
         monitor.register(label)
         defer { monitor.unregister(label) }
 
         monitor.recheckNow()
-        #expect(monitor.walkedLabelCount == 1, "a resting app was not re-asked")
+        #expect(monitor.walkedLabelCount == 1, "the recheck walked nothing")
 
         monitor.appDidEnterBackground()
         monitor.recheckNow()
@@ -567,44 +566,39 @@ struct EmoteLabelTests {
         #expect(abs(actual.height - expected.height) < 0.001)
     }
 
-    /// ⚠️ **A RESTING APP IS NOT WALKED** (#830): idle calm, or the song
-    /// playing behind the home screen, re-asked every label four times a second
-    /// a question nothing could have changed. On a monitor of its own, so the
-    /// app-wide `IdleCalm` is never flipped under the suites beside this one.
+    /// ⚠️ **IDLE CALM IS WALKED** (#1072, which narrows #830). #830 skipped
+    /// the walk while the app rested, when every emote was a still holding no
+    /// slot. Emotes now play through idle calm, and one can leave the screen
+    /// with nobody touching anything (a feed advancing on its own, a sheet
+    /// dismissing itself): its slot must still come back on the next tick.
+    /// Idle calm is injected through the emotes' own conditions — the
+    /// monitor no longer reads it at all — never the app-wide `IdleCalm`.
     ///
-    /// Paired with its witness: once the app wakes, the very next tick walks
-    /// again and the hidden label gives its slots back — a monitor that never
-    /// walked at all would pass the first half alone.
-    @Test func theMonitorWalksNothingWhileTheAppRests() throws {
+    /// SYNCHRONOUS: `EmoteMotion.conditions` is process-wide while forced.
+    @Test func anEmoteLeavingTheScreenDuringIdleCalmGivesItsSlotBack() throws {
+        EmoteMotion.conditions = { EmoteMotion.Conditions(idleCalm: true) }
+        defer { EmoteMotion.conditions = { .current } }
         let engine = try warmEngine(["noto:1f525"])
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
         let (label, window) = nestedLabel("🔥", engine: engine, in: container)
         defer { window.isHidden = true }
         let monitor = EmoteVisibilityMonitor()
-        var resting = true
-        monitor.isResting = { resting }
         monitor.register(label)
         defer { monitor.unregister(label) }
-        #expect(engine.animatedCount == 1)
+        #expect(engine.animatedCount == 1, "witness: the emote plays through idle calm")
 
         container.isHidden = true
         monitor.tick()
-        #expect(monitor.walkedLabelCount == 0, "a resting app was walked")
-        #expect(engine.animatedCount == 1, "witness: nothing re-asked, so nothing changed")
-
-        resting = false
-        monitor.tick()
-        #expect(monitor.walkedLabelCount == 1)
-        #expect(engine.animatedCount == 0, "awake again, the hidden label kept its slot")
+        #expect(monitor.walkedLabelCount == 1, "a tick during idle calm walked nothing")
+        #expect(engine.animatedCount == 0, "the hidden label kept its slot through idle calm")
     }
 
-    /// The background is a rest too, ended by coming back to the front.
+    /// The background is a rest, ended by coming back to the front.
     @Test func theMonitorWalksNothingInTheBackground() throws {
         let engine = try warmEngine(["noto:1f525"])
         let (label, window) = hostedLabel("🔥", engine: engine)
         defer { window.isHidden = true }
         let monitor = EmoteVisibilityMonitor()
-        monitor.isResting = { false }
         monitor.register(label)
         defer { monitor.unregister(label) }
 

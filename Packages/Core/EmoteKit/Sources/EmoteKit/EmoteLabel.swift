@@ -405,6 +405,9 @@ open class EmoteLabel: UILabel {
             } else {
                 if let replaced = players[index] { release(replaced) }
                 player = EmotePlayer(emote: emote, side: side, motion: motion)
+                // The emotes' own policy, not the device's default: it is the
+                // one a test can set, and the one every emote surface shares.
+                player.view.playbackPolicy = policy
                 players[index] = player
                 addSubview(player.view)
                 start(player, index: index)
@@ -524,13 +527,8 @@ open class EmoteLabel: UILabel {
         }
         let center = NotificationCenter.default
         // Selector observers are dropped with the label: nothing to remove.
-        for name in [
-            UIAccessibility.reduceMotionStatusDidChangeNotification,
-            Notification.Name.emoteAnimationPreferenceDidChange,
-            Notification.Name.decorativeMotionDidChange,
-            Notification.Name.NSProcessInfoPowerStateDidChange,
-            ProcessInfo.thermalStateDidChangeNotification
-        ] {
+        // Not idle calm: an emote plays through it (#1072).
+        for name in EmoteMotion.policyNotifications {
             center.addObserver(self, selector: #selector(motionPolicyChanged), name: name, object: nil)
         }
         center.addObserver(self, selector: #selector(willEnterForeground),

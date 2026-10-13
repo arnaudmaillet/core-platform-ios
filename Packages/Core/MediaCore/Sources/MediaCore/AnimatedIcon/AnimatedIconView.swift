@@ -46,13 +46,20 @@ public final class AnimatedIconView: UIView {
 
     public static var devicePolicy: MotionPolicy {
         // Decoration: still under Reduce Motion and Power Saving, and while
-        // the app rests (`IdleCalm`, #580).
-        if MotionPreference.stillsDecoration { return .still }
+        // the app rests (`IdleCalm`, #580) — the map's markers, which the
+        // owner keeps at rest (#1072). Emotes in text state their own policy
+        // through `playbackPolicy`, and play through idle calm.
+        if MotionPreference.reducesMotion || isIdleCalm() { return .still }
         if ProcessInfo.processInfo.thermalState.rawValue
             >= ProcessInfo.ThermalState.serious.rawValue { return .still }
         if ProcessInfo.processInfo.isLowPowerModeEnabled { return .reduced }
         return .full
     }
+
+    /// Whether the app rests (`IdleCalm`) — the idle half of
+    /// `MotionPreference.stillsDecoration`, read on its own so a test can
+    /// inject it without flipping the app-wide state under the suites beside.
+    public static var isIdleCalm: () -> Bool = { IdleCalm.isCalm }
 
     /// Overrides the device's answer. Exists because no simulator can switch on
     /// Low Power, so without it two of the three states are untestable.
@@ -61,9 +68,10 @@ public final class AnimatedIconView: UIView {
 
     /// The policy THIS view plays under. Nil, the default: the app's
     /// (`policy`) — decoration, which Reduce Motion, Power Saving, Low Power
-    /// and idle calm all reach. An owner whose motion is the content itself
-    /// states its own: the emote keyboard keeps playing through idle calm and
-    /// stops under Low Power (#926). Read at install time like the app's, so
+    /// and idle calm all reach: the map's markers. An owner whose motion is
+    /// the content itself states its own: every emote in text, the composer
+    /// and the keyboard plays through idle calm (#926, #1072), and the
+    /// keyboard stops under Low Power. Read at install time like the app's, so
     /// a change re-installs.
     public var playbackPolicy: MotionPolicy? {
         didSet {

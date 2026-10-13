@@ -3,17 +3,49 @@ import Foundation
 import MediaCore
 import UIKit
 
-/// How an emote may move right now: the device's answer (`AnimatedIconView`,
-/// shared with the map's icons), held still when the viewer turned off
-/// Animate Emojis or Power Saving is on (Settings → App and Device).
+/// How an emote may move right now (`policy`): still under Reduce Motion
+/// (iOS or the app's), Animate Emojis off, Power Saving and overheating; at
+/// half rate under Low Power Mode; at its own rate otherwise.
+///
+/// ⚠️ **EMOTES IN TEXT PLAY THROUGH IDLE CALM** (#1072, the owner's
+/// decision of 2026-10-13). Idle calm (#580/#650) rests the app's decoration
+/// — the shimmer, the badge's breath, the record's spin — once nobody has
+/// touched the app for a while; an emote in a caption or a comment is what
+/// the viewer is reading, and froze while they simply watched. The keyboard
+/// already played through it (#926); every EmoteKit surface now does, each
+/// stating this policy on its player (`playbackPolicy`).
+///
+/// ⚠️ **NOT THE MAP.** Its emote markers keep `AnimatedIconView`'s own
+/// policy and rest with the decoration: there are far more of them (the
+/// owner's decision on #1072, the #580 cost).
 @MainActor
 enum EmoteMotion {
+    /// What every emote surface plays under: a label, the composer, a tile
+    /// that is not the keyboard's. `AnimatedIconView.forcedPolicy` (a debug
+    /// override) still wins, held still when emotes may not animate at all.
     static var policy: AnimatedIconView.MotionPolicy {
-        EmoteAnimationPreference.animatesEmotes ? AnimatedIconView.policy : .still
+        let now = conditions()
+        if let forced = AnimatedIconView.forcedPolicy { return now.animatesEmotes ? forced : .still }
+        return policy(for: now)
     }
 
-    /// What the device says, for the emote keyboard's gate.
-    struct KeyboardConditions: Equatable {
+    /// The policy for `conditions`. Idle calm is read into them only so a
+    /// test can say it does NOT count.
+    static func policy(for conditions: Conditions) -> AnimatedIconView.MotionPolicy {
+        if conditions.reducesMotion || !conditions.animatesEmotes || conditions.overheated { return .still }
+        return conditions.lowPower ? .reduced : .full
+    }
+
+    /// Where every surface but the keyboard reads its conditions. Swappable
+    /// for tests, which must not flip process-wide settings under suites
+    /// running beside them.
+    static var conditions: @MainActor () -> Conditions = { .current }
+
+    /// The keyboard's name for the same conditions (#926).
+    typealias KeyboardConditions = Conditions
+
+    /// What the device says, for every emote's gate.
+    struct Conditions: Equatable {
         /// iOS Reduce Motion, or the app's own switch, or Power Saving
         /// (`MotionPreference.reducesMotion`).
         var reducesMotion = false
@@ -28,8 +60,8 @@ enum EmoteMotion {
         /// a test can say it does NOT count.
         var idleCalm = false
 
-        static var current: KeyboardConditions {
-            KeyboardConditions(
+        static var current: Conditions {
+            Conditions(
                 reducesMotion: MotionPreference.reducesMotion,
                 lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
                 animatesEmotes: EmoteAnimationPreference.animatesEmotes,
@@ -41,10 +73,10 @@ enum EmoteMotion {
     }
 
     /// The emote keyboard's policy (#926): its emotes ARE what it offers, so
-    /// they loop for as long as it shows — through idle calm (#650), which
-    /// rests the app's decoration and not this. Still under Reduce Motion and
-    /// under Low Power Mode, which the owner named, and under what already
-    /// stills every emote: Animate Emojis off, Power Saving, overheating.
+    /// they loop for as long as it shows — through idle calm, like every
+    /// emote (#1072). Still under Reduce Motion and under Low Power Mode,
+    /// which the owner named, and under what already stills every emote:
+    /// Animate Emojis off, Power Saving, overheating.
     ///
     /// ⚠️ LOW POWER IS STILL HERE, NOT `.reduced`. Decoration only halves its
     /// rate under Low Power (`AnimatedIconView.devicePolicy`); a screen of
@@ -64,9 +96,13 @@ enum EmoteMotion {
         keyboardPolicy(for: keyboardConditions())
     }
 
-    /// What the keyboard re-reads its policy on. Not
-    /// `.decorativeMotionDidChange`: idle calm does not reach it.
-    static let keyboardPolicyNotifications: [Notification.Name] = [
+    /// What the keyboard re-reads its policy on: the same as every emote
+    /// surface (`policyNotifications`).
+    static var keyboardPolicyNotifications: [Notification.Name] { policyNotifications }
+
+    /// What every emote surface re-reads its policy on. Not
+    /// `.decorativeMotionDidChange`: idle calm reaches none of them (#1072).
+    static let policyNotifications: [Notification.Name] = [
         UIAccessibility.reduceMotionStatusDidChangeNotification,
         Notification.Name.NSProcessInfoPowerStateDidChange,
         Notification.Name.emoteAnimationPreferenceDidChange,

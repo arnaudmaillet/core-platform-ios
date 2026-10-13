@@ -552,13 +552,8 @@ final class EmoteAttachmentView: UIView {
             addSubview(view)
         }
         let center = NotificationCenter.default
-        for name in [
-            UIAccessibility.reduceMotionStatusDidChangeNotification,
-            Notification.Name.emoteAnimationPreferenceDidChange,
-            Notification.Name.decorativeMotionDidChange,
-            Notification.Name.NSProcessInfoPowerStateDidChange,
-            ProcessInfo.thermalStateDidChangeNotification
-        ] {
+        // Not idle calm: an emote plays through it (#1072).
+        for name in EmoteMotion.policyNotifications {
             center.addObserver(self, selector: #selector(motionPolicyChanged), name: name, object: nil)
         }
         center.addObserver(self, selector: #selector(willEnterForeground),
@@ -584,9 +579,11 @@ final class EmoteAttachmentView: UIView {
 
     private func start() {
         guard request == nil, !isShowingArt, window != nil else { return }
-        let motion = motion
+        let policy = EmoteMotion.policy
+        let motion: EmoteEngine.Motion = policy == .still ? .still : .loop
         // Motion off: an emoji's still IS the glyph already showing.
         if motion == .still, emote.isUnicodeEmoji { return }
+        player.playbackPolicy = policy
         let side = EmoteEngine.pixelSide(forPoints: bounds.width, scale: window?.screen.scale ?? 3)
         var answered = false
         request = engine.requestArt(for: emote, pixelSide: side, motion: motion) { [weak self] art in

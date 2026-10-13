@@ -121,8 +121,9 @@ public final class EmoteTileView: UIView {
         accessibilityLabel = emote.name
 
         let policy = playsAsContent ? EmoteMotion.keyboardPolicy : EmoteMotion.policy
-        // The player follows the same answer; nil leaves it the app's.
-        player.playbackPolicy = playsAsContent ? policy : nil
+        // The player follows the same answer: through idle calm either way
+        // (#1072), and the keyboard's own way under Low Power (#926).
+        player.playbackPolicy = policy
         let motion: EmoteEngine.Motion = policy == .still ? .still : .loop
         if motion == .still && emote.isUnicodeEmoji { return }
         if let art = engine.cachedArt(for: emote, pixelSide: Self.pixelSide, motion: motion) {
