@@ -99,6 +99,31 @@ public protocol EngagementProviding: Sendable {
     func likeCounts(for postIDs: [PostID]) async throws -> [PostID: Int64]
 }
 
+/// A comment's likes (#637): its count — everyone's points — and the
+/// viewer's own points on it.
+public struct CommentLikes: Equatable, Sendable {
+    public var count: Int64
+    public var mine: Int64
+
+    public init(count: Int64, mine: Int64) {
+        self.count = count
+        self.mine = mine
+    }
+}
+
+/// Comment likes, as point stakes like a post's (#637, the owner's call
+/// 2026-10-13): one point per tap through `wallet.Stake` on the comment,
+/// final, read back by engagement's `BatchGetLikes`. A capability of its
+/// own, so engagement fakes that know only posts need not answer it.
+public protocol CommentLiking: Sendable {
+    /// One point on the comment, committed at once. Throws when it does not
+    /// land (a transport failure, or `LikeRefused`).
+    func likeComment(_ commentID: String) async throws
+    /// The comments' likes, by id; a comment the server does not answer for
+    /// is absent.
+    func commentLikes(for commentIDs: [String]) async throws -> [String: CommentLikes]
+}
+
 /// The server answered a like with a refusal: no point went on the post.
 public struct LikeRefused: Error, Equatable {
     public let outcome: LikeStakeAnswer.Outcome
@@ -470,11 +495,17 @@ public actor FeedRepository: FeedProviding {
 
 extension FeedRepository: EngagementProviding {
     public func like(_ postID: PostID) async throws {
-        let profileID = try await resolveViewerProfileID(forWrite: "like")
+        try await stakeOnePoint(on: .post(postID.rawValue), write: "like")
+    }
+
+    /// One sealed point on `target`, committed now rather than through the
+    /// outbox: the screen rolls back what does not land.
+    private func stakeOnePoint(on target: LikeOutbox.Target, write: String) async throws {
+        let profileID = try await resolveViewerProfileID(forWrite: write)
         guard let likeStaking else { throw FeedError.transport(message: "no like path") }
         let now = Date()
         let batch = LikeOutbox.Batch(
-            target: .post(postID.rawValue), points: 1, usesStakeShot: false,
+            target: target, points: 1, usesStakeShot: false,
             idempotencyKey: UUID().uuidString.replacingOccurrences(of: "-", with: ""),
             firstTapAt: now, lastTapAt: now, isSealed: true,
             accountID: nil, profileID: profileID.rawValue
@@ -509,6 +540,37 @@ extension FeedRepository: EngagementProviding {
         return counts
     }
 
+}
+
+// MARK: - CommentLiking
+
+extension FeedRepository: CommentLiking {
+    public func likeComment(_ commentID: String) async throws {
+        try await stakeOnePoint(on: .comment(commentID), write: "likeComment")
+    }
+
+    public func commentLikes(for commentIDs: [String]) async throws -> [String: CommentLikes] {
+        var likes: [String: CommentLikes] = [:]
+        // At most 100 targets a call.
+        for start in stride(from: 0, to: commentIDs.count, by: 100) {
+            var request = Engagement_V1_BatchGetLikesRequest()
+            request.targets = commentIDs[start..<min(start + 100, commentIDs.count)].map { id in
+                var target = Engagement_V1_LikeTarget()
+                target.commentID = id
+                return target
+            }
+            let response = await engagementClient.batchGetLikes(request: request, headers: [:])
+            switch response.result {
+            case .success(let body):
+                for view in body.likes where !view.target.commentID.isEmpty {
+                    likes[view.target.commentID] = CommentLikes(count: view.count, mine: view.mine)
+                }
+            case .failure(let error):
+                throw FeedError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            }
+        }
+        return likes
+    }
 }
 
 /// The lock-guarded shadow behind `FeedRepository.peekPost` — a plain
