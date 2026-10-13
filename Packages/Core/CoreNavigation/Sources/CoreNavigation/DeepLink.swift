@@ -6,6 +6,7 @@ import Foundation
 ///     https://core-platform.click/@kenji.dev     →  .profileHandle("kenji.dev")
 ///     https://core-platform.click/tag/travel     →  .hashtag("travel")
 ///     https://core-platform.click/s/Ab3_x-…      →  .profileShareToken("Ab3_x-…")
+///     https://core-platform.click/family/K7M2…   →  .supervisionInvite("K7M2…")
 ///     wynn://@kenji.dev, wynn:/tag/travel   (the same paths)
 ///
 /// The web form is what `ProfileShareLink` and a place's share URL already
@@ -34,6 +35,9 @@ public extension AppRoute {
         case 2 where parts[0].lowercased() == "s":
             guard let token = Self.shareToken(parts[1]) else { return nil }
             self = .profileShareToken(token)
+        case 2 where parts[0].lowercased() == "family":
+            guard let code = SupervisionInviteCode.normalized(parts[1]) else { return nil }
+            self = .supervisionInvite(code)
         default:
             return nil
         }

@@ -156,6 +156,11 @@ public struct MockBackend: Sendable {
         let geoDiscovery = MockGeoDiscoveryService(dataset: dataset, spreadsHierarchy: seedsMapHierarchy)
         geoDiscovery.register(on: bff)
         moderationService.register(on: bff)
+        // Family supervision (#417): each side checked against the date of
+        // birth account keeps; `-mock-supervision <seed>` starts with links.
+        MockSupervisionService(
+            dataset: dataset, viewerAge: { accountLifecycle.viewerAge }, seed: MockSupervisionService.launchSeed
+        ).register(on: bff)
 
         self.dataset = dataset
         self.geoDiscovery = geoDiscovery

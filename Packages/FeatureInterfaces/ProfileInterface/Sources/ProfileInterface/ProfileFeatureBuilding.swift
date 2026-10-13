@@ -92,6 +92,12 @@ public protocol ProfileFeatureBuilding {
     /// — the app-wide section (preferences, help, legal) — with "Log in or sign
     /// up", which calls `onSignIn`, where Log Out would be.
     func makeGuestSettingsViewController(onSignIn: @escaping () -> Void) -> UIViewController
+
+    /// The screen that accepts a family supervision invite (#417), opened by
+    /// a `core-platform.click/family/<code>` link with the code filled in.
+    /// Nothing is linked until the viewer confirms there. Nil when the
+    /// account can't take one.
+    func makeSupervisionAcceptViewController(code: String) -> UIViewController?
 }
 
 public extension ProfileFeatureBuilding {

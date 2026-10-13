@@ -58,3 +58,34 @@ struct DeepLinkTests {
         #expect(route("other://@kenji.dev") == nil)
     }
 }
+
+/// A family supervision invite (#417): the code read as the server reads it.
+struct SupervisionInviteLinkTests {
+    private func route(_ link: String) -> AppRoute? {
+        URL(string: link).flatMap(AppRoute.init(deepLink:))
+    }
+
+    @Test func anInviteLinkOpensTheCode() {
+        #expect(route("https://core-platform.click/family/K7M2Q9XRTD") == .supervisionInvite("K7M2Q9XRTD"))
+        #expect(route("https://core-platform.click/family/k7m2q-9xrtd") == .supervisionInvite("K7M2Q9XRTD"))
+        #expect(route("wynn:/family/K7M2Q9XRTD") == .supervisionInvite("K7M2Q9XRTD"))
+        #expect(route("https://core-platform.click/family/K7M2Q9XRT") == nil, "one short")
+        #expect(route("https://core-platform.click/family/K7M2Q9XRTDX") == nil, "one long")
+        #expect(route("https://core-platform.click/family/") == nil)
+    }
+
+    /// Typing ignores case, spaces and dashes, like the server.
+    @Test func aCodeIsReadIgnoringCaseSpacesAndDashes() {
+        #expect(SupervisionInviteCode.normalized(" k7m2q 9xr-td ") == "K7M2Q9XRTD")
+        #expect(SupervisionInviteCode.normalized("K7M2Q9XRT!") == nil)
+        #expect(SupervisionInviteCode.normalized("K7M2Q9XRTÉ") == nil)
+        #expect(SupervisionInviteCode.display("K7M2Q9XRTD") == "K7M2Q-9XRTD")
+    }
+
+    /// The QR code and the share sheet carry a link the app opens back.
+    @Test func theLinkRoundTrips() throws {
+        let link = try #require(SupervisionInviteCode.link(for: "K7M2Q9XRTD"))
+        #expect(link.absoluteString == "https://core-platform.click/family/K7M2Q9XRTD")
+        #expect(AppRoute(deepLink: link) == .supervisionInvite("K7M2Q9XRTD"))
+    }
+}
