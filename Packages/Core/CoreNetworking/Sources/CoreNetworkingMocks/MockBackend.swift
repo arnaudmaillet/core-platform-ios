@@ -62,6 +62,8 @@ public struct MockBackend: Sendable {
         let accountLifecycle = MockAccountLifecycle(twoStepOn: ProcessInfo.processInfo.arguments.contains("-mock-two-step"))
         let auth = MockAuthService(lifecycle: accountLifecycle)
         auth.register(on: bff)
+        // Apps and Websites (#485): none unless `-mock-authorized-apps`.
+        MockAuthorizedAppsService().register(on: bff)
         MockAccountService(lifecycle: accountLifecycle).register(on: bff)
         // `-mock-verification pending|rejected|approved` gives the viewer a
         // verification request in that state (#415).
