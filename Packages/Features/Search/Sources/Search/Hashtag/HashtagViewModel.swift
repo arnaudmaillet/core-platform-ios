@@ -42,8 +42,8 @@ final class HashtagViewModel {
     let tag: String
     private(set) var top: SearchPostSurfaceState = .loading
     private(set) var recent: SearchPostSurfaceState = .loading
-    /// What Recent found when it fits in one page — every post there is —
-    /// else the index's coarse count; nil until either is known.
+    /// The tag's post count, the server's (`HashtagHit.post_count`, #848);
+    /// nil until it answers.
     private(set) var postCount: Int?
     var onChange: (() -> Void)?
 
@@ -109,7 +109,10 @@ final class HashtagViewModel {
         async let topDone: Void = loadPage(.top, first: true)
         async let recentDone: Void = loadPage(.recent, first: true)
         _ = await (topDone, recentDone)
-        if postCount == nil, let counted = await count { postCount = counted }
+        // The server's own count (`HashtagHit.post_count`, backend #900): the
+        // searchable posts carrying the tag, refreshed every minute. No local
+        // tally from a page any more — a deleted or hidden post leaves it.
+        if let counted = await count { postCount = counted }
         onChange?()
     }
 
@@ -123,9 +126,15 @@ final class HashtagViewModel {
     /// (empty or failed) goes back to loading and says what came back. A tab
     /// already loading is left to its load.
     func refresh() async {
+        async let count = try? await repository.hashtagPostCount(tag)
         async let topDone: Void = refreshPage(.top)
         async let recentDone: Void = refreshPage(.recent)
         _ = await (topDone, recentDone)
+        // The count moves too (refreshed every minute on the server).
+        if let counted = await count, counted != postCount {
+            postCount = counted
+            onChange?()
+        }
     }
 
     private func refreshPage(_ tab: Tab) async {
@@ -152,7 +161,6 @@ final class HashtagViewModel {
         var seen = Set<PostID>()
         let ids = page.hits.map(\.id).filter { seen.insert($0).inserted }
         paging[tab] = Paging(ids: ids, nextPageToken: page.nextPageToken)
-        if tab == .recent, page.nextPageToken == nil { postCount = page.hits.count }
         set(tab, ids.isEmpty ? .empty(query: title) : .posts(ids))
         onChange?()
     }
@@ -203,10 +211,6 @@ final class HashtagViewModel {
         NSLog("[hashtag] %@ %@ +%d → %d, next=%@", title, "\(tab)", page.hits.count, state.ids.count,
               page.nextPageToken ?? "none")
         #endif
-        if tab == .recent, first, page.nextPageToken == nil {
-            // A first page with no next one is every post there is.
-            postCount = page.hits.count
-        }
         set(tab, state.ids.isEmpty ? .empty(query: title) : .posts(state.ids))
         onChange?()
     }

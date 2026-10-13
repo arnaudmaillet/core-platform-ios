@@ -82,21 +82,28 @@ struct HashtagViewModelTests {
         #expect(await search.queries.allSatisfy { $0 == "#travel" }, "the tag is asked for with its #")
     }
 
-    /// A first page that is not full is every post there is; a full one
-    /// leaves the count to the index.
-    @Test func theCountIsThePageWhenItIsAllThereIs() async {
+    /// The header's count is the server's (`HashtagHit.post_count`, #848),
+    /// whatever one page holds: no local tally any more.
+    @Test func theCountIsTheServersWhateverAPageHolds() async {
         let small = HashtagViewModel(tag: "travel", repository: TagSearch(recent: [hit("a"), hit("b")], count: 40))
         await small.load()
-        #expect(small.countText == "2 posts")
+        #expect(small.countText == "40 posts", "a one-page Recent no longer stands in for the count")
 
         let more = hits(Int(HashtagViewModel.pageSize) + 5)
         let big = HashtagViewModel(tag: "travel", repository: TagSearch(recent: more, count: 1_500))
         await big.load()
         #expect(big.countText == "1.5K posts")
 
-        let one = HashtagViewModel(tag: "travel", repository: TagSearch(recent: [hit("a")]))
+        let one = HashtagViewModel(tag: "travel", repository: TagSearch(recent: [hit("a")], count: 1))
         await one.load()
         #expect(one.countText == "1 post")
+    }
+
+    /// No count from the server: none shown, not a guess from a page.
+    @Test func noCountMeansNoneShown() async {
+        let unknown = HashtagViewModel(tag: "travel", repository: TagSearch(recent: [hit("a"), hit("b")]))
+        await unknown.load()
+        #expect(unknown.countText == nil)
     }
 
     // MARK: Refresh (#798)
@@ -244,6 +251,21 @@ struct HashtagRepositoryTests {
     private func repository() -> SearchRepository {
         let backend = MockBackend()
         return SearchRepository(searchClient: Search_V1_SearchServiceClient(client: backend.makeRPCClient()))
+    }
+
+    /// The mock serves `ListTrendingHashtags` (#848, backend #900): tags
+    /// used this week, ranked by recent use, each with its whole count.
+    @Test func trendingHashtagsAreServedRankedWithTheirCounts() async throws {
+        let backend = MockBackend()
+        let client = Search_V1_SearchServiceClient(client: backend.makeRPCClient())
+        var request = Search_V1_ListTrendingHashtagsRequest()
+        request.limit = 5
+        let trending = try await client.listTrendingHashtags(request: request, headers: [:]).result.get().hashtags
+        try #require(!trending.isEmpty && trending.count <= 5)
+        #expect(trending.allSatisfy { $0.postCount > 0 })
+        #expect(Set(trending.map(\.tag)).count == trending.count, "a tag once")
+        let carrying = backend.dataset.posts.filter { $0.caption.lowercased().contains("#\(trending[0].tag)") }
+        #expect(!carrying.isEmpty, "a trending tag is on some post")
     }
 
     @Test func aTagsPostsAreTheOnesCarryingIt() async throws {

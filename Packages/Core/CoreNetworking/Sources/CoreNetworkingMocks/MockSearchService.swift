@@ -41,6 +41,9 @@ public final class MockSearchService: @unchecked Sendable {
         bff.register(path: "/search.v1.SearchService/Suggest") { [self] (request: Search_V1_SuggestRequest) in
             suggest(request)
         }
+        bff.register(path: "/search.v1.SearchService/ListTrendingHashtags") { [self] (request: Search_V1_ListTrendingHashtagsRequest) in
+            listTrendingHashtags(request)
+        }
     }
 
     /// Typeahead completions.
@@ -314,6 +317,35 @@ public final class MockSearchService: @unchecked Sendable {
 
     /// Every tag the corpus carries and how many posts carry it, most used
     /// first, then alphabetical.
+    /// `ListTrendingHashtags` (backend #900): the tags rising now. The fleet's
+    /// rule: the last day's posts count three times the rest of the week's,
+    /// and a tag unused this week is left out; each carries its whole
+    /// `post_count`. The mock's "now" is its newest TAGGED post, so a corpus
+    /// seeded on fixed dates still has a week to trend in.
+    private func listTrendingHashtags(
+        _ request: Search_V1_ListTrendingHashtagsRequest
+    ) -> Result<Search_V1_ListTrendingHashtagsResponse, ConnectError> {
+        let day: Int64 = 86_400_000
+        let now = dataset.posts.filter { !Self.tags(in: $0.caption).isEmpty }.map(\.publishedAtMS).max() ?? 0
+        var weights: [String: Int] = [:]
+        for post in dataset.posts where now - post.publishedAtMS < 7 * day {
+            let weight = now - post.publishedAtMS < day ? 3 : 1
+            for tag in Self.tags(in: post.caption) { weights[tag, default: 0] += weight }
+        }
+        let counts = Dictionary(uniqueKeysWithValues: tagCounts().map { ($0.tag, $0.count) })
+        var response = Search_V1_ListTrendingHashtagsResponse()
+        response.hashtags = weights
+            .sorted { ($0.value, $1.key) > ($1.value, $0.key) }
+            .prefix(request.limit > 0 ? Int(request.limit) : 20)
+            .map { entry in
+                var hashtag = Search_V1_HashtagHit()
+                hashtag.tag = entry.key
+                hashtag.postCount = Int64(counts[entry.key] ?? 0)
+                return hashtag
+            }
+        return .success(response)
+    }
+
     private func tagCounts() -> [(tag: String, count: Int)] {
         var counts: [String: Int] = [:]
         for post in dataset.posts {

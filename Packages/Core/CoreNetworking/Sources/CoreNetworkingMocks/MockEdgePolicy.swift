@@ -78,6 +78,8 @@ public enum MockEdgePolicy {
         "/timeline.v1.TimelineService/GetDiscoveryFeed",
         "/search.v1.SearchService/Search",
         "/search.v1.SearchService/Suggest",
+        // Edge `public_read` (backend #900): guests see what's trending.
+        "/search.v1.SearchService/ListTrendingHashtags",
         "/media.v1.MediaService/ResolveDelivery",
         // The one write open to guests: reporting content (DSA Art. 16), and
         // what became of those reports (`member_or_guest` on the edge).
