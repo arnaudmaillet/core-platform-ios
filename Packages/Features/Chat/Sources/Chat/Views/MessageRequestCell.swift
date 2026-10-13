@@ -73,7 +73,7 @@ final class MessageRequestCell: UITableViewCell {
         avatarTask?.cancel()
         avatarTask = nil
         avatarPeerID = nil
-        avatarView.setPicture(nil, animated: false)
+        avatarView.setPicture(nil, pipeline: nil)
     }
 
     /// Same contract as `ConversationCell`: the row is complete on initials,
@@ -139,15 +139,14 @@ final class MessageRequestCell: UITableViewCell {
         avatarTask?.cancel()
         avatarTask = nil
         avatarPeerID = model.peerID
-        avatarView.setPicture(nil, animated: false)
+        avatarView.setPicture(nil, pipeline: nil)
 
         guard let peerID = model.peerID, let avatars, let imagePipeline else { return }
         avatarTask = Task { [weak self] in
             let urls = await avatars.avatarURLs(for: [peerID])
             guard !Task.isCancelled, let url = urls[peerID] else { return }
-            guard let image = try? await imagePipeline.image(for: url, size: .avatar) else { return }
             guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
-            self.avatarView.setPicture(image, animated: true)
+            self.avatarView.setPicture(url, pipeline: imagePipeline)
         }
     }
 

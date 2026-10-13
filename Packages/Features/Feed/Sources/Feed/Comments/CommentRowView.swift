@@ -61,23 +61,14 @@ final class CommentRowView: UIView {
     /// compose picker, and the profile relationship lists draw, at this
     /// surface's diameter. Two features rolling their own discs drift, and
     /// the lists read as different products the moment they do.
-    private let avatarView = MonogramAvatarView(diameter: CommentRowView.avatarSize)
+    ///
+    /// The app's avatar (#943): the initials, then the picture over them, on
+    /// the loading ladder — which cancels and identity-guards a recycled
+    /// row's late picture by itself.
+    private let avatarView = AvatarView(diameter: CommentRowView.avatarSize, size: .avatar)
     /// Whether this row is a reply — kept so a Dynamic Type change can restate
     /// the indent, which is sized from the same type as the avatar.
     private var isReplyRow = false
-    /// The picture, pinned OVER the monogram (never swapped for it — the
-    /// monogram stays behind as the permanent fallback).
-    private let avatarImageView = AvatarImageView()
-    /// The in-flight avatar fetch, cancelled on reuse.
-    private var avatarTask: Task<Void, Never>?
-    /// The picture on show, so the same one is not dropped and fetched
-    /// again (#743).
-    private var shownAvatarURL: URL?
-    /// REUSE GUARD, and it must be an identity check rather than
-    /// cancellation alone: a recycled row can outlive its own fetch, and
-    /// without this a slow avatar lands on whichever comment the row has
-    /// since become.
-    private var representedID: String?
     /// The reply indent, restated per configure — a reused row can switch
     /// depth between a top-level comment and a reply.
     private var rowLeading: NSLayoutConstraint?
@@ -159,7 +150,7 @@ final class CommentRowView: UIView {
     /// The name · time line, for what sits beside the time (#725).
     var headerTextLabel: UILabel { headerLabel }
     /// The avatar's picture on show, nil while the monogram shows. Tests.
-    var debugAvatarImage: UIImage? { avatarImageView.image }
+    var debugAvatarImage: UIImage? { avatarView.shownPicture }
 
     // MARK: - Variant and effect (#920)
 
@@ -238,7 +229,6 @@ final class CommentRowView: UIView {
     /// including the monogram — the row is fully readable on the frame it
     /// appears, and only the picture arrives later.
     func configure(with model: CommentDisplayModel, imagePipeline: ImagePipeline? = nil) {
-        representedID = model.id
         // A held comment says so — to its author, who is waiting, and to the
         // post's owner, who decides.
         headerLabel.text = model.isHeld
@@ -258,7 +248,11 @@ final class CommentRowView: UIView {
     /// Restates everything sized from the text: the disc's diameter and a
     /// reply's indent.
     private func refreshTypeDrivenGeometry() {
-        avatarView.setDiameter(Self.avatarSize(for: traitCollection))
+        let side = Self.avatarSize(for: traitCollection)
+        avatarView.setDiameter(side)
+        // Decoded at the avatar's own size (it follows Dynamic Type), not at
+        // 1200 px (#894).
+        avatarView.pictureSize = ImageBucket(fitting: CGSize(width: side, height: side), scale: traitCollection.displayScale)
         rowLeading?.constant = isReplyRow ? Self.replyIndent(for: traitCollection) : 0
     }
 
@@ -284,7 +278,6 @@ final class CommentRowView: UIView {
         likeCount: Int64?,
         imagePipeline: ImagePipeline?
     ) {
-        representedID = nil
         bodyLabel.textColor = .label
         headerLabel.text = timestamp.isEmpty ? authorName : "\(authorName) · \(timestamp)"
         bodyLabel.text = caption
@@ -331,11 +324,7 @@ final class CommentRowView: UIView {
     /// Cell recycling: drop the in-flight fetch, the picture, and the
     /// identity it belonged to. Called from `CommentCell.prepareForReuse`.
     func prepareForReuse() {
-        avatarTask?.cancel()
-        avatarTask = nil
-        representedID = nil
-        avatarImageView.image = nil
-        shownAvatarURL = nil
+        avatarView.reset()
         // ⚠️ BACK TO A COMMENT. A row that stood in for a caption has its reply
         // tap, its menu and its like control switched off, and a recycled cell
         // that inherited that would be a comment nobody could interact with —
@@ -416,26 +405,10 @@ final class CommentRowView: UIView {
     /// cell (a delivered message taking its pending row's place) blinked to
     /// its monogram for a frame. The same picture stays; a cached one lands
     /// at once; only a picture not in memory is fetched.
+    /// The picture over the initials: the same one again is kept (#743), a
+    /// recycled row's late one lands nowhere — both the avatar's own rules.
     private func loadAvatar(_ url: URL?, for id: String?, using pipeline: ImagePipeline?) {
-        avatarTask?.cancel()
-        avatarTask = nil
-        if let url, url == shownAvatarURL, avatarImageView.image != nil { return }
-        shownAvatarURL = url
-        avatarImageView.image = nil
-        guard let url, let pipeline else { return }
-        // Decoded at the avatar's own size (it follows Dynamic Type), not at
-        // 1200 px (#894).
-        let side = Self.avatarSize(for: traitCollection)
-        let size = ImageBucket(fitting: CGSize(width: side, height: side), scale: traitCollection.displayScale)
-        if let cached = pipeline.cachedImage(for: url, size: size) {
-            avatarImageView.image = cached
-            return
-        }
-        avatarTask = Task { [weak self] in
-            let image = try? await pipeline.image(for: url, size: size)
-            guard let self, let image, !Task.isCancelled, self.representedID == id else { return }
-            self.avatarImageView.image = image
-        }
+        avatarView.setPicture(url, pipeline: pipeline)
     }
 
     @objc private func avatarTapped() { onAvatarTap?() }
@@ -704,7 +677,6 @@ final class CommentRowView: UIView {
         // The picture overlays the disc and inherits its circle — the
         // monogram behind it is the permanent fallback, so an absent or
         // failed image is simply the disc, never a hole.
-        avatarImageView.pin(to: avatarView)
 
         headerLabel.font = .appFont(forTextStyle: .footnote)
         headerLabel.adjustsFontForContentSizeCategory = true

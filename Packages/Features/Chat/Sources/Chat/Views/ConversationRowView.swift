@@ -44,7 +44,7 @@ final class ConversationRowView: UIView {
         avatarTask?.cancel()
         avatarTask = nil
         avatarPeerID = nil
-        avatarView.setPicture(nil, animated: false)
+        avatarView.setPicture(nil, pipeline: nil)
     }
 
     /// The row draws immediately from `model`; the picture, if there is one,
@@ -107,8 +107,8 @@ final class ConversationRowView: UIView {
         timeLabel.textColor = isUnread ? .label : .secondaryLabel
     }
 
-    /// Resolves the peer's avatar URL, then its image, then draws it — each
-    /// step abandoned if the row has moved on.
+    /// Resolves the peer's avatar URL, then hands it to the avatar, which
+    /// loads and draws it — abandoned if the row has moved on.
     private func loadAvatar(
         for model: ConversationDisplayModel,
         imagePipeline: ImagePipeline?,
@@ -117,15 +117,14 @@ final class ConversationRowView: UIView {
         avatarTask?.cancel()
         avatarTask = nil
         avatarPeerID = model.peerID
-        avatarView.setPicture(nil, animated: false)
+        avatarView.setPicture(nil, pipeline: nil)
 
         guard let peerID = model.peerID, let avatars, let imagePipeline else { return }
         avatarTask = Task { [weak self] in
             let urls = await avatars.avatarURLs(for: [peerID])
             guard !Task.isCancelled, let url = urls[peerID] else { return }
-            guard let image = try? await imagePipeline.image(for: url, size: .avatar) else { return }
             guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
-            self.avatarView.setPicture(image, animated: true)
+            self.avatarView.setPicture(url, pipeline: imagePipeline)
         }
     }
 

@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaCore
 import UIKit
 
 /// A monogram disc with a notification badge pinned to its bottom-right corner.
@@ -79,14 +80,10 @@ final class BadgedAvatarView: UIView {
         static let overhang: CGFloat = 3
     }
 
-    private let avatar = MonogramAvatarView()
-    /// The picture, drawn OVER the monogram rather than instead of it.
-    ///
-    /// The monogram stays underneath for the whole lifetime of the row, so
-    /// there is no empty disc at any point: before the fetch, during it, and
-    /// after one that failed, the initials are what shows. A swap would need a
-    /// third state for "loading" and would flash on cell reuse.
-    private let picture = AvatarImageView()
+    /// The app's avatar (#943): the picture drawn OVER the initials rather
+    /// than instead of them, so there is no empty disc at any point — before
+    /// the fetch, during it, and after one that failed, the initials show.
+    private let avatar = AvatarView(size: .avatar)
     private let badge = UIView()
     private let label = UILabel()
     private var badgeWidth: NSLayoutConstraint!
@@ -94,7 +91,6 @@ final class BadgedAvatarView: UIView {
     init() {
         super.init(frame: .zero)
         avatar.pin(to: self)
-        picture.pin(to: avatar)
 
         badge.backgroundColor = .tintColor
         badge.layer.borderWidth = Metrics.ringWidth
@@ -164,21 +160,16 @@ final class BadgedAvatarView: UIView {
         avatar.setMonogram(monogram)
     }
 
-    /// Reveals a fetched picture over the initials, or clears back to them.
-    ///
-    /// Cross-dissolved when it arrives late (the common case — the row was on
-    /// screen before the profile service answered) and set outright when it is
-    /// already in hand, so a scroll through cached rows doesn't shimmer.
-    func setPicture(_ image: UIImage?, animated: Bool) {
-        guard animated, image != nil else {
-            picture.image = image
-            return
-        }
-        UIView.transition(
-            with: picture, duration: 0.25,
-            options: [.transitionCrossDissolve, .allowUserInteraction]
-        ) { self.picture.image = image }
+    /// Shows the picture at `url` over the initials, or clears back to them
+    /// (nil). The avatar decides the motion: at once when the pipeline has it
+    /// (a scroll through cached rows doesn't shimmer), dissolved in when it
+    /// lands late.
+    func setPicture(_ url: URL?, pipeline: ImagePipeline?) {
+        avatar.setPicture(url, pipeline: pipeline)
     }
+
+    /// The picture on show, nil while the initials are — for tests.
+    var shownPicture: UIImage? { avatar.shownPicture }
 
     func setBadge(_ style: Style) {
         badge.isHidden = !style.isVisible

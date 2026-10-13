@@ -1964,7 +1964,8 @@ struct SnapCommentsPresentationTests {
 
         // …while the avatar keeps exactly its own. (The cell's contentView is
         // not asserted: UIKit puts its own recognizers there.)
-        let avatar = try #require(Self.firstView(MonogramAvatarView.self, in: cell))
+        // The app's avatar (#943) carries the tap, around its initials.
+        let avatar = try #require(Self.firstView(AvatarView.self, in: cell))
         #expect(avatar.gestureRecognizers?.count == 1)
 
         var profiles = 0

@@ -98,8 +98,8 @@ final class RelationshipListCell: UICollectionViewListCell {
     private let avatarHost = AvatarAccessoryView(
         frame: CGRect(x: 0, y: 0, width: MonogramAvatarView.rowDiameter, height: MonogramAvatarView.rowDiameter)
     )
-    private let monogramView = MonogramAvatarView()
-    private let avatarView = AvatarImageView()
+    /// The app's avatar (#943): the initials, then the picture over them.
+    private let avatarView = AvatarView(size: .avatar)
     private let actionHost = ActionAccessoryView()
     /// Who the row shows and the action it offers them: a change for the same
     /// person cross-fades the button, a new person does not.
@@ -116,15 +116,12 @@ final class RelationshipListCell: UICollectionViewListCell {
     var onAction: (() -> Void)?
 
     private var imagePipeline: ImagePipeline?
-    private var currentAvatarURL: URL?
-    private var avatarTask: Task<Void, Never>?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        monogramView.pin(to: avatarHost)
-        // The image overlays the disc exactly, leaving the monogram behind it
-        // as the permanent fallback — a row never renders as an empty circle.
-        avatarView.pin(to: monogramView)
+        // The picture overlays the initials exactly, the initials staying
+        // behind as the permanent fallback — never an empty circle.
+        avatarView.pin(to: avatarHost)
         actionHost.button.addAction(
             UIAction { [weak self] _ in self?.onAction?() },
             for: .primaryActionTriggered
@@ -137,15 +134,12 @@ final class RelationshipListCell: UICollectionViewListCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         onAction = nil
-        avatarTask?.cancel()
-        avatarTask = nil
-        currentAvatarURL = nil
-        avatarView.image = nil
+        avatarView.reset()
     }
 
     func configure(with row: ProfileRelationshipsViewModel.Row, imagePipeline: ImagePipeline?) {
         self.imagePipeline = imagePipeline
-        monogramView.setMonogram(row.monogram)
+        avatarView.setMonogram(row.monogram)
 
         var content = UIListContentConfiguration.subtitleCell()
         content.attributedText = Self.nameText(for: row)
@@ -261,23 +255,9 @@ final class RelationshipListCell: UICollectionViewListCell {
 
     /// Dissolves the avatar in over the monogram once it resolves. Separate
     /// from `configure` so a snapshot re-apply that re-configures the same row
-    /// doesn't restart a fetch that is already in flight.
+    /// doesn't restart a fetch that is already in flight — the same URL again
+    /// is a reconfigure for the avatar.
     func loadAvatar(_ url: URL?) {
-        guard url != currentAvatarURL || avatarView.image == nil else { return }
-        currentAvatarURL = url
-        avatarTask?.cancel()
-        avatarView.image = nil
-
-        guard let url, let pipeline = imagePipeline else { return }
-        avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url, size: .avatar) else { return }
-            guard let self, !Task.isCancelled, self.currentAvatarURL == url else { return }
-            UIView.transition(
-                with: self.avatarView, duration: 0.25,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                self.avatarView.image = image
-            }
-        }
+        avatarView.setPicture(url, pipeline: imagePipeline)
     }
 }
