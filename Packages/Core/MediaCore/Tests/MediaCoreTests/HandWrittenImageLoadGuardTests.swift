@@ -26,7 +26,6 @@ struct HandWrittenImageLoadGuardTests {
         // The hero's sources and their grids: the media surface (#1088).
         "PostGridCells.swift": "hero source: the row and tile covers (#1088)",
         "MediaCarouselView.swift": "hero source: the carousel's pages (#1088)",
-        "ForYouFollowingCardCell.swift": "hero source: the Following card's cover (#1088)",
         "ForYouGridPage.swift": "hero source: the For You grid's covers and its skeleton dissolve (#1088)",
         "ProfileGalleryGridView.swift": "hero source: the profile gallery's covers and its skeleton dissolve (#1088)",
         "SnapMediaAttributionView.swift": "snap chrome: the sound cover swaps inside the attribution's content transition (#1088)",
