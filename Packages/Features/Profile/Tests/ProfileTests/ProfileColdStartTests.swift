@@ -57,16 +57,31 @@ private func person(_ id: String, visibility: ProfileVisibility = .public) -> Us
 private actor ColdGallery: ProfileGalleryProviding {
     private let pages: [String?: GalleryPage]
     private var offline = false
+    private var isHeld = false
+    private var held: [CheckedContinuation<Void, Never>] = []
 
     init(pages: [String?: GalleryPage]) { self.pages = pages }
 
     func goOffline() { offline = true }
 
+    /// Holds every later first-page fetch until `release()`: the test decides
+    /// which of the header and the grid answers first (#1091).
+    func hold() { isHeld = true }
+
+    func release() {
+        isHeld = false
+        held.forEach { $0.resume() }
+        held = []
+    }
+
     /// First pages asked for (a load or a revalidation of the grid).
     private(set) var firstPageFetches = 0
 
     func authoredPage(for profileID: ProfileID, after pageToken: String?) async throws -> GalleryPage {
-        if pageToken == nil { firstPageFetches += 1 }
+        if pageToken == nil {
+            firstPageFetches += 1
+            if isHeld { await withCheckedContinuation { held.append($0) } }
+        }
         if offline { throw URLError(.notConnectedToInternet) }
         return pages[pageToken] ?? GalleryPage(posts: [], nextPageToken: nil)
     }
@@ -97,12 +112,29 @@ private actor ColdProfiles: ProfileProviding {
         if offline { throw URLError(.notConnectedToInternet) }
     }
 
+    private var isHeld = false
+    private var held: [CheckedContinuation<Void, Never>] = []
+
+    /// Holds every later profile read until `release()`: the test decides
+    /// which of the header and the grid answers first (#1091).
+    func hold() { isHeld = true }
+
+    func release() {
+        isHeld = false
+        held.forEach { $0.resume() }
+        held = []
+    }
+
+    private func gate() async {
+        if isHeld { await withCheckedContinuation { held.append($0) } }
+    }
+
     /// Profile reads asked for, offline ones included.
     private(set) var profileFetches = 0
     private(set) var relationshipReads = 0
 
-    func currentUserProfile() async throws -> UserProfile { profileFetches += 1; try check(); return own }
-    func profile(id: ProfileID) async throws -> UserProfile { profileFetches += 1; try check(); return other }
+    func currentUserProfile() async throws -> UserProfile { profileFetches += 1; await gate(); try check(); return own }
+    func profile(id: ProfileID) async throws -> UserProfile { profileFetches += 1; await gate(); try check(); return other }
     func relationship(for profileID: ProfileID) async throws -> ProfileRelationship {
         relationshipReads += 1
         try check()
@@ -352,6 +384,22 @@ final class ProfileColdStartTests {
         withExtendedLifetime((first, revisit)) {}
     }
 
+    /// The grace that stands for "nothing more happens": a second grid fetch
+    /// would have gone out at once, on the header's landing (#1091).
+    private static let nothingMore = Duration.milliseconds(200)
+
+    /// A revisit `open`ed with `onLoadSettled` watched: set before any await,
+    /// so the header's load cannot settle unseen.
+    private final class Settled {
+        var isSettled = false
+    }
+
+    private func watchLoad(_ viewModel: ProfileViewModel) -> Settled {
+        let settled = Settled()
+        viewModel.onLoadSettled = { settled.isSettled = true }
+        return settled
+    }
+
     @Test func aRevisitPastTheWindowRevalidates() async throws {
         let clock = Clock()
         let cache = ProfileCache(center: center, now: { clock.now })
@@ -361,9 +409,94 @@ final class ProfileColdStartTests {
 
         clock.offset = LocalStorePolicy.profileScreenRevalidation + 1
         let (revisit, shown) = open(.profile(ProfileID("prof-1")), cache: cache, profiles: profiles, gallery: pages)
+        let header = watchLoad(revisit)
         #expect(isContent(shown.phases.last), "a stale revisit still opens on the cached profile")
+        // Reached, then exact once both loads settled: an overshoot fails here
+        // instead of running a budget out on `== 2` (#1091).
+        #expect(await settle { await profiles.profileFetches >= 2 })
+        #expect(await settle { await pages.firstPageFetches >= 2 })
+        #expect(await settle { header.isSettled && !revisit.isGalleryLoading })
+        #expect(await profiles.profileFetches == 2)
+        #expect(await pages.firstPageFetches == 2, "a stale revisit fetched the grid more than once")
+        try? await Task.sleep(for: Self.nothingMore) // nothing more happens
+        #expect(await pages.firstPageFetches == 2, "a second grid fetch went out after both loads settled")
+        withExtendedLifetime((first, revisit)) {}
+    }
+
+    /// ⚠️ THE ORDER THAT FETCHED THE GRID TWICE (#1091). The seed's grid
+    /// revalidation answers before the header; the header's landing then
+    /// found no grid load in flight and started a second one.
+    @Test func aStaleRevisitWhoseGridAnswersFirstFetchesTheGridOnce() async throws {
+        let clock = Clock()
+        let cache = ProfileCache(center: center, now: { clock.now })
+        let profiles = ColdProfiles()
+        let pages = gallery()
+        let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
+
+        clock.offset = LocalStorePolicy.profileScreenRevalidation + 1
+        await profiles.hold()
+        let (revisit, _) = open(.profile(ProfileID("prof-1")), cache: cache, profiles: profiles, gallery: pages)
+        let header = watchLoad(revisit)
+        #expect(await settle { await pages.firstPageFetches == 2 }, "the seed did not revalidate the grid")
+        #expect(await settle { !revisit.isGalleryLoading }, "the grid did not land while the header was held")
         #expect(await settle { await profiles.profileFetches == 2 })
-        #expect(await settle { await pages.firstPageFetches == 2 })
+        #expect(!header.isSettled, "guard: the header is still held")
+
+        await profiles.release()
+        #expect(await settle { header.isSettled })
+        try? await Task.sleep(for: Self.nothingMore) // nothing more happens
+        #expect(await pages.firstPageFetches == 2, "the header's landing fetched the grid a second time")
+        #expect(!revisit.isGalleryLoading)
+        withExtendedLifetime((first, revisit)) {}
+    }
+
+    /// The order that always worked: the header lands while the seed's grid
+    /// revalidation is still out, and rides it.
+    @Test func aStaleRevisitWhoseHeaderAnswersFirstFetchesTheGridOnce() async throws {
+        let clock = Clock()
+        let cache = ProfileCache(center: center, now: { clock.now })
+        let profiles = ColdProfiles()
+        let pages = gallery()
+        let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
+
+        clock.offset = LocalStorePolicy.profileScreenRevalidation + 1
+        await pages.hold()
+        let (revisit, _) = open(.profile(ProfileID("prof-1")), cache: cache, profiles: profiles, gallery: pages)
+        let header = watchLoad(revisit)
+        #expect(await settle { header.isSettled }, "the header did not land while the grid was held")
+        #expect(await profiles.profileFetches == 2)
+        #expect(await pages.firstPageFetches == 2)
+        #expect(revisit.isGalleryLoading, "guard: the seed's grid revalidation is still out")
+
+        await pages.release()
+        #expect(await settle { !revisit.isGalleryLoading })
+        try? await Task.sleep(for: Self.nothingMore) // nothing more happens
+        #expect(await pages.firstPageFetches == 2, "a stale revisit fetched the grid more than once")
+        withExtendedLifetime((first, revisit)) {}
+    }
+
+    /// A seed whose grid revalidation FAILED is tried again when the header
+    /// lands: skipping the second fetch is only right when the first one
+    /// answered.
+    @Test func aStaleRevisitRetriesAGridRevalidationThatFailed() async throws {
+        let clock = Clock()
+        let cache = ProfileCache(center: center, now: { clock.now })
+        let profiles = ColdProfiles()
+        let pages = gallery()
+        let first = try await firstVisit(cache: cache, profiles: profiles, gallery: pages)
+
+        clock.offset = LocalStorePolicy.profileScreenRevalidation + 1
+        let failing = gallery()
+        await failing.goOffline()
+        await profiles.hold()
+        let (revisit, _) = open(.profile(ProfileID("prof-1")), cache: cache, profiles: profiles, gallery: failing)
+        let header = watchLoad(revisit)
+        #expect(await settle { await failing.firstPageFetches == 1 })
+        #expect(await settle { !revisit.isGalleryLoading }, "the failed grid revalidation did not end")
+
+        await profiles.release()
+        #expect(await settle { header.isSettled })
+        #expect(await settle { await failing.firstPageFetches == 2 }, "a failed grid revalidation was not tried again")
         withExtendedLifetime((first, revisit)) {}
     }
 
