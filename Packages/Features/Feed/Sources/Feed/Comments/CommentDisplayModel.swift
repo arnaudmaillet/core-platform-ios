@@ -39,6 +39,9 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// A thread the viewer started (#921): it rides in the viewer's own
     /// section, right under the caption, whatever the sort.
     public let isOwnThread: Bool
+    /// A top-level comment's replies on the server (#637): "View N more
+    /// replies" counts from it. Nil when not known.
+    public var replyCount: Int?
 
     public init(entry: CommentEntry, now: Date = Date(), canReview: Bool = false, isOwnThread: Bool = false) {
         id = entry.id
@@ -53,6 +56,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         isHeld = entry.isHeld
         self.canReview = entry.isHeld && canReview
         self.isOwnThread = isOwnThread
+        replyCount = entry.replyCount
     }
 
     /// A row that is not a comment: a conversation's message, drawn in the

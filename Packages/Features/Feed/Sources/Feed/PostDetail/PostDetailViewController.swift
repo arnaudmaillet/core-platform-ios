@@ -2712,10 +2712,13 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// The fold opening: one snapshot apply — UIKit animates the row
-    /// insertions natively.
+    /// insertions natively — and the thread's next page of replies asked
+    /// for (#637), which lands as a second apply. Tapped again while the
+    /// thread is open, the seam asks for the page after.
     private func expandThread(_ parentID: String) {
         expandedReplyParents.insert(parentID)
         applyStream(animated: true)
+        viewModel.loadMoreReplies(parentID: parentID)
     }
 
     /// The fold's inverse: the deletions animate natively, then the

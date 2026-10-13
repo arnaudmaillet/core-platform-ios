@@ -3,21 +3,28 @@ import Foundation
 /// One renderable unit of the threaded comments stream.
 enum CommentStreamItem: Equatable {
     case comment(CommentDisplayModel)
-    /// The collapsed remainder of a popular thread: rendered as a tappable
-    /// "View N more replies…" row at reply depth; tapping expands that
-    /// parent's full reply pool.
+    /// The rest of a thread: a tappable "View N more replies…" row at reply
+    /// depth. Tapping expands the thread and asks for its next page of
+    /// replies (#637); `hiddenCount` counts what is neither shown nor yet
+    /// loaded, from the thread's server-side reply count.
     case viewMoreReplies(parentID: String, hiddenCount: Int)
-    /// The fold's inverse face, closing an EXPANDED popular thread: a
-    /// "Hide replies" row at the bottom of the reply block. Only threads
-    /// that exceed the threshold ever grow either seam.
+    /// The fold's inverse face, closing an EXPANDED thread once all of it is
+    /// loaded: a "Hide replies" row at the bottom of the reply block.
     case collapseReplies(parentID: String)
 }
 
 /// The stream's truncation authority — pure, so the pagination seam is
 /// unit-tested without views. Input is the repository's thread order
-/// (each parent immediately followed by its replies); output caps each
-/// thread's visible replies at `visibleRepliesThreshold` until the parent
-/// is in `expanded`, standing a view-more row in for the remainder.
+/// (each parent immediately followed by its replies, most popular first);
+/// output caps each thread's visible replies at `visibleRepliesThreshold`
+/// until the parent is in `expanded`, standing a view-more row in for the
+/// remainder.
+///
+/// **The remainder is the server's (#637).** A page carries each thread's two
+/// most popular replies and the thread's `replyCount`; "View N more" is that
+/// count minus what is shown, and an expanded thread keeps the row while the
+/// server holds replies not loaded yet. Without a count (an older record),
+/// what was loaded is the whole thread.
 enum CommentThreadPresentation {
     /// How many replies a collapsed thread shows before the seam.
     static let visibleRepliesThreshold = 2
@@ -39,17 +46,20 @@ enum CommentThreadPresentation {
                 replies.append(models[index])
                 index += 1
             }
-            if replies.count <= visibleRepliesThreshold {
+            let total = max(model.replyCount ?? replies.count, replies.count)
+            if expanded.contains(model.id) {
                 items.append(contentsOf: replies.map(CommentStreamItem.comment))
-            } else if expanded.contains(model.id) {
-                items.append(contentsOf: replies.map(CommentStreamItem.comment))
-                items.append(.collapseReplies(parentID: model.id))
+                if total > replies.count {
+                    items.append(.viewMoreReplies(parentID: model.id, hiddenCount: total - replies.count))
+                } else if replies.count > visibleRepliesThreshold {
+                    items.append(.collapseReplies(parentID: model.id))
+                }
             } else {
-                items.append(contentsOf: replies.prefix(visibleRepliesThreshold).map(CommentStreamItem.comment))
-                items.append(.viewMoreReplies(
-                    parentID: model.id,
-                    hiddenCount: replies.count - visibleRepliesThreshold
-                ))
+                let shown = min(replies.count, visibleRepliesThreshold)
+                items.append(contentsOf: replies.prefix(shown).map(CommentStreamItem.comment))
+                if total > shown {
+                    items.append(.viewMoreReplies(parentID: model.id, hiddenCount: total - shown))
+                }
             }
         }
         return items

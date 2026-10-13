@@ -22,19 +22,24 @@ public final class MockCommentService: @unchecked Sendable {
     /// Whether the viewer's first three posts carry comments held for their
     /// review (a temporary interaction limit, backend #669).
     private let seedsHeldComments: Bool
+    /// A comment's likes (its stakes, counted by engagement): what
+    /// `ListReplies` ranks a thread by under `REPLY_SORT_POPULARITY` (#637).
+    private let likeCount: @Sendable (String) -> Int64
 
     public init(
         dataset: MockSocialDataset,
         postStore: MockPostStore? = nil,
         hiddenWords: @escaping @Sendable (String) -> [String] = { _ in [] },
         mayComment: @escaping @Sendable (String, String) -> Bool = { _, _ in true },
-        seedsHeldComments: Bool = false
+        seedsHeldComments: Bool = false,
+        likeCount: @escaping @Sendable (String) -> Int64 = { _ in 0 }
     ) {
         self.dataset = dataset
         self.postStore = postStore
         self.hiddenWords = hiddenWords
         self.mayComment = mayComment
         self.seedsHeldComments = seedsHeldComments
+        self.likeCount = likeCount
     }
 
     /// The post a seeded held comment ("<post>-held-<n>") sits under.
@@ -80,7 +85,12 @@ public final class MockCommentService: @unchecked Sendable {
                 limit: request.limit, token: request.pageToken
             )
             var response = Comment_V1_ListCommentsResponse()
-            response.comments = filtered(page.comments, postID: request.postID)
+            // Each thread's reply count, held replies included (#637).
+            response.comments = filtered(page.comments, postID: request.postID).map { comment in
+                var counted = comment
+                counted.replyCount = UInt64(replies(to: comment.commentID, postID: request.postID).count)
+                return counted
+            }
             response.nextToken = page.nextToken
             return .success(response)
         }
@@ -100,10 +110,8 @@ public final class MockCommentService: @unchecked Sendable {
         }
         bff.register(path: "/comment.v1.CommentService/ListReplies") { [self] (request: Comment_V1_ListRepliesRequest) in
             let page = Self.page(
-                store.replies(
-                    for: request.commentID,
-                    postID: request.postID,
-                    seed: seedReplies(for: request.postID)[request.commentID] ?? []
+                Self.sorted(
+                    replies(to: request.commentID, postID: request.postID), by: request.sort, likes: likeCount
                 ),
                 limit: request.limit, token: request.pageToken
             )
@@ -125,6 +133,27 @@ public final class MockCommentService: @unchecked Sendable {
             response.postID = created.postID
             return .success(response)
         }
+    }
+
+    private func replies(to commentID: String, postID: String) -> [Comment_V1_CommentView] {
+        store.replies(for: commentID, postID: postID, seed: seedReplies(for: postID)[commentID] ?? [])
+    }
+
+    /// A thread's replies in comment.v1's order (#832): newest first, or —
+    /// under `popularity` — most liked first, ties to the newest. (The
+    /// server ranks only the 500 newest; no mock thread comes near.)
+    static func sorted(
+        _ replies: [Comment_V1_CommentView], by sort: Comment_V1_ReplySort, likes: (String) -> Int64
+    ) -> [Comment_V1_CommentView] {
+        let newestFirst = replies.sorted {
+            ($0.createdAtMs, $0.commentID) > ($1.createdAtMs, $1.commentID)
+        }
+        guard sort == .popularity else { return newestFirst }
+        let counts = Dictionary(uniqueKeysWithValues: replies.map { ($0.commentID, likes($0.commentID)) })
+        return newestFirst.enumerated().sorted { lhs, rhs in
+            let (a, b) = (counts[lhs.element.commentID] ?? 0, counts[rhs.element.commentID] ?? 0)
+            return a != b ? a > b : lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     /// One page of `comments`, as comment.v1 pages them (#589): at most

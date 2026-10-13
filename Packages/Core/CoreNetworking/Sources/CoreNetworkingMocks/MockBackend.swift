@@ -121,7 +121,9 @@ public struct MockBackend: Sendable {
             },
             // `-mock-held-comments` holds two comments on each of the viewer's first
             // three posts for their review (#416).
-            seedsHeldComments: ProcessInfo.processInfo.arguments.contains("-mock-held-comments")
+            seedsHeldComments: ProcessInfo.processInfo.arguments.contains("-mock-held-comments"),
+            // Replies rank by their likes — wallet stakes on the comment (#637).
+            likeCount: { counterStore.likeCount(target: "comment:" + $0) }
         ).register(on: bff)
         // A message to someone who takes none is refused (#397).
         MockChatService(dataset: dataset, mayMessage: { _, recipient in

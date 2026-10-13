@@ -87,13 +87,17 @@ struct CommentsRepositoryTests {
         let repository = makeRepository()
 
         let comments = try await repository.loadComments(for: PostID("post-0006"))
-        // 18 reactions + 6 semantic seeds + 7 level-2 replies (a popular
-        // 6-reply thread + one single-reply thread, threaded in place
-        // under their parents by the repository).
-        #expect(comments.count == 31)
+        // 18 reactions + 6 semantic seeds + 3 level-2 replies: the popular
+        // 6-reply thread's two most popular (none liked: the two newest,
+        // both reactions) + the single-reply thread's one (#637), threaded
+        // in place under their parents by the repository.
+        #expect(comments.count == 27)
         // The replies sit directly under their parents, marked as level 2.
         let replies = comments.filter { $0.parentID != nil }
-        #expect(replies.count == 7)
+        #expect(replies.count == 3)
+        // Each thread carries its whole reply count.
+        #expect(comments.first { $0.id == "post-0006-sem-0" }?.replyCount == 6)
+        #expect(comments.first { $0.id == "post-0006-dense-0" }?.replyCount == 1)
         for reply in replies {
             let parentIndex = try #require(comments.firstIndex { $0.id == reply.parentID })
             let replyIndex = try #require(comments.firstIndex { $0.id == reply.id })
@@ -101,9 +105,9 @@ struct CommentsRepositoryTests {
         }
 
         let queue = CommentTickerBuilder().build(comments, postID: PostID("post-0006"))
-        // 27 − 3 disqualified reaction-bank bodies − 6 semantic seeds − 2
-        // semantic replies (the reaction reply "fr fr 🔥" joins the band).
-        #expect(queue.count == comments.count - 11)
+        // − 3 disqualified reaction-bank bodies − 6 semantic seeds (the
+        // three reaction replies join the band).
+        #expect(queue.count == comments.count - 9)
         #expect(queue.count >= CommentTickerBuilder.minTickerCount)
         #expect(queue.allSatisfy { $0.text.count <= CommentTickerBuilder.maxCharacterCount })
         #expect(queue.allSatisfy { !$0.text.contains(where: \.isNewline) })
@@ -113,9 +117,8 @@ struct CommentsRepositoryTests {
         let cues = SubtitleCommentBuilder().build(
             comments, postID: PostID("post-0006"), tickerIsRendering: !queue.isEmpty
         )
-        // 6 semantic seeds + the 2 semantic bodies in the reaction bank +
-        // the 2 sentence-shaped replies.
-        #expect(cues.count == 10)
+        // 6 semantic seeds + the 2 semantic bodies in the reaction bank.
+        #expect(cues.count == 8)
         #expect(Set(cues.map(\.id)).isDisjoint(with: queue.map(\.id))) // one comment, one surface
         #expect(cues.allSatisfy { !$0.text.contains(where: \.isNewline) })
     }
