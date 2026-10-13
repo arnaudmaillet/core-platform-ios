@@ -132,6 +132,9 @@ final class WalletClaimViewController: UIViewController {
     static let shopItemIdentifier = "wallet.shop"
     static let closeItemIdentifier = "wallet.close"
 
+    /// The Shop's posters and preview loops (#1075).
+    private let shopMedia: ShopMedia?
+
     init(
         wallet: WalletStore,
         lookUpPosts: PostLookup? = nil,
@@ -139,8 +142,10 @@ final class WalletClaimViewController: UIViewController {
         openFeedHero: OpenFeedHero? = nil,
         countries: (any CountryAccess)? = nil,
         stakePacks: (any StakePackSelling)? = nil,
+        shopMedia: ShopMedia? = nil,
         welcome: WalletBadgeInstaller.WelcomeGiftFace? = nil
     ) {
+        self.shopMedia = shopMedia
         self.welcome = welcome
         self.openFeedHero = openFeedHero
         self.countries = countries
@@ -598,11 +603,16 @@ final class WalletClaimViewController: UIViewController {
         return item
     }
 
-    /// The Shop, as a sheet OVER this one — where the gems go; closing it
-    /// comes back to the balance they came from.
+    /// The Shop — where the gems go. A pushed screen since 2026-10-13: this
+    /// sheet comes down and the Shop is pushed on the stack under it
+    /// (`StakeShop.push`).
     func openShop() {
-        guard let countries, presentedViewController == nil else { return }
-        present(CountryShopViewController.sheet(access: countries, stakePacks: stakePacks), animated: true)
+        guard let countries, presentedViewController == nil,
+              let root = view.window?.rootViewController else { return }
+        StakeShop.push(
+            CountryShopViewController.storefront(access: countries, stakePacks: stakePacks, media: shopMedia),
+            over: root
+        )
     }
 
     // MARK: - State

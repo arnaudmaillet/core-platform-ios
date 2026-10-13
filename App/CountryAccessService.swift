@@ -41,14 +41,17 @@ final class CountryAccessService: CountryAccess {
     /// The countries with posts of their own — the corpus's, without the
     /// standings' population baseline, which gives every country a count.
     private let postedCountries: Set<String>
+    private let covers: [String: CountryCover]
     private var observers: [NSObjectProtocol] = []
 
     init(
         accountID: String, homeCountry: String, wallet: WalletStore, unlocks: CountryUnlockStore,
         activity: [String: (likes: Int64, posts: Int)],
         isMember: @escaping @MainActor () -> Bool = { true },
-        locator: (any CurrentCountryLocating)? = nil
+        locator: (any CurrentCountryLocating)? = nil,
+        covers: [String: CountryCover] = [:]
     ) {
+        self.covers = covers
         self.accountID = accountID
         self.accountHomeCountry = homeCountry
         self.isMember = isMember
@@ -76,6 +79,8 @@ final class CountryAccessService: CountryAccess {
     var currentCountry: String? { locator?.currentCountry }
 
     var gems: Int { wallet.snapshot().gems }
+
+    func cover(of code: String) -> CountryCover? { covers[code.uppercased()] }
 
     func isUnlocked(_ code: String) -> Bool {
         let code = code.uppercased()
@@ -129,6 +134,33 @@ final class CountryAccessService: CountryAccess {
                 code: entry.code, rank: index + 1, likes: entry.likes, posts: entry.posts,
                 price: entry.code == homeCountry ? 0 : CountryStanding.price(forRank: index + 1)
             )
+        }
+    }
+
+    /// Each country's most liked post, as its Shop card's cover (#1075) — what
+    /// backend #942's `CountryStanding.cover` will carry.
+    static func mockCovers(in backend: MockBackend) -> [String: CountryCover] {
+        var best: [String: (postID: String, likes: Int64)] = [:]
+        for placement in backend.geoDiscovery.placements() {
+            let coordinate = CLLocationCoordinate2D(latitude: placement.latitude, longitude: placement.longitude)
+            guard let code = CountryAtlas.shared.country(owning: coordinate)?.code else { continue }
+            let likes = backend.counterStore.likeCount(for: placement.postID)
+            if let current = best[code], current.likes >= likes { continue }
+            best[code] = (placement.postID, likes)
+        }
+        let posts = Dictionary(backend.dataset.posts.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
+        return best.compactMapValues { top -> CountryCover? in
+            guard let post = posts[top.postID] else { return nil }
+            guard let media = post.media else {
+                return .text(postID: post.postID, caption: post.caption)
+            }
+            let poster = URL(string: MockGeoDiscoveryService.pinURL(
+                forMediaURL: media.url, catalog: backend.dataset.mediaCatalog
+            ))
+            if MockMediaFixtures.isVideoURL(media.url), let preview = URL(string: media.url) {
+                return .video(postID: post.postID, poster: poster, preview: preview)
+            }
+            return poster.map { .image(postID: post.postID, poster: $0) }
         }
     }
 

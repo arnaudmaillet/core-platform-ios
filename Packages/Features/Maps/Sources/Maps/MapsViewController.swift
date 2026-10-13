@@ -60,10 +60,10 @@ final class MapsViewController: UIViewController {
     /// prevent. And it must RE-DRESS rather than "reinstall if not running",
     /// which can only promote a marker and never demote one.
     private let iconPolicyBag = MapNotificationBag()
-    #if DEBUG
-    /// Kept only so the debug readout can distinguish DECODERS from surfaces.
-    /// Internal (not private) only for the +QA hooks.
+    /// The player pool: the Shop's country cards play from it, and the debug
+    /// readout tells DECODERS from surfaces with it (internal for +QA).
     var videoPool: VideoPlaybackController?
+    #if DEBUG
     /// Internal (not private) only for the +QA hooks.
     var iconDebugHUD: MapIconDebugHUD?
     #endif
@@ -434,9 +434,7 @@ final class MapsViewController: UIViewController {
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog
         self.videoCoordinator = MapVideoPlaybackCoordinator(pool: videoPlayback)
-        #if DEBUG
         self.videoPool = videoPlayback
-        #endif
         self.makeSnapFeed = makeSnapFeed
         self.pushPlainSnapFeed = pushPlainSnapFeed
         self.revealSnapFeed = revealSnapFeed
@@ -819,14 +817,22 @@ final class MapsViewController: UIViewController {
     /// door only then.
     var sellsCountries: Bool { countryAccess != nil }
 
-    /// The Shop, over the map — opened by the Explore header's storefront
-    /// (`MapCountryShopHosting`). A row takes you to its country.
+    /// The Shop, PUSHED over the map — opened by the Explore header's
+    /// storefront (`MapCountryShopHosting`). A row takes you to its country:
+    /// back to the map, then there.
     func presentCountryShop() {
-        guard let countryAccess, presentedViewController == nil else { return }
-        let shop = CountryShopViewController.sheet(access: countryAccess, stakePacks: stakePacks) { [weak self] code in
-            self?.dismiss(animated: true) { self?.showCountry(code) }
+        guard let countryAccess, presentedViewController == nil, let navigationController,
+              navigationController.topViewController === self, transitionCoordinator == nil else { return }
+        let media = ShopMedia(images: imagePipeline, videos: videoPool)
+        let shop = CountryShopViewController.storefront(access: countryAccess, stakePacks: stakePacks, media: media) {
+            [weak self] code in
+            guard let self, let navigationController = self.navigationController else { return }
+            CATransaction.begin()
+            CATransaction.setCompletionBlock { [weak self] in self?.showCountry(code) }
+            navigationController.popToViewController(self, animated: true)
+            CATransaction.commit()
         }
-        present(shop, animated: true)
+        navigationController.pushViewController(shop, animated: true)
     }
 
     /// Goes to a country from the shop: lifted and framed, and a locked one

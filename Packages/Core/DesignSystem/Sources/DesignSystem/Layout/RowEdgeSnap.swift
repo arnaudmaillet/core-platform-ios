@@ -51,7 +51,7 @@ public enum RowEdgeSnap {
 
     /// Half a point of slack: a rest a hair short of an anchor it is already
     /// resting on is on it.
-    static let slack: CGFloat = 0.5
+    public static let slack: CGFloat = 0.5
 
     /// The direction a release means: its velocity when it has one; else the
     /// drag's last movement (a slow drag lifted from a standstill still said
@@ -145,7 +145,17 @@ public enum RowEdgeSnap {
         }
     }
 
-    static func clamp(_ x: CGFloat, to offsets: ClosedRange<CGFloat>) -> CGFloat {
+    /// The width of one item when `perWidth` of them — gaps included — fill
+    /// `width` from the left margin: `perWidth.rounded(.down)` whole items,
+    /// the rest of one cropped by the screen's edge, the cue to scroll. Whole
+    /// points, so every item's edges — and every snap computed from them —
+    /// fall on the pixel grid. For You's rows and the Shop's shelves (#1075).
+    public static func itemWidth(forWidth width: CGFloat, perWidth: CGFloat, margin: CGFloat, gap: CGFloat) -> CGFloat {
+        let whole = perWidth.rounded(.down)
+        return max(0, ((width - margin - whole * gap) / perWidth).rounded(.down))
+    }
+
+    public static func clamp(_ x: CGFloat, to offsets: ClosedRange<CGFloat>) -> CGFloat {
         min(max(x, offsets.lowerBound), offsets.upperBound)
     }
 }

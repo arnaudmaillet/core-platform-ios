@@ -26,17 +26,31 @@ final class StakePackService: StakePackSelling {
         }
     }
 
+    /// The pack loaded, or the standard one when none is.
     var offer: StakePackOffer {
-        StakePackOffer(
-            shotsPerPack: WalletStore.Policy.StakePack.shots,
-            pointsPerShot: WalletStore.Policy.StakePack.pointsPerShot,
-            price: WalletStore.Policy.StakePack.price,
-            shotsLeft: wallet.stakeShots
-        )
+        let all = offers
+        return all.first(where: \.isActive) ?? all[0]
+    }
+
+    var offers: [StakePackOffer] {
+        let loaded = wallet.stakePackTierID
+        let shotsLeft = wallet.stakeShots
+        return WalletStore.Policy.StakePack.tiers.map { tier in
+            StakePackOffer(
+                id: tier.id, shotsPerPack: tier.shots,
+                pointsPerShot: WalletStore.Policy.StakePack.pointsPerShot,
+                price: tier.price, shotsLeft: tier.id == loaded ? shotsLeft : 0
+            )
+        }
     }
 
     func buyPack() -> StakePackPurchase {
-        switch wallet.buyStakePack() {
+        buyPack(offer)
+    }
+
+    func buyPack(_ offer: StakePackOffer) -> StakePackPurchase {
+        let tier = WalletStore.Policy.StakePack.tiers.first { $0.id == offer.id } ?? WalletStore.Policy.StakePack.standard
+        return switch wallet.buyStakePack(tier) {
         case .bought(let shots, let remainingGems): .bought(shots: shots, remainingGems: remainingGems)
         case .packStillActive(let shotsLeft): .packStillActive(shotsLeft: shotsLeft)
         case .insufficientGems(let needed, let have): .insufficientGems(needed: needed, have: have)

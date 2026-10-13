@@ -115,12 +115,12 @@ struct CountryShopViewControllerTests {
         #expect(header(shop, .locked) == "Locked 3")
     }
 
-    @Test func theBarIsGemsLeftTitleShopCloseRight() throws {
+    @Test func theBarIsBackTitleShopGemsRight() throws {
         let shop = makeShop()
         #expect(shop.title == "Shop")
         #expect(shop.title == CountryShopEntry.title)
 
-        let gems = try #require(shop.navigationItem.leftBarButtonItem)
+        let gems = try #require(shop.navigationItem.rightBarButtonItem)
         #expect(gems.identifier == CountryShopViewController.balanceItemIdentifier)
         #expect(gems.accessibilityLabel == "40 gems")
         let balance = try #require(gems.customView as? UIStackView)
@@ -132,36 +132,35 @@ struct CountryShopViewControllerTests {
         let count = try #require(balance.arrangedSubviews.last as? UILabel)
         #expect(count.text == "40")
 
-        let close = try #require(shop.navigationItem.rightBarButtonItem)
-        #expect(close.identifier == CountryShopViewController.closeItemIdentifier)
-        #expect(close.primaryAction != nil)
+        // A pushed screen: the back button leads, nothing replaces it.
         #expect(shop.navigationItem.rightBarButtonItems?.count == 1)
-        #expect(shop.navigationItem.leftBarButtonItems?.count == 1)
+        #expect(shop.navigationItem.leftBarButtonItems?.isEmpty ?? true)
+        #expect(shop.hidesBottomBarWhenPushed)
+        // The search field sits at the bottom, in the toolbar (owner, 2026-10-13).
+        #expect(shop.navigationItem.preferredSearchBarPlacement == .integrated)
+        #expect(shop.navigationItem.searchBarPlacementAllowsToolbarIntegration)
+        #expect(shop.toolbarItems?.contains(shop.navigationItem.searchBarPlacementBarButtonItem) == true)
     }
 
     /// The gems item is rebuilt, not mutated, when the balance moves.
     @Test func theGemsItemFollowsTheBalance() throws {
         let access = FakeAccess()
         let shop = makeShop(access)
-        let before = shop.navigationItem.leftBarButtonItem
+        let before = shop.navigationItem.rightBarButtonItem
         access.gems = 1_250
         _ = access.unlock("IT")
-        let after = try #require(shop.navigationItem.leftBarButtonItem)
+        let after = try #require(shop.navigationItem.rightBarButtonItem)
         #expect(after !== before)
         #expect(after.identifier == CountryShopViewController.balanceItemIdentifier)
         #expect(after.accessibilityLabel == "1250 gems")
     }
 
-    /// Opens collapsed, drags to full.
-    @Test func theSheetOpensCollapsedAndGrowsToLarge() throws {
-        let navigation = try #require(CountryShopViewController.sheet(access: FakeAccess()) as? UINavigationController)
-        #expect(navigation.viewControllers.first is CountryShopViewController)
-        #expect(navigation.modalPresentationStyle == .pageSheet)
-        let sheet = try #require(navigation.sheetPresentationController)
-        #expect(sheet.detents.map(\.identifier) == [.medium, .large])
-        #expect(sheet.selectedDetentIdentifier == .medium)
-        #expect(sheet.prefersScrollingExpandsWhenScrolledToEdge)
-        #expect(sheet.prefersGrabberVisible)
+    /// A pushed screen, not a sheet (owner, 2026-10-13): the storefront
+    /// itself, no tab bar under it.
+    @Test func theShopIsAPushedScreen() throws {
+        let shop = try #require(CountryShopViewController.storefront(access: FakeAccess()) as? ShopStorefrontViewController)
+        #expect(shop.hidesBottomBarWhenPushed)
+        #expect(shop.modalPresentationStyle != .pageSheet)
     }
 
     /// The list is the whole sheet, and the rows passing under the bar soften
@@ -177,7 +176,7 @@ struct CountryShopViewControllerTests {
         #expect(shop.collectionView.topEdgeEffect.style == .soft)
         #expect(shop.contentScrollView(for: .top) === shop.collectionView)
         #expect(shop.navigationItem.searchController != nil)
-        #expect(shop.navigationItem.preferredSearchBarPlacement == .stacked)
+        #expect(shop.navigationItem.preferredSearchBarPlacement == .integrated)
     }
 
     /// A PLAIN list: every row spans the sheet's full width (no inset-grouped
@@ -284,13 +283,16 @@ struct CountryShopViewControllerTests {
     @Test func theStakeMenusShopFlashesTheCartridgePack() throws {
         let access = FakeAccess()
         let packs = FakePacks(access: access)
-        let sheet = CountryShopViewController.sheet(access: access, stakePacks: packs, focus: .boosts)
-        let shop = try #require((sheet as? UINavigationController)?.viewControllers.first as? CountryShopViewController)
-        #expect(shop.focus == .boosts)
-        #expect(sheet.sheetPresentationController?.selectedDetentIdentifier == .medium)
-        let browsing = CountryShopViewController.sheet(access: access, stakePacks: packs)
-        #expect(((browsing as? UINavigationController)?.viewControllers.first as? CountryShopViewController)?.focus == nil)
+        let front = try #require(
+            CountryShopViewController.storefront(access: access, stakePacks: packs, focus: .boosts) as? ShopStorefrontViewController
+        )
+        #expect(front.focus == .boosts)
+        let browsing = CountryShopViewController.storefront(access: access, stakePacks: packs)
+        #expect((browsing as? ShopStorefrontViewController)?.focus == nil)
 
+        // The list (Countries' See all) still flashes its pack row.
+        let shop = CountryShopViewController(access: access, stakePacks: packs)
+        shop.loadViewIfNeeded()
         let row = try packRow(shop)
         let path = try #require(shop.dataSource.indexPath(for: .stakePack))
         shop.flashStakePack()

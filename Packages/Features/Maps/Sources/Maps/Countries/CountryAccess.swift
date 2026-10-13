@@ -91,6 +91,18 @@ public protocol CountryAccess: AnyObject {
     /// neither unlocking a country nor buying a pack with gems. Declared in
     /// the body for the same reason as `hasPosts`.
     var purchasesRestricted: Bool { get }
+    /// What a country's Shop card wears (#1075): its top post. Nil: none — the
+    /// card draws the flag.
+    func cover(of code: String) -> CountryCover?
+}
+
+/// A country's top post, as its Shop card shows it (#1075, backend #942):
+/// a picture, a video's poster and preview loop, or a text post's words.
+/// Advertising only — nothing on the card opens the post.
+public enum CountryCover: Equatable, Sendable {
+    case image(postID: String, poster: URL)
+    case video(postID: String, poster: URL?, preview: URL)
+    case text(postID: String, caption: String)
 }
 
 /// What a refused purchase says (#401).
@@ -104,6 +116,8 @@ public extension CountryAccess {
 
     /// Nothing is restricted by default.
     var purchasesRestricted: Bool { false }
+
+    func cover(of code: String) -> CountryCover? { nil }
 
     /// Whether nothing at all is open — a guest without location (decision
     /// 9). The map's "See posts around you" card stands then.

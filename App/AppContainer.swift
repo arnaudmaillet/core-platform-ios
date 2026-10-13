@@ -759,6 +759,7 @@ final class AppContainer {
             },
             countries: countryAccess,
             stakePacks: stakePacks,
+            shopMedia: ShopMedia(images: imagePipeline, videos: videoPlayback),
             welcome: welcomeGiftFace
         ).wrappedInSheet()
     }
@@ -766,11 +767,14 @@ final class AppContainer {
     /// The Shop opened on its Boosts — where the stake menu's "Get ×100
     /// cartridges in the Shop" goes, from the feed rail, the composer and
     /// every card (`ShellTabBarController`, `StakeShopOpening`). The SAME
-    /// sheet the points sheet's Shop and the Explore header open, with the
+    /// screen the points sheet's Shop and the Explore header push, with the
     /// same sellers; nil where they sell nothing (no shop door either).
-    func makeStakeShopSheet() -> UIViewController? {
+    func makeStakeShopScreen() -> UIViewController? {
         guard let countryAccess, let stakePacks else { return nil }
-        return CountryShopViewController.sheet(access: countryAccess, stakePacks: stakePacks, focus: .boosts)
+        return CountryShopViewController.storefront(
+            access: countryAccess, stakePacks: stakePacks, focus: .boosts,
+            media: ShopMedia(images: imagePipeline, videos: videoPlayback)
+        )
     }
 
     /// The Text Post page's drafts: ONE store for the app's lifetime.
@@ -1035,7 +1039,8 @@ final class AppContainer {
             unlocks: unlocks,
             activity: CountryAccessService.mockActivity(in: mockBackend),
             isMember: { [unowned self] in self.memberGate.isMember },
-            locator: currentCountry
+            locator: currentCountry,
+            covers: CountryAccessService.mockCovers(in: mockBackend)
         )
     }()
 
