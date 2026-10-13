@@ -144,6 +144,26 @@ struct PlacePostsTests {
         #expect(pages.asked == [nil, "t1"], "the first page, then its token, then nothing")
     }
 
+    /// A page with nothing new (POPULAR re-reads its ranking) asks the next
+    /// one at once, since no tile reaches the end to ask — a few times, not
+    /// forever.
+    @Test func emptyPagesAreWalkedAFewTimesNotForever() async {
+        let pages = Pages()
+        pages.pins = [post("pin-a")]
+        for index in 0..<20 {
+            pages.answers[index == 0 ? "" : "t\(index)"] = PlacePostsPage(posts: [post("pin-a")], nextPageToken: "t\(index + 1)")
+        }
+        let profile = makeProfile(pages)
+        profile.beginLoading()
+        #expect(await settle { profile.renderedPosts.count == 1 })
+
+        profile.loadMorePosts()
+        #expect(await settle { pages.asked.count == PlaceProfileViewController.maxEmptyPagesInARow })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(pages.asked.count == PlaceProfileViewController.maxEmptyPagesInARow)
+        #expect(profile.renderedPosts.map(\.id.rawValue) == ["pin-a"])
+    }
+
     /// Done when: a refresh doesn't drop loaded pages.
     @Test func aRefreshKeepsThePagesLoaded() async {
         let pages = Pages()

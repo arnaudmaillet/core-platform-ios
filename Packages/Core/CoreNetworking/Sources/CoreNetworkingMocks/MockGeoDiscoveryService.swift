@@ -528,6 +528,20 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
             return card
         }
         response.nextPageToken = end < ranked.count ? String(end) : ""
+        #if DEBUG
+        // `-maps-log-place-posts`: each page a place page asks for (#643).
+        if ProcessInfo.processInfo.arguments.contains("-maps-log-place-posts") {
+            let place: String = switch request.place {
+            case .countryCode(let code)?: "country \(code)"
+            case .point(let point)?: "point \(point.lat),\(point.lng)"
+            case .h3Cell(let cell)?: "cell \(cell)"
+            case nil: "none"
+            }
+            let token: String = request.pageToken.isEmpty ? "-" : request.pageToken
+            let next: String = response.nextPageToken.isEmpty ? "-" : response.nextPageToken
+            print("[place-posts] \(place) token=\(token) limit=\(request.limit) → \(response.cards.count) of \(ranked.count) next=\(next)")
+        }
+        #endif
         return .success(response)
     }
 
