@@ -770,6 +770,27 @@ final class AppContainer {
     /// Commits `likeOutbox`; started with `walletStore`.
     private var likeOutboxSender: LikeOutboxSender?
 
+    // MARK: - Saves (#837)
+
+    /// Sends every save to engagement (queued offline, replayed) and reads
+    /// the Saved tab's list from it, through `PostBookmarkStore.shared`.
+    private var savedPostsSync: SavedPostsSync?
+
+    /// Hands the app's saved pile its way to the server and sends what an
+    /// earlier launch left queued. Called once, after connectivity starts.
+    @MainActor
+    func startSavedPostsSync() {
+        guard savedPostsSync == nil else { return }
+        let sync = SavedPostsSync(
+            store: .shared,
+            outbox: SaveOutbox(),
+            transport: EngagementSavedPosts(client: Engagement_V1_EngagementServiceClient(client: authenticatedRPCClient))
+        )
+        PostBookmarkStore.shared.sync = sync
+        sync.start()
+        savedPostsSync = sync
+    }
+
     // MARK: - Feed
 
     private lazy var feedRepository = FeedRepository(

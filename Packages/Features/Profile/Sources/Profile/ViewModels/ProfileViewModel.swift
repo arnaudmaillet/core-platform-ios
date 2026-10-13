@@ -1456,25 +1456,72 @@ public final class ProfileViewModel {
     /// landed renders first (#742: its tabs follow what the sources hold).
     public private(set) var publishedGallery: GallerySnapshot?
 
-    /// Rebuilds the Saved page from the pile the viewer has curated.
+    /// Rebuilds the Saved page from the pile the viewer has curated, then
+    /// from the server's list (#837) when it brings anything new.
     ///
     /// ⚠️ Reads the ids EVERY time rather than caching them. The pile is
     /// mutable from outside this screen — the feed's bookmark button writes to
     /// the same store — so the ids are the store's answer at the moment of
     /// asking, not a copy taken when the profile opened.
     ///
+    /// The pile shows first: it is what the device knew, offline included.
+    /// The server's list replaces it once read (`PostSaveSyncing`), which is
+    /// how saves made on another device arrive — and how a new device, whose
+    /// pile is empty, shows anything at all.
+    ///
     /// A post that no longer resolves simply drops out, the same way a tile
-    /// that fails to hydrate does everywhere else. That is the honest behaviour
-    /// for a client-owned list pointing at server-owned posts: the pile can
-    /// outlive what it points at.
+    /// that fails to hydrate does everywhere else: the list can outlive what
+    /// it points at.
     func loadSavedPosts() {
-        guard let bookmarks, let gallery else { return }
-        let ids = bookmarks.savedPostIDs
+        guard let bookmarks, gallery != nil else { return }
+        let sync = bookmarks.sync.flatMap { $0.readsServer ? $0 : nil }
+        showSavedPosts(bookmarks.savedPostIDs, awaitingServer: sync != nil)
+        guard let sync else { return }
+        savedRefresh?.cancel()
+        savedRefresh = Task { [weak self] in
+            await sync.refreshFromServer()
+            guard let self, !Task.isCancelled else { return }
+            let fresh = bookmarks.savedPostIDs
+            // The same list again costs the page nothing.
+            if fresh != shownSavedIDs || isAwaitingSavedList {
+                showSavedPosts(fresh, awaitingServer: false)
+            }
+        }
+    }
+
+    /// The ids the Saved page last asked to show.
+    private var shownSavedIDs: [String]?
+    /// Whether the page shows bones until the server's list arrives: an
+    /// empty pile on a device that has not heard the list yet.
+    private var isAwaitingSavedList = false
+    /// The server's list on its way (`loadSavedPosts`).
+    private var savedRefresh: Task<Void, Never>?
+    /// Bumped by every `showSavedPosts`: a hydration that lands after a newer
+    /// one started is dropped.
+    private var savedGeneration = 0
+
+    private func showSavedPosts(_ ids: [String], awaitingServer: Bool) {
+        guard let gallery else { return }
+        shownSavedIDs = ids
+        savedGeneration += 1
+        let generation = savedGeneration
         guard !ids.isEmpty else {
-            galleryStore.saved = .empty(message: "")
+            // Nothing on the device yet may be everything on the server: the
+            // page waits for it rather than saying "nothing saved" first —
+            // bones, or the tiles it already shows (never bones over tiles,
+            // see below), until the list answers.
+            isAwaitingSavedList = awaitingServer
+            if !awaitingServer {
+                galleryStore.saved = .empty(message: "")
+            } else if case .content = galleryStore.saved {
+                return
+            } else {
+                galleryStore.saved = .loading
+            }
             renderGallery()
             return
         }
+        isAwaitingSavedList = false
         // ⚠️ SKELETONS ONLY FOR A PAGE WITH NOTHING TO SHOW. This runs on
         // every appearance, including the one a closing post delivers, and a
         // `.loading` over shown tiles reloaded the grid as bones mid-dismissal:
@@ -1486,7 +1533,7 @@ public final class ProfileViewModel {
         }
         Task { [weak self] in
             let tiles = (try? await gallery.posts(ids: ids)) ?? []
-            guard let self else { return }
+            guard let self, generation == savedGeneration else { return }
             galleryStore.saved = tiles.isEmpty
                 ? .empty(message: "Nothing saved yet.")
                 : .content(tiles)

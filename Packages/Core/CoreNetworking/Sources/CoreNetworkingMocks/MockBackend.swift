@@ -80,7 +80,9 @@ public struct MockBackend: Sendable {
             isSuggestible: { socialServices.isSuggestible($0) },
             seedsFollowRequests: ProcessInfo.processInfo.arguments.contains("-mock-follow-requests")
         )
-        MockEngagementService(store: counterStore).register(on: bff)
+        // Saves are kept per profile, the account's own only, and across
+        // launches as the server keeps them (#837).
+        MockEngagementService(store: counterStore, dataset: dataset, persistence: .standard).register(on: bff)
         // A like is a point staked in the wallet (#676).
         MockWalletService(store: counterStore, dataset: dataset).register(on: bff)
         MockCounterService(store: counterStore).register(on: bff)

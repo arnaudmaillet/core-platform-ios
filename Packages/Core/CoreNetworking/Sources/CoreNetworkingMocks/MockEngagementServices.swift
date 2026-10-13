@@ -103,14 +103,47 @@ public final class MockCounterStore: @unchecked Sendable {
 /// Fake of engagement.v1's like reads (#676): `GetPostEngagement` and
 /// `BatchGetLikes` over the shared store. The likes themselves are written by
 /// `MockWalletService.Stake` — the reactions are gone from the contracts.
+///
+/// And its saves (#837): `SavePost` / `UnsavePost` / `ListSavedPosts`, kept
+/// per profile, most recently saved first, as the backend does — a re-save
+/// keeps its place (its first save time), unsaving what isn't saved is a
+/// no-op, and a list is its owner's alone (no profile shows its Saved tab in
+/// the mock: anyone else reads it empty).
+///
+/// ⚠️ The app's mock keeps the saves across launches (`persistence`), as the
+/// server would: the app pushes its pile once per profile, so a mock that
+/// forgot them at every launch answered an empty list and wiped the pile.
 public final class MockEngagementService: @unchecked Sendable {
+    private static let persistenceKey = "mock.engagement.saves"
     private let store: MockCounterStore
+    /// Whose profiles a caller may save as; nil: any (tests without one).
+    private let dataset: MockSocialDataset?
+    private let persistence: UserDefaults?
+    private let lock = NSLock()
+    /// Per profile, most recently saved first.
+    private var saves: [String: [String]] {
+        didSet { persistence?.set(saves, forKey: Self.persistenceKey) }
+    }
 
-    public init(store: MockCounterStore) {
+    public init(store: MockCounterStore, dataset: MockSocialDataset? = nil, persistence: UserDefaults? = nil) {
         self.store = store
+        self.dataset = dataset
+        self.persistence = persistence
+        // `-reset-bookmarks` (the app's QA hook) empties the server's saves
+        // too: the device's pile would otherwise come back with the list.
+        if ProcessInfo.processInfo.arguments.contains("-reset-bookmarks") {
+            persistence?.removeObject(forKey: Self.persistenceKey)
+        }
+        saves = persistence?.dictionary(forKey: Self.persistenceKey) as? [String: [String]] ?? [:]
+    }
+
+    /// The posts `profileID` saved, most recent first.
+    public func savedPostIDs(of profileID: String) -> [String] {
+        lock.withLock { saves[profileID] ?? [] }
     }
 
     public func register(on bff: MockBFF) {
+        registerSaves(on: bff)
         bff.register(path: "/engagement.v1.EngagementService/GetPostEngagement") { [self] (request: Engagement_V1_GetPostEngagementRequest, headers: Headers) -> Result<Engagement_V1_PostEngagementView, ConnectError> in
             let target = "post:" + request.postID
             var view = Engagement_V1_PostEngagementView()
@@ -137,6 +170,68 @@ public final class MockEngagementService: @unchecked Sendable {
             }
             return .success(response)
         }
+    }
+
+    private func registerSaves(on bff: MockBFF) {
+        bff.register(path: "/engagement.v1.EngagementService/SavePost") { [self] (request: Engagement_V1_SavePostRequest, headers: Headers) -> Result<Engagement_V1_SavePostResponse, ConnectError> in
+            if let refusal = refusal(account: request.accountID, profile: request.profileID, headers: headers) {
+                return .failure(refusal)
+            }
+            guard !request.postID.isEmpty else {
+                return .failure(ConnectError(code: .invalidArgument, message: "post_id is required"))
+            }
+            lock.withLock {
+                var list = saves[request.profileID] ?? []
+                if !list.contains(request.postID) { list.insert(request.postID, at: 0) }
+                saves[request.profileID] = list
+            }
+            return .success(Engagement_V1_SavePostResponse())
+        }
+        bff.register(path: "/engagement.v1.EngagementService/UnsavePost") { [self] (request: Engagement_V1_UnsavePostRequest, headers: Headers) -> Result<Engagement_V1_UnsavePostResponse, ConnectError> in
+            if let refusal = refusal(account: request.accountID, profile: request.profileID, headers: headers) {
+                return .failure(refusal)
+            }
+            lock.withLock { saves[request.profileID]?.removeAll { $0 == request.postID } }
+            return .success(Engagement_V1_UnsavePostResponse())
+        }
+        bff.register(path: "/engagement.v1.EngagementService/ListSavedPosts") { [self] (request: Engagement_V1_ListSavedPostsRequest, headers: Headers) -> Result<Engagement_V1_ListSavedPostsResponse, ConnectError> in
+            var response = Engagement_V1_ListSavedPostsResponse()
+            guard let caller = Self.account(from: headers), owns(caller, request.profileID) else {
+                return .success(response)
+            }
+            let all = savedPostIDs(of: request.profileID)
+            let limit = request.limit <= 0 ? 30 : min(Int(request.limit), 100)
+            let start = Int(request.pageToken) ?? 0
+            guard start >= 0, start <= all.count else {
+                return .failure(ConnectError(code: .invalidArgument, message: "bad page_token"))
+            }
+            let end = min(start + limit, all.count)
+            response.posts = all[start..<end].map { id in
+                var view = Engagement_V1_SavedPostView()
+                view.postID = id
+                view.profileID = request.profileID
+                return view
+            }
+            response.nextPageToken = end < all.count ? String(end) : ""
+            return .success(response)
+        }
+    }
+
+    /// Why a save as `account`/`profile` is refused, as the backend words
+    /// it: a guest, another account, a profile not the account's.
+    private func refusal(account: String, profile: String, headers: Headers) -> ConnectError? {
+        guard let caller = Self.account(from: headers) else {
+            return ConnectError(code: .unauthenticated, message: "sign in to save posts")
+        }
+        guard account == caller, owns(caller, profile) else {
+            return ConnectError(code: .permissionDenied, message: "may not act as the requested account")
+        }
+        return nil
+    }
+
+    private func owns(_ account: String, _ profile: String) -> Bool {
+        guard let dataset else { return !profile.isEmpty }
+        return dataset.profileIDs(inAccount: account).contains(profile)
     }
 
     /// The caller's account; nil for a guest or no token (`mine` is 0).

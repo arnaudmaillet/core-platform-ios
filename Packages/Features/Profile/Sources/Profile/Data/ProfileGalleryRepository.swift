@@ -29,11 +29,10 @@ public protocol ProfileGalleryProviding: Sendable {
     func taggedPosts(for profileID: ProfileID, handle: String) async throws -> [GalleryPost]
     /// Tiles for a list of post ids the caller already has.
     ///
-    /// The Saved pile is the only corpus the client itself owns — no service
-    /// lists it, so it arrives as bare ids from `PostBookmarkStore` and needs
-    /// the same hydration every other tile gets. Order is the caller's, because
-    /// a saved pile is ordered by when you saved it and nothing on the wire
-    /// knows that.
+    /// The Saved pile arrives as bare ids — `PostBookmarkStore`'s, filled
+    /// from engagement's `ListSavedPosts` (#837) — and needs the same
+    /// hydration every other tile gets. Order is the caller's: a saved pile
+    /// is ordered by when you saved it.
     func posts(ids: [String]) async throws -> [GalleryPost]
     /// A page of the profile's own posts: the first when `pageToken` is nil,
     /// otherwise the one that token starts (#634).
