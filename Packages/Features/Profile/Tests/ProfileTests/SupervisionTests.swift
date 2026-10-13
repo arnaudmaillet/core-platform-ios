@@ -273,6 +273,64 @@ struct SupervisionTests {
         return snapshot.itemIdentifiers(inSection: .supervision)
     }
 
+    // MARK: - From a notification (#1106)
+
+    /// A supervision notification opens Family and Teens, then that link's
+    /// page once the list has it; a link that has ended leaves the page be.
+    @Test func aNotificationOpensItsSupervisionOnceListed() async throws {
+        let manager = FakeManager()
+        manager.list = [Self.link(.supervisor, "s1", handle: "mum")]
+        let page = FamilyAndTeensViewController(
+            isTeen: { true }, screenTime: ScreenTimeStore(defaults: UserDefaults(suiteName: "fam-\(UUID().uuidString)")!),
+            supervision: manager
+        )
+        page.pendingSupervisionAccountID = "s1"
+        // A visible window for this test alone (`visible-window-suite-release-crash`).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
+        let navigation = UINavigationController(rootViewController: page)
+        window.rootViewController = navigation
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+            window.layoutIfNeeded()
+        }
+        #expect(await settle {
+            (navigation.topViewController as? SupervisionDetailViewController)?.supervision.otherAccountID == "s1"
+        })
+        #expect(page.pendingSupervisionAccountID == nil, "opened once")
+
+        let ended = FamilyAndTeensViewController(
+            isTeen: { true }, screenTime: ScreenTimeStore(defaults: UserDefaults(suiteName: "fam-\(UUID().uuidString)")!),
+            supervision: manager
+        )
+        ended.pendingSupervisionAccountID = "gone"
+        let endedNavigation = UINavigationController(rootViewController: ended)
+        window.rootViewController = endedNavigation
+        window.layoutIfNeeded()
+        #expect(await settle { ended.pendingSupervisionAccountID == nil })
+        #expect(endedNavigation.topViewController === ended)
+    }
+
+    /// Reached outside Settings, the protections open nothing: there is no
+    /// Settings stack to open them in.
+    @Test func protectionsOpenNothingOutsideSettings() async throws {
+        let page = FamilyAndTeensViewController(
+            isTeen: { true }, screenTime: ScreenTimeStore(defaults: UserDefaults(suiteName: "fam-\(UUID().uuidString)")!)
+        )
+        page.loadViewIfNeeded()
+        #expect(await settle {
+            page.dataSource.snapshot().itemIdentifiers.contains { if case .protection = $0 { true } else { false } }
+        })
+        let list = try #require(page.view.subviews.compactMap { $0 as? UICollectionView }.first)
+        let first = try #require(page.dataSource.snapshot().itemIdentifiers.firstIndex { if case .protection = $0 { true } else { false } })
+        let path = try #require(page.dataSource.indexPath(for: page.dataSource.snapshot().itemIdentifiers[first]))
+        #expect(!page.collectionView(list, shouldHighlightItemAt: path))
+        page.openSection = { _ in }
+        #expect(page.collectionView(list, shouldHighlightItemAt: path))
+    }
+
     // MARK: - Copy
 
     /// Ending tells the other side (backend #848), and the confirmation says

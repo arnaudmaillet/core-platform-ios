@@ -243,7 +243,10 @@ public final class NotificationsViewModel {
     /// closes the drawer to show where it went).
     public func didSelect(_ id: String) {
         guard let item = items.first(where: { $0.id == id }) else { return }
-        if let postID = item.postSubjectID {
+        if item.action.isSupervision, let account = item.subjectAccountID {
+            // Family and Teens, on that link when it still exists (#1106).
+            router?.route(to: .supervision(otherAccountID: account))
+        } else if let postID = item.postSubjectID {
             router?.route(to: .post(postID))
         } else {
             // Notification rows render an aggregated sentence, not the raw

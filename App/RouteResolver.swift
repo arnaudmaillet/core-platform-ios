@@ -323,6 +323,15 @@ final class RouteResolver: Router {
             }
             push(accept, using: navigator)
 
+        case .supervision(let otherAccountID):
+            // A supervision notification (#1106): Family and Teens, then
+            // that link's page if it still exists.
+            guard let page = profileFeature().makeFamilyAndTeensViewController(openingSupervisionWith: otherAccountID) else {
+                logger.debug("No account; dropping the supervision route")
+                return
+            }
+            push(page, using: navigator)
+
         case .messageUser(let profileID, let stub):
             // Pushed immediately, with whatever identity the origin knew. The
             // thread finds-or-creates its conversation once it is on screen —
@@ -376,7 +385,7 @@ private extension AppRoute {
         case .messages, .conversation:
             .inbox
         // Linking a family account needs one.
-        case .supervisionInvite:
+        case .supervisionInvite, .supervision:
             .supervision
         default:
             nil

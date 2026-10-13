@@ -76,4 +76,8 @@ public enum AppRoute: Equatable, Sendable {
     /// it, with the code filled in; nothing is linked until the viewer
     /// confirms there. The code as `SupervisionInviteCode` normalizes it.
     case supervisionInvite(String)
+    /// Settings → Family and Teens, on the supervision with this account (the
+    /// other side) when it still exists — a supervision notification's tap
+    /// (#1106). A link that has ended opens the page alone.
+    case supervision(otherAccountID: String)
 }

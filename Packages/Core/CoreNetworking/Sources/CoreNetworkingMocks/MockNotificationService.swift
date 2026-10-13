@@ -68,8 +68,36 @@ public final class MockNotificationService: @unchecked Sendable {
         Spec(sender: 16, kind: .reaction, post: 6, senderCount: 1, samples: [], minutesAgo: 60 * 24 * 9, isRead: true)
     ]
 
-    public init(dataset: MockSocialDataset) {
+    /// Family supervision notices (#1106, backend #848), given when the
+    /// viewer starts with supervision links (`-mock-supervision`): the
+    /// seeded link starting, and another one ended by its other side.
+    private struct SupervisionNotice {
+        let senderIndex: Int
+        let kind: Notification_V1_NotificationKind
+        let minutesAgo: Int64
+    }
+
+    private let supervisionNotices: [SupervisionNotice]
+
+    public init(dataset: MockSocialDataset, supervisionSeed: MockSupervisionService.Seed? = nil) {
         self.dataset = dataset
+        // The people `MockSupervisionService` seeds: a supervisor for a
+        // supervised viewer, a teen for a supervising one; the ended link is
+        // someone no longer listed.
+        switch supervisionSeed {
+        case .supervised, .supervisedFull:
+            supervisionNotices = [
+                SupervisionNotice(senderIndex: 40, kind: .supervisionStarted, minutesAgo: 5),
+                SupervisionNotice(senderIndex: 45, kind: .supervisionEnded, minutesAgo: 60 * 20),
+            ]
+        case .supervisor:
+            supervisionNotices = [
+                SupervisionNotice(senderIndex: 13, kind: .supervisionStarted, minutesAgo: 5),
+                SupervisionNotice(senderIndex: 20, kind: .supervisionCameOfAge, minutesAgo: 60 * 20),
+            ]
+        case nil:
+            supervisionNotices = []
+        }
     }
 
     /// Push preferences by profile (backend #725): every push on, every
@@ -177,7 +205,7 @@ public final class MockNotificationService: @unchecked Sendable {
         }
         let allRead = readState.allRead
 
-        let notifications: [Notification_V1_NotificationView] = Self.specs.enumerated().map { offset, spec in
+        let posts: [Notification_V1_NotificationView] = Self.specs.enumerated().map { offset, spec in
             var view = Notification_V1_NotificationView()
             view.notificationID = "notif-\(offset)"
             view.targetProfileID = request.profileID
@@ -194,6 +222,25 @@ public final class MockNotificationService: @unchecked Sendable {
             view.isRead = spec.isRead || allRead
             return view
         }
+
+        // Supervision notices: the subject is the other side's account, the
+        // sender its profile (backend #848). Merged in by time.
+        let notices: [Notification_V1_NotificationView] = supervisionNotices.enumerated().compactMap { offset, notice in
+            guard notice.senderIndex < authors.count else { return nil }
+            var view = Notification_V1_NotificationView()
+            view.notificationID = "notif-supervision-\(offset)"
+            view.targetProfileID = request.profileID
+            view.senderProfileID = authors[notice.senderIndex].profileID
+            view.senderCount = 1
+            view.kind = notice.kind
+            view.subjectKind = .account
+            view.subjectID = dataset.accountID(for: authors[notice.senderIndex].profileID)
+            view.createdAtMs = nowMs - notice.minutesAgo * minute
+            view.isRead = allRead
+            return view
+        }
+        let notifications: [Notification_V1_NotificationView] = notices.isEmpty
+            ? posts : (posts + notices).sorted { $0.createdAtMs > $1.createdAtMs }
 
         // Paged (#608): at most `limit` from where `page_token` left off, with
         // a token while there are more. The token is an offset here — opaque

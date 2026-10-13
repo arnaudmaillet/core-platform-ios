@@ -115,10 +115,14 @@ final class NotificationsLocalCache: Sendable {
         var thumbnailURL: URL?
         var excerpt: String?
         var hasPreview: Bool
+        /// The other side of a supervision (#1106). Optional, so a row stored
+        /// before it existed still reads (format unchanged).
+        var subjectAccountID: String?
         var isRead: Bool
         var createdAt: Date
 
         init(_ item: NotificationItem) {
+            subjectAccountID = item.subjectAccountID
             id = item.id
             action = item.action.storedName
             sender = Actor(id: item.senderID.rawValue, name: item.senderName, avatarURL: item.senderAvatarURL)
@@ -143,6 +147,7 @@ final class NotificationsLocalCache: Sendable {
                 sampleSenders: sampleSenders.map { NotificationActor(id: ProfileID($0.id), name: $0.name, avatarURL: $0.avatarURL) },
                 postSubjectID: postSubjectID.map { PostID($0) },
                 subjectPreview: hasPreview ? NotificationSubjectPreview(thumbnailURL: thumbnailURL, excerpt: excerpt) : nil,
+                subjectAccountID: subjectAccountID,
                 isRead: isRead,
                 createdAt: createdAt
             )
@@ -159,6 +164,9 @@ extension NotificationItem.Action {
         case .comment: "comment"
         case .reply: "reply"
         case .mention: "mention"
+        case .supervisionStarted: "supervisionStarted"
+        case .supervisionEnded: "supervisionEnded"
+        case .supervisionCameOfAge: "supervisionCameOfAge"
         case .other: "other"
         }
     }
@@ -169,6 +177,9 @@ extension NotificationItem.Action {
         case "comment": self = .comment
         case "reply": self = .reply
         case "mention": self = .mention
+        case "supervisionStarted": self = .supervisionStarted
+        case "supervisionEnded": self = .supervisionEnded
+        case "supervisionCameOfAge": self = .supervisionCameOfAge
         default: self = .other
         }
     }

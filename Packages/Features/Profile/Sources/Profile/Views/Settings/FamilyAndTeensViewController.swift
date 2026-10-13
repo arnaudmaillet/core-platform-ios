@@ -78,6 +78,9 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
     private let imagePipeline: ImagePipeline?
     private let router: (any Router)?
     private let avatarLoads = RowAvatarLoads()
+    /// The supervision a notification asked for (#1106): opened once the
+    /// list has it and the page is at rest, then forgotten.
+    var pendingSupervisionAccountID: String?
     #if DEBUG
     /// `-supervision-open` runs once per screen, not on every appearance.
     fileprivate var didOpenSupervisionForQA = false
@@ -120,7 +123,10 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         collectionView.delegate = self
         view.addSubview(collectionView)
         configureDataSource()
-        supervisionList?.onChange = { [weak self] in self?.applySnapshot() }
+        supervisionList?.onChange = { [weak self] in
+            self?.applySnapshot()
+            self?.openPendingSupervision()
+        }
         applySnapshot()
         readAge()
     }
@@ -174,6 +180,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
         #if DEBUG
         openSupervisionForQA()
         #endif
+        openPendingSupervision()
     }
 
     // MARK: - Copy
@@ -258,7 +265,7 @@ final class FamilyAndTeensViewController: UIViewController, SettingsSectionLinki
                 content.secondaryText = protection.detail
                 content.image = UIImage(systemName: protection.symbol)
                 content.imageProperties.tintColor = .label
-                if teen == true, protection.section != nil { cell.accessories = [.disclosureIndicator()] }
+                if teen == true, protection.section != nil, openSection != nil { cell.accessories = [.disclosureIndicator()] }
             case .supervision:
                 content = .cell()
                 content.text = "Not Available Yet"
@@ -383,7 +390,7 @@ extension FamilyAndTeensViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed, .supervisionFailed, .link, .invite, .enterCode: return true
-        case .protection(let protection): return teen == true && protection.section != nil
+        case .protection(let protection): return teen == true && protection.section != nil && openSection != nil
         default: return false
         }
     }
@@ -448,6 +455,25 @@ extension FamilyAndTeensViewController {
             }
         }
         navigationController?.pushViewController(detail, animated: true)
+    }
+
+    /// Opens the link a notification asked for, once the list is in and the
+    /// page is the top screen at rest; a link that has ended leaves the page
+    /// as it is.
+    func openPendingSupervision() {
+        guard let pending = pendingSupervisionAccountID, let supervisionList,
+              case .loaded(let links) = supervisionList.phase else { return }
+        guard view.window != nil, let navigation = navigationController, navigation.topViewController === self else { return }
+        // Still sliding in (the list can land first, and `viewDidAppear`
+        // runs inside the push's completion): wait for the stack to settle,
+        // or UIKit drops the push.
+        guard navigation.transitionCoordinator == nil else {
+            navigation.whenAtRest { [weak self] in self?.openPendingSupervision() }
+            return
+        }
+        pendingSupervisionAccountID = nil
+        guard let link = links.first(where: { $0.otherAccountID == pending }) else { return }
+        openSupervision(link)
     }
 
     #if DEBUG
