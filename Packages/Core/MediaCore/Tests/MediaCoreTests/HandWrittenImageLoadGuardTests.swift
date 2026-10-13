@@ -30,11 +30,10 @@ struct HandWrittenImageLoadGuardTests {
         "ForYouGridPage.swift": "hero source: the For You grid's covers and its skeleton dissolve (#1088)",
         "ProfileGalleryGridView.swift": "hero source: the profile gallery's covers and its skeleton dissolve (#1088)",
         "SnapMediaAttributionView.swift": "snap chrome: the sound cover swaps inside the attribution's content transition (#1088)",
-        // Avatars not yet on `AvatarView` (#943): each draws its face inside
-        // a choreography of its own.
-        "ProfileHeaderView.swift": "avatar: a px512 face with a .avatar stand-in, and the push waits on it (arePicturesSettled) (#943)",
-        "SnapAuthorIdentityView.swift": "avatar: the bar pill's face swaps inside the item's content transition, drawn by CALayer.render (#943)",
-        "MapSubFilterBarView.swift": "avatar: the pills' faces are circle-cropped again for their menus (#943)",
+        // Not an image arrival: the file's dissolve is the header button's role
+        // swap; the pills' faces land without animation and are UIImages the
+        // menus reuse, not an avatar view (#943).
+        "MapSubFilterBarView.swift": "the dissolve is the header button's role swap; the faces land unanimated as menu images",
     ]
 
     private static var root: URL {

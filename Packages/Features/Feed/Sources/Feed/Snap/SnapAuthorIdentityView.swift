@@ -154,8 +154,13 @@ final class SnapAuthorIdentityView: UIView {
     /// initials first, the picture hydrates in front of them. It used to be a
     /// grey disc for anyone without a picture, the one place in the app a
     /// person was faceless.
-    private let monogramView = MonogramAvatarView(diameter: AvatarImageView.barDiameter)
-    private let avatarView = AvatarImageView()
+    ///
+    /// The app's avatar (#943): the initials, the picture dissolved in over
+    /// them and covering them once landed, a late face for someone else
+    /// landing nowhere. Its load starts INSIDE the content swap (`draw`), so
+    /// a face that arrives late can only land on the new author's content —
+    /// never mid-blur on the old one.
+    private let avatar = AvatarView(diameter: AvatarImageView.barDiameter, size: SnapAuthorIdentityView.faceBucket)
     private let nameLabel = UILabel()
     private let metaLabel = UILabel()
     /// The relation's mark over the avatar's bottom-right corner (#925).
@@ -201,7 +206,6 @@ final class SnapAuthorIdentityView: UIView {
     /// What is actually on screen, so a repeat call can tell "same page again"
     /// from "same page, better data".
     private var renderedModel: FeedItemDisplayModel?
-    private var avatarTask: Task<Void, Never>?
     /// The width bounds, held so `setWidthBudget` can retune them.
     private var maxWidthConstraint: NSLayoutConstraint?
     private var minWidthConstraint: NSLayoutConstraint?
@@ -213,8 +217,7 @@ final class SnapAuthorIdentityView: UIView {
         // diameter as the Maps toolbar's profile avatar, and a radius bound
         // to the bounds each layout pass — a perfect circle by construction.
         // Clear: with no picture (yet) the initials behind show through.
-        avatarView.backgroundColor = .clear
-        avatarView.pin(to: monogramView)
+        avatar.picture.backgroundColor = .clear
 
         nameLabel.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
         nameLabel.textColor = .label
@@ -252,7 +255,7 @@ final class SnapAuthorIdentityView: UIView {
         labelsStack.alignment = .leading
         setRedacted(true)
 
-        let row = UIStackView(arrangedSubviews: [monogramView, labelsStack])
+        let row = UIStackView(arrangedSubviews: [avatar, labelsStack])
         row.axis = .horizontal
         row.spacing = Spacing.sm
         row.alignment = .center
@@ -288,11 +291,11 @@ final class SnapAuthorIdentityView: UIView {
         // offset mirrors under a right-to-left layout.
         statusBadge.constrain(in: contentView) { _ in
             statusBadge.trailingAnchor.constraint(
-                equalTo: monogramView.trailingAnchor,
+                equalTo: avatar.trailingAnchor,
                 constant: AvatarStatusBadge.diameter / 2 - AvatarStatusBadge.cornerInset
             )
             statusBadge.centerYAnchor.constraint(
-                equalTo: monogramView.bottomAnchor, constant: -AvatarStatusBadge.cornerInset
+                equalTo: avatar.bottomAnchor, constant: -AvatarStatusBadge.cornerInset
             )
         }
         // 999, not required: the bar wraps items in its own fixed-height
@@ -345,35 +348,21 @@ final class SnapAuthorIdentityView: UIView {
             contentTransition.perform(animated: animated) { self.metaLabel.text = meta }
             return
         }
-        let cached = model.avatarURL.flatMap { pipeline.cachedImage(for: $0, size: Self.faceBucket) }
+        var faceURL = model.avatarURL
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-pill-no-face") { faceURL = nil }
+        #endif
         contentTransition.perform(animated: animated) {
             self.setRedacted(false)
             self.nameLabel.text = model.authorName
             self.metaLabel.text = meta
-            self.showFace(cached, animated: false)
-            self.monogramView.setMonogram(MonogramAvatarView.monogram(
+            self.avatar.setMonogram(MonogramAvatarView.monogram(
                 name: model.authorName, handle: Self.handle(fromMeta: model.metaText)
             ))
-        }
-
-        avatarTask?.cancel()
-        avatarTask = nil
-        // A face already in hand is drawn above, in the same pass as the name:
-        // nothing to fetch, and nothing to fade in after the pill appears.
-        guard cached == nil, let url = model.avatarURL else { return }
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("-pill-no-face") { return }
-        #endif
-        let id = model.authorID
-        avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url, size: Self.faceBucket) else { return }
-            guard let self, self.authorID == id else { return }
-            // Onto the NEW author's content: mid-blur, the old one is still
-            // what the live views draw.
-            self.contentTransition.afterSwap { [weak self] in
-                guard let self, self.authorID == id else { return }
-                self.showFace(image)
-            }
+            // A face already in the pipeline's memory is drawn here, in the
+            // same pass as the name — nothing to fade in after the pill
+            // appears. Any other lands later, on THIS author's content.
+            self.avatar.setPicture(faceURL, pipeline: pipeline)
         }
     }
 
@@ -442,8 +431,8 @@ final class SnapAuthorIdentityView: UIView {
             self.setRedacted(false)
             self.nameLabel.text = name
             self.metaLabel.text = meta
-            if personChanged { self.showFace(nil) }
-            self.monogramView.setMonogram(MonogramAvatarView.monogram(
+            if personChanged { self.avatar.setPicture(nil, pipeline: nil) }
+            self.avatar.setMonogram(MonogramAvatarView.monogram(
                 name: name, handle: Self.handle(fromMeta: meta)
             ))
         }
@@ -457,41 +446,9 @@ final class SnapAuthorIdentityView: UIView {
         }
 
         guard personChanged || urlChanged else { return }
-        avatarTask?.cancel()
-        guard let url = avatarURL else {
-            // The same person, whose picture is gone: the initials again.
-            if !personChanged { showFace(nil) }
-            return
-        }
-        avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url, size: Self.faceBucket) else { return }
-            guard let self, self.personAvatarURL == url else { return }
-            self.showFace(image)
-        }
-    }
-
-    /// Puts a picture on the disc, or takes it off.
-    ///
-    /// With a picture the avatar is the picture ALONE: the initials plate is
-    /// covered once the picture has faded in (not before, or the disc would
-    /// be empty for the fade). Without one, the initials show on their round
-    /// plate.
-    private func showFace(_ image: UIImage?, animated: Bool = true) {
-        guard let image else {
-            avatarView.image = nil
-            monogramView.isCovered = false
-            return
-        }
-        guard animated else {
-            avatarView.image = image
-            monogramView.isCovered = true
-            return
-        }
-        UIView.transition(with: avatarView, duration: 0.15, options: [.transitionCrossDissolve]) {
-            self.avatarView.image = image
-        } completion: { _ in
-            self.monogramView.isCovered = self.avatarView.image != nil
-        }
+        // The face over the initials (nil: the person's picture is gone, the
+        // initials again); the avatar fades it in on the disc alone.
+        avatar.setPicture(avatarURL, pipeline: pipeline)
     }
 
     /// What the pill's second line says for a post's meta ("@handle · 3m"):
@@ -819,14 +776,14 @@ enum SnapNavControls {
 #if DEBUG
 extension SnapAuthorIdentityView {
     /// The picture on the disc now; nil while the initials show.
-    var debugFaceImage: UIImage? { avatarView.image }
+    var debugFaceImage: UIImage? { avatar.shownPicture }
 
     /// `-pill-probe`: what the pill's disc actually is at this instant — its
     /// frame in the window, its corner and mask, every transformed ancestor up
     /// to the bar, and any OTHER view in the window drawing the same initials.
     func debugProbe(_ tag: String) {
         guard let window else { print("[pill-probe] \(tag) pill=\(ObjectIdentifier(self)) NO WINDOW"); return }
-        let disc = monogramView
+        let disc = avatar.monogram
         let frame = disc.convert(disc.bounds, to: window)
         let presentation = disc.layer.presentation()
         let maskPath = (disc.layer.mask as? CAShapeLayer)?.path?.boundingBox

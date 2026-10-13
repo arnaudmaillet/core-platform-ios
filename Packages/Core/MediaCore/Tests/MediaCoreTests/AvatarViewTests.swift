@@ -81,4 +81,27 @@ struct AvatarViewTests {
         #expect(avatar.monogram.shape == .superellipse(exponent: 4))
         #expect(avatar.picture.shape == .superellipse(exponent: 4))
     }
+
+    /// A smaller decode at hand stands in while the sharp one decodes: the
+    /// face shows at once (never the initials), the avatar counts as settled
+    /// for a push, and the sharp face replaces it when it lands (the profile
+    /// header, #943).
+    @Test func aSmallerDecodeStandsInForTheSharpFace() async throws {
+        let pipeline = makePipeline()
+        let url = try #require(URL(string: "mock://face/header"))
+        pipeline.store(solid(), for: url, size: .avatar)
+        let avatar = AvatarView(diameter: 96, size: .px512)
+        avatar.standInSize = .avatar
+        var settledAfterLoad = 0
+        avatar.onSettledAfterLoad = { settledAfterLoad += 1 }
+        avatar.setPicture(url, pipeline: pipeline)
+        #expect(avatar.ladder.rung == .preview)
+        #expect(avatar.shownPicture != nil, "the stand-in face shows at once")
+        #expect(avatar.monogram.isCovered)
+        #expect(avatar.isSettled, "a push does not wait for the sharper face")
+        for _ in 0..<200 where avatar.debugIsLoading { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(avatar.ladder.rung == .content)
+        #expect(settledAfterLoad == 1)
+    }
+
 }
