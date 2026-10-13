@@ -213,6 +213,18 @@ public final class SectionTitleView: UIView {
     /// The bar was tapped. Only ever called on a link.
     public var onTap: (() -> Void)?
 
+    /// The title's inset from the bar's own edges, when the host knows it:
+    /// nil measures it against the scrolling surface (`surfaceInsets(of:)`).
+    ///
+    /// ⚠️ For a bar that always spans its surface (a page's full-width
+    /// section), say `Metrics.surfaceInset`: the measurement reads the bar's
+    /// POSITION, and UIKit lays a view out again when its size changes, not
+    /// when it only moves — a bar measured while a push was still placing
+    /// its page kept a title 221pt in (the Shop, 2026-10-13).
+    public var fixedInset: CGFloat? {
+        didSet { setNeedsLayout() }
+    }
+
     /// A view at the bar's trailing end — the explore screen's "Clear all",
     /// the wallet's totals. The title's run gives way to it, never the
     /// reverse.
@@ -382,7 +394,9 @@ public final class SectionTitleView: UIView {
 
     override public func layoutSubviews() {
         super.layoutSubviews()
-        let insets = isEmbedded ? (leading: CGFloat(0), trailing: CGFloat(0)) : Self.surfaceInsets(of: self)
+        let insets = isEmbedded
+            ? (leading: CGFloat(0), trailing: CGFloat(0))
+            : fixedInset.map { (leading: $0, trailing: $0) } ?? Self.surfaceInsets(of: self)
         let parts = measured
         let midY = bounds.midY
         var end = bounds.width - insets.trailing

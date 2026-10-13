@@ -344,34 +344,23 @@ struct ShopStorefrontTests {
     }
 
 
-    /// A heading measured while the page sat off its rest measures again once
-    /// the page moves back: its title ends up 20pt in, never stranded
-    /// (owner, 2026-10-13: "Boosts" drawn ~200pt in after opening).
-    @Test func aHeadingMeasuresAgainWhenThePageMoves() throws {
+    /// A shelf's title stands the surface's 20pt in wherever the page sits:
+    /// SAID, not measured (owner, 2026-10-13: "Boosts" drawn ~200pt in after
+    /// opening — measured, it read the page's position mid-push and kept it).
+    @Test func aHeadingsInsetIsSaidNotMeasured() throws {
         let (front, _) = front()
         let page = try #require(front.view.subviews.first as? UIScrollView)
-        // The cause first: a push's sliding safe area never insets the page
-        // sideways, nor a row.
+        // A push's sliding safe area never insets the page sideways, nor a row.
         #expect(page.contentInsetAdjustmentBehavior == .scrollableAxes)
         #expect(front.countriesShelf?.row.contentInsetAdjustmentBehavior == .never)
         let heading = try #require(front.boostsShelf?.heading)
+        #expect(heading.fixedInset == SectionTitleView.Metrics.surfaceInset)
         let label = try #require(heading.subviews.compactMap { $0 as? UILabel }.first { $0.text == "Boosts" })
-        // Measured off its rest with nobody listening — what a settling
-        // transition did.
-        let delegate = page.delegate
-        page.delegate = nil
+        // Laid out while the page sits 200pt off its rest: still 20pt in.
         page.contentOffset.x = 200
         heading.setNeedsLayout()
         heading.layoutIfNeeded()
-        page.contentOffset.x = 0
-        let stranded = label.convert(label.bounds, to: page).minX - page.bounds.minX
-        #expect(stranded > 100, "precondition: stranded")
-        page.delegate = delegate
-        // The page moves: the heading measures again.
-        page.contentOffset.x = 1
-        page.contentOffset.x = 0
-        let title = label.convert(label.bounds, to: page).minX - page.bounds.minX
-        #expect(abs(title - SectionTitleView.Metrics.surfaceInset) < 1)
+        #expect(abs(label.frame.minX - SectionTitleView.Metrics.surfaceInset) < 0.5)
     }
 
 }
