@@ -306,6 +306,13 @@ public final class SuggestionsViewModel {
         emit()
     }
 
+    /// Takes a dismissal back (#957, the toast's Undo): the row returns at its
+    /// place — `accounts` never lost it, only the filter did.
+    public func undoDismiss(_ id: ProfileID) {
+        guard dismissed.remove(id) != nil else { return }
+        emit()
+    }
+
     public func isFollowing(_ id: ProfileID) -> Bool { following.contains(id) }
 
     /// ⚠️ **NO ROW SHOWN IS NOT "EMPTY" WHILE THE TOKEN SAYS MORE.** A first

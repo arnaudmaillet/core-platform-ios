@@ -90,6 +90,22 @@ struct ForYouUnfollowTests {
         #expect(resets() == before + 1)
     }
 
+    /// The toast's Undo (#957) follows again: the author's posts come back
+    /// to Following, where they were.
+    @Test func undoPutsTheAuthorBack() async {
+        let (model, resets) = await loaded([
+            post("a1", by: "sofia"), post("b1", by: "marcus"), post("a2", by: "sofia")
+        ])
+        let before = model.followingPosts.map(\.id.rawValue)
+        model.removeAuthor(ProfileID("sofia"))
+        let afterRemoval = resets()
+
+        model.restoreAuthor(ProfileID("sofia"))
+
+        #expect(model.followingPosts.map(\.id.rawValue) == before)
+        #expect(resets() == afterRemoval + 1)
+    }
+
     /// Nothing to remove, nothing to announce — an unfollow from a surface that
     /// was showing none of that author's posts must not make every page
     /// re-derive for no reason.

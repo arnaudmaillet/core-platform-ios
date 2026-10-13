@@ -735,10 +735,22 @@ final class ConversationThreadViewController: UIViewController {
     /// flips at once; the toast waits for the write, and a refusal — which
     /// puts the bell back — gets a failure toast instead of a confirmation
     /// of something that did not happen.
+    ///
+    /// A mute is said with Undo (#957): optimistic + compensating — Undo
+    /// turns the notifications back on, and a refused unmute is said.
     private func setMuted(_ mute: Bool, until: Date?, toast: String? = nil) {
         driver.setMuted(mute, until: until) { [weak self] confirmed in
             guard let self else { return }
-            if confirmed {
+            if confirmed, mute {
+                Feedback.undoable(
+                    toast ?? "Notifications muted",
+                    symbol: "bell.slash.fill",
+                    from: self,
+                    above: composeBar.inputRowView,
+                    commit: {},
+                    undo: { [weak self] in self?.undoMute() }
+                )
+            } else if confirmed {
                 Feedback.success(
                     toast ?? (mute ? "Notifications muted" : "Notifications on"),
                     symbol: mute ? "bell.slash.fill" : "bell.fill",
@@ -753,6 +765,15 @@ final class ConversationThreadViewController: UIViewController {
                     above: composeBar.inputRowView
                 )
             }
+        }
+    }
+
+    /// A mute's Undo: the compensating unmute — the bell is the answer, said
+    /// in words only if refused.
+    private func undoMute() {
+        driver.setMuted(false, until: nil) { [weak self] confirmed in
+            guard let self, !confirmed else { return }
+            Feedback.failure("Couldn't turn notifications on", from: self, above: composeBar.inputRowView)
         }
     }
 

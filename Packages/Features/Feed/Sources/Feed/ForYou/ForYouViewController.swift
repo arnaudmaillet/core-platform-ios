@@ -1058,11 +1058,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { _ in handler() }
     }
 
-    /// Unfollows, clears the author off the surface, and says so.
+    /// Unfollows, clears the author off the surface, and says so — with Undo
+    /// (#957).
     ///
     /// The rows go only once the graph has ACCEPTED. Removing them optimistically
     /// would mean putting them back on a failure — a list that empties and
     /// refills itself under the reader is worse than one that waits a moment.
+    ///
+    /// Undo is a COMPENSATING call (the unfollow already went out): follow
+    /// again, and the rows come back once that is accepted too. A refused
+    /// follow-back is said, and the rows stay as the graph has them.
     private func unfollow(_ id: ProfileID, handle: String) {
         guard let socialGraph else { return }
         Task { [weak self] in
@@ -1074,9 +1079,26 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // the people the viewer follows (`removeAuthor`).
                 viewModel.removeAuthor(id)
                 let name = handle.isEmpty ? "this author" : "@\(handle)"
-                Feedback.success("Unfollowed \(name)", symbol: "person.badge.minus", from: self)
+                Feedback.undoable(
+                    "Unfollowed \(name)", symbol: "person.badge.minus", from: self,
+                    commit: {},
+                    undo: { [weak self] in self?.followAgain(id, name: name) }
+                )
             } catch {
                 self?.presentFailure(handle.isEmpty ? "Couldn't unfollow" : "Couldn't unfollow @\(handle)")
+            }
+        }
+    }
+
+    /// The unfollow's Undo: the compensating follow.
+    private func followAgain(_ id: ProfileID, name: String) {
+        guard let socialGraph else { return }
+        Task { [weak self] in
+            do {
+                try await socialGraph.setFollowing(true, for: id)
+                self?.viewModel.restoreAuthor(id)
+            } catch {
+                self?.presentFailure("Couldn't follow \(name) again")
             }
         }
     }

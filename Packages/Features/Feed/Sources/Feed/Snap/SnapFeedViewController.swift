@@ -4886,7 +4886,17 @@ final class SnapFeedViewController: UIViewController {
         // acknowledge a menu tap is a worse answer than the one they asked for.
         // The next render drops it — see `render(_:)` — so it goes when they
         // move on, which is when "not interested" means anything.
-        Feedback.info("Hidden from this feed", symbol: "hand.thumbsdown", from: self)
+        //
+        // With Undo (#957): nothing is sent either way (the hiding is this
+        // screen's), so the commit is empty and Undo forgets the id. Not
+        // rendered back at once: a post already dropped is one the viewer
+        // moved past, and inserting it behind them would shift the page they
+        // are on — the next render brings it back.
+        Feedback.undoable(
+            "Hidden from this feed", symbol: "hand.thumbsdown", from: self,
+            commit: {},
+            undo: { [weak self] in self?.notInterestedIDs.remove(id) }
+        )
     }
 
     private func presentReportReasons(for id: PostID) {

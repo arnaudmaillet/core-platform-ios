@@ -65,6 +65,14 @@ final class ProfileGalleryStore {
 
     private var tileMemo: [TileKey: [GalleryPost]] = [:]
 
+    /// Posts on their way out, behind an Undo (#957): kept in the corpus, so
+    /// Undo puts them back exactly where they were, and left out of every
+    /// tile until then.
+    private(set) var pendingRemovals: Set<PostID> = [] { didSet { tileMemo.removeAll() } }
+
+    func hidePendingRemoval(_ postID: PostID) { pendingRemovals.insert(postID) }
+    func unhidePendingRemoval(_ postID: PostID) { pendingRemovals.remove(postID) }
+
     /// Internal for tests: how many times the corpora were actually filtered.
     private(set) var tileComputations = 0
 
@@ -255,7 +263,11 @@ final class ProfileGalleryStore {
         if let memo = tileMemo[key] { return memo }
         tileComputations += 1
         let filter = GalleryFilter(format: format, source: source)
-        let tiles = filter.tiles(authored: authored ?? [], tagged: tagged ?? [])
+        let hidden = pendingRemovals
+        let tiles = filter.tiles(
+            authored: (authored ?? []).filter { !hidden.contains($0.id) },
+            tagged: (tagged ?? []).filter { !hidden.contains($0.id) }
+        )
         tileMemo[key] = tiles
         return tiles
     }

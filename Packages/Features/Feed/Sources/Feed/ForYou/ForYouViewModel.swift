@@ -416,6 +416,13 @@ public final class ForYouViewModel {
         return posts.filter { !entities.isDeleted($0.id) }
     }
 
+    /// Puts an author back in their rows after an unfollow was taken back
+    /// (#957, the toast's Undo) and the follow accepted again. The inbound
+    /// half was kept by `removeAuthor`, so a friend comes back a friend.
+    public func restoreAuthor(_ authorID: ProfileID) {
+        apply(FollowChange(profileID: authorID, isFollowing: true))
+    }
+
     // MARK: - Who is who
 
     /// Where an author sits on this screen.

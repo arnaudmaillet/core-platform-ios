@@ -168,8 +168,6 @@ public final class ProfileViewModel {
         case muteChanged(handle: String, scopes: MuteScopes)
         /// Restricted (#416) or no longer.
         case restrictChanged(handle: String, restricted: Bool)
-        /// One of the viewer's posts went to Recently Deleted (#408).
-        case postDeleted
         case reported
         case failed(message: String)
         /// A follow change the server refused, already rolled back on the
@@ -177,6 +175,10 @@ public final class ProfileViewModel {
         /// the truth again, so there is nothing to dismiss — a failure toast
         /// says why it flipped back, where a silent rollback read as a glitch.
         case followFailed(message: String)
+        /// An action shown with Undo (#957) the server refused when its
+        /// countdown ran out: already put back on screen, said in a failure
+        /// toast.
+        case commitFailed(message: String)
     }
 
     /// Which follow change failed, for its message.
@@ -212,6 +214,10 @@ public final class ProfileViewModel {
     /// Fires when an overflow-menu command settles. Paired with
     /// `onDismissRequested` for block, which both reports and leaves.
     public var onActionResult: ((ActionResult) -> Void)?
+    /// An action shown with Undo (#957): deleting a post, muting, restricting.
+    /// They are DEFERRED commits — nothing reaches the server until the
+    /// countdown runs out, so Undo has nothing to take back there.
+    var onUndoable: ((UndoableAction) -> Void)?
     /// Fires after a successful block: the screen should leave (pop to the
     /// origin, or dismiss if it was presented). Never fires for the viewer's
     /// own profile, which cannot be blocked.
@@ -960,6 +966,40 @@ public final class ProfileViewModel {
         guard let profile, canModerate, !muteInFlight, let muting = repository as? any ProfileMuting else { return }
         let before = muteScopes
         let after = before.toggling(scope)
+        // Muting MORE is shown with Undo (#957), a deferred commit; un-muting
+        // stays the menu's own reverse row and goes out at once.
+        if after.contains(scope), onUndoable != nil {
+            muteScopes = after
+            // A read out from before the toggle must not overwrite it.
+            muteGeneration += 1
+            let handle = "@" + profile.handle
+            let id = profile.id
+            onUndoable?(UndoableAction(
+                message: Self.muteMessage(handle: handle, scopes: after),
+                symbol: "speaker.slash.fill",
+                commit: { [weak self] in
+                    // Superseded on this screen (un-muted from the menu, or a
+                    // later mute that carries this one): not sent. Gone with
+                    // the screen, it still is.
+                    if let self, self.muteScopes != after { return }
+                    Task { @MainActor [weak self] in
+                        do {
+                            try await muting.setMuteScopes(after, for: id)
+                        } catch {
+                            guard let self, self.muteScopes == after else { return }
+                            self.muteScopes = before
+                            self.onActionResult?(.commitFailed(message: "Couldn't mute \(handle)"))
+                        }
+                    }
+                },
+                undo: { [weak self] in
+                    guard let self, self.muteScopes == after else { return }
+                    self.muteScopes = before
+                    self.muteGeneration += 1
+                }
+            ))
+            return
+        }
         muteScopes = after
         muteInFlight = true
         muteGeneration += 1
@@ -980,6 +1020,37 @@ public final class ProfileViewModel {
     public func toggleRestrict() {
         guard let profile, canModerate, !restrictInFlight, let restricting = repository as? any ProfileRestricting else { return }
         let target = !isRestricted
+        // Restricting is shown with Undo (#957), a deferred commit;
+        // unrestricting stays the menu's reverse row and goes out at once.
+        if target, onUndoable != nil {
+            isRestricted = true
+            // A read out from before the toggle must not overwrite it.
+            restrictGeneration += 1
+            let handle = "@" + profile.handle
+            let id = profile.id
+            onUndoable?(UndoableAction(
+                message: "Restricted \(handle)",
+                symbol: "person.crop.circle.badge.minus",
+                commit: { [weak self] in
+                    // Unrestricted from the menu meanwhile: not sent.
+                    if let self, !self.isRestricted { return }
+                    Task { @MainActor [weak self] in
+                        do {
+                            try await restricting.setRestricted(true, for: id)
+                        } catch {
+                            guard let self, self.isRestricted else { return }
+                            self.isRestricted = false
+                            self.onActionResult?(.commitFailed(message: "Couldn't restrict \(handle)"))
+                        }
+                    }
+                },
+                undo: { [weak self] in
+                    self?.isRestricted = false
+                    self?.restrictGeneration += 1
+                }
+            ))
+            return
+        }
         isRestricted = target
         restrictInFlight = true
         restrictGeneration += 1
@@ -1095,28 +1166,64 @@ public final class ProfileViewModel {
     /// `EntityStore` drops the post from every feed and from For You.
     private let postDeleted: (@MainActor (PostID) -> Void)?
 
-    /// Deletes one of the viewer's own posts. Not optimistic: the tile leaves
-    /// once the server has the tombstone, so a refused delete never shows a
-    /// post gone and back. It can be restored for 30 days from Settings →
-    /// Your Activity → Recently Deleted.
+    /// The undo toast's detail line for a deleted post: the long way back.
+    public nonisolated static let deletedPostDetail = "Restore it from Recently Deleted for 30 days"
+
+    /// Deletes one of the viewer's own posts, with Undo (#957): the tile
+    /// leaves at once, and the delete is sent only when the toast's countdown
+    /// runs out — a DEFERRED commit, so Undo puts the tile back where it was
+    /// with nothing to take back on the server. A refused delete brings the
+    /// tile back and says so. Once deleted it can be restored for 30 days
+    /// from Settings → Your Activity → Recently Deleted.
+    ///
+    /// The app's `EntityStore` hears of it (#896) when the server ACCEPTED it
+    /// — at the commit, whether or not this screen is still there — so an
+    /// Undo, which sends nothing, leaves no tombstone anywhere.
     public func deletePost(_ postID: PostID) {
         guard let profile, followButton == .edit, let trash = gallery as? any PostTrashManaging else { return }
-        Task { [weak self] in
-            do {
-                try await trash.deletePost(postID, author: profile.id)
-                guard let self else { return }
-                // Every other screen first: the feeds and For You drop it
-                // in the same turn as this gallery.
-                self.postDeleted?(postID)
-                self.galleryStore.removeAuthoredPost(postID)
-                // The next visit must not open on the deleted post.
-                self.rememberGallery(of: profile.id)
-                self.renderGallery()
-                self.onActionResult?(.postDeleted)
-            } catch {
-                self?.onActionResult?(.failed(message: "Couldn't delete this post. Try again."))
+        let author = profile.id
+        let cache = cache
+        let postDeleted = postDeleted
+        galleryStore.hidePendingRemoval(postID)
+        renderGallery()
+        let action = UndoableAction(
+            message: "Post deleted",
+            detail: Self.deletedPostDetail,
+            symbol: "trash.fill",
+            commit: { [weak self] in
+                Task { @MainActor [weak self] in
+                    do {
+                        try await trash.deletePost(postID, author: author)
+                        // Every other screen first: the feeds and For You
+                        // drop it in the same turn as this gallery.
+                        postDeleted?(postID)
+                        guard let self else {
+                            // The screen is gone: its kept gallery still
+                            // holds the post, and the next visit would open
+                            // on it — dropped, so that visit loads afresh.
+                            cache?.removeGallery(for: author)
+                            return
+                        }
+                        self.galleryStore.removeAuthoredPost(postID)
+                        self.galleryStore.unhidePendingRemoval(postID)
+                        // The next visit must not open on the deleted post.
+                        self.rememberGallery(of: author)
+                        self.renderGallery()
+                    } catch {
+                        guard let self else { return }
+                        self.galleryStore.unhidePendingRemoval(postID)
+                        self.renderGallery()
+                        self.onActionResult?(.commitFailed(message: "Couldn't delete this post"))
+                    }
+                }
+            },
+            undo: { [weak self] in
+                self?.galleryStore.unhidePendingRemoval(postID)
+                self?.renderGallery()
             }
-        }
+        )
+        // No screen to offer Undo: sent now — never left hidden and unsent.
+        if let onUndoable { onUndoable(action) } else { action.commit() }
     }
 
     public func canReportPost(by authorID: ProfileID?) -> Bool {

@@ -518,6 +518,21 @@ struct SuggestionsPagingTests {
         #expect(await source.asked == [nil, "a"])
     }
 
+    /// The toast's Undo (#957) brings a dismissed row back at its place.
+    @Test func undoingADismissalBringsTheRowBackInPlace() async throws {
+        let source = PagedSuggestions(["": page(0..<3, next: nil)])
+        let viewModel = SuggestionsViewModel(repository: source, limit: 3, pageLimit: 3)
+        viewModel.loadIfNeeded()
+        try #require(await settle { self.rows(viewModel).count == 3 })
+
+        viewModel.dismiss(ProfileID("p1"))
+        #expect(rows(viewModel) == ["p0", "p2"])
+        viewModel.undoDismiss(ProfileID("p1"))
+        #expect(rows(viewModel) == ["p0", "p1", "p2"])
+        viewModel.undoDismiss(ProfileID("p1")) // idempotent
+        #expect(rows(viewModel) == ["p0", "p1", "p2"])
+    }
+
     /// A failed ask with no row shown is said, with its retry — not asked
     /// again at once, over and over.
     @Test func aFailedAskWithNothingShownIsSaid() async throws {

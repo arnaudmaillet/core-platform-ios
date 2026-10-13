@@ -271,10 +271,31 @@ struct ProfileGalleryRevisitTests {
         let (viewModel, shown) = visit(gallery, cache: cache, profiles: RevisitProfiles(relationship: .me))
         try #require(await settle { ids(shown.snapshots.last?.activity) == ["a", "b"] && viewModel.isRelationshipSettled })
 
+        var pending: UndoableAction?
+        viewModel.onUndoable = { pending = $0 }
         viewModel.deletePost(PostID("a"))
-
+        // Gone from the grid at once, with Undo (#957)…
         #expect(await settle { ids(shown.snapshots.last?.activity) == ["b"] })
-        #expect(cache.gallery(for: id)?.authored?.posts.map(\.id.rawValue) == ["b"])
+        #expect(cache.gallery(for: id)?.authored?.posts.map(\.id.rawValue) == ["a", "b"], "not sent yet")
+        // …and from the cache once the delete went out.
+        try #require(pending).commit()
+        #expect(await settle { cache.gallery(for: id)?.authored?.posts.map(\.id.rawValue) == ["b"] })
+    }
+
+    /// Undo puts the tile back where it was, and nothing was sent (#957).
+    @Test func undoPutsTheDeletedPostBackInPlace() async throws {
+        let cache = ProfileCache()
+        let gallery = twoPages()
+        let (viewModel, shown) = visit(gallery, cache: cache, profiles: RevisitProfiles(relationship: .me))
+        try #require(await settle { ids(shown.snapshots.last?.activity) == ["a", "b"] && viewModel.isRelationshipSettled })
+
+        var pending: UndoableAction?
+        viewModel.onUndoable = { pending = $0 }
+        viewModel.deletePost(PostID("a"))
+        #expect(await settle { ids(shown.snapshots.last?.activity) == ["b"] })
+        try #require(pending).undo()
+        #expect(await settle { ids(shown.snapshots.last?.activity) == ["a", "b"] })
+        #expect(cache.gallery(for: id)?.authored?.posts.map(\.id.rawValue) == ["a", "b"])
     }
 
     /// The delete reaches every other screen through the app (#896): the
@@ -293,7 +314,7 @@ struct ProfileGalleryRevisitTests {
         #expect(await settle { ids(shown.snapshots.last?.activity) == ["b"] })
     }
 
-    /// Not optimistic: a refused delete tells no one, and the post stays.
+    /// A refused delete tells no one, and the post comes back.
     @Test func aRefusedDeleteIsToldToNoOne() async throws {
         var told: [PostID] = []
         var results: [ProfileViewModel.ActionResult] = []
@@ -311,6 +332,33 @@ struct ProfileGalleryRevisitTests {
         #expect(await settle { !results.isEmpty })
         #expect(told.isEmpty)
         #expect(ids(shown.snapshots.last?.activity) == ["a", "b"])
+    }
+
+    /// With Undo (#957) the delete waits for the toast: undone, it was never
+    /// sent — no one is told, no tombstone anywhere, the post back in place;
+    /// committed, it is sent and told once.
+    @Test func anUndoneDeleteIsToldToNoOneAndACommittedOneOnce() async throws {
+        var told: [PostID] = []
+        var pending: [UndoableAction] = []
+        let (viewModel, shown) = visit(
+            twoPages(), cache: ProfileCache(), profiles: RevisitProfiles(relationship: .me),
+            postDeleted: { told.append($0) }
+        )
+        viewModel.onUndoable = { pending.append($0) }
+        try #require(await settle { ids(shown.snapshots.last?.activity) == ["a", "b"] && viewModel.isRelationshipSettled })
+
+        viewModel.deletePost(PostID("a"))
+        #expect(ids(shown.snapshots.last?.activity) == ["b"], "gone at once")
+        try #require(pending.count == 1)
+        pending[0].undo()
+        #expect(ids(shown.snapshots.last?.activity) == ["a", "b"])
+        for _ in 0..<20 { await Task.yield() }
+        #expect(told.isEmpty, "an undone delete left a tombstone")
+
+        viewModel.deletePost(PostID("a"))
+        try #require(pending.count == 2)
+        pending[1].commit()
+        #expect(await settle { told == [PostID("a")] })
     }
 
     /// Restored from Recently Deleted: the app lets the post back in (#896).

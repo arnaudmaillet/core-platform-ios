@@ -120,6 +120,61 @@ struct MuteTests {
         #expect(try await repository.muteScopes(for: target) == MuteScopes(posts: true))
     }
 
+    /// With an undo toast wired (#957), muting is a deferred commit: shown at
+    /// once, sent only when the countdown runs out, and Undo takes it back
+    /// with nothing sent.
+    @Test func muteWithUndoIsSentOnlyOnCommit() async throws {
+        let repository = makeRepository()
+        let target = ProfileID("prof-3")
+        let viewModel = ProfileViewModel(repository: repository, source: .profile(target))
+        var pending: [UndoableAction] = []
+        viewModel.onUndoable = { pending.append($0) }
+        viewModel.viewDidLoad()
+        try #require(await settle { viewModel.canModerate && viewModel.profile != nil }, "the profile never loaded")
+
+        viewModel.toggleMute(.posts)
+        #expect(viewModel.muteScopes == MuteScopes(posts: true))
+        let undone = try #require(pending.last)
+        #expect(undone.message.hasPrefix("Muted @"))
+        undone.undo()
+        #expect(viewModel.muteScopes == .none)
+        #expect(try await repository.muteScopes(for: target) == .none, "sent before the countdown ran out")
+
+        viewModel.toggleMute(.posts)
+        try #require(pending.count == 2)
+        pending[1].commit()
+        var sent = MuteScopes.none
+        for _ in 0..<200 where sent == .none {
+            sent = try await repository.muteScopes(for: target)
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(sent == MuteScopes(posts: true))
+        #expect(viewModel.muteScopes == MuteScopes(posts: true))
+    }
+
+    /// A pending mute un-muted from the menu before its countdown ran out is
+    /// never sent when the countdown does run out.
+    @Test func aSupersededPendingMuteIsNotSent() async throws {
+        let repository = makeRepository()
+        let target = ProfileID("prof-3")
+        let viewModel = ProfileViewModel(repository: repository, source: .profile(target))
+        var pending: [UndoableAction] = []
+        var results: [ProfileViewModel.ActionResult] = []
+        viewModel.onUndoable = { pending.append($0) }
+        viewModel.onActionResult = { results.append($0) }
+        viewModel.viewDidLoad()
+        try #require(await settle { viewModel.canModerate && viewModel.profile != nil }, "the profile never loaded")
+
+        viewModel.toggleMute(.posts)
+        viewModel.toggleMute(.posts) // the menu's reverse row: sent at once
+        #expect(viewModel.muteScopes == .none)
+        try #require(await settle { !results.isEmpty })
+
+        try #require(pending.first).commit()
+        for _ in 0..<40 { await Task.yield() }
+        #expect(try await repository.muteScopes(for: target) == .none, "the superseded mute went out")
+    }
+
     @Test func theToastSaysWhatIsMuted() {
         #expect(ProfileViewModel.muteMessage(handle: "@ada", scopes: .none) == "Unmuted @ada")
         #expect(ProfileViewModel.muteMessage(handle: "@ada", scopes: MuteScopes(posts: true)) == "Muted @ada's posts")

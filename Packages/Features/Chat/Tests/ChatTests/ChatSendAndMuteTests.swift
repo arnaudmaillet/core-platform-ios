@@ -250,6 +250,29 @@ struct ChatSendAndMuteTests {
         #expect(ConversationListViewModel.muteAnswer(muting: true, confirmed: false) == "Couldn't mute notifications")
     }
 
+    /// With an undo toast wired (#957), a mute the server took is offered
+    /// with Undo, and Undo turns the notifications back on.
+    @Test func anInboxMuteCanBeUndone() async throws {
+        let provider = TextStubProvider(failures: 0)
+        let list = ConversationListViewModel(repository: provider)
+        var answered: [String] = []
+        var undoable: [(String, @MainActor () -> Void)] = []
+        list.onMuteAnswered = { message, _, _ in answered.append(message) }
+        list.onMuteUndoable = { message, undo in undoable.append((message, undo)) }
+        let id = ConversationID("c1")
+
+        list.toggleMute(id)
+        #expect(await settle { !undoable.isEmpty })
+        #expect(undoable.first?.0 == "Notifications muted")
+        #expect(answered.isEmpty, "said twice")
+        #expect(list.isMuted(id))
+
+        try #require(undoable.first).1()
+        #expect(!list.isMuted(id))
+        for _ in 0..<40 { await Task.yield() }
+        #expect(answered.isEmpty, "a written unmute is not said")
+    }
+
     /// ⚠️ ANSWERS OUT OF ORDER: a mute then an unmute, the unmute answered
     /// first and the mute refused after. Only the latest request speaks — the
     /// stale refusal neither toasts "Couldn't mute" nor puts the mute back.

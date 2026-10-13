@@ -99,6 +99,36 @@ struct RestrictAndLimitsTests {
         #expect(try await repository.isRestricted(ProfileID("prof-3")))
     }
 
+    /// With an undo toast wired (#957), restricting is a deferred commit:
+    /// Undo takes it back with nothing sent; the countdown running out sends it.
+    @Test func restrictWithUndoIsSentOnlyOnCommit() async throws {
+        let repository = makeRepository()
+        let target = ProfileID("prof-3")
+        let viewModel = ProfileViewModel(repository: repository, source: .profile(target))
+        var pending: [UndoableAction] = []
+        viewModel.onUndoable = { pending.append($0) }
+        viewModel.viewDidLoad()
+        try #require(await settle { viewModel.canModerate && viewModel.profile != nil }, "the profile never loaded")
+
+        viewModel.toggleRestrict()
+        #expect(viewModel.isRestricted)
+        try #require(pending.count == 1)
+        pending[0].undo()
+        #expect(!viewModel.isRestricted)
+        #expect(try await repository.isRestricted(target) == false, "sent before the countdown ran out")
+
+        viewModel.toggleRestrict()
+        try #require(pending.count == 2)
+        pending[1].commit()
+        var sent = false
+        for _ in 0..<200 where !sent {
+            sent = try await repository.isRestricted(target)
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(sent)
+        #expect(viewModel.isRestricted)
+    }
+
     /// A limit sets, reads back and clears; past four weeks it's refused.
     @Test func aLimitSetsAndClears() async throws {
         let repository = makeRepository()

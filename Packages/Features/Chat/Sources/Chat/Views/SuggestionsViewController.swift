@@ -97,9 +97,21 @@ final class SuggestionsViewController: UIViewController {
                 cell.configure(with: model, imagePipeline: self?.imagePipeline)
             }
             cell.onToggleFollow = { [weak self] in self?.viewModel.toggleFollow(id) }
-            cell.onDismiss = { [weak self] in self?.viewModel.dismiss(id) }
+            cell.onDismiss = { [weak self] in self?.dismiss(id) }
             return cell
         }
+    }
+
+    /// Hides a suggestion with Undo (#957). Nothing is sent either way — the
+    /// dismissal is local (`SuggestionsViewModel.dismiss`) — so the commit is
+    /// empty and Undo just shows the row again.
+    private func dismiss(_ id: ProfileID) {
+        viewModel.dismiss(id)
+        Feedback.undoable(
+            "Hidden from suggestions", symbol: "hand.thumbsdown", from: self,
+            commit: {},
+            undo: { [weak self] in self?.viewModel.undoDismiss(id) }
+        )
     }
 
     private func configureStatusViews() {
@@ -265,7 +277,7 @@ extension SuggestionsViewController: UITableViewDelegate {
                 title: "Not interested",
                 image: UIImage(systemName: "hand.thumbsdown"),
                 attributes: .destructive
-            ) { [weak self] _ in self?.viewModel.dismiss(id) }
+            ) { [weak self] _ in self?.dismiss(id) }
             return UIMenu(children: [message, follow, UIMenu(options: .displayInline, children: [hide])])
         }
     }
