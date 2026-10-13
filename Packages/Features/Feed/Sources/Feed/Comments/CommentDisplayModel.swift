@@ -42,8 +42,15 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// A top-level comment's replies on the server (#637): "View N more
     /// replies" counts from it. Nil when not known.
     public var replyCount: Int?
+    /// Everyone's likes on it — points staked (#637); 0 when not known.
+    public var likeCount: Int = 0
+    /// The viewer has a point on it.
+    public var isLiked = false
 
-    public init(entry: CommentEntry, now: Date = Date(), canReview: Bool = false, isOwnThread: Bool = false) {
+    public init(
+        entry: CommentEntry, now: Date = Date(), canReview: Bool = false, isOwnThread: Bool = false,
+        likes: CommentLikes? = nil
+    ) {
         id = entry.id
         authorID = entry.authorID
         authorName = entry.authorName
@@ -57,6 +64,8 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         self.canReview = entry.isHeld && canReview
         self.isOwnThread = isOwnThread
         replyCount = entry.replyCount
+        likeCount = Int(clamping: likes?.count ?? 0)
+        isLiked = (likes?.mine ?? 0) > 0
     }
 
     /// A row that is not a comment: a conversation's message, drawn in the

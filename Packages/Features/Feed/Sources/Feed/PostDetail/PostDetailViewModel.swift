@@ -184,11 +184,21 @@ public final class PostDetailViewModel {
     /// The stream's sort order — Recent is the repository's chronology,
     /// Trending reorders THREADS by engagement (see `sortedForDisplay`).
     private var commentSort: CommentSortOrder = .recent
-    /// Session-local optimistic comment likes (comment.v1 exposes no like
-    /// API yet — dev/BACKEND_GAPS.md; swap for the real seam). Living in
-    /// the VIEW MODEL, likes are part of the data pipeline: Trending
-    /// weighs them, and every consumer reads one truth.
-    private var likedComments: Set<String> = []
+    /// The comments' likes, from the server (#637): point stakes like a
+    /// post's, read with engagement's `BatchGetLikes` as comments arrive and
+    /// moved optimistically by the viewer's taps. Living in the VIEW MODEL,
+    /// likes are part of the data pipeline: every row reads one truth.
+    private var commentLikes: [String: CommentLikes] = [:]
+    /// The comments whose likes were asked for — once each.
+    private var commentLikesAsked: Set<String> = []
+    /// The comments with a like on its way — one at a time each.
+    private var commentLikesInFlight: Set<String> = []
+    /// What Trending ranks by: the comments the viewer liked when the likes
+    /// last landed or the sort last changed — NOT on a tap, so a row never
+    /// jumps out from under the finger that just liked it.
+    private var likedForRanking: Set<String> = []
+    /// Comment likes are a capability of the engagement provider.
+    private var commentLiking: (any CommentLiking)? { engagementProvider as? any CommentLiking }
     /// Held comments whose review is on its way to the server.
     private var reviewing: Set<String> = []
     private var isComposing = false
@@ -896,16 +906,46 @@ public final class PostDetailViewModel {
         let now = now()
         let viewer = shownIdentity?.profileID
         let ordered = Self.sortedForDisplay(
-            comments, order: commentSort, liked: likedComments, pageStarts: pageStarts, viewer: viewer
+            comments, order: commentSort, liked: likedForRanking, pageStarts: pageStarts, viewer: viewer
         )
         let canReview = isViewerPostOwner && commentsProvider is any HeldCommentReviewing
         showsAnswer = true
         onCommentsChange?(.loaded(ordered.map {
             CommentDisplayModel(
                 entry: $0, now: now, canReview: canReview && !reviewing.contains($0.id),
-                isOwnThread: Self.isOwnThread($0, viewer: viewer)
+                isOwnThread: Self.isOwnThread($0, viewer: viewer), likes: commentLikes[$0.id]
             )
         }))
+        askForCommentLikes()
+    }
+
+    /// The likes of the comments on screen that were never asked for (#637):
+    /// every emission funnels here, so a first page, a later one and a
+    /// page of replies all get theirs. One read per batch; a failure leaves
+    /// the hearts bare, asked again with the next comments.
+    private func askForCommentLikes() {
+        guard let commentLiking else { return }
+        let ids = comments.map(\.id).filter { !commentLikesAsked.contains($0) }
+        guard !ids.isEmpty else { return }
+        commentLikesAsked.formUnion(ids)
+        Task { [weak self] in
+            let likes = (try? await commentLiking.commentLikes(for: ids)) ?? [:]
+            guard let self else { return }
+            guard !likes.isEmpty else {
+                self.commentLikesAsked.subtract(ids)
+                return
+            }
+            // A tap that landed meanwhile already moved its comment's likes.
+            for (id, fetched) in likes where !self.commentLikesInFlight.contains(id) {
+                self.commentLikes[id] = fetched
+            }
+            self.rerankLikes()
+            self.emitComments()
+        }
+    }
+
+    private func rerankLikes() {
+        likedForRanking = Set(commentLikes.filter { $0.value.mine > 0 }.keys)
     }
 
     /// A thread the viewer started (#921): a top-level comment by the face the
@@ -958,23 +998,33 @@ public final class PostDetailViewModel {
     public func setCommentSort(_ order: CommentSortOrder) {
         guard order != commentSort else { return }
         commentSort = order
+        rerankLikes()
         emitComments()
     }
 
-    /// Toggles the viewer's like on a comment and returns the new state.
-    /// Deliberately does NOT re-emit: the row updates in place, and a
-    /// Trending re-rank lands on the next sort change or reload — rows
-    /// must never jump out from under the finger that just liked them.
-    public func toggleCommentLike(commentID: String) -> Bool {
-        if likedComments.remove(commentID) != nil {
-            return false
+    /// One like on a comment (#637): a point staked on it, shown at once and
+    /// taken back if it does not land — final, like a post's. One in flight
+    /// per comment. Re-emits so the row shows it, but Trending does not
+    /// re-rank on a tap (`likedForRanking`).
+    public func likeComment(commentID: String) {
+        guard let commentLiking, !commentLikesInFlight.contains(commentID) else { return }
+        let before = commentLikes[commentID] ?? CommentLikes(count: 0, mine: 0)
+        commentLikes[commentID] = CommentLikes(count: before.count + 1, mine: before.mine + 1)
+        commentLikesInFlight.insert(commentID)
+        emitComments()
+        Task { [weak self] in
+            let landed = (try? await commentLiking.likeComment(commentID)) != nil
+            guard let self else { return }
+            self.commentLikesInFlight.remove(commentID)
+            guard !landed, let now = self.commentLikes[commentID] else { return }
+            self.commentLikes[commentID] = CommentLikes(count: max(0, now.count - 1), mine: max(0, now.mine - 1))
+            self.emitComments()
         }
-        likedComments.insert(commentID)
-        return true
     }
 
+    /// Whether the viewer has a point on the comment.
     public func isCommentLiked(_ commentID: String) -> Bool {
-        likedComments.contains(commentID)
+        (commentLikes[commentID]?.mine ?? 0) > 0
     }
 
     /// The display order, thread-aware: replies always stay under their

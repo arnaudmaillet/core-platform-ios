@@ -389,8 +389,7 @@ struct PostDetailCommentsTests {
 
     /// The sort selector re-ranks the LIVE stream: switching to Trending
     /// re-emits with the popular thread first; back to Recent restores
-    /// chronology. Likes toggle through the view model (one truth) and
-    /// deliberately do not re-emit.
+    /// chronology. (Likes: `CommentLikesTests`.)
     @Test func settingSortReordersTheStream() async {
         let parent = comment("c1", "quiet top")
         let popular = comment("c2", "popular top")
@@ -408,20 +407,10 @@ struct PostDetailCommentsTests {
         #expect(await settle { !emitted.isEmpty })
         #expect(emitted.last == ["c1", "c2", "c2-r0"])
 
-        let emitsBefore = emitted.count
-        #expect(viewModel.toggleCommentLike(commentID: "c1"))
-        #expect(viewModel.isCommentLiked("c1"))
-        #expect(emitted.count == emitsBefore) // likes never re-emit
-
-        viewModel.setCommentSort(.trending)
-        // c2's thread scores 1 (reply); c1 scores 1 (session like) — the
-        // tie keeps chronology, so c1 stays first; unlike and re-sort to
-        // see the reply-count lead.
-        #expect(emitted.last == ["c1", "c2", "c2-r0"])
-        _ = viewModel.toggleCommentLike(commentID: "c1") // unlike
-        viewModel.setCommentSort(.recent)
         viewModel.setCommentSort(.trending)
         #expect(emitted.last == ["c2", "c2-r0", "c1"])
+        viewModel.setCommentSort(.recent)
+        #expect(emitted.last == ["c1", "c2", "c2-r0"])
     }
 
     /// A first load must ALWAYS report `.loaded`, even when it returns the

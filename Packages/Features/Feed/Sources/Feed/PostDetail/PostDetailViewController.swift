@@ -1520,11 +1520,13 @@ final class PostDetailViewController: UIViewController {
         arrivingCommentID = nil
         let previous = streamModels
         streamModels = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        // A row keeps its identity (the comment id) when it is approved or
-        // its review starts, so the diff alone would leave it drawn as before.
+        // A row keeps its identity (the comment id) when it is approved, its
+        // review starts or its likes move (#637), so the diff alone would
+        // leave it drawn as before.
         let reviewChanged = models.compactMap { model -> StreamItem? in
             guard let old = previous[model.id],
-                  old.isHeld != model.isHeld || old.canReview != model.canReview else { return nil }
+                  old.isHeld != model.isHeld || old.canReview != model.canReview
+                    || old.likeCount != model.likeCount || old.isLiked != model.isLiked else { return nil }
             return .comment(model.id)
         } + (interruptedLanding?.reconfiguring ?? [])
         // Bones were on screen and real rows are about to take their place.
@@ -2767,17 +2769,15 @@ final class PostDetailViewController: UIViewController {
         // repost/save posture).
         row.onBlock = nil
         row.onReport = nil
-        // Like truth lives in the VIEW MODEL (Trending weighs it); the
-        // row updates in place — re-ranking waits for the next sort or
-        // reload, never yanking the row from under the finger.
-        let liked = viewModel.isCommentLiked(model.id)
-        row.setLiked(liked, count: liked ? 1 : 0)
-        row.onLikeTap = { [weak self, weak row] in
+        // Like truth lives in the VIEW MODEL, from the server (#637): a tap
+        // stakes a point and re-emits, and the row is reconfigured in place
+        // (`renderComments`) — re-ranking waits for the next sort, never
+        // yanking the row from under the finger.
+        row.setLiked(model.isLiked, count: model.likeCount)
+        row.onLikeTap = { [weak self] in
             guard let self else { return }
-            MemberGates.perform(.comment, from: self) { [weak self, weak row] in
-                guard let self else { return }
-                let nowLiked = self.viewModel.toggleCommentLike(commentID: model.id)
-                row?.setLiked(nowLiked, count: nowLiked ? 1 : 0)
+            MemberGates.perform(.comment, from: self) { [weak self] in
+                self?.viewModel.likeComment(commentID: model.id)
             }
         }
     }
