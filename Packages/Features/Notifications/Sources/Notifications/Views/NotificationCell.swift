@@ -226,37 +226,26 @@ final class NotificationAvatarView: UIView {
     }
 }
 
-/// One face: the initials disc, the picture over it, and optionally a ring in
-/// the page's colour that separates it from a face behind.
+/// One face: the app's avatar (#943 — the initials, the picture dissolved in
+/// over them, a recycled row never showing the previous person), and
+/// optionally a ring in the page's colour that separates it from a face
+/// behind.
 private final class FaceView: UIView {
-    private let monogram: MonogramAvatarView
-    private let picture = AvatarImageView()
-    private let diameter: CGFloat
-    private let ring: CGFloat
-    private var avatarURL: URL?
-    private var task: Task<Void, Never>?
+    private let avatar: AvatarView
 
     init(diameter: CGFloat, ring: CGFloat) {
-        self.diameter = diameter
-        self.ring = ring
-        monogram = MonogramAvatarView(diameter: diameter)
+        avatar = AvatarView(diameter: diameter, size: .avatar)
         super.init(frame: .zero)
         backgroundColor = Surface.page
         layer.cornerRadius = diameter / 2 + ring
         layer.cornerCurve = .circular
-        monogram.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(monogram)
-        picture.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(picture)
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(avatar)
         NSLayoutConstraint.activate([
             widthAnchor.constraint(equalToConstant: diameter + ring * 2),
             heightAnchor.constraint(equalTo: widthAnchor),
-            monogram.centerXAnchor.constraint(equalTo: centerXAnchor),
-            monogram.centerYAnchor.constraint(equalTo: centerYAnchor),
-            picture.widthAnchor.constraint(equalToConstant: diameter),
-            picture.heightAnchor.constraint(equalToConstant: diameter),
-            picture.centerXAnchor.constraint(equalTo: centerXAnchor),
-            picture.centerYAnchor.constraint(equalTo: centerYAnchor)
+            avatar.centerXAnchor.constraint(equalTo: centerXAnchor),
+            avatar.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
 
@@ -264,34 +253,12 @@ private final class FaceView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func prepareForReuse() {
-        task?.cancel()
-        task = nil
-        avatarURL = nil
-        picture.image = nil
-        monogram.isCovered = false
+        avatar.reset()
     }
 
     func configure(_ face: NotificationDisplayModel.Face, imagePipeline: ImagePipeline?) {
-        monogram.setMonogram(face.monogram)
-        guard face.avatarURL != avatarURL || picture.image == nil else { return }
-        avatarURL = face.avatarURL
-        task?.cancel()
-        picture.image = nil
-        monogram.isCovered = false
-        guard let url = face.avatarURL, let imagePipeline else { return }
-        task = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url, size: .avatar) else { return }
-            guard let self, !Task.isCancelled, self.avatarURL == url else { return }
-            UIView.transition(
-                with: self.picture, duration: 0.2,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                self.picture.image = image
-            } completion: { _ in
-                // A covered disc draws nothing: an avatar is the picture alone.
-                if self.avatarURL == url { self.monogram.isCovered = true }
-            }
-        }
+        avatar.setMonogram(face.monogram)
+        avatar.setPicture(face.avatarURL, pipeline: imagePipeline)
     }
 }
 

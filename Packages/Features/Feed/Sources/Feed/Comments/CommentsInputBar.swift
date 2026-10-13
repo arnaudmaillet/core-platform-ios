@@ -299,8 +299,8 @@ final class CommentsInputBar: UIView {
     /// rows: the monogram is the RENDERED identity, drawn immediately; the
     /// picture layers over it and never replaces it, so there is no empty
     /// disc and no third loading state.
-    private let avatarView = MonogramAvatarView(diameter: Metrics.avatarDiameter)
-    private let avatarImageView = AvatarImageView()
+    /// The app's avatar (#943) does exactly that.
+    private let avatarView = AvatarView(diameter: Metrics.avatarDiameter, size: .avatar)
     /// The glass bubble the avatar sits in, and the button that owns its
     /// touches. The bubble matches the input row's other glass controls — the composer
     /// reads as one row of glass controls with a face at its head — and the
@@ -311,11 +311,6 @@ final class CommentsInputBar: UIView {
     /// stalls headless CI simulators.
     private let avatarBubble = UIVisualEffectView(effect: nil)
     private let avatarButton = UIButton(type: .system)
-    private var avatarTask: Task<Void, Never>?
-    /// The identity the in-flight fetch belongs to. The bar is not a
-    /// recycled cell, but it IS re-identified per engagement, and a slow
-    /// fetch from the previous one must not land on the next viewer.
-    private var representedAvatarURL: URL?
 
     // Effect set on window attach: materializing one in init contacts the
     // render server and stalls headless CI simulators (see ci memory).
@@ -576,7 +571,6 @@ final class CommentsInputBar: UIView {
         // The button is LAST and full-bleed over the bubble, so the whole
         // bubble — the glass ring included — is the tap target and owns the
         // menu.
-        avatarImageView.pin(to: avatarView)
         avatarBubble.cornerConfiguration = .capsule(maximumRadius: Metrics.controlSize / 2)
         avatarBubble.clipsToBounds = true
         avatarView.translatesAutoresizingMaskIntoConstraints = false
@@ -1075,22 +1069,14 @@ final class CommentsInputBar: UIView {
     /// resolves. A nil identity (nobody signed in, no profile) leaves the
     /// neutral placeholder disc — never someone else's face.
     func setViewerIdentity(_ identity: ViewerIdentity?, imagePipeline: ImagePipeline?) {
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarImageView.image = nil
-        representedAvatarURL = identity?.avatarURL
         avatarView.setMonogram(Self.monogram(identity?.name))
         // The placeholder names the viewer, so a profile switch rewrites it
         // on the same beat as the face — one setter, both surfaces.
         viewerName = identity?.name
         applyPlaceholder()
-        guard let url = identity?.avatarURL, let imagePipeline else { return }
-        avatarTask = Task { [weak self] in
-            let image = try? await imagePipeline.image(for: url, size: .avatar)
-            guard let self, let image, !Task.isCancelled,
-                  self.representedAvatarURL == url else { return }
-            self.avatarImageView.image = image
-        }
+        // The face over the initials; another viewer's late face lands
+        // nowhere (the avatar's own rule).
+        avatarView.setPicture(identity?.avatarURL, pipeline: imagePipeline)
     }
 
     /// Installs the profile switcher on the avatar bubble. Nil disables it —

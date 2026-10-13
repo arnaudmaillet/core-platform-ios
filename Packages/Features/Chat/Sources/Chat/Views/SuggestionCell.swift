@@ -16,8 +16,8 @@ final class SuggestionCell: UITableViewCell {
     var onToggleFollow: (() -> Void)?
     var onDismiss: (() -> Void)?
 
-    private let monogramView = MonogramAvatarView()
-    private let avatarView = AvatarImageView()
+    /// The app's avatar (#943): the initials, then the picture over them.
+    private let avatarView = AvatarView(size: .avatar)
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let reasonLabel = UILabel()
@@ -40,8 +40,6 @@ final class SuggestionCell: UITableViewCell {
     private var shownIsFollowing: Bool?
 
     private var imagePipeline: ImagePipeline?
-    private var currentAvatarURL: URL?
-    private var avatarTask: Task<Void, Never>?
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -59,15 +57,12 @@ final class SuggestionCell: UITableViewCell {
         // a real reuse forgets who the row showed.
         shownID = nil
         shownIsFollowing = nil
-        avatarTask?.cancel()
-        avatarTask = nil
-        currentAvatarURL = nil
-        avatarView.image = nil
+        avatarView.reset()
     }
 
     func configure(with model: SuggestionDisplayModel, imagePipeline: ImagePipeline?) {
         self.imagePipeline = imagePipeline
-        monogramView.setMonogram(model.monogram)
+        avatarView.setMonogram(model.monogram)
         nameLabel.text = model.displayName
         handleLabel.text = model.handleText
         reasonLabel.text = model.reasonText
@@ -102,22 +97,7 @@ final class SuggestionCell: UITableViewCell {
     /// The image dissolves in over the monogram, which stays behind it as the
     /// permanent fallback — a suggestion never renders as an empty disc.
     private func loadAvatar(_ url: URL?) {
-        guard url != currentAvatarURL || avatarView.image == nil else { return }
-        currentAvatarURL = url
-        avatarTask?.cancel()
-        avatarView.image = nil
-
-        guard let url, let pipeline = imagePipeline else { return }
-        avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url, size: .avatar) else { return }
-            guard let self, !Task.isCancelled, self.currentAvatarURL == url else { return }
-            UIView.transition(
-                with: self.avatarView, duration: 0.25,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                self.avatarView.image = image
-            }
-        }
+        avatarView.setPicture(url, pipeline: imagePipeline)
     }
 
     private func configure() {
@@ -141,9 +121,6 @@ final class SuggestionCell: UITableViewCell {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         }
 
-        // The image overlays the monogram exactly, so the fallback is a layer
-        // behind rather than a swap.
-        avatarView.pin(to: monogramView)
 
         followButton.addAction(UIAction { [weak self] _ in self?.onToggleFollow?() }, for: .primaryActionTriggered)
         followButton.setContentHuggingPriority(.required, for: .horizontal)
@@ -173,7 +150,7 @@ final class SuggestionCell: UITableViewCell {
         actions.alignment = .center
         actions.setContentHuggingPriority(.required, for: .horizontal)
 
-        let row = UIStackView(arrangedSubviews: [monogramView, textColumn, actions])
+        let row = UIStackView(arrangedSubviews: [avatarView, textColumn, actions])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = Spacing.md

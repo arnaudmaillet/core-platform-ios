@@ -196,8 +196,9 @@ public final class RowImageLoads {
 /// never picks a duration itself.
 @MainActor
 public final class ImageLoadSlot {
-    /// The bucket the picture is decoded at — required (#894).
-    public let size: ImageBucket
+    /// The bucket the picture is decoded at — required (#894). A host whose
+    /// view follows Dynamic Type restates it; the next load reads it.
+    public var size: ImageBucket
     /// How a late picture arrives.
     public let arrival: LoadingLadder.Transition
     private var task: Task<Void, Never>?
