@@ -343,8 +343,9 @@ public final class WalletStore: @unchecked Sendable {
         /// Mock-only, like `seededBalance`; the real wallet provisions at 0.
         public static let seededGems = 100
         /// How long a stake stays ACTIVE before it settles (charter §33's
-        /// deferred settlement) — a mock value until a service decides.
-        public static let settlementDelay: TimeInterval = 6 * 60 * 60
+        /// deferred settlement): a day after the first stake, as the server
+        /// settles a position (backend #886, #841).
+        public static let settlementDelay: TimeInterval = 24 * 60 * 60
 
         /// A stake's settled outcome, MOCK: stable per target and amount, so
         /// the same stake always settles the same way. About 55% earn gems —
