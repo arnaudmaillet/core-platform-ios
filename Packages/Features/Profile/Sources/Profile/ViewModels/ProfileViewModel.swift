@@ -371,6 +371,10 @@ public final class ProfileViewModel {
     private let galleryStore = ProfileGalleryStore()
     public var galleryFilter: GalleryFilter { galleryStore.filter }
     private var galleryLoad: Task<Void, Never>?
+    /// Whether the last first-page load came back with a failure (either
+    /// corpus): the fetch that confirms a cache seed then tries the grid
+    /// again instead of trusting the seed's revalidation (#1091).
+    private var galleryLoadFailed = false
     /// The next page(s) on their way — one round at a time.
     private var galleryMoreLoad: Task<Void, Never>?
     /// Pages walked through in a row that add nothing to the tab on screen
@@ -1322,10 +1326,14 @@ public final class ProfileViewModel {
                 tagged: tagged, taggedFailure: taggedFailure
             )
             self.rememberGallery(of: profile.id)
+            self.galleryLoadFailed = authoredFailure != nil || taggedFailure != nil
             self.galleryLoad = nil
             self.renderGallery()
         }
     }
+
+    /// Whether the grid's first pages are on their way, for tests.
+    var isGalleryLoading: Bool { galleryLoad != nil }
 
     /// The viewer neared the end of the grid on screen: the next page of
     /// every corpus its source reads, if any has one and none is on its way
@@ -1543,7 +1551,17 @@ public final class ProfileViewModel {
                 // pull-to-refresh picks up new posts alongside the header —
                 // except right after a cache seed, whose grid is loading or
                 // loaded already and only needs confirming.
-                self.loadGallery(for: profile, reset: !self.galleryWasSeeded && !galleryRevalidates)
+                //
+                // ⚠️ AND THAT CONFIRMATION IS THE SEED'S OWN LOAD (#1091). A
+                // stale revisit's seed starts the grid's revalidation at once;
+                // asking again here leaned on `galleryLoad` still being in
+                // flight. When the grid answered BEFORE the header, it no
+                // longer was, and a second first-page fetch went out for
+                // nothing. Only a seed load that failed is tried again.
+                let seedRevalidated = self.galleryWasSeeded && !galleryRevalidates && !self.galleryLoadFailed
+                if !seedRevalidated {
+                    self.loadGallery(for: profile, reset: !self.galleryWasSeeded && !galleryRevalidates)
+                }
                 self.galleryWasSeeded = false
             } catch is CancellationError {
                 // Superseded by a newer load; leave the phase alone.
