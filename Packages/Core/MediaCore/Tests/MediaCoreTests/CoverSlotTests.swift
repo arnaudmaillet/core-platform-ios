@@ -59,6 +59,22 @@ struct CoverSlotTests {
         #expect(slot.image === parked, "a reconfigure dropped the parked frame")
     }
 
+    /// What the host derives from the picture (a page's framing) runs with
+    /// every picture it draws: warm, parked, or handed in.
+    @Test func whatTheHostDerivesRunsWithEveryPicture() throws {
+        let pipeline = makePipeline()
+        let url = try #require(URL(string: "mock://slot/framed"))
+        pipeline.store(solid(), for: url, size: .full)
+        let slot = CoverSlot(view: UIImageView(), size: .full, dissolving: UIView())
+        var derived: [UIImage] = []
+        slot.alongside = { derived.append($0) }
+        slot.load(url, pipeline: pipeline, item: "p1")
+        let parked = solid(.systemOrange)
+        slot.showParked(parked)
+        #expect(derived.count == 2)
+        #expect(derived.last === parked)
+    }
+
     /// A new post cuts: the old cover goes, and its late answer lands nowhere.
     @Test func aNewPostNeverShowsThePreviousCover() async throws {
         let pipeline = makePipeline()

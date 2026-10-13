@@ -510,21 +510,20 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// Concealment applies to the page, and a walk for image views answers for
     /// the layers inside one.
     private(set) var pageViews: [CarouselPageView] = []
-    /// The page loads still in flight, by page. An entry leaves when its load
-    /// lands, so whatever is left here when the work is cancelled is exactly
-    /// the pages that never got their picture (#779).
-    private var loadTasks: [Int: Task<Void, Never>] = [:]
     private var pages: [GalleryPost.MediaPage] = []
     private var imagePipeline: ImagePipeline?
-    /// Which pages have been asked for. A SET rather than a count, because the
-    /// window moves in both directions and a page must never be fetched twice.
+    /// Which pages have been asked for: a picture on show or one in flight.
+    /// A SET rather than a count, because the window moves in both directions
+    /// and a page must never be fetched twice.
     ///
     /// ⚠️ A page whose load is CANCELLED leaves this set (`cancelPendingWork`),
     /// and so does one whose fetch FAILED.
     /// It used to stay: the page counted as fetched, the window skipped it, and
     /// a row recycled mid-load and dequeued again for the same post kept an
     /// empty fill for good (#779). Readable inside the package for that test.
-    private(set) var loadedPages: Set<Int> = []
+    var loadedPages: Set<Int> {
+        Set(pageViews.indices.filter { pageViews[$0].coverSlot.isLoading || pageViews[$0].coverSlot.image != nil })
+    }
     private let style: Style
 
     public init(style: Style = .card, frame: CGRect = .zero) {
@@ -606,9 +605,11 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         pageViews.forEach { $0.removeFromSuperview() }
         self.pages = pages
         self.imagePipeline = imagePipeline
-        loadedPages = []
-        pageViews = pages.map { page in
+        pageViews = pages.enumerated().map { index, page in
             let view = CarouselPageView()
+            // The picture's own pixels decide its framing, in the same beat
+            // as it arrives.
+            view.coverSlot.alongside = { [weak self] _ in self?.applyFraming(onPage: index) }
             // ⚠️ A page knows whether it is PLAYABLE, and it is per page.
             //
             // Nothing in `post.v1` says a carousel's attachments agree about
@@ -668,42 +669,16 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
         if style == .card, let shown = pagesInBox() {
             window.formUnion((shown.lowerBound - 1)...(shown.upperBound + 1))
         }
+        let asked = loadedPages
         for index in window.sorted() where pages.indices.contains(index) {
-            guard !loadedPages.contains(index), let url = pages[index].thumbnailURL else { continue }
-            loadedPages.insert(index)
-            if let cached = imagePipeline.cachedImage(for: url) {
-                pageViews[index].cover.image = cached
-                // The picture's own pixels now decide its framing.
-                applyFraming(onPage: index)
-                continue
-            }
-            loadTasks[index] = Task { [weak self] in
-                let image = try? await imagePipeline.image(for: url)
-                // A cancelled load returns without touching `loadTasks`: the
-                // cancel already retired its entry, and the slot may belong to
-                // a newer load of the same page by now.
-                guard !Task.isCancelled, let self else { return }
-                self.loadTasks[index] = nil
-                // ⚠️ A FAILED fetch is not a loaded page either: kept in the
-                // set, it was never asked for again and stayed an empty fill.
-                // Out of it, the next window that shows it retries.
-                guard let image else {
-                    self.loadedPages.remove(index)
-                    return
-                }
-                guard self.pageViews.indices.contains(index) else { return }
-                let page = self.pageViews[index]
-                // The whole page dissolves, not only its cover: a fitted page
-                // gains its backdrop in the same beat as its picture, and a
-                // backdrop that cut in under a fading picture would flash.
-                UIView.transition(
-                    with: page.pictureLayers, duration: 0.25,
-                    options: [.transitionCrossDissolve, .allowUserInteraction]
-                ) {
-                    page.cover.image = image
-                    self.applyFraming(onPage: index)
-                }
-            }
+            guard !asked.contains(index), let url = pages[index].thumbnailURL else { continue }
+            // On the ladder (#1088): drawn at once from the cache, else the
+            // WHOLE PAGE dissolves, not only its cover — a fitted page gains
+            // its backdrop in the same beat as its picture, and a backdrop
+            // that cut in under a fading picture would flash. ⚠️ A FAILED
+            // fetch is not a loaded page either: the next window that shows
+            // it retries.
+            pageViews[index].coverSlot.load(url, pipeline: imagePipeline, item: index)
         }
     }
 
@@ -835,11 +810,9 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// were asked for, so the next configure or scroll that shows them asks
     /// again (#779). Pages that already landed keep their picture.
     public func cancelPendingWork() {
-        for (index, task) in loadTasks {
-            task.cancel()
-            loadedPages.remove(index)
+        for page in pageViews where page.coverSlot.isLoading {
+            page.coverSlot.reset()
         }
-        loadTasks.removeAll()
     }
 
     // MARK: - Layout
@@ -1312,6 +1285,9 @@ private final class EdgeYieldingScrollView: UIScrollView {
 /// ⚠️ NO PLAY BADGE, deliberately — see `isPlayable`.
 final class CarouselPageView: UIView {
     let cover = UIImageView()
+    /// The page's picture on the loading ladder (#1088): its dissolve runs
+    /// over the whole picture stack, backdrop included.
+    private(set) lazy var coverSlot = CoverSlot(view: cover, size: .full, dissolving: pictureLayers)
 
     /// Whether this page has a stream behind it.
     ///

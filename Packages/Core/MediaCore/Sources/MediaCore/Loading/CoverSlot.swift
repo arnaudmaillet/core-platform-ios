@@ -29,16 +29,26 @@ public final class CoverSlot {
     /// Told whenever the cover changes picture, so a live surface keeps it as
     /// its poster.
     public var onChange: ((UIImage) -> Void)?
+    /// Run in the same beat as the picture changes — inside its dissolve — for
+    /// what the host derives from the picture (a page's framing, its blurred
+    /// backdrop), so the two never arrive one after the other.
+    public var alongside: ((UIImage) -> Void)?
 
     private let load: ImageLoadSlot
     private var url: URL?
+    private weak var dissolving: UIView?
 
-    /// - Parameter size: the bucket the cover is decoded at — required (#894).
+    /// - Parameters:
+    ///   - size: the bucket the cover is decoded at — required (#894).
+    ///   - dissolving: the view a late picture's dissolve runs over — the
+    ///     image view by default; a page whose backdrop arrives with its
+    ///     picture dissolves both together.
     public init(
-        view: UIImageView, size: ImageBucket,
+        view: UIImageView, size: ImageBucket, dissolving: UIView? = nil,
         policy: LoadingLadder.Policy = .standard, clock: LoadingLadder.Clock = .system
     ) {
         self.view = view
+        self.dissolving = dissolving
         load = ImageLoadSlot(size: size)
         ladder = LoadingLadder(policy: policy, clock: clock)
     }
@@ -54,7 +64,7 @@ public final class CoverSlot {
             // A parked frame put meanwhile is the better picture (hook 7).
             guard ladder.previewSource != .parked else { return }
             ladder.show(.preview, token: token, warm: transition == .none)
-            transition.perform(on: view) { [view] in view.image = image }
+            transition.perform(on: dissolving ?? view) { [weak self] in self?.draw(image) }
             onChange?(image)
             if transition != .none { onLoaded?() }
         } failed: { [weak self] in
@@ -67,7 +77,7 @@ public final class CoverSlot {
     /// used only when there is none yet.
     public func apply(_ image: UIImage) {
         guard view.image == nil else { return }
-        view.image = image
+        draw(image)
         ladder.show(.preview, token: ladder.currentToken, warm: true)
         onChange?(image)
     }
@@ -75,7 +85,7 @@ public final class CoverSlot {
     /// The frame a closing hero lands the host on: it replaces the cover, and
     /// the thumbnail still loading is dropped (hook 7).
     public func showParked(_ image: UIImage) {
-        view.image = image
+        draw(image)
         ladder.show(.preview, token: ladder.currentToken, warm: true, source: .parked)
         onChange?(image)
     }
@@ -87,6 +97,11 @@ public final class CoverSlot {
         url = nil
         view.image = nil
         ladder.begin(item: nil)
+    }
+
+    private func draw(_ image: UIImage) {
+        view.image = image
+        alongside?(image)
     }
 
     /// What the host draws as its still now.
