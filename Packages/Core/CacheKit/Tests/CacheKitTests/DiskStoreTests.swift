@@ -293,6 +293,33 @@ final class DiskStoreTests {
         #expect(store.usage.bytes == 0)
     }
 
+    /// A lease that ends puts its entry back in its tier ONCE: its bytes are
+    /// counted once, nothing stays pinned, and a wipe leaves zero (#1068).
+    /// Every played video and song ends a lease, so a double count inflated
+    /// Settings → Storage and left bytes behind every clear.
+    @Test func anEndedLeaseCountsItsEntryOnceAndPinsNothing() throws {
+        let store = try open()
+        try store.write(bytes(10), for: "played", tier: .retained)
+        try store.write(bytes(20), for: "other")
+        let lease = try #require(store.lease("played"))
+        #expect(store.usage.bytes == 30)
+        #expect(store.usage.pinnedBytes == 10)
+        lease.release()
+        #expect(store.usage.bytes == 30, "the released entry is counted twice")
+        #expect(store.usage.pinnedBytes == 0, "a released entry stayed pinned")
+        #expect(store.usage.bytesByTier == [.retained: 10, .recent: 20])
+        store.removeAll()
+        #expect(store.usage.bytes == 0 && store.usage.pinnedBytes == 0, "a wipe left bytes behind")
+
+        // A lease ended under a budget it no longer fits evicts it, once.
+        try store.write(bytes(10), for: "played", tier: .retained)
+        let again = try #require(store.lease("played"))
+        store.setLimits(CacheLimits(bytes: 0, speculativeBytes: 0))
+        again.release()
+        #expect(!store.contains("played"))
+        #expect(store.usage.bytes == 0 && store.usage.pinnedBytes == 0, "an eviction at release left bytes behind")
+    }
+
     // MARK: - Wipes off the caller's thread (#898)
 
     private func trashFolders(_ name: String = "media", version: Int = 1) -> [String] {

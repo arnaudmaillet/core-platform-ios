@@ -132,7 +132,13 @@ final class MapSubFilterSheetViewController: UIViewController {
         title: "Cancel",
         primaryAction: UIAction { [weak self] _ in self?.cancelAndDismiss() }
     )
-    private var avatarTasks: [Task<Void, Never>] = []
+    /// Face loads in flight, one per avatar URL.
+    private var avatarLoads: [URL: Task<Void, Never>] = [:]
+    /// The face that just landed, while what shows it is redrawn. Read
+    /// before the pipeline, so the redraw never asks again for a face the
+    /// pipeline could not keep (one larger than its budget), which would
+    /// loop. One face, for one redraw: not a cache.
+    private var landingFace: (url: URL, image: UIImage)?
     private var query = ""
 
     /// Handles are meaningless over a filtered subset — see the type comment.
@@ -223,7 +229,7 @@ final class MapSubFilterSheetViewController: UIViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     deinit {
-        for task in avatarTasks { task.cancel() }
+        for task in avatarLoads.values { task.cancel() }
     }
 
     override func viewDidLoad() {
@@ -291,9 +297,7 @@ final class MapSubFilterSheetViewController: UIViewController {
             let isActiveSection = section(of: subFilter) == .active
             cell.configure(
                 option: option,
-                avatar: option.favorite?.avatarURL.flatMap {
-                    self.imagePipeline?.cachedImage(for: $0, size: MapSubFilterBarView.avatarBucket)
-                },
+                avatar: face(for: option),
                 // Which verb this row's edit accessory carries: ⊖ for a row
                 // that is in the bar, ⊕ for one that could be.
                 isInActiveSection: isActiveSection,
@@ -566,15 +570,40 @@ final class MapSubFilterSheetViewController: UIViewController {
         for option in sections.active + sections.available {
             guard let url = option.favorite?.avatarURL,
                   !imagePipeline.isDecoded(url, size: MapSubFilterBarView.avatarBucket) else { continue }
-            let subFilter = option.subFilter
-            avatarTasks.append(Task { [weak self] in
-                guard (try? await imagePipeline.image(for: url, size: MapSubFilterBarView.avatarBucket)) != nil,
-                      let self, !Task.isCancelled else { return }
-                var snapshot = self.dataSource.snapshot()
-                guard snapshot.itemIdentifiers.contains(subFilter) else { return }
-                snapshot.reconfigureItems([subFilter])
-                await self.dataSource.apply(snapshot, animatingDifferences: false)
-            })
+            loadAvatar(url)
+        }
+    }
+
+    /// `option`'s face if the pipeline holds it decoded; nil draws the glyph.
+    /// A miss asks again (#1069): a face the pipeline evicted since the sheet
+    /// opened is loaded again when its row is configured, and the row is
+    /// redrawn when it lands. A face still in memory costs nothing.
+    private func face(for option: MapSubFilterOption) -> UIImage? {
+        guard let url = option.favorite?.avatarURL else { return nil }
+        if let landingFace, landingFace.url == url { return landingFace.image }
+        if let face = imagePipeline?.cachedImage(for: url, size: MapSubFilterBarView.avatarBucket) { return face }
+        loadAvatar(url)
+        return nil
+    }
+
+    /// Loads `url`'s face, once at a time, and redraws every row showing that
+    /// person when it lands.
+    private func loadAvatar(_ url: URL) {
+        guard let imagePipeline, avatarLoads[url] == nil else { return }
+        avatarLoads[url] = Task { [weak self] in
+            let image = try? await imagePipeline.image(for: url, size: MapSubFilterBarView.avatarBucket)
+            guard let self, !Task.isCancelled else { return }
+            self.avatarLoads[url] = nil
+            guard let image else { return }
+            var snapshot = self.dataSource.snapshot()
+            let rows = snapshot.itemIdentifiers.filter { self.option(for: $0)?.favorite?.avatarURL == url }
+            guard !rows.isEmpty else { return }
+            snapshot.reconfigureItems(rows)
+            // Unanimated: the rows are reconfigured within this call, while
+            // `landingFace` holds the face.
+            self.landingFace = (url, image)
+            self.dataSource.apply(snapshot, animatingDifferences: false, completion: nil)
+            self.landingFace = nil
         }
     }
 }

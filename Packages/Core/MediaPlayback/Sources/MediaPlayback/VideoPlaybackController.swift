@@ -297,22 +297,26 @@ public final class VideoPlaybackController {
 
     /// The item for a resolved URL: read through the byte cache when there is
     /// one and the file is cacheable, straight from the URL otherwise.
-    private func makeItem(for playableURL: URL, priority: CacheFillPriority) -> AVPlayerItem {
+    private func makeItem(
+        for playableURL: URL, priority: CacheFillPriority, content: VideoByteCache.Content = .clip
+    ) -> AVPlayerItem {
         guard let byteCache, VideoByteCache.isCacheable(playableURL) else { return AVPlayerItem(url: playableURL) }
-        return AVPlayerItem(asset: byteCache.asset(for: playableURL, priority: priority))
+        return AVPlayerItem(asset: byteCache.asset(for: playableURL, priority: priority, content: content))
     }
 
     /// An item for a song or a sound preview (#895): a progressive file over
     /// HTTP(S), MP3, M4A or a clip played for its sound, reads through the
-    /// byte cache exactly as a clip does (same namespaces, same tiers, pinned
-    /// while it plays), so a sound heard twice is fetched once. A local file,
-    /// or a pool with no cache, opens the URL directly.
+    /// byte cache as a clip does (same chunks, same tiers, pinned while it
+    /// plays), so a sound heard twice is fetched once. A local file, or a pool
+    /// with no cache, opens the URL directly.
     ///
-    /// The same namespaces on purpose: a post's original sound IS its clip
+    /// Its bytes go to the sound namespaces, counted and cleared as Music &
+    /// Sounds in Settings → Storage (#1068), except for a file the clip
+    /// namespaces already hold: a post's original sound IS its clip
     /// (`SnapSoundState.sound(for:playingClip:)`), and a preview of it reads
     /// the chunks the clip's playback already wrote instead of a second copy.
     public func soundItem(for url: URL) -> AVPlayerItem {
-        makeItem(for: url, priority: .visible)
+        makeItem(for: url, priority: .visible, content: .sound)
     }
 
     /// Never removed: the block holds this pool weakly, and a pool lives as

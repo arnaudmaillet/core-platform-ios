@@ -124,7 +124,7 @@ final class StorageClearKeepsSessionTests {
     }
 
     /// `nil` is Clear All.
-    @Test(arguments: [CacheCategory?.none, .images, .videos, .messages, .other])
+    @Test(arguments: [CacheCategory?.none, .images, .videos, .sounds, .messages, .other])
     func aClearKeepsTheSessionTheScopeAndThePreferences(_ category: CacheCategory?) async throws {
         let scope = StorageScope(owner: .member(account: "acc-1", profile: "prof-1"))
         let device = try await self.device(scope: scope)

@@ -1,3 +1,4 @@
+import CacheKit
 import CoreModels
 import Foundation
 import MediaCore
@@ -126,6 +127,56 @@ struct MapSubFilterAvatarsOnPipelineTests {
 
         #expect(Self.headerImage(bar, option)?.isSymbolImage == false,
                 "a face already decoded was not drawn on this turn")
+    }
+
+    /// ⚠️ AN EVICTED FACE IS ASKED FOR AGAIN (#1069). The row keeps no copy
+    /// of its faces (#894), so once the pipeline evicts one (critical memory
+    /// here), a pill configured again would wear the glyph until the next
+    /// option set. Showing the row (a selection reconfigures every visible
+    /// pill) now loads the evicted face through the pipeline and puts it on
+    /// the pill when it lands, while a face still in memory is read as it is,
+    /// with no fetch.
+    @Test func anEvictedFaceIsAskedForAgainWhenItsPillIsShown() async throws {
+        let fetcher = CountingFetcher()
+        let coordinator = CacheCoordinator(device: CacheDevice(physicalMemory: { 4 << 30 }, availableDiskCapacity: { nil }))
+        let pipeline = ImagePipeline(fetcher: fetcher, coordinator: coordinator)
+        let ada = Self.person("ada")
+        let grace = Self.person("grace")
+        let adaURL = Self.url("ada")
+        let graceURL = Self.url("grace")
+        let bar = MapSubFilterBarView()
+        bar.frame = CGRect(x: 0, y: 0, width: 600, height: 64)
+        bar.imagePipeline = pipeline
+        bar.setOptions([ada, grace])
+        bar.layoutIfNeeded()
+        let bucket = MapSubFilterBarView.avatarBucket
+        #expect(await viewsLoadLanded(adaURL, size: bucket, fetcher: fetcher, pipeline: pipeline))
+        #expect(await viewsLoadLanded(graceURL, size: bucket, fetcher: fetcher, pipeline: pipeline))
+        #expect(await Self.settle { bar.showsFace(on: ada.subFilter) == true && bar.showsFace(on: grace.subFilter) == true },
+                "guard: both pills wear their faces")
+
+        // Critical memory evicts every face; Grace's comes back into memory
+        // without a fetch, Ada's stays out.
+        let graceFace = try #require(pipeline.cachedImage(for: graceURL, size: bucket))
+        coordinator.trim(.memoryCritical)
+        try #require(!pipeline.isDecoded(adaURL, size: bucket) && !pipeline.isDecoded(graceURL, size: bucket),
+                     "guard: the trim evicted the faces")
+        pipeline.store(graceFace, for: graceURL, size: bucket)
+
+        bar.setSelectedSubFilters([grace.subFilter])
+        #expect(bar.showsFace(on: ada.subFilter) == false, "guard: the evicted face shows the glyph while it reloads")
+        #expect(bar.showsFace(on: grace.subFilter) == true, "a face still in memory was not read at once")
+
+        // Nothing but the row asks for Ada now: a second fetch is the row's.
+        // A visible load then joins it (one fill per image and bucket) and
+        // returns when it lands, however late.
+        #expect(await Self.settle { fetcher.fetchCount(for: adaURL) == 2 }, "the evicted face was not asked for again")
+        _ = try? await pipeline.image(for: adaURL, size: bucket)
+        #expect(await Self.settle { bar.showsFace(on: ada.subFilter) == true },
+                "the evicted face was not asked for again, or never reached its pill")
+        #expect(fetcher.fetchCount(for: adaURL) == 2, "the evicted face was fetched \(fetcher.fetchCount(for: adaURL)) times")
+        #expect(fetcher.fetchCount(for: graceURL) == 1, "a face still in memory was fetched again")
+        #expect(Self.headerImage(bar, ada)?.isSymbolImage == false, "the menu header kept the glyph")
     }
 
     /// The organize sheet fetches the faces it lacks through the same

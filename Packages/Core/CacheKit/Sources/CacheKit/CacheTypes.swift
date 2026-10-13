@@ -46,6 +46,9 @@ public enum CacheScope: String, Sendable, Codable {
 public enum CacheCategory: String, Sendable, CaseIterable {
     case images
     case videos
+    /// Songs and sound previews (#1068): progressive audio read through the
+    /// video byte cache, in namespaces of their own.
+    case sounds
     case messages
     case other
 }

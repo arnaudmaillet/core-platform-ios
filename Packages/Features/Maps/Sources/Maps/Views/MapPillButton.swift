@@ -203,6 +203,9 @@ final class MapPillButton: UIButton {
         applyConfiguration()
     }
 
+    /// Whether a face is showing rather than the symbol.
+    var showsAvatar: Bool { avatarImage != nil }
+
     /// Configuration swaps can change intrinsic width (weight shift on
     /// selection, avatar insets on arrival). Landing them inside an implicit
     /// animation makes the stack interpolate widths — the accordion. Apply

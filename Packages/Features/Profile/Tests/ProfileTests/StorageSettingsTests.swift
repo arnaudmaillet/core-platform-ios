@@ -238,7 +238,7 @@ final class StorageSettingsTests {
 
     @Test func theScreenListsEveryCategoryTheLimitsAndTheToggle() {
         #expect(StorageSettingsViewController.items(in: .usage) == [
-            .category(.images), .category(.videos), .category(.messages), .category(.other), .total, .clearAll
+            .category(.images), .category(.videos), .category(.sounds), .category(.messages), .category(.other), .total, .clearAll
         ])
         #expect(StorageSettingsViewController.items(in: .limit) == [
             .inUse, .limit(.automatic), .limit(.halfGigabyte), .limit(.oneGigabyte), .limit(.twoGigabytes)

@@ -662,6 +662,10 @@ public final class DiskStore: ManagedCache {
                     state.leases[key] = count - 1
                     return []
                 }
+                // Out of the pinned bytes while still leased, then back into
+                // its tier: linked without the unlink, the entry counted twice
+                // and its pinned bytes stayed for good (#1068).
+                state.unlink(key, record)
                 state.leases[key] = nil
                 state.link(key, record)
                 return state.enforceLimits(protecting: nil, ceiling: .retained, reason: .budget)
