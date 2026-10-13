@@ -30,7 +30,7 @@ final class ShareSearchResultCell: UICollectionViewListCell {
         apply(target: target, avatar: nil)
         guard let url = target.avatarURL, let imagePipeline else { return }
         avatarTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let image = try? await imagePipeline.image(for: url, size: .avatar) else { return }
             // The id check, not just cancellation: a recycled cell can be
             // reconfigured for someone else before its task is cancelled, and
             // the wrong face on the right name is worse than no face.

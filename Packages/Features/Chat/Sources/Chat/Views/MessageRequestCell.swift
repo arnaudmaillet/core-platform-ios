@@ -140,7 +140,7 @@ final class MessageRequestCell: UITableViewCell {
         avatarTask = Task { [weak self] in
             let urls = await avatars.avatarURLs(for: [peerID])
             guard !Task.isCancelled, let url = urls[peerID] else { return }
-            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let image = try? await imagePipeline.image(for: url, size: .avatar) else { return }
             guard let self, !Task.isCancelled, self.avatarPeerID == peerID else { return }
             self.avatarView.setPicture(image, animated: true)
         }

@@ -188,7 +188,7 @@ final class ShareTargetsView: UIView {
 
         if let url = target.avatarURL, let imagePipeline {
             avatarTasks.append(Task { [weak avatar] in
-                guard let image = try? await imagePipeline.image(for: url) else { return }
+                guard let image = try? await imagePipeline.image(for: url, size: .px256) else { return }
                 guard !Task.isCancelled else { return }
                 avatar.map { $0.image = image }
             })

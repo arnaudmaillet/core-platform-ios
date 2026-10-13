@@ -291,12 +291,12 @@ public final class PostCardCaptionOverlay: UIView {
     /// contract), so a face that never arrives costs nothing.
     private func loadAvatar(_ url: URL?, from imagePipeline: ImagePipeline?) {
         guard let url, let imagePipeline, !avatar.isHidden else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
+        if let cached = imagePipeline.cachedImage(for: url, size: .avatar) {
             showAvatar(cached)
             return
         }
         avatarTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url), !Task.isCancelled,
+            guard let image = try? await imagePipeline.image(for: url, size: .avatar), !Task.isCancelled,
                   let self else { return }
             showAvatar(image)
         }

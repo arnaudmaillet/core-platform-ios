@@ -307,7 +307,7 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         if pin.isText, let avatar = pin.authorAvatarURL {
             let id = pin.postID
             imageTask = Task { [weak self] in
-                guard let image = try? await imagePipeline.image(for: avatar) else { return }
+                guard let image = try? await imagePipeline.image(for: avatar, size: .avatar) else { return }
                 guard let self, self.representedID == id else { return }
                 self.card.setTextAvatar(image)
             }

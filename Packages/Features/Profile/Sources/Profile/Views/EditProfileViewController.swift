@@ -247,7 +247,7 @@ final class EditProfileViewController: UIViewController {
         guard let url else { return }
         let pipeline = imagePipeline
         Task { [weak self] in
-            let image = try? await pipeline.image(for: url)
+            let image = try? await pipeline.image(for: url, size: .px512)
             guard let self, self.avatarURL == url, let image else { return }
             self.avatarImage = image
             // If the real hero isn't on screen yet (still skeleton), just stash

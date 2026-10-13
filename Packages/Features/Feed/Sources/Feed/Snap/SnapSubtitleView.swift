@@ -453,7 +453,7 @@ final class SnapSubtitleView: UIView {
         guard let url, let pipeline = imagePipeline else { return }
         let expected = generation
         avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let image = try? await pipeline.image(for: url, size: .avatar) else { return }
             guard !Task.isCancelled, let self, self.generation == expected else { return }
             self.avatarView.image = image
         }

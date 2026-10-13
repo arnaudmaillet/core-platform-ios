@@ -102,7 +102,7 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     /// A small circular avatar for a menu row (or nil). Rendered `.alwaysOriginal`
     /// so the photo shows through the menu's tinting (incl. the active row's red).
     private func thumbnail(for url: URL?) async -> UIImage? {
-        guard let url, let image = try? await imagePipeline.image(for: url) else { return nil }
+        guard let url, let image = try? await imagePipeline.image(for: url, size: .avatar) else { return nil }
         let side: CGFloat = 36
         let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
         return renderer.image { _ in

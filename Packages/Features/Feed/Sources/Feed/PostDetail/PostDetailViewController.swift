@@ -2837,7 +2837,7 @@ final class PostDetailViewController: UIViewController {
         guard let url else { return }
         let pipeline = imagePipeline
         imageTasks.append(Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let image = try? await pipeline.image(for: url, size: .avatar) else { return }
             self?.avatarImageView.image = image
         })
     }

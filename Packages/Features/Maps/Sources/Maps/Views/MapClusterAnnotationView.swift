@@ -214,7 +214,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         // never loaded anything to be bare with.
         if face == .text || face == .icon, let avatar {
             imageTask = Task { [weak self] in
-                guard let image = try? await imagePipeline.image(for: avatar) else { return }
+                guard let image = try? await imagePipeline.image(for: avatar, size: .avatar) else { return }
                 guard let self, self.representedAvatar == avatar else { return }
                 self.card.setTextAvatar(image)
             }

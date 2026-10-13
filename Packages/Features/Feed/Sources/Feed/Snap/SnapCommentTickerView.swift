@@ -1156,7 +1156,7 @@ private final class TickerBubbleView: UIView {
         avatarView.image = nil
         guard let avatarURL, let pipeline else { return }
         avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: avatarURL) else { return }
+            guard let image = try? await pipeline.image(for: avatarURL, size: .avatar) else { return }
             guard !Task.isCancelled, let self else { return }
             self.avatarView.image = image
         }
