@@ -103,7 +103,25 @@ extension MainTabCoordinator {
                     Feedback.success("Posted", from: top, at: .top, id: "demo-post")
                 }
             }
-            for round in 0..<14 where !["kinds", "undo", "stack"].contains(mode) {
+            // `-toast-demo navbar` (#1058): an
+            // undo, an info, a warning a beat apart — the bar shows 1, 2 then
+            // 3 — then a failure with Retry, which preempts the info.
+            if mode == "navbar" {
+                let shots: [(TimeInterval, @MainActor (UIViewController) -> Void)] = [
+                    (3, { Feedback.undoable("Unfollowed @ava.moreau", symbol: "person.badge.minus", from: $0, commit: {}, undo: {}) }),
+                    (4.5, { Feedback.info("Link copied", symbol: "link", from: $0) }),
+                    (6, { Feedback.warning("Posted without its sound", from: $0) }),
+                    (9, { top in Feedback.failure("Couldn't send", from: top, action: ToastView.Action("Retry") {}) }),
+                ]
+                for (delay, fire) in shots {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                        guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
+                            .topViewController else { return }
+                        fire(top)
+                    }
+                }
+            }
+            for round in 0..<14 where !["kinds", "undo", "stack", "navbar"].contains(mode) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 1.5) { [weak self] in
                     self?.debugToastDemo(pops: mode == "pop")
                 }

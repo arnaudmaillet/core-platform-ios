@@ -234,6 +234,18 @@ public enum Feedback {
         playsHaptic: Bool = true
     ) -> ToastView {
         let host = host(for: source)
+        // EXPERIMENT (#1058, `-toast-in-navbar`): in the top bar, as its
+        // trailing items, when the screen shows one.
+        if NavigationBarToasts.isEnabled, let toast = NavigationBarToasts.present(
+            ToastView.Content(
+                message: message, symbol: symbol, style: kind.style, action: action,
+                undoable: undoable, id: id, isCondition: isCondition
+            ),
+            from: host
+        ) {
+            if playsHaptic, let haptic = kind.haptic { playHaptic(haptic) }
+            return toast
+        }
         let floor = host === source && floor?.window != nil ? floor : nil
         let toast: ToastView
         if let window = host.viewIfLoaded?.window, let overlay = ToastOverlay.overlay(for: window) {

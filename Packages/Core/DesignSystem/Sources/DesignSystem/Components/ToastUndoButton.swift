@@ -80,7 +80,9 @@ final class ToastUndoButton: UIControl {
             ringHost.widthAnchor.constraint(equalToConstant: Self.ringDiameter),
             ringHost.heightAnchor.constraint(equalToConstant: Self.ringDiameter),
             // The touch target's floor (#1034): a 20 pt ring, a 44 pt control.
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
+            // Below required: in a bar item (#1058) the bar's platter is the
+            // target, and the item is shorter.
+            { let floor = heightAnchor.constraint(greaterThanOrEqualToConstant: 44); floor.priority = .required - 1; return floor }(),
         ])
         setContentHuggingPriority(.required, for: .horizontal)
         setContentCompressionResistancePriority(.required, for: .horizontal)
@@ -91,6 +93,12 @@ final class ToastUndoButton: UIControl {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The "Undo" label beside the ring; off in a bar item (#1058, owner):
+    /// the ring and its arrow alone. VoiceOver still reads "Undo".
+    var showsTitle = true {
+        didSet { title.isHidden = !showsTitle }
+    }
 
     /// CGColors do not follow the appearance on their own.
     private func resolveRingColors() {
