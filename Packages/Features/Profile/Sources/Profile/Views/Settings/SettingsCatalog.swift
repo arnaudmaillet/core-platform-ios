@@ -106,8 +106,8 @@ enum SettingsSection: String, CaseIterable, Sendable {
     /// rows exist. Plain words, no promises of dates.
     var plannedItems: [String] {
         switch self {
-        case .account: ["Email, phone and password", "Date of birth and profiles", "Deactivate, delete or download your data"]
-        case .security: ["Change password", "Two-factor authentication and backup codes", "Where you're logged in"]
+        case .account: ["Email and phone", "Date of birth and profiles", "Deactivate, delete or download your data"]
+        case .security: ["Two-factor authentication and backup codes", "Where you're logged in"]
         case .familyAndTeens: ["Teen protections", "Quiet hours", "Parental supervision"]
         case .wallet: ["Balance and transaction history", "Restore purchases", "Spending limits"]
         case .adsAndData: ["Personalised ads", "Consents", "Why you see an ad"]

@@ -3,11 +3,6 @@ import Testing
 import UIKit
 @testable import Auth
 
-private struct NoLogin: LoginPerforming {
-    func login(username: String, password: String) async throws -> LoginOutcome { .signedIn }
-    func completeLogin(_ challenge: SecondStepChallenge, code: String) async throws {}
-}
-
 private struct Refused: Error {}
 
 /// A session whose code and nonce requests wait at a gate the test opens, so
@@ -82,7 +77,7 @@ private final class InstantApple: FederatedSignInProviding {
 struct AuthBusyStateTests {
     private func start(_ signUp: GatedSignUp, picking method: SignInMethod) throws -> UINavigationController {
         let flow = LoginFlowCoordinator(
-            loginService: NoLogin(), signUp: signUp, federated: InstantApple(), homeCountry: { "FR" }
+            signUp: signUp, federated: InstantApple(), homeCountry: { "FR" }
         ).start()
         let navigation = try #require(flow as? UINavigationController)
         let methods = try #require(navigation.viewControllers.first as? MethodSelectionViewController)

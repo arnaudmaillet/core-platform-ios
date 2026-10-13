@@ -5,10 +5,10 @@ import UIKit
 
 /// Settings → Security and Login → Two-Step Sign-In (#383, backend #649).
 ///
-/// Off: one way in, behind the password — the app's QR code, then its first
+/// Off: one way in, behind a fresh proof of the holder (a code to the
+/// account's address, #840) — the app's QR code, then its first
 /// code, then the backup codes. On: new backup codes, or off, each behind a
-/// code from the app (the proof every account has once two-step is on,
-/// password or not). Not optimistic: the screen changes once the server has.
+/// code from the app (the proof every account has once two-step is on). Not optimistic: the screen changes once the server has.
 final class TwoStepViewController: UIViewController {
     enum Phase: Equatable {
         case loading
@@ -94,7 +94,7 @@ final class TwoStepViewController: UIViewController {
         switch section {
         case .status:
             isOn
-                ? "When you sign in, you enter a code from your authenticator app after your password, emailed code or Apple ID."
+                ? "When you sign in, you enter a code from your authenticator app after your emailed code or Apple ID."
                 : "Add a code from an authenticator app — like Passwords, Google Authenticator or 1Password — to every sign-in, so your password alone isn't enough."
         case .backupCodes:
             (codesLeft <= lowOnCodes
@@ -102,7 +102,7 @@ final class TwoStepViewController: UIViewController {
                 : "")
                 + "Each backup code works once, when you can't use your authenticator app. Getting new ones stops the old ones and logs out your other devices."
         case .toggle:
-            isOn ? "Signing in will need only your password, emailed code or Apple ID." : nil
+            isOn ? "Signing in will need only your emailed code or Apple ID." : nil
         }
     }
 
@@ -204,7 +204,7 @@ final class TwoStepViewController: UIViewController {
     private func turnOn() {
         StepUpPrompt.present(
             on: self,
-            message: "To turn on two-step sign-in, enter your password.",
+            message: "To turn on two-step sign-in, confirm it's you.",
             actionTitle: "Continue",
             stepUp: stepUp,
             onVerified: { [weak self] in self?.startEnrollment() },
@@ -218,7 +218,7 @@ final class TwoStepViewController: UIViewController {
 
     /// ⚠️ PUSHES AT ONCE, THEN THE SCREEN FETCHES ITS SECRET (#800). This
     /// used to await `startTwoStepEnrollment()` before pushing: for the whole
-    /// round trip the password alert had gone and nothing happened, which
+    /// round trip the confirmation alert had gone and nothing happened, which
     /// reads as a tap that didn't take — so people tapped again. The setup
     /// screen now arrives on its own skeleton, starts the enrolment itself,
     /// and keeps a failure inside it (with Try Again) instead of an alert
@@ -392,13 +392,13 @@ final class TwoStepEnrollmentModel {
 
     /// ⚠️ NOT EVERY FAILURE IS RETRIED THE SAME WAY. Starting again only
     /// fixes what the next round trip can fix: a stale step-up fails every
-    /// start until the password is asked again, and two-step changed
+    /// start until the holder is asked again, and two-step changed
     /// elsewhere fails every start for good — Try Again there would be a
     /// button that never works.
     enum Recovery: Equatable {
         /// Start again (the network, the server having a moment).
         case retry
-        /// Ask for the password again, then start (`stepUpRequired`).
+        /// Confirm it's the holder again, then start (`stepUpRequired`).
         case stepUp
         /// Nothing to set up any more: back to the Two-Step screen, which
         /// has reloaded underneath (`alreadyChanged`).
@@ -480,8 +480,8 @@ final class TwoStepEnrollmentViewController: UIViewController {
     let model: TwoStepEnrollmentModel
     private let manager: any TwoStepManaging
     private let stepUp: any CredentialStepUp
-    /// Asks for the password, then runs its closure once the step-up has
-    /// gone through. Nil: the password alert. A test hands in its own (an
+    /// Confirms it's the holder, then runs its closure once the step-up has
+    /// gone through. Nil: the confirmation alerts. A test hands in its own (an
     /// alert never finishes presenting in the test host).
     var presentStepUp: ((@escaping () -> Void) -> Void)?
     private let onEnabled: (BackupCodes) -> Void
@@ -584,7 +584,7 @@ final class TwoStepEnrollmentViewController: UIViewController {
         model.start()
     }
 
-    /// The failed state's action: start again, ask for the password first,
+    /// The failed state's action: start again, confirm it's the holder first,
     /// or go back — whichever can actually get past this failure.
     func recover() {
         guard case .failed(_, let recovery) = model.state else { return }
@@ -598,7 +598,7 @@ final class TwoStepEnrollmentViewController: UIViewController {
             } else {
                 StepUpPrompt.present(
                     on: self,
-                    message: "To turn on two-step sign-in, enter your password.",
+                    message: "To turn on two-step sign-in, confirm it's you.",
                     actionTitle: "Continue",
                     stepUp: stepUp,
                     onVerified: start,

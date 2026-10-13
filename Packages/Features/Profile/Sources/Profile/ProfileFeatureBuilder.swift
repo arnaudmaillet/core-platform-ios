@@ -227,9 +227,6 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                     account: account, sessions: sessions, authenticator: DeviceAuthenticator()
                                                 )
                                             },
-                                            makeChangePassword: (sessions as? any AccountPasswordChanging).map { changer in
-                                                { ChangePasswordViewController(changer: changer) }
-                                            },
                                             makeTwoStep: (sessions as? any TwoStepManaging & CredentialStepUp).map { twoStep in
                                                 { TwoStepViewController(account: account, manager: twoStep, stepUp: twoStep) }
                                             }

@@ -344,9 +344,6 @@ public nonisolated struct Account_V1_CreateAccountRequest: Sendable {
 
   public var phone: String = String()
 
-  /// Pre-hashed credential. The service NEVER accepts plaintext passwords.
-  public var passwordHash: String = String()
-
   public var countryOfResidence: String = String()
 
   /// UUID of the admin account that created this account; empty for self-registration.
@@ -424,21 +421,6 @@ public nonisolated struct Account_V1_ChangePhoneRequest: Sendable {
 
   /// E.164 (e.g. +33612345678).
   public var phone: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Account_V1_ChangePasswordRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var accountID: String = String()
-
-  /// New Argon2id hash — plaintext must never cross the gRPC boundary.
-  public var newPasswordHash: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -585,18 +567,6 @@ public nonisolated struct Account_V1_ResumeDeactivatedAccountRequest: Sendable {
 }
 
 public nonisolated struct Account_V1_RecordLoginRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var accountID: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Account_V1_RecordFailedLoginRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -1855,7 +1825,7 @@ nonisolated extension Account_V1_CommandResponse: SwiftProtobuf.Message, SwiftPr
 
 nonisolated extension Account_V1_CreateAccountRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CreateAccountRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}identity_id\0\u{1}email\0\u{1}phone\0\u{3}password_hash\0\u{3}country_of_residence\0\u{3}created_by\0\u{3}date_of_birth\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}identity_id\0\u{1}email\0\u{1}phone\0\u{4}\u{2}country_of_residence\0\u{3}created_by\0\u{3}date_of_birth\0\u{b}password_hash\0\u{c}\u{4}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1866,7 +1836,6 @@ nonisolated extension Account_V1_CreateAccountRequest: SwiftProtobuf.Message, Sw
       case 1: try { try decoder.decodeSingularStringField(value: &self.identityID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.email) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.phone) }()
-      case 4: try { try decoder.decodeSingularStringField(value: &self.passwordHash) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.countryOfResidence) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.createdBy) }()
       case 7: try { try decoder.decodeSingularStringField(value: &self.dateOfBirth) }()
@@ -1885,9 +1854,6 @@ nonisolated extension Account_V1_CreateAccountRequest: SwiftProtobuf.Message, Sw
     if !self.phone.isEmpty {
       try visitor.visitSingularStringField(value: self.phone, fieldNumber: 3)
     }
-    if !self.passwordHash.isEmpty {
-      try visitor.visitSingularStringField(value: self.passwordHash, fieldNumber: 4)
-    }
     if !self.countryOfResidence.isEmpty {
       try visitor.visitSingularStringField(value: self.countryOfResidence, fieldNumber: 5)
     }
@@ -1904,7 +1870,6 @@ nonisolated extension Account_V1_CreateAccountRequest: SwiftProtobuf.Message, Sw
     if lhs.identityID != rhs.identityID {return false}
     if lhs.email != rhs.email {return false}
     if lhs.phone != rhs.phone {return false}
-    if lhs.passwordHash != rhs.passwordHash {return false}
     if lhs.countryOfResidence != rhs.countryOfResidence {return false}
     if lhs.createdBy != rhs.createdBy {return false}
     if lhs.dateOfBirth != rhs.dateOfBirth {return false}
@@ -2073,41 +2038,6 @@ nonisolated extension Account_V1_ChangePhoneRequest: SwiftProtobuf.Message, Swif
   public static func ==(lhs: Account_V1_ChangePhoneRequest, rhs: Account_V1_ChangePhoneRequest) -> Bool {
     if lhs.accountID != rhs.accountID {return false}
     if lhs.phone != rhs.phone {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Account_V1_ChangePasswordRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ChangePasswordRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}new_password_hash\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.newPasswordHash) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.accountID.isEmpty {
-      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
-    }
-    if !self.newPasswordHash.isEmpty {
-      try visitor.visitSingularStringField(value: self.newPasswordHash, fieldNumber: 2)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Account_V1_ChangePasswordRequest, rhs: Account_V1_ChangePasswordRequest) -> Bool {
-    if lhs.accountID != rhs.accountID {return false}
-    if lhs.newPasswordHash != rhs.newPasswordHash {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2472,36 +2402,6 @@ nonisolated extension Account_V1_RecordLoginRequest: SwiftProtobuf.Message, Swif
   }
 
   public static func ==(lhs: Account_V1_RecordLoginRequest, rhs: Account_V1_RecordLoginRequest) -> Bool {
-    if lhs.accountID != rhs.accountID {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Account_V1_RecordFailedLoginRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".RecordFailedLoginRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.accountID.isEmpty {
-      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Account_V1_RecordFailedLoginRequest, rhs: Account_V1_RecordFailedLoginRequest) -> Bool {
     if lhs.accountID != rhs.accountID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

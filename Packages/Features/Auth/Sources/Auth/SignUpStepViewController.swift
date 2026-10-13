@@ -100,7 +100,7 @@ class SignUpStepViewController: BottomAnchoredTableViewController {
 
     func present(error: Error) {
         feedback.notificationOccurred(.error)
-        let message = (error as? AuthError).map(LoginViewModel.message(for:)) ?? "Something went wrong. Try again."
+        let message = (error as? AuthError).map(AuthMessages.message(for:)) ?? "Something went wrong. Try again."
         let alert = UIAlertController(title: "Couldn\u{2019}t Continue", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         present(alert, animated: true)

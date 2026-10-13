@@ -7,7 +7,7 @@ import UIKit
 public struct AuthFeatureBuilder: AuthFeatureBuilding {
     private let sessionManager: SessionManager
     /// The new account's profile (`profile.v1`), from the composition root.
-    /// Nil: "email" and "phone" keep the password / unavailable paths.
+    /// Nil: a sign-up completes without one.
     private let profileSetup: (any AccountProfileSetup)?
     private let homeCountry: @Sendable () async -> String
     /// Sign in with Apple's sheet. Nil keeps "Continue with Apple" unavailable.
@@ -27,10 +27,8 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
 
     private func makeFlow() -> LoginFlowCoordinator {
         LoginFlowCoordinator(
-            loginService: sessionManager,
-            // Codes and sign-up need a place to make the profile: without
-            // one, the flow keeps its password path.
-            signUp: profileSetup == nil ? nil : sessionManager,
+            // Codes are the only way in since passwords went (#840).
+            signUp: sessionManager,
             federated: federated,
             profileSetup: profileSetup,
             homeCountry: homeCountry

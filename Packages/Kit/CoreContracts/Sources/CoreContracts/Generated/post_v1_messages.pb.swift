@@ -69,6 +69,12 @@ public nonisolated struct Post_V1_MediaAttachmentInput: Sendable {
 
   public var durationSeconds: Float = 0
 
+  /// #907: the media asset this attachment shows (media.v1 IssueUploadTicket's
+  /// asset_id). Optional. It must be the caller's own POST_IMAGE or VIDEO asset
+  /// (not failed, quarantined or deleted): otherwise FAILED_PRECONDITION
+  /// (PST-3005). Media unreachable ⇒ UNAVAILABLE (PST-5002), retryable.
+  public var assetID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -91,9 +97,30 @@ public nonisolated struct Post_V1_MediaAttachmentView: Sendable {
 
   public var durationSeconds: Float = 0
 
+  /// #907: the media asset, when the attachment names one — a stable cache key
+  /// (unlike a SIGNED URL). Empty for attachments made before.
+  public var assetID: String = String()
+
+  /// #907: how to deliver it, resolved per read: the blurhash, and for a READY
+  /// asset every rendition (THUMBNAIL / SMALL / MEDIUM / LARGE, or a video's
+  /// MANIFEST + POSTER) with its URL, size, visibility and expiry. An asset still
+  /// processing has its blurhash and no renditions. Absent when the attachment
+  /// has no asset_id, or when media could not answer in time (fail-open:
+  /// `cdn_url` and `thumbnail_url` still deliver it).
+  public var media: Media_V1_DeliveredMedia {
+    get {_media ?? Media_V1_DeliveredMedia()}
+    set {_media = newValue}
+  }
+  /// Returns true if `media` has been explicitly set.
+  public var hasMedia: Bool {self._media != nil}
+  /// Clears the value of `media`. Subsequent reads from it will return its default value.
+  public mutating func clearMedia() {self._media = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _media: Media_V1_DeliveredMedia? = nil
 }
 
 public nonisolated struct Post_V1_PostView: @unchecked Sendable {
@@ -631,7 +658,7 @@ nonisolated extension Post_V1_GeoPoint: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 nonisolated extension Post_V1_MediaAttachmentInput: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".MediaAttachmentInput"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}cdn_url\0\u{3}mime_type\0\u{1}width\0\u{1}height\0\u{3}thumbnail_url\0\u{3}duration_seconds\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}cdn_url\0\u{3}mime_type\0\u{1}width\0\u{1}height\0\u{3}thumbnail_url\0\u{3}duration_seconds\0\u{3}asset_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -645,6 +672,7 @@ nonisolated extension Post_V1_MediaAttachmentInput: SwiftProtobuf.Message, Swift
       case 4: try { try decoder.decodeSingularUInt32Field(value: &self.height) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.thumbnailURL) }()
       case 6: try { try decoder.decodeSingularFloatField(value: &self.durationSeconds) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.assetID) }()
       default: break
       }
     }
@@ -668,6 +696,9 @@ nonisolated extension Post_V1_MediaAttachmentInput: SwiftProtobuf.Message, Swift
     }
     if self.durationSeconds.bitPattern != 0 {
       try visitor.visitSingularFloatField(value: self.durationSeconds, fieldNumber: 6)
+    }
+    if !self.assetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.assetID, fieldNumber: 7)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -679,6 +710,7 @@ nonisolated extension Post_V1_MediaAttachmentInput: SwiftProtobuf.Message, Swift
     if lhs.height != rhs.height {return false}
     if lhs.thumbnailURL != rhs.thumbnailURL {return false}
     if lhs.durationSeconds != rhs.durationSeconds {return false}
+    if lhs.assetID != rhs.assetID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -686,7 +718,7 @@ nonisolated extension Post_V1_MediaAttachmentInput: SwiftProtobuf.Message, Swift
 
 nonisolated extension Post_V1_MediaAttachmentView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".MediaAttachmentView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}cdn_url\0\u{3}mime_type\0\u{1}width\0\u{1}height\0\u{3}thumbnail_url\0\u{3}duration_seconds\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}cdn_url\0\u{3}mime_type\0\u{1}width\0\u{1}height\0\u{3}thumbnail_url\0\u{3}duration_seconds\0\u{3}asset_id\0\u{1}media\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -700,12 +732,18 @@ nonisolated extension Post_V1_MediaAttachmentView: SwiftProtobuf.Message, SwiftP
       case 4: try { try decoder.decodeSingularUInt32Field(value: &self.height) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.thumbnailURL) }()
       case 6: try { try decoder.decodeSingularFloatField(value: &self.durationSeconds) }()
+      case 7: try { try decoder.decodeSingularStringField(value: &self.assetID) }()
+      case 8: try { try decoder.decodeSingularMessageField(value: &self._media) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.cdnURL.isEmpty {
       try visitor.visitSingularStringField(value: self.cdnURL, fieldNumber: 1)
     }
@@ -724,6 +762,12 @@ nonisolated extension Post_V1_MediaAttachmentView: SwiftProtobuf.Message, SwiftP
     if self.durationSeconds.bitPattern != 0 {
       try visitor.visitSingularFloatField(value: self.durationSeconds, fieldNumber: 6)
     }
+    if !self.assetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.assetID, fieldNumber: 7)
+    }
+    try { if let v = self._media {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -734,6 +778,8 @@ nonisolated extension Post_V1_MediaAttachmentView: SwiftProtobuf.Message, SwiftP
     if lhs.height != rhs.height {return false}
     if lhs.thumbnailURL != rhs.thumbnailURL {return false}
     if lhs.durationSeconds != rhs.durationSeconds {return false}
+    if lhs.assetID != rhs.assetID {return false}
+    if lhs._media != rhs._media {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -9,7 +9,7 @@ import Foundation
 public enum AccountError: Error, Equatable, Sendable {
     case notAuthenticated
     /// A step-up-gated RPC refused a token that wasn't re-proved recently
-    /// (PERMISSION_DENIED "step_up_required"): ask for the password again.
+    /// (PERMISSION_DENIED "step_up_required"): confirm it's the holder again.
     case stepUpRequired
     /// The server answered and declined: this deployment doesn't serve the
     /// call (UNIMPLEMENTED), won't show it to this account (PERMISSION_DENIED)
@@ -222,7 +222,7 @@ public actor AccountRepository: AccountProviding, AccountLifecycleManaging, Acco
         }
     }
 
-    /// A step-up-gated RPC's refusal is a prompt for the password, not a
+    /// A step-up-gated RPC's refusal is a prompt to confirm the holder, not a
     /// failure (PERMISSION_DENIED "step_up_required", #648).
     static func accountError(_ error: ConnectError) -> AccountError {
         if error.code == .permissionDenied, (error.message ?? "").contains("step_up") {

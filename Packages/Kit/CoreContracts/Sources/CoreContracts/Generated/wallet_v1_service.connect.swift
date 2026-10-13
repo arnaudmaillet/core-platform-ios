@@ -66,6 +66,14 @@ public protocol Wallet_V1_WalletServiceClientInterface: Sendable {
     /// target, for the GDPR data export.
     @available(iOS 13, *)
     func `listStakePositions`(request: Wallet_V1_ListStakePositionsRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_ListStakePositionsResponse>
+
+    /// The caller's own stakes, for the wallet sheet (#886): each post or
+    /// comment it staked on, active (with when it settles) or settled (with the
+    /// day's verdict), newest first, paged. Edge: the caller's account. While
+    /// settlement is shadow mode no gems are shown — the app never displays gems
+    /// the balance does not hold.
+    @available(iOS 13, *)
+    func `listMyStakes`(request: Wallet_V1_ListMyStakesRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_ListMyStakesResponse>
 }
 
 /// Concrete implementation of `Wallet_V1_WalletServiceClientInterface`.
@@ -116,6 +124,11 @@ public final class Wallet_V1_WalletServiceClient: Wallet_V1_WalletServiceClientI
         return await self.client.unary(path: "/wallet.v1.WalletService/ListStakePositions", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `listMyStakes`(request: Wallet_V1_ListMyStakesRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Wallet_V1_ListMyStakesResponse> {
+        return await self.client.unary(path: "/wallet.v1.WalletService/ListMyStakes", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let getWallet = Connect.MethodSpec(name: "GetWallet", service: "wallet.v1.WalletService", type: .unary)
@@ -126,6 +139,7 @@ public final class Wallet_V1_WalletServiceClient: Wallet_V1_WalletServiceClientI
             public static let spendGems = Connect.MethodSpec(name: "SpendGems", service: "wallet.v1.WalletService", type: .unary)
             public static let exportWallet = Connect.MethodSpec(name: "ExportWallet", service: "wallet.v1.WalletService", type: .unary)
             public static let listStakePositions = Connect.MethodSpec(name: "ListStakePositions", service: "wallet.v1.WalletService", type: .unary)
+            public static let listMyStakes = Connect.MethodSpec(name: "ListMyStakes", service: "wallet.v1.WalletService", type: .unary)
         }
     }
 }

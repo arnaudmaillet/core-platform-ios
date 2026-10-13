@@ -38,11 +38,8 @@ struct AuthEndToEndTests {
     @Test func fullLoginRefreshLogoutLifecycle() async throws {
         let (manager, store) = makeStack(accessTokenLifetimeSeconds: 0) // expires immediately
 
-        // Login with the fixture credentials over real Connect framing.
-        try await manager.login(
-            username: MockAuthService.defaultCredentials.username,
-            password: MockAuthService.defaultCredentials.password
-        )
+        // A code sign-in for the demo account over real Connect framing.
+        try await manager.signInAsDemo()
         #expect(await manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
         let initialRefreshToken = try #require(try store.load()?.refreshToken)
 
@@ -67,10 +64,7 @@ struct AuthEndToEndTests {
         bff.enforcesEdgePolicy = true
         let store = InMemorySessionStore()
         let manager = makeManager(bff: bff, store: store)
-        try await manager.login(
-            username: MockAuthService.defaultCredentials.username,
-            password: MockAuthService.defaultCredentials.password
-        )
+        try await manager.signInAsDemo()
         let session = try #require(try store.load())
 
         await manager.logout()
@@ -305,11 +299,12 @@ struct AuthEndToEndTests {
         }
     }
 
-    @Test func wrongPasswordFailsWithInvalidCredentials() async {
+    @Test func aWrongCodeFailsWithInvalidCode() async throws {
         let (manager, _) = makeStack()
+        let challenge = try await manager.startVerification(.email, to: MockAuthService.demoEmail)
 
-        await #expect(throws: AuthError.invalidCredentials) {
-            try await manager.login(username: "demo", password: "not-the-password")
+        await #expect(throws: AuthError.invalidCode) {
+            try await manager.signInWithCode(challengeID: challenge.id, code: "000000")
         }
         #expect(await manager.currentState() == .unauthenticated)
     }
@@ -319,10 +314,7 @@ struct AuthEndToEndTests {
         let store = InMemorySessionStore()
         let manager = makeManager(bff: bff, store: store)
 
-        try await manager.login(
-            username: MockAuthService.defaultCredentials.username,
-            password: MockAuthService.defaultCredentials.password
-        )
+        try await manager.signInAsDemo()
         let preRotationSession = try #require(try store.load())
 
         // Legitimate refresh rotates the token server-side.

@@ -89,7 +89,7 @@ class BottomAnchoredTableViewController: UITableViewController {
     }
 
     /// Plain-text link row (clear background, centered, tinted) — the flow's
-    /// secondary-action register: Forgot Password, Create Account.
+    /// secondary-action register: Create Account, Log In.
     func makeLinkCell(title: String) -> UITableViewCell {
         let cell = UITableViewCell()
         cell.backgroundConfiguration = .clear()

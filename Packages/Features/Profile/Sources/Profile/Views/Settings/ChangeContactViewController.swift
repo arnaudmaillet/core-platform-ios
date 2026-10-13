@@ -5,8 +5,8 @@ import UIKit
 /// a code sent there, then the change.
 ///
 /// The change is takeover-prone, so the server wants a recent proof of the
-/// holder: when it asks (`stepUpRequired`), the password is asked for and the
-/// same code is sent again — the viewer types nothing twice. The address on
+/// holder: when it asks (`stepUpRequired`), the holder confirms it's them
+/// (a code to the account's address, #840) and the same code is sent again — the viewer types nothing twice. The address on
 /// file before is told by the server. Not optimistic: Account shows the new
 /// address once the server has it, verified (the code proved it).
 final class ChangeContactViewController: UIViewController {
@@ -263,7 +263,7 @@ final class ChangeContactViewController: UIViewController {
                 onChanged(stored)
             } catch ContactChangeError.stepUpRequired {
                 isWorking = false
-                askForPassword(then: challenge)
+                confirmItsYou(then: challenge)
             } catch {
                 isWorking = false
                 codeField.text = ""
@@ -273,13 +273,13 @@ final class ChangeContactViewController: UIViewController {
         }
     }
 
-    private func askForPassword(then challenge: ContactChallenge) {
+    private func confirmItsYou(then challenge: ContactChallenge) {
         guard let stepUp else { return present(ContactChangeError.stepUpRequired) }
         StepUpPrompt.present(
             on: self,
             message: kind == .email
-                ? "To change your email address, enter your password."
-                : "To change your phone number, enter your password.",
+                ? "To change your email address, confirm it's you."
+                : "To change your phone number, confirm it's you.",
             actionTitle: "Continue",
             stepUp: stepUp,
             onVerified: { [weak self] in self?.confirm(challenge) },

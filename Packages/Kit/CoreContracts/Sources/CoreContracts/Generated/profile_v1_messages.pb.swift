@@ -279,6 +279,40 @@ public nonisolated struct Profile_V1_ProfileView: @unchecked Sendable {
   /// Clears the value of `visibleTabs`. Subsequent reads from it will return its default value.
   public mutating func clearVisibleTabs() {_uniqueStorage()._visibleTabs = nil}
 
+  /// #907: the avatar's / banner's media asset, when set with one — a stable
+  /// cache key (unlike a SIGNED URL). Empty for ones set by URL only.
+  public var avatarAssetID: String {
+    get {_storage._avatarAssetID}
+    set {_uniqueStorage()._avatarAssetID = newValue}
+  }
+
+  public var bannerAssetID: String {
+    get {_storage._bannerAssetID}
+    set {_uniqueStorage()._bannerAssetID = newValue}
+  }
+
+  /// #907: how to deliver them, resolved per client read: the blurhash, and
+  /// for a READY asset every rendition (URL, size, visibility, expiry); one
+  /// still processing has its blurhash only. Absent without an asset id, or
+  /// when media could not answer in time (fail-open: the URLs still deliver).
+  public var avatar: Media_V1_DeliveredMedia {
+    get {_storage._avatar ?? Media_V1_DeliveredMedia()}
+    set {_uniqueStorage()._avatar = newValue}
+  }
+  /// Returns true if `avatar` has been explicitly set.
+  public var hasAvatar: Bool {_storage._avatar != nil}
+  /// Clears the value of `avatar`. Subsequent reads from it will return its default value.
+  public mutating func clearAvatar() {_uniqueStorage()._avatar = nil}
+
+  public var banner: Media_V1_DeliveredMedia {
+    get {_storage._banner ?? Media_V1_DeliveredMedia()}
+    set {_uniqueStorage()._banner = newValue}
+  }
+  /// Returns true if `banner` has been explicitly set.
+  public var hasBanner: Bool {_storage._banner != nil}
+  /// Clears the value of `banner`. Subsequent reads from it will return its default value.
+  public mutating func clearBanner() {_uniqueStorage()._banner = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -326,9 +360,23 @@ public nonisolated struct Profile_V1_ProfileSummaryView: Sendable {
 
   public var status: Profile_V1_ProfileStatus = .unspecified
 
+  /// #907: as on ProfileView.
+  public var avatarAssetID: String = String()
+
+  public var avatar: Media_V1_DeliveredMedia {
+    get {_avatar ?? Media_V1_DeliveredMedia()}
+    set {_avatar = newValue}
+  }
+  /// Returns true if `avatar` has been explicitly set.
+  public var hasAvatar: Bool {self._avatar != nil}
+  /// Clears the value of `avatar`. Subsequent reads from it will return its default value.
+  public mutating func clearAvatar() {self._avatar = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _avatar: Media_V1_DeliveredMedia? = nil
 }
 
 public nonisolated struct Profile_V1_CommandResponse: Sendable {
@@ -416,6 +464,13 @@ public nonisolated struct Profile_V1_UpdateAvatarRequest: Sendable {
 
   public var avatarURL: String = String()
 
+  /// #907: the media asset avatar_url shows (media IssueUploadTicket's
+  /// asset_id). Optional; it follows each update (an avatar set without one,
+  /// or cleared, has none). It must be an image (AVATAR or POST_IMAGE) of the
+  /// profile's account, not failed, quarantined or deleted: otherwise
+  /// FAILED_PRECONDITION (PRF-5007). Media unreachable ⇒ UNAVAILABLE (PRF-5005).
+  public var avatarAssetID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -429,6 +484,9 @@ public nonisolated struct Profile_V1_UpdateBannerRequest: Sendable {
   public var profileID: String = String()
 
   public var bannerURL: String = String()
+
+  /// #907: as UpdateAvatarRequest.avatar_asset_id.
+  public var bannerAssetID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1328,7 +1386,7 @@ nonisolated extension Profile_V1_ProfileLinkProto: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ProfileView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}account_id\0\u{1}handle\0\u{3}display_name\0\u{1}bio\0\u{3}avatar_url\0\u{3}banner_url\0\u{3}website_url\0\u{3}custom_links\0\u{3}profile_kind\0\u{1}visibility\0\u{1}verified\0\u{3}verification_kind\0\u{1}locale\0\u{1}timezone\0\u{1}status\0\u{3}masking_reason\0\u{3}masked_at\0\u{3}created_at\0\u{3}updated_at\0\u{1}version\0\u{3}interaction_settings\0\u{3}location_settings\0\u{3}discovery_settings\0\u{3}comment_filters\0\u{3}tab_settings\0\u{3}feed_settings\0\u{3}business_info\0\u{3}visible_tabs\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}account_id\0\u{1}handle\0\u{3}display_name\0\u{1}bio\0\u{3}avatar_url\0\u{3}banner_url\0\u{3}website_url\0\u{3}custom_links\0\u{3}profile_kind\0\u{1}visibility\0\u{1}verified\0\u{3}verification_kind\0\u{1}locale\0\u{1}timezone\0\u{1}status\0\u{3}masking_reason\0\u{3}masked_at\0\u{3}created_at\0\u{3}updated_at\0\u{1}version\0\u{3}interaction_settings\0\u{3}location_settings\0\u{3}discovery_settings\0\u{3}comment_filters\0\u{3}tab_settings\0\u{3}feed_settings\0\u{3}business_info\0\u{3}visible_tabs\0\u{3}avatar_asset_id\0\u{3}banner_asset_id\0\u{1}avatar\0\u{1}banner\0")
 
   fileprivate class _StorageClass {
     var _profileID: String = String()
@@ -1360,6 +1418,10 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
     var _feedSettings: Profile_V1_FeedSettings? = nil
     var _businessInfo: Profile_V1_BusinessInfo? = nil
     var _visibleTabs: Profile_V1_VisibleTabs? = nil
+    var _avatarAssetID: String = String()
+    var _bannerAssetID: String = String()
+    var _avatar: Media_V1_DeliveredMedia? = nil
+    var _banner: Media_V1_DeliveredMedia? = nil
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -1399,6 +1461,10 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
       _feedSettings = source._feedSettings
       _businessInfo = source._businessInfo
       _visibleTabs = source._visibleTabs
+      _avatarAssetID = source._avatarAssetID
+      _bannerAssetID = source._bannerAssetID
+      _avatar = source._avatar
+      _banner = source._banner
     }
   }
 
@@ -1446,6 +1512,10 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
         case 27: try { try decoder.decodeSingularMessageField(value: &_storage._feedSettings) }()
         case 28: try { try decoder.decodeSingularMessageField(value: &_storage._businessInfo) }()
         case 29: try { try decoder.decodeSingularMessageField(value: &_storage._visibleTabs) }()
+        case 30: try { try decoder.decodeSingularStringField(value: &_storage._avatarAssetID) }()
+        case 31: try { try decoder.decodeSingularStringField(value: &_storage._bannerAssetID) }()
+        case 32: try { try decoder.decodeSingularMessageField(value: &_storage._avatar) }()
+        case 33: try { try decoder.decodeSingularMessageField(value: &_storage._banner) }()
         default: break
         }
       }
@@ -1545,6 +1615,18 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
       try { if let v = _storage._visibleTabs {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 29)
       } }()
+      if !_storage._avatarAssetID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._avatarAssetID, fieldNumber: 30)
+      }
+      if !_storage._bannerAssetID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._bannerAssetID, fieldNumber: 31)
+      }
+      try { if let v = _storage._avatar {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 32)
+      } }()
+      try { if let v = _storage._banner {
+        try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
+      } }()
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -1583,6 +1665,10 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
         if _storage._feedSettings != rhs_storage._feedSettings {return false}
         if _storage._businessInfo != rhs_storage._businessInfo {return false}
         if _storage._visibleTabs != rhs_storage._visibleTabs {return false}
+        if _storage._avatarAssetID != rhs_storage._avatarAssetID {return false}
+        if _storage._bannerAssetID != rhs_storage._bannerAssetID {return false}
+        if _storage._avatar != rhs_storage._avatar {return false}
+        if _storage._banner != rhs_storage._banner {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -1639,7 +1725,7 @@ nonisolated extension Profile_V1_VisibleTabs: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ProfileSummaryView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}handle\0\u{3}display_name\0\u{3}avatar_url\0\u{3}profile_kind\0\u{1}visibility\0\u{1}status\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}handle\0\u{3}display_name\0\u{3}avatar_url\0\u{3}profile_kind\0\u{1}visibility\0\u{1}status\0\u{3}avatar_asset_id\0\u{1}avatar\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1654,12 +1740,18 @@ nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, Swif
       case 5: try { try decoder.decodeSingularEnumField(value: &self.profileKind) }()
       case 6: try { try decoder.decodeSingularEnumField(value: &self.visibility) }()
       case 7: try { try decoder.decodeSingularEnumField(value: &self.status) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.avatarAssetID) }()
+      case 9: try { try decoder.decodeSingularMessageField(value: &self._avatar) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.profileID.isEmpty {
       try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
     }
@@ -1681,6 +1773,12 @@ nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, Swif
     if self.status != .unspecified {
       try visitor.visitSingularEnumField(value: self.status, fieldNumber: 7)
     }
+    if !self.avatarAssetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.avatarAssetID, fieldNumber: 8)
+    }
+    try { if let v = self._avatar {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1692,6 +1790,8 @@ nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, Swif
     if lhs.profileKind != rhs.profileKind {return false}
     if lhs.visibility != rhs.visibility {return false}
     if lhs.status != rhs.status {return false}
+    if lhs.avatarAssetID != rhs.avatarAssetID {return false}
+    if lhs._avatar != rhs._avatar {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1889,7 +1989,7 @@ nonisolated extension Profile_V1_ChangeHandleRequest: SwiftProtobuf.Message, Swi
 
 nonisolated extension Profile_V1_UpdateAvatarRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".UpdateAvatarRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}avatar_url\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}avatar_url\0\u{3}avatar_asset_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1899,6 +1999,7 @@ nonisolated extension Profile_V1_UpdateAvatarRequest: SwiftProtobuf.Message, Swi
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.avatarURL) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.avatarAssetID) }()
       default: break
       }
     }
@@ -1911,12 +2012,16 @@ nonisolated extension Profile_V1_UpdateAvatarRequest: SwiftProtobuf.Message, Swi
     if !self.avatarURL.isEmpty {
       try visitor.visitSingularStringField(value: self.avatarURL, fieldNumber: 2)
     }
+    if !self.avatarAssetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.avatarAssetID, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Profile_V1_UpdateAvatarRequest, rhs: Profile_V1_UpdateAvatarRequest) -> Bool {
     if lhs.profileID != rhs.profileID {return false}
     if lhs.avatarURL != rhs.avatarURL {return false}
+    if lhs.avatarAssetID != rhs.avatarAssetID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1924,7 +2029,7 @@ nonisolated extension Profile_V1_UpdateAvatarRequest: SwiftProtobuf.Message, Swi
 
 nonisolated extension Profile_V1_UpdateBannerRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".UpdateBannerRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}banner_url\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}banner_url\0\u{3}banner_asset_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1934,6 +2039,7 @@ nonisolated extension Profile_V1_UpdateBannerRequest: SwiftProtobuf.Message, Swi
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.bannerURL) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.bannerAssetID) }()
       default: break
       }
     }
@@ -1946,12 +2052,16 @@ nonisolated extension Profile_V1_UpdateBannerRequest: SwiftProtobuf.Message, Swi
     if !self.bannerURL.isEmpty {
       try visitor.visitSingularStringField(value: self.bannerURL, fieldNumber: 2)
     }
+    if !self.bannerAssetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.bannerAssetID, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Profile_V1_UpdateBannerRequest, rhs: Profile_V1_UpdateBannerRequest) -> Bool {
     if lhs.profileID != rhs.profileID {return false}
     if lhs.bannerURL != rhs.bannerURL {return false}
+    if lhs.bannerAssetID != rhs.bannerAssetID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

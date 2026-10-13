@@ -78,14 +78,6 @@ public struct SecondStepChallenge: Equatable, Sendable {
     }
 }
 
-/// How a password sign-in ended.
-public enum LoginOutcome: Equatable, Sendable {
-    /// The session is the app's.
-    case signedIn
-    /// Two-step sign-in is on: the holder's code finishes it.
-    case needsSecondStep(SecondStepChallenge)
-}
-
 extension AuthError: NetworkUnavailabilityDescribing {
     /// Only `offline`: a server error during a refresh is not the network's
     /// (#791).

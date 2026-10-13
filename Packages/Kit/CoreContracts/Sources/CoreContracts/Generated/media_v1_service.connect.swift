@@ -68,6 +68,14 @@ public protocol Media_V1_MediaServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `deleteAsset`(request: Media_V1_DeleteAssetRequest, headers: Connect.Headers) async -> ResponseMessage<Media_V1_DeleteAssetResponse>
 
+    /// MESH ONLY (#919): the owner changes how a READY asset is delivered.
+    /// SIGNED moves its renditions into its own restricted tree (once enabled)
+    /// and purges their public CDN paths; PUBLIC moves them back. Idempotent.
+    /// Not READY ⇒ FAILED_PRECONDITION (MED-2002); a private kind never goes
+    /// PUBLIC (MED-9001); another owner's asset ⇒ NOT_FOUND.
+    @available(iOS 13, *)
+    func `changeDeliveryVisibility`(request: Media_V1_ChangeDeliveryVisibilityRequest, headers: Connect.Headers) async -> ResponseMessage<Media_V1_ChangeDeliveryVisibilityResponse>
+
     /// Resolve one asset to a delivery URL set (CDN immutable or short-lived
     /// signed). Fails open to a placeholder.
     @available(iOS 13, *)
@@ -128,6 +136,11 @@ public final class Media_V1_MediaServiceClient: Media_V1_MediaServiceClientInter
     }
 
     @available(iOS 13, *)
+    public func `changeDeliveryVisibility`(request: Media_V1_ChangeDeliveryVisibilityRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Media_V1_ChangeDeliveryVisibilityResponse> {
+        return await self.client.unary(path: "/media.v1.MediaService/ChangeDeliveryVisibility", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `resolveDelivery`(request: Media_V1_ResolveDeliveryRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Media_V1_ResolveDeliveryResponse> {
         return await self.client.unary(path: "/media.v1.MediaService/ResolveDelivery", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -151,6 +164,7 @@ public final class Media_V1_MediaServiceClient: Media_V1_MediaServiceClientInter
             public static let listAssetsByOwner = Connect.MethodSpec(name: "ListAssetsByOwner", service: "media.v1.MediaService", type: .unary)
             public static let getPrivateDocumentURL = Connect.MethodSpec(name: "GetPrivateDocumentUrl", service: "media.v1.MediaService", type: .unary)
             public static let deleteAsset = Connect.MethodSpec(name: "DeleteAsset", service: "media.v1.MediaService", type: .unary)
+            public static let changeDeliveryVisibility = Connect.MethodSpec(name: "ChangeDeliveryVisibility", service: "media.v1.MediaService", type: .unary)
             public static let resolveDelivery = Connect.MethodSpec(name: "ResolveDelivery", service: "media.v1.MediaService", type: .unary)
             public static let batchResolveDelivery = Connect.MethodSpec(name: "BatchResolveDelivery", service: "media.v1.MediaService", type: .unary)
             public static let reprocess = Connect.MethodSpec(name: "Reprocess", service: "media.v1.MediaService", type: .unary)

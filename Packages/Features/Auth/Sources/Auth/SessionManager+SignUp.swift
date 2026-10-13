@@ -54,7 +54,7 @@ public enum SignInCredential: Equatable, Sendable {
 
 /// How an existing account signs in — SignUp's "you already have an account".
 public enum ExistingSignInMethod: Equatable, Sendable {
-    case apple, google, password, emailCode, phoneCode, unknown
+    case apple, google, emailCode, phoneCode, unknown
 }
 
 /// The answers the sign-up steps collect.
@@ -303,7 +303,6 @@ extension SessionManager {
         switch method {
         case .apple: .apple
         case .google: .google
-        case .password: .password
         case .emailCode: .emailCode
         case .phoneCode: .phoneCode
         default: .unknown
@@ -313,5 +312,60 @@ extension SessionManager {
     /// ISO 8601, `YYYY-MM-DD`.
     static func isoDate(_ components: DateComponents) -> String {
         String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
+    }
+}
+
+// MARK: - Proving the holder again (#840)
+
+/// How a re-authentication ended.
+public enum Reauthentication: Equatable, Sendable {
+    /// The session is fresh: step-up-gated calls go through.
+    case done
+    /// Two-step sign-in is on: the holder's code finishes it
+    /// (`completeReauthentication`).
+    case needsSecondStep(SecondStepChallenge)
+}
+
+extension SessionManager {
+    /// Proves the signed-in holder again with a code sent to their address.
+    /// This is what replaced the password before a destructive action (#840):
+    /// a sign-in's token carries `auth_time` = now, which every step-up-gated
+    /// RPC accepts for a few minutes. An account with two-step sign-in on
+    /// answers `.needsSecondStep`.
+    ///
+    /// The new session replaces the current one SILENTLY: same account, so
+    /// the auth state does not change and the app is not rebuilt. The
+    /// session it replaces is ended on the server.
+    public func reauthenticate(challengeID: String, code: String) async throws -> Reauthentication {
+        switch try await signIn(.code(challengeID: challengeID, code: code)) {
+        case .existing(let account):
+            try await adoptReauthentication(account)
+            return .done
+        case .needsSecondStep(let challenge):
+            return .needsSecondStep(challenge)
+        case .needsSignUp:
+            // The address proves no account: not the holder's.
+            throw AuthError.identityRejected
+        }
+    }
+
+    /// The second step of `reauthenticate`.
+    public func completeReauthentication(_ challenge: SecondStepChallenge, code: String) async throws {
+        try await adoptReauthentication(completeSecondStep(challenge, code: code))
+    }
+
+    private func adoptReauthentication(_ account: PendingAccount) async throws {
+        guard let previous = session, previous.accountID == account.accountID else {
+            throw AuthError.identityRejected
+        }
+        session = account.session
+        try? store.save(account.session)
+        // Best effort, with the ended session's own bearer (#486), as
+        // `logout` does: otherwise every re-proof leaves a session behind.
+        guard previous.sessionID != account.session.sessionID,
+              previous.accessTokenExpiry > now() else { return }
+        var request = Auth_V1_LogoutRequest()
+        request.sessionID = previous.sessionID.rawValue
+        _ = await authClient.logout(request: request, headers: ["Authorization": ["Bearer \(previous.accessToken)"]])
     }
 }

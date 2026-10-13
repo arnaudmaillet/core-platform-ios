@@ -78,6 +78,12 @@ public nonisolated struct Media_V1_Asset: Sendable {
   /// Clears the value of `updatedAt`. Subsequent reads from it will return its default value.
   public mutating func clearUpdatedAt() {self._updatedAt = nil}
 
+  /// How its renditions are delivered (#919): decided by the server — the
+  /// kind's default, or what the owner asked for at upload. For a SIGNED
+  /// asset, `content_hash` and every rendition's `storage_key` are empty for
+  /// anyone but its owner (and the mesh).
+  public var deliveryVisibility: Media_V1_DeliveryVisibility = .mediaDeliveryVisibilityUnspecified
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -140,6 +146,12 @@ public nonisolated struct Media_V1_IssueUploadTicketRequest: Sendable {
   /// key for another kind, declared type or content fails FAILED_PRECONDITION
   /// (MED-1007). Deleting or aborting the asset frees its key.
   public var idempotencyKey: String = String()
+
+  /// How the asset is delivered (#919): SIGNED for media that must never be
+  /// served from a public, permanent URL (a private account's, a message's).
+  /// UNSPECIFIED ⇒ the kind's default (PUBLIC). Never relaxed afterwards by a
+  /// reader's request.
+  public var deliveryVisibility: Media_V1_DeliveryVisibility = .mediaDeliveryVisibilityUnspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -443,6 +455,46 @@ public nonisolated struct Media_V1_DeleteAssetResponse: Sendable {
   public init() {}
 }
 
+public nonisolated struct Media_V1_ChangeDeliveryVisibilityRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var assetID: String = String()
+
+  /// The owning account; must own the asset.
+  public var ownerID: String = String()
+
+  /// PUBLIC or SIGNED; UNSPECIFIED ⇒ INVALID_ARGUMENT.
+  public var deliveryVisibility: Media_V1_DeliveryVisibility = .mediaDeliveryVisibilityUnspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Media_V1_ChangeDeliveryVisibilityResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The asset as it now is (its keys moved, if they did).
+  public var asset: Media_V1_Asset {
+    get {_asset ?? Media_V1_Asset()}
+    set {_asset = newValue}
+  }
+  /// Returns true if `asset` has been explicitly set.
+  public var hasAsset: Bool {self._asset != nil}
+  /// Clears the value of `asset`. Subsequent reads from it will return its default value.
+  public mutating func clearAsset() {self._asset = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _asset: Media_V1_Asset? = nil
+}
+
 public nonisolated struct Media_V1_ResolveDeliveryRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -453,7 +505,8 @@ public nonisolated struct Media_V1_ResolveDeliveryRequest: Sendable {
   /// Preferred rendition; UNSPECIFIED ⇒ a sensible default for the asset's kind.
   public var preferred: Media_V1_RenditionKind = .mediaRenditionKindUnspecified
 
-  /// Requested visibility; UNSPECIFIED ⇒ the asset's default delivery policy.
+  /// Requested visibility; UNSPECIFIED ⇒ the asset's own (#919). It can only
+  /// make delivery stricter: PUBLIC for a SIGNED asset still resolves SIGNED.
   public var visibility: Media_V1_DeliveryVisibility = .mediaDeliveryVisibilityUnspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -504,9 +557,47 @@ public nonisolated struct Media_V1_DeliveredMedia: Sendable {
   /// caller renders what it can.
   public var degraded: Bool = false
 
+  /// #921: a SIGNED video's signed cookies. Its renditions' URLs are then plain
+  /// CDN URLs, and the player must send these cookies with every request of the
+  /// HLS tree (master, rung playlists, segments): they grant the asset's whole
+  /// tree until `expires_at` (re-resolve to refresh). Empty otherwise.
+  public var cdnCookies: [Media_V1_SignedCookie] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+/// A cookie the client sends to the CDN (#921).
+public nonisolated struct Media_V1_SignedCookie: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var name: String = String()
+
+  public var value: String = String()
+
+  /// The CDN host it is sent to, and the path: the asset's own tree, so several
+  /// videos' cookies (all named CloudFront-*) coexist in one cookie jar.
+  public var domain: String = String()
+
+  public var path: String = String()
+
+  public var expiresAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_expiresAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_expiresAt = newValue}
+  }
+  /// Returns true if `expiresAt` has been explicitly set.
+  public var hasExpiresAt: Bool {self._expiresAt != nil}
+  /// Clears the value of `expiresAt`. Subsequent reads from it will return its default value.
+  public mutating func clearExpiresAt() {self._expiresAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _expiresAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
 }
 
 public nonisolated struct Media_V1_DeliveredRendition: Sendable {
@@ -552,6 +643,8 @@ public nonisolated struct Media_V1_BatchResolveDeliveryRequest: Sendable {
 
   public var preferred: Media_V1_RenditionKind = .mediaRenditionKindUnspecified
 
+  /// As ResolveDeliveryRequest.visibility: only ever stricter than each
+  /// asset's own (#919).
   public var visibility: Media_V1_DeliveryVisibility = .mediaDeliveryVisibilityUnspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -617,7 +710,7 @@ fileprivate nonisolated let _protobuf_package = "media.v1"
 
 nonisolated extension Media_V1_Asset: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Asset"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}owner_id\0\u{1}kind\0\u{1}state\0\u{3}mime_type\0\u{3}byte_size\0\u{1}width\0\u{1}height\0\u{3}content_hash\0\u{1}blurhash\0\u{1}renditions\0\u{3}created_at\0\u{3}updated_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}owner_id\0\u{1}kind\0\u{1}state\0\u{3}mime_type\0\u{3}byte_size\0\u{1}width\0\u{1}height\0\u{3}content_hash\0\u{1}blurhash\0\u{1}renditions\0\u{3}created_at\0\u{3}updated_at\0\u{3}delivery_visibility\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -638,6 +731,7 @@ nonisolated extension Media_V1_Asset: SwiftProtobuf.Message, SwiftProtobuf._Mess
       case 11: try { try decoder.decodeRepeatedMessageField(value: &self.renditions) }()
       case 12: try { try decoder.decodeSingularMessageField(value: &self._createdAt) }()
       case 13: try { try decoder.decodeSingularMessageField(value: &self._updatedAt) }()
+      case 14: try { try decoder.decodeSingularEnumField(value: &self.deliveryVisibility) }()
       default: break
       }
     }
@@ -687,6 +781,9 @@ nonisolated extension Media_V1_Asset: SwiftProtobuf.Message, SwiftProtobuf._Mess
     try { if let v = self._updatedAt {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 13)
     } }()
+    if self.deliveryVisibility != .mediaDeliveryVisibilityUnspecified {
+      try visitor.visitSingularEnumField(value: self.deliveryVisibility, fieldNumber: 14)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -704,6 +801,7 @@ nonisolated extension Media_V1_Asset: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if lhs.renditions != rhs.renditions {return false}
     if lhs._createdAt != rhs._createdAt {return false}
     if lhs._updatedAt != rhs._updatedAt {return false}
+    if lhs.deliveryVisibility != rhs.deliveryVisibility {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -766,7 +864,7 @@ nonisolated extension Media_V1_Rendition: SwiftProtobuf.Message, SwiftProtobuf._
 
 nonisolated extension Media_V1_IssueUploadTicketRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".IssueUploadTicketRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}owner_id\0\u{1}kind\0\u{3}declared_mime_type\0\u{3}declared_size_bytes\0\u{3}content_sha256\0\u{3}idempotency_key\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}owner_id\0\u{1}kind\0\u{3}declared_mime_type\0\u{3}declared_size_bytes\0\u{3}content_sha256\0\u{3}idempotency_key\0\u{3}delivery_visibility\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -780,6 +878,7 @@ nonisolated extension Media_V1_IssueUploadTicketRequest: SwiftProtobuf.Message, 
       case 4: try { try decoder.decodeSingularUInt64Field(value: &self.declaredSizeBytes) }()
       case 5: try { try decoder.decodeSingularStringField(value: &self.contentSha256) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.idempotencyKey) }()
+      case 7: try { try decoder.decodeSingularEnumField(value: &self.deliveryVisibility) }()
       default: break
       }
     }
@@ -804,6 +903,9 @@ nonisolated extension Media_V1_IssueUploadTicketRequest: SwiftProtobuf.Message, 
     if !self.idempotencyKey.isEmpty {
       try visitor.visitSingularStringField(value: self.idempotencyKey, fieldNumber: 6)
     }
+    if self.deliveryVisibility != .mediaDeliveryVisibilityUnspecified {
+      try visitor.visitSingularEnumField(value: self.deliveryVisibility, fieldNumber: 7)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -814,6 +916,7 @@ nonisolated extension Media_V1_IssueUploadTicketRequest: SwiftProtobuf.Message, 
     if lhs.declaredSizeBytes != rhs.declaredSizeBytes {return false}
     if lhs.contentSha256 != rhs.contentSha256 {return false}
     if lhs.idempotencyKey != rhs.idempotencyKey {return false}
+    if lhs.deliveryVisibility != rhs.deliveryVisibility {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1396,6 +1499,80 @@ nonisolated extension Media_V1_DeleteAssetResponse: SwiftProtobuf.Message, Swift
   }
 }
 
+nonisolated extension Media_V1_ChangeDeliveryVisibilityRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ChangeDeliveryVisibilityRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}asset_id\0\u{3}owner_id\0\u{3}delivery_visibility\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.assetID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.ownerID) }()
+      case 3: try { try decoder.decodeSingularEnumField(value: &self.deliveryVisibility) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.assetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.assetID, fieldNumber: 1)
+    }
+    if !self.ownerID.isEmpty {
+      try visitor.visitSingularStringField(value: self.ownerID, fieldNumber: 2)
+    }
+    if self.deliveryVisibility != .mediaDeliveryVisibilityUnspecified {
+      try visitor.visitSingularEnumField(value: self.deliveryVisibility, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Media_V1_ChangeDeliveryVisibilityRequest, rhs: Media_V1_ChangeDeliveryVisibilityRequest) -> Bool {
+    if lhs.assetID != rhs.assetID {return false}
+    if lhs.ownerID != rhs.ownerID {return false}
+    if lhs.deliveryVisibility != rhs.deliveryVisibility {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Media_V1_ChangeDeliveryVisibilityResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ChangeDeliveryVisibilityResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}asset\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularMessageField(value: &self._asset) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    try { if let v = self._asset {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Media_V1_ChangeDeliveryVisibilityResponse, rhs: Media_V1_ChangeDeliveryVisibilityResponse) -> Bool {
+    if lhs._asset != rhs._asset {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 nonisolated extension Media_V1_ResolveDeliveryRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ResolveDeliveryRequest"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}asset_id\0\u{1}preferred\0\u{1}visibility\0")
@@ -1472,7 +1649,7 @@ nonisolated extension Media_V1_ResolveDeliveryResponse: SwiftProtobuf.Message, S
 
 nonisolated extension Media_V1_DeliveredMedia: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".DeliveredMedia"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}asset_id\0\u{1}state\0\u{1}blurhash\0\u{1}renditions\0\u{1}degraded\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}asset_id\0\u{1}state\0\u{1}blurhash\0\u{1}renditions\0\u{1}degraded\0\u{3}cdn_cookies\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1485,6 +1662,7 @@ nonisolated extension Media_V1_DeliveredMedia: SwiftProtobuf.Message, SwiftProto
       case 3: try { try decoder.decodeSingularStringField(value: &self.blurhash) }()
       case 4: try { try decoder.decodeRepeatedMessageField(value: &self.renditions) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self.degraded) }()
+      case 6: try { try decoder.decodeRepeatedMessageField(value: &self.cdnCookies) }()
       default: break
       }
     }
@@ -1506,6 +1684,9 @@ nonisolated extension Media_V1_DeliveredMedia: SwiftProtobuf.Message, SwiftProto
     if self.degraded != false {
       try visitor.visitSingularBoolField(value: self.degraded, fieldNumber: 5)
     }
+    if !self.cdnCookies.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.cdnCookies, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1515,6 +1696,61 @@ nonisolated extension Media_V1_DeliveredMedia: SwiftProtobuf.Message, SwiftProto
     if lhs.blurhash != rhs.blurhash {return false}
     if lhs.renditions != rhs.renditions {return false}
     if lhs.degraded != rhs.degraded {return false}
+    if lhs.cdnCookies != rhs.cdnCookies {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Media_V1_SignedCookie: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SignedCookie"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{1}value\0\u{1}domain\0\u{1}path\0\u{3}expires_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.value) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.domain) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.path) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._expiresAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 1)
+    }
+    if !self.value.isEmpty {
+      try visitor.visitSingularStringField(value: self.value, fieldNumber: 2)
+    }
+    if !self.domain.isEmpty {
+      try visitor.visitSingularStringField(value: self.domain, fieldNumber: 3)
+    }
+    if !self.path.isEmpty {
+      try visitor.visitSingularStringField(value: self.path, fieldNumber: 4)
+    }
+    try { if let v = self._expiresAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Media_V1_SignedCookie, rhs: Media_V1_SignedCookie) -> Bool {
+    if lhs.name != rhs.name {return false}
+    if lhs.value != rhs.value {return false}
+    if lhs.domain != rhs.domain {return false}
+    if lhs.path != rhs.path {return false}
+    if lhs._expiresAt != rhs._expiresAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

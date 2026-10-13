@@ -37,13 +37,7 @@ struct TwoStepSignInTests {
         MockAccountService(lifecycle: lifecycle).register(on: bff)
         let host = "https://mock.bff.local"
         let anonymous = Auth_V1_AuthServiceClient(client: ConnectClientFactory.makeUnauthenticated(host: host, httpClient: bff))
-        var grant = Auth_V1_PasswordGrant()
-        grant.username = MockAuthService.defaultCredentials.username
-        grant.password = MockAuthService.defaultCredentials.password
-        var request = Auth_V1_LoginRequest()
-        request.grantType = .password
-        request.credential = .password(grant)
-        var first = try await anonymous.login(request: request, headers: [:]).result.get()
+        var first = try #require(await MockCodeSignIn.login(anonymous))
         if first.mfaRequired {
             var second = Auth_V1_CompleteLoginRequest()
             second.mfaToken = first.mfaToken
@@ -52,10 +46,17 @@ struct TwoStepSignInTests {
         }
         let session = Session()
         await session.set(first.tokens.accessToken)
+        // The sign-in that minted it was long ago: a gated call needs a
+        // fresh proof (#840).
+        lifecycle.forgetRecentProofs()
         let client = ConnectClientFactory.makeAuthenticated(host: host, tokenProvider: session, httpClient: bff)
+        let account = AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session)
         return Fixture(
-            sessions: AccountSessionsRepository(authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session),
-            account: AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session),
+            sessions: AccountSessionsRepository(
+                authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session,
+                account: account, reauthenticator: CodeReauthenticator(anonymous: anonymous, session: session)
+            ),
+            account: account,
             lifecycle: lifecycle
         )
     }
@@ -67,7 +68,7 @@ struct TwoStepSignInTests {
         #expect(try await !fixture.account.currentAccount().twoStepOn)
         await #expect(throws: TwoStepError.stepUpRequired) { _ = try await fixture.sessions.startTwoStepEnrollment() }
 
-        try await fixture.sessions.stepUp(password: MockAuthService.defaultCredentials.password)
+        try await fixture.sessions.reconfirmWithTheSentCode()
         let enrollment = try await fixture.sessions.startTwoStepEnrollment()
         #expect(enrollment.secret == MockAccountLifecycle.authenticatorSecret)
         #expect(enrollment.otpauthURI.hasPrefix("otpauth://totp/"))

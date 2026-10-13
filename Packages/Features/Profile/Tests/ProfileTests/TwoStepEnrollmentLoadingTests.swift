@@ -45,8 +45,10 @@ struct TwoStepEnrollmentLoadingTests {
     }
 
     private struct NoStepUp: CredentialStepUp {
-        func stepUp(password: String) async throws {}
         func stepUp(code: String) async throws {}
+        func sendReconfirmationCode() async throws -> Reconfirmation { Reconfirmation(challengeID: "vc-1", destination: "demo@example.com") }
+        func reconfirm(_ reconfirmation: Reconfirmation, code: String) async throws -> ReconfirmationStep { .done }
+        func completeReconfirmation(secondStepCode: String) async throws {}
     }
 
     private static let enrollment = TwoStepEnrollment(
@@ -160,9 +162,9 @@ struct TwoStepEnrollmentLoadingTests {
         #expect(setup.failureView.isHidden)
     }
 
-    /// A stale step-up fails every start: Try Again asks for the password
+    /// A stale step-up fails every start: Try Again confirms it's the holder
     /// first, and only then starts.
-    @Test func aStaleStepUpAsksForThePasswordBeforeStartingAgain() async throws {
+    @Test func aStaleStepUpConfirmsTheHolderBeforeStartingAgain() async throws {
         let gate = GatedTwoStep()
         let setup = setupScreen(gate)
         var prompts = 0

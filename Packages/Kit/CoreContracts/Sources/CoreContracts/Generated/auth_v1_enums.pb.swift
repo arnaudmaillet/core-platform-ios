@@ -69,20 +69,11 @@ public nonisolated enum Auth_V1_SessionStatus: SwiftProtobuf.Enum, Swift.CaseIte
 
 }
 
-/// How the caller authenticates at OUR boundary. Deliberately IdP-agnostic: the
-/// concrete IdP protocol (Keycloak/Cognito/Okta) is brokered behind the
-/// infrastructure adapter and never named in this contract.
+/// How the caller authenticates at OUR boundary. Every credential is checked by
+/// this service itself; nothing signs in with a password (#881).
 public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
   case unspecified // = 0
-
-  /// OIDC authorization-code flow with PKCE (primary, browser/native clients).
-  case authorizationCode // = 1
-
-  /// Resource-owner password grant — first-party trusted clients only. The
-  /// password transits TLS to the IdP broker and is NEVER stored by this service
-  /// (credentials are owned by the IdP under the federated model).
-  case password // = 2
 
   /// A native Sign in with Apple / Google id_token, verified by this service
   /// against the provider's keys (no IdP round-trip).
@@ -102,8 +93,6 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
   public init?(rawValue: Int) {
     switch rawValue {
     case 0: self = .unspecified
-    case 1: self = .authorizationCode
-    case 2: self = .password
     case 3: self = .idToken
     case 4: self = .verificationCode
     case 5: self = .passkey
@@ -114,8 +103,6 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
   public var rawValue: Int {
     switch self {
     case .unspecified: return 0
-    case .authorizationCode: return 1
-    case .password: return 2
     case .idToken: return 3
     case .verificationCode: return 4
     case .passkey: return 5
@@ -126,8 +113,6 @@ public nonisolated enum Auth_V1_GrantType: SwiftProtobuf.Enum, Swift.CaseIterabl
   // The compiler won't synthesize support with the UNRECOGNIZED case.
   public static let allCases: [Auth_V1_GrantType] = [
     .unspecified,
-    .authorizationCode,
-    .password,
     .idToken,
     .verificationCode,
     .passkey,
@@ -222,9 +207,6 @@ public nonisolated enum Auth_V1_SignInMethod: SwiftProtobuf.Enum, Swift.CaseIter
   case apple // = 1
   case google // = 2
 
-  /// Email / username + password (the IdP's own credential).
-  case password // = 3
-
   /// A one-time code sent to the email address (no password).
   case emailCode // = 4
 
@@ -241,7 +223,6 @@ public nonisolated enum Auth_V1_SignInMethod: SwiftProtobuf.Enum, Swift.CaseIter
     case 0: self = .unspecified
     case 1: self = .apple
     case 2: self = .google
-    case 3: self = .password
     case 4: self = .emailCode
     case 5: self = .phoneCode
     default: self = .UNRECOGNIZED(rawValue)
@@ -253,7 +234,6 @@ public nonisolated enum Auth_V1_SignInMethod: SwiftProtobuf.Enum, Swift.CaseIter
     case .unspecified: return 0
     case .apple: return 1
     case .google: return 2
-    case .password: return 3
     case .emailCode: return 4
     case .phoneCode: return 5
     case .UNRECOGNIZED(let i): return i
@@ -265,7 +245,6 @@ public nonisolated enum Auth_V1_SignInMethod: SwiftProtobuf.Enum, Swift.CaseIter
     .unspecified,
     .apple,
     .google,
-    .password,
     .emailCode,
     .phoneCode,
   ]
@@ -279,7 +258,7 @@ nonisolated extension Auth_V1_SessionStatus: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Auth_V1_GrantType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0GRANT_TYPE_UNSPECIFIED\0\u{1}AUTHORIZATION_CODE\0\u{1}PASSWORD\0\u{1}ID_TOKEN\0\u{1}VERIFICATION_CODE\0\u{1}PASSKEY\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0GRANT_TYPE_UNSPECIFIED\0\u{2}\u{3}ID_TOKEN\0\u{1}VERIFICATION_CODE\0\u{1}PASSKEY\0")
 }
 
 nonisolated extension Auth_V1_VerificationChannel: SwiftProtobuf._ProtoNameProviding {
@@ -291,5 +270,5 @@ nonisolated extension Auth_V1_FederatedProvider: SwiftProtobuf._ProtoNameProvidi
 }
 
 nonisolated extension Auth_V1_SignInMethod: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SIGN_IN_METHOD_UNSPECIFIED\0\u{1}SIGN_IN_METHOD_APPLE\0\u{1}SIGN_IN_METHOD_GOOGLE\0\u{1}SIGN_IN_METHOD_PASSWORD\0\u{1}SIGN_IN_METHOD_EMAIL_CODE\0\u{1}SIGN_IN_METHOD_PHONE_CODE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0SIGN_IN_METHOD_UNSPECIFIED\0\u{1}SIGN_IN_METHOD_APPLE\0\u{1}SIGN_IN_METHOD_GOOGLE\0\u{2}\u{2}SIGN_IN_METHOD_EMAIL_CODE\0\u{1}SIGN_IN_METHOD_PHONE_CODE\0")
 }

@@ -4,20 +4,11 @@ import Foundation
 import SwiftProtobuf
 
 /// Deterministic fake of auth.v1.AuthService implementing the contract's
-/// real semantics: password-grant login, single-use rotating refresh tokens,
+/// real semantics: code and id_token sign-in (passwords went, #840),
+/// single-use rotating refresh tokens,
 /// and reuse-detection that revokes the whole session (so client bugs around
 /// refresh rotation fail loudly in development, exactly as they would in prod).
 public final class MockAuthService: @unchecked Sendable {
-    public struct Credentials: Sendable {
-        public let username: String
-        public let password: String
-
-        public init(username: String, password: String) {
-            self.username = username
-            self.password = password
-        }
-    }
-
     private struct SessionRecord {
         var currentRefreshToken: String
         /// Every refresh token this session has ever been issued, for
@@ -54,12 +45,8 @@ public final class MockAuthService: @unchecked Sendable {
         ]
     }
 
-    public static let defaultCredentials = Credentials(username: "demo", password: "password123")
     public static let accountID = "acct-demo-0001"
 
-    /// Mutable: `ChangePassword` replaces the password, and the next login
-    /// must use the new one, as it would against the IdP.
-    private var credentials: Credentials
     private let accessTokenLifetime: Int64
     private let lifecycle: MockAccountLifecycle
 
@@ -72,11 +59,9 @@ public final class MockAuthService: @unchecked Sendable {
     private var tokenCounter = 0
 
     public init(
-        credentials: Credentials = MockAuthService.defaultCredentials,
         accessTokenLifetimeSeconds: Int64 = 900,
         lifecycle: MockAccountLifecycle = MockAccountLifecycle()
     ) {
-        self.credentials = credentials
         self.accessTokenLifetime = accessTokenLifetimeSeconds
         self.lifecycle = lifecycle
         self.sessions = Self.seededOtherSessions(now: Date())
@@ -119,9 +104,6 @@ public final class MockAuthService: @unchecked Sendable {
         bff.register(path: "/auth.v1.AuthService/VerifyCredentials") { [self] (request: Auth_V1_VerifyCredentialsRequest, headers: Headers) in
             verifyCredentials(request, callerSession: callerSession(headers))
         }
-        bff.register(path: "/auth.v1.AuthService/ChangePassword") { [self] (request: Auth_V1_ChangePasswordRequest, headers: Headers) in
-            changePassword(request, callerSession: callerSession(headers))
-        }
         bff.register(path: "/auth.v1.AuthService/CompleteLogin") { [self] (request: Auth_V1_CompleteLoginRequest) in
             completeLogin(request)
         }
@@ -155,35 +137,7 @@ public final class MockAuthService: @unchecked Sendable {
         if case .idToken(let grant) = request.credential {
             return loginWithIdToken(grant, request: request)
         }
-        guard request.grantType == .password,
-              case .password(let grant) = request.credential else {
-            return .failure(ConnectError(code: .invalidArgument, message: "expected password grant"))
-        }
-        let expected = lock.withLock { credentials }
-        guard grant.username == expected.username, grant.password == expected.password else {
-            return .failure(ConnectError(code: .unauthenticated, message: "invalid credentials"))
-        }
-        if lifecycle.isTwoStepOn {
-            return .success(lock.withLock { secondStepLocked(device: request.device, guestRefreshToken: "") })
-        }
-
-        return lock.withLock {
-            tokenCounter += 1
-            let sessionID = "sess-\(UUID().uuidString.prefix(8))"
-            let refreshToken = "rt-\(tokenCounter)"
-            sessions[sessionID] = SessionRecord(
-                currentRefreshToken: refreshToken,
-                issuedRefreshTokens: [refreshToken],
-                device: request.device
-            )
-
-            var response = Auth_V1_LoginResponse()
-            response.accountID = Self.accountID
-            // A self-deactivated account is resumed by signing back in (#650).
-            response.reactivated = lifecycle.resumeIfDeactivated()
-            response.tokens = makeTokenPair(sessionID: sessionID, refreshToken: refreshToken)
-            return .success(response)
-        }
+        return .failure(ConnectError(code: .invalidArgument, message: "expected a verification code or an id_token"))
     }
 
     // MARK: - Codes and sign-up (B4)
@@ -276,7 +230,13 @@ public final class MockAuthService: @unchecked Sendable {
         sessions[sessionID] = SessionRecord(
             currentRefreshToken: refreshToken, issuedRefreshTokens: [refreshToken], device: device
         )
-        return makeTokenPair(sessionID: sessionID, refreshToken: refreshToken)
+        let tokens = makeTokenPair(sessionID: sessionID, refreshToken: refreshToken)
+        // A sign-in's token carries `auth_time` = now on the fleet, which
+        // step-up-gated RPCs accept: re-signing in is how an account with
+        // no second factor proves the holder before a destructive action
+        // (#840).
+        lifecycle.recordStepUp(accessToken: tokens.accessToken)
+        return tokens
     }
 
     private func loginWithCode(
@@ -295,6 +255,9 @@ public final class MockAuthService: @unchecked Sendable {
             }
             var response = Auth_V1_LoginResponse()
             response.accountID = Self.accountID
+            // Any sign-in resumes a self-deactivated account (#650) — the
+            // password's did, and a code or Apple is how one signs in now.
+            response.reactivated = lifecycle.resumeIfDeactivated()
             response.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
             return .success(response)
         }
@@ -386,6 +349,9 @@ public final class MockAuthService: @unchecked Sendable {
             }
             var response = Auth_V1_LoginResponse()
             response.accountID = Self.accountID
+            // Any sign-in resumes a self-deactivated account (#650) — the
+            // password's did, and a code or Apple is how one signs in now.
+            response.reactivated = lifecycle.resumeIfDeactivated()
             response.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
             return .success(response)
         }
@@ -554,11 +520,12 @@ public final class MockAuthService: @unchecked Sendable {
         }
     }
 
-    /// Step-up (auth.v1 VerifyCredentials): the password proves the holder
-    /// again, and the caller's session gets a fresh access token that
-    /// step-up-gated RPCs accept for `MockAccountLifecycle.stepUpWindow`. The
-    /// refresh token is unchanged. With two-step sign-in on, the authenticator's
-    /// code or a backup code proves the holder too (#649).
+    /// Step-up (auth.v1 VerifyCredentials): with two-step sign-in on, the
+    /// authenticator's code or a backup code proves the holder again (#649),
+    /// and the caller's session gets a fresh access token that step-up-gated
+    /// RPCs accept for `MockAccountLifecycle.stepUpWindow`. The refresh token
+    /// is unchanged. (The password went with passwords, #840; a fresh sign-in
+    /// proves the holder too — see `memberSessionLocked`.)
     private func verifyCredentials(
         _ request: Auth_V1_VerifyCredentialsRequest, callerSession: String?
     ) -> Result<Auth_V1_VerifyCredentialsResponse, ConnectError> {
@@ -567,10 +534,6 @@ public final class MockAuthService: @unchecked Sendable {
                 return .failure(ConnectError(code: .unauthenticated, message: "AUT-5001: sign in first"))
             }
             switch request.credential {
-            case .password(let password)?:
-                guard password == credentials.password else {
-                    return .failure(ConnectError(code: .unauthenticated, message: "AUT-5002: the password is wrong"))
-                }
             case .mfaCode(let code)?:
                 guard lifecycle.isTwoStepOn else {
                     return .failure(ConnectError(code: .failedPrecondition, message: "AUT-5020: two-step sign-in is off"))
@@ -589,45 +552,6 @@ public final class MockAuthService: @unchecked Sendable {
             response.accessToken = token
             response.expiresIn = accessTokenLifetime
             response.stepUpExpiresIn = Int64(MockAccountLifecycle.stepUpWindow)
-            return .success(response)
-        }
-    }
-
-    /// The contract's semantics (auth.v1 ChangePassword): a signed-in caller
-    /// only; a wrong current password is UNAUTHENTICATED (AUT-5002); a new
-    /// one outside 8…128 characters or equal to the current one is
-    /// FAILED_PRECONDITION (AUT-VAL-024/026). On success the caller's own
-    /// session stays, and the others end only when asked.
-    private func changePassword(
-        _ request: Auth_V1_ChangePasswordRequest, callerSession: String?
-    ) -> Result<Auth_V1_ChangePasswordResponse, ConnectError> {
-        lock.withLock {
-            guard let callerSession, sessions[callerSession]?.revoked == false else {
-                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5001: sign in to change your password"))
-            }
-            guard request.currentPassword == credentials.password else {
-                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5002: the current password is wrong"))
-            }
-            guard (8...128).contains(request.newPassword.count) else {
-                return .failure(ConnectError(
-                    code: .failedPrecondition, message: "AUT-VAL-024: the new password must be 8 to 128 characters"
-                ))
-            }
-            guard request.newPassword != request.currentPassword else {
-                return .failure(ConnectError(
-                    code: .failedPrecondition, message: "AUT-VAL-026: the new password must differ from the current one"
-                ))
-            }
-            credentials = Credentials(username: credentials.username, password: request.newPassword)
-            var revoked: Int32 = 0
-            if request.signOutOtherSessions {
-                for (id, record) in sessions where id != callerSession && !record.revoked {
-                    sessions[id]?.revoked = true
-                    revoked += 1
-                }
-            }
-            var response = Auth_V1_ChangePasswordResponse()
-            response.sessionsRevoked = revoked
             return .success(response)
         }
     }

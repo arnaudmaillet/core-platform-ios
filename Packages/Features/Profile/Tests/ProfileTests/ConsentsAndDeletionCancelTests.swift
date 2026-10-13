@@ -36,21 +36,20 @@ struct ConsentsAndDeletionCancelTests {
         MockAccountService(lifecycle: lifecycle).register(on: bff)
         let host = "https://mock.bff.local"
         let anonymous = Auth_V1_AuthServiceClient(client: ConnectClientFactory.makeUnauthenticated(host: host, httpClient: bff))
-        let login: () async -> Auth_V1_LoginResponse? = {
-            var grant = Auth_V1_PasswordGrant()
-            grant.username = MockAuthService.defaultCredentials.username
-            grant.password = MockAuthService.defaultCredentials.password
-            var request = Auth_V1_LoginRequest()
-            request.grantType = .password
-            request.credential = .password(grant)
-            return try? await anonymous.login(request: request, headers: [:]).result.get()
-        }
+        let login: () async -> Auth_V1_LoginResponse? = { await MockCodeSignIn.login(anonymous) }
         let session = Session()
         await session.set(try #require(await login()).tokens.accessToken)
+        // The sign-in that minted it was long ago: a gated call needs a
+        // fresh proof (#840).
+        lifecycle.forgetRecentProofs()
         let client = ConnectClientFactory.makeAuthenticated(host: host, tokenProvider: session, httpClient: bff)
+        let account = AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session)
         return Fixture(
-            sessions: AccountSessionsRepository(authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session),
-            account: AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session),
+            sessions: AccountSessionsRepository(
+                authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session,
+                account: account, reauthenticator: CodeReauthenticator(anonymous: anonymous, session: session)
+            ),
+            account: account,
             login: login
         )
     }
@@ -131,7 +130,7 @@ struct ConsentsAndDeletionCancelTests {
     /// cancel says nothing is pending.
     @Test func aPendingDeletionCanBeCancelled() async throws {
         let fixture = try await fixture()
-        try await fixture.sessions.stepUp(password: MockAuthService.defaultCredentials.password)
+        try await fixture.sessions.reconfirmWithTheSentCode()
         try await fixture.account.requestDeletion()
         #expect(try await fixture.account.gdprStatus().deletionRequestedAt != nil)
 
@@ -143,7 +142,7 @@ struct ConsentsAndDeletionCancelTests {
     /// #402's "done when": logging back in cancels a pending deletion.
     @Test func loggingBackInCancelsAPendingDeletion() async throws {
         let fixture = try await fixture()
-        try await fixture.sessions.stepUp(password: MockAuthService.defaultCredentials.password)
+        try await fixture.sessions.reconfirmWithTheSentCode()
         try await fixture.account.requestDeletion()
 
         let back = try #require(await fixture.login())

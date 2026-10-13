@@ -3,9 +3,10 @@ import Foundation
 /// What `MockAuthService` and `MockAccountService` both need to know about the
 /// demo account, the way auth and account share it on the fleet:
 ///
-/// - **step-up**: `VerifyCredentials` (auth) mints a fresh access token, and
-///   step-up-gated account RPCs (`DeactivateAccount`) accept only a token
-///   stepped up within the last `stepUpWindow` seconds;
+/// - **step-up**: a sign-in, or `VerifyCredentials` with the second factor
+///   (auth), mints a fresh access token, and step-up-gated account RPCs
+///   (`DeactivateAccount`) accept only a token minted within the last
+///   `stepUpWindow` seconds — the fleet's `auth_time` rule;
 /// - **deactivation**: `DeactivateAccount` (account) marks the account
 ///   deactivated, and the next `Login` (auth) resumes it and says so with
 ///   `LoginResponse.reactivated`;
@@ -31,6 +32,12 @@ public final class MockAccountLifecycle: @unchecked Sendable {
 
     func recordStepUp(accessToken: String, at date: Date = Date()) {
         lock.withLock { steppedUp[accessToken] = date }
+    }
+
+    /// Every proof is older than `stepUpWindow` now — the sign-in that
+    /// minted them too (#840): what a test does to see a gated call refused.
+    public func forgetRecentProofs() {
+        lock.withLock { steppedUp.removeAll() }
     }
 
     func isSteppedUp(accessToken: String, now: Date = Date()) -> Bool {

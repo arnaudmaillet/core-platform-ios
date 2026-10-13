@@ -24,8 +24,8 @@ struct SecurityCheckupItem: Hashable, Sendable {
 }
 
 /// What the checkup recommends, from what the app knows. Pure, so the rules
-/// are pinned by tests. The password is advice (it can be changed, but the
-/// app can't judge how strong it is); two-factor is listed as unavailable
+/// are pinned by tests. (There is no password to advise on any more, #840.)
+/// Two-factor is listed as unavailable
 /// rather than hidden: their contracts are internal today (#382, #383), and a
 /// checkup that skipped them would look complete when it isn't.
 ///
@@ -92,11 +92,6 @@ enum SecurityCheckup {
                 : "Require \(method) to open the app, so someone holding your phone can't.",
             symbolName: "lock",
             state: appLockOn ? .done : (lockMethod == nil ? .unavailable : .recommended)
-        ))
-        items.append(SecurityCheckupItem(
-            id: "password", title: "Password",
-            detail: "Change it from Security and Login if you think someone else knows it.",
-            symbolName: "key", state: .info
         ))
         items.append(SecurityCheckupItem(
             id: "twoFactor", title: "Two-factor authentication",
@@ -263,10 +258,10 @@ extension SecurityCheckupViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         guard let item = dataSource.itemIdentifier(for: indexPath) else { return false }
         return item.state == .failed
-            || (item.state == .recommended && (item.id == "sessions" || item.id == "appLock")) || item.id == "password"
+            || (item.state == .recommended && (item.id == "sessions" || item.id == "appLock"))
     }
 
-    /// Devices, App Lock and Change Password live on the Security page this
+    /// Devices and App Lock live on the Security page this
     /// was pushed from; a failed line reads its part again.
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)

@@ -1239,7 +1239,11 @@ final class AppContainer {
         authClient: Auth_V1_AuthServiceClient(client: authenticatedRPCClient),
         // A step-up's fresh access token replaces the session's, so the
         // gated call right after it (deactivation…) carries the proof.
-        tokenInstaller: sessionManager
+        tokenInstaller: sessionManager,
+        // No password any more (#840): a code to the account's address signs
+        // the holder in again, which is the proof the server accepts.
+        account: accountRepository,
+        reauthenticator: sessionManager
     )
 
     /// Settings → Account Status: `moderation.v1.GetEnforcementState` for the
@@ -1716,3 +1720,26 @@ final class AppContainer {
 /// Step-up (#648): the session manager takes a step-up's fresh access token
 /// for the session it vends (Settings → deactivate, delete…).
 extension SessionManager: @retroactive AccessTokenInstalling {}
+
+/// Proving the holder again with a code (#840): the session manager signs
+/// in again and adopts the fresh session.
+extension SessionManager: @retroactive SessionReauthenticating {
+    public func reauthenticate(challengeID: String, code: String) async throws -> ReauthenticationResult {
+        do {
+            switch try await reauthenticate(challengeID: challengeID, code: code) as Reauthentication {
+            case .done: return .done
+            case .needsSecondStep(let step): return .needsSecondStep(token: step.token, expiresIn: step.expiresIn)
+            }
+        } catch AuthError.invalidCode {
+            throw StepUpError.wrongCode
+        }
+    }
+
+    public func completeReauthentication(secondStepToken: String, expiresIn: TimeInterval, code: String) async throws {
+        do {
+            try await completeReauthentication(SecondStepChallenge(token: secondStepToken, expiresIn: expiresIn), code: code)
+        } catch AuthError.wrongSecondStepCode {
+            throw StepUpError.wrongCode
+        }
+    }
+}
