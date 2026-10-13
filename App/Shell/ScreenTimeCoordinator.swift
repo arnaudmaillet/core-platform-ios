@@ -1,5 +1,6 @@
 import CoreStorage
 import DesignSystem
+import Profile
 import UIKit
 
 /// Counts time in the app and raises the daily-limit and break reminders
@@ -13,6 +14,13 @@ import UIKit
 /// Time is flushed to the ledger every half minute while active, so Settings
 /// reads a current total. Reminders show in their own window, above the app
 /// and below App Lock's.
+///
+/// **A supervised teen (#417).** The same foreground time also goes to
+/// `SupervisedScreenTime`, which reports it every five minutes and when the
+/// app leaves the front. When the supervisor's daily limit is reached, a
+/// pause screen says so and who set it — dismissible, never a lock: Settings,
+/// blocking and reporting stay one tap away. It comes back at most every
+/// half hour while the limit holds.
 @MainActor
 final class ScreenTimeCoordinator {
     private let scene: UIWindowScene
@@ -20,6 +28,24 @@ final class ScreenTimeCoordinator {
     private let store: ScreenTimeStore
     private let calendar: Calendar
     private let now: () -> Date
+    /// Where a teen's time is queued and reported; nil reports nothing.
+    private let supervised: SupervisedScreenTime?
+    /// Who set the limit, by handle, for the pause screen's words.
+    private let limitSetter: (() async -> String?)?
+    private var reportTimer: Timer?
+
+    /// How often a supervised teen's time is reported while in front.
+    static var reportInterval: TimeInterval {
+        #if DEBUG
+        // `-supervision-report-interval <seconds>`: sooner, for a QA run.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-supervision-report-interval"), index + 1 < arguments.count,
+           let seconds = TimeInterval(arguments[index + 1]), seconds > 0 {
+            return seconds
+        }
+        #endif
+        return SupervisedScreenTime.reportInterval
+    }
 
     /// When the current stretch of use began, nil while inactive.
     private var activeSince: Date?
@@ -39,13 +65,17 @@ final class ScreenTimeCoordinator {
         mainWindow: UIWindow,
         store: ScreenTimeStore = .standard,
         calendar: Calendar = .current,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        supervised: SupervisedScreenTime? = nil,
+        limitSetter: (() async -> String?)? = nil
     ) {
         self.scene = scene
         self.mainWindow = mainWindow
         self.store = store
         self.calendar = calendar
         self.now = now
+        self.supervised = supervised
+        self.limitSetter = limitSetter
         settingsObserver = NotificationCenter.default.addObserver(
             forName: .screenTimeSettingsDidChange, object: nil, queue: .main
         ) { [weak self] _ in
@@ -62,15 +92,25 @@ final class ScreenTimeCoordinator {
         flushTimer = Timer.scheduledTimer(withTimeInterval: Self.flushInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.flush() }
         }
+        if supervised != nil {
+            reportTimer = Timer.scheduledTimer(withTimeInterval: Self.reportInterval, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reportSupervised() }
+            }
+        }
         reschedule()
+        // Whatever an earlier session couldn't send (offline, closed).
+        reportSupervised()
     }
 
     func sceneWillResignActive() {
         flush()
+        reportSupervised()
         activeSince = nil
         lastFlush = nil
         flushTimer?.invalidate()
         flushTimer = nil
+        reportTimer?.invalidate()
+        reportTimer = nil
         reminderTimer?.invalidate()
         reminderTimer = nil
     }
@@ -80,6 +120,32 @@ final class ScreenTimeCoordinator {
         let to = now()
         store.record(from: from, to: to, calendar: calendar)
         lastFlush = to
+        if let supervised {
+            let seconds = to.timeIntervalSince(from)
+            Task { await supervised.record(seconds: seconds) }
+        }
+    }
+
+    /// Sends the teen's queued minutes, off main; a reached limit brings the
+    /// pause screen up, unless another reminder is on screen.
+    private func reportSupervised() {
+        guard let supervised else { return }
+        Task { [weak self] in
+            guard let status = await supervised.flush(), status.reached else { return }
+            guard let self, reminderWindow == nil, await supervised.shouldShowPause(for: status) else { return }
+            let setBy = await limitSetter?()
+            presentSupervisedPause(status, setBy: setBy)
+        }
+    }
+
+    private func presentSupervisedPause(_ status: ScreenTimeStatus, setBy: String?) {
+        guard reminderWindow == nil else { return }
+        let controller = ScreenTimeReminderViewController.supervisedPause(
+            body: SupervisedPauseCopy.body(status, setBy: setBy)
+        ) { [weak self] in
+            self?.dismissReminder()
+        }
+        show(controller)
     }
 
     /// Schedules one timer for the next reminder due, if any.
@@ -126,6 +192,11 @@ final class ScreenTimeCoordinator {
                 self?.dismissReminder()
             }
         }
+        show(controller)
+    }
+
+    /// A reminder in its own window, above the app's sheets and alerts.
+    private func show(_ controller: ScreenTimeReminderViewController) {
         let window = UIWindow(windowScene: scene)
         // Above the app's sheets and alerts, below App Lock's `.alert + 1`.
         window.windowLevel = .alert
@@ -202,6 +273,16 @@ final class ScreenTimeReminderViewController: UIViewController {
                 ("Remind Me in \(ScreenTimeSettings.snoozeMinutes) Minutes", true, { onChoice(.remindLater) }),
                 ("Ignore Limit for Today", false, { onChoice(.ignoreToday) })
             ]
+        )
+    }
+
+    /// A supervisor's daily limit is reached (#417): why, and who set it.
+    /// One way out, always: the app is never locked.
+    static func supervisedPause(body: String, onDismiss: @escaping () -> Void) -> ScreenTimeReminderViewController {
+        ScreenTimeReminderViewController(
+            title: SupervisedPauseCopy.title,
+            body: body,
+            actions: [(SupervisedPauseCopy.dismiss, true, onDismiss)]
         )
     }
 
