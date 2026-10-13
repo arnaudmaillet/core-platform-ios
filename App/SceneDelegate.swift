@@ -93,7 +93,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #if DEBUG
         ScreenTimeCoordinator.applyDebugSeed()
         #endif
-        screenTime = ScreenTimeCoordinator(scene: windowScene, mainWindow: window)
+        // A supervised teen's time is reported too, and a reached limit
+        // shows a pause screen (#417).
+        let shared = AppContainer.shared
+        screenTime = ScreenTimeCoordinator(
+            scene: windowScene, mainWindow: window,
+            supervised: shared.supervisedScreenTime,
+            limitSetter: { await shared.supervisedLimitSetter() }
+        )
     }
 
     /// A `wynn:` link opened while the app runs.

@@ -73,6 +73,26 @@ struct MockSupervisionTests {
     }
 }
 
+extension MockSupervisionTests {
+    /// Time is counted only under a daily limit, at most 15 minutes a report.
+    @Test func screenTimeCountsOnlyUnderALimitAndFifteenMinutesAtATime() async throws {
+        var report = Account_V1_ReportScreenTimeRequest()
+        report.accountID = MockAuthService.accountID
+        report.timezone = "Europe/Paris"
+        report.minutes = 16
+        let free = client(MockSupervisionService(dataset: MockSocialDataset(), viewerAge: { 15 }))
+        #expect(await free.reportScreenTime(request: report).result.failure?.message?.hasPrefix("ACC-9001") == true)
+        report.minutes = 5
+        let uncounted = try await free.reportScreenTime(request: report).result.get()
+        #expect(uncounted.usedMinutes == 0 && uncounted.limitMinutes == 0 && !uncounted.reached)
+
+        let limited = client(MockSupervisionService(dataset: MockSocialDataset(), viewerAge: { 15 }, seed: .supervised))
+        let counted = try await limited.reportScreenTime(request: report).result.get()
+        #expect(counted.limitMinutes == 60)
+        #expect(counted.usedMinutes >= 5)
+    }
+}
+
 private extension Result {
     var failure: Failure? {
         if case .failure(let error) = self { error } else { nil }

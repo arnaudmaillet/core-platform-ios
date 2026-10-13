@@ -122,7 +122,10 @@ public final class MockSupervisionService: @unchecked Sendable {
             limits.messages = .followers
             let setBy = "acct-mock-prof-\(Self.supervisorIndices[0])"
             limitsByTeen[MockAuthService.accountID] = LimitsRecord(limits: limits, setBy: setBy, setAt: now.addingTimeInterval(-86_400 * 2))
-            minutesByTeen[MockAuthService.accountID] = Self.days([42, 65, 31, 58, 12], endingOn: now)
+            // `-mock-screen-time-used <minutes>`: today starts there, so the
+            // pause screen can be reached in a QA run.
+            let today = Self.launchMinutesToday ?? 42
+            minutesByTeen[MockAuthService.accountID] = Self.days([today, 65, 31, 58, 12], endingOn: now)
         case .supervisor:
             var limits = Account_V1_SupervisionLimits()
             limits.dailyMinutes = 90
@@ -159,6 +162,12 @@ public final class MockSupervisionService: @unchecked Sendable {
         return Seed(rawValue: arguments[index + 1])
     }
 
+    private static var launchMinutesToday: Int? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-mock-screen-time-used"), index + 1 < arguments.count else { return nil }
+        return Int(arguments[index + 1])
+    }
+
     private static func link(_ role: Account_V1_SupervisionRole, index: Int, since: Date) -> Link {
         Link(otherRole: role, otherAccountID: "acct-mock-prof-\(index)", profileIndex: index, since: since)
     }
@@ -184,6 +193,9 @@ public final class MockSupervisionService: @unchecked Sendable {
         }
         bff.register(path: "/account.v1.AccountService/GetSupervisionOverview") { [self] (request: Account_V1_GetSupervisionOverviewRequest) in
             overview(request)
+        }
+        bff.register(path: "/account.v1.AccountService/ReportScreenTime") { [self] (request: Account_V1_ReportScreenTimeRequest) in
+            reportScreenTime(request)
         }
     }
 
@@ -390,6 +402,34 @@ public final class MockSupervisionService: @unchecked Sendable {
             overview.profiles = [profile]
         }
         return .success(overview)
+    }
+
+    /// The app's time, counted only under a daily limit, on the local day of
+    /// the zone it names (UTC when the zone is unknown). At most 15 minutes a
+    /// report (ACC-9001 past that).
+    private func reportScreenTime(_ request: Account_V1_ReportScreenTimeRequest) -> Result<Account_V1_ScreenTimeView, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else { return .failure(Self.notTheViewer) }
+        guard request.minutes <= 15 else {
+            return .failure(ConnectError(code: .invalidArgument, message: "ACC-9001: a report adds at most 15 minutes"))
+        }
+        let day = Self.dayKey(Date(), timeZone: TimeZone(identifier: request.timezone) ?? TimeZone(identifier: "UTC")!)
+        let view: Account_V1_ScreenTimeView = lock.withLock {
+            var view = Account_V1_ScreenTimeView()
+            guard let limit = limitsByTeen[MockAuthService.accountID]?.limits.dailyMinutes, limit > 0 else { return view }
+            var days = minutesByTeen[MockAuthService.accountID] ?? [:]
+            days[day, default: 0] += Int(request.minutes)
+            minutesByTeen[MockAuthService.accountID] = days
+            view.usedMinutes = UInt32(days[day] ?? 0)
+            view.limitMinutes = limit
+            view.reached = view.usedMinutes >= limit
+            return view
+        }
+        return .success(view)
+    }
+
+    /// Today's minutes for the demo account, for tests.
+    public var viewerMinutesToday: Int {
+        lock.withLock { minutesByTeen[MockAuthService.accountID]?[Self.dayKey(Date())] ?? 0 }
     }
 
     private static func view(of record: LimitsRecord) -> Account_V1_SupervisionLimitsView {

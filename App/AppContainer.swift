@@ -216,7 +216,9 @@ final class AppContainer {
         let scoped: [any ViewerScoped] = [
             commentsRepository, profileRelationshipsRepository, profileMetadataRepository,
             // What notification lookups answered, missing posts included (#978).
-            notificationsRepository
+            notificationsRepository,
+            // A teen's time not yet reported is that account's (#417).
+            supervisedScreenTime
         ]
         viewerTransitionsTask = Task {
             for await state in await viewer.transitions() {
@@ -1257,6 +1259,33 @@ final class AppContainer {
         accountClient: Account_V1_AccountServiceClient(client: authenticatedRPCClient),
         authSession: sessionManager
     )
+
+    /// A supervised teen's foreground time, queued and reported (#417).
+    /// Only an account the device knows to be 13–17 reports anything.
+    private(set) lazy var supervisedScreenTime: SupervisedScreenTime = makeSupervisedScreenTime()
+
+    private func makeSupervisedScreenTime() -> SupervisedScreenTime {
+        let session: any AuthSessionProviding = sessionManager
+        return SupervisedScreenTime(
+            reporter: accountRepository,
+            defaults: .standard,
+            accountID: { await Self.signedInAccount(session) },
+            isMinor: { TeenProtections.shared.isMinor },
+            calendar: { Calendar.current },
+            now: { Date() }
+        )
+    }
+
+    private nonisolated static func signedInAccount(_ session: any AuthSessionProviding) async -> String? {
+        guard case .authenticated(let account) = await session.currentState() else { return nil }
+        return account.rawValue
+    }
+
+    /// Who set the supervised teen's daily limit, by handle, for the pause
+    /// screen; nil when it can't be told.
+    func supervisedLimitSetter() async -> String? {
+        await SupervisedPauseCopy.limitSetter(using: accountRepository)
+    }
 
     /// "Where you're logged in": `auth.v1` ListSessions / Logout / LogoutAllSessions
     /// on the AUTHENTICATED client — they act on the calling principal's account.
