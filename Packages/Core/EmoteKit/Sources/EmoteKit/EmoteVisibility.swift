@@ -145,17 +145,19 @@ enum EmoteVisibility {
 /// without waiting for the finger to lift), and stops when no label is
 /// registered.
 ///
-/// ⚠️ **A TICK WALKS NOTHING WHILE THE APP RESTS.** The walk is cheap per
+/// ⚠️ **A TICK WALKS NOTHING IN THE BACKGROUND.** The walk is cheap per
 /// label and not per second: profiled at ~2.4% of the main thread's busy time
-/// (#830), most ticks re-asking a question whose answer had not changed. Two
-/// states make the answer moot:
-/// - **Idle calm** (`IdleCalm`): nobody has touched the app, so nobody
-///   scrolled anything, and every emote is a still that holds no playback
-///   slot — there is nothing to give back. Resting and waking both reset every
-///   label's players and lay it out again, which re-asks then.
-/// - **The background**: the song keeps the process running behind the home
-///   screen (`UIBackgroundModes: audio`), and the timer with it — four walks a
-///   second per label for a screen nobody can see.
+/// (#830), most ticks re-asking a question whose answer had not changed. The
+/// song keeps the process running behind the home screen
+/// (`UIBackgroundModes: audio`), and the timer with it — four walks a second
+/// per label for a screen nobody can see.
+///
+/// ⚠️ **IT WALKS THROUGH IDLE CALM.** #830 skipped the walk while the app
+/// rested too, when every emote was a still holding no slot. Emotes now play
+/// through idle calm (#1072), and one can leave the screen with nobody
+/// touching anything — a feed that advances on its own, autoplay, a sheet
+/// that dismisses itself — so its slot must still be given back, and one
+/// coming into view must still start.
 @MainActor
 final class EmoteVisibilityMonitor {
     static let shared = EmoteVisibilityMonitor()
@@ -170,10 +172,6 @@ final class EmoteVisibilityMonitor {
     private var lifecycleObservers: [any NSObjectProtocol] = []
     /// Between `didEnterBackground` and `willEnterForeground`.
     private var isInBackground = false
-
-    /// Whether a tick should skip its walk. Swappable for tests, which must not
-    /// flip the app-wide `IdleCalm` under suites running beside them.
-    var isResting: () -> Bool = { IdleCalm.isCalm }
 
     var isRunning: Bool { timer != nil }
     var registeredCount: Int { labels.allObjects.count }
@@ -213,21 +211,20 @@ final class EmoteVisibilityMonitor {
         if labels.allObjects.isEmpty { stop() }
     }
 
-    /// One pass over every registered label — none while the app rests.
+    /// One pass over every registered label — none in the background.
     func tick() {
         let live = labels.allObjects
         guard !live.isEmpty else {
             stop()
             return
         }
-        guard !isInBackground, !isResting() else { return }
+        guard !isInBackground else { return }
         walkedLabelCount += live.count
         live.forEach { $0.reevaluateVisibility() }
     }
 
-    /// One pass NOW, out of turn — `EmoteLabel.recheckVisibility()`. Walks a
-    /// resting app too: it is asked for by something that just changed what
-    /// is on screen, which is the one thing a rest assumes did not happen.
+    /// One pass NOW, out of turn — `EmoteLabel.recheckVisibility()`: asked
+    /// for by something that just changed what is on screen.
     func recheckNow() {
         guard !isInBackground else { return }
         let live = labels.allObjects

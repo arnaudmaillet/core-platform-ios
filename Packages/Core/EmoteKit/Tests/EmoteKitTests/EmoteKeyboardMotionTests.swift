@@ -7,11 +7,12 @@ import UIKit
 /// The emote keyboard's emotes always animate (#926): their motion is the
 /// keyboard's content, so idle calm (#650) does not rest them — only Reduce
 /// Motion and Low Power Mode do, with what already stills every emote (Animate
-/// Emojis off, Power Saving, overheating). The rest of the app's decoration
-/// keeps the app's policy.
+/// Emojis off, Power Saving, overheating). Since #1072 no emote rests in idle
+/// calm; the keyboard differs from the rest only under Low Power.
 ///
-/// ⚠️ SYNCHRONOUS, AND IT MUST STAY SO: `AnimatedIconView.forcedPolicy` and
-/// `EmoteMotion.keyboardConditions` are process-wide; a test that awaited
+/// ⚠️ SYNCHRONOUS, AND IT MUST STAY SO: `AnimatedIconView.forcedPolicy`,
+/// `EmoteMotion.keyboardConditions` and `EmoteMotion.conditions` are
+/// process-wide; a test that awaited
 /// while forcing them would hand them to the suites beside it.
 @MainActor
 @Suite(.serialized, .sharesMainThread)
@@ -73,15 +74,17 @@ struct EmoteKeyboardMotionTests {
         return (tile, window)
     }
 
-    /// Idle calm stills the app's decoration through `AnimatedIconView`'s
-    /// policy — forced still here, as a resting app has it. A keyboard tile
-    /// plays on; a strip or rail tile (decoration) rests, as before.
-    @Test func aKeyboardTilePlaysWhileDecorationRests() throws {
-        AnimatedIconView.forcedPolicy = .still
-        EmoteMotion.keyboardConditions = { Conditions(idleCalm: true) }
+    /// Idle calm rests neither a keyboard tile nor any other: a strip or rail
+    /// tile, which #650 rested with the app's decoration, plays through it
+    /// too now (#1072). The witness is a gate both share: Reduce Motion
+    /// stills them both.
+    @Test func keyboardAndStripTilesBothPlayThroughIdleCalm() throws {
+        var conditions = Conditions(idleCalm: true)
+        EmoteMotion.keyboardConditions = { conditions }
+        EmoteMotion.conditions = { conditions }
         defer {
-            AnimatedIconView.forcedPolicy = nil
             EmoteMotion.keyboardConditions = { .current }
+            EmoteMotion.conditions = { .current }
         }
         let engine = warmEngine()
 
@@ -89,9 +92,15 @@ struct EmoteKeyboardMotionTests {
         defer { w1.isHidden = true }
         #expect(keyboard.isAnimating, "a resting app stilled the keyboard")
 
-        let (decoration, w2) = try hostedTile(engine, asContent: false)
+        let (strip, w2) = try hostedTile(engine, asContent: false)
         defer { w2.isHidden = true }
-        #expect(!decoration.isAnimating, "witness: the app's decoration rests")
+        #expect(strip.isAnimating, "a resting app stilled a strip tile")
+        #expect(strip.player.playbackPolicy == .full)
+
+        conditions.reducesMotion = true
+        let (stilled, w3) = try hostedTile(engine, asContent: false)
+        defer { w3.isHidden = true }
+        #expect(!stilled.isAnimating, "witness: Reduce Motion left a strip tile playing")
     }
 
     /// Low Power Mode stills a keyboard tile — while the app's decoration

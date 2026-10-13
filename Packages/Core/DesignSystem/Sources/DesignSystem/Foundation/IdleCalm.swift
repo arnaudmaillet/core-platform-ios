@@ -11,8 +11,11 @@ import UIKit
 /// 2026-10-07).
 ///
 /// ⚠️ **DECORATION ONLY, NOT CONTENT.** What rests: the wallet badge's breath,
-/// animated emotes and map icons, the record turning under a song. What does
-/// NOT: the feed's own clip, the backdrop that follows it, its song, its
+/// the skeletons' shimmer, the map's animated markers (far more numerous than
+/// anywhere else), the record turning under a song. What does NOT: animated
+/// emotes in text — a caption, a comment, the composer, the keyboard (#1072,
+/// the owner's decision of 2026-10-13: they froze while the viewer read); the
+/// feed's own clip, the backdrop that follows it, its song, its
 /// comment band, the sound bubble's record, which says the post is playing
 /// aloud (#683) — someone watching a post without touching it is the whole
 /// point of a feed. Nor does ANY VIDEO PLAYER: the grids' tiles, the rails'
