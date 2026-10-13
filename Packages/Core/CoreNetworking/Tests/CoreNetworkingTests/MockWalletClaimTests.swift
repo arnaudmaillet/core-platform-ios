@@ -55,12 +55,12 @@ struct MockWalletClaimTests {
 
     @Test func aNewWalletOpensAtItsStartWithTheClaimOpen() async throws {
         let (client, _) = make()
-        let wallet = try await wallet(client)
-        #expect(wallet.points == 250)
-        #expect(wallet.claimAvailable)
-        #expect(wallet.claimAmount == 25)
-        #expect(!wallet.hasNextClaimAt)
-        #expect(wallet.pointsCap == MockWalletService.pointsCap)
+        let opened = try await wallet(client)
+        #expect(opened.points == 250)
+        #expect(opened.claimAvailable)
+        #expect(opened.claimAmount == 25)
+        #expect(!opened.hasNextClaimAt)
+        #expect(opened.pointsCap == MockWalletService.pointsCap)
     }
 
     /// A claim pays, then the next one waits an hour — in-band, with the
