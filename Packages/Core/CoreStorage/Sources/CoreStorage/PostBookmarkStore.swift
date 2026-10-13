@@ -69,28 +69,26 @@ public final class PostBookmarkStore: @unchecked Sendable {
     /// Saved tab reloads from this rather than polling.
     public var onChange: (() -> Void)?
 
-    public init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
+    public convenience init(defaults: UserDefaults = .standard, scope: StorageScope = .shared) {
+        self.init(defaults: defaults, scope: scope, launchArguments: ProcessInfo.processInfo.arguments)
+    }
+
+    /// - Parameter launchArguments: where the DEBUG QA hooks read
+    ///   `-reset-bookmarks` and `-seed-bookmarks` (the process's, outside
+    ///   tests). Ignored in Release.
+    init(defaults: UserDefaults, scope: StorageScope, launchArguments: [String]) {
         self.defaults = defaults
         self.scope = scope
         #if DEBUG
-        // `-reset-bookmarks`: deterministic QA, so a scripted launch always
-        // starts from an empty pile. The map's favorites store carries the
-        // same hook for the same reason.
-        if ProcessInfo.processInfo.arguments.contains("-reset-bookmarks") {
-            defaults.removeObject(forKey: key)
-        }
-        // `-seed-bookmarks a,b,c`: a pile without having to save three posts by
-        // hand first. The Saved tab is otherwise empty on a fresh install,
-        // which is exactly the state that cannot show whether it renders.
-        if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "-seed-bookmarks"),
-           index + 1 < ProcessInfo.processInfo.arguments.count {
-            let ids = ProcessInfo.processInfo.arguments[index + 1]
-                .split(separator: ",")
-                .map(String.init)
-            defaults.set(ids, forKey: key)
-        }
+        armLaunchHooks(launchArguments)
         #endif
     }
+
+    #if DEBUG
+    deinit {
+        if let observer = launchHooksObserver { NotificationCenter.default.removeObserver(observer) }
+    }
+    #endif
 
     /// Most recently saved first.
     public var savedPostIDs: [String] {
@@ -130,4 +128,85 @@ public final class PostBookmarkStore: @unchecked Sendable {
         onChange?()
         return saved
     }
+
+    // MARK: - DEBUG launch hooks
+
+    #if DEBUG
+    /// What the launch asked of the pile, until the scope says whose it is.
+    private struct LaunchHooks {
+        /// `-reset-bookmarks`: deterministic QA, so a scripted launch always
+        /// starts from an empty pile. The map's favorites store carries the
+        /// same hook for the same reason.
+        var reset: Bool
+        /// `-seed-bookmarks a,b,c`: a pile without having to save three posts
+        /// by hand first. The Saved tab is otherwise empty on a fresh install,
+        /// which is exactly the state that cannot show whether it renders.
+        var seed: [String]?
+    }
+
+    private var pendingLaunchHooks: LaunchHooks?
+    private var launchHooksObserver: NSObjectProtocol?
+
+    /// ⚠️ NOT AT INIT (#1074): the app's one pile (`shared`) is made before
+    /// the viewer is known, while the scope is still unscoped, and a reset
+    /// there cleared the original key — never the member's pile. The hooks
+    /// wait for the scope to name a viewer — a guest, or a member whose
+    /// active profile resolved — and run once, for that pile: a later
+    /// profile switch in the same launch resets nothing.
+    private func armLaunchHooks(_ arguments: [String]) {
+        let seed: [String]? = arguments.firstIndex(of: "-seed-bookmarks").flatMap { index in
+            arguments.indices.contains(index + 1)
+                ? arguments[index + 1].split(separator: ",").map(String.init)
+                : nil
+        }
+        let hooks = LaunchHooks(reset: arguments.contains("-reset-bookmarks"), seed: seed)
+        guard hooks.reset || hooks.seed != nil else { return }
+        let observer = NotificationCenter.default.addObserver(
+            forName: StorageScope.didChangeNotification, object: scope, queue: nil
+        ) { [weak self] _ in
+            self?.runLaunchHooksIfViewerKnown()
+        }
+        lock.withLock {
+            pendingLaunchHooks = hooks
+            launchHooksObserver = observer
+        }
+        runLaunchHooksIfViewerKnown()
+    }
+
+    private func runLaunchHooksIfViewerKnown() {
+        switch scope.owner {
+        case .guest, .member(_, _?): break
+        case .unscoped, .member(_, nil): return
+        }
+        // Taken under the lock, so a change racing this one runs nothing twice.
+        typealias Run = (hooks: LaunchHooks, cleared: [String], memory: (any PostSaveFacts)?, done: NSObjectProtocol?)
+        let run: Run? = lock.withLock {
+            guard let hooks = pendingLaunchHooks else { return nil }
+            pendingLaunchHooks = nil
+            let done = launchHooksObserver
+            launchHooksObserver = nil
+            let pile = key
+            var cleared: [String] = []
+            if hooks.reset {
+                cleared = defaults.array(forKey: pile) as? [String] ?? []
+                defaults.removeObject(forKey: pile)
+            }
+            if let seed = hooks.seed { defaults.set(seed, forKey: pile) }
+            factsOwner = pile
+            return (hooks, cleared, _facts, done)
+        }
+        guard let run else { return }
+        if let done = run.done { NotificationCenter.default.removeObserver(done) }
+        // The saved facts every screen observes say it too: a glyph drawn
+        // from a fact already in memory re-draws empty (or seeded).
+        let seeded = Set(run.hooks.seed ?? [])
+        for id in run.cleared where !seeded.contains(id) {
+            run.memory?.setSaved(false, for: PostID(id))
+        }
+        for id in seeded {
+            run.memory?.setSaved(true, for: PostID(id))
+        }
+        onChange?()
+    }
+    #endif
 }
