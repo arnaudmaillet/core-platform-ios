@@ -179,7 +179,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// no longer what they are looking at.
     public var renderedCover: UIImage? {
         if let carousel, !carousel.isHidden { return carousel.renderedCover }
-        return mediaView.image
+        return cover.image
     }
 
     /// The preview box — a row's media is one part of its card, so this is the
@@ -614,9 +614,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// in flight — the same race the tile closes, for the same reason: the
     /// autoplay gate must not pass on a cover the row is not actually showing.
     public func applyCover(_ image: UIImage) {
-        guard mediaView.image == nil else { return }
-        mediaView.image = image
-        loadedVideoRenderView?.setPoster(image)
+        cover.apply(image)
     }
 
     /// The frame a return player was parked on (#895) REPLACES the thumbnail
@@ -630,10 +628,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             applyCover(image)
             return
         }
-        loadTask?.cancel()
-        loadTask = nil
-        mediaView.image = image
-        loadedVideoRenderView?.setPoster(image)
+        cover.showParked(image)
     }
 
     /// Fired when the cover lands from an async load, so the autoplay gate is
@@ -1885,9 +1880,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The carousel, for a test that needs to ask where a page put something.
     var debugCarousel: MediaCarouselView? { carousel }
 
-    /// The cover load in flight. Readable inside the package so a test can
-    /// ask whether a reconfigure cancelled it (#781).
-    private(set) var loadTask: Task<Void, Never>?
+    /// The single-media cover on the loading ladder (#1088): a reconfigure
+    /// for another post cancelling the load in flight (#781), a parked frame
+    /// outranking a late thumbnail, every new cover the live surface's poster.
+    /// Only the cover half of `MediaSurface`: the row's surfaces are per page
+    /// and hang in the box behind its furniture, which is the row's own
+    /// plumbing. Readable inside the package so a test can ask what is in
+    /// flight.
+    private(set) lazy var cover: CoverSlot = {
+        let cover = CoverSlot(view: mediaView, size: .full)
+        // The row now has a face, which is the one thing the autoplay gate
+        // was waiting for. Nothing else would ask again while the timeline
+        // sits still.
+        cover.onLoaded = { [weak self] in self?.onCoverLoaded?() }
+        cover.onChange = { [weak self] image in self?.loadedVideoRenderView?.setPoster(image) }
+        return cover
+    }()
     /// The metadata line always hangs off the caption; what changes per
     /// configure is whether it CLOSES the card. A media row's line is hidden
     /// under the preview, laid out but drawing nothing, which is what keeps it
@@ -2318,9 +2326,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // card. Reported after several round trips, because each one can leave
         // another.
         card.alpha = 1
-        loadTask?.cancel()
-        loadTask = nil
-        mediaView.image = nil
+        cover.reset()
         // A recycled row must not keep the previous post's pages: the loads are
         // per-page tasks and the indicator is per-post state, and neither is
         // touched by `configure` for a post that turns out to have one piece of
@@ -2440,13 +2446,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         with post: GalleryPost, imagePipeline: ImagePipeline, captionExpanded: Bool = false,
         showsAuthorIdentity: Bool = true, captionLines: Int? = nil
     ) {
-        // ⚠️ The previous cover load goes FIRST, before anything can return.
-        // A reconfigure without a reuse (the profile gallery's
-        // `reconfigureItems`, a seeded post then its hydrated one) used to
-        // leave it running beside the new one, and whichever landed last won:
-        // the old URL's cover over the right one (#781).
-        loadTask?.cancel()
-        loadTask = nil
         fixedCaptionLines = captionLines
         isCaptionExpanded = captionExpanded && captionLines == nil
         captionLabel.numberOfLines = isCaptionExpanded ? 0 : (captionLines ?? Self.captionLineLimit)
@@ -2506,7 +2505,6 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // ⚠️ AFTER the indicator has been configured below, since it is on the
         // line too — see the end of this method.
 
-        mediaView.image = nil
         mediaView.backgroundColor = post.kind == .video ? .darkGray : .tertiarySystemFill
 
         // A collection hands its pages to the carousel and stops here: the
@@ -2526,31 +2524,22 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
             let carousel = makeCarouselIfNeeded()
             carousel.isHidden = false
             carousel.configure(with: post.pages, imagePipeline: imagePipeline)
+            cover.reset()
             return
         }
         carousel?.isHidden = true
         carousel?.cancelPendingWork()
 
-        guard hasMedia, let url = post.thumbnailURL else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
-            mediaView.image = cached
+        // ⚠️ A new post's cover cancels the previous load: a reconfigure
+        // without a reuse (the profile gallery's `reconfigureItems`, a seeded
+        // post then its hydrated one) used to leave it running beside the new
+        // one, and whichever landed last won — the old URL's cover over the
+        // right one (#781). The same post again keeps what it shows.
+        guard hasMedia else {
+            cover.reset()
             return
         }
-        loadTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url), !Task.isCancelled else { return }
-            guard let self else { return }
-            UIView.transition(
-                with: self.mediaView, duration: 0.25,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                self.mediaView.image = image
-            }
-            // The row now has a face, which is the one thing the autoplay gate
-            // was waiting for. Nothing else would ask again while the timeline
-            // sits still.
-            loadedVideoRenderView?.setPoster(image)
-            onCoverLoaded?()
-        }
+        cover.load(post.thumbnailURL, pipeline: imagePipeline, item: post.id)
     }
 }
 

@@ -8,13 +8,13 @@ import UIKit
 ///
 /// ```
 ///   host's ground (the card fill)
-///   cover   (UIImageView) — the ladder's PREVIEW rung, a permanent floor
+///   cover   (UIImageView) — its picture on the ladder (`CoverSlot`)
 ///   surface (VideoRenderView) — revealed on its first frame, by itself
 ///   host's chrome (captions, counters) above
 /// ```
 ///
 /// Two halves, and they are kept apart on purpose:
-/// - **The cover's arrival is the ladder's** (`LoadingLadder`): drawn in the
+/// - **The cover's arrival is the ladder's** (`CoverSlot`): drawn in the
 ///   configure pass when the pipeline has it, dissolved in when it lands, a
 ///   recycled host never showing the previous post's, and a PARKED frame —
 ///   the still a closing hero lands the tile on — outranking the pipeline's
@@ -31,20 +31,25 @@ import UIKit
 /// it always did.
 @MainActor
 public final class MediaSurface {
+    /// The cover's arrival (`CoverSlot`): the half a host without a single
+    /// live surface — the list row, a carousel's pages — uses alone.
+    public let coverSlot: CoverSlot
     /// The cover — the host's own image view.
-    public let cover: UIImageView
+    public var cover: UIImageView { coverSlot.view }
     /// The live surface, once built or adopted.
     public private(set) var video: VideoRenderView?
-    /// The cover's ladder (its arrival only).
-    public let ladder: LoadingLadder
+    /// The cover's ladder (its state only — it never touches the view).
+    public var ladder: LoadingLadder { coverSlot.ladder }
     /// Told when a cover that had to be fetched has landed — the autoplay
     /// waits on a cover to stand behind its first frame.
-    public var onCoverLoaded: (() -> Void)?
+    public var onCoverLoaded: (() -> Void)? {
+        get { coverSlot.onLoaded }
+        set { coverSlot.onLoaded = newValue }
+    }
     /// The surface's label in the playback logs (DEBUG).
     public var debugLabel: String?
 
     private weak var host: UIView?
-    private let load: ImageLoadSlot
 
     /// - Parameters:
     ///   - cover: the host's image view, already laid out in `host`.
@@ -54,71 +59,38 @@ public final class MediaSurface {
         cover: UIImageView, in host: UIView, coverSize: ImageBucket,
         policy: LoadingLadder.Policy = .standard, clock: LoadingLadder.Clock = .system
     ) {
-        self.cover = cover
         self.host = host
-        load = ImageLoadSlot(size: coverSize)
-        ladder = LoadingLadder(policy: policy, clock: clock)
-        // The cover's alpha is not the ladder's: a hero source's cover is
-        // read and concealed by the transitions (hook 2), so its arrival is a
-        // dissolve of the picture, not a fade of the view.
-        ladder.setView(cover, for: .preview, drivesAlpha: false, permanent: true)
+        coverSlot = CoverSlot(view: cover, size: coverSize, policy: policy, clock: clock)
+        // Every new cover is the live surface's poster.
+        coverSlot.onChange = { [weak self] image in self?.video?.setPoster(image) }
     }
 
     // MARK: - The cover
 
     /// Shows `url`'s cover for `item` (the post): drawn now when the pipeline
-    /// has it, else dissolved in when it lands — the live surface's poster
-    /// follows it. The same item again is a reconfigure and changes nothing
-    /// in flight; another cuts.
+    /// has it, else dissolved in when it lands. The same item again is a
+    /// reconfigure and changes nothing; another cuts.
     public func loadCover(_ url: URL?, pipeline: ImagePipeline?, item: AnyHashable) {
-        if item == ladder.item, url == load.url, load.isLoading || ladder.rung != nil { return }
-        let token = ladder.begin(item: item)
-        cover.image = nil
-        load.load(url, using: pipeline) { [weak self] image, transition in
-            guard let self, ladder.isCurrent(token) else { return }
-            // A parked frame put meanwhile is the better picture (hook 7).
-            guard ladder.previewSource != .parked else { return }
-            // Unhidden first, so the picture dissolves in on a visible view.
-            ladder.show(.preview, token: token, warm: transition == .none)
-            transition.perform(on: cover) { [cover] in cover.image = image }
-            video?.setPoster(image)
-            if transition != .none { onCoverLoaded?() }
-        } failed: { [weak self] in
-            guard let self, ladder.isCurrent(token) else { return }
-            ladder.fail(token: token)
-        }
+        coverSlot.load(url, pipeline: pipeline, item: item)
     }
 
-    /// A cover handed in from outside the pipeline (a seed, a stand-in):
-    /// used only when there is none yet.
-    public func applyCover(_ image: UIImage) {
-        guard cover.image == nil else { return }
-        cover.image = image
-        ladder.show(.preview, token: ladder.currentToken, warm: true)
-        video?.setPoster(image)
-    }
+    /// A cover handed in from outside the pipeline: used only when there is
+    /// none yet.
+    public func applyCover(_ image: UIImage) { coverSlot.apply(image) }
 
-    /// The frame a closing hero lands the host on, taken as its cover: it
-    /// outranks the pipeline's thumbnail landing later (hook 7).
-    public func showReturnStill(_ image: UIImage) {
-        cover.image = image
-        ladder.show(.preview, token: ladder.currentToken, warm: true, source: .parked)
-        video?.setPoster(image)
-    }
+    /// The frame a closing hero lands the host on: it outranks the pipeline's
+    /// thumbnail landing later (hook 7).
+    public func showReturnStill(_ image: UIImage) { coverSlot.showParked(image) }
 
     /// Whether a cover load is in flight.
-    public var isLoadingCover: Bool { load.isLoading }
+    public var isLoadingCover: Bool { coverSlot.isLoading }
 
     /// What the host draws as its still now.
-    public var renderedCover: UIImage? { cover.image }
+    public var renderedCover: UIImage? { coverSlot.image }
 
     /// Back to nothing — a recycled host's first step: the load in flight
     /// lands nowhere.
-    public func reset() {
-        load.cancel()
-        cover.image = nil
-        ladder.begin(item: nil)
-    }
+    public func reset() { coverSlot.reset() }
 
     // MARK: - The surface
 

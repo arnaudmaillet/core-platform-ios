@@ -127,16 +127,15 @@ struct CoverLoadCancellationTests {
     }
 
     /// The list row's single-media cover follows the same rule.
-    @Test func aListRowReconfiguredMidLoadCancelsTheFirstCover() throws {
+    @Test func aListRowReconfiguredMidLoadCancelsTheFirstCover() {
         let pipeline = ImagePipeline(fetcher: GatedCoverFetcher())
         let cell = PostGridListRowCell(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
 
         cell.configure(with: Self.photo("row-a"), imagePipeline: pipeline)
-        let firstLoad = try #require(cell.loadTask)
+        #expect(cell.cover.isLoading)
         cell.configure(with: Self.photo("row-b"), imagePipeline: pipeline)
-
-        #expect(firstLoad.isCancelled)
-        #expect(cell.loadTask != nil)
+        #expect(cell.cover.isLoading)
+        #expect(cell.cover.ladder.item == AnyHashable(PostID("row-b")))
     }
 }
 
