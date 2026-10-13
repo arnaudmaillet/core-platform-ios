@@ -24,12 +24,18 @@ import UIKit
 ///
 /// ## Content
 ///
-/// A glyph (the kind's, or the caller's), a title and an optional detail
-/// line, and in the trailing slot ONE of: an action ("Retry", "View") or a
-/// close button — the close button whenever the toast does not leave on its
-/// own (a failure).
+/// ONE LINE (#1034): a glyph (the kind's, or the caller's), a short message
+/// — tail-truncated, two lines only at accessibility text sizes — and in the
+/// trailing slot ONE of: an action ("Retry", "View", Undo) or a close button,
+/// the close button whenever the toast does not leave on its own (a failure).
+/// No second text line: one idea per toast, the references' rule (Polaris,
+/// Material's snackbar, Avaya); two levels made it too big (owner, #1034).
 ///
-/// ## Time (`duration(for:message:detail:hasAction:assistiveTechnologyRunning:)`)
+/// A toast with an action spans the margins (capped at `maximumWidth`), its
+/// control flush with the trailing edge; without one, the capsule hugs its
+/// text. 48 pt tall with an action, 44 pt without.
+///
+/// ## Time (`duration(for:message:hasAction:assistiveTechnologyRunning:)`)
 ///
 /// - success, info, warning: `max(4 s, 2 s + 0.3 s × words)`;
 /// - failure: until closed, acted on or replaced — an error that fades on a
@@ -69,8 +75,16 @@ import UIKit
 ///   `effect` inside the animation block, which is how UIKit interpolates
 ///   glass; only the content row, which is ordinary content, uses alpha.
 ///
-/// Under Reduce Motion (`MotionPreference`) there is no slide: the glass
-/// materialises and the row fades, in place.
+/// So the "scale" in and out (#1034) is a MORPH through layout: the capsule
+/// arrives at `Metrics.morphScale` of its size and springs to it (a slight
+/// overshoot) while it slides in, the glass materialises and the content —
+/// ordinary content, where a transform is fine — fades and scales up from
+/// `contentScale`. It leaves the same way back, shorter and without the
+/// bounce. The content keeps its own size during the morph (centred, clipped
+/// by the capsule), so the text never re-wraps or truncates mid-flight.
+///
+/// Under Reduce Motion (`MotionPreference`) there is no slide, no morph and
+/// no scale: the glass materialises and the row fades, in place.
 @MainActor
 public final class ToastView: UIView {
     enum Metrics {
@@ -79,11 +93,29 @@ public final class ToastView: UIView {
         /// How far the capsule travels on entrance/exit.
         static let travel: CGFloat = 24
         static let transitionDuration: TimeInterval = 0.32
+        /// The entrance's spring (#1034): the capsule grows from
+        /// `morphScale` of its size and overshoots a little.
+        static let entranceDuration: TimeInterval = 0.55
+        static let entranceDamping: CGFloat = 0.72
+        /// The exit: shorter, no bounce.
+        static let exitDuration: TimeInterval = 0.26
+        /// The capsule's size before it arrives and as it leaves, against its
+        /// own — reached through its CONSTRAINTS, never a transform on glass.
+        static let morphScale = CGSize(width: 0.7, height: 0.85)
+        /// The content's scale on the way in and out (ordinary content: a
+        /// transform is fine there).
+        static let contentScale: CGFloat = 0.9
         /// Resting shadow strength. Soft and low-contrast: the glass already
         /// separates itself; the shadow only grounds it.
         static let shadowOpacity: Float = 0.22
-        /// The touch target's floor.
+        /// The height of a toast without an action — the touch target's
+        /// floor — and with one (#1034), at the default text size.
         static let minimumHeight: CGFloat = 44
+        static let actionHeight: CGFloat = 48
+        /// Between the glyph and the message, and between the message and
+        /// the trailing control (#1034: ≥ 16 pt, the references' gap).
+        static let glyphGap: CGFloat = 10
+        static let controlGap: CGFloat = Spacing.lg
         /// Never wider than this, however wide the screen (iPad).
         static let maximumWidth: CGFloat = 420
         /// A swipe toward the edge dismisses past this distance…
@@ -163,7 +195,6 @@ public final class ToastView: UIView {
     @MainActor
     struct Content {
         var message: String
-        var detail: String?
         var symbol: String?
         var style: Style
         var action: Action?
@@ -179,12 +210,11 @@ public final class ToastView: UIView {
         var isCondition = false
 
         init(
-            message: String, detail: String?, symbol: String?, style: Style, action: Action?,
+            message: String, symbol: String?, style: Style, action: Action?,
             undoable: Undoable?, id: String?, isCondition: Bool = false
         ) {
             self.isCondition = isCondition
             self.message = message
-            self.detail = detail
             self.symbol = symbol
             self.style = style
             // Undo IS the toast's action: the trailing control, a tap on the
@@ -192,10 +222,10 @@ public final class ToastView: UIView {
             self.action = undoable != nil ? Action("Undo") {} : action
             self.undoable = undoable
             duration = ToastView.duration(
-                for: style, message: message, detail: detail, hasAction: action != nil || undoable != nil,
+                for: style, message: message, hasAction: action != nil || undoable != nil,
                 isUndoable: undoable != nil, assistiveTechnologyRunning: ToastView.isAssistiveTechnologyRunning()
             )
-            key = id ?? "\(style)|\(message)|\(detail ?? "")"
+            key = id ?? "\(style)|\(message)"
             if isCondition { duration = nil }
         }
     }
@@ -203,9 +233,8 @@ public final class ToastView: UIView {
     private(set) var content: Content
     /// The style this toast was drawn in (read by tests).
     public var style: Style { content.style }
-    /// Its title and detail line.
+    /// Its one line of text.
     public var message: String { content.message }
-    public var detail: String? { content.detail }
     /// Where the toast sits (#954).
     public private(set) var position: ToastPosition = .bottom
     /// How long it stays up, in seconds; nil: until closed (`duration`).
@@ -253,6 +282,16 @@ public final class ToastView: UIView {
     private lazy var idealWidth = widthAnchor.constraint(equalToConstant: 0)
     private var rowInsets: CGFloat = 0
     private var textLabels: [UILabel] = []
+    /// The text's own vertical inset, rebuilt with the label (#1034).
+    private var textInset: NSLayoutConstraint?
+    /// Below required: the entrance/exit morph squeezes the capsule past it.
+    private lazy var minimumHeightConstraint: NSLayoutConstraint = {
+        let constraint = heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight)
+        constraint.priority = .required - 1
+        return constraint
+    }()
+    /// The capsule's size and the content's while it morphs in or out.
+    private var morphConstraints: [NSLayoutConstraint] = []
     private let row = UIStackView()
     private(set) var closeButton: UIButton?
     private(set) var actionButton: UIButton?
@@ -292,7 +331,7 @@ public final class ToastView: UIView {
         style: Style = .confirmation
     ) -> ToastView {
         present(
-            message, detail: nil, symbol: symbol, style: style, action: nil, position: .bottom, in: host,
+            message, symbol: symbol, style: style, action: nil, position: .bottom, in: host,
             edge: floor ?? host.safeAreaLayoutGuide.bottomAnchor
         )
     }
@@ -310,7 +349,6 @@ public final class ToastView: UIView {
     ///   told otherwise.
     static func present(
         _ message: String,
-        detail: String? = nil,
         symbol: String?,
         style: Style,
         action: Action? = nil,
@@ -322,7 +360,7 @@ public final class ToastView: UIView {
         edge: NSLayoutYAxisAnchor? = nil
     ) -> ToastView {
         let content = Content(
-            message: message, detail: detail, symbol: symbol, style: style, action: action,
+            message: message, symbol: symbol, style: style, action: action,
             undoable: undoable, id: id, isCondition: isCondition
         )
         let existing = stack(at: position, in: container).last { $0.content.key == content.key }
@@ -412,7 +450,7 @@ public final class ToastView: UIView {
             Self.restack(at: position, in: container, animated: true)
         }
         countdown?.start()
-        Self.announce([content.message, content.detail].compactMap { $0 }.joined(separator: ". "), style: content.style)
+        Self.announce(content.message, style: content.style)
     }
 
     // MARK: - The stack
@@ -530,17 +568,14 @@ public final class ToastView: UIView {
     /// How long a toast stays up, in seconds; nil: until it is closed, acted
     /// on or replaced (see the type doc).
     public static func duration(
-        for style: Style, message: String, detail: String?, hasAction: Bool,
+        for style: Style, message: String, hasAction: Bool,
         isUndoable: Bool = false, assistiveTechnologyRunning: Bool
     ) -> TimeInterval? {
         // A loading toast waits for its outcome (an update by `id`).
         if style == .failure || style == .loading { return nil }
         if hasAction, assistiveTechnologyRunning { return nil }
         if isUndoable { return undoDuration }
-        let words = ([message] + (detail.map { [$0] } ?? []))
-            .joined(separator: " ")
-            .split(whereSeparator: \.isWhitespace)
-            .count
+        let words = message.split(whereSeparator: \.isWhitespace).count
         return max(4, 2 + 0.3 * Double(words))
     }
 
@@ -616,12 +651,21 @@ public final class ToastView: UIView {
         row.alpha = 0
         let trailing = row.trailingAnchor.constraint(equalTo: backdrop.contentView.trailingAnchor)
         rowTrailing = trailing
-        row.constrain(in: backdrop.contentView) { parent in
-            row.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.md)
-            row.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -Spacing.md)
-            row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: Spacing.lg)
-            trailing
-        }
+        // Thin: the height is the toast's own (44/48 pt, #1034), and the
+        // trailing control must not push it — the TEXT keeps its own inset
+        // (`textInset`), which matters at large text sizes. Below required,
+        // so the morph can hold the content at its size inside a smaller
+        // capsule (`morph(to:)`).
+        let edges = [
+            row.topAnchor.constraint(equalTo: backdrop.contentView.topAnchor, constant: Spacing.xs / 2),
+            row.bottomAnchor.constraint(equalTo: backdrop.contentView.bottomAnchor, constant: -Spacing.xs / 2),
+            row.leadingAnchor.constraint(equalTo: backdrop.contentView.leadingAnchor, constant: Spacing.lg),
+            trailing,
+        ]
+        edges.forEach { $0.priority = .required - 1 }
+        row.translatesAutoresizingMaskIntoConstraints = false
+        backdrop.contentView.addSubview(row)
+        NSLayoutConstraint.activate(edges)
         // ⚠️ THE WIDTH IS MEASURED, NOT LEFT TO THE LABELS. Two-line labels
         // in a stack give Auto Layout no width of their own: the bubble came
         // out narrow and wrapped "Couldn't send" over two lines with the
@@ -630,7 +674,7 @@ public final class ToastView: UIView {
         // wraps only where the margins stop it.
         idealWidth.priority = .defaultHigh + 10
         NSLayoutConstraint.activate([
-            heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight),
+            minimumHeightConstraint,
             widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.maximumWidth),
             idealWidth,
         ])
@@ -655,7 +699,7 @@ public final class ToastView: UIView {
         apply(content)
         // Announced rather than read on focus: the user's attention is on what
         // they just did.
-        Self.announce([content.message, content.detail].compactMap { $0 }.joined(separator: ". "), style: content.style)
+        Self.announce(content.message, style: content.style)
     }
 
     /// Builds the row, the trailing control, VoiceOver's element and the
@@ -672,19 +716,14 @@ public final class ToastView: UIView {
         // its own luminance against whatever it sits over, so the label tracks
         // it in both appearances without a hand-picked color.
         title.textColor = .label
-        title.numberOfLines = 2
-        let texts = UIStackView(arrangedSubviews: [title])
-        texts.axis = .vertical
-        texts.spacing = 2
-        if let detail = content.detail {
-            let line = UILabel()
-            line.text = detail
-            line.font = .appFont(forTextStyle: .footnote)
-            line.adjustsFontForContentSizeCategory = true
-            line.textColor = .secondaryLabel
-            line.numberOfLines = 2
-            texts.addArrangedSubview(line)
-        }
+        title.numberOfLines = textLineCount
+        title.lineBreakMode = .byTruncatingTail
+        // The message takes the room the control leaves — with an action the
+        // toast spans the margins and the control sits flush trailing — and
+        // is the one thing that gives way.
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let texts = title
 
         var arranged: [UIView] = []
         if content.style == .loading {
@@ -694,6 +733,7 @@ public final class ToastView: UIView {
             arranged.append(spinner)
         } else if let symbol = content.symbol, let image = UIImage(systemName: symbol) {
             let glyph = UIImageView(image: image)
+            glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .medium)
             glyph.tintColor = content.style.glyphTint
             glyph.contentMode = .scaleAspectFit
             glyph.setContentHuggingPriority(.required, for: .horizontal)
@@ -720,13 +760,20 @@ public final class ToastView: UIView {
             arranged.append(closeButton)
         }
         row.addArrangedSubviews(arranged)
+        if let glyph = arranged.first, glyph !== texts { row.setCustomSpacing(Metrics.glyphGap, after: glyph) }
+        row.setCustomSpacing(Metrics.controlGap, after: texts)
+        minimumHeightConstraint.constant = content.action != nil ? Metrics.actionHeight : Metrics.minimumHeight
+        textInset?.isActive = false
+        textInset = heightAnchor.constraint(greaterThanOrEqualTo: title.heightAnchor, constant: 2 * Spacing.md)
+        textInset?.priority = .required - 1
+        textInset?.isActive = true
         let trailing = actionButton != nil || closeButton != nil || undoButton != nil ? Spacing.sm : Spacing.lg
         rowTrailing?.constant = -trailing
         rowInsets = Spacing.lg + trailing
-        textLabels = texts.arrangedSubviews.compactMap { $0 as? UILabel }
+        textLabels = [title]
         measureIdealWidth()
 
-        accessibilityLabel = [content.message, content.detail].compactMap { $0 }.joined(separator: ", ")
+        accessibilityLabel = content.message
         var actions: [UIAccessibilityCustomAction] = []
         if let action = content.action {
             actions.append(UIAccessibilityCustomAction(name: action.title) { [weak self] _ in
@@ -767,6 +814,7 @@ public final class ToastView: UIView {
         let button = UIButton(configuration: configuration)
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        button.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumHeight).isActive = true
         return button
     }
 
@@ -782,17 +830,33 @@ public final class ToastView: UIView {
         return button
     }
 
-    /// Measures the row with its text on one line.
+    /// One line; two at accessibility text sizes, where one would cut most
+    /// of the message.
+    private var textLineCount: Int {
+        traitCollection.preferredContentSizeCategory.isAccessibilityCategory ? 2 : 1
+    }
+
+    /// The width it asks for: with an action, all the margins allow (capped
+    /// at `maximumWidth`), so the control sits flush trailing (#1034);
+    /// without one, its row with the text on one line.
     private func measureIdealWidth() {
+        textLabels.forEach { $0.numberOfLines = textLineCount }
+        if content.action != nil {
+            idealWidth.constant = Metrics.maximumWidth
+            return
+        }
         textLabels.forEach { $0.numberOfLines = 1 }
         let width = row.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
-        textLabels.forEach { $0.numberOfLines = 2 }
+        textLabels.forEach { $0.numberOfLines = textLineCount }
         idealWidth.constant = ceil(width + rowInsets)
     }
 
 
     public override func didMoveToWindow() {
         super.didMoveToWindow()
+        // Built before it had a window: the text size it was measured at may
+        // not be the window's (one line, or two at accessibility sizes).
+        if window != nil { measureIdealWidth() }
         // Materialized on window attach, never in init: building a real effect
         // off-screen contacts the render server and stalls the main actor for
         // tens of seconds on headless CI simulators (the rule `CommentsInputBar`
@@ -1032,24 +1096,62 @@ public final class ToastView: UIView {
 
     private func animateIn() {
         // Land the pre-entrance state before animating: the capsule sits one
-        // `travel` out, with no glass and no shadow to inherit.
+        // `travel` out, with no glass and no shadow to inherit — and, laid
+        // out at its real size first, squeezed to its morph size.
         superview?.layoutIfNeeded()
+        let reduces = MotionPreference.reducesMotion
+        if !reduces {
+            morph(to: Metrics.morphScale)
+            row.transform = CGAffineTransform(scaleX: Metrics.contentScale, y: Metrics.contentScale)
+            superview?.layoutIfNeeded()
+        }
         slide?.constant = restConstant
         hasArrived = true
-        UIView.animate(
-            withDuration: Metrics.transitionDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction]
-        ) {
-            // Layout drives the slide, so the material re-renders in place
-            // each frame instead of being carried as a stale image.
+        let arrive = {
+            // Layout drives the slide and the morph, so the material
+            // re-renders in place each frame instead of being carried as a
+            // stale image.
+            self.morph(to: nil)
             self.superview?.layoutIfNeeded()
             self.backdrop.effect = Self.makeGlass()
             self.row.alpha = 1
+            self.row.transform = .identity
             // A CALayer property set inside a UIView animation block adopts
             // that block's timing, so the shadow arrives with the capsule
             // instead of snapping on at frame 0.
             self.layer.shadowOpacity = Metrics.shadowOpacity
         }
+        if reduces {
+            UIView.animate(
+                withDuration: Metrics.transitionDuration, delay: 0, options: [.curveEaseOut, .allowUserInteraction],
+                animations: arrive
+            )
+        } else {
+            UIView.animate(
+                withDuration: Metrics.entranceDuration, delay: 0, usingSpringWithDamping: Metrics.entranceDamping,
+                initialSpringVelocity: 0, options: [.allowUserInteraction], animations: arrive
+            )
+        }
         countdown?.start()
+    }
+
+    /// Squeezes the capsule to `scale` of its current size through its
+    /// constraints — never a transform on glass (see the type doc) — with the
+    /// content held at its own size, centred and clipped; nil lets both go.
+    private func morph(to scale: CGSize?) {
+        NSLayoutConstraint.deactivate(morphConstraints)
+        morphConstraints = []
+        guard let scale, bounds.width > 0, stackLocks.isEmpty else { return }
+        let content = backdrop.contentView
+        morphConstraints = [
+            widthAnchor.constraint(equalToConstant: bounds.width * scale.width),
+            heightAnchor.constraint(equalToConstant: bounds.height * scale.height),
+            row.widthAnchor.constraint(equalToConstant: row.bounds.width),
+            row.heightAnchor.constraint(equalToConstant: row.bounds.height),
+            row.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            row.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+        ]
+        NSLayoutConstraint.activate(morphConstraints)
     }
 
     /// Takes the toast away — animated: it slides back out (none under
@@ -1085,7 +1187,17 @@ public final class ToastView: UIView {
             superview?.layoutIfNeeded()
             slide?.constant = offConstant
         }
-        UIView.animate(withDuration: Metrics.transitionDuration, delay: 0, options: [.curveEaseIn, .beginFromCurrentState]) {
+        let reduces = MotionPreference.reducesMotion
+        UIView.animate(
+            withDuration: reduces ? Metrics.transitionDuration : Metrics.exitDuration, delay: 0,
+            options: [.curveEaseIn, .beginFromCurrentState]
+        ) {
+            // The way it came, back: squeezed, its content shrinking — unless
+            // it is collapsed behind another, whose size it is locked to.
+            if !reduces, !self.isCollapsedBehind {
+                self.morph(to: Metrics.morphScale)
+                self.row.transform = CGAffineTransform(scaleX: Metrics.contentScale, y: Metrics.contentScale)
+            }
             self.superview?.layoutIfNeeded()
             // Dissolving the effect is how glass leaves; fading the view would
             // put group opacity on the effect view (see the type doc).

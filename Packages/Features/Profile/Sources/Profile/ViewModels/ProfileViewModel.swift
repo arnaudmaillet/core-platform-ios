@@ -1166,9 +1166,6 @@ public final class ProfileViewModel {
     /// `EntityStore` drops the post from every feed and from For You.
     private let postDeleted: (@MainActor (PostID) -> Void)?
 
-    /// The undo toast's detail line for a deleted post: the long way back.
-    public nonisolated static let deletedPostDetail = "Restore it from Recently Deleted for 30 days"
-
     /// Deletes one of the viewer's own posts, with Undo (#957): the tile
     /// leaves at once, and the delete is sent only when the toast's countdown
     /// runs out — a DEFERRED commit, so Undo puts the tile back where it was
@@ -1188,7 +1185,6 @@ public final class ProfileViewModel {
         renderGallery()
         let action = UndoableAction(
             message: "Post deleted",
-            detail: Self.deletedPostDetail,
             symbol: "trash.fill",
             commit: { [weak self] in
                 Task { @MainActor [weak self] in

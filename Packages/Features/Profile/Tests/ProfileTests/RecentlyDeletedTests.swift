@@ -151,6 +151,5 @@ struct RecentlyDeletedTests {
         #expect(RecentlyDeletedViewModel.remaining(deleted, now: day.addingTimeInterval(29 * 86_400), calendar: calendar) == "1 day left")
         #expect(RecentlyDeletedViewModel.remaining(deleted, now: day.addingTimeInterval(30 * 86_400), calendar: calendar) == "Last day")
         #expect(RecentlyDeletedViewController.footer.contains("30 days"))
-        #expect(ProfileViewModel.deletedPostDetail.contains("Recently Deleted"))
     }
 }

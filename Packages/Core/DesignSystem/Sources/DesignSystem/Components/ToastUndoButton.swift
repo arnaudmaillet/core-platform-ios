@@ -11,8 +11,8 @@ import UIKit
 /// emptying is not the kind of motion that setting is about.
 @MainActor
 final class ToastUndoButton: UIControl {
-    static let ringDiameter: CGFloat = 26
-    static let ringWidth: CGFloat = 2
+    static let ringDiameter: CGFloat = 20
+    static let ringWidth: CGFloat = 1.5
 
     private let ring = CAShapeLayer()
     private let track = CAShapeLayer()
@@ -50,7 +50,7 @@ final class ToastUndoButton: UIControl {
         track.path = path
         ring.path = path
 
-        glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption1, scale: .medium)
+        glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .caption2, scale: .small)
         glyph.tintColor = .label
         glyph.contentMode = .center
         glyph.isUserInteractionEnabled = false
@@ -79,6 +79,8 @@ final class ToastUndoButton: UIControl {
         NSLayoutConstraint.activate([
             ringHost.widthAnchor.constraint(equalToConstant: Self.ringDiameter),
             ringHost.heightAnchor.constraint(equalToConstant: Self.ringDiameter),
+            // The touch target's floor (#1034): a 20 pt ring, a 44 pt control.
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
         ])
         setContentHuggingPriority(.required, for: .horizontal)
         setContentCompressionResistancePriority(.required, for: .horizontal)

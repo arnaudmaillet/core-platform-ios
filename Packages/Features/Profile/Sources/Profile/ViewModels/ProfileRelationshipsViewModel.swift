@@ -398,7 +398,6 @@ public final class ProfileRelationshipsViewModel {
         let handle = "@" + relation.handle
         let action = UndoableAction(
             message: "Removed \(handle)",
-            detail: "They won't be told",
             symbol: "person.crop.circle.badge.minus",
             commit: { [weak self] in
                 Task { @MainActor [weak self] in
