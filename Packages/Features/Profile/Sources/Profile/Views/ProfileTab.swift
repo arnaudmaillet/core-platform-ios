@@ -14,12 +14,12 @@ import PostGrid
 public enum ProfileTab: Equatable, Sendable {
     /// One of the profile's own published-content pages.
     case format(GalleryFilter.Format)
-    /// Posts the viewer saved: engagement's `ListSavedPosts` (#837). Own
-    /// profile only — the server lists another profile's only when its owner
-    /// shows the tab (`TabSettings.show_saved`, hidden by default), which no
-    /// screen offers yet.
+    /// Posts the profile saved: the viewer's pile on their own profile,
+    /// engagement's `ListSavedPosts` on anyone else's — shown only when its
+    /// owner shows the tab (#837, #411).
     case saved
-    /// Posts the viewer reacted to. Own profile only, same reason.
+    /// Posts the profile liked: engagement's `ListLikesByProfile` (#411),
+    /// hidden from others when its owner hides the tab.
     case reactions
     /// The profile's reposts, alone (#696): its authored corpus split on
     /// `isRepost`. Every profile since #772.
@@ -73,8 +73,9 @@ public enum ProfileTab: Equatable, Sendable {
     /// filter (#631) — "it is no longer a sort".
     public static let publicTabs: [ProfileTab] = [.format(.activity), .reposts, .tagged]
 
-    /// What the viewer sees on their own: the public pages, then Saved and
-    /// Liked — corpora nobody else can see (the owner's call, 2026-10-07).
+    /// The public pages, then Saved and Liked: what the viewer sees on their
+    /// own, and on anyone else's whose owner shows them (#411) — each only
+    /// with something in it (#742).
     ///
     /// ⚠️ NO TOP SOURCE FILTER ANY MORE (#772, the owner's call 2026-10-10):
     /// Reposts and Tagged were a menu in the bar's leading run (All / Posts /

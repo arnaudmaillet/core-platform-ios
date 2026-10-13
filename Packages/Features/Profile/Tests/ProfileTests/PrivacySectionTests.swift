@@ -54,7 +54,7 @@ struct PrivacySectionTests {
     private func makeSideModel(_ sides: StubSides) -> PrivacySectionViewModel {
         PrivacySectionViewModel(
             visibility: StubVisibility(isPrivate: false),
-            windows: sides, comments: sides, sharing: sides, audiences: sides
+            windows: sides, comments: sides, sharing: sides, audiences: sides, tabs: sides
         )
     }
 
@@ -77,7 +77,7 @@ struct PrivacySectionTests {
         await sides.setFails(false)
         #expect(await model.reload(.commentAudience))
         #expect(model.commentAudience == .followers)
-        #expect(model.failedSides == [.postWindow, .interactionAudiences, .postSharing])
+        #expect(model.failedSides == [.postWindow, .interactionAudiences, .postSharing, .tabVisibility])
         #expect(model.postWindow == nil)
         #expect(await sides.commentReads == 2)
         #expect(await sides.windowReads == 1)
@@ -155,8 +155,66 @@ private actor GatedSharing: PostSharingManaging {
     func setPostSharing(_ sharing: PostSharing) async throws {}
 }
 
-private actor StubSides:PostWindowManaging, CommentAudienceManaging, PostSharingManaging, InteractionAudienceManaging {
+// MARK: - Profile tabs (#411)
+
+@MainActor
+struct ProfileTabSwitchesTests {
+    private func model(_ sides: StubSides) -> PrivacySectionViewModel {
+        PrivacySectionViewModel(visibility: StubVisibility(isPrivate: false), tabs: sides)
+    }
+
+    /// The switches show the server's flags.
+    @Test func theSwitchesReadTheServersFlags() async {
+        let model = model(StubSides())
+        await model.load()
+        #expect(model.tabVisibility == ProfileTabVisibility(likes: true, saved: false, reposts: true))
+    }
+
+    /// A switch writes its own flag only, and shows it once the server has it.
+    @Test func aSwitchWritesItsFlagThenShowsIt() async throws {
+        let sides = StubSides()
+        let model = model(sides)
+        await model.load()
+
+        try await model.setTab(.saved, visible: true)
+
+        #expect(await sides.tabWrites.map(\.0) == [.saved])
+        #expect(await sides.tabWrites.map(\.1) == [true])
+        #expect(model.tabVisibility?.saved == true)
+        #expect(model.tabVisibility?.likes == true)
+    }
+
+    /// Not optimistic: a failed write leaves the switch on the server's value.
+    @Test func aFailedWriteKeepsTheServersValue() async {
+        let sides = StubSides()
+        await sides.setFailsTabWrites(true)
+        let model = model(sides)
+        await model.load()
+
+        await #expect(throws: (any Error).self) { try await model.setTab(.reposts, visible: false) }
+
+        #expect(model.tabVisibility?.reposts == true)
+    }
+
+    /// The same value again sends nothing.
+    @Test func theSameValueSendsNothing() async throws {
+        let sides = StubSides()
+        let model = model(sides)
+        await model.load()
+
+        try await model.setTab(.likes, visible: true)
+
+        #expect(await sides.tabWrites.isEmpty)
+    }
+}
+
+private actor StubSides:PostWindowManaging, CommentAudienceManaging, PostSharingManaging, InteractionAudienceManaging,
+    ProfileTabVisibilityManaging {
     private var fails: Bool
+    private var tabs = ProfileTabVisibility(likes: true, saved: false, reposts: true)
+    private(set) var tabWrites: [(ProfileTabVisibility.Tab, Bool)] = []
+    var failsTabWrites = false
+    func setFailsTabWrites(_ fails: Bool) { failsTabWrites = fails }
     private(set) var commentReads = 0
     private(set) var windowReads = 0
 
@@ -197,6 +255,17 @@ private actor StubSides:PostWindowManaging, CommentAudienceManaging, PostSharing
     }
 
     func setAudience(_ audience: InteractionAudience, for kind: InteractionKind) async throws {}
+
+    func tabVisibility() async throws -> ProfileTabVisibility {
+        try check()
+        return tabs
+    }
+
+    func setTab(_ tab: ProfileTabVisibility.Tab, visible: Bool) async throws {
+        if failsTabWrites { throw ProfileError.notAuthenticated }
+        tabWrites.append((tab, visible))
+        tabs[tab] = visible
+    }
 }
 
 private actor StubVisibility: ProfileVisibilityManaging {

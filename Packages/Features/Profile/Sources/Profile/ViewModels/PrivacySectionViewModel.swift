@@ -17,7 +17,7 @@ final class PrivacySectionViewModel {
 
     /// A setting read beside Private Account, each with its own row.
     enum SideSetting: Hashable, CaseIterable {
-        case postWindow, commentAudience, interactionAudiences, postSharing
+        case postWindow, commentAudience, interactionAudiences, postSharing, tabVisibility
     }
 
     private(set) var phase: Phase = .loading {
@@ -34,6 +34,11 @@ final class PrivacySectionViewModel {
     /// How far back others see this profile's posts (#411); nil until read
     /// or when the screen can't set it.
     private(set) var postWindow: PostWindow? {
+        didSet { onChange?() }
+    }
+    /// Which of this profile's tabs others see (#411); nil until read or
+    /// when the screen can't set it.
+    private(set) var tabVisibility: ProfileTabVisibility? {
         didSet { onChange?() }
     }
     /// Who may comment on this profile's posts (#397); nil until read or
@@ -81,6 +86,7 @@ final class PrivacySectionViewModel {
     let comments: (any CommentAudienceManaging)?
     let sharing: (any PostSharingManaging)?
     let audiences: (any InteractionAudienceManaging)?
+    let tabs: (any ProfileTabVisibilityManaging)?
 
     init(
         visibility: any ProfileVisibilityManaging,
@@ -88,9 +94,11 @@ final class PrivacySectionViewModel {
         windows: (any PostWindowManaging)? = nil,
         comments: (any CommentAudienceManaging)? = nil,
         sharing: (any PostSharingManaging)? = nil,
-        audiences: (any InteractionAudienceManaging)? = nil
+        audiences: (any InteractionAudienceManaging)? = nil,
+        tabs: (any ProfileTabVisibilityManaging)? = nil
     ) {
         self.audiences = audiences
+        self.tabs = tabs
         self.visibility = visibility
         self.requests = requests
         self.windows = windows
@@ -109,6 +117,14 @@ final class PrivacySectionViewModel {
         guard let windows, window != postWindow else { return }
         try await windows.setPostWindow(window)
         postWindow = window
+    }
+
+    /// Not optimistic: the switch shows the server's value.
+    func setTab(_ tab: ProfileTabVisibility.Tab, visible: Bool) async throws {
+        guard let tabs, let current = tabVisibility, current[tab] != visible else { return }
+        try await tabs.setTab(tab, visible: visible)
+        // On the value as it is now: another switch may have landed meanwhile.
+        tabVisibility?[tab] = visible
     }
 
     /// Not optimistic: the value shown is the server's.
@@ -199,6 +215,9 @@ final class PrivacySectionViewModel {
             case .postSharing:
                 guard let sharing else { return true }
                 postSharing = try await sharing.postSharing()
+            case .tabVisibility:
+                guard let tabs else { return true }
+                tabVisibility = try await tabs.tabVisibility()
             }
             failedSides.remove(side)
             sideFailures[side] = nil
@@ -223,6 +242,7 @@ final class PrivacySectionViewModel {
         case .commentAudience: commentAudience != nil
         case .interactionAudiences: mentionAudience != nil && messageAudience != nil
         case .postSharing: postSharing != nil
+        case .tabVisibility: tabVisibility != nil
         }
     }
 

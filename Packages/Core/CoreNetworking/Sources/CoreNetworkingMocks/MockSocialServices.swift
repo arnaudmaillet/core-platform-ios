@@ -609,6 +609,11 @@ public final class MockSocialServices: @unchecked Sendable {
         return .success(response)
     }
 
+    /// A profile's tab settings as `SetTabSettings` left them (#411).
+    public func tabSettings(of profileID: String) -> Profile_V1_TabSettings {
+        lock.withLock { tabSettings[profileID] } ?? Self.defaultTabSettings
+    }
+
     private static let defaultTabSettings: Profile_V1_TabSettings = {
         var settings = Profile_V1_TabSettings()
         settings.postWindow = .all

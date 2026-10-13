@@ -111,15 +111,12 @@ public final class ProfileViewModel {
         /// Whether no further page is coming, under the active source. What
         /// lets the Posts list settle its tail chunk (`MosaicChunkPlanner`).
         public var isComplete: Bool = true
-        /// The viewer's saved pile. Absent on anyone else's profile — a saved
-        /// list is private by construction. Own profile only.
+        /// The viewer's saved pile on their own profile; on anyone else's,
+        /// the server's list of what they saved — empty unless its owner
+        /// shows the tab (#837, #411).
         public var saved: GalleryPageState = .empty(message: "")
-        /// ⚠️ Always the same answer, and honestly so. `engagement.v1` can
-        /// record a reaction and count reactions on a post; nothing anywhere
-        /// answers "which posts did this profile react to", and the client
-        /// cannot even read back whether IT reacted to one. The tab exists so
-        /// the shape is right when a seam arrives; what it shows until then is
-        /// the truth about what can be known.
+        /// The posts the profile liked (engagement `ListLikesByProfile`,
+        /// #411) — empty for anyone but the owner while the owner hides it.
         public var reactions: GalleryPageState = .empty(message: "")
         /// The profile's reposts and the posts that tag it, each its own page
         /// (#696; your own profile too since #772).
@@ -597,6 +594,9 @@ public final class ProfileViewModel {
         guard let profile else { return }
         relationshipLoad?.cancel()
         loadRelationship(for: profile.id)
+        // Liked, and someone else's Saved, are kept nowhere (#411): read now,
+        // or the revisit would show neither tab.
+        loadEngagementTabs(for: profile)
         onLoadSettled?()
     }
 
@@ -1300,7 +1300,15 @@ public final class ProfileViewModel {
             galleryMoreLoad = nil
             galleryStore.reset()
         }
+        if reset {
+            // Read for this viewer only (#892): never shown to the next one.
+            engagementTabsLoad?.cancel()
+            engagementTabsLoad = nil
+            galleryStore.reactions = .empty(message: "")
+            galleryStore.othersSaved = .empty(message: "")
+        }
         guard galleryLoad == nil else { return }
+        loadEngagementTabs(for: profile)
         galleryStore.resumePaging()
         renderGallery() // all pages report loading — or, revalidating, what they hold
         galleryLoad = Task { [weak self] in
@@ -1334,6 +1342,36 @@ public final class ProfileViewModel {
 
     /// Whether the grid's first pages are on their way, for tests.
     var isGalleryLoading: Bool { galleryLoad != nil }
+
+    /// The Liked tab, and someone else's Saved tab (#411, #837): the
+    /// server's lists, read with the grid's first pages — beside them, never
+    /// a second grid load — and kept nowhere but this screen: no device
+    /// cache, so a viewer change cannot show them to the next viewer. A tab
+    /// shows only once its list holds something (#742), so a hidden tab
+    /// (the server answers empty) never appears; a failed read leaves what
+    /// was shown.
+    private func loadEngagementTabs(for profile: UserProfile) {
+        guard let gallery else { return }
+        engagementTabsLoad?.cancel()
+        let readsSaved = !isOwnProfile
+        engagementTabsLoad = Task { [weak self] in
+            async let liked = try? gallery.likedPosts(of: profile.id)
+            async let saved = readsSaved ? try? gallery.savedPosts(of: profile.id) : nil
+            let (likedPosts, savedPosts) = await (liked, saved)
+            guard let self, !Task.isCancelled, self.profile?.id ?? profile.id == profile.id else { return }
+            if let likedPosts {
+                galleryStore.reactions = likedPosts.isEmpty ? .empty(message: "") : .content(likedPosts)
+            }
+            if readsSaved, let savedPosts {
+                galleryStore.othersSaved = savedPosts.isEmpty ? .empty(message: "") : .content(savedPosts)
+            }
+            engagementTabsLoad = nil
+            renderGallery()
+        }
+    }
+
+    /// The Liked / Saved reads on their way.
+    private var engagementTabsLoad: Task<Void, Never>?
 
     /// The viewer neared the end of the grid on screen: the next page of
     /// every corpus its source reads, if any has one and none is on its way
