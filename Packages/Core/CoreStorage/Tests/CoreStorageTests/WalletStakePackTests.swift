@@ -218,4 +218,31 @@ private final class Counter: @unchecked Sendable {
     private var count = 0
     var value: Int { lock.withLock { count } }
     func increment() { lock.withLock { count += 1 } }
+
+}
+
+extension WalletStakePackTests {
+    /// Several packs (backend #941): a bigger one loads its own shots for its
+    /// own price, and remembers which it was; they still don't stack.
+    @Test func aBiggerPackLoadsItsShotsAndIsRemembered() throws {
+        let defaults = Self.defaults()
+        // Gems granted up front: the seeded 100 buy only the smallest pack.
+        defaults.set(1_000, forKey: StorageScope.shared.accountKey("wallet.gemsGranted"))
+        let store = WalletStore(defaults: defaults)
+        let tier = try #require(Pack.tiers.first { $0.shots == 10 })
+        let gems = store.snapshot().gems
+        #expect(gems >= tier.price, "precondition: the seed affords the 10-shot pack")
+        #expect(store.stakePackTierID == nil)
+        #expect(store.buyStakePack(tier) == .bought(shots: 10, remainingGems: gems - tier.price))
+        #expect(store.stakeShots == 10)
+        #expect(store.stakePackTierID == tier.id)
+        #expect(store.buyStakePack(Pack.standard) == .packStillActive(shotsLeft: 10))
+    }
+
+    @Test func tiersAreSmallestFirstAndCheaperAShotAsTheyGrow() {
+        #expect(Pack.tiers.map(\.shots) == Pack.tiers.map(\.shots).sorted())
+        #expect(Pack.standard.shots == Pack.shots && Pack.standard.price == Pack.price)
+        let perShot = Pack.tiers.map { Double($0.price) / Double($0.shots) }
+        #expect(perShot == perShot.sorted(by: >))
+    }
 }

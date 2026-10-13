@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import DesignSystem
 import PostGrid
 import UIKit
 

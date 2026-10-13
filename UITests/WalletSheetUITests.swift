@@ -11,7 +11,7 @@ final class WalletSheetUITests: XCTestCase {
 
     override func setUp() { continueAfterFailure = false }
 
-    func testThePointsSheetBarOpensTheShopOverItAndBothClose() {
+    func testThePointsSheetBarOpensTheShopScreen() {
         let app = XCUIApplication()
         app.launchArguments = ["-mock-auto-login", "-open-wallet"]
         app.launch()
@@ -39,32 +39,18 @@ final class WalletSheetUITests: XCTestCase {
             .matching(NSPredicate(format: "label MATCHES '^[0-9]+ points, [0-9]+ gems$'"))
         XCTAssertEqual(compact.count, 0, "compact counters appeared on scroll")
 
-        // Shop → the shop sheet, over the points sheet.
+        // Shop → the Shop's own screen (2026-10-13: pushed, not a sheet):
+        // the points sheet comes down, and the Shop is pushed under it.
         XCTAssertTrue(shop.isHittable)
         shop.tap()
-        let search = app.searchFields["Search countries"]
-        XCTAssertTrue(search.waitForExistence(timeout: 8), "the Shop item did not present the shop")
+        let title = app.navigationBars["Shop"]
+        XCTAssertTrue(title.waitForExistence(timeout: 8), "the Shop item did not open the Shop")
+        XCTAssertTrue(shop.waitForNonExistence(timeout: 8), "the points sheet stayed over the Shop")
+        XCTAssertFalse(app.buttons["shop.close"].exists, "a pushed Shop has no close button")
 
-        // A plain list: a country's row spans its list's full width.
-        // A country row is one accessibility element, "<name>, rank <n>, …"
-        // (whichever leads — the mock world decides). UIKit exposes it as a
-        // static text, not a cell, so it is matched by label at any type.
-        let row = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS ', rank '")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 5), "no country row in the shop")
-        let listFrame = app.collectionViews
-            .containing(NSPredicate(format: "label CONTAINS ', rank '")).firstMatch.frame
-        XCTAssertEqual(row.frame.minX, listFrame.minX, accuracy: 1, "the row starts inside a card")
-        XCTAssertEqual(row.frame.width, listFrame.width, accuracy: 1, "the row is narrower than the list")
-
-        // Closing the shop comes back to the points sheet.
-        app.buttons["shop.close"].tap()
-        XCTAssertTrue(search.waitForNonExistence(timeout: 8), "the shop did not close")
-        XCTAssertTrue(shop.waitForExistence(timeout: 5), "closing the shop also closed the points sheet")
-
-        // And the points sheet's own close takes it down.
-        close.tap()
-        XCTAssertTrue(shop.waitForNonExistence(timeout: 8), "the close item did not dismiss the points sheet")
+        // Back comes back to where the sheet was opened.
+        title.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(title.waitForNonExistence(timeout: 8), "back did not leave the Shop")
         app.terminate()
     }
 }

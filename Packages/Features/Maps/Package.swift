@@ -19,7 +19,8 @@ let package = Package(
         .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/MediaPlayback"),
         .package(path: "../../Core/CacheKit"),
-        .package(path: "../../Core/LocalStore")
+        .package(path: "../../Core/LocalStore"),
+        .package(path: "../../Core/EmoteKit")
     ],
     targets: [
         .target(
@@ -41,7 +42,9 @@ let package = Package(
                 // (#971).
                 "CacheKit",
                 // The pins of the last viewports, on the device (#893).
-                "LocalStore"
+                "LocalStore",
+                // A text post's words on its Shop card, emotes animated (#1075).
+                "EmoteKit"
             ],
             // The world's borders (`CountryAtlas`), imported from Natural
             // Earth by `Scripts/import-country-borders.py`; the round flags

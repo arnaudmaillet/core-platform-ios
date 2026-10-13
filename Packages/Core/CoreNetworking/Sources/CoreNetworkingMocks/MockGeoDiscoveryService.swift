@@ -312,7 +312,7 @@ public final class MockGeoDiscoveryService: @unchecked Sendable {
     /// of something else. Under `.realAssets` it carries the `mock-kind=video`
     /// stamp that `GeoDiscoveryRepository.kind(for:)` matches on. A photo
     /// post's URL passes through untouched.
-    static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
+    public static func pinURL(forMediaURL url: String, catalog: MockSocialDataset.MediaCatalog) -> String {
         // ⚠️ A VIDEO POST'S MARKER SHOWS ITS OWN CLIP'S FIRST FRAME, and this
         // is the line that used to make that false.
         //

@@ -328,6 +328,30 @@ public final class WalletStore: @unchecked Sendable {
             public static let pointsPerShot = 100
             /// What a pack costs, in gems.
             public static let price = 50
+
+            /// One size of pack: its shots, its price. Server policy once
+            /// wallet.v1 sells several (backend #941); mock tiers until then.
+            public struct Tier: Equatable, Sendable, Identifiable {
+                public let id: String
+                public let shots: Int
+                public let price: Int
+
+                public init(id: String, shots: Int, price: Int) {
+                    self.id = id
+                    self.shots = shots
+                    self.price = price
+                }
+            }
+
+            /// The packs on sale, smallest first; bigger ones cost less a shot.
+            public static let tiers: [Tier] = [
+                Tier(id: "shots_3", shots: shots, price: price),
+                Tier(id: "shots_10", shots: 10, price: 150),
+                Tier(id: "shots_25", shots: 25, price: 325),
+            ]
+
+            /// The pack wallet.v1 sells today, and the one an older call buys.
+            public static var standard: Tier { tiers[0] }
         }
         /// The most of THIS viewer's points one post (or comment) can hold
         /// — spends past it are clamped to the remainder, and a full target
@@ -386,6 +410,8 @@ public final class WalletStore: @unchecked Sendable {
         static let gemsSpent = "wallet.gemsSpent"
         /// Shots left in the ×100 cartridge pack.
         static let stakeShots = "wallet.stakeShots"
+        /// Which pack (`Policy.StakePack.Tier.id`) those shots came from.
+        static let stakePackTier = "wallet.stakePackTier"
     }
 
     /// Fired after every balance-affecting change, on whatever thread made
@@ -447,7 +473,7 @@ public final class WalletStore: @unchecked Sendable {
             for key in [k(Key.balance), k(Key.lifetimeEarned), k(Key.lifetimeSpent), k(Key.lastClaimAt),
                         k(Key.claimedToday), k(Key.claimedTodayDay), k(Key.streakDays), k(Key.boostTotals),
                         k(Key.stakedAt), k(Key.seeded), k(Key.demoStakesSeeded), k(Key.gemsGranted), k(Key.gemsSpent),
-                        k(Key.stakeShots)] {
+                        k(Key.stakeShots), k(Key.stakePackTier)] {
                 defaults.removeObject(forKey: key)
             }
         }
@@ -552,6 +578,14 @@ public final class WalletStore: @unchecked Sendable {
     /// Shots left in the ×100 cartridge pack; 0 when none is active.
     public var stakeShots: Int {
         lock.withLock { defaults.integer(forKey: k(Key.stakeShots)) }
+    }
+
+    /// The pack the shots left came from; nil when none is loaded.
+    public var stakePackTierID: String? {
+        lock.withLock {
+            guard defaults.integer(forKey: k(Key.stakeShots)) > 0 else { return nil }
+            return defaults.string(forKey: k(Key.stakePackTier)) ?? Policy.StakePack.standard.id
+        }
     }
 
     /// Total points ever boosted into one post or comment, this device.
@@ -810,16 +844,17 @@ public final class WalletStore: @unchecked Sendable {
     /// for `Policy.StakePack.price` gems, all or nothing. Refused while the
     /// current pack still has shots — packs don't stack.
     @discardableResult
-    public func buyStakePack() -> WalletStakePackPurchase {
+    public func buyStakePack(_ tier: Policy.StakePack.Tier = Policy.StakePack.standard) -> WalletStakePackPurchase {
         let outcome: WalletStakePackPurchase = lock.withLock {
             let shots = defaults.integer(forKey: k(Key.stakeShots))
             guard shots == 0 else { return .packStillActive(shotsLeft: shots) }
             let gems = gemsLocked(at: now())
-            let price = Policy.StakePack.price
+            let price = tier.price
             guard gems >= price else { return .insufficientGems(needed: price, have: gems) }
             defaults.set(defaults.integer(forKey: k(Key.gemsSpent)) + price, forKey: k(Key.gemsSpent))
-            defaults.set(Policy.StakePack.shots, forKey: k(Key.stakeShots))
-            return .bought(shots: Policy.StakePack.shots, remainingGems: gems - price)
+            defaults.set(tier.shots, forKey: k(Key.stakeShots))
+            defaults.set(tier.id, forKey: k(Key.stakePackTier))
+            return .bought(shots: tier.shots, remainingGems: gems - price)
         }
         if case .bought = outcome { postDidChange() }
         return outcome

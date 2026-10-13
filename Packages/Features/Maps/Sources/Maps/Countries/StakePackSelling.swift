@@ -5,17 +5,20 @@ import Foundation
 /// A pack of SHOTS: each stakes `pointsPerShot` of the viewer's OWN points in
 /// one tap, where a plain stake commits the default amount. Gems buy the
 /// convenience, never points (charter V5.3 §34: B never becomes A).
-public struct StakePackOffer: Equatable, Sendable {
+public struct StakePackOffer: Equatable, Sendable, Identifiable {
+    /// Which pack (backend #941: `pack_id`).
+    public let id: String
     /// Shots in a fresh pack.
     public let shotsPerPack: Int
     /// Points one shot stakes.
     public let pointsPerShot: Int
     /// What a pack costs, in gems.
     public let price: Int
-    /// Shots left in the current pack; 0 = none active, a pack can be bought.
+    /// Shots left in THIS pack: 0 unless it is the one loaded.
     public let shotsLeft: Int
 
-    public init(shotsPerPack: Int, pointsPerShot: Int, price: Int, shotsLeft: Int) {
+    public init(id: String = "shots_3", shotsPerPack: Int, pointsPerShot: Int, price: Int, shotsLeft: Int) {
+        self.id = id
         self.shotsPerPack = shotsPerPack
         self.pointsPerShot = pointsPerShot
         self.price = price
@@ -42,6 +45,15 @@ public protocol StakePackSelling: AnyObject {
     /// The pack, as of now.
     var offer: StakePackOffer { get }
     func buyPack() -> StakePackPurchase
+    /// Every pack on sale, smallest first (backend #941). Packs don't stack:
+    /// while one is loaded, none can be bought.
+    var offers: [StakePackOffer] { get }
+    func buyPack(_ offer: StakePackOffer) -> StakePackPurchase
+}
+
+public extension StakePackSelling {
+    var offers: [StakePackOffer] { [offer] }
+    func buyPack(_ offer: StakePackOffer) -> StakePackPurchase { buyPack() }
 }
 
 public extension Notification.Name {

@@ -117,8 +117,7 @@ final class ForYouRailsView: UIView {
         /// Whole points, so every item's edges — and every offset a snap
         /// computes from them — fall on the pixel grid.
         static func itemWidth(forWidth width: CGFloat, perWidth: CGFloat) -> CGFloat {
-            let whole = perWidth.rounded(.down)
-            return max(0, ((width - sideMargin - whole * itemGap) / perWidth).rounded(.down))
+            ForYouRowSnap.itemWidth(forWidth: width, perWidth: perWidth, margin: sideMargin, gap: itemGap)
         }
 
         static func cardSize(forWidth width: CGFloat) -> CGSize {

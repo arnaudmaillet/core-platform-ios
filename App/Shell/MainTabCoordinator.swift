@@ -273,7 +273,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         applyBar(animated: false)
         tabBarController.delegate = self
         // The stake menu's way to the cartridge pack, from any screen.
-        tabBarController.makeStakeShopSheet = { [unowned container] in container.makeStakeShopSheet() }
+        tabBarController.makeStakeShopScreen = { [unowned container] in container.makeStakeShopScreen() }
         // A `@handle` tapped in a comment, a caption or a bio (#524).
         tabBarController.openMention = { [weak self] handle, source in self?.openMention(handle, from: source) }
         tabBarController.openHashtag = { [weak container] tag in container?.router.route(to: .hashtag(tag)) }

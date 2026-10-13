@@ -293,20 +293,33 @@ struct StakeShopTests {
         }
     }
 
-    /// Opened from a control on the root screen: the opener builds the Shop
-    /// and the top presenter presents it.
-    @Test func openingPresentsTheOpenersShop() throws {
-        let root = Opener()
+    /// Opened from a control on a screen: the opener builds the Shop and it
+    /// is PUSHED on that screen's stack — a screen of its own, not a sheet.
+    @Test func openingPushesTheOpenersShop() throws {
+        let opener = Opener()
+        let root = UINavigationController(rootViewController: opener)
         try hosting(root) {
             let control = UIButton()
-            root.view.addSubview(control)
+            opener.view.addSubview(control)
 
             let open = try #require(StakeShop.openAction(from: control))
             open()
 
-            #expect(root.built.count == 1)
-            #expect(root.presentedViewController === root.built.first)
+            #expect(opener.built.count == 1)
+            #expect(root.viewControllers.last === opener.built.first)
+            #expect(root.presentedViewController == nil)
         }
+    }
+
+    /// The stack a push goes on: a tab bar's selected tab's.
+    @Test func thePushGoesOnTheSelectedTabsStack() {
+        let first = UINavigationController(rootViewController: UIViewController())
+        let second = UINavigationController(rootViewController: UIViewController())
+        let tabs = UITabBarController()
+        tabs.viewControllers = [first, second]
+        tabs.selectedIndex = 1
+        #expect(StakeShop.navigation(in: tabs) === second)
+        #expect(StakeShop.navigation(in: first.viewControllers[0]) === first)
     }
 
     /// An opener that sells nothing presents nothing.

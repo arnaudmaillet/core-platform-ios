@@ -19,9 +19,9 @@ import UIKit
 final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberGateProviding, TextEntityOpening {
     /// Called after every layout pass.
     var onLayout: (() -> Void)?
-    /// Builds the Shop on its Boosts (`AppContainer.makeStakeShopSheet`);
+    /// Builds the Shop on its Boosts (`AppContainer.makeStakeShopScreen`);
     /// nil, or nil answered, sells no packs.
-    var makeStakeShopSheet: (() -> UIViewController?)?
+    var makeStakeShopScreen: (() -> UIViewController?)?
     /// The app's one gate (`AppContainer.memberGate`), set by the shell before
     /// any screen can ask for it.
     var memberGate: any MemberGating = MemberGate()
@@ -41,7 +41,7 @@ final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberG
     }
 
     func makeStakeShop() -> UIViewController? {
-        makeStakeShopSheet?()
+        makeStakeShopScreen?()
     }
 
     /// Opens a tapped `@handle` and a tapped `#tag` (#524), set by the shell.

@@ -9,9 +9,7 @@ import CoreNavigation
 ///
 /// ```
 ///  ┌──────────────────────────────────────┐
-///  │               ▔▔                     │
-///  │ (◆ 100)        Shop             (✕)  │
-///  │ 🔍 Search countries                  │
+///  │ (‹)            Shop          (◆ 100) │
 ///  │ Boosts                               │
 ///  │ (⚡) ×100 cartridges           [◆ 50] │  ← or "Active — 2 left"
 ///  │      3 shots · 100 points a tap      │
@@ -23,6 +21,7 @@ import CoreNavigation
 ///  │ Locked 234                           │
 ///  │ 🇪🇸 Spain                             │
 ///  │    #4 · ♥ 12.4K · 86 posts    [◆ 50] │
+///  │ ( 🔍 Search countries              ) │  ← the toolbar's
 ///  └──────────────────────────────────────┘
 /// ```
 ///
@@ -56,21 +55,19 @@ import CoreNavigation
 /// The collection view is the sheet's whole content, edge to edge, and a
 /// PLAIN list: rows run the sheet's full width on its standard margins, with
 /// inset separators — no inset-grouped card around each section, whose own
-/// margins doubled the sheet's (2026-10-01). The bar — gems on the left, the
-/// title, the close button on the right — and the search field float over
+/// margins doubled the sheet's (2026-10-01). The bar — the back button, the
+/// title, the gems on the right — and the search field float over
 /// it, and the rows passing under them soften into UIKit's own SOFT top edge
 /// effect: a progressive blur, the one exception (with the notifications
 /// drawer and the sound sheet's gallery) to the app's bare headers
 /// (`prefersClearTopEdge`), asked for on 2026-10-01. The bar items are plain
 /// bar items, so the system draws their glass.
 ///
-/// # Collapsed, then full
-/// The sheet opens at `.medium()` — the progress block and the first rows —
-/// and grows to `.large()` by a drag or by scrolling the list up
-/// (`prefersScrollingExpandsWhenScrolledToEdge`). A system detent, not a
-/// measured one: the list is long and the cut row is the cue to scroll, so
-/// there is nothing to measure. Searching grows it to large, where the
-/// keyboard leaves room for results.
+/// # A pushed screen
+/// Countries' See all under the storefront (#1075), pushed with no tab bar:
+/// the back button, the gems on the right, and the system's search field at
+/// the BOTTOM, in the toolbar (owner, 2026-10-13 — it was a sheet with a
+/// close button and the field under the title).
 public final class CountryShopViewController: UIViewController {
     /// Shows a country on the map. Nil hides the "show" half of a row's tap.
     public var onShowCountry: ((String) -> Void)?
@@ -99,7 +96,6 @@ public final class CountryShopViewController: UIViewController {
     /// Stable identifiers for the bar items: a reused identifier is how
     /// iOS 26 matches an item across a reinstall.
     static let balanceItemIdentifier = "shop.balance"
-    static let closeItemIdentifier = "shop.close"
 
     private let access: any CountryAccess
     /// What Boosts sells; nil shows no Boosts section.
@@ -118,39 +114,32 @@ public final class CountryShopViewController: UIViewController {
         self.atlas = atlas
         super.init(nibName: nil, bundle: nil)
         title = CountryShopEntry.title
+        hidesBottomBarWhenPushed = true
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The shop in its own navigation stack, as a sheet that opens collapsed
-    /// and drags to full height (see the type's note).
-    public static func sheet(
+    /// The Shop: the storefront (#1075), PUSHED on the stack it is opened
+    /// from — a screen of its own with a back button and no tab bar, not a
+    /// sheet (owner, 2026-10-13). The country list is its Countries See all.
+    public static func storefront(
         access: any CountryAccess, stakePacks: (any StakePackSelling)? = nil,
         focus: Focus? = nil,
+        media: ShopMedia? = nil,
         onShowCountry: ((String) -> Void)? = nil
     ) -> UIViewController {
-        let shop = CountryShopViewController(access: access, stakePacks: stakePacks)
+        let shop = ShopStorefrontViewController(access: access, stakePacks: stakePacks, media: media)
         shop.focus = focus
         shop.onShowCountry = onShowCountry
-        let navigation = UINavigationController(rootViewController: shop)
-        navigation.modalPresentationStyle = .pageSheet
-        if let sheet = navigation.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
-            sheet.selectedDetentIdentifier = .medium
-            sheet.prefersGrabberVisible = true
-            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
-        }
-        return navigation
+        return shop
     }
 
     override public func viewDidLoad() {
         super.viewDidLoad()
-        // ⚠️ CLEAR: the sheet's own ground is the surface — glass while
-        // collapsed, opaque once full height — exactly as the wallet sheet.
-        // A grouped colour here sat over the glass and defeated it (the
-        // collapsed Shop was a flat grey slab, 2026-09-28).
-        view.backgroundColor = .clear
+        // A pushed screen's own ground (it was a sheet's glass until
+        // 2026-10-13).
+        view.backgroundColor = .systemBackground
         navigationItem.largeTitleDisplayMode = .never
 
         let search = UISearchController(searchResultsController: nil)
@@ -160,16 +149,11 @@ public final class CountryShopViewController: UIViewController {
         search.searchBar.placeholder = "Search countries"
         navigationItem.searchController = search
         navigationItem.hidesSearchBarWhenScrolling = false
-        // Left automatic, iOS 26 hands an iPhone sheet the bottom-aligned
-        // search bar; `.stacked` keeps it under the title.
-        navigationItem.preferredSearchBarPlacement = .stacked
-
-        let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
-            self?.close()
-        })
-        close.identifier = Self.closeItemIdentifier
-        close.accessibilityIdentifier = Self.closeItemIdentifier
-        navigationItem.rightBarButtonItem = close
+        // The field at the BOTTOM, the system's own (owner, 2026-10-13): iOS
+        // 26 puts an integrated search in the toolbar, where the thumb is.
+        navigationItem.preferredSearchBarPlacement = .integrated
+        navigationItem.searchBarPlacementAllowsToolbarIntegration = true
+        toolbarItems = [navigationItem.searchBarPlacementBarButtonItem]
 
         // The whole sheet: the bar and the search field float over it.
         collectionView.backgroundColor = .clear
@@ -426,6 +410,10 @@ public final class CountryShopViewController: UIViewController {
     /// whose measured host is what receives the taps (the hand-made host this
     /// replaced). With a `menu`, the tap raises it.
     private func priceButton(price: Int, accessibilityLabel: String, menu: UIMenu? = nil) -> AppButton {
+        Self.priceButton(price: price, accessibilityLabel: accessibilityLabel, menu: menu)
+    }
+
+    static func priceButton(price: Int, accessibilityLabel: String, menu: UIMenu? = nil) -> AppButton {
         let button = AppButton(
             aspect: .pill(.tinted), size: .row,
             content: AppButton.Content(title: price.formatted(), symbol: "diamond.fill")
@@ -483,14 +471,22 @@ public final class CountryShopViewController: UIViewController {
     /// account that may not buy (a teen, #803) keeps the button and reads why
     /// in the menu.
     private func packPriceButton(_ offer: StakePackOffer) -> AppButton {
+        Self.packPriceButton(offer, access: access) { [weak self] in
+            guard let self else { return }
+            MemberGates.perform(.shop, from: self) { [weak self] in self?.buyStakePack() }
+        }
+    }
+
+    /// The pack's price and its confirmation menu, for every screen that
+    /// sells it (the list's row, the storefront's card, the pack's page).
+    static func packPriceButton(
+        _ offer: StakePackOffer, access: any CountryAccess, buy confirmed: @escaping @MainActor () -> Void
+    ) -> AppButton {
         let gems = access.gems
         let buy = UIAction(
             title: "Buy for \(offer.price) gems",
             image: GemSymbol.glyphImage()
-        ) { [weak self] _ in
-            guard let self else { return }
-            MemberGates.perform(.shop, from: self) { [weak self] in self?.buyStakePack() }
-        }
+        ) { _ in confirmed() }
         if access.purchasesRestricted {
             buy.attributes = .disabled
             buy.subtitle = PurchaseRestriction.message
@@ -510,23 +506,32 @@ public final class CountryShopViewController: UIViewController {
         return button
     }
 
+    /// Buys the pack from `presenter`, saying why a refusal refused.
+    @discardableResult
+    static func buyStakePack(
+        _ offer: StakePackOffer? = nil,
+        from stakePacks: any StakePackSelling, access: any CountryAccess, presenter: UIViewController
+    ) -> StakePackPurchase? {
+        guard !access.purchasesRestricted else { return nil }
+        let outcome = offer.map { stakePacks.buyPack($0) } ?? stakePacks.buyPack()
+        if let refusal = refusalMessage(for: outcome) {
+            Feedback.failure(refusal, from: presenter)
+        } else {
+            HapticNotification().notificationOccurred(.success)
+        }
+        return outcome
+    }
+
     /// Buys the pack. Internal for tests — the confirmation menu cannot be
     /// raised in one.
     @discardableResult
     func buyStakePack() -> StakePackPurchase? {
-        guard let stakePacks, !access.purchasesRestricted else { return nil }
-        let outcome = stakePacks.buyPack()
-        if let refusal = Self.refusalMessage(for: outcome) {
-            // A refusal says WHY (#803): it used to be a vibration with no
-            // words, which reads as a tap that missed. The failure toast
-            // carries the error haptic.
-            Feedback.failure(refusal, from: self)
-        } else {
-            // Bought: the row turns into "Active — N left" on the spot, so
-            // the hand only needs to feel it.
-            HapticNotification().notificationOccurred(.success)
-        }
-        return outcome
+        // A refusal says WHY (#803): a vibration with no words reads as a
+        // tap that missed; the failure toast carries the error haptic. Bought,
+        // the row turns into "Active — N left" on the spot, so the hand only
+        // needs to feel it.
+        guard let stakePacks else { return nil }
+        return Self.buyStakePack(from: stakePacks, access: access, presenter: self)
     }
 
     /// Why the store refused a pack, in the toast's words — nil when it was
@@ -545,14 +550,44 @@ public final class CountryShopViewController: UIViewController {
 
     private func flag(for country: CountryAtlas.Country) -> UIImage {
         if let image = flags[country.code] { return image }
+        let image = Self.flagImage(for: country, pointSize: 28)
+        flags[country.code] = image
+        return image
+    }
+
+    /// A country's flag emoji drawn as an image of `pointSize`.
+    static func flagImage(for country: CountryAtlas.Country, pointSize: CGFloat, trimmed: Bool = false) -> UIImage {
         let text = country.flag as NSString
-        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: 28)]
+        let attributes: [NSAttributedString.Key: Any] = [.font: UIFont.systemFont(ofSize: pointSize)]
         let size = text.size(withAttributes: attributes)
         let image = UIGraphicsImageRenderer(size: size).image { _ in
             text.draw(at: .zero, withAttributes: attributes)
         }
-        flags[country.code] = image
-        return image
+        return trimmed ? trimmingTransparentEdges(of: image) : image
+    }
+
+    /// The image cropped to its drawn pixels: an emoji's glyph carries side
+    /// bearings, which read as a gap too wide beside a name (owner, 2026-10-13).
+    static func trimmingTransparentEdges(of image: UIImage) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+        let width = cgImage.width, height = cgImage.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var minX = width, minY = height, maxX = -1, maxY = -1
+        for y in 0..<height {
+            for x in 0..<width where pixels[(y * width + x) * 4 + 3] > 8 {
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY,
+              let cropped = cgImage.cropping(to: CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1))
+        else { return image }
+        return UIImage(cgImage: cropped, scale: image.scale, orientation: .up)
     }
 
     /// The offer the map makes, over the shop.
@@ -561,10 +596,16 @@ public final class CountryShopViewController: UIViewController {
     /// is active, the search controller is the shop's presented controller,
     /// and presenting from under it fails ("already presenting").
     private func offer(_ country: CountryAtlas.Country) {
+        Self.offer(country, access: access, from: self)
+    }
+
+    /// The unlock sheet — a country's item page — over the top of what
+    /// `host` presents.
+    static func offer(_ country: CountryAtlas.Country, access: any CountryAccess, from host: UIViewController) {
         // The search keeps its results but lets the keyboard go: it would
         // stand over the offer's button.
-        navigationItem.searchController?.searchBar.resignFirstResponder()
-        var presenter: UIViewController = navigationController ?? self
+        host.navigationItem.searchController?.searchBar.resignFirstResponder()
+        var presenter: UIViewController = host.navigationController ?? host
         while let next = presenter.presentedViewController, !next.isBeingDismissed { presenter = next }
         guard !((presenter as? UINavigationController)?.viewControllers.first is CountryUnlockSheetViewController)
         else { return }
@@ -573,14 +614,15 @@ public final class CountryShopViewController: UIViewController {
         )
     }
 
-    /// The close button. From the PRESENTER: on the shop itself `dismiss`
-    /// would take down only an active search.
-    private func close() {
-        if let presenter = navigationController?.presentingViewController {
-            presenter.dismiss(animated: true)
-        } else {
-            dismiss(animated: true)
-        }
+    override public func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        // The toolbar carries the search field; it leaves with this screen.
+        navigationController?.setToolbarHidden(false, animated: animated)
+    }
+
+    override public func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        navigationController?.setToolbarHidden(true, animated: animated)
     }
 
     @objc private func accessChanged() {
@@ -588,7 +630,7 @@ public final class CountryShopViewController: UIViewController {
         apply(animated: true)
     }
 
-    /// The gem balance on the bar's LEFT: a cyan diamond and the count, in the
+    /// The gem balance on the bar's RIGHT: a cyan diamond and the count, in the
     /// glass the system draws behind any bar item.
     ///
     /// ⚠️ AN IMAGE VIEW, NOT A TEXT ATTACHMENT: bar items sit on glass, which
@@ -598,10 +640,17 @@ public final class CountryShopViewController: UIViewController {
     /// identifier: a reused custom-view item keeps a wrapper sized for the
     /// old count.
     private func installBalance() {
+        // Trailing, where a sheet had its close button: the back button
+        // leads (owner, 2026-10-13).
+        navigationItem.rightBarButtonItem = Self.balanceItem(gems: access.gems)
+    }
+
+    /// The gems balance as a bar item: a cyan diamond and the count.
+    static func balanceItem(gems: Int) -> UIBarButtonItem {
         let diamond = UIImageView(image: GemSymbol.glyphImage(.init(pointSize: 14, weight: .bold)))
         diamond.tintColor = GemSymbol.tint
         let count = UILabel()
-        count.text = access.gems.formatted()
+        count.text = gems.formatted()
         count.font = .scaledMonospacedDigitSystemFont(
             ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20
         )
@@ -612,13 +661,13 @@ public final class CountryShopViewController: UIViewController {
         balance.isLayoutMarginsRelativeArrangement = true
         balance.directionalLayoutMargins = .init(top: 0, leading: Spacing.sm, bottom: 0, trailing: Spacing.sm)
         balance.isAccessibilityElement = true
-        balance.accessibilityLabel = "\(access.gems) gems"
+        balance.accessibilityLabel = "\(gems) gems"
         let fitted = balance.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
         balance.frame.size = CGSize(width: ceil(fitted.width), height: 36)
         let item = UIBarButtonItem(customView: balance)
-        item.identifier = Self.balanceItemIdentifier
-        item.accessibilityLabel = "\(access.gems) gems"
-        navigationItem.leftBarButtonItem = item
+        item.identifier = balanceItemIdentifier
+        item.accessibilityLabel = "\(gems) gems"
+        return item
     }
 
     /// The list's appearance — plain: rows the sheet's full width.
@@ -683,13 +732,6 @@ extension CountryShopViewController: UISearchResultsUpdating, UISearchController
         apply(animated: false)
     }
 
-    /// Searching grows the sheet to full height: at medium, the keyboard
-    /// would leave the results a strip.
-    public func willPresentSearchController(_ searchController: UISearchController) {
-        guard let sheet = navigationController?.sheetPresentationController,
-              sheet.selectedDetentIdentifier != .large else { return }
-        sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
-    }
 }
 
 /// A country's row: flag, name, and "#rank · ♥ likes · posts" under it; the
