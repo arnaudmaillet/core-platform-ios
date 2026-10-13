@@ -24,8 +24,8 @@ import UIKit
 /// styles, highlight tinting, accessibility, actions — is UIKit's.
 ///
 /// Only the profile header's Follow wears it now: the person rows (relation
-/// lists, the inbox's Requests and Suggestions) moved to `RowActionButton`,
-/// UIKit's press and a cross-fade (#885).
+/// lists, the inbox's Requests and Suggestions) moved to `AppButton` (#932),
+/// and the header follows with #933.
 open class MorphingButton: UIButton {
     /// How long a whole morph takes: blur in, swap, blur out.
     public static let morphDuration: TimeInterval = 0.36
