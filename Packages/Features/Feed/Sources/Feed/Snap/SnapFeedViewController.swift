@@ -109,7 +109,21 @@ final class SnapFeedViewController: UIViewController {
     /// still exposes no save API — but the profile now has a Saved tab, and two
     /// surfaces reading one list is precisely what a store is for. See
     /// `PostBookmarkStore` for what a client-owned list can and cannot claim.
-    private let bookmarks = PostBookmarkStore.shared
+    /// The app's one (`shared`) outside tests.
+    private let bookmarks: PostBookmarkStore
+    /// Keeps the save glyph on the saved fact of the post it draws (#1067):
+    /// a save or unsave made on another surface — a card, a grid behind a
+    /// sheet, the post's "..." elsewhere — writes the EntityStore's fact
+    /// (`PostBookmarkStore`), and the glyph draws it at once: the cards'
+    /// mechanism (`PostCardStaking`). One observation for the screen's life,
+    /// filtered to `bookmarkGlyphPostID`: it ends with the screen, and a page
+    /// paged away from is never the one it re-draws.
+    private var savedObservation: EntityObservation?
+    /// The post whose saved state the glyph draws — the page the bars last
+    /// settled on. Nil before the first.
+    private var bookmarkGlyphPostID: PostID?
+    /// The glyph's symbol as last drawn.
+    private var drawnBookmarkSymbol = "bookmark"
 
     /// The viewer's point balance, spent by the rail's boost anchor.
     ///
@@ -469,6 +483,7 @@ final class SnapFeedViewController: UIViewController {
         followRelations: (any SocialGraphReading)? = nil,
         followEvents: FollowGraphEvents? = nil,
         entities: EntityStore = EntityStore(),
+        bookmarks: PostBookmarkStore = .shared,
         soundProvider: (any PostSoundProviding)? = nil,
         useSound: (@MainActor (PostSound) -> Void)? = nil,
         openFeedHero: (@MainActor ([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)? = nil,
@@ -490,7 +505,16 @@ final class SnapFeedViewController: UIViewController {
         self.makeWalletSheet = makeWalletSheet
         self.reporting = reporting
         self.followStore = SnapAuthorFollowStore(writer: socialGraph, reader: followRelations, entities: entities)
+        self.bookmarks = bookmarks
         super.init(nibName: nil, bundle: nil)
+        savedObservation = entities.observePosts { [weak self] change in
+            guard let self, let id = self.bookmarkGlyphPostID, change.contains(id) else { return }
+            // The post's counts move here too (a realtime tick): only a
+            // changed save re-draws.
+            let saved = self.bookmarks.isSaved(id.rawValue)
+            guard Self.bookmarkSymbol(saved: saved) != self.drawnBookmarkSymbol else { return }
+            self.refreshBookmarkGlyph(for: id)
+        }
         followStore.onRelationChange = { [weak self] author in
             guard let self else { return }
             // The pill's badge is part of what a pair of pages draws: a cached
@@ -921,6 +945,8 @@ final class SnapFeedViewController: UIViewController {
     /// ONCE PER LAUNCH, not per feed: a feed opened from the sheet's own grid
     /// ran the hook again and stacked a second sheet over it.
     private static var didDebugSoundSheet = false
+    /// Once per launch, like the sound sheet's.
+    private static var didDebugSaveElsewhere = false
     private weak var debugPresentedSoundSheet: SoundSheetViewController?
 
     private func runDebugAppearanceHooks() {
@@ -1089,6 +1115,23 @@ final class SnapFeedViewController: UIViewController {
                 let cell = self.collectionView.visibleCells
                     .compactMap { $0 as? SnapFeedCell }.first
                 self.performBoostUndo(on: self.orderedIDs[index], feedbackCell: cell)
+            }
+        }
+        // `-save-elsewhere [seconds]` (#1067): toggles the active post's save
+        // `seconds` (default 3) after appearing THROUGH THE APP'S PILE, as a
+        // card or a grid saves — never this screen's own toggle, which draws
+        // its glyph itself. Only the saved fact's observation can redraw the
+        // glyph; the log line reads it back right after the write.
+        if !Self.didDebugSaveElsewhere, let position = arguments.firstIndex(of: "-save-elsewhere") {
+            Self.didDebugSaveElsewhere = true
+            let delay = arguments.indices.contains(position + 1) ? Double(arguments[position + 1]) ?? 3 : 3
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                QAWait.until("-save-elsewhere", { [weak self] in self?.activeModel != nil }) { [weak self] in
+                    guard let self, let id = self.activeModel?.id else { return }
+                    let before = self.drawnBookmarkSymbol
+                    let saved = PostBookmarkStore.shared.toggle(id.rawValue)
+                    print("[qa] -save-elsewhere: \(id.rawValue) saved=\(saved) glyph \(before) -> \(self.drawnBookmarkSymbol)")
+                }
             }
         }
         // `-snap-scroll-demo`: animated-scrolls one page forward shortly
@@ -2150,18 +2193,32 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
-    /// Points the bookmark glyph at `id`'s state — called on toggle and when
-    /// the active page changes.
-    private func refreshBookmarkGlyph(for id: PostID) {
+    /// Points the bookmark glyph at `id`'s state — called on toggle, when
+    /// the active page changes, and when the saved fact of the post it draws
+    /// changes anywhere (`savedObservation`).
+    func refreshBookmarkGlyph(for id: PostID) {
+        bookmarkGlyphPostID = id
         let saved = bookmarks.isSaved(id.rawValue)
+        drawnBookmarkSymbol = Self.bookmarkSymbol(saved: saved)
         // The label follows the state, like the glyph: "Save" and "Saved" are
         // different offers, and a reader who cannot see the fill has only this.
         bookmarkButton.accessibilityLabel = saved ? "Saved" : "Save"
         var config = bookmarkButton.configuration
-        config?.image = UIImage(systemName: saved ? "bookmark.fill" : "bookmark")?
+        config?.image = UIImage(systemName: drawnBookmarkSymbol)?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
         bookmarkButton.configuration = config
     }
+
+    static func bookmarkSymbol(saved: Bool) -> String {
+        saved ? "bookmark.fill" : "bookmark"
+    }
+
+    #if DEBUG
+    /// The save glyph as drawn: its symbol and its spoken label.
+    var debugBookmarkGlyph: (symbol: String, label: String?) {
+        (drawnBookmarkSymbol, bookmarkButton.accessibilityLabel)
+    }
+    #endif
 
     // MARK: - Toolbar visibility
 
