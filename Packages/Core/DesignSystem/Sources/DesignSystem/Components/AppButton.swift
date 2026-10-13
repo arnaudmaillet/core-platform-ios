@@ -135,8 +135,8 @@ open class AppButton: UIButton {
         public static let appearScale: CGFloat = 0.6
         public static let appearDuration: TimeInterval = 0.42
         public static let disappearDuration: TimeInterval = 0.24
-        /// The content change: blur out, swap, unblur in — `MorphingButton`'s
-        /// 0.36 s (`AppButtonTests` holds the two equal).
+        /// The content change: blur out, swap, unblur in (the 0.36 s the
+        /// profile's Follow morphed in before it became this button).
         public static let morphDuration: TimeInterval = 0.36
         /// A fade: the state tint, the Reduce Motion fallbacks.
         public static let fadeDuration: TimeInterval = 0.22
@@ -802,12 +802,17 @@ open class AppButton: UIButton {
     private var explicitAccessibilityLabel: String?
 
     override open var accessibilityLabel: String? {
-        get { explicitAccessibilityLabel ?? content.title ?? super.accessibilityLabel }
+        get {
+            // A placeholder has no answer to name.
+            guard phase != .placeholder else { return nil }
+            return explicitAccessibilityLabel ?? content.title ?? super.accessibilityLabel
+        }
         set { explicitAccessibilityLabel = newValue }
     }
 
     private func refreshAccessibility() {
-        isAccessibilityElement = true
+        // A placeholder claims no answer — not even to VoiceOver (#933).
+        isAccessibilityElement = phase != .placeholder
         var traits: UIAccessibilityTraits = .button
         if isToggle { traits.insert(.toggleButton) }
         if isSelected { traits.insert(.selected) }

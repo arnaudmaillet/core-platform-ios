@@ -97,16 +97,25 @@ final class ProfileHeaderView: UIView {
     /// tile of the gallery below counts. Was "Reactions" beside a "Views"
     /// total until 2026-09-30.
     private let likesStat = ProfileStatView(caption: "Likes")
-    private let messageButton = UIButton(configuration: .filled())
-    private let editButton = UIButton(configuration: .filled())
-    /// Morphs between Follow, Following and Requested (#726): the content
-    /// through a blur, the capsule on a spring, a native press.
-    private let followButton = MorphingButton(configuration: .filled())
+    /// The tray is the app's button (#933): quiet capsules and bubbles, one
+    /// press each (#866), never glass.
+    private let messageButton = AppButton(aspect: .pill(.quiet), size: .header, content: .title("Message"))
+    private let editButton = AppButton(aspect: .pill(.quiet), size: .header, content: .title("Edit Profile"))
+    /// Follow is the one prominent capsule; Following and Requested are its
+    /// selected, quiet state. Between them the words and the ground swap
+    /// under one blur, the capsule springs to its width (#726, #931), and
+    /// while the relationship is unread it is the button's placeholder.
+    private let followButton: AppButton = {
+        let button = AppButton(aspect: .pill(.prominent), size: .header, content: .title("Follow"))
+        button.isToggle = true
+        button.reservedContents = [.title("Follow"), .title("Following"), .title("Requested")]
+        return button
+    }()
     /// What the capsule last showed, so a change of state morphs and a first
     /// answer simply lands.
     private var shownFollowState: ProfileViewModel.FollowButton?
-    private let qrCodeButton = UIButton(configuration: .filled())
-    private let moreButton = UIButton(configuration: .filled())
+    private let qrCodeButton = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("qrcode"))
+    private let moreButton = AppButton(aspect: .pill(.quiet), size: .icon, content: .symbol("ellipsis"))
     private var columnTopConstraint: NSLayoutConstraint?
 
     /// Pins the banner's top to the scroll viewport's top edge (required,
@@ -458,7 +467,7 @@ final class ProfileHeaderView: UIView {
     var debugBannerShowsBlur: Bool { bannerView.debugShowsBlur }
     var debugBannerRampTone: UIColor { bannerView.debugRampTone }
     var debugBannerShowsRamp: Bool { bannerView.debugShowsRamp }
-    var debugTrayButtons: [UIButton] {
+    var debugTrayButtons: [AppButton] {
         [followButton, messageButton, editButton, qrCodeButton, moreButton]
     }
     /// The banner's fade, in the HEADER's coordinates — the banner's at
@@ -776,34 +785,41 @@ final class ProfileHeaderView: UIView {
     /// call to action.
     func configureAction(_ state: ProfileViewModel.FollowButton) {
         layoutRevision += 1
+        // A tray already showing a state changes on screen: what comes in
+        // bounces in, what goes scales out (#931). A first answer lands.
+        let onScreen = shownFollowState != nil && window != nil
         defer { shownFollowState = state }
         switch state {
         case .follow, .following, .requested:
-            followButton.isHidden = false
-            var config = Self.capsule(prominent: state == .follow)
-            config.title = switch state {
+            let title = switch state {
             case .follow: "Follow"
             case .requested: "Requested"
             default: "Following"
             }
             let changes = [.follow, .following, .requested].contains(shownFollowState) && shownFollowState != state
-            followButton.morph(to: config, animated: changes)
-            followButton.accessibilityLabel = config.title
+            if followButton.phase == .placeholder {
+                // The read landed: the bone fades into the answer.
+                followButton.setContent(.title(title), selected: state != .follow, animated: false)
+                followButton.setPhase(.content, animated: onScreen)
+            } else {
+                followButton.setContent(.title(title), selected: state != .follow, animated: changes)
+            }
+            followButton.accessibilityLabel = title
             // Tapping Requested withdraws it; say so to VoiceOver.
             followButton.accessibilityHint = state == .requested ? "Withdraws your follow request." : nil
-            followButton.isUserInteractionEnabled = true
-            followButton.isAccessibilityElement = true
-            messageButton.isHidden = false
-            editButton.isHidden = true
+            show(followButton, true, animated: onScreen)
+            show(messageButton, true, animated: onScreen)
+            show(editButton, false, animated: onScreen)
         case .edit:
-            followButton.isHidden = true
-            messageButton.isHidden = true
-            editButton.isHidden = false
+            show(followButton, false, animated: onScreen)
+            show(messageButton, false, animated: onScreen)
+            show(editButton, true, animated: onScreen)
         case .unavailable:
             // No Follow where following is impossible (#726); Message stays.
-            followButton.isHidden = true
-            messageButton.isHidden = false
-            editButton.isHidden = true
+            followButton.setPhase(.content, animated: false)
+            show(followButton, false, animated: onScreen)
+            show(messageButton, true, animated: onScreen)
+            show(editButton, false, animated: onScreen)
         case .hidden:
             // ⚠️ NOT YET KNOWN IS NOT "FOLLOW". The capsule used to open on a
             // prominent Follow — "the statistical prior" — and a followed
@@ -814,16 +830,24 @@ final class ProfileHeaderView: UIView {
             // already right, and nothing on it claims an answer it does not
             // have. The push never waits for the answer (#778): this holds
             // the slot until the read lands.
-            followButton.isHidden = false
-            var config = Self.capsule(prominent: false)
-            config.title = "Following"
-            config.baseForegroundColor = .clear
-            followButton.configuration = config
+            // It is the button's PLACEHOLDER (#933): a bone as wide as the
+            // widest answer, inert, hidden from VoiceOver.
             followButton.accessibilityLabel = nil
-            followButton.isUserInteractionEnabled = false
-            followButton.isAccessibilityElement = false
-            messageButton.isHidden = false
-            editButton.isHidden = true
+            followButton.setPhase(.placeholder, animated: false)
+            show(followButton, true, animated: false)
+            show(messageButton, true, animated: onScreen)
+            show(editButton, false, animated: onScreen)
+        }
+    }
+
+    /// Shows or hides one of the tray's buttons — through its own motion when
+    /// the tray changes on screen, at once otherwise.
+    private func show(_ button: AppButton, _ shown: Bool, animated: Bool) {
+        guard button.isHidden == shown else { return }
+        if shown {
+            button.appear(animated: animated)
+        } else {
+            button.disappear(animated: animated)
         }
     }
 
@@ -831,12 +855,13 @@ final class ProfileHeaderView: UIView {
     /// What the relationship capsule currently says — nil while it is the
     /// blank placeholder or hidden. For tests and QA probes.
     var debugFollowTitle: String? {
-        guard !followButton.isHidden, followButton.isUserInteractionEnabled else { return nil }
-        return followButton.configuration?.title
+        guard !followButton.isHidden, followButton.phase == .content else { return nil }
+        return followButton.content.title
     }
     var debugFollowIsProminent: Bool {
-        followButton.configuration?.baseBackgroundColor != Self.trayFill
+        followButton.phase == .content && followButton.currentGround == .prominent
     }
+    var debugFollowButton: AppButton { followButton }
     var debugIsRedacted: Bool { isRedacted }
     var debugHasAvatarPicture: Bool { avatarView.image != nil }
     #endif
@@ -988,12 +1013,9 @@ final class ProfileHeaderView: UIView {
         redactionBones = [avatarBone, nameBone, handleBone, bioFirst, bioSecond, websiteBone]
     }
 
-    /// The tray's buttons — DesignSystem's `HeroTray`, shared with the place
-    /// page's tray: a prominent or quiet flat capsule, a bubble, and the
-    /// opaque grey of the quiet ones (see `HeroTray` for why flat and opaque).
-    private static func capsule(prominent: Bool) -> UIButton.Configuration { HeroTray.capsule(prominent: prominent) }
+    /// The quiet buttons' opaque grey — `HeroTray.fill`, which `AppButton`'s
+    /// quiet ground wears (see `HeroTray` for why flat and opaque).
     static let trayFill = HeroTray.fill
-    private static func bubble(systemImage: String) -> UIButton.Configuration { HeroTray.bubble(systemImage: systemImage) }
 
     private func loadAvatar(_ url: URL?) {
         guard url != currentAvatarURL || avatarView.image == nil else { return }
@@ -1168,9 +1190,6 @@ final class ProfileHeaderView: UIView {
             for: .primaryActionTriggered
         )
 
-        var messageConfig = Self.capsule(prominent: false)
-        messageConfig.title = "Message"
-        messageButton.configuration = messageConfig
         messageButton.isHidden = true
         messageButton.addAction(
             UIAction { [weak self] _ in self?.onMessageTapped?() },
@@ -1180,35 +1199,24 @@ final class ProfileHeaderView: UIView {
         // Edit Profile: the own-profile action, a quiet capsule sharing the
         // leading slot with Message (never both shown). Same capsule styling as
         // Message so the two read as one action affordance beside the avatar.
-        var editConfig = Self.capsule(prominent: false)
-        editConfig.title = "Edit Profile"
-        editButton.configuration = editConfig
         editButton.isHidden = true
         editButton.addAction(
             UIAction { [weak self] _ in self?.onEditTapped?() },
             for: .primaryActionTriggered
         )
 
-        qrCodeButton.configuration = Self.bubble(systemImage: "qrcode")
+        qrCodeButton.accessibilityLabel = "QR code"
         qrCodeButton.addAction(
             UIAction { [weak self] _ in self?.onQRCodeTapped?() },
             for: .primaryActionTriggered
         )
-        moreButton.configuration = Self.bubble(systemImage: "ellipsis")
         moreButton.accessibilityLabel = "More actions"
         // The menu IS the primary action — one tap opens it, no intermediate
         // callback. The controller supplies the content (see `setMoreMenu`).
         moreButton.showsMenuAsPrimaryAction = true
-        // The app's one press (`PressFeedback`): the tray's controls give a
-        // little under the finger like every card control does. Their system
-        // highlight is the dim, so only the shrink is added; silent — the
-        // action answers.
-        //
-        // ⚠️ NOT the Follow button: a `MorphingButton` carries this very press
-        // already, and a second one stacked two shrinks on one finger (#866).
-        for button in [messageButton, editButton, qrCodeButton, moreButton] {
-            PressFeedback.attach(to: button, sound: nil)
-        }
+        // ⚠️ NO PRESS ATTACHED HERE: every `AppButton` carries the app's one
+        // press already, and a second one stacked two shrinks on one finger
+        // (#866).
 
         // The Liquid Glass tray, split composition: the leading capsule
         // (Message for others, Edit Profile for the viewer) leads the identity

@@ -71,10 +71,6 @@ struct AppButtonTests {
         #expect(icon.intrinsicContentSize == CGSize(width: 44, height: 44))
     }
 
-    @Test func theMorphMatchesMorphingButtons() {
-        #expect(AppButton.Metrics.morphDuration == MorphingButton.morphDuration)
-    }
-
     // MARK: - Hit region
 
     @Test(arguments: AppButton.Size.allCases)
@@ -185,6 +181,7 @@ struct AppButtonTests {
         #expect(button.configuration?.image == nil)
         #expect(!button.acceptsTaps, "a placeholder is inert")
         #expect(button.accessibilityValue == nil)
+        #expect(!button.isAccessibilityElement, "a placeholder is spoken")
 
         button.setContent(.title("Following"), animated: false)
         button.setPhase(.content, animated: false)
