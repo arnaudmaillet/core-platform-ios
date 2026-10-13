@@ -71,6 +71,8 @@ final class CommentsDiskTier: Sendable {
         var createdAt: Date
         var parentID: String?
         var isHeld: Bool
+        /// Absent from a record written before #637: decodes as unknown.
+        var replyCount: Int?
 
         init(_ entry: CommentEntry) {
             id = entry.id
@@ -82,12 +84,14 @@ final class CommentsDiskTier: Sendable {
             createdAt = entry.createdAt
             parentID = entry.parentID
             isHeld = entry.isHeld
+            replyCount = entry.replyCount
         }
 
         var entry: CommentEntry {
             CommentEntry(
                 id: id, authorID: ProfileID(authorID), authorName: authorName, authorHandle: authorHandle,
-                authorAvatarURL: authorAvatarURL, body: body, createdAt: createdAt, parentID: parentID, isHeld: isHeld
+                authorAvatarURL: authorAvatarURL, body: body, createdAt: createdAt, parentID: parentID, isHeld: isHeld,
+                replyCount: replyCount
             )
         }
     }

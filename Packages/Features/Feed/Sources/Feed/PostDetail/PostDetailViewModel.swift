@@ -128,6 +128,13 @@ public final class PostDetailViewModel {
     private var nextPageToken: String?
     /// The page being fetched — one at a time.
     private var pageLoad: Task<Void, Never>?
+    /// Where each thread's replies continue (#637), by parent id: from the
+    /// page that brought the thread, then from each "View more" page. A
+    /// thread with none here starts from its first page (one the cache
+    /// opened, which keeps no cursor), dropping what it already shows.
+    private var replyCursors: [String: String] = [:]
+    /// The threads whose next replies are on their way — one fetch each.
+    private(set) var replyLoads: Set<String> = []
     /// Bumped by every reset, so a page from before it neither lands nor
     /// frees the slot a newer fetch holds.
     private var pagingGeneration = 0
@@ -509,6 +516,13 @@ public final class PostDetailViewModel {
             return false
         }
         comments = Self.inserting(entry, into: comments)
+        // The viewer's reply is one more in its thread's count (#637), or
+        // "View N more" would count it among the ones not shown.
+        if let parentID = entry.parentID,
+           let parentIndex = comments.firstIndex(where: { $0.id == parentID }),
+           let count = comments[parentIndex].replyCount {
+            comments[parentIndex].replyCount = count + 1
+        }
         return true
     }
 
@@ -683,6 +697,7 @@ public final class PostDetailViewModel {
             // after a review, must not cut the stream under the viewer. A
             // failure leaves it all as it is.
             let firstPage = self.keepingPostedComments(in: page.entries, generation: generation)
+            self.replyCursors.merge(page.replyTokens) { _, fresh in fresh }
             if self.hasLaterPages {
                 let merged = Self.merging(firstPage: firstPage, over: self.comments)
                 guard merged != self.comments else { return }
@@ -733,6 +748,7 @@ public final class PostDetailViewModel {
                 return
             }
             nextPageToken = page.nextPageToken
+            replyCursors.merge(page.replyTokens) { _, fresh in fresh }
             // A comment can sit on both sides of a page boundary.
             let known = Set(comments.map(\.id))
             fresh = page.entries.filter { !known.contains($0.id) }
@@ -754,6 +770,56 @@ public final class PostDetailViewModel {
         emitComments()
     }
 
+    /// "View N more replies" (#637): the thread's next page of replies, most
+    /// popular first, appended under the ones it shows. One fetch per thread
+    /// at a time; nothing when the thread has no more.
+    ///
+    /// ⚠️ THE SERVER RANKS AGAIN FOR EVERY PAGE: a reply whose likes moved
+    /// can come back twice, so what the stream holds is dropped, and a page
+    /// that brings nothing new asks for the next one.
+    func loadMoreReplies(parentID: String) {
+        guard let commentsProvider, let postID, !replyLoads.contains(parentID),
+              let parent = comments.first(where: { $0.id == parentID }) else { return }
+        let loaded = comments.filter { $0.parentID == parentID }.count
+        let cursor = replyCursors[parentID]
+        guard cursor != nil || (parent.replyCount ?? 0) > loaded else { return }
+        replyLoads.insert(parentID)
+        let generation = pagingGeneration
+        Task { [weak self] in
+            var token = cursor
+            var fresh: [CommentEntry] = []
+            var exhausted = false
+            for _ in 0..<Self.maxEmptyPagesInARow {
+                let page = try? await commentsProvider.loadReplies(for: postID, to: parentID, after: token)
+                guard let self, self.pagingGeneration == generation, self.postID == postID else { return }
+                guard let page else { break }
+                let known = Set(self.comments.map(\.id))
+                fresh = page.entries.filter { !known.contains($0.id) && $0.parentID == parentID }
+                token = page.nextPageToken
+                exhausted = token == nil
+                guard fresh.isEmpty, !exhausted else { break }
+            }
+            guard let self, self.pagingGeneration == generation, self.postID == postID else { return }
+            self.replyLoads.remove(parentID)
+            self.replyCursors[parentID] = token
+            var list = self.comments
+            guard var parentIndex = list.firstIndex(where: { $0.id == parentID }) else { return }
+            var end = parentIndex + 1
+            while end < list.count, list[end].parentID == parentID { end += 1 }
+            list.insert(contentsOf: fresh, at: end)
+            // The thread is all here: its count is what it shows, so the
+            // seam closes rather than offering replies the server filters
+            // out for this viewer.
+            if exhausted {
+                parentIndex = list.firstIndex(where: { $0.id == parentID }) ?? parentIndex
+                list[parentIndex].replyCount = list.filter { $0.parentID == parentID }.count
+            }
+            guard list != self.comments else { return }
+            self.comments = list
+            self.emitComments()
+        }
+    }
+
     /// Internal, not private, for the one test that races a page against it:
     /// in the app only a draft becoming a post resets, and a draft pages
     /// nothing before that.
@@ -765,6 +831,8 @@ public final class PostDetailViewModel {
         hasLaterPages = false
         pageStarts = []
         wantsNextPage = false
+        replyCursors = [:]
+        replyLoads = []
     }
 
     /// A refreshed first page over a stream that runs past it: the page
@@ -950,7 +1018,8 @@ public final class PostDetailViewModel {
         }
         let own = threads.filter { isOwnThread($0.parent, viewer: viewer) }
         func score(_ thread: Thread) -> Int {
-            thread.replies.count
+            // The thread's whole reply count (#637): a page loads two.
+            max(thread.parent.replyCount ?? 0, thread.replies.count)
                 + (liked.contains(thread.parent.id) ? 1 : 0)
                 + thread.replies.filter { liked.contains($0.id) }.count
         }

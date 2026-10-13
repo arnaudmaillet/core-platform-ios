@@ -1757,8 +1757,9 @@ struct SnapCommentsPresentationTests {
     }
 
     /// The 2-level thread order: each top-level comment immediately
-    /// followed by its replies oldest-first; orphaned replies (parent not
-    /// in the page) are dropped, never stranded at the wrong depth.
+    /// followed by its replies in the server's order — most popular first
+    /// (#637); orphaned replies (parent not in the page) are dropped, never
+    /// stranded at the wrong depth.
     @Test func commentThreadingInterleavesRepliesUnderParents() {
         func view(_ id: String, parent: String = "", age: Int64 = 0) -> Comment_V1_CommentView {
             var v = Comment_V1_CommentView()
@@ -1775,7 +1776,7 @@ struct SnapCommentsPresentationTests {
                 "ghost": [view("ghost-r0", parent: "ghost")],
             ]
         )
-        #expect(thread.map(\.commentID) == ["a", "a-r0", "a-r1", "b", "c", "c-r0"])
+        #expect(thread.map(\.commentID) == ["a", "a-r1", "a-r0", "b", "c", "c-r0"])
     }
 
     /// A reply's display model carries the level-2 marker, and its row

@@ -44,6 +44,12 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
     /// #416): only its author and the post's owner see it until it is
     /// approved.
     public let isHeld: Bool
+    /// A top-level comment's replies on the server, held ones included
+    /// (comment.v1 `reply_count`, #637) — what "View N more replies" counts
+    /// from, since only the most popular two are loaded with the page. Nil
+    /// for a reply, and wherever the count is not known (a record from an
+    /// older build).
+    public var replyCount: Int?
 
     public init(
         id: String,
@@ -54,7 +60,8 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         body: String,
         createdAt: Date,
         parentID: String? = nil,
-        isHeld: Bool = false
+        isHeld: Bool = false,
+        replyCount: Int? = nil
     ) {
         self.id = id
         self.authorID = authorID
@@ -65,13 +72,15 @@ public struct CommentEntry: Equatable, Sendable, Identifiable {
         self.createdAt = createdAt
         self.parentID = parentID
         self.isHeld = isHeld
+        self.replyCount = replyCount
     }
 
     /// This comment once its post's owner approved it: shown to everyone.
     func released() -> CommentEntry {
         CommentEntry(
             id: id, authorID: authorID, authorName: authorName, authorHandle: authorHandle,
-            authorAvatarURL: authorAvatarURL, body: body, createdAt: createdAt, parentID: parentID
+            authorAvatarURL: authorAvatarURL, body: body, createdAt: createdAt, parentID: parentID,
+            replyCount: replyCount
         )
     }
 }
@@ -121,10 +130,15 @@ public struct CommentPage: Equatable, Sendable {
     public let entries: [CommentEntry]
     /// The cursor for the next page; nil when the server has no more.
     public let nextPageToken: String?
+    /// Where each thread's replies continue after the ones this page carries
+    /// (#637), by parent id: what "View N more replies" asks for next. A
+    /// thread with nothing more has no entry.
+    public let replyTokens: [String: String]
 
-    public init(entries: [CommentEntry], nextPageToken: String?) {
+    public init(entries: [CommentEntry], nextPageToken: String?, replyTokens: [String: String] = [:]) {
         self.entries = entries
         self.nextPageToken = nextPageToken
+        self.replyTokens = replyTokens
     }
 }
 
@@ -136,6 +150,10 @@ public protocol CommentsProviding: Sendable {
     /// A page of top-level comments, with their replies: the first one when
     /// `pageToken` is nil, otherwise the one that token starts (#589).
     func loadCommentsPage(for postID: PostID, after pageToken: String?) async throws -> CommentPage
+    /// A page of one thread's replies, most popular first (#637): the first
+    /// when `pageToken` is nil, otherwise the one that token starts. The
+    /// page's `nextPageToken` is where the thread continues.
+    func loadReplies(for postID: PostID, to parentID: String, after pageToken: String?) async throws -> CommentPage
     /// Loads the first page of top-level comments into a cache the panel can
     /// read WITHOUT awaiting, so a post opened later renders its comments on
     /// frame one instead of a skeleton. Idempotent and best-effort.
@@ -184,6 +202,10 @@ public extension CommentsProviding {
         guard pageToken == nil else { return CommentPage(entries: [], nextPageToken: nil) }
         return CommentPage(entries: try await loadComments(for: postID), nextPageToken: nil)
     }
+    /// Providers that load every reply with its page have no more to give.
+    func loadReplies(for postID: PostID, to parentID: String, after pageToken: String?) async throws -> CommentPage {
+        CommentPage(entries: [], nextPageToken: nil)
+    }
     /// Providers that do not prefetch simply keep the old behaviour: the
     /// panel awaits its load and shows a skeleton meanwhile.
     func prefetchTopComments(for postID: PostID) async {}
@@ -212,6 +234,10 @@ public actor CommentsRepository: CommentsProviding {
     private let profileClient: any Profile_V1_ProfileServiceClientInterface
     private let authSession: any AuthSessionProviding
     private let pageSize: Int32
+    /// Replies per thread with a page of comments: its most popular (#637).
+    static let repliesShownWithAPage: Int32 = 2
+    /// Replies per "View more replies" page.
+    private let replyPageSize: Int32
 
     /// Who is signed in, and as which profile — shared with every other
     /// repository (`ViewerSession`), so a switch or a sign-out reaches all of them.
@@ -232,6 +258,7 @@ public actor CommentsRepository: CommentsProviding {
         authSession: any AuthSessionProviding,
         viewer: (any ViewerProviding)? = nil,
         pageSize: Int32 = 50,
+        replyPageSize: Int32 = 20,
         localStore: LocalStore? = nil
     ) {
         self.topPages = TopCommentsCache(disk: localStore.map(CommentsDiskTier.init(store:)))
@@ -245,6 +272,7 @@ public actor CommentsRepository: CommentsProviding {
                 .map { ProfileID($0) }
         }
         self.pageSize = pageSize
+        self.replyPageSize = replyPageSize
     }
 
     // MARK: - CommentsProviding
@@ -284,34 +312,39 @@ public actor CommentsRepository: CommentsProviding {
         case .failure(let error): throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
 
-        // Level 2: fan out ListReplies per top-level comment, concurrently.
-        // Replies are an enhancement — a failed (or unimplemented) replies
-        // fetch yields an empty set for that parent, never a sunk thread.
+        // Level 2 (#637): each thread's two most popular replies, and where
+        // the rest continue — asked only of threads that have any, so a post
+        // opens on two replies per thread plus their count, never fifty.
+        // Replies are an enhancement: a failed fetch yields none for that
+        // parent, never a sunk thread.
         let client = commentClient
         let postIDValue = postID.rawValue
-        let limit = pageSize
-        let repliesByParent: [String: [Comment_V1_CommentView]] = await withTaskGroup(
-            of: (String, [Comment_V1_CommentView]).self
+        let limit = Self.repliesShownWithAPage
+        let replies: [String: (views: [Comment_V1_CommentView], next: String)] = await withTaskGroup(
+            of: (String, [Comment_V1_CommentView], String).self
         ) { group in
-            for top in views {
+            for top in views where top.replyCount > 0 {
                 group.addTask {
                     var request = Comment_V1_ListRepliesRequest()
                     request.postID = postIDValue
                     request.commentID = top.commentID
                     request.limit = limit
+                    request.sort = .popularity
                     let response = await client.listReplies(request: request, headers: [:])
                     switch response.result {
-                    case .success(let body): return (top.commentID, body.comments)
-                    case .failure: return (top.commentID, [])
+                    case .success(let body): return (top.commentID, body.comments, body.nextToken)
+                    case .failure: return (top.commentID, [], "")
                     }
                 }
             }
-            var result: [String: [Comment_V1_CommentView]] = [:]
-            for await (parent, replies) in group where !replies.isEmpty {
-                result[parent] = replies
+            var result: [String: (views: [Comment_V1_CommentView], next: String)] = [:]
+            for await (parent, replies, next) in group where !replies.isEmpty {
+                result[parent] = (replies, next)
             }
             return result
         }
+        let repliesByParent = replies.mapValues(\.views)
+        let replyTokens = replies.compactMapValues { $0.next.isEmpty ? nil : $0.next }
 
         let thread = Self.threaded(topLevel: views, repliesByParent: repliesByParent)
         await hydrateAuthors(for: thread.map { ProfileID($0.authorID) })
@@ -320,7 +353,32 @@ public actor CommentsRepository: CommentsProviding {
         // prefetch: a page opened once and returned to should render
         // instantly the second time for the same reason it should the first.
         if pageToken == nil { topPages.set(entries, for: postID, persistingAs: writer) }
-        return CommentPage(entries: entries, nextPageToken: nextToken.isEmpty ? nil : nextToken)
+        return CommentPage(
+            entries: entries, nextPageToken: nextToken.isEmpty ? nil : nextToken, replyTokens: replyTokens
+        )
+    }
+
+    /// ⚠️ THE ORDER IS READ AGAIN PER PAGE (comment.v1): a reply whose likes
+    /// moved between two pages can come back twice or be passed over. The
+    /// caller drops what it already shows (`PostDetailViewModel`).
+    public func loadReplies(for postID: PostID, to parentID: String, after pageToken: String?) async throws -> CommentPage {
+        var request = Comment_V1_ListRepliesRequest()
+        request.postID = postID.rawValue
+        request.commentID = parentID
+        request.limit = replyPageSize
+        request.pageToken = pageToken ?? ""
+        request.sort = .popularity
+        let response = await commentClient.listReplies(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            await hydrateAuthors(for: body.comments.map { ProfileID($0.authorID) })
+            return CommentPage(
+                entries: body.comments.map(makeEntry),
+                nextPageToken: body.nextToken.isEmpty ? nil : body.nextToken
+            )
+        case .failure(let error):
+            throw CommentsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        }
     }
 
     public func addComment(
@@ -459,13 +517,15 @@ public actor CommentsRepository: CommentsProviding {
             body: view.body,
             createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000),
             parentID: view.parentID.isEmpty ? nil : view.parentID,
-            isHeld: view.held
+            isHeld: view.held,
+            // Filled for a top-level comment only (ListTopLevel).
+            replyCount: view.parentID.isEmpty ? Int(clamping: view.replyCount) : nil
         )
     }
 
     /// The 2-level thread order the stream renders: each top-level comment
-    /// in its listed order, immediately followed by its replies oldest-
-    /// first (a conversation reads downward). Replies whose parent never
+    /// in its listed order, immediately followed by its replies in the
+    /// server's order — most popular first (#637). Replies whose parent never
     /// arrived (a truncated top-level page) are dropped rather than
     /// stranded at the wrong depth. Pure and static — the threading
     /// contract is unit-tested without a network.
@@ -475,7 +535,6 @@ public actor CommentsRepository: CommentsProviding {
     ) -> [Comment_V1_CommentView] {
         topLevel.flatMap { top in
             [top] + (repliesByParent[top.commentID] ?? [])
-                .sorted { $0.createdAtMs < $1.createdAtMs }
         }
     }
 
