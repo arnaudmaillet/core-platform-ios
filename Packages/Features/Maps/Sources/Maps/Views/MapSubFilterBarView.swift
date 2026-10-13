@@ -251,7 +251,14 @@ final class MapSubFilterBarView: UIView {
     /// not a copy of a fetched image: the faces themselves live in the
     /// pipeline (#894).
     private var headerImageCache: [URL: UIImage] = [:]
-    private var avatarTasks: [Task<Void, Never>] = []
+    /// Face loads in flight, one per avatar URL: a pill configured again
+    /// while its face is coming joins the load instead of starting another.
+    private var avatarLoads: [URL: Task<Void, Never>] = [:]
+    /// The face that just landed, while what shows it is redrawn. Read
+    /// before the pipeline, so the redraw never asks again for a face the
+    /// pipeline could not keep (one larger than its budget), which would
+    /// loop. One face, for one redraw: not a cache.
+    private var landingFace: (url: URL, image: UIImage)?
     /// Monotonic token superseding in-flight cross-dissolves: a stale
     /// fade-out completion must never swap content selected later (rapid
     /// taps land mid-animation; `.beginFromCurrentState` retargets the
@@ -388,8 +395,8 @@ final class MapSubFilterBarView: UIView {
         // Direct set supersedes any in-flight cross-dissolve…
         transitionGeneration += 1
         pendingTransitionOptions = nil
-        for task in avatarTasks { task.cancel() }
-        avatarTasks.removeAll()
+        for task in avatarLoads.values { task.cancel() }
+        avatarLoads.removeAll()
         selectedSubFilters = []
         let options = carryingKnownHandles(options)
         orderedSubFilters = options.map(\.subFilter)
@@ -609,36 +616,72 @@ final class MapSubFilterBarView: UIView {
     static let avatarBucket = ImageBucket.avatar
 
     /// `favorite`'s face if the pipeline holds it decoded; nil draws the glyph.
+    ///
+    /// ⚠️ **A MISS ASKS AGAIN** (#1069). The pipeline evicts decoded faces
+    /// under memory pressure or its budget, and the row keeps no copy (#894),
+    /// so a pill configured after that (a selection, a scroll back, a menu
+    /// rebuilt) would wear the glyph until the next option set. A face that
+    /// is not in memory is loaded again through the pipeline (from its disk,
+    /// else the network) and replaces the glyph when it lands. A face still
+    /// in memory costs nothing.
     private func avatar(for favorite: MapFavorite?) -> UIImage? {
         guard let url = favorite?.avatarURL else { return nil }
-        return imagePipeline?.cachedImage(for: url, size: Self.avatarBucket)
+        if let landingFace, landingFace.url == url { return landingFace.image }
+        if let face = imagePipeline?.cachedImage(for: url, size: Self.avatarBucket) { return face }
+        loadAvatar(url)
+        return nil
     }
 
     private func loadAvatars(for options: [MapSubFilterOption]) {
         guard let imagePipeline else { return }
         for option in options {
-            guard let favorite = option.favorite, let url = favorite.avatarURL,
+            guard let url = option.favorite?.avatarURL,
                   !imagePipeline.isDecoded(url, size: Self.avatarBucket) else { continue }
-            let subFilter = option.subFilter
-            avatarTasks.append(Task { [weak self] in
-                guard let image = try? await imagePipeline.image(for: url, size: Self.avatarBucket),
-                      let self, !Task.isCancelled else { return }
-                self.headerImageCache[url] = nil
-                // Atomic content refresh — no width animation on arrival.
-                UIView.performWithoutAnimation {
-                    if let indexPath = self.dataSource.indexPath(for: .subFilter(subFilter)) {
-                        let cell = self.collectionView.cellForItem(at: indexPath) as? MapPillCell
-                        cell?.setAvatar(image)
-                        // The menu was built while this face was still a
-                        // placeholder glyph — rebuild it, or the header keeps
-                        // the glyph until the next restack.
-                        cell?.refreshMenu()
-                        self.collectionView.collectionViewLayout.invalidateLayout()
-                        self.collectionView.layoutIfNeeded()
-                    }
-                }
-            })
+            loadAvatar(url)
         }
+    }
+
+    /// Loads `url`'s face at the avatar bucket, once at a time, and puts it
+    /// on every pill showing that person when it lands.
+    private func loadAvatar(_ url: URL) {
+        guard let imagePipeline, avatarLoads[url] == nil else { return }
+        avatarLoads[url] = Task { [weak self] in
+            let image = try? await imagePipeline.image(for: url, size: Self.avatarBucket)
+            guard let self, !Task.isCancelled else { return }
+            self.avatarLoads[url] = nil
+            guard let image else { return }
+            self.headerImageCache[url] = nil
+            let showing = self.optionsBySubFilter.values
+                .filter { $0.favorite?.avatarURL == url }
+                .map(\.subFilter)
+            self.landingFace = (url, image)
+            defer { self.landingFace = nil }
+            // Atomic content refresh — no width animation on arrival.
+            UIView.performWithoutAnimation {
+                var landed = false
+                for subFilter in showing {
+                    guard let indexPath = self.dataSource.indexPath(for: .subFilter(subFilter)),
+                          let cell = self.collectionView.cellForItem(at: indexPath) as? MapPillCell else { continue }
+                    cell.setAvatar(image)
+                    // The menu was built while this face was still a
+                    // placeholder glyph — rebuild it, or the header keeps
+                    // the glyph until the next restack.
+                    cell.refreshMenu()
+                    landed = true
+                }
+                guard landed else { return }
+                self.collectionView.collectionViewLayout.invalidateLayout()
+                self.collectionView.layoutIfNeeded()
+            }
+        }
+    }
+
+    /// Whether the pill for `subFilter` wears a face (not the glyph); nil
+    /// when it has no cell on screen. For tests.
+    func showsFace(on subFilter: MapSubFilter) -> Bool? {
+        guard let indexPath = dataSource.indexPath(for: .subFilter(subFilter)),
+              let cell = collectionView.cellForItem(at: indexPath) as? MapPillCell else { return nil }
+        return cell.showsAvatar
     }
 
     // MARK: - Selection
