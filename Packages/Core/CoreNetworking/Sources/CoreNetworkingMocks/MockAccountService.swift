@@ -34,6 +34,7 @@ public final class MockAccountService: @unchecked Sendable {
 
     public init(lifecycle: MockAccountLifecycle = MockAccountLifecycle()) {
         self.lifecycle = lifecycle
+        lifecycle.provideAge { [weak self] in self?.viewerAge }
     }
 
     public func register(on bff: MockBFF) {
@@ -203,6 +204,12 @@ public final class MockAccountService: @unchecked Sendable {
             return .failure(ConnectError(code: .failedPrecondition, message: "ACC-2004: under the minimum age (13)"))
         }
         return .success(viewerAccount)
+    }
+
+    /// The viewer's whole years today; nil with no date of birth on file.
+    /// What family supervision checks each side against (#417).
+    var viewerAge: Int? {
+        lock.withLock { dateOfBirth }.flatMap(Self.age(of:))
     }
 
     /// Whole years old today, or nil for a malformed date.

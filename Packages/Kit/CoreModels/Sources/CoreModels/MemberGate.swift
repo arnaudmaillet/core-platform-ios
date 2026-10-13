@@ -21,6 +21,9 @@ public enum GatedAction: Sendable, Equatable {
     case unlockCountry
     case shop
     case claim
+    /// Linking a parent's and a teen's accounts (#417): an invite link opened
+    /// by a guest.
+    case supervision
 
     /// The sign-up sheet's title: the reason it opened, in the person's terms.
     public var signUpPrompt: String {
@@ -39,6 +42,7 @@ public enum GatedAction: Sendable, Equatable {
         case .ownProfile: "Sign up to create your profile"
         case .followPlace, .unlockCountry, .shop: "Sign up to explore more places"
         case .claim: "Sign up to claim your likes"
+        case .supervision: "Sign up to link a family account"
         }
     }
 }

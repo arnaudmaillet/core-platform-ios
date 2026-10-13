@@ -112,6 +112,23 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         }
     }
 
+    /// A family supervision invite opened from a link (#417): the code filled
+    /// in, nothing linked until the viewer taps Link. Once linked, the screen
+    /// steps back and says so. Nil when the account can't take one.
+    public func makeSupervisionAcceptViewController(code: String) -> UIViewController? {
+        guard let account, let manager = account as? any SupervisionManaging else { return nil }
+        return SupervisionAcceptViewController(
+            model: SupervisionAcceptModel(manager: manager, code: code),
+            resolveTeen: { try await account.currentAccount().ageBracket.isTeen }
+        ) { accept, link in
+            let navigation = accept.navigationController
+            navigation?.popViewController(animated: true)
+            if let landing = navigation?.topViewController ?? navigation {
+                Feedback.success(SupervisionCopy.linkedToast(link), from: landing)
+            }
+        }
+    }
+
     public func makeGuestSettingsViewController(onSignIn: @escaping () -> Void) -> UIViewController {
         SettingsViewController(
             switching: nil,
@@ -372,9 +389,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                     }
                                 case .familyAndTeens:
                                     // Throws on a failed read: never "adult" by default (#799).
-                                    FamilyAndTeensViewController(isTeen: {
-                                        try await account.currentAccount().ageBracket.isTeen
-                                    })
+                                    FamilyAndTeensViewController(
+                                        isTeen: { try await account.currentAccount().ageBracket.isTeen },
+                                        // Parental Supervision (#417).
+                                        supervision: account as? any SupervisionManaging,
+                                        imagePipeline: imagePipeline,
+                                        router: router
+                                    )
                                 case .whatYouSee:
                                     (repository as? any FeedPreferencesManaging).map { preferences in
                                         WhatYouSeeViewController(preferences: preferences, interestTags: interestTags, isTeen: {

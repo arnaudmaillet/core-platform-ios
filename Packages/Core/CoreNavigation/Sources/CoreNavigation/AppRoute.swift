@@ -71,4 +71,9 @@ public enum AppRoute: Equatable, Sendable {
     /// ("message them" vs "send them this"). Nothing is sent automatically —
     /// the thread opens with the text typed and waiting.
     case sendLink(String, to: ProfileID, stub: ProfileIdentityStub?)
+    /// A family supervision invite (#417): a scanned QR code or a shared
+    /// `core-platform.click/family/<code>` link. Opens the screen that accepts
+    /// it, with the code filled in; nothing is linked until the viewer
+    /// confirms there. The code as `SupervisionInviteCode` normalizes it.
+    case supervisionInvite(String)
 }

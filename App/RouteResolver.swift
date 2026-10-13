@@ -314,6 +314,15 @@ final class RouteResolver: Router {
             )
             push(thread, using: navigator)
 
+        case .supervisionInvite(let code):
+            // A family invite link or QR code (#417): the accept screen, the
+            // code filled in. A guest signs up first (`gatedAction`).
+            guard let accept = profileFeature().makeSupervisionAcceptViewController(code: code) else {
+                logger.debug("No supervision on this account; dropping the invite link")
+                return
+            }
+            push(accept, using: navigator)
+
         case .messageUser(let profileID, let stub):
             // Pushed immediately, with whatever identity the origin knew. The
             // thread finds-or-creates its conversation once it is on screen —
@@ -366,6 +375,9 @@ private extension AppRoute {
         // lands once they have.
         case .messages, .conversation:
             .inbox
+        // Linking a family account needs one.
+        case .supervisionInvite:
+            .supervision
         default:
             nil
         }

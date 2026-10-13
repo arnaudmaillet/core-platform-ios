@@ -203,6 +203,23 @@ public final class MockAccountLifecycle: @unchecked Sendable {
         code.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
+    // MARK: - Age (family supervision, #417)
+
+    private var ageProvider: (@Sendable () -> Int?)?
+
+    /// The demo account's whole years, from the date of birth `account`
+    /// keeps (`SetDateOfBirth`, `-mock-birthdate`); nil with none on file.
+    /// What `MockSupervisionService` checks each side against.
+    public var viewerAge: Int? {
+        let provider = lock.withLock { ageProvider }
+        return provider?()
+    }
+
+    /// Set by `MockAccountService`, which owns the date of birth.
+    func provideAge(_ provider: @escaping @Sendable () -> Int?) {
+        lock.withLock { ageProvider = provider }
+    }
+
     /// Ten `xxxxx-xxxxx` codes.
     private static func freshBackupCodes() -> [String] {
         let alphabet = Array("abcdefghjkmnpqrstuvwxyz23456789")
