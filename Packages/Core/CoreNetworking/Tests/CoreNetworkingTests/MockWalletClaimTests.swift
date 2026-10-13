@@ -26,12 +26,14 @@ struct MockWalletClaimTests {
     private let clock = Clock()
     private let account = MockAuthService.accountID
 
-    private func make(startingPoints: Int64 = 250) -> (Wallet_V1_WalletServiceClient, MockWalletService) {
+    private func make(
+        startingPoints: Int64 = 250, demoPositions: [String] = []
+    ) -> (Wallet_V1_WalletServiceClient, MockWalletService) {
         let bff = MockBFF()
         let clock = clock
         let service = MockWalletService(
             store: MockCounterStore(dataset: dataset), dataset: dataset, startingPoints: startingPoints,
-            now: { clock.now }
+            demoPositions: demoPositions, now: { clock.now }
         )
         service.register(on: bff)
         let client = ConnectClientFactory.makeAuthenticated(
@@ -114,5 +116,85 @@ struct MockWalletClaimTests {
         #expect(service.creditWelcomeGift(account: account, device: "dev-1", firstLaunch: twoDaysAgo) == 100)
         #expect(service.creditWelcomeGift(account: account, device: "dev-1", firstLaunch: twoDaysAgo) == 0)
         #expect(try await wallet(client).points == 350)
+    }
+
+    /// ListMyStakes (#903): a stake opens a position; a day later it is
+    /// settled, PENDING for its first hour, and listed under SETTLED.
+    @Test func aStakeIsListedActiveThenSettled() async throws {
+        let (client, _) = make()
+        let post = try #require(dataset.posts.first { dataset.accountID(for: $0.authorProfileID) != account }).postID
+        var stake = Wallet_V1_StakeRequest()
+        stake.accountID = account
+        stake.profileID = MockSocialDataset.viewerProfileID
+        stake.postID = post
+        stake.points = 3
+        stake.idempotencyKey = "stake-key-0001"
+        stake.firstTapAt = Google_Protobuf_Timestamp(date: clock.now)
+        #expect(await client.stake(request: stake, headers: [:]).message?.outcome == .staked)
+
+        func list(_ status: Wallet_V1_StakeStatusFilter) async throws -> [Wallet_V1_MyStake] {
+            var request = Wallet_V1_ListMyStakesRequest()
+            request.accountID = account
+            request.status = status
+            return try #require(await client.listMyStakes(request: request, headers: [:]).message).stakes
+        }
+        let active = try await list(.active)
+        #expect(active.map(\.postID) == [post])
+        #expect(active.first?.points == 3)
+        #expect(active.first?.hasSettledAt == false)
+
+        clock.now = clock.now.addingTimeInterval(24 * 3_600 + 60)
+        #expect(try await list(.active).isEmpty)
+        let settled = try await list(.settled)
+        #expect(settled.first?.verdict == .pending)
+        clock.now = clock.now.addingTimeInterval(3_600)
+        #expect(try await list(.settled).first.map { [.rewarded, .notRewarded].contains($0.verdict) } == true)
+    }
+
+    /// The pages follow the token, newest first stake first.
+    @Test func theStakesPage() async throws {
+        let posts = dataset.posts.prefix(5).map(\.postID)
+        let (client, _) = make(demoPositions: posts)
+        var request = Wallet_V1_ListMyStakesRequest()
+        request.accountID = account
+        request.pageSize = 2
+        var ids: [String] = []
+        var token = ""
+        repeat {
+            request.pageToken = token
+            let page = try #require(await client.listMyStakes(request: request, headers: [:]).message)
+            ids += page.stakes.map(\.postID)
+            token = page.nextPageToken
+        } while !token.isEmpty
+        #expect(ids == posts)
+    }
+
+    /// ListWalletTransactions (#400): the ledger newest first — a claim, a
+    /// stake, the opening gifts — by currency.
+    @Test func theHistoryListsEveryMovementNewestFirst() async throws {
+        let (client, _) = make()
+        _ = try await claim(client, key: "claim-key-0100")
+        let post = try #require(dataset.posts.first { dataset.accountID(for: $0.authorProfileID) != account }).postID
+        var stake = Wallet_V1_StakeRequest()
+        stake.accountID = account
+        stake.profileID = MockSocialDataset.viewerProfileID
+        stake.postID = post
+        stake.points = 4
+        stake.idempotencyKey = "stake-key-0100"
+        stake.firstTapAt = Google_Protobuf_Timestamp(date: clock.now)
+        _ = await client.stake(request: stake, headers: [:])
+
+        func history(_ currency: Wallet_V1_Currency) async throws -> [Wallet_V1_WalletTransaction] {
+            var request = Wallet_V1_ListWalletTransactionsRequest()
+            request.accountID = account
+            request.currency = currency
+            return try #require(await client.listWalletTransactions(request: request, headers: [:]).message).transactions
+        }
+        let points = try await history(.points)
+        #expect(points.map(\.kind) == [.stake, .claim, .starterGift])
+        #expect(points.map(\.delta) == [-4, 25, 250])
+        #expect(points.first?.balanceAfter == 271)
+        #expect(try await history(.gems).map(\.kind) == [.starterGift])
+        #expect(try await history(.unspecified).count == 4)
     }
 }

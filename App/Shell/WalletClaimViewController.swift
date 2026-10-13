@@ -200,7 +200,14 @@ final class WalletClaimViewController: UIViewController {
         buildChrome()
         buildBar()
         // The server's wallet as of now (#1098): its change notice redraws.
-        if guestGift == nil { Task { await wallet.refreshFromServer() } }
+        if guestGift == nil {
+            let wallet = wallet
+            Task {
+                await wallet.refreshFromServer()
+                // Active and Settled are the server's (#903).
+                await wallet.refreshStakesFromServer()
+            }
+        }
 
         walletObservers.tokens = [
             NotificationCenter.default.addObserver(
@@ -417,6 +424,12 @@ final class WalletClaimViewController: UIViewController {
             header.configure(title: "Active stakes", detail: detail)
         case .settled:
             let earned = stakes.reduce(0) { $0 + $1.gems }
+            // The server's settlement credits no gems yet (shadow mode,
+            // #903): a total of none is not shown as "+0".
+            guard earned > 0 else {
+                header.configure(title: "Settled", detail: NSAttributedString())
+                return
+            }
             let detail = NSMutableAttributedString(attributedString: walletAmount(
                 "+\(earned)", glyph: GemSymbol.glyphImage(), font: font, color: GemSymbol.tint
             ))

@@ -46,4 +46,47 @@ struct ServerWalletTests {
         #expect(await store.claim(idempotencyKey: "tap-key-0002") != .claimed(awarded: 25))
         #expect(service.points(of: MockAuthService.accountID) == 275)
     }
+
+    /// A settled stake is the server's verdict alone: no gems in shadow
+    /// mode (#903); a comment stake is left out of the post list.
+    @Test func aSettledStakeIsItsVerdictAlone() {
+        var settled = Wallet_V1_MyStake()
+        settled.postID = "post-1"
+        settled.points = 7
+        settled.firstAt = .init(date: Date(timeIntervalSince1970: 1_000))
+        settled.settlesAt = .init(date: Date(timeIntervalSince1970: 87_400))
+        settled.settledAt = .init(date: Date(timeIntervalSince1970: 87_400))
+        settled.verdict = .rewarded
+        let stake = ServerWallet.stake(settled)
+        #expect(stake?.outcome == .rewarded)
+        #expect(stake?.gems == 0)
+        #expect(stake?.amount == 7)
+
+        var active = settled
+        active.clearSettledAt()
+        active.verdict = .unspecified
+        #expect(ServerWallet.stake(active)?.outcome == nil)
+
+        var comment = Wallet_V1_MyStake()
+        comment.commentID = "c-1"
+        #expect(ServerWallet.stake(comment) == nil)
+    }
+
+    /// A history row as the app keeps it (#400); a kind this build does not
+    /// know is kept, as "other".
+    @Test func aTransactionKeepsItsKindAmountAndBalance() {
+        var wire = Wallet_V1_WalletTransaction()
+        wire.transactionID = "tx-9"
+        wire.currency = .gems
+        wire.delta = -50
+        wire.balanceAfter = 130
+        wire.kind = .countryUnlock
+        wire.refID = "FR"
+        let row = ServerWallet.transaction(wire)
+        #expect(row == WalletTransaction(
+            id: "tx-9", currency: .gems, delta: -50, balanceAfter: 130, kind: .countryUnlock, createdAt: nil, reference: "FR"
+        ))
+        wire.kind = .UNRECOGNIZED(42)
+        #expect(ServerWallet.transaction(wire).kind == .other)
+    }
 }

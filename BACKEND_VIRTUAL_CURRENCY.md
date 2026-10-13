@@ -1,359 +1,109 @@
-# Backend: virtual currency wallet, reward claims, and trending boosts
+# Wallet: points, gems, the hourly claim and stakes (`wallet.v1`)
 
-**Requested by:** iOS client team
-**Area:** `wallet.v1` (new service), `trending.v1` (new service or extension of the
-ranking pipeline), touches `counter.v1` (score projections)
-**Type:** new capability — no wallet, points, or boost concept exists anywhere in
-the current contracts
-**Related:** `dev/BACKEND_GAPS.md` (general gap register); the iOS client ships a
-fully client-side mock (`WalletStore`) in the meantime, described in §6
+**Status (2026-10-13):** the backend wallet exists. It is `wallet.v1` on the client edge (backend #665 and the follow-ups below), published on `buf.build/core-platform/contracts`. This document used to be the iOS team's *request* for that service. It now records **what the app binds to**, and what the client still keeps locally.
 
-The iOS client is shipping a **virtual currency & trending boost** surface:
-a coin balance in the map screen's toolbar, periodic point claims with a daily
-cap and streak, and a **Boost** button on posts and comments that spends points
-to raise their trending rank. All of it currently runs against a local mock
-store. This document specifies the backend contract the client wants to bind
-to, so the mock can be deleted rather than reverse-engineered later.
-
-Endpoint names below are given in both shapes: the REST-ish path (as the
-product spec phrases it) and the Connect RPC the BFF edge would actually
-expose. The client speaks Connect; the REST paths are aliases.
+**Related:**
+- `dev/economy/ECONOMY_CHARTER_V5.3.*.md`: the economy's design.
+- Issues #676 (likes are points), #1098 (the server wallet), #1008 (welcome gift), #901 (points cap), #903 (stakes list), #841 (this alignment).
 
 ---
 
-## 1. `GET /user/wallet` — read the wallet
+## 1. The model
 
-**RPC:** `wallet.v1.WalletService/GetWallet` (idempotent, safe for Connect GET)
+- **One wallet per account**, not per profile, with two currencies:
+  - **points** (currency A): what a like stakes;
+  - **gems** (currency B): earned by stakes, spent in the shop.
+- Every request carries `account_id`. The edge binds it to the token's subject; another account's id is `PERMISSION_DENIED`.
+- **Every wallet RPC is authenticated.** A guest token is refused on all of them, so a guest never calls one. A guest's likes are the **welcome gift**, a locked pile shown on the device (`WelcomeGift`) until they sign up.
+- A wallet opens on first use with **100 starter gems and 0 points**.
+- **Nothing is sold for real money.** There is no StoreKit and no restore. Gems are earned.
+- Gems may not be spent under 18, or when the age is unknown: `Wallet.gem_spending_restricted`, `WAL-3001`. The app then hides the stake pack and the country unlocks.
 
-Returns the caller's wallet. There is no "create wallet" call — the wallet is
-provisioned lazily on first read, with `balance = 0` and the claim immediately
-available.
+## 2. Reading the wallet: `GetWallet`
 
-```proto
-// wallet.v1
-message GetWalletRequest {}  // caller identity comes from auth, never from the request
+`wallet.v1.WalletService/GetWallet(account_id)` returns `Wallet`:
 
-message Wallet {
-  string profile_id                        = 1;
-  int64  balance                           = 2;  // spendable points, never negative
-  int64  lifetime_earned                   = 3;
-  int64  lifetime_spent                    = 4;
-
-  // Claim state — everything the client needs to render the claim surface
-  // without doing its own timer math against a possibly-skewed local clock.
-  bool   claim_available                   = 5;
-  google.protobuf.Timestamp next_claim_at  = 6;  // meaningful when claim_available == false
-  int32  claim_amount                      = 7;  // what the NEXT claim will pay (after streak multiplier)
-  int32  claimed_today                     = 8;  // points earned via claims in the current UTC day
-  int32  daily_claim_cap                   = 9;  // server policy, returned so the client never hardcodes it
-  int32  streak_days                       = 10; // consecutive UTC days with >= 1 claim
-  google.protobuf.Timestamp last_claim_at  = 11;
-  int32  stake_shots                       = 12; // shots left in the ×100 cartridge pack (§3.3), 0 = none
-}
-
-message GetWalletResponse {
-  Wallet wallet = 1;
-}
-```
-
-Notes:
-
-- **The server is the clock.** `claim_available` and `next_claim_at` are
-  computed server-side. The client renders a countdown from `next_claim_at`
-  but never decides eligibility locally (the mock currently does, and it is
-  exactly the kind of logic that must not survive into production — a device
-  clock rolled forward mints points).
-- `daily_claim_cap` and `claim_amount` are echoed policy, not client config,
-  so ops can tune reward economics without an app release.
-- Suggested initial policy (client mock ships with these): claim every
-  **1 hour**, base claim **25 points**, daily cap **200 points/day**, streak
-  multiplier +10 %/consecutive day capped at 2× (see §4.4).
-
-## 2. `POST /user/wallet/claim` — claim reward points
-
-**RPC:** `wallet.v1.WalletService/ClaimReward` (mutating, idempotent per key)
-
-```proto
-message ClaimRewardRequest {
-  // Client-generated UUID. Two requests with the same key MUST return the
-  // same response and credit at most once (retries over flaky mobile links).
-  string idempotency_key = 1;
-}
-
-message ClaimRewardResponse {
-  ClaimOutcome outcome     = 1;
-  int32        awarded     = 2;  // points credited by THIS call (0 unless CLAIMED)
-  Wallet       wallet      = 3;  // full post-claim state, saves a follow-up GetWallet
-}
-
-enum ClaimOutcome {
-  CLAIM_OUTCOME_UNSPECIFIED = 0;
-  CLAIMED                   = 1;
-  TOO_EARLY                 = 2;  // next_claim_at not reached; wallet carries the timestamp
-  DAILY_CAP_REACHED         = 3;  // claimed_today >= daily_claim_cap
-}
-```
-
-Notes:
-
-- **In-band outcomes, not error codes.** `TOO_EARLY` and `DAILY_CAP_REACHED`
-  are ordinary states the UI renders (disabled button + countdown), not
-  failures. Reserve gRPC errors for actual faults (`UNAUTHENTICATED`,
-  `RESOURCE_EXHAUSTED` for abuse, `INTERNAL`).
-- The response embeds the full `Wallet` so a claim is one round trip:
-  tap → new balance, new `next_claim_at`, new streak.
-- Streak accounting: `streak_days` increments on the first successful claim
-  of a UTC day if the previous UTC day had at least one claim; otherwise it
-  resets to 1. Timezone-per-user is explicitly out of scope for v1 (see §7).
-
-## 3. `POST /posts/{id}/boost` and `POST /comments/{id}/boost` — spend points on rank
-
-**RPC:** `trending.v1.BoostService/Boost` — one RPC, typed target. Two path
-aliases at the edge if REST ergonomics matter, but the client prefers a single
-RPC because post- and comment-boosting share every rule below.
-
-```proto
-// trending.v1
-message BoostTarget {
-  oneof target {
-    string post_id    = 1;
-    string comment_id = 2;
-  }
-}
-
-message BoostRequest {
-  BoostTarget target     = 1;
-  int32  amount          = 2;  // points to spend; server validates against allowed denominations
-  string idempotency_key = 3;  // same contract as ClaimReward
-  bool   use_stake_shot  = 4;  // spend ONE shot of the ×100 pack (§3.3); `amount` is then the shot's
-}
-
-message BoostResponse {
-  BoostOutcome outcome    = 1;
-  int64  new_balance      = 2;  // caller's wallet after the spend
-  int64  target_boost_total = 3;  // total points ever boosted into this target, all users
-  int32  my_boost_total     = 4;  // caller's cumulative spend on this target
-}
-
-enum BoostOutcome {
-  BOOST_OUTCOME_UNSPECIFIED = 0;
-  BOOSTED                   = 1;
-  INSUFFICIENT_BALANCE      = 2;
-  TARGET_NOT_BOOSTABLE      = 3;  // deleted/moderated target, or boosting disabled on it
-  RATE_LIMITED              = 4;  // per-user or per-target velocity limit (§4.5)
-  INVALID_AMOUNT            = 5;  // not one of the allowed denominations
-  TARGET_CAP_REACHED        = 6;  // this viewer's per-target allowance (§4.5) is full
-  NO_STAKE_SHOTS            = 7;  // `use_stake_shot` with no pack loaded; nothing changed
-  SHOT_DOES_NOT_FIT         = 8;  // `use_stake_shot` on a target with room for less than a whole shot (§3.3); nothing changed
-}
-```
-
-Notes:
-
-- **Allowed amounts are server policy.** Since 2026-10-02 a plain stake
-  spends the **default amount, 1 point** (`WalletStore.Policy.
-  defaultStakeAmount`), and staking several points in ONE gesture is the ×100
-  cartridge pack's job (§3.3): the client no longer sends "Max" or 100. The
-  server should accept the default amount, and a shot (`use_stake_shot`).
-  Echo the default in `GetWalletResponse` if it ever needs to vary.
-- **Per-target cap, clamp semantics.** One viewer can put at most **250
-  points** on one target, lifetime. A spend that would overshoot is CLAMPED
-  to the remainder — `BoostResponse` then reports the actual debit (add
-  `int32 spent = 5` to the response) — and a full target answers
-  `TARGET_CAP_REACHED`. The client mirrors both behaviours exactly
-  (`WalletStore.Policy.perTargetBoostCap`).
-- **Boosting is irreversible.** No refund RPC. Moderated-away targets do not
-  refund spenders (this kills a laundering vector: boost, report own post,
-  collect refunds — any refund path needs its own abuse review first).
-- **Self-boost is allowed in v1** (it is the primary use case — promoting
-  your own post) but must be attributable in the ledger (§4.2) so policy can
-  change without a schema change.
-- `target_boost_total` lets the client animate the score increment from an
-  authoritative number instead of guessing.
-
-### 3.1 How boost affects trending rank
-
-The client takes no position on ranking internals, but the contract needs one
-decision made explicitly: **boost weight must decay.** A flat additive score
-means week-old posts with deep-pocketed authors permanently occupy trending.
-Suggested shape (matches the industry-standard half-life approach):
-
-```
-effective_boost(t) = Σ over boosts b of: b.amount * 0.5 ^ ((t - b.created_at) / HALF_LIFE)
-HALF_LIFE = 24h initially, ops-tunable
-```
-
-`effective_boost` feeds the trending scorer as one weighted input next to
-organic signals (reactions, comments, views from `counter.v1`). Boost must
-never be able to outrank organic signal by more than a bounded factor —
-suggest capping boost's contribution at some percentile of organic score so
-the feed stays a feed and not an auction.
-
-### 3.2 Session undo (a client behavior the contract should know about)
-
-The client ships an UNDO on boosts, deliberately narrow: a boost can be taken
-back only **while the boosted post is still the post on screen** — paging
-away, or leaving the screen, finalizes it. In the mock this is a plain
-compensating credit; against a real service it needs one of:
-
-- **A. Deferred commit (preferred).** The client batches a post's boosts
-  locally and issues ONE `Boost` when the viewer moves on. No new RPC, no
-  refund path, and the rate limiter sees fewer, larger spends. Cost: a boost
-  is invisible to other viewers for the seconds the post stays on screen —
-  acceptable for a ranking signal.
-- **B. `UndoBoost` with a server-enforced window.** Same idempotency contract
-  as `Boost`; refuses (`WINDOW_EXPIRED`) beyond a short TTL (suggest 5 min)
-  or from a different session. Strictly more moving parts than A, and the
-  §3 "no refunds" stance stays true for everything outside the window.
-
-Either way the general rule stands: **no open-ended refunds** (§5).
-
-### 3.3 The ×100 cartridge pack (bought with gems)
-
-A pack of **3 shots**; one shot stakes **100 points** in one tap — the
-viewer's OWN points, under every rule above (balance, per-target cap). Gems
-buy the convenience (one tap instead of a hundred), never points: charter
-V5.3 §34 (B ─X→ A) holds. Shots never expire; packs don't stack. (It was a
-×10 pack — 10 shots of 10 points for 20 gems — until 2026-10-02.)
-
-```proto
-// wallet.v1
-message BuyStakePackRequest { string idempotency_key = 1; }
-message BuyStakePackResponse {
-  StakePackOutcome outcome = 1;
-  int64 gems_remaining     = 2;
-  int32 stake_shots        = 3;  // shots now loaded
-}
-enum StakePackOutcome {
-  STAKE_PACK_OUTCOME_UNSPECIFIED = 0;
-  BOUGHT                         = 1;
-  PACK_STILL_ACTIVE              = 2;  // shots left: nothing charged
-  INSUFFICIENT_GEMS              = 3;
-}
-```
-
-- A `Boost` with `use_stake_shot` consumes the shot only when it answers
-  `BOOSTED`; any refusal (balance, cap, rate limit) keeps it, atomically with
-  the points.
-- **A shot is never clamped.** Unlike a plain amount (clamped to the
-  per-target cap's remainder, §3), a shot always moves its whole 100 points
-  or nothing: a target with room for fewer answers `SHOT_DOES_NOT_FIT` (a
-  full one `TARGET_CAP_REACHED`), checked before the balance. The client's
-  store and menu refuse it the same way.
-- Pack size, points per shot and price (mock: 3 / 100 / **50 gems**) are
-  server policy; the client keeps them in `WalletStore.Policy.StakePack`.
-- **The mock's price rationale**, for whoever sets the real one: a settled
-  stake earns gems ~55% of the time, at 15–49% of the points staked — about
-  18 gems back per 100 points, so ~18 per shot. A pack is priced near what
-  its own stakes would earn back (an average curator breaks even). Ten ×100
-  shots would then cost ~180 gems, past the seeded 100 and six mid-tier
-  countries; three shots (300 points, ~53 gems back) cost 50, a top-10
-  country's price.
-- A session undo (§3.2) refunds the points, not the shot.
-
-## 4. Data models
-
-### 4.1 `wallets`
-
-| column | type | notes |
-|---|---|---|
-| `profile_id` | PK | one wallet per profile |
-| `balance` | int64, `CHECK >= 0` | authoritative spendable balance |
-| `lifetime_earned` / `lifetime_spent` | int64 | monotonic counters |
-| `last_claim_at` | timestamptz | |
-| `claimed_today` | int32 | reset lazily on first read/claim of a new UTC day |
-| `claimed_today_date` | date | the UTC day `claimed_today` refers to |
-| `streak_days` | int32 | |
-| `updated_at` | timestamptz | |
-
-### 4.2 `point_transactions` — append-only ledger
-
-Every balance mutation is a ledger row; `wallets.balance` is a materialized
-view of the ledger and must be reconcilable against `SUM(delta)` at any time.
-
-| column | type | notes |
-|---|---|---|
-| `id` | PK (ULID) | |
-| `profile_id` | FK | indexed |
-| `delta` | int64 | positive = credit, negative = debit |
-| `kind` | enum | `CLAIM`, `BOOST_SPEND`, `ADMIN_ADJUST`, (future: `PURCHASE`, `REFUND`) |
-| `ref_id` | string | boost id for `BOOST_SPEND`, null for `CLAIM` |
-| `idempotency_key` | string | **unique per profile** — this constraint IS the idempotency mechanism |
-| `created_at` | timestamptz | |
-
-### 4.3 `boosts` / `boost_scores`
-
-| column | type | notes |
-|---|---|---|
-| `id` | PK (ULID) | |
-| `target_kind` | enum | `POST`, `COMMENT` |
-| `target_id` | string | indexed with `target_kind` |
-| `booster_profile_id` | FK | attribution (self-boost analytics, abuse tooling) |
-| `amount` | int32 | |
-| `created_at` | timestamptz | decay input (§3.1) |
-
-Plus a rolled-up `boost_scores(target_kind, target_id, total_amount,
-effective_boost, computed_at)` projection refreshed by the ranking job, so
-read paths never scan the raw boost table.
-
-### 4.4 Claim/streak policy (initial values)
-
-| knob | v1 value |
+| Fields | Meaning |
 |---|---|
-| claim interval | 1 hour |
-| base claim amount | 25 points |
-| daily claim cap | 200 points / UTC day |
-| streak multiplier | ×(1 + 0.1 × (streak_days − 1)), capped ×2.0 |
-| streak reset | one full UTC day with zero claims |
+| `points`, `gems`, `points_earned` / `_spent`, `gems_earned` / `_spent` | balances and lifetime counters |
+| `claim_available`, `next_claim_at`, `claim_amount` | the hourly claim (§3) |
+| `claimed_today`, `daily_claim_cap`, `streak_days`, `last_claim_at` | the day's claims and the streak |
+| `points_cap` | the balance a claim never takes past (§3) |
+| `stake_shots`, `stake_pack_price`, `stake_pack_shots`, `points_per_shot` | the ×100 pack (§5) |
+| `gem_spending_restricted` | see §1 |
+| `conviction_probabilities` | the C1–C4 levels (§4, #1007) |
 
-### 4.5 Rate limiting & abuse rules
+**The server is the clock.** The app draws the countdown from `next_claim_at` but never decides on the device that a claim is open. When `next_claim_at` passes, it reads the wallet again.
 
-- **Idempotency:** unique `(profile_id, idempotency_key)` on the ledger;
-  replays return the stored response. Applies to claim and boost identically.
-- **Claim velocity:** the interval itself is the limiter, but additionally
-  cap `ClaimReward` calls at ~30/hour/profile (`RESOURCE_EXHAUSTED`) so a
-  hammering client can't turn the outcome check into load.
-- **Boost velocity:** per-user ceiling (suggest 1 000 points/hour) returned
-  as `RATE_LIMITED`; the per-target allowance is the LIFETIME cap of §3
-  (250/viewer/target, `TARGET_CAP_REACHED`) — a velocity window on top is
-  unnecessary once the lifetime cap exists.
-- **Serialization:** balance check + debit + boost insert in one transaction
-  with the wallet row locked (`SELECT … FOR UPDATE`). Two concurrent boosts
-  must not double-spend; the `CHECK (balance >= 0)` is the backstop.
-- **New-account gating:** consider withholding claims for accounts younger
-  than 24 h — points farming via throwaway accounts is the obvious attack.
+**App binding (#1098).**
+- `WalletStore.server` is a `ServerWallet` (Feed) over this RPC.
+- `WalletServerSync` (App) reads the wallet:
+  - at launch;
+  - on every viewer change, and again 3 s later, for the welcome gift (§6);
+  - back in the foreground;
+  - when the network returns;
+  - just after `next_claim_at`.
+- `WalletStore.apply` takes the answer as the truth. The balance shown is the server's points minus the likes the outbox has not sent yet, which the device already deducted (§4).
 
-## 5. Out of scope for v1 (flagged so nobody designs the schema into a corner)
+## 3. The hourly claim: `ClaimReward`
 
-- Purchasing points with real money (App Store IAP has its own review and
-  ledger `kind` reserved: `PURCHASE`).
-- Transfers/gifting between users.
-- Refunds of any kind (the session undo of §3.2 is a commit-window question,
-  not a refund feature).
-- Per-user timezone streak accounting (UTC day everywhere in v1).
+`ClaimReward(account_id, idempotency_key)` returns `{ outcome, awarded, wallet }`.
 
-## 6. What the client ships in the meantime
+- **The key** is 8–64 characters of `[A-Za-z0-9_-]` (otherwise `WAL-9002`). The app mints it **once per tap** and sends the same one with every retry of that tap. The server credits a key at most once and answers a replay with its first answer.
+- **The outcomes are in-band**, each with the full `Wallet`, so there is no follow-up `GetWallet`:
+  - `CLAIMED`: `awarded` points credited;
+  - `TOO_EARLY`: `wallet.next_claim_at` says when;
+  - `DAILY_CAP_REACHED`: the next claim is at 00:00 UTC;
+  - `BALANCE_FULL` (#901): the balance is at `points_cap`. `claim_available` is false **with no `next_claim_at`**: no wait opens it, only spending points does.
+- **Policy** (server config; the mock mirrors it):
+  - 25 points × the streak multiplier, which grows by 0.1 per consecutive UTC day and stops at ×2;
+  - once an hour, at most 200 points per UTC day;
+  - `points_cap` 2,000. A claim that would pass it is clamped to what fits (`CLAIMED`).
+- `ClaimReward` is also limited to about 30 calls an hour per account at the edge (`RESOURCE_EXHAUSTED`). A normal app never gets close.
 
-`WalletStore` (iOS, `Packages/Core/CoreStorage`): a local mock with the exact
-`Wallet` shape above — UserDefaults persistence, server-policy constants from §4.4,
-hourly claim timer, daily cap, streak, and optimistic boost spends. All
-mutation goes through the same `ClaimOutcome`/`BoostOutcome` enums, so binding
-to the real service is a transport swap, not a redesign. The mock's known
-lies, accepted for now:
+## 4. Likes are points: `Stake`
 
-- device clock is trusted (the reason §1 insists the server owns the clock);
-- boosts mutate a local score only — trending rank is unaffected;
-- balances are per-device, not per-account.
+A like is a point **staked** on a post or a comment (#676). There is no reaction kind and no unlike. Like counts are read from `engagement.v1` (`BatchGetLikes`, and `ListLikesByProfile` for a profile's Liked tab). There is no `trending.v1`.
 
-## 7. Open questions for the backend team
+`Stake(account_id, profile_id, post_id | comment_id, points | use_stake_shot, idempotency_key, first_tap_at, conviction)` returns `{ outcome, spent, my_total, wallet }`.
 
-1. Does boost feed the existing ranking pipeline as a `counter.v1` projection,
-   or does `trending.v1` own its own read path? The client only needs
-   `target_boost_total` on the boost response either way.
-2. Should `GetWallet` piggyback on an existing bootstrap call (session
-   hydration) instead of being its own round trip on app start?
-3. Half-life and cap values in §3.1 — who owns tuning, and is there an
-   experimentation surface for them?
-4. §3.2: deferred commit vs. windowed `UndoBoost` — the client can bind to
-   either, but the choice decides whether `Boost` stays the contract's only
-   spend mutation.
+- **Batched taps (the deferred commit).** The app records taps locally (`LikeOutbox`) and commits one batch per target with its own key:
+  - 10 s after the last tap;
+  - when the viewer moves on from the post;
+  - when the app goes to the background.
+
+  Until then a tap can be undone; after the commit it is final. There is no `UndoBoost` and no refund path.
+- **`first_tap_at`**: a batch more than 24 h old is `EXPIRED`.
+- **Outcomes, in the server's order:**
+  - `EXPIRED`;
+  - `OWN_CONTENT`: staking on one's own content is refused;
+  - for a shot, room for a whole 100 (`SHOT_DOES_NOT_FIT`);
+  - then the target's room, 250 points per account ever (`TARGET_CAP_REACHED`);
+  - the balance (`INSUFFICIENT_BALANCE`);
+  - the hour's room, 1,000 points (`RATE_LIMITED`).
+
+  A plain batch is **clamped** to what fits, and `spent` says what was debited. The app gives the rest back (`settleCommittedStake`).
+- **Conviction (#1007, backend #888).** `conviction` (C1–C4) is recorded and frozen with each batch, and has no effect yet. A quick tap sends `UNSPECIFIED`.
+
+## 5. The ×100 stake pack
+
+A pack of `stake_pack_shots` shots, each staking `points_per_shot` of the viewer's **own** points in one tap. It costs `stake_pack_price` gems, read from the `Wallet`, never hard-coded. Gems buy the convenience, never points.
+- A shot is never clamped: room for less than a whole shot answers `SHOT_DOES_NOT_FIT`.
+- A refusal keeps the shot.
+- `BuyStakePack` is in the contract. The app still sells the pack from the local mock (§7).
+
+## 6. The welcome gift
+
+A guest's likes are a locked pile that grows with each day the app has been open: 50 + 25 × min(full days since first launch, 3). The server credits it **once per device**, when a sign-up or sign-in carrying the guest's refresh token ends the guest session (`guest_upgraded`, backend #934). It appears as `TRANSACTION_KIND_WELCOME_GIFT`.
+- With a server wallet, the app does **not** credit it locally (`WelcomeGift.settle` only marks it settled, #1008). It reads the wallet again after the sign-in.
+- The guest's refresh token always goes with `Login` and `SignUp`.
+
+## 7. What is still local, and why
+
+| Local | Until |
+|---|---|
+| Gems, stake shots, buying the pack, country unlocks | the gem catalogue and minting (backend #890, #892) |
+| The stakes list on the claim sheet (`WalletStore.stakes()`, demo stakes) | #903: `ListMyStakes`, active / settled, outcome only while settlement is in shadow mode |
+| Settlement and its gem rewards (`Policy.mockOutcome`, 6 h) | backend settlement: **24 h** after a position's first stake, and **shadow mode** (no gems minted) until backend #890 |
+
+The mock (`MockWalletService`) mirrors §3 and §4 with one wallet per account, kept across launches. The app's mock wallet opens at 250 points; package tests open one with a generous balance. It also credits the welcome gift (§6) when a guest becomes a member.

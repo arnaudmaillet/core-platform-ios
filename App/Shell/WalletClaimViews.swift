@@ -135,6 +135,12 @@ final class WalletBalanceTile: UIView {
         accessibilityValue = valueLabel.text
     }
 
+    /// The line under the figure, and its tone.
+    func setNote(_ note: String, color: UIColor = .tertiaryLabel) {
+        noteLabel.text = note
+        noteLabel.textColor = color
+    }
+
     /// The claim's payoff: the new number pops.
     func pop() {
         valueLabel.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
@@ -280,6 +286,17 @@ final class WalletSummaryView: UIView {
 
     func configure(with snapshot: WalletSnapshot) {
         pointsTile.setValue(snapshot.balance)
+        // The server's points cap (#901): how far the claim can fill the
+        // balance, and — at it — that only spending opens the claim again.
+        if let cap = snapshot.pointsCap {
+            if snapshot.balance >= cap {
+                pointsTile.setNote("Full — stake to claim again", color: .systemOrange)
+            } else {
+                pointsTile.setNote("Up to \(cap.formatted())")
+            }
+        } else {
+            pointsTile.setNote("To stake on posts")
+        }
         gemsTile.setValue(snapshot.gems)
 
         // The streak's three faces: none yet (invitation), fed today (kept),
@@ -314,6 +331,7 @@ final class WalletSummaryView: UIView {
     /// rest as an account would start — no gems, no streak, nothing earned.
     func configure(guestGift amount: Int, dailyClaimCap: Int) {
         pointsTile.setValue(amount)
+        pointsTile.setNote("To stake on posts")
         gemsTile.setValue(0)
         streakIcon.image = UIImage(
             systemName: "flame",
@@ -578,12 +596,26 @@ final class WalletStakeCell: UICollectionViewCell {
                 "+\(earned)", glyph: GemSymbol.glyphImage(), font: resultFont, color: GemSymbol.tint
             ))
             detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
-        case .noReward:
+        case .noReward, .notRewarded:
             result.append(NSAttributedString(string: "No reward", attributes: [
                 .font: UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline),
                 .foregroundColor: UIColor.secondaryLabel,
             ]))
             detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
+        // The server's verdicts (#903): the outcome alone, never gems the
+        // balance does not hold while settlement runs in shadow mode.
+        case .rewarded:
+            result.append(NSAttributedString(string: "Rewarded", attributes: [
+                .font: resultFont,
+                .foregroundColor: GemSymbol.tint,
+            ]))
+            detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
+        case .pending:
+            result.append(NSAttributedString(string: "Result tomorrow", attributes: [
+                .font: UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline),
+                .foregroundColor: UIColor.secondaryLabel,
+            ]))
+            detailLabel.text = "\(stake.amount) staked · settled \(walletAgoText(since: stake.settlesAt, now: now))"
         }
         resultLabel.attributedText = result
         accessibilityValue = [resultLabel.text, detailLabel.text].compactMap { $0 }.joined(separator: ", ")

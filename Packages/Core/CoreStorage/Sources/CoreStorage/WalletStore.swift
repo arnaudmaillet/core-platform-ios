@@ -71,6 +71,64 @@ public protocol WalletServer: Sendable {
     /// per tap and sent again with every retry of it: the server credits a
     /// key at most once. Refusals are outcomes, with the wallet as it is.
     func claim(idempotencyKey: String) async throws -> (outcome: WalletClaimOutcome, wallet: WalletServerState)
+    /// The member's stakes (wallet.v1 `ListMyStakes`, #903): active and
+    /// settled, newest first stake first.
+    func myStakes() async throws -> [WalletStake]
+    /// A page of the wallet's history (wallet.v1 `ListWalletTransactions`,
+    /// #400), newest first; nil `currency` lists both.
+    func transactions(currency: WalletTransaction.Currency?, after pageToken: String?) async throws -> WalletTransactionPage
+}
+
+public extension WalletServer {
+    /// Servers that list no stakes: the device's.
+    func myStakes() async throws -> [WalletStake] { [] }
+    /// Servers with no history.
+    func transactions(currency: WalletTransaction.Currency?, after pageToken: String?) async throws -> WalletTransactionPage {
+        WalletTransactionPage(transactions: [], nextPageToken: nil)
+    }
+}
+
+/// One movement of the wallet (#400): a claim, a stake, a gift…
+public struct WalletTransaction: Equatable, Sendable, Identifiable, Hashable {
+    public enum Currency: Equatable, Sendable, Hashable { case points, gems }
+    public enum Kind: Equatable, Sendable, Hashable {
+        case claim, starterGift, stakePack, countryUnlock, stake, welcomeGift
+        /// A kind this build does not know — shown plainly, never hidden.
+        case other
+    }
+
+    public let id: String
+    public let currency: Currency
+    /// Positive: credited; negative: spent.
+    public let delta: Int
+    public let balanceAfter: Int
+    public let kind: Kind
+    public let createdAt: Date?
+    /// What it was for, when it names something (a country's code).
+    public let reference: String?
+
+    public init(
+        id: String, currency: Currency, delta: Int, balanceAfter: Int, kind: Kind, createdAt: Date?, reference: String?
+    ) {
+        self.id = id
+        self.currency = currency
+        self.delta = delta
+        self.balanceAfter = balanceAfter
+        self.kind = kind
+        self.createdAt = createdAt
+        self.reference = reference
+    }
+}
+
+public struct WalletTransactionPage: Equatable, Sendable {
+    public let transactions: [WalletTransaction]
+    /// Nil on the last page.
+    public let nextPageToken: String?
+
+    public init(transactions: [WalletTransaction], nextPageToken: String?) {
+        self.transactions = transactions
+        self.nextPageToken = nextPageToken
+    }
 }
 
 /// A stake of points (the charter's currency A) on a post or comment, and
@@ -87,6 +145,14 @@ public struct WalletStake: Equatable, Sendable, Identifiable {
         case gems(Int)
         /// Settled with nothing earned — popularity alone pays nothing.
         case noReward
+        /// The server's verdicts (#903), shown without gems while settlement
+        /// runs in shadow mode — the app never shows gems the balance does
+        /// not hold. Settled, the day's result not computed yet.
+        case pending
+        /// The stake was rewarded (its gems arrive once minting is live).
+        case rewarded
+        /// Settled, not rewarded.
+        case notRewarded
     }
 
     /// The post (or comment) staked on.
@@ -95,6 +161,14 @@ public struct WalletStake: Equatable, Sendable, Identifiable {
     public let amount: Int
     /// When the first of them was placed.
     public let stakedAt: Date
+
+    public init(targetID: String, amount: Int, stakedAt: Date, settlesAt: Date, outcome: Outcome?) {
+        self.targetID = targetID
+        self.amount = amount
+        self.stakedAt = stakedAt
+        self.settlesAt = settlesAt
+        self.outcome = outcome
+    }
     /// When the stake settles.
     public let settlesAt: Date
     /// Nil while the stake is still active.
@@ -269,8 +343,9 @@ public final class WalletStore: @unchecked Sendable {
         /// Mock-only, like `seededBalance`; the real wallet provisions at 0.
         public static let seededGems = 100
         /// How long a stake stays ACTIVE before it settles (charter §33's
-        /// deferred settlement) — a mock value until a service decides.
-        public static let settlementDelay: TimeInterval = 6 * 60 * 60
+        /// deferred settlement): a day after the first stake, as the server
+        /// settles a position (backend #886, #841).
+        public static let settlementDelay: TimeInterval = 24 * 60 * 60
 
         /// A stake's settled outcome, MOCK: stable per target and amount, so
         /// the same stake always settles the same way. About 55% earn gems —
@@ -487,7 +562,20 @@ public final class WalletStore: @unchecked Sendable {
     /// Every stake, as of `now()`: the ACTIVE ones first, soonest to settle
     /// first; then the SETTLED ones, most recent first.
     public func stakes() -> [WalletStake] {
-        lock.withLock { stakesLocked(at: now()) }
+        // Read before the lock: the outbox has its own.
+        let outboxTargets = Set((likeOutbox?.batches ?? []).map(\.target))
+        return lock.withLock {
+            let local = stakesLocked(at: now())
+            // The server's list, once read for this viewer (#903) — with the
+            // device's stakes it does not know yet (taps not committed) as
+            // active ones on top.
+            guard _server != nil, let server = _serverStakes, server.owner == scope.owner else { return local }
+            let listed = Set(server.stakes.map(\.targetID))
+            let unsent = local.filter {
+                !$0.isSettled && !listed.contains($0.targetID) && outboxTargets.contains(.post($0.targetID))
+            }
+            return unsent + server.stakes
+        }
     }
 
     /// Mock mode's demo ledger: stakes on real posts of the mock corpus, some
@@ -569,6 +657,35 @@ public final class WalletStore: @unchecked Sendable {
         }
         if applied { postDidChange() }
         return applied
+    }
+
+    /// The member's stakes as the server last listed them (#903), with the
+    /// account they belong to. Memory only: the sheet asks again on opening.
+    private var _serverStakes: (owner: StorageScope.Owner, stakes: [WalletStake])?
+
+    /// A page of the member's wallet history (#400); throws without a server
+    /// or for a guest, who has no wallet to list.
+    public func transactions(
+        currency: WalletTransaction.Currency?, after pageToken: String?
+    ) async throws -> WalletTransactionPage {
+        guard let server, case .member = scope.owner else { throw WalletHistoryUnavailable() }
+        return try await server.transactions(currency: currency, after: pageToken)
+    }
+
+    /// Lists the member's stakes from the server; the sheet's Active and
+    /// Settled read them (`stakes()`). Returns whether it did.
+    @discardableResult
+    public func refreshStakesFromServer() async -> Bool {
+        guard let server, case .member = scope.owner else { return false }
+        let owner = scope.owner
+        guard let listed = try? await server.myStakes() else { return false }
+        let stored: Bool = lock.withLock {
+            guard scope.owner == owner else { return false }
+            _serverStakes = (owner, listed)
+            return true
+        }
+        if stored { postDidChange() }
+        return stored
     }
 
     /// The last server wallet read for this account, if any — while a
@@ -931,4 +1048,9 @@ public final class WalletStore: @unchecked Sendable {
         // test suites (MapFavoritesStore's rule).
         NotificationCenter.default.post(name: Self.didChangeNotification, object: self)
     }
+}
+
+/// The wallet's history cannot be read: no server, or no member.
+public struct WalletHistoryUnavailable: Error, Equatable {
+    public init() {}
 }

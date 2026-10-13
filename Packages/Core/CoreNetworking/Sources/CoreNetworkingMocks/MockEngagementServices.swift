@@ -304,13 +304,53 @@ public final class MockWalletService: @unchecked Sendable {
         var claimDay: String = ""
         var streakDays: Int32 = 0
         var lastClaimAt: Date?
+        /// Every target staked on, newest first stake first (#903). Optional:
+        /// wallets kept before stakes were listed decode without it.
+        var positions: [Position]?
+        /// The wallet's history, oldest first (#400). Optional, as above.
+        var ledger: [LedgerEntry]?
+
+        /// Records one movement, with the balance right after.
+        mutating func record(_ kind: Wallet_V1_TransactionKind, points delta: Int64, at moment: Date, ref: String = "") {
+            var entries = ledger ?? []
+            entries.append(LedgerEntry(
+                id: "tx-\(entries.count + 1)", gems: false, delta: delta, balanceAfter: points,
+                kind: kind.rawValue, at: moment, ref: ref
+            ))
+            ledger = entries
+        }
     }
+
+    /// One ledger row (#400), as kept.
+    struct LedgerEntry: Codable, Equatable {
+        var id: String
+        var gems: Bool
+        var delta: Int64
+        var balanceAfter: Int64
+        var kind: Int
+        var at: Date
+        var ref: String
+    }
+
+    /// One target's stakes, all batches together.
+    struct Position: Codable, Equatable {
+        var target: String
+        var points: Int64
+        var firstAt: Date
+        var lastAt: Date
+    }
+
+    /// Positions settle a day after their first stake (backend #886).
+    static let settlementDelay: TimeInterval = 24 * 3_600
 
     private let store: MockCounterStore
     private let dataset: MockSocialDataset
     private let now: @Sendable () -> Date
     private let startingPoints: Int64
     private let persistence: UserDefaults?
+    /// Posts a new wallet opens with stakes on, some settled — so the
+    /// sheet's lists are not empty on a fresh install (the app's mock).
+    private let demoPositions: [String]
     private let lock = NSLock()
     private var accounts: [String: Account] {
         didSet {
@@ -327,8 +367,10 @@ public final class MockWalletService: @unchecked Sendable {
         dataset: MockSocialDataset,
         startingPoints: Int64 = MockWalletService.generousStartingPoints,
         persistence: UserDefaults? = nil,
+        demoPositions: [String] = [],
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
+        self.demoPositions = demoPositions
         self.store = store
         self.dataset = dataset
         self.startingPoints = startingPoints
@@ -354,6 +396,18 @@ public final class MockWalletService: @unchecked Sendable {
         }
         bff.register(path: "/wallet.v1.WalletService/ClaimReward") { [self] (request: Wallet_V1_ClaimRewardRequest, headers: Headers) -> Result<Wallet_V1_ClaimRewardResponse, ConnectError> in
             claim(request, caller: MockEngagementService.account(from: headers))
+        }
+        bff.register(path: "/wallet.v1.WalletService/ListWalletTransactions") { [self] (request: Wallet_V1_ListWalletTransactionsRequest, headers: Headers) -> Result<Wallet_V1_ListWalletTransactionsResponse, ConnectError> in
+            if let refusal = Self.refusal(request.accountID, caller: MockEngagementService.account(from: headers)) {
+                return .failure(refusal)
+            }
+            return .success(lock.withLock { transactionsLocked(request) })
+        }
+        bff.register(path: "/wallet.v1.WalletService/ListMyStakes") { [self] (request: Wallet_V1_ListMyStakesRequest, headers: Headers) -> Result<Wallet_V1_ListMyStakesResponse, ConnectError> in
+            if let refusal = Self.refusal(request.accountID, caller: MockEngagementService.account(from: headers)) {
+                return .failure(refusal)
+            }
+            return .success(lock.withLock { myStakesLocked(request) })
         }
     }
 
@@ -386,6 +440,7 @@ public final class MockWalletService: @unchecked Sendable {
             var wallet = accountLocked(account)
             wallet.points += amount
             wallet.pointsEarned += amount
+            wallet.record(.welcomeGift, points: amount, at: now())
             accounts[account] = wallet
             // The device's mark, kept with the wallets so it survives too.
             accounts[key] = Account(points: 0, gems: 0)
@@ -396,7 +451,26 @@ public final class MockWalletService: @unchecked Sendable {
     // MARK: The wallet
 
     private func accountLocked(_ id: String) -> Account {
-        accounts[id] ?? Account(points: startingPoints, gems: Self.starterGems)
+        if let account = accounts[id] { return account }
+        var opened = Account(points: startingPoints, gems: Self.starterGems)
+        // The wallet opens with its starter gems — and, in the mock, its
+        // starting points — as the first rows of its history.
+        let openedAt = now().addingTimeInterval(-7 * 86_400)
+        opened.ledger = [
+            LedgerEntry(id: "tx-0", gems: true, delta: Self.starterGems, balanceAfter: Self.starterGems,
+                        kind: Wallet_V1_TransactionKind.starterGift.rawValue, at: openedAt, ref: ""),
+            LedgerEntry(id: "tx-00", gems: false, delta: startingPoints, balanceAfter: startingPoints,
+                        kind: Wallet_V1_TransactionKind.starterGift.rawValue, at: openedAt, ref: ""),
+        ]
+        // Demo stakes placed before the wallet "opened", seven hours apart:
+        // some active, some settled — and, a few hours on, one whose day has
+        // just settled shows PENDING for an hour.
+        let moment = now()
+        opened.positions = demoPositions.enumerated().map { index, post in
+            let first = moment.addingTimeInterval(-Double(index) * 7 * 3_600 - 1_800)
+            return Position(target: "post:" + post, points: Int64(1 + index * 7 % 40), firstAt: first, lastAt: first)
+        }
+        return opened
     }
 
     private static let utc: Calendar = {
@@ -467,6 +541,88 @@ public final class MockWalletService: @unchecked Sendable {
         return wallet
     }
 
+    // MARK: The history (#400)
+
+    /// The account's ledger, newest first, by currency, paged by offset.
+    private func transactionsLocked(_ request: Wallet_V1_ListWalletTransactionsRequest) -> Wallet_V1_ListWalletTransactionsResponse {
+        let entries = (accountLocked(request.accountID).ledger ?? [])
+            .reversed()
+            .filter { entry in
+                switch request.currency {
+                case .points: !entry.gems
+                case .gems: entry.gems
+                default: true
+                }
+            }
+        let all = Array(entries)
+        let size = request.pageSize <= 0 ? 50 : min(Int(request.pageSize), 100)
+        let start = min(max(Int(request.pageToken) ?? 0, 0), all.count)
+        let end = min(start + size, all.count)
+        var response = Wallet_V1_ListWalletTransactionsResponse()
+        response.transactions = all[start..<end].map { entry in
+            var transaction = Wallet_V1_WalletTransaction()
+            transaction.transactionID = entry.id
+            transaction.currency = entry.gems ? .gems : .points
+            transaction.delta = entry.delta
+            transaction.balanceAfter = entry.balanceAfter
+            transaction.kind = Wallet_V1_TransactionKind(rawValue: entry.kind) ?? .unspecified
+            transaction.createdAt = Google_Protobuf_Timestamp(date: entry.at)
+            transaction.refID = entry.ref
+            return transaction
+        }
+        response.nextPageToken = end < all.count ? String(end) : ""
+        return response
+    }
+
+    // MARK: The stakes (#903)
+
+    /// The account's positions, newest first stake first, filtered by
+    /// status and paged by an offset token. Settlement runs in shadow mode:
+    /// a settled position has a verdict and no gems — PENDING for its first
+    /// hour, then REWARDED or NOT_REWARDED (stable per target).
+    private func myStakesLocked(_ request: Wallet_V1_ListMyStakesRequest) -> Wallet_V1_ListMyStakesResponse {
+        let moment = now()
+        let positions = (accountLocked(request.accountID).positions ?? [])
+            .sorted { $0.firstAt > $1.firstAt }
+            .filter { position in
+                let settled = moment >= position.firstAt.addingTimeInterval(Self.settlementDelay)
+                switch request.status {
+                case .active: return !settled
+                case .settled: return settled
+                default: return true
+                }
+            }
+        let size = request.pageSize <= 0 ? 50 : min(Int(request.pageSize), 100)
+        let start = min(max(Int(request.pageToken) ?? 0, 0), positions.count)
+        let end = min(start + size, positions.count)
+        var response = Wallet_V1_ListMyStakesResponse()
+        response.stakes = positions[start..<end].map { position in
+            var stake = Wallet_V1_MyStake()
+            if position.target.hasPrefix("post:") {
+                stake.postID = String(position.target.dropFirst(5))
+            } else {
+                stake.commentID = String(position.target.dropFirst(8))
+            }
+            stake.points = position.points
+            stake.firstAt = Google_Protobuf_Timestamp(date: position.firstAt)
+            stake.lastAt = Google_Protobuf_Timestamp(date: position.lastAt)
+            let settlesAt = position.firstAt.addingTimeInterval(Self.settlementDelay)
+            stake.settlesAt = Google_Protobuf_Timestamp(date: settlesAt)
+            if moment >= settlesAt {
+                stake.settledAt = Google_Protobuf_Timestamp(date: settlesAt)
+                if moment < settlesAt.addingTimeInterval(3_600) {
+                    stake.verdict = .pending
+                } else {
+                    let hash = position.target.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) & 0xFFFF }
+                    stake.verdict = hash % 100 < 55 ? .rewarded : .notRewarded
+                }
+            }
+            return stake
+        }
+        response.nextPageToken = end < positions.count ? String(end) : ""
+        return response
+    }
+
     // MARK: The claim
 
     func claim(_ request: Wallet_V1_ClaimRewardRequest, caller: String?) -> Result<Wallet_V1_ClaimRewardResponse, ConnectError> {
@@ -494,6 +650,7 @@ public final class MockWalletService: @unchecked Sendable {
                 account.lastClaimAt = moment
                 account.points += amount
                 account.pointsEarned += amount
+                account.record(.claim, points: amount, at: moment)
                 accounts[request.accountID] = account
                 response.outcome = .claimed
                 response.awarded = Int32(amount)
@@ -575,6 +732,15 @@ public final class MockWalletService: @unchecked Sendable {
         }
         wallet.points -= spend
         wallet.pointsSpent += spend
+        wallet.record(.stake, points: -spend, at: moment, ref: target)
+        var positions = wallet.positions ?? []
+        if let index = positions.firstIndex(where: { $0.target == target }) {
+            positions[index].points += spend
+            positions[index].lastAt = moment
+        } else {
+            positions.append(Position(target: target, points: spend, firstAt: moment, lastAt: moment))
+        }
+        wallet.positions = positions
         accounts[account] = wallet
         hourLedger[account] = recent + [(moment, spend)]
         let total = store.stake(spend, account: account, target: target)
