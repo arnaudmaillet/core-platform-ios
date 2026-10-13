@@ -3,6 +3,30 @@ import Foundation
 import Testing
 @testable import MediaPlayback
 
+/// A look budget, not a deadline (#1084): counts this test's own looks, so a
+/// starved runner only makes it slower, and stops as soon as `condition`
+/// holds. Its result is always asserted.
+@MainActor
+private func settle(_ condition: () -> Bool) async -> Bool {
+    for _ in 0..<6_000 {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return condition()
+}
+
+/// Returns once the clip in `surface` has no seek in flight and none queued:
+/// the controller's own release seam, awaited where a fixed sleep used to
+/// stand for "the seeks landed" (#1084: 600 ms was not enough on a starved
+/// runner). With nothing in flight it returns at once, so a dead seek path
+/// still fails the landed guard that follows.
+@MainActor
+private func seeksSettled(_ controller: VideoPlaybackController, in surface: VideoRenderView) async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        controller.whenSeeksSettle(in: surface) { continuation.resume() }
+    }
+}
+
 /// **SEEKING A PAUSED PLAYER, AND THEN LETTING IT GO.**
 ///
 /// ⚠️ **THE PAUSE ANCHOR EXISTS TO UNDO DRIFT, AND IT WAS UNDOING SCRUBS.**
@@ -40,10 +64,7 @@ struct ScrubWhilePausedTests {
         let surface = VideoRenderView()
         surface.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
         await controller.play(file, in: surface)
-        for _ in 0..<400 {
-            if controller.playhead(in: surface) != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try #require(await settle { controller.playhead(in: surface) != nil }, "the item never reported a length")
         return (controller, surface)
     }
 
@@ -57,7 +78,7 @@ struct ScrubWhilePausedTests {
 
         controller.setPaused(true, in: surface)
         controller.seek(toFraction: 0.75, in: surface)
-        try await Task.sleep(for: .milliseconds(300))
+        await seeksSettled(controller, in: surface)
 
         let head = try #require(controller.playhead(in: surface))
         #expect(abs(head.fraction - 0.75) < 0.12, "the seek did not land: \(head)")
@@ -73,12 +94,14 @@ struct ScrubWhilePausedTests {
 
         controller.setPaused(true, in: surface)
         controller.seek(toFraction: 0.75, in: surface)
-        try await Task.sleep(for: .milliseconds(300))
+        await seeksSettled(controller, in: surface)
         let scrubbed = try #require(controller.playhead(in: surface)).fraction
         #expect(abs(scrubbed - 0.75) < 0.12, "guard: the scrub landed before we resumed")
 
         let resumed = ContinuousClock.now
         controller.setPaused(false, in: surface)
+        // Not a wait for something to happen: a stretch of playback, read back
+        // against the time it actually took (below), however long that was.
         try await Task.sleep(for: .milliseconds(300))
         let readFrom = ContinuousClock.now - resumed
         let head = try #require(controller.playhead(in: surface))
@@ -130,10 +153,7 @@ struct ChasedSeekTests {
         let surface = VideoRenderView()
         surface.frame = CGRect(x: 0, y: 0, width: 80, height: 80)
         await controller.play(file, in: surface)
-        for _ in 0..<400 {
-            if controller.playhead(in: surface) != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try #require(await settle { controller.playhead(in: surface) != nil }, "the item never reported a length")
         return (controller, surface)
     }
 
@@ -169,7 +189,7 @@ struct ChasedSeekTests {
                         "the queue is holding an older position: \(queued)")
             }
         }
-        try await Task.sleep(for: .milliseconds(600))
+        await seeksSettled(controller, in: surface)
 
         #expect(controller.debugSeeksCancelled == 0,
                 "\(controller.debugSeeksCancelled) seeks were issued and then killed")
@@ -186,7 +206,7 @@ struct ChasedSeekTests {
         for step in 0..<12 {
             controller.seek(toFraction: Double(step) / 12, in: surface, toleranceSeconds: 0.05)
         }
-        try await Task.sleep(for: .milliseconds(700))
+        await seeksSettled(controller, in: surface)
 
         let head = try #require(controller.playhead(in: surface))
         #expect(abs(head.fraction - 11.0 / 12.0) < 0.1,
@@ -207,7 +227,9 @@ struct ChasedSeekTests {
                 toFraction: Double(step) / 24, in: surface, toleranceSeconds: 0.05
             )
         }
-        try await Task.sleep(for: .milliseconds(600))
+        // The last reverse seek's landing, awaited: a fixed 600 ms ran out
+        // before the FIRST one landed on a starved runner (#1084).
+        await seeksSettled(controller, in: surface)
 
         // ⚠️ **THE WITNESS ITS FORWARD TWIN HAD AND THIS ONE DID NOT.** With
         // `seek` neutered to `return`, nothing is cancelled and nothing is
@@ -253,10 +275,8 @@ struct ChasedSeekTests {
             inFlightWhenRun = controller.debugSeeksInFlight
         }
         #expect(landedAt == nil, "it ran before the seeks it was waiting for")
-        for _ in 0..<300 where landedAt == nil {
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        let head = try #require(landedAt, "the release was never let go")
+        try #require(await settle { landedAt != nil }, "the release was never let go")
+        let head = try #require(landedAt)
         #expect(abs(head - 0.6) < 0.02, "it ran with the picture at \(head), not at 0.6")
         #expect(inFlightWhenRun == 0)
     }
