@@ -331,6 +331,17 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 print("[qa] gate-demo: requireMember(.like) -> \(passed)")
             }
         }
+        // `-button-gallery`: every AppButton aspect, size and state, and its
+        // motions on demand (#931), over the app.
+        if ProcessInfo.processInfo.arguments.contains("-button-gallery") {
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(1))
+                guard let shell = self?.mainTabCoordinator?.rootViewController else { return }
+                let gallery = UINavigationController(rootViewController: AppButtonGalleryViewController())
+                gallery.modalPresentationStyle = .fullScreen
+                shell.present(gallery, animated: false)
+            }
+        }
         #endif
     }
 
