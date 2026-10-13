@@ -462,8 +462,9 @@ public final class MockWalletService: @unchecked Sendable {
             LedgerEntry(id: "tx-00", gems: false, delta: startingPoints, balanceAfter: startingPoints,
                         kind: Wallet_V1_TransactionKind.starterGift.rawValue, at: openedAt, ref: ""),
         ]
-        // Demo stakes placed before the wallet "opened": hours apart, so some
-        // are active, some settled, one settled within the hour (pending).
+        // Demo stakes placed before the wallet "opened", seven hours apart:
+        // some active, some settled — and, a few hours on, one whose day has
+        // just settled shows PENDING for an hour.
         let moment = now()
         opened.positions = demoPositions.enumerated().map { index, post in
             let first = moment.addingTimeInterval(-Double(index) * 7 * 3_600 - 1_800)

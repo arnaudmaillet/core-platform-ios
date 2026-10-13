@@ -53,7 +53,7 @@ public actor ServerWallet: WalletServer {
     /// Every stake on a post, active and settled, newest first stake first
     /// (#903). Comment stakes are left out: the sheet lists posts.
     public func myStakes() async throws -> [WalletStake] {
-        let account = try await account()
+        let account = try await self.account()
         var stakes: [WalletStake] = []
         var token = ""
         for _ in 0..<Self.stakePages {
