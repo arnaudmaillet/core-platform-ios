@@ -133,6 +133,9 @@ public enum Feedback {
     /// Undo and a ring counting down `ToastView.undoDuration`, and a success
     /// haptic. Exactly one of `commit` and `undo` runs, once — see
     /// `ToastView.Undoable` for when it commits.
+    ///
+    /// - Parameter playsHaptic: false where the action already played its
+    ///   own (a stake's impact, on every tap of a burst).
     @discardableResult
     public static func undoable(
         _ message: String,
@@ -142,12 +145,14 @@ public enum Feedback {
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom,
         id: String? = nil,
+        playsHaptic: Bool = true,
         commit: @escaping @MainActor () -> Void,
         undo: @escaping @MainActor () -> Void
     ) -> ToastView {
         show(
             .success, message, detail: detail, symbol: symbol, from: source, above: floor, at: position,
-            action: nil, undoable: ToastView.Undoable(commit: commit, undo: undo), id: id
+            action: nil, undoable: ToastView.Undoable(commit: commit, undo: undo), id: id,
+            playsHaptic: playsHaptic
         )
     }
 
@@ -234,7 +239,8 @@ public enum Feedback {
         action: ToastView.Action?,
         undoable: ToastView.Undoable? = nil,
         id: String? = nil,
-        isCondition: Bool = false
+        isCondition: Bool = false,
+        playsHaptic: Bool = true
     ) -> ToastView {
         let host = host(for: source)
         let floor = host === source && floor?.window != nil ? floor : nil
@@ -256,7 +262,7 @@ public enum Feedback {
                 edge: position.isTop ? nil : floor?.topAnchor
             )
         }
-        if let haptic = kind.haptic { playHaptic(haptic) }
+        if playsHaptic, let haptic = kind.haptic { playHaptic(haptic) }
         return toast
     }
 

@@ -63,6 +63,40 @@ struct CardStakeTests {
         #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
     }
 
+    /// A burst of taps shows ONE toast with the burst so far, and its Undo
+    /// takes all of it back (#957).
+    @Test func aBurstShowsOneUndoToastThatTakesItAllBack() throws {
+        let wallet = WalletStore(defaults: Self.defaults())
+        let before = wallet.balance
+        let staking = PostCardStaking(wallet: wallet)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let screen = UIViewController()
+        window.rootViewController = screen
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        let cell = row()
+        screen.view.addSubview(cell)
+        staking.bind(cell, to: PostID("post-1"))
+
+        #expect(cell.debugTapLikesChip())
+        #expect(cell.debugTapLikesChip())
+
+        let toasts = screen.view.subviews.compactMap { $0 as? ToastView }
+        let toast = try #require(toasts.first)
+        #expect(toasts.count == 1)
+        let burst = 2 * WalletStore.Policy.defaultStakeAmount
+        #expect(toast.message == StakeMenu.stakedToastMessage(burst))
+
+        let undo = try #require(toast.accessibilityCustomActions?.first { $0.name == "Undo" })
+        _ = undo.actionHandler?(undo)
+        #expect(wallet.balance == before)
+        #expect(wallet.boostTotal(forTarget: "post-1") == 0)
+        #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
+    }
+
     /// The card's menu reads the wallet's pack: the default only without one,
     /// "×100 — N left" with one.
     @Test func theCardMenuReadsThePack() {
