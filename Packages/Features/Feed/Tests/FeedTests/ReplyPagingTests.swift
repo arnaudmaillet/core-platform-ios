@@ -87,11 +87,16 @@ struct ReplyPagingTests {
         var ids: [String] { models.map(\.id) }
     }
 
-    private func settle(until condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while !(await condition()), ContinuousClock.now < deadline {
+    /// A look budget, not a wall-clock deadline: a starved runner sleeps
+    /// longer per look and so waits longer, and a wait that never arrives
+    /// fails the `#expect` around it instead of running on silently.
+    @discardableResult
+    private func settle(until condition: () async -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return await condition()
     }
 
     private static let page = CommentPage(
@@ -110,7 +115,7 @@ struct ReplyPagingTests {
             shown.models = models
         }
         viewModel.viewDidLoad()
-        await settle { shown.ids.count == 4 && !viewModel.isLoadingFirstPage }
+        #expect(await settle { shown.ids.count == 4 && !viewModel.isLoadingFirstPage })
         return (viewModel, shown)
     }
 
@@ -127,20 +132,21 @@ struct ReplyPagingTests {
         ))
 
         viewModel.loadMoreReplies(parentID: "a")
-        await settle { shown.ids.count == 6 }
+        #expect(await settle { shown.ids.count == 6 })
         #expect(shown.ids == ["a", "a-r4", "a-r3", "a-r2", "a-r1", "b"])
         #expect(CommentThreadPresentation.items(from: shown.models, expanded: ["a"]).contains(
             .viewMoreReplies(parentID: "a", hiddenCount: 1)
         ))
 
         viewModel.loadMoreReplies(parentID: "a")
-        await settle { shown.ids.count == 7 }
+        #expect(await settle { shown.ids.count == 7 })
         #expect(shown.ids == ["a", "a-r4", "a-r3", "a-r2", "a-r1", "a-r0", "b"])
         let expanded = CommentThreadPresentation.items(from: shown.models, expanded: ["a"])
         #expect(expanded.contains(.collapseReplies(parentID: "a")))
         #expect(!expanded.contains { if case .viewMoreReplies = $0 { true } else { false } })
 
         viewModel.loadMoreReplies(parentID: "a")
+        // Grace for "nothing more happens": the thread is whole, so no ask.
         try? await Task.sleep(for: .milliseconds(50))
         #expect(await provider.replyAsks == ["t1", "t2"], "nothing asked once the thread is whole")
     }
@@ -155,9 +161,9 @@ struct ReplyPagingTests {
 
         viewModel.loadMoreReplies(parentID: "a")
         viewModel.loadMoreReplies(parentID: "a")
-        await settle { await provider.waitingCount == 1 }
+        #expect(await settle { await provider.waitingCount == 1 })
         await provider.release()
-        await settle { shown.ids.count == 5 }
+        #expect(await settle { shown.ids.count == 5 })
 
         #expect(await provider.replyAsks == ["t1"])
     }
@@ -172,7 +178,7 @@ struct ReplyPagingTests {
         let (viewModel, shown) = await load(provider)
 
         viewModel.loadMoreReplies(parentID: "a")
-        await settle { shown.ids.count == 5 }
+        #expect(await settle { shown.ids.count == 5 })
 
         #expect(shown.ids == ["a", "a-r4", "a-r3", "a-r2", "b"])
         #expect(await provider.replyAsks == ["t1", "t2"])
@@ -185,7 +191,7 @@ struct ReplyPagingTests {
         let (viewModel, shown) = await load(provider)
 
         viewModel.submitComment("mine", parentID: "a")
-        await settle { shown.ids.count == 5 }
+        #expect(await settle { shown.ids.count == 5 })
 
         #expect(shown.models.first { $0.id == "a" }?.replyCount == 6)
         #expect(CommentThreadPresentation.items(from: shown.models, expanded: ["a"]).contains(
