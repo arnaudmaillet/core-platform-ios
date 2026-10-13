@@ -1441,6 +1441,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// entry held so it is never fetched back, its empty first page of
     /// comments — and from then on the sheet is that post's.
     public func makeTextPostScreen(publisher: any TextPostPublishing) -> UIViewController {
+        makeTextPostScreen(publisher: publisher, bookmarks: .shared)
+    }
+
+    /// The same, over `bookmarks` — the app's one pile outside tests.
+    func makeTextPostScreen(publisher: any TextPostPublishing, bookmarks: PostBookmarkStore) -> UIViewController {
         let repository = repository
         let commentsProvider = commentsProvider
         let draft = PostDetailDraft { text, author in
@@ -1469,7 +1474,10 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             imagePipeline: imagePipeline,
             router: router,
             wallet: wallet,
-            makeWalletSheet: makeWalletSheet
+            makeWalletSheet: makeWalletSheet,
+            // A save made elsewhere while the page shows the post (#1067).
+            entities: entities,
+            bookmarks: bookmarks
         )
         let navigation = UINavigationController(rootViewController: composer)
         navigation.modalPresentationStyle = .pageSheet

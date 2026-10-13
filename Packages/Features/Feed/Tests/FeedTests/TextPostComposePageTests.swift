@@ -1,6 +1,7 @@
 import CoreModels
 import CoreStorage
 import DesignSystem
+import EntityStore
 import FeedInterface
 import MediaCore
 import Testing
@@ -118,7 +119,9 @@ struct TextPostComposePageTests {
     /// every geometry expectation here red for a reason no test names.
     private func openPage(
         size: CGSize = CGSize(width: 390, height: 844),
-        contentSize: UIContentSizeCategory = .large
+        contentSize: UIContentSizeCategory = .large,
+        entities: EntityStore? = nil,
+        bookmarks: PostBookmarkStore? = nil
     ) async throws -> Page {
         let posts = RememberingFeed()
         let comments = ViewerComments()
@@ -126,12 +129,19 @@ struct TextPostComposePageTests {
         let draftsFile = "post-drafts-test-\(UUID().uuidString)"
         try CodableFileStore<[PostDraft]>(name: draftsFile).clear()
         let drafts = PostDraftStore(name: draftsFile)
+        // A pile of the test's own unless one is given: the app's shared one
+        // is never touched.
+        let pile = bookmarks ?? PostBookmarkStore(
+            defaults: UserDefaults(suiteName: "text-post.bookmarks.tests.\(UUID().uuidString)")!,
+            scope: StorageScope(owner: .member(account: "acc-1", profile: "prof-1"))
+        )
         let screen = FeedFeatureBuilder(
             repository: posts,
             commentsProvider: comments,
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            postDrafts: drafts
-        ).makeTextPostScreen(publisher: publisher)
+            postDrafts: drafts,
+            entities: entities
+        ).makeTextPostScreen(publisher: publisher, bookmarks: pile)
         let navigation = try #require(screen as? UINavigationController)
         #expect(navigation.modalPresentationStyle == .pageSheet, "a sheet, not a full screen")
         let composer = try #require(navigation.viewControllers.first as? TextPostComposerViewController)
@@ -438,6 +448,55 @@ struct TextPostComposePageTests {
         try await settle { !page.comments.added.isEmpty }
 
         #expect(page.comments.added == [PostID("post-new")])
+    }
+
+    // MARK: - Saved (#1067)
+
+    /// A save or unsave of the published post made on another surface while
+    /// the page shows it — through the app's one pile, which writes the
+    /// EntityStore's fact — draws on the page's glyph at once.
+    @Test func theTextPostPageGlyphFollowsASaveMadeElsewhere() async throws {
+        let entities = EntityStore()
+        let pile = PostBookmarkStore(
+            defaults: UserDefaults(suiteName: "text-post.save-glyph.tests.\(UUID().uuidString)")!,
+            scope: StorageScope(owner: .member(account: "acc-1", profile: "prof-1"))
+        )
+        pile.facts = entities
+        let page = try await openPage(entities: entities, bookmarks: pile)
+        // Another post's save while still a draft: nothing to draw, nothing drawn.
+        pile.toggle("post-other")
+        try await publish(page)
+        try #require(page.composer.debugIsPublished)
+        let id = try #require(page.composer.debugPublishedPostID)
+        #expect(page.composer.debugBookmarkGlyph.symbol == "bookmark", "precondition: not saved")
+
+        pile.toggle(id.rawValue)
+        #expect(page.composer.debugBookmarkGlyph.symbol == "bookmark.fill", "the glyph fills at once")
+        #expect(page.composer.debugBookmarkGlyph.label == "Saved")
+
+        pile.toggle("post-other")
+        #expect(page.composer.debugBookmarkGlyph.symbol == "bookmark.fill", "another post's unsave is not this glyph")
+
+        entities.setSaved(false, for: id)
+        #expect(page.composer.debugBookmarkGlyph.symbol == "bookmark", "and empties when the fact does")
+        #expect(page.composer.debugBookmarkGlyph.label == "Save")
+    }
+
+    /// The observation is the page's own: it does not keep the page alive,
+    /// and it goes with it (`EntityObservation` cancels on release).
+    @Test func theTextPostPageObservationEndsWithThePage() throws {
+        let entities = EntityStore()
+        weak var released: TextPostComposerViewController?
+        autoreleasepool {
+            let navigation = FeedFeatureBuilder(
+                repository: RememberingFeed(),
+                imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+                entities: entities
+            ).makeTextPostScreen(publisher: RecordingPublisher()) as? UINavigationController
+            released = navigation?.viewControllers.first as? TextPostComposerViewController
+            #expect(released != nil)
+        }
+        #expect(released == nil, "the observation kept the page alive")
     }
 
     // MARK: - Leaving and drafts

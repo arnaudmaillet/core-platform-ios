@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import EntityStore
 import MediaCore
 import UIKit
 
@@ -81,16 +82,26 @@ final class TextPostComposerViewController: UIViewController {
     private let walletBadge = WalletBadgeButton()
     private var walletBadgeItem: UIBarButtonItem?
     private let walletObservers = NotificationObserverTokenBag()
-    private let bookmarks = PostBookmarkStore.shared
+    /// The saved pile: the app's one (`shared`) outside tests.
+    private let bookmarks: PostBookmarkStore
     private let bookmarkButton = SnapFooterToolbar.makeSaveButton()
+    /// Keeps the published post's save glyph on its saved fact (#1067): a
+    /// save or unsave made on another surface while the page shows the post
+    /// draws at once — the feed page's and the cards' mechanism. Lives as
+    /// long as the page, and draws nothing while it is still a draft.
+    private var savedObservation: EntityObservation?
 
+    /// - Parameter entities: where a save made elsewhere is heard. Nil: the
+    ///   glyph reads the pile when the post is published and on a tap.
     init(
         panel: PostDetailViewController,
         drafts: PostDraftStore,
         imagePipeline: ImagePipeline,
         router: (any Router)?,
         wallet: WalletStore?,
-        makeWalletSheet: (@MainActor () -> UIViewController)?
+        makeWalletSheet: (@MainActor () -> UIViewController)?,
+        entities: EntityStore? = nil,
+        bookmarks: PostBookmarkStore = .shared
     ) {
         self.panel = panel
         self.drafts = drafts
@@ -98,7 +109,15 @@ final class TextPostComposerViewController: UIViewController {
         self.router = router
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.bookmarks = bookmarks
         super.init(nibName: nil, bundle: nil)
+        savedObservation = entities?.observePosts { [weak self] change in
+            guard let self, let id = self.publishedModel?.id, change.contains(id) else { return }
+            // Its counts move here too: only a changed save re-draws.
+            let saved = self.bookmarks.isSaved(id.rawValue)
+            guard SnapFeedViewController.bookmarkSymbol(saved: saved) != self.drawnBookmarkSymbol else { return }
+            self.refreshBookmarkGlyph()
+        }
     }
 
     @available(*, unavailable)
@@ -645,12 +664,18 @@ final class TextPostComposerViewController: UIViewController {
         refreshBookmarkGlyph()
     }
 
+    /// The glyph's symbol as last drawn.
+    private var drawnBookmarkSymbol = "bookmark"
+
+    /// Draws the published post's saved state — on publish, on a tap, and
+    /// when its saved fact changes anywhere (`savedObservation`).
     private func refreshBookmarkGlyph() {
         guard let id = publishedModel?.id else { return }
         let saved = bookmarks.isSaved(id.rawValue)
+        drawnBookmarkSymbol = SnapFeedViewController.bookmarkSymbol(saved: saved)
         bookmarkButton.accessibilityLabel = saved ? "Saved" : "Save"
         var config = bookmarkButton.configuration
-        config?.image = UIImage(systemName: saved ? "bookmark.fill" : "bookmark")?
+        config?.image = UIImage(systemName: drawnBookmarkSymbol)?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
         bookmarkButton.configuration = config
     }
@@ -667,6 +692,12 @@ final class TextPostComposerViewController: UIViewController {
     #if DEBUG
     var debugIsPublished: Bool { publishedModel != nil }
     var debugRestingFloor: CGFloat? { restingFloor }
+    /// The published post's id, once there is one.
+    var debugPublishedPostID: PostID? { publishedModel?.id }
+    /// The save glyph as drawn: its symbol and its spoken label.
+    var debugBookmarkGlyph: (symbol: String, label: String?) {
+        (drawnBookmarkSymbol, bookmarkButton.accessibilityLabel)
+    }
 
     private var didRunDebugHooks = false
 
