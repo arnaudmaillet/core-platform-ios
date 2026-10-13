@@ -5,6 +5,7 @@ import CacheKit
 import Chat
 import ChatInterface
 import Connect
+import CoreLocation
 import CoreContracts
 import CoreNavigation
 import MediaCore
