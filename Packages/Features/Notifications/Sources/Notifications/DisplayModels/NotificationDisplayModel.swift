@@ -70,6 +70,10 @@ public struct NotificationDisplayModel: Equatable, Sendable, Identifiable {
         case .comment: return "commented on your post"
         case .reply: return "replied to you"
         case .mention: return "mentioned you"
+        // The sender is the other side of the link, either role (#1106).
+        case .supervisionStarted: return "is now linked with you for parental supervision"
+        case .supervisionEnded: return "ended your parental supervision link"
+        case .supervisionCameOfAge: return "is no longer linked with you: supervision ends at 18"
         case .other: return "interacted with you"
         }
     }

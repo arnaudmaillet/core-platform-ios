@@ -58,7 +58,18 @@ public struct NotificationItem: Equatable, Sendable, Identifiable {
         case comment
         case reply
         case mention
+        /// Family supervision (#1106, backend #848): a link began, the
+        /// other side ended it, or it ended because the teen turned 18. The
+        /// sender is the other side.
+        case supervisionStarted
+        case supervisionEnded
+        case supervisionCameOfAge
         case other
+
+        /// A supervision notice: its row opens Family and Teens.
+        public var isSupervision: Bool {
+            self == .supervisionStarted || self == .supervisionEnded || self == .supervisionCameOfAge
+        }
     }
 
     public let id: String
@@ -76,6 +87,9 @@ public struct NotificationItem: Equatable, Sendable, Identifiable {
     public let postSubjectID: PostID?
     /// The subject post's thumbnail or text, when it could be read.
     public let subjectPreview: NotificationSubjectPreview?
+    /// Non-nil when the subject is an account (`SUBJECT_KIND_ACCOUNT`): the
+    /// other side of a supervision, whose link the row opens (#1106).
+    public let subjectAccountID: String?
     public let isRead: Bool
     public let createdAt: Date
 
@@ -89,9 +103,11 @@ public struct NotificationItem: Equatable, Sendable, Identifiable {
         sampleSenders: [NotificationActor] = [],
         postSubjectID: PostID?,
         subjectPreview: NotificationSubjectPreview? = nil,
+        subjectAccountID: String? = nil,
         isRead: Bool,
         createdAt: Date
     ) {
+        self.subjectAccountID = subjectAccountID
         self.id = id
         self.action = action
         self.senderID = senderID
@@ -116,7 +132,7 @@ public struct NotificationItem: Equatable, Sendable, Identifiable {
             id: id, action: action, senderID: senderID, senderName: senderName,
             senderAvatarURL: senderAvatarURL, otherSenderCount: otherSenderCount,
             sampleSenders: sampleSenders, postSubjectID: postSubjectID,
-            subjectPreview: subjectPreview, isRead: true, createdAt: createdAt
+            subjectPreview: subjectPreview, subjectAccountID: subjectAccountID, isRead: true, createdAt: createdAt
         )
     }
 }
@@ -387,17 +403,22 @@ public actor NotificationsRepository: NotificationsProviding, ViewerScoped {
             sampleSenders: samples,
             postSubjectID: postSubjectID,
             subjectPreview: postSubjectID.flatMap { previewCache.value(for: $0) },
+            subjectAccountID: view.subjectKind == .account && !view.subjectID.isEmpty ? view.subjectID : nil,
             isRead: view.isRead,
             createdAt: Date(timeIntervalSince1970: TimeInterval(view.createdAtMs) / 1000)
         )
     }
 
-    private static func action(from kind: Notification_V1_NotificationKind) -> NotificationItem.Action {
+    static func action(from kind: Notification_V1_NotificationKind) -> NotificationItem.Action {
         switch kind {
         case .reaction: .reaction
         case .comment: .comment
         case .reply: .reply
         case .mention: .mention
+        case .supervisionStarted: .supervisionStarted
+        case .supervisionEnded: .supervisionEnded
+        case .supervisionCameOfAge: .supervisionCameOfAge
+        // A kind this build doesn't know yet reads as generic activity.
         default: .other
         }
     }

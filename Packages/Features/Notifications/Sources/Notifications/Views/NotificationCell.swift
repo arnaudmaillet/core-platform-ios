@@ -297,7 +297,7 @@ private final class FaceView: UIView {
 
 /// The small disc at the avatar's corner that says what happened — a heart
 /// for a like, a bubble for a comment — so the kind reads before the sentence.
-private final class KindBadgeView: UIView {
+final class KindBadgeView: UIView {
     private let glyph = UIImageView()
     private let disc = UIView()
 
@@ -339,6 +339,9 @@ private final class KindBadgeView: UIView {
         case .comment: (PostActionSymbol.commentsFilled, .systemBlue)
         case .reply: ("arrowshape.turn.up.left.fill", .systemGreen)
         case .mention: ("at", .systemIndigo)
+        case .supervisionStarted: ("figure.2.and.child.holdinghands", .systemTeal)
+        case .supervisionEnded: ("xmark", .systemGray)
+        case .supervisionCameOfAge: ("party.popper.fill", .systemOrange)
         case .other: ("bell.fill", .systemGray)
         }
     }

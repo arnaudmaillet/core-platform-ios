@@ -98,6 +98,11 @@ public protocol ProfileFeatureBuilding {
     /// Nothing is linked until the viewer confirms there. Nil when the
     /// account can't take one.
     func makeSupervisionAcceptViewController(code: String) -> UIViewController?
+
+    /// Settings → Family and Teens, opening the supervision with
+    /// `otherAccountID` once the page has it (#1106) — a supervision
+    /// notification's destination. Nil for an account it can't be shown to.
+    func makeFamilyAndTeensViewController(openingSupervisionWith otherAccountID: String?) -> UIViewController?
 }
 
 public extension ProfileFeatureBuilding {

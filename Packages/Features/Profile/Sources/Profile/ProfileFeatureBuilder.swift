@@ -115,6 +115,22 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// A family supervision invite opened from a link (#417): the code filled
     /// in, nothing linked until the viewer taps Link. Once linked, the screen
     /// steps back and says so. Nil when the account can't take one.
+    /// Family and Teens from a supervision notification (#1106): the same
+    /// page Settings opens, which then opens the link with `otherAccountID`
+    /// if it still exists. Reached outside Settings, its protection rows
+    /// open nothing (there is no Settings stack to open them in).
+    public func makeFamilyAndTeensViewController(openingSupervisionWith otherAccountID: String?) -> UIViewController? {
+        guard let account else { return nil }
+        let page = FamilyAndTeensViewController(
+            isTeen: { try await account.currentAccount().ageBracket.isTeen },
+            supervision: account as? any SupervisionManaging,
+            imagePipeline: imagePipeline,
+            router: router
+        )
+        page.pendingSupervisionAccountID = otherAccountID
+        return page
+    }
+
     public func makeSupervisionAcceptViewController(code: String) -> UIViewController? {
         guard let account, let manager = account as? any SupervisionManaging else { return nil }
         return SupervisionAcceptViewController(

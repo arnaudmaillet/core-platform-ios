@@ -139,7 +139,8 @@ public struct MockBackend: Sendable {
             counters: counterStore,
             isFindable: { socialServices.isFindableInSearch($0) }
         ).register(on: bff)
-        MockNotificationService(dataset: dataset).register(on: bff)
+        // Supervision notices ride on `-mock-supervision` (#1106).
+        MockNotificationService(dataset: dataset, supervisionSeed: MockSupervisionService.launchSeed).register(on: bff)
         // Comments matching a post owner's hidden words are dropped (#404),
         // and one outside the owner's "Who Can Comment" is refused (#397).
         MockCommentService(
