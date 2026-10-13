@@ -1,6 +1,7 @@
 import Connect
 import CoreContracts
 import Foundation
+import SwiftProtobuf
 
 /// Shared mutable counter state: seeded like-counts per post, mutated by the
 /// engagement mock (likes) and by the demo realtime ticker, read by the
@@ -257,42 +258,259 @@ public final class MockEngagementService: @unchecked Sendable {
     }
 }
 
-/// Fake of wallet.v1 `Stake` (#676): a like is a point. The server's rules
-/// (backend `crates/services/wallet/README.md`), in its order: a batch over
-/// 24 h old is EXPIRED; one's own post is OWN_CONTENT; a shot needs room for
-/// a whole 100; a plain batch is clamped to the target's room (250 per
-/// account, ever), the balance and the hour's room (1,000), and refused with
-/// the binding limit when nothing fits. Replays of a key answer the first
-/// answer and spend nothing.
+/// Fake of wallet.v1 (#676, #1098): `Stake`, `GetWallet` and `ClaimReward`
+/// over one wallet per account.
 ///
-/// The balance is generous (`startingPoints`): the app's own wallet is still
-/// local (`WalletStore`), and a mock that ran out first would refund likes the
-/// app had shown.
+/// **Stake**, with the server's rules (backend `crates/services/wallet/README.md`),
+/// in its order: a batch over 24 h old is EXPIRED; one's own post is
+/// OWN_CONTENT; a shot needs room for a whole 100; a plain batch is clamped
+/// to the target's room (250 per account, ever), the balance and the hour's
+/// room (1,000), and refused with the binding limit when nothing fits.
+/// Replays of a key answer the first answer and spend nothing.
+///
+/// **The hourly claim** (charter V5.3 §4.1): 25 points × the streak multiplier
+/// (1 + 0.1 a day, at most ×2), once an hour, at most 200 a UTC day, clamped
+/// under `points_cap` (2,000); at the cap the claim is BALANCE_FULL with no
+/// `next_claim_at` — only spending opens it again. Refusals come back
+/// in-band with the whole wallet. A replayed key answers the first answer.
+///
+/// `startingPoints` is what a wallet opens with: the app's mock opens at the
+/// charter's 250; package tests keep a generous balance so a stake rule, not
+/// the balance, is what they meet. `persistence` keeps the wallets across
+/// launches, as the server does.
 public final class MockWalletService: @unchecked Sendable {
-    public static let startingPoints: Int64 = 100_000
+    public static let generousStartingPoints: Int64 = 100_000
     static let perTargetCap: Int64 = 250
     static let hourlyCap: Int64 = 1_000
     static let pointsPerShot: Int64 = 100
+    static let claimInterval: TimeInterval = 3_600
+    static let baseClaim: Double = 25
+    static let dailyClaimCap: Int64 = 200
+    public static let pointsCap: Int64 = 2_000
+    static let starterGems: Int64 = 100
+    static let stakePackPrice: Int64 = 50
+    static let stakePackShots: Int32 = 3
+    private static let persistenceKey = "mock.wallet.accounts"
+
+    /// One account's wallet, as the server keeps it.
+    struct Account: Codable, Equatable {
+        var points: Int64
+        var gems: Int64
+        var pointsEarned: Int64 = 0
+        var pointsSpent: Int64 = 0
+        var stakeShots: Int32 = 0
+        var claimedToday: Int64 = 0
+        /// The UTC day `claimedToday` counts ("yyyy-MM-dd").
+        var claimDay: String = ""
+        var streakDays: Int32 = 0
+        var lastClaimAt: Date?
+    }
 
     private let store: MockCounterStore
     private let dataset: MockSocialDataset
     private let now: @Sendable () -> Date
+    private let startingPoints: Int64
+    private let persistence: UserDefaults?
     private let lock = NSLock()
-    private var spentPoints: [String: Int64] = [:]
+    private var accounts: [String: Account] {
+        didSet {
+            guard let persistence, let data = try? JSONEncoder().encode(accounts) else { return }
+            persistence.set(data, forKey: Self.persistenceKey)
+        }
+    }
     private var hourLedger: [String: [(Date, Int64)]] = [:]
     private var answers: [String: Wallet_V1_StakeResponse] = [:]
+    private var claimAnswers: [String: Wallet_V1_ClaimRewardResponse] = [:]
 
-    public init(store: MockCounterStore, dataset: MockSocialDataset, now: @escaping @Sendable () -> Date = { Date() }) {
+    public init(
+        store: MockCounterStore,
+        dataset: MockSocialDataset,
+        startingPoints: Int64 = MockWalletService.generousStartingPoints,
+        persistence: UserDefaults? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.store = store
         self.dataset = dataset
+        self.startingPoints = startingPoints
+        self.persistence = persistence
         self.now = now
+        // `-wallet-reset` (the app's QA hook) opens every wallet afresh.
+        if ProcessInfo.processInfo.arguments.contains("-wallet-reset") {
+            persistence?.removeObject(forKey: Self.persistenceKey)
+        }
+        accounts = persistence?.data(forKey: Self.persistenceKey)
+            .flatMap { try? JSONDecoder().decode([String: Account].self, from: $0) } ?? [:]
     }
 
     public func register(on bff: MockBFF) {
         bff.register(path: "/wallet.v1.WalletService/Stake") { [self] (request: Wallet_V1_StakeRequest, headers: Headers) -> Result<Wallet_V1_StakeResponse, ConnectError> in
             stake(request, caller: MockEngagementService.account(from: headers))
         }
+        bff.register(path: "/wallet.v1.WalletService/GetWallet") { [self] (request: Wallet_V1_GetWalletRequest, headers: Headers) -> Result<Wallet_V1_Wallet, ConnectError> in
+            if let refusal = Self.refusal(request.accountID, caller: MockEngagementService.account(from: headers)) {
+                return .failure(refusal)
+            }
+            return .success(lock.withLock { walletLocked(request.accountID, at: now()) })
+        }
+        bff.register(path: "/wallet.v1.WalletService/ClaimReward") { [self] (request: Wallet_V1_ClaimRewardRequest, headers: Headers) -> Result<Wallet_V1_ClaimRewardResponse, ConnectError> in
+            claim(request, caller: MockEngagementService.account(from: headers))
+        }
     }
+
+    private static func refusal(_ account: String, caller: String?) -> ConnectError? {
+        guard let caller else { return ConnectError(code: .unauthenticated, message: "sign in for a wallet") }
+        guard account == caller else { return ConnectError(code: .permissionDenied, message: "another account's wallet") }
+        return nil
+    }
+
+    private static func isValidKey(_ key: String) -> Bool {
+        (8...64).contains(key.count)
+            && key.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }
+    }
+
+    /// The account's points, as the server holds them (tests).
+    public func points(of account: String) -> Int64 {
+        lock.withLock { accountLocked(account).points }
+    }
+
+    /// The welcome gift (backend #934, #1008): 50 + 25 × min(full days since
+    /// the device's first launch, 3), credited once per device — whoever
+    /// signs in on it — when a guest becomes a member. Returns the amount.
+    @discardableResult
+    public func creditWelcomeGift(account: String, device: String, firstLaunch: Date) -> Int64 {
+        lock.withLock {
+            let key = "welcome:" + device
+            guard accounts[key] == nil else { return 0 }
+            let days = max(0, Int(now().timeIntervalSince(firstLaunch) / 86_400))
+            let amount = Int64(50 + 25 * min(days, 3))
+            var wallet = accountLocked(account)
+            wallet.points += amount
+            wallet.pointsEarned += amount
+            accounts[account] = wallet
+            // The device's mark, kept with the wallets so it survives too.
+            accounts[key] = Account(points: 0, gems: 0)
+            return amount
+        }
+    }
+
+    // MARK: The wallet
+
+    private func accountLocked(_ id: String) -> Account {
+        accounts[id] ?? Account(points: startingPoints, gems: Self.starterGems)
+    }
+
+    private static let utc: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }()
+
+    private static func day(_ date: Date) -> String {
+        let parts = utc.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    /// The streak a claim at `moment` continues (0: none to continue).
+    private static func streak(_ account: Account, at moment: Date) -> Int32 {
+        guard let last = account.lastClaimAt else { return 0 }
+        let lastDay = utc.startOfDay(for: last)
+        let today = utc.startOfDay(for: moment)
+        let days = utc.dateComponents([.day], from: lastDay, to: today).day ?? 0
+        return days <= 1 ? account.streakDays : 0
+    }
+
+    private enum ClaimState { case available(amount: Int64), tooEarly(Date), dailyCap(Date), full }
+
+    private func claimStateLocked(_ account: Account, at moment: Date) -> ClaimState {
+        let claimedToday = account.claimDay == Self.day(moment) ? account.claimedToday : 0
+        if account.points >= Self.pointsCap { return .full }
+        if claimedToday >= Self.dailyClaimCap {
+            return .dailyCap(Self.utc.date(byAdding: .day, value: 1, to: Self.utc.startOfDay(for: moment))!)
+        }
+        if let last = account.lastClaimAt, moment < last.addingTimeInterval(Self.claimInterval) {
+            return .tooEarly(last.addingTimeInterval(Self.claimInterval))
+        }
+        let continuing = Self.streak(account, at: moment)
+        let isNewDay = account.lastClaimAt.map { Self.day($0) != Self.day(moment) } ?? true
+        let streak = isNewDay ? continuing + 1 : max(continuing, 1)
+        let multiplier = min(2, 1 + 0.1 * Double(streak - 1))
+        let amount = min(Int64((Self.baseClaim * multiplier).rounded()), Self.dailyClaimCap - claimedToday, Self.pointsCap - account.points)
+        return .available(amount: amount)
+    }
+
+    private func walletLocked(_ id: String, at moment: Date) -> Wallet_V1_Wallet {
+        let account = accountLocked(id)
+        var wallet = Wallet_V1_Wallet()
+        wallet.accountID = id
+        wallet.points = account.points
+        wallet.gems = account.gems
+        wallet.pointsEarned = account.pointsEarned
+        wallet.pointsSpent = account.pointsSpent
+        wallet.stakeShots = account.stakeShots
+        wallet.claimedToday = Int32(account.claimDay == Self.day(moment) ? account.claimedToday : 0)
+        wallet.dailyClaimCap = Int32(Self.dailyClaimCap)
+        wallet.streakDays = Self.streak(account, at: moment)
+        if let last = account.lastClaimAt { wallet.lastClaimAt = Google_Protobuf_Timestamp(date: last) }
+        wallet.pointsCap = Self.pointsCap
+        wallet.stakePackPrice = Self.stakePackPrice
+        wallet.stakePackShots = Self.stakePackShots
+        wallet.pointsPerShot = Int32(Self.pointsPerShot)
+        switch claimStateLocked(account, at: moment) {
+        case .available(let amount):
+            wallet.claimAvailable = true
+            wallet.claimAmount = Int32(amount)
+        case .tooEarly(let next), .dailyCap(let next):
+            wallet.nextClaimAt = Google_Protobuf_Timestamp(date: next)
+        case .full:
+            break
+        }
+        return wallet
+    }
+
+    // MARK: The claim
+
+    func claim(_ request: Wallet_V1_ClaimRewardRequest, caller: String?) -> Result<Wallet_V1_ClaimRewardResponse, ConnectError> {
+        if let refusal = Self.refusal(request.accountID, caller: caller) { return .failure(refusal) }
+        guard Self.isValidKey(request.idempotencyKey) else {
+            return .failure(ConnectError(code: .invalidArgument, message: "WAL-9002: idempotency_key"))
+        }
+        return .success(lock.withLock {
+            let replayKey = "\(request.accountID)/\(request.idempotencyKey)"
+            if var answer = claimAnswers[replayKey] {
+                answer.wallet = walletLocked(request.accountID, at: now())
+                return answer
+            }
+            let moment = now()
+            var account = accountLocked(request.accountID)
+            var response = Wallet_V1_ClaimRewardResponse()
+            switch claimStateLocked(account, at: moment) {
+            case .available(let amount):
+                let today = Self.day(moment)
+                let continuing = Self.streak(account, at: moment)
+                let isNewDay = account.lastClaimAt.map { Self.day($0) != today } ?? true
+                account.streakDays = isNewDay ? continuing + 1 : max(continuing, 1)
+                account.claimedToday = (account.claimDay == today ? account.claimedToday : 0) + amount
+                account.claimDay = today
+                account.lastClaimAt = moment
+                account.points += amount
+                account.pointsEarned += amount
+                accounts[request.accountID] = account
+                response.outcome = .claimed
+                response.awarded = Int32(amount)
+            case .tooEarly:
+                response.outcome = .tooEarly
+            case .dailyCap:
+                response.outcome = .dailyCapReached
+            case .full:
+                response.outcome = .balanceFull
+            }
+            response.wallet = walletLocked(request.accountID, at: moment)
+            claimAnswers[replayKey] = response
+            return response
+        })
+    }
+
+    // MARK: Stakes
 
     func stake(_ request: Wallet_V1_StakeRequest, caller: String?) -> Result<Wallet_V1_StakeResponse, ConnectError> {
         guard let caller else { return .failure(ConnectError(code: .unauthenticated, message: "sign in to like")) }
@@ -300,9 +518,7 @@ public final class MockWalletService: @unchecked Sendable {
             return .failure(ConnectError(code: .permissionDenied, message: "another account's wallet"))
         }
         let key = request.idempotencyKey
-        guard (8...64).contains(key.count),
-              key.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") })
-        else { return .failure(ConnectError(code: .invalidArgument, message: "idempotency_key")) }
+        guard Self.isValidKey(key) else { return .failure(ConnectError(code: .invalidArgument, message: "idempotency_key")) }
         let target: String
         switch request.target {
         case .postID(let id): target = "post:" + id
@@ -328,10 +544,7 @@ public final class MockWalletService: @unchecked Sendable {
             response.outcome = outcome
             response.spent = Int32(spent)
             response.myTotal = Int32(total ?? mine)
-            var wallet = Wallet_V1_Wallet()
-            wallet.accountID = account
-            wallet.points = Self.startingPoints - (spentPoints[account] ?? 0)
-            response.wallet = wallet
+            response.wallet = walletLocked(account, at: moment)
             return response
         }
         if request.hasFirstTapAt, moment.timeIntervalSince(request.firstTapAt.date) > 24 * 3600 {
@@ -342,7 +555,8 @@ public final class MockWalletService: @unchecked Sendable {
            dataset.accountID(for: post.authorProfileID) == account {
             return answer(.ownContent)
         }
-        let balance = Self.startingPoints - (spentPoints[account] ?? 0)
+        var wallet = accountLocked(account)
+        let balance = wallet.points
         let recent = (hourLedger[account] ?? []).filter { moment.timeIntervalSince($0.0) < 3600 }
         let hourRoom = Self.hourlyCap - recent.reduce(0) { $0 + $1.1 }
         let room = Self.perTargetCap - mine
@@ -359,7 +573,9 @@ public final class MockWalletService: @unchecked Sendable {
             guard hourRoom > 0 else { return answer(.rateLimited) }
             spend = min(Int64(request.points), room, balance, hourRoom)
         }
-        spentPoints[account, default: 0] += spend
+        wallet.points -= spend
+        wallet.pointsSpent += spend
+        accounts[account] = wallet
         hourLedger[account] = recent + [(moment, spend)]
         let total = store.stake(spend, account: account, target: target)
         return answer(.staked, spent: spend, total: total)

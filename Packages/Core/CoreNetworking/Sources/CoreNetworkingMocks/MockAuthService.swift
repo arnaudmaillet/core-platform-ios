@@ -216,6 +216,15 @@ public final class MockAuthService: @unchecked Sendable {
         return challenge.destination
     }
 
+    /// The guest's session ended into a member's (`guest_upgraded`, backend
+    /// #934): the account, the device, and when that guest session began.
+    /// The mock's wallet credits the welcome gift from it (#1008).
+    public var onGuestUpgraded: (@Sendable (_ account: String, _ device: Auth_V1_DeviceContext, _ guestSince: Date) -> Void)? {
+        get { lock.withLock { _onGuestUpgraded } }
+        set { lock.withLock { _onGuestUpgraded = newValue } }
+    }
+    private var _onGuestUpgraded: (@Sendable (String, Auth_V1_DeviceContext, Date) -> Void)?
+
     /// A member session for the demo account, the guest's (if sent) ended.
     private func memberSessionLocked(
         device: Auth_V1_DeviceContext, guestRefreshToken: String
@@ -223,6 +232,7 @@ public final class MockAuthService: @unchecked Sendable {
         if !guestRefreshToken.isEmpty,
            let guest = sessions.first(where: { $0.value.isGuest && $0.value.issuedRefreshTokens.contains(guestRefreshToken) }) {
             sessions[guest.key]?.revoked = true
+            _onGuestUpgraded?(Self.accountID, device, guest.value.issuedAt)
         }
         tokenCounter += 1
         let sessionID = "sess-\(UUID().uuidString.prefix(8))"
