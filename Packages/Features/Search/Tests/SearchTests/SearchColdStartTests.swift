@@ -146,10 +146,13 @@ final class SearchColdStartTests {
         return nil
     }
 
-    private func settle(until condition: () -> Bool) async {
-        for _ in 0..<1_000 where !condition() {
-            try? await Task.sleep(for: .milliseconds(2))
+    /// A look budget, 6,000 × 10 ms like the other suites' (#1031): a smaller
+    /// one ran out on a loaded CI runner before a revalidation's fetch landed.
+    private func settle(until condition: () -> Bool) async -> Bool {
+        for _ in 0..<6_000 where !condition() {
+            try? await Task.sleep(for: .milliseconds(10))
         }
+        return condition()
     }
 
     private func corpus() -> Corpus {
@@ -163,9 +166,9 @@ final class SearchColdStartTests {
         let (viewModel, phases) = open(
             cache: cache, corpus: corpus(), people: People(followed: ["grace"], followers: ["ada": 12]), at: start
         )
-        await settle {
+        #expect(await settle {
             trending(phases)?.creators.map(\.context) == [.following, .followerCount(12)]
-        }
+        })
         try #require(trending(phases)?.creators.map(\.context) == [.following, .followerCount(12)])
         cache.waitForPendingWrites()
         withExtendedLifetime(viewModel) {}
@@ -190,15 +193,15 @@ final class SearchColdStartTests {
         #expect(creators.map(\.context) == [.following, .followerCount(12)])
         #expect(creators.first?.avatarURL == URL(string: "https://cdn.example/grace.jpg"))
 
-        await settle { offline.fetches == 1 }
+        #expect(await settle { offline.fetches == 1 })
         try? await Task.sleep(for: .milliseconds(50))
         #expect(offline.fetches == 1, "past its window the list revalidates")
         #expect(trending(phases)?.creators.map(\.handle) == ["grace", "ada"], "a failed revalidation took the list away")
         // The rows' failed metadata reads say nothing: the stored contexts stay.
         var looks = 0
-        while await people.asked == 0, looks < 2_000 {
+        while await people.asked == 0, looks < 6_000 {
             looks += 1
-            try? await Task.sleep(for: .milliseconds(5))
+            try? await Task.sleep(for: .milliseconds(10))
         }
         #expect(await people.asked >= 1)
         try? await Task.sleep(for: .milliseconds(50))
@@ -228,11 +231,11 @@ final class SearchColdStartTests {
         let later = start.addingTimeInterval(LocalStorePolicy.trendingRevalidation + 1)
         let cache = try launchCache()
         let (viewModel, phases) = open(cache: cache, corpus: changed, at: later)
-        await settle { trending(phases)?.creators.first?.handle == "linus" }
+        #expect(await settle { trending(phases)?.creators.first?.handle == "linus" })
         #expect(trending(phases)?.creators.map(\.handle) == ["linus", "grace"])
         #expect(changed.fetches == 1)
 
-        await settle { cache.trending()?.creators.first?.handle == "linus" }
+        #expect(await settle { cache.trending()?.creators.first?.handle == "linus" })
         cache.waitForPendingWrites()
         #expect(try launchCache().trending()?.creators.map(\.handle) == ["linus", "grace"])
         withExtendedLifetime(viewModel) {}
@@ -245,7 +248,7 @@ final class SearchColdStartTests {
             if case .explore(let model) = phase { return model.trending }
             return nil
         } == .loading)
-        await settle { trending(phases)?.creators.count == 2 }
+        #expect(await settle { trending(phases)?.creators.count == 2 })
         cache.waitForPendingWrites()
         #expect(try launchCache().trending()?.creators.map(\.handle) == ["grace", "ada"])
         withExtendedLifetime(viewModel) {}

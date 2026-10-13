@@ -77,11 +77,14 @@ final class MapPinsColdStartTests {
         return MapPinsLocalCache(store: try LocalStore(directory: folder.url, viewer: { box.viewer }))
     }
 
-    private func waitUntil(_ condition: () -> Bool) async {
-        for _ in 0..<2_000 where !condition() {
+    /// A look budget, 6,000 × 10 ms like the other suites' (#1031): a smaller
+    /// one ran out on a loaded CI runner before a revalidation's fetch landed.
+    private func waitUntil(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<6_000 where !condition() {
             await Task.yield()
-            try? await Task.sleep(for: .milliseconds(1))
+            try? await Task.sleep(for: .milliseconds(10))
         }
+        return condition()
     }
 
     private func ids(_ pins: [MapPin]?) -> Set<String> {
@@ -97,7 +100,7 @@ final class MapPinsColdStartTests {
         var answered = 0
         viewModel.onTileCount = { _ in answered += 1 }
         viewModel.viewportChanged(viewport)
-        await waitUntil { answered == 1 }
+        #expect(await waitUntil { answered == 1 })
         try #require(answered == 1)
         cache.waitForPendingWrites()
     }
@@ -125,9 +128,9 @@ final class MapPinsColdStartTests {
 
         // Offline, the queries fail and the pins stay (fail-open).
         viewModel.viewportChanged(Self.paris)
-        await waitUntil { server.calls == 1 }
+        #expect(await waitUntil { server.calls == 1 })
         viewModel.viewportChanged(Self.paris)
-        await waitUntil { failures.count == 1 }
+        #expect(await waitUntil { failures.count == 1 })
         #expect(diffs.count == 1, "a failed query took the restored pins away")
         #expect(viewModel.pinCount == 3)
     }
@@ -141,7 +144,7 @@ final class MapPinsColdStartTests {
         viewModel.onDiff = { diffs.append($0) }
         viewModel.restoreStoredPins()
         viewModel.viewportChanged(Self.paris)
-        await waitUntil { diffs.count == 2 }
+        #expect(await waitUntil { diffs.count == 2 })
 
         let revalidation = try #require(diffs.last)
         #expect(ids(revalidation.added) == ["c"])
@@ -156,14 +159,14 @@ final class MapPinsColdStartTests {
         var answered = 0
         viewModel.onTileCount = { _ in answered += 1 }
         viewModel.viewportChanged(Self.paris)
-        await waitUntil { answered == 1 }
+        #expect(await waitUntil { answered == 1 })
         server.pins = [pin("t1", lat: 35.6762, lng: 139.6503)]
         viewModel.viewportChanged(Self.tokyo)
-        await waitUntil { answered == 2 }
+        #expect(await waitUntil { answered == 2 })
         // Paris again: p2 is gone from there now.
         server.pins = [pin("p1"), pin("p3")]
         viewModel.viewportChanged(Self.paris)
-        await waitUntil { answered == 3 }
+        #expect(await waitUntil { answered == 3 })
         try #require(answered == 3)
         cache.waitForPendingWrites()
 
@@ -180,7 +183,7 @@ final class MapPinsColdStartTests {
         viewModel.onTileCount = { _ in answered += 1 }
         viewModel.filterChanged(.friends)
         viewModel.viewportChanged(Self.paris)
-        await waitUntil { answered == 1 }
+        #expect(await waitUntil { answered == 1 })
         try #require(answered == 1)
         cache.waitForPendingWrites()
 
