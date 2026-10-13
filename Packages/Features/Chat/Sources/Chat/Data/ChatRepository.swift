@@ -564,7 +564,7 @@ public actor ChatRepository: ChatProviding {
         guard case .authenticated(let account) = await authSession.currentState() else {
             throw ChatError.notAuthenticated
         }
-        let media: ChatMedia
+        let media: (media: ChatMedia, assetID: String)
         do {
             media = try await Self.upload(
                 upload, key: idempotencyKey, ownerID: account.rawValue, uploader: mediaUploader, encoder: encoder
@@ -576,27 +576,36 @@ public actor ChatRepository: ChatProviding {
             throw ChatError.mediaUpload(message: String(describing: error), failure: NetworkFailure.of(error))
         }
         return try await sendMessage(
-            body: caption, media: media, as: viewer, to: conversationID, replyingTo: replyToID,
-            idempotencyKey: idempotencyKey
+            body: caption, media: media.media, mediaAssetID: media.assetID, as: viewer, to: conversationID,
+            replyingTo: replyToID, idempotencyKey: idempotencyKey
         )
     }
 
     /// The photo, or the clip and its still (best effort: a clip sends
     /// without one), through media.v1 — under the bubble's `key`, the still
     /// under one derived from it (its own asset, retried with the clip).
-    private static func upload(
+    /// Returns the asset id too: the message carries it (#990).
+    ///
+    /// ⚠️ **A CHAT PHOTO IS UPLOADED SIGNED (#990, backend #928).** A
+    /// conversation is private: its picture is delivered through a signed
+    /// URL, and the server refuses a still-processing image uploaded PUBLIC
+    /// for a message (CHT-2012). Videos stay as they were: SIGNED delivery
+    /// for clips needs the CDN's signed cookies (#1062).
+    static func upload(
         _ upload: ChatMediaUpload, key: String, ownerID: String, uploader: MediaAssetUploader, encoder: MediaEncoder
-    ) async throws -> ChatMedia {
+    ) async throws -> (media: ChatMedia, assetID: String) {
         switch upload {
         case .image(let image):
             let encoded = try encoder.encode(image)
             let asset = try await uploader.upload(
                 .data(encoded.data), ownerID: ownerID, mimeType: encoded.mimeType,
-                sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex, idempotencyKey: key
+                sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex, idempotencyKey: key,
+                visibility: .mediaDeliveryVisibilitySigned
             )
-            return ChatMedia(
+            let media = ChatMedia(
                 kind: .image, url: asset.url, pixelWidth: encoded.pixelWidth, pixelHeight: encoded.pixelHeight
             )
+            return (media, asset.assetID)
         case .video(let video):
             let fingerprint = try video.fingerprint()
             let asset = try await uploader.upload(
@@ -610,10 +619,11 @@ public actor ChatRepository: ChatProviding {
                     sizeBytes: encoded.byteSize, sha256: encoded.sha256Hex, idempotencyKey: key + ".poster"
                 ).url
             }
-            return ChatMedia(
+            let media = ChatMedia(
                 kind: .video, url: asset.url, posterURL: posterURL,
                 pixelWidth: video.pixelWidth, pixelHeight: video.pixelHeight, duration: video.duration
             )
+            return (media, asset.assetID)
         }
     }
 
@@ -634,7 +644,7 @@ public actor ChatRepository: ChatProviding {
     /// (`inFlightRetryDelays`); only after the last wait does it fail like
     /// any other — and the bubble's own retry goes under the same key again.
     private func sendMessage(
-        body: String, media: ChatMedia?, as viewer: ProfileID,
+        body: String, media: ChatMedia?, mediaAssetID: String? = nil, as viewer: ProfileID,
         to conversationID: ConversationID, replyingTo replyToID: String?,
         idempotencyKey: String
     ) async throws -> ChatMessage {
@@ -644,6 +654,8 @@ public actor ChatRepository: ChatProviding {
         request.contentType = media == nil ? .text : .media
         request.body = body
         if let media { request.mediaRef = ChatMediaRef.encode(media) }
+        // The message's asset (#990): its own upload, checked server-side.
+        if let mediaAssetID { request.mediaAssetID = mediaAssetID }
         if let replyToID { request.replyTo = replyToID }
         request.idempotencyKey = IdempotencyKey.wire(idempotencyKey)
         var waits = inFlightRetryDelays[...]

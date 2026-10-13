@@ -89,6 +89,11 @@ public struct MediaAssetUploader: Sendable {
     /// No default on purpose: a default is exactly the per-call key this
     /// replaced.
     ///
+    /// `visibility`: how the CDN delivers the asset (#990). SIGNED for a chat
+    /// image or a private profile's picture — the server refuses such an
+    /// image uploaded PUBLIC while it is still processing (CHT-2012,
+    /// PST-3006). Unspecified leaves it to the server (PUBLIC).
+    ///
     /// ⚠️ **WHAT GOES ON THE WIRE IS THE INTENT'S KEY AND THE CONTENT'S HASH
     /// (`wireKey`).** A retry can carry different BYTES for the same intent: a
     /// clip re-exported gets new timestamps (a new SHA-256), a library picture
@@ -102,7 +107,8 @@ public struct MediaAssetUploader: Sendable {
         sizeBytes: UInt64,
         sha256: String,
         idempotencyKey: String,
-        kind: Media_V1_MediaKind = .postImage
+        kind: Media_V1_MediaKind = .postImage,
+        visibility: Media_V1_DeliveryVisibility = .mediaDeliveryVisibilityUnspecified
     ) async throws -> Asset {
         var ticketRequest = Media_V1_IssueUploadTicketRequest()
         ticketRequest.ownerID = ownerID
@@ -111,6 +117,7 @@ public struct MediaAssetUploader: Sendable {
         ticketRequest.declaredSizeBytes = sizeBytes
         ticketRequest.contentSha256 = sha256
         ticketRequest.idempotencyKey = Self.wireKey(idempotencyKey, sha256: sha256)
+        ticketRequest.deliveryVisibility = visibility
 
         let ticketResponse = await mediaClient.issueUploadTicket(request: ticketRequest, headers: [:])
         guard let ticketBody = ticketResponse.message else {

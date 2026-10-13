@@ -387,7 +387,7 @@ public actor PostComposer: PostComposing {
 
     private func uploadImage(_ picked: PickedImage, ownerID: AccountID) async throws -> MediaAttachment {
         let encoded = try encoder.encode(picked.image)
-        let cdnURL = try await uploadAsset(
+        let asset = try await uploadAsset(
             ownerID: ownerID,
             mimeType: encoded.mimeType,
             sizeBytes: encoded.byteSize,
@@ -396,11 +396,12 @@ public actor PostComposer: PostComposing {
             payload: .data(encoded.data)
         )
         return MediaAttachment(
-            url: cdnURL,
-            thumbnailURL: cdnURL,
+            url: asset.url,
+            thumbnailURL: asset.url,
             mimeType: encoded.mimeType,
             pixelWidth: encoded.pixelWidth,
-            pixelHeight: encoded.pixelHeight
+            pixelHeight: encoded.pixelHeight,
+            assetID: asset.assetID
         )
     }
 
@@ -416,7 +417,7 @@ public actor PostComposer: PostComposing {
         } catch {
             throw ComposeError.media("couldn't prepare the video: \(error)")
         }
-        let cdnURL = try await uploadAsset(
+        let asset = try await uploadAsset(
             ownerID: ownerID,
             mimeType: exported.mimeType,
             sizeBytes: exported.byteSize,
@@ -428,11 +429,12 @@ public actor PostComposer: PostComposing {
         let poster = await uploadPoster(for: exported, key: picked.posterUploadKey, ownerID: ownerID)
 
         let server = MediaAttachment(
-            url: cdnURL,
-            thumbnailURL: poster?.url ?? cdnURL,
+            url: asset.url,
+            thumbnailURL: poster?.url ?? asset.url,
             mimeType: exported.mimeType,
             pixelWidth: exported.pixelWidth,
-            pixelHeight: exported.pixelHeight
+            pixelHeight: exported.pixelHeight,
+            assetID: asset.assetID
         )
         return (server, exported, poster)
     }
@@ -458,7 +460,8 @@ public actor PostComposer: PostComposing {
                 thumbnailURL: server.thumbnailURL == delivery ? kept : server.thumbnailURL,
                 mimeType: server.mimeType,
                 pixelWidth: server.pixelWidth,
-                pixelHeight: server.pixelHeight
+                pixelHeight: server.pixelHeight,
+                assetID: server.assetID
             )
         }
     }
@@ -504,7 +507,7 @@ public actor PostComposer: PostComposing {
                 sha256: encoded.sha256Hex,
                 idempotencyKey: key,
                 payload: .data(encoded.data)
-            )
+            ).url
             return (frame, url)
         } catch {
             logger.warning("poster upload failed (\(String(describing: error))); publishing without one")
@@ -513,7 +516,8 @@ public actor PostComposer: PostComposing {
     }
 
     /// The shared media.v1 upload dance (`MediaAssetUploader`, shared with the
-    /// Messages thread since #681). Returns the delivery URL.
+    /// Messages thread since #681). Returns the asset: its id goes on the
+    /// post (#990), its URL is what the entry shows.
     private func uploadAsset(
         ownerID: AccountID,
         mimeType: String,
@@ -521,12 +525,12 @@ public actor PostComposer: PostComposing {
         sha256: String,
         idempotencyKey: String,
         payload: MediaAssetUploader.Payload
-    ) async throws -> URL {
+    ) async throws -> MediaAssetUploader.Asset {
         do {
             return try await uploader.upload(
                 payload, ownerID: ownerID.rawValue, mimeType: mimeType, sizeBytes: sizeBytes, sha256: sha256,
                 idempotencyKey: idempotencyKey
-            ).url
+            )
         } catch let error as MediaAssetUploader.UploadError {
             throw ComposeError.media(error.message, failure: error.networkFailure)
         }
@@ -659,6 +663,9 @@ public actor PostComposer: PostComposing {
         input.width = UInt32(attachment.pixelWidth)
         input.height = UInt32(attachment.pixelHeight)
         input.thumbnailURL = attachment.thumbnailURL?.absoluteString ?? ""
+        // The server ties the post to its asset (#990): the account's own
+        // upload, checked server-side (PST-3005 otherwise).
+        input.assetID = attachment.assetID ?? ""
         return input
     }
 

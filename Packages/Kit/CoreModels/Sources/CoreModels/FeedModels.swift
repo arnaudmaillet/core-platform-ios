@@ -10,13 +10,22 @@ public struct MediaAttachment: Sendable, Equatable, Codable {
     public let mimeType: String
     public let pixelWidth: Int
     public let pixelHeight: Int
+    /// The media asset behind it (media.v1, #990): what an upload produced,
+    /// sent on CreatePost so the server ties the post to the asset — a
+    /// stable key, unlike a SIGNED URL. Nil when unknown (an older snapshot,
+    /// a URL-only post). Optional, so snapshots without it still decode.
+    public let assetID: String?
 
-    public init(url: URL?, thumbnailURL: URL?, mimeType: String, pixelWidth: Int, pixelHeight: Int) {
+    public init(
+        url: URL?, thumbnailURL: URL?, mimeType: String, pixelWidth: Int, pixelHeight: Int,
+        assetID: String? = nil
+    ) {
         self.url = url
         self.thumbnailURL = thumbnailURL
         self.mimeType = mimeType
         self.pixelWidth = pixelWidth
         self.pixelHeight = pixelHeight
+        self.assetID = assetID
     }
 
     /// width / height; 1 when dimensions are missing so layout never divides by zero.

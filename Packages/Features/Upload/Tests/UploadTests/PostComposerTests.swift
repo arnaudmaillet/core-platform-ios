@@ -1,3 +1,4 @@
+import Connect
 import AVFoundation
 import AuthInterface
 import CoreContracts
@@ -365,5 +366,22 @@ struct PostComposerTests {
         await #expect(throws: ComposeError.noViewerProfile) {
             try await harness.composer.publish(media: nil, caption: "Second account", as: nil)
         }
+    }
+
+    /// ⚠️ THE POST CARRIES ITS ASSET (#990): CreatePost's attachment names the
+    /// upload's `asset_id`, the stable key the server ties the post to (a
+    /// SIGNED URL changes with each signature); the entry keeps it too.
+    @Test func createPostCarriesTheUploadsAssetID() async throws {
+        let harness = makeHarness()
+        final class Box: @unchecked Sendable { var attachments: [Post_V1_MediaAttachmentInput] = [] }
+        let box = Box()
+        harness.bff.register(path: "/post.v1.PostService/CreatePost") { (request: Post_V1_CreatePostRequest) in
+            box.attachments = request.attachments
+            return Result<Post_V1_CreatePostResponse, ConnectError>.failure(ConnectError(code: .internalError, message: "stop"))
+        }
+        _ = try? await harness.composer.publish(media: .image(PickedImage(solidImage())), caption: "asset")
+        let sent = try #require(box.attachments.first)
+        #expect(sent.assetID.hasPrefix("asset-"), "no asset_id on the attachment: \(sent.assetID)")
+        #expect(sent.cdnURL.contains(sent.assetID), "the asset is the one uploaded")
     }
 }
