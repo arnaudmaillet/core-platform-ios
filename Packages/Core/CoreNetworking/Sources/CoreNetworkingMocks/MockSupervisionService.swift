@@ -59,6 +59,18 @@ public final class MockSupervisionService: @unchecked Sendable {
     private var invites: [String: Invite] = [:]
     private var failedAccepts = 0
 
+    /// One shared set per teen, keyed by the teen's account (the viewer's own
+    /// when the viewer is the teen), with who set it and when.
+    struct LimitsRecord {
+        var limits: Account_V1_SupervisionLimits
+        var setBy: String
+        var setAt: Date
+    }
+
+    private var limitsByTeen: [String: LimitsRecord] = [:]
+    /// Minutes per local day ("YYYY-MM-DD"), keyed by the teen's account.
+    private var minutesByTeen: [String: [String: Int]] = [:]
+
     /// Demo people on each side, from the dataset's authors: never prof-0 or
     /// prof-2 (the viewer's own account's), and parents apart from teens.
     private static let supervisorIndices = Array(40...50)
@@ -95,6 +107,49 @@ public final class MockSupervisionService: @unchecked Sendable {
         case nil:
             break
         }
+        seedActivity(seed, now: now)
+    }
+
+    /// Limits and a few days of time, so the overview has something to show:
+    /// a supervised viewer under a 60-minute limit; the first seeded teen
+    /// under 90 minutes, the second with no limits (so no time counted).
+    private func seedActivity(_ seed: Seed?, now: Date) {
+        switch seed {
+        case .supervised, .supervisedFull:
+            var limits = Account_V1_SupervisionLimits()
+            limits.dailyMinutes = 60
+            limits.privateAccount = true
+            limits.messages = .followers
+            let setBy = "acct-mock-prof-\(Self.supervisorIndices[0])"
+            limitsByTeen[MockAuthService.accountID] = LimitsRecord(limits: limits, setBy: setBy, setAt: now.addingTimeInterval(-86_400 * 2))
+            minutesByTeen[MockAuthService.accountID] = Self.days([42, 65, 31, 58, 12], endingOn: now)
+        case .supervisor:
+            var limits = Account_V1_SupervisionLimits()
+            limits.dailyMinutes = 90
+            limits.comments = .mutuals
+            let teen = "acct-mock-prof-\(Self.teenIndices[1])"
+            limitsByTeen[teen] = LimitsRecord(limits: limits, setBy: MockAuthService.accountID, setAt: now.addingTimeInterval(-86_400 * 4))
+            minutesByTeen[teen] = Self.days([25, 94, 77, 51, 88, 40, 66], endingOn: now)
+        case nil:
+            break
+        }
+    }
+
+    /// `minutes[0]` today, then each day before.
+    private static func days(_ minutes: [Int], endingOn now: Date) -> [String: Int] {
+        var days: [String: Int] = [:]
+        for (offset, value) in minutes.enumerated() {
+            guard let day = Calendar.current.date(byAdding: .day, value: -offset, to: now) else { continue }
+            days[dayKey(day)] = value
+        }
+        return days
+    }
+
+    static func dayKey(_ date: Date, timeZone: TimeZone = .current) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 
     /// The seed `-mock-supervision <seed>` names, if any.
@@ -120,6 +175,15 @@ public final class MockSupervisionService: @unchecked Sendable {
         }
         bff.register(path: "/account.v1.AccountService/EndSupervision") { [self] (request: Account_V1_EndSupervisionRequest) in
             end(request)
+        }
+        bff.register(path: "/account.v1.AccountService/SetSupervisionLimits") { [self] (request: Account_V1_SetSupervisionLimitsRequest) in
+            setLimits(request)
+        }
+        bff.register(path: "/account.v1.AccountService/GetSupervisionLimits") { [self] (request: Account_V1_GetSupervisionLimitsRequest) in
+            limits(request)
+        }
+        bff.register(path: "/account.v1.AccountService/GetSupervisionOverview") { [self] (request: Account_V1_GetSupervisionOverviewRequest) in
+            overview(request)
         }
     }
 
@@ -220,7 +284,15 @@ public final class MockSupervisionService: @unchecked Sendable {
         guard request.accountID == MockAuthService.accountID else { return .failure(Self.notTheViewer) }
         let removed: Bool = lock.withLock {
             guard let index = links.firstIndex(where: { $0.otherAccountID == request.otherAccountID }) else { return false }
-            links.remove(at: index)
+            let ended = links.remove(at: index)
+            // The teen's last supervision ending lifts their limits (the
+            // settings keep their values, unlocked). A demo teen has only the
+            // viewer as supervisor.
+            if ended.otherRole == .teen {
+                limitsByTeen[ended.otherAccountID] = nil
+            } else if !links.contains(where: { $0.otherRole == .supervisor }) {
+                limitsByTeen[MockAuthService.accountID] = nil
+            }
             return true
         }
         guard removed else {
@@ -250,6 +322,92 @@ public final class MockSupervisionService: @unchecked Sendable {
             view.profiles = [profile]
         }
         return view
+    }
+
+    // MARK: - Limits and the overview (#670 parts 2 and 3)
+
+    private static let notFound = ConnectError(code: .notFound, message: "ACC-3005: This supervision was not found.")
+
+    /// The teen a request names (empty: the viewer), when the viewer is that
+    /// teen or supervises them; nil otherwise (ACC-3005).
+    private func viewableTeen(_ teen: String) -> String? {
+        if teen.isEmpty || teen == MockAuthService.accountID { return MockAuthService.accountID }
+        return links.contains { $0.otherRole == .teen && $0.otherAccountID == teen } ? teen : nil
+    }
+
+    private func setLimits(_ request: Account_V1_SetSupervisionLimitsRequest) -> Result<Account_V1_SupervisionLimitsView, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else { return .failure(Self.notTheViewer) }
+        let daily = request.limits.dailyMinutes
+        guard daily == 0 || (15...1440).contains(daily) else {
+            return .failure(ConnectError(code: .invalidArgument, message: "ACC-9001: a daily limit is 15 to 1440 minutes"))
+        }
+        let record: LimitsRecord? = lock.withLock {
+            guard links.contains(where: { $0.otherRole == .teen && $0.otherAccountID == request.teenAccountID }) else { return nil }
+            let record = LimitsRecord(limits: request.limits, setBy: request.accountID, setAt: Date())
+            limitsByTeen[request.teenAccountID] = record
+            return record
+        }
+        guard let record else { return .failure(Self.notFound) }
+        return .success(Self.view(of: record))
+    }
+
+    private func limits(_ request: Account_V1_GetSupervisionLimitsRequest) -> Result<Account_V1_SupervisionLimitsView, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else { return .failure(Self.notTheViewer) }
+        let found: (teen: String, record: LimitsRecord?)? = lock.withLock {
+            viewableTeen(request.teenAccountID).map { ($0, limitsByTeen[$0]) }
+        }
+        guard let found else { return .failure(Self.notFound) }
+        return .success(found.record.map(Self.view(of:)) ?? Account_V1_SupervisionLimitsView())
+    }
+
+    private func overview(_ request: Account_V1_GetSupervisionOverviewRequest) -> Result<Account_V1_SupervisionOverview, ConnectError> {
+        guard request.accountID == MockAuthService.accountID else { return .failure(Self.notTheViewer) }
+        let found: (teen: String, record: LimitsRecord?, minutes: [String: Int], index: Int?)? = lock.withLock {
+            viewableTeen(request.teenAccountID).map { teen in
+                (teen, limitsByTeen[teen], minutesByTeen[teen] ?? [:], links.first { $0.otherAccountID == teen }?.profileIndex)
+            }
+        }
+        guard let found else { return .failure(Self.notFound) }
+        var overview = Account_V1_SupervisionOverview()
+        overview.limits = found.record.map(Self.view(of:)) ?? Account_V1_SupervisionLimitsView()
+        // The last 7 local days with time counted, most recent first.
+        let recent = Set((0..<7).compactMap { Calendar.current.date(byAdding: .day, value: -$0, to: Date()) }.map { Self.dayKey($0) })
+        overview.screenTime = found.minutes.filter { recent.contains($0.key) && $0.value > 0 }
+            .sorted { $0.key > $1.key }
+            .map { entry in
+                var day = Account_V1_ScreenTimeDay()
+                day.day = entry.key
+                day.minutes = UInt32(entry.value)
+                return day
+            }
+        if let index = found.index, index < dataset.authors.count {
+            overview.profiles = [Self.profile(dataset.authors[index])]
+        } else if found.teen == MockAuthService.accountID {
+            var profile = Account_V1_SupervisionProfile()
+            profile.profileID = MockSocialDataset.viewerProfileID
+            profile.handle = "you"
+            profile.displayName = "You"
+            overview.profiles = [profile]
+        }
+        return .success(overview)
+    }
+
+    private static func view(of record: LimitsRecord) -> Account_V1_SupervisionLimitsView {
+        var view = Account_V1_SupervisionLimitsView()
+        view.set = true
+        view.limits = record.limits
+        view.setByAccountID = record.setBy
+        view.setAt = Google_Protobuf_Timestamp(date: record.setAt)
+        return view
+    }
+
+    private static func profile(_ author: MockSocialDataset.Author) -> Account_V1_SupervisionProfile {
+        var profile = Account_V1_SupervisionProfile()
+        profile.profileID = author.profileID
+        profile.handle = author.handle
+        profile.displayName = author.displayName
+        profile.avatarURL = author.avatarURL
+        return profile
     }
 
     /// The viewer's links, for tests: the other side's account ids.

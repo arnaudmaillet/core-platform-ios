@@ -432,8 +432,11 @@ extension FamilyAndTeensViewController {
 
     func openSupervision(_ link: Supervision) {
         guard let supervisionList else { return }
+        // The overview and limits ride on the same account service (#417
+        // parts 2 and 3); a manager without them leaves the page to pairing.
         let detail = SupervisionDetailViewController(
-            supervision: link, list: supervisionList, imagePipeline: imagePipeline, router: router
+            supervision: link, list: supervisionList, overviewing: supervisionList.manager as? any SupervisionOverviewing,
+            imagePipeline: imagePipeline, router: router
         ) { [weak self] detail, ended, wasGone in
             detail.navigationController?.popViewController(animated: true)
             guard let self else { return }
@@ -448,7 +451,8 @@ extension FamilyAndTeensViewController {
     }
 
     #if DEBUG
-    /// `-supervision-open invite|accept|first`: pushes that screen once the
+    /// `-supervision-open invite|accept|first|limits`: pushes that screen
+    /// (`limits`: the first link's limits editor) once the
     /// age and the list are in — the rows take no simulated touch. With
     /// `-open-settings familyAndTeens`.
     private func openSupervisionForQA() {
@@ -466,11 +470,20 @@ extension FamilyAndTeensViewController {
             switch target {
             case "invite": openInvite()
             case "accept": openAccept()
-            case "first":
+            case "first", "limits":
                 guard let first = supervisionList?.supervisions.first else {
                     return QAWait.fail("supervision-open", "no supervision to open")
                 }
                 openSupervision(first)
+                guard target == "limits" else { return }
+                // The editor needs the overview in, and the detail at rest.
+                QAWait.until("supervision-open limits", { [weak self] in
+                    guard let navigation = self?.navigationController,
+                          let detail = navigation.topViewController as? SupervisionDetailViewController else { return false }
+                    return detail.overview?.overview != nil && navigation.transitionCoordinator == nil
+                }) { [weak self] in
+                    (self?.navigationController?.topViewController as? SupervisionDetailViewController)?.openLimitsEditor()
+                }
             default:
                 QAWait.fail("supervision-open", "unknown target \(target)")
             }

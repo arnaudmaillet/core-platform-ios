@@ -234,7 +234,9 @@ final class ActivityDiscoveryViewController: UIViewController {
             } catch {
                 saving.remove(key)
                 applySnapshot()
-                let alert = UIAlertController(title: nil, message: "Couldn't change \(Self.title(key)). Try again.", preferredStyle: .alert)
+                // A supervisor's floor holds it (PRF-5006, #417): say who.
+                let message = SupervisionLock.message(for: error, fallback: "Couldn't change \(Self.title(key)). Try again.")
+                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
             }

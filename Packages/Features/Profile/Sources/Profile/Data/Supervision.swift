@@ -124,6 +124,8 @@ public enum SupervisionError: Error, Equatable, Sendable {
     case ownCode
     /// ACC-3007: too many wrong codes this hour.
     case tooManyAttempts
+    /// ACC-9001: a daily limit outside 15–1440 minutes.
+    case invalidLimit
     /// The call failed on the way to or at the server. `failure` keeps WHY
     /// (#794): offline, a timeout, a refusal, a server fault.
     case transport(message: String, failure: NetworkFailure? = nil)
@@ -135,7 +137,7 @@ public enum SupervisionError: Error, Equatable, Sendable {
         let codes: [(String, SupervisionError)] = [
             ("ACC-3001", .invalidCode), ("ACC-3002", .ageDoesNotFit), ("ACC-3003", .teenHasTwoSupervisors),
             ("ACC-3004", .alreadyLinked), ("ACC-3005", .notFound), ("ACC-3006", .ownCode),
-            ("ACC-3007", .tooManyAttempts),
+            ("ACC-3007", .tooManyAttempts), ("ACC-9001", .invalidLimit),
         ]
         if let match = codes.first(where: { message.contains($0.0) }) {
             self = match.1
