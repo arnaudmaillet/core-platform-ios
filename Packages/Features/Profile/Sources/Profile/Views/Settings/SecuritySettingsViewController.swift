@@ -12,12 +12,14 @@ import UIKit
 /// (backend #808), the app's contracts and associated domain don't yet.
 final class SecuritySettingsViewController: UIViewController {
     private enum Section: Hashable {
-        case checkup, signIn, sessions, global, appLock, comingSoon
+        case checkup, signIn, apps, sessions, global, appLock, comingSoon
     }
 
     enum Item: Hashable {
         case checkup
         case twoStep
+        /// Apps and Websites (#485).
+        case authorizedApps
         case requireLock
         case lockDelay
         case session(AccountSession)
@@ -35,6 +37,7 @@ final class SecuritySettingsViewController: UIViewController {
     private let authenticator: any DeviceAuthenticating
     private let makeCheckup: (() -> UIViewController)?
     private let makeTwoStep: (() -> UIViewController)?
+    private let makeAuthorizedApps: (() -> UIViewController)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     /// Whether the sessions section last drew bones: the swap away from them
@@ -46,9 +49,11 @@ final class SecuritySettingsViewController: UIViewController {
         onSignedOutEverywhere: @escaping () -> Void,
         authenticator: any DeviceAuthenticating = DeviceAuthenticator(),
         makeCheckup: (() -> UIViewController)? = nil,
-        makeTwoStep: (() -> UIViewController)? = nil
+        makeTwoStep: (() -> UIViewController)? = nil,
+        makeAuthorizedApps: (() -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel
+        self.makeAuthorizedApps = makeAuthorizedApps
         self.makeTwoStep = makeTwoStep
         self.onSignedOutEverywhere = onSignedOutEverywhere
         self.authenticator = authenticator
@@ -146,6 +151,7 @@ final class SecuritySettingsViewController: UIViewController {
         switch section {
         case .checkup: nil
         case .signIn: nil
+        case .apps: nil
         case .sessions: "Where You're Logged In"
         case .global: nil
         case .appLock: "App Lock"
@@ -157,6 +163,7 @@ final class SecuritySettingsViewController: UIViewController {
         switch section {
         case .checkup: nil
         case .signIn: nil
+        case .apps: "Apps and websites you signed in to with your account."
         case .sessions: "Tap another device to log it out."
         case .global: "Ends every session, including this one. You'll need to log in again."
         case .appLock: "Applies to this iPhone. When it's on, opening the app asks for Face ID or your passcode, and the app is hidden in the app switcher."
@@ -175,6 +182,10 @@ final class SecuritySettingsViewController: UIViewController {
         if makeTwoStep != nil {
             snapshot.appendSections([.signIn])
             snapshot.appendItems([.twoStep], toSection: .signIn)
+        }
+        if makeAuthorizedApps != nil {
+            snapshot.appendSections([.apps])
+            snapshot.appendItems([.authorizedApps], toSection: .apps)
         }
         snapshot.appendSections([.sessions, .global, .appLock, .comingSoon])
         let sessionItems = Self.sessionItems(for: viewModel.phase)
@@ -261,6 +272,13 @@ final class SecuritySettingsViewController: UIViewController {
             var content = UIListContentConfiguration.cell()
             content.text = "Two-Step Sign-In"
             content.image = UIImage(systemName: "lock.shield")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .authorizedApps:
+            var content = UIListContentConfiguration.cell()
+            content.text = AuthorizedAppsViewController.title
+            content.image = UIImage(systemName: "app.connected.to.app.below.fill")
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
             cell.accessories = [.disclosureIndicator()]
@@ -448,7 +466,7 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .session(let session): !session.isCurrent
-        case .failed, .logOutEverywhere, .checkup, .twoStep: true
+        case .failed, .logOutEverywhere, .checkup, .twoStep, .authorizedApps: true
         case .skeleton, .planned, .requireLock, .lockDelay, nil: false
         }
     }
@@ -468,6 +486,10 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
             }
         case .twoStep:
             if let screen = makeTwoStep?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
+        case .authorizedApps:
+            if let screen = makeAuthorizedApps?() {
                 navigationController?.pushViewController(screen, animated: true)
             }
         default:
