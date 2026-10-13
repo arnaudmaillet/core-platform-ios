@@ -386,7 +386,9 @@ final class PrivacySectionViewController: UIViewController {
                 try await viewModel.setCommentAudience(audience)
             } catch {
                 applySnapshot()
-                let alert = UIAlertController(title: nil, message: "Couldn't change who can comment. Try again.", preferredStyle: .alert)
+                // A supervisor's floor holds it (PRF-5006, #417): say who.
+                let message = SupervisionLock.message(for: error, fallback: "Couldn't change who can comment. Try again.")
+                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
             }
@@ -401,7 +403,8 @@ final class PrivacySectionViewController: UIViewController {
             } catch {
                 applySnapshot()
                 let what = kind == .mentions ? "who can mention you" : "who can message you"
-                let alert = UIAlertController(title: nil, message: "Couldn't change \(what). Try again.", preferredStyle: .alert)
+                let message = SupervisionLock.message(for: error, fallback: "Couldn't change \(what). Try again.")
+                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
             }
@@ -477,7 +480,8 @@ final class PrivacySectionViewController: UIViewController {
             } catch {
                 // Snap the switch back to what the server holds.
                 applySnapshot()
-                let alert = UIAlertController(title: nil, message: "Couldn't change your privacy setting. Try again.", preferredStyle: .alert)
+                let message = SupervisionLock.message(for: error, fallback: "Couldn't change your privacy setting. Try again.")
+                let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
             }

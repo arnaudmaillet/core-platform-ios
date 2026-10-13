@@ -1,4 +1,5 @@
 import CoreNetworking
+import CoreStorage
 import Foundation
 
 /// What Parental Supervision says (#417), in one place so tests pin it. The
@@ -108,6 +109,83 @@ enum SupervisionCopy {
         supervision.otherRole == .supervisor ? "Supervision by \(supervision.handleText) ended" : "Stopped supervising \(supervision.handleText)"
     }
 
+    // MARK: Overview and limits
+
+    static let screenTimeHeader = "Daily Time in the App"
+    static let limitsHeader = "Limits"
+    static let overviewFailedRow = "Couldn't load the activity. Tap to try again."
+
+    /// Under the days: what the numbers are, honestly.
+    static let screenTimeFooter = "Time in the app on all devices, counted only while a daily limit is set. Days without use aren't listed."
+
+    static let noTimeYet = "No time counted in the last 7 days"
+
+    /// "Today", "Yesterday", or "Mon 6 Oct" for a teen's local day.
+    static func dayText(_ day: String, today: Date = Date(), calendar: Calendar = .current) -> String {
+        let todayKey = ScreenTimeLedger.key(for: today, calendar: calendar)
+        if day == todayKey { return "Today" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+           day == ScreenTimeLedger.key(for: yesterday, calendar: calendar) {
+            return "Yesterday"
+        }
+        guard let date = BirthDate(iso: day)?.date(calendar: calendar) else { return day }
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.timeZone = calendar.timeZone
+        formatter.locale = calendar.locale ?? .current
+        formatter.setLocalizedDateFormatFromTemplate("EEEdMMM")
+        return formatter.string(from: date)
+    }
+
+    static func minutesText(_ minutes: Int) -> String {
+        ScreenTimeLedger.durationText(TimeInterval(minutes * 60))
+    }
+
+    static func dailyLimitText(_ minutes: Int?) -> String {
+        minutes.map { ScreenTimeLedger.durationText(TimeInterval($0 * 60)) } ?? "Off"
+    }
+
+    static func floorText(_ floor: AudienceFloor?) -> String {
+        switch floor {
+        case .followers: "Followers"
+        case .mutuals: "Mutual Followers"
+        case .noOne: "No One"
+        case nil: "No Limit"
+        }
+    }
+
+    static func onOff(_ on: Bool) -> String { on ? "On" : "Off" }
+
+    /// The limits as rows: what each is, and its value.
+    static func limitRows(_ limits: SupervisionLimits) -> [(title: String, value: String)] {
+        [
+            ("Daily Limit", dailyLimitText(limits.dailyMinutes)),
+            ("Private Account", onOff(limits.privateAccount)),
+            ("Who Can Message", floorText(limits.messages)),
+            ("Who Can Comment", floorText(limits.comments)),
+            ("Hidden from Search", onOff(limits.hiddenFromSearch)),
+        ]
+    }
+
+    static let noLimits = "No limits set"
+
+    /// Under the limits. `teen`: the viewer is the teen. `changedBy`: who
+    /// made the last change, when known.
+    static func limitsFooter(teen: Bool, teenName: String, changedBy: String?, changedAt: Date?) -> String {
+        let rule: String = teen
+            ? "Set by your supervisors. You can choose stricter settings, but not looser ones."
+            : "\(teenName) can choose stricter settings, but not looser ones. Any other supervisor shares these limits: the last change applies."
+        guard let changedAt else { return rule }
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("dMMMy")
+        let when: String = formatter.string(from: changedAt)
+        let who: String = changedBy.map { " by \($0)" } ?? ""
+        return "\(rule) Last changed\(who) on \(when)."
+    }
+
+    static let editLimitsTitle = "Edit Limits"
+    static let limitsSaved = "Limits saved"
+
     // MARK: Refusals
 
     /// A refusal or a failure, as a toast. `teen` is the viewer's side, nil
@@ -126,6 +204,7 @@ enum SupervisionCopy {
         case .notFound: "This supervision has already ended"
         case .ownCode: "This is your own code. Share it with the other person"
         case .tooManyAttempts: "Too many wrong codes. Try again in an hour"
+        case .invalidLimit: "A daily limit is 15 minutes to 24 hours"
         case .transport, nil: FailureCopy.title(for: error, fallback: fallback)
         }
     }
