@@ -1,6 +1,7 @@
 import CoreNetworking
 import DesignSystem
 import MediaCore
+import PostGrid
 import UIKit
 
 /// Settings → Privacy, for the active profile: Private Account (server-side,
@@ -8,7 +9,7 @@ import UIKit
 /// relationship lists (server-side, #403), and what is still coming.
 final class PrivacySectionViewController: UIViewController {
     private enum Section: Hashable {
-        case visibility, lists, comingSoon
+        case visibility, profileTabs, lists, comingSoon
     }
 
     private enum Item: Hashable {
@@ -30,6 +31,8 @@ final class PrivacySectionViewController: UIViewController {
         case locationSharing
         case dataTransparency
         case planned(String)
+        /// A tab others see or not (#411).
+        case tab(ProfileTabVisibility.Tab)
     }
 
     private var planned: [String] {
@@ -37,7 +40,7 @@ final class PrivacySectionViewController: UIViewController {
             + (viewModel.audiences == nil ? ["Who can mention and message you"] : [])
             + (viewModel.sharing == nil ? ["Downloads of your posts and who sees your likes"] : [])
             + (makeLocationSharing == nil ? ["Location sharing"] : [])
-            + ["Hide profile tabs from others"]
+            + (viewModel.tabs == nil ? ["Hide profile tabs from others"] : [])
     }
 
     /// The failed row of a side setting, in the wording every Settings
@@ -48,6 +51,7 @@ final class PrivacySectionViewController: UIViewController {
         case .commentAudience: "who can comment"
         case .interactionAudiences: "who can mention and message you"
         case .postSharing: "your like count and download settings"
+        case .tabVisibility: "which tabs others see"
         }
         return FailureCopy.row(for: failure, fallback: "Couldn't load \(what). Tap to try again.")
     }
@@ -113,6 +117,8 @@ final class PrivacySectionViewController: UIViewController {
         switch section {
         case .visibility:
             "When your profile is private, only your followers can see your posts and your lists. Older posts outside the window you choose are hidden from others, not deleted; you always see them. Comments and mentions from anyone outside the audience you choose are refused; their messages arrive as requests, and with No One they're refused. Applies to this profile only."
+        case .profileTabs:
+            "Others see only the tabs you turn on here. You always see all of them. Applies to this profile only."
         case .lists:
             nil
         case .comingSoon:
@@ -147,7 +153,11 @@ final class PrivacySectionViewController: UIViewController {
             elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] view, _, indexPath in
             var content = UIListContentConfiguration.header()
-            content.text = self?.dataSource.sectionIdentifier(for: indexPath.section) == .comingSoon ? "Coming Soon" : nil
+            content.text = switch self?.dataSource.sectionIdentifier(for: indexPath.section) {
+            case .comingSoon: "Coming Soon"
+            case .profileTabs: "Profile Tabs"
+            default: nil
+            }
             view.contentConfiguration = content
         }
         let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
@@ -250,6 +260,23 @@ final class PrivacySectionViewController: UIViewController {
                 setPostSharing(next)
             }, for: .valueChanged)
             cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
+        case .tab(let tab):
+            content.text = tab.title
+            let symbol = switch tab {
+            case .likes: "heart"
+            case .saved: "bookmark"
+            case .reposts: PostActionSymbol.repost
+            }
+            content.image = UIImage(systemName: symbol)
+            content.imageProperties.tintColor = .label
+            let toggle = UISwitch()
+            toggle.isOn = viewModel.tabVisibility?[tab] ?? false
+            toggle.accessibilityLabel = "Show \(tab.title) to others"
+            toggle.addAction(UIAction { [weak self] action in
+                guard let self, let toggle = action.sender as? UISwitch else { return }
+                setTab(tab, visible: toggle.isOn, from: toggle)
+            }, for: .valueChanged)
+            cell.accessories = [.customView(configuration: .init(customView: toggle, placement: .trailing(displayed: .always)))]
         case .postWindow:
             content = .valueCell()
             content.text = "Posts Visible to Others"
@@ -291,7 +318,7 @@ final class PrivacySectionViewController: UIViewController {
 
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.visibility, .lists, .comingSoon])
+        snapshot.appendSections([.visibility, .profileTabs, .lists, .comingSoon])
         switch viewModel.phase {
         case .loading: snapshot.appendItems([.loading], toSection: .visibility)
         case .loaded: snapshot.appendItems([.privateAccount], toSection: .visibility)
@@ -323,6 +350,13 @@ final class PrivacySectionViewController: UIViewController {
             snapshot.reconfigureItems([.likeCounts, .downloads])
         } else if viewModel.failedSides.contains(.postSharing) {
             snapshot.appendItems([.sideFailed(.postSharing)], toSection: .visibility)
+        }
+        if viewModel.tabs != nil, viewModel.tabVisibility != nil {
+            let rows = ProfileTabVisibility.Tab.allCases.map(Item.tab)
+            snapshot.appendItems(rows, toSection: .profileTabs)
+            snapshot.reconfigureItems(rows)
+        } else if viewModel.failedSides.contains(.tabVisibility) {
+            snapshot.appendItems([.sideFailed(.tabVisibility)], toSection: .profileTabs)
         }
         snapshot.appendItems(
             (makeListPrivacy == nil ? [] : [.hideLists])
@@ -386,6 +420,26 @@ final class PrivacySectionViewController: UIViewController {
                 alert.addAction(UIAlertAction(title: "OK", style: .default))
                 present(alert, animated: true)
             }
+        }
+    }
+
+    /// Not optimistic: the switch waits for the server, disabled meanwhile,
+    /// and snaps back if the change fails.
+    private func setTab(_ tab: ProfileTabVisibility.Tab, visible: Bool, from toggle: UISwitch) {
+        toggle.isEnabled = false
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await viewModel.setTab(tab, visible: visible)
+            } catch {
+                let alert = UIAlertController(
+                    title: nil, message: "Couldn't change who sees your \(tab.title) tab. Try again.", preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+            toggle.isEnabled = true
+            applySnapshot()
         }
     }
 

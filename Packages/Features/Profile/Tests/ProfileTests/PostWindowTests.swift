@@ -53,6 +53,20 @@ struct PostWindowTests {
         )
     }
 
+    /// The tab flags (#411): the server's defaults, and a change to one flag
+    /// that leaves the window and the other flags as they were.
+    @Test func aTabFlagRoundTripsAlone() async throws {
+        let fixture = makeFixture()
+        #expect(try await fixture.profiles.tabVisibility() == ProfileTabVisibility(likes: true, saved: false, reposts: true))
+        try await fixture.profiles.setPostWindow(.oneMonth)
+
+        try await fixture.profiles.setTab(.saved, visible: true)
+        try await fixture.profiles.setTab(.reposts, visible: false)
+
+        #expect(try await fixture.profiles.tabVisibility() == ProfileTabVisibility(likes: true, saved: true, reposts: false))
+        #expect(try await fixture.profiles.postWindow() == .oneMonth)
+    }
+
     /// All by default; a change sticks.
     @Test func theWindowRoundTrips() async throws {
         let fixture = makeFixture()
