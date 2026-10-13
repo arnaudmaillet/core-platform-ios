@@ -1,34 +1,37 @@
 {
-  "fill" : {
-    "linear-gradient" : [
-      "extended-srgb:0.00000,0.75294,0.90980,1.00000",
-      "display-p3:0.67924,0.36883,0.83811,1.00000"
-    ]
-  },
+  "fill" : "automatic",
   "groups" : [
     {
       "layers" : [
         {
           "fill" : {
-            "solid" : "extended-gray:1.00000,1.00000"
+            "solid" : "extended-gray:1.00000,0.70000"
           },
           "image-name" : "play.svg",
-          "name" : "play"
+          "name" : "play",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -3.347490434095846,
+              -9.135392164744474
+            ]
+          }
         },
         {
+          "blend-mode" : "normal",
           "fill" : {
             "linear-gradient" : [
-              "extended-gray:1.00000,1.00000",
-              "extended-srgb:0.00000,0.75294,0.90980,1.00000"
+              "display-p3:0.67924,0.36883,0.83811,0.50000",
+              "extended-srgb:0.00000,0.75294,0.90980,0.70000"
             ],
             "orientation" : {
               "start" : {
-                "x" : -0.10360162457878615,
-                "y" : 1.2538583400726564
+                "x" : -0.15829669455956163,
+                "y" : 0.891772255870937
               },
               "stop" : {
-                "x" : 1,
-                "y" : -0.058181073581686685
+                "x" : 0.6390187622027844,
+                "y" : 0.3549148284865596
               }
             }
           },
