@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import Foundation
 import MediaCore
@@ -99,8 +100,9 @@ struct RevealDismissCardTests {
     /// the length of the flight. This is the premise that made the deletion
     /// safe, so it is worth holding on to.
     @Test func theStandInAlreadyCarriesTheClosingMetricLine() throws {
-        func metrics(_ view: UIView) -> [PostMetricLabel] {
-            if let label = view as? PostMetricLabel { return [label] }
+        // The line's counters: the actions carrying a count (#934).
+        func metrics(_ view: UIView) -> [AppButton] {
+            if let button = view as? AppButton { return button.content.count == nil ? [] : [button] }
             return view.subviews.flatMap(metrics)
         }
         // Counted, because a chip with no number hides itself — the line the

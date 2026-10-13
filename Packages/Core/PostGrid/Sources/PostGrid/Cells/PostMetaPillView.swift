@@ -160,12 +160,9 @@ public class PostMetaPillView: UIVisualEffectView {
         // shape was CONFIGURED, never that it was drawn. It took a 3x crop of a
         // screenshot to see it.
         clipsToBounds = true
-        // ⚠️ FURNITURE UNTIL SOMETHING ASKS OTHERWISE — see `setTapHandler`.
-        //
-        // The card's own tap opens the post, so a chip that swallowed touches
-        // for nothing would put dead corners on the preview. A chip that has
-        // somewhere to send them is a different thing, and turns this back on
-        // for itself.
+        // ⚠️ FURNITURE: the card's own tap opens the post, so a chip that
+        // swallowed touches would put dead corners on the preview. The card's
+        // actions are buttons of their own (`PostCardAction`, #934).
         isUserInteractionEnabled = false
         let row = UIStackView(arrangedSubviews: contents)
         row.axis = .horizontal
@@ -193,52 +190,6 @@ public class PostMetaPillView: UIVisualEffectView {
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// Makes the pill a control, or furniture again with nil.
-    ///
-    /// ⚠️ **THE CARD'S ONE ACTION COMPONENT, NOT THIS CHIP'S OWN.** The chip
-    /// used to wire a tap recogniser and a press of its own, and the comment
-    /// chip of a TEXT post was left with neither — reported from a device as
-    /// a button that "does nothing". `ActionAffordance` is the shared answer
-    /// for every chip on a card: the press, a contrast step inside the
-    /// capsule, a hold that freezes the screen until the lift, and — through
-    /// `setMenuProvider` — a menu. Its tap swallows the touch, so pressing a
-    /// chip never also opens the post under it.
-    ///
-    /// The chip is 32pt tall and `point(inside:)` already grows its target to
-    /// 44, so this inherits a finger-sized region without the capsule growing
-    /// to match.
-    public func setTapHandler(_ handler: (() -> Void)?) {
-        tapHandler = handler
-        if handler != nil {
-            ActionAffordance.attach(to: self, washingIn: contentView) { [weak self] in
-                self?.tapHandler?()
-            }
-        }
-        // After the attach, which turns interaction on: a chip with nothing
-        // to do is furniture again, and its recognisers go dormant with it.
-        isUserInteractionEnabled = handler != nil
-        isAccessibilityElement = handler != nil
-    }
-
-    /// A menu raised by holding the chip — nil for none. Only meaningful on a
-    /// chip that is a control (`setTapHandler`).
-    public func setMenuProvider(_ provider: (() -> UIMenu?)?) {
-        ActionAffordance.attached(to: self)?.menuProvider = provider
-    }
-
-    private var tapHandler: (() -> Void)?
-
-    #if DEBUG
-    /// Fires whatever the chip is wired to, for a simulator that injects no
-    /// touches. Reports whether there was anything to fire — "the chip did
-    /// nothing" and "the chip is not a control" are different answers.
-    public func debugTap() -> Bool {
-        guard let tapHandler else { return false }
-        tapHandler()
-        return true
-    }
-    #endif
 
     /// Extends the touch area to `minimumTouchTarget` without growing the chip.
     ///
@@ -354,11 +305,14 @@ extension UIView {
 /// What stays of the capsule is its BOX, and every part of it still works:
 /// - the declared height (`PostMetaPillView.height`), so the line keeps one
 ///   rhythm with the page indicator's capsule beside it;
-/// - the press region, grown to 44pt by `point(inside:)`;
-/// - the SHAPE the press draws. `ActionAffordance`'s wash is a capsule inside
-///   this box, so a pressed action shows a capsule that was not there a moment
-///   before and a held one a deeper one — the container appears only while a
-///   finger is on it, the way the system's plain buttons answer a press.
+/// - the press region, grown to 44pt;
+/// - the SHAPE the press draws: a wash inside this box, so a pressed action
+///   shows a capsule that was not there a moment before and a held one a
+///   deeper one — the container appears only while a finger is on it.
+///
+/// ⚠️ SINCE #934 THE ACTIONS ARE `AppButton`s (`PostCardAction`), which carry
+/// every part of that box themselves; this type keeps the line's ink and
+/// padding as the constants they read.
 ///
 /// ⚠️ **ONE INK FOR THE WHOLE LINE** (`ink`) — glyphs and counts, primary
 /// actions and secondary ones. See `ink` for the two-rank version it replaced.
@@ -435,59 +389,13 @@ public class PostCardPillView: PostMetaPillView {
     var inkTrailing: CGFloat { padding.trailing }
 }
 
-/// A plain action that is ONE GLYPH — the closing line's repost and save.
-///
-/// Interaction is ON, which is the one thing every other `PostMetaPillView` on
-/// a card turns off by default — the counters become controls only when the
-/// host gives them something to do. This one exists to be pressed.
+/// The card's GLYPH metrics: the size and weight every glyph on a card is
+/// drawn at, and the band's "..." control. The closing line's repost and save
+/// were instances of this until #934 made them `AppButton`s (`PostCardAction`).
 public final class PostActionPillView: PostCardPillView {
     /// The width of the band's "..." — a glyph button carrying its own margin
     /// inside its width, hung from the card's top-right corner.
     public static let controlWidth: CGFloat = 36
-
-    /// The width of a glyph action on the closing line: the glyph and a few
-    /// points either side, which is what the press wash needs to read as a
-    /// disc around it. 36 was sized to sit inside a capsule's ends; with no
-    /// capsule it left ~12pt of air before the ink, and the save glyph sat
-    /// visibly right of the caption it closes. `point(inside:)` grows the
-    /// press region back to 44 either way.
-    public static let plainControlWidth: CGFloat = 28
-
-    override public init(
-        contents: [UIView], spacing: CGFloat = 8,
-        insets: NSDirectionalEdgeInsets = PostCardPillView.plainInsets
-    ) {
-        super.init(contents: contents, spacing: spacing, insets: insets)
-        isUserInteractionEnabled = true
-    }
-
-    /// A plain action around exactly one glyph control, which fills it.
-    public convenience init(control: UIView) {
-        self.init(contents: [control], spacing: 0, insets: .zero)
-        glyphControl = control
-        // ⚠️ THE PILL IS THE CONTROL, the glyph inside is its face.
-        //
-        // The button used to answer its own events with the pill giving
-        // around it, while the counter chips beside it ran a different
-        // recogniser and a different press. Every action on the card goes
-        // through `ActionAffordance` instead (see `setTapHandler`), so this
-        // one forwards its tap to the button's own actions — the host's
-        // target-action wiring is untouched — and the button stops taking
-        // touches, so there is exactly one owner of the finger.
-        if let control = control as? UIControl {
-            control.isUserInteractionEnabled = false
-            isAccessibilityElement = true
-            accessibilityLabel = control.accessibilityLabel
-            ActionAffordance.attach(to: self, washingIn: contentView) { [weak control] in
-                control?.sendActions(for: .touchUpInside)
-            }
-        }
-    }
-
-    @available(*, unavailable)
-    public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    private weak var glyphControl: UIView?
 
     /// ⚠️ A LONE GLYPH IS SIZED TO ITS BOX, NOT TO THE CARD'S TYPE.
     ///
@@ -531,8 +439,7 @@ public final class PostActionPillView: PostCardPillView {
     /// middle, the height left to whatever holds it, and a touch region grown
     /// back to a finger's size around the drawn glyph.
     ///
-    /// - Parameter width: `controlWidth` for the band's "...";
-    ///   `plainControlWidth` for an action on the closing line.
+    /// - Parameter width: `controlWidth` for the band's "...".
     public static func makeGlyphControl(
         systemName: String, label: String,
         width: CGFloat = controlWidth
@@ -546,43 +453,6 @@ public final class PostActionPillView: PostCardPillView {
         button.widthAnchor.constraint(equalToConstant: width).isActive = true
         button.fixedWidth = width
         return button
-    }
-
-    /// The air between the box's edge and the glyph's ink: the glyph is
-    /// centred in a control of fixed width, so it is half of what the glyph
-    /// leaves of that width. Read off the image the button is drawing, so a
-    /// wider glyph (the repost arrows) hangs less than a narrow one (save).
-    override var inkLeading: CGFloat {
-        guard let button = glyphControl as? PostGlyphButton,
-              let configuration = button.configuration,
-              let image = configuration.image else { return 0 }
-        let drawn = configuration.preferredSymbolConfigurationForImage
-            .flatMap { image.applyingSymbolConfiguration($0) } ?? image
-        return max((button.fixedWidth - drawn.size.width) / 2, 0)
-    }
-
-    override var inkTrailing: CGFloat { inkLeading }
-
-    /// Folds the box's hit-slop onto the control inside it.
-    ///
-    /// ⚠️ `point(inside:)` alone does NOT give the button a 44pt target. It
-    /// lets the touch reach the PILL, and hit-testing then walks its subviews —
-    /// which are bounded normally, so a touch beside or below the glyph finds
-    /// the content view outside itself, and the pill answers for a press that
-    /// was aimed at a control. Clamping the point back into the box — on BOTH
-    /// axes now that the box is narrower than a finger too — hands it to the
-    /// control it was beside.
-    override public func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        if let hit = super.hitTest(point, with: event), hit !== self { return hit }
-        guard self.point(inside: point, with: event), bounds.height > 2, bounds.width > 2 else {
-            return nil
-        }
-        let clamped = CGPoint(
-            x: min(max(point.x, 1), bounds.width - 1),
-            y: min(max(point.y, 1), bounds.height - 1)
-        )
-        let retargeted = super.hitTest(clamped, with: event)
-        return retargeted === self ? nil : retargeted
     }
 }
 
@@ -602,5 +472,73 @@ final class PostGlyphButton: UIButton {
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         let slopY = max((PostMetaPillView.minimumTouchTarget - bounds.height) / 2, 0)
         return bounds.insetBy(dx: 0, dy: -slopY).contains(point)
+    }
+}
+
+/// A card's ACTION — likes, comments, repost, save — as the app's one button
+/// (#934, the move to #931's `AppButton`): BARE, card-action size, ink on the
+/// card's own fill.
+///
+/// What `PostCardPillView` and the deleted `ActionAffordance` gave these, kept:
+/// - the line's one ink (`PostCardPillView.ink`), a staked heart the points'
+///   red (`selectedTint`);
+/// - the glyph at the card's control size (`PostActionPillView.glyphPointSize`);
+/// - the declared height (`PostMetaPillView.height`), one rhythm with the
+///   page indicator's capsule;
+/// - the press: a `.label` wash rising inside the capsule, a second step while
+///   held (`washesOnPress`), never a dim;
+/// - the hold that freezes the list and the pager until the lift
+///   (`holdFreezesScrolling`), and the like's stake menu (`menuProvider`);
+/// - a 44pt region for a finger (`AppButton.hitRegion`).
+///
+/// What the button adds: the count rolls, the glyph is replaced rather than
+/// cut, the state tint fades — each a cross-fade under Reduce Motion.
+@MainActor
+public enum PostCardAction {
+    public static func make(symbol: String, label: String, selectedTint: UIColor? = nil) -> AppButton {
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(symbol), dims: false)
+        button.inkColor = PostCardPillView.ink
+        button.selectedTint = selectedTint
+        button.symbolPointSize = PostActionPillView.glyphPointSize
+        button.washesOnPress = true
+        button.holdFreezesScrolling = true
+        button.accessibilityLabel = label
+        // A count never truncates: a clipped count is a wrong count.
+        button.setContentCompressionResistancePriority(.init(999), for: .horizontal)
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        // 999: the line's height is required, so a taller content (the
+        // largest text sizes) degrades the shape rather than the layout.
+        let height = button.heightAnchor.constraint(equalToConstant: PostMetaPillView.height)
+        height.priority = .init(999)
+        height.isActive = true
+        return button
+    }
+
+    /// How far in from the button's leading edge its ink starts — what the
+    /// closing line hangs an end out by, to put the INK on its column.
+    ///
+    /// ⚠️ A LONE GLYPH IS CENTRED, NOT INSET: UIKit sizes an image-only
+    /// button tighter than its content insets (measured: 28pt for a 17.7pt
+    /// bookmark, not 34) and centres the glyph in it, so the air is half of
+    /// what the glyph leaves of the button's width — read off the drawn
+    /// image, as the closing line's glyph controls always were.
+    static func inkLeading(_ button: AppButton) -> CGFloat {
+        glyphAir(button) ?? button.configuration?.contentInsets.leading ?? 0
+    }
+
+    /// The same, from the trailing edge.
+    static func inkTrailing(_ button: AppButton) -> CGFloat {
+        glyphAir(button) ?? button.configuration?.contentInsets.trailing ?? 0
+    }
+
+    /// The air either side of a glyph-only button's glyph; nil for one with
+    /// words or a count.
+    private static func glyphAir(_ button: AppButton) -> CGFloat? {
+        guard button.content.title == nil, button.content.count == nil,
+              let configuration = button.configuration, let image = configuration.image else { return nil }
+        let drawn = configuration.preferredSymbolConfigurationForImage
+            .flatMap { image.applyingSymbolConfiguration($0) } ?? image
+        return max((button.fittingSize(for: button.content).width - drawn.size.width) / 2, 0)
     }
 }

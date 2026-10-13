@@ -97,7 +97,9 @@ struct AppButtonTests {
         let liked = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
         liked.selectedTint = .systemRed
         liked.isSelected = true
-        #expect(liked.configuration?.baseForegroundColor == .systemRed)
+        // The symbol turns red; the count keeps the ink.
+        #expect(liked.configuration?.imageColorTransformer?(.label) == .systemRed)
+        #expect(liked.configuration?.baseForegroundColor == .label)
         let ground = liked.configuration?.updated(for: liked).background.resolvedBackgroundColor(for: .systemBlue)
         #expect(ground == .clear, "a selected bare button grew a ground: \(String(describing: ground))")
     }
@@ -411,10 +413,73 @@ struct AppButtonTests {
         #expect(button.debugHoldRecognizer == nil)
         button.holdFreezesScrolling = true
         let hold = try #require(button.debugHoldRecognizer)
-        #expect(hold.minimumPressDuration == ActionAffordance.Metrics.holdDuration)
+        #expect(hold.minimumPressDuration == AppButton.Metrics.holdDuration)
+        #expect(AppButton.Metrics.holdDuration == 0.25, "shorter than a context menu's own timing")
         #expect(!hold.cancelsTouchesInView, "the button must keep tracking the finger for its tap")
         button.holdFreezesScrolling = false
         #expect(button.debugHoldRecognizer == nil)
+    }
+
+    // MARK: - The card actions' press (#934)
+
+    /// A card action: no dim, a wash inside its shape — one step pressed, a
+    /// second held — gone once the finger lifts; a lift inside still taps.
+    @Test func aCardActionWashesInsteadOfDimming() {
+        let button = AppButton(aspect: .bare, size: .inline, content: .init(symbol: "heart", count: 3), dims: false)
+        button.washesOnPress = true
+        button.holdFreezesScrolling = true
+        var tapped = 0
+        button.addAction(UIAction { _ in tapped += 1 }, for: .primaryActionTriggered)
+        #expect(button.debugWashAlpha == 0)
+        button.debugHold(liftInside: true)
+        #expect(tapped == 1)
+        #expect(button.debugWashAlpha == 0, "the wash clears after the hold")
+        #expect(!button.isHolding)
+        button.debugHold(liftInside: false)
+        #expect(tapped == 1, "a lift outside does not tap")
+        #expect(AppButton.Metrics.pressedWash < AppButton.Metrics.heldWash)
+    }
+
+    /// The hold shares the finger with the button's own recognisers (its
+    /// menu's) and with nothing above it.
+    @Test func theHoldSharesOnlyWithTheButtonsOwnRecognisers() throws {
+        let host = UIScrollView()
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
+        host.addSubview(button)
+        button.holdFreezesScrolling = true
+        let hold = try #require(button.debugHoldRecognizer)
+        let own = UILongPressGestureRecognizer()
+        button.addGestureRecognizer(own)
+        let delegate = try #require(hold.delegate)
+        #expect(delegate.gestureRecognizer?(hold, shouldRecognizeSimultaneouslyWith: own) == true)
+        #expect(delegate.gestureRecognizer?(hold, shouldRecognizeSimultaneouslyWith: host.panGestureRecognizer) == false)
+    }
+
+    /// A held card action raises its menu — built when it lifts — and a
+    /// button without one keeps UIKit's own context menu off.
+    @Test func aMenuProviderTurnsTheHoldMenuOn() throws {
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
+        #expect(!button.isContextMenuInteractionEnabled)
+        var built = 0
+        button.menuProvider = {
+            built += 1
+            return UIMenu(children: [UIAction(title: "Stake 50") { _ in }])
+        }
+        #expect(button.isContextMenuInteractionEnabled)
+        #expect(built == 0, "built when raised, not when set")
+        let interaction = try #require(button.contextMenuInteraction)
+        let configuration = try #require(button.contextMenuInteraction(interaction, configurationForMenuAtLocation: .zero))
+        _ = configuration
+        button.menuProvider = nil
+        #expect(!button.isContextMenuInteractionEnabled)
+    }
+
+    /// A card's glyph is drawn at its own size, not the type's.
+    @Test func aSymbolPointSizeOverridesTheTypes() throws {
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
+        button.symbolPointSize = 17
+        let symbol = try #require(button.configuration?.preferredSymbolConfigurationForImage)
+        #expect(symbol == UIImage.SymbolConfiguration(pointSize: 17, weight: .medium, scale: .medium))
     }
 
     @Test func aMenuIsUIKits() {

@@ -922,17 +922,21 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// none, and wiring only one of the two is a defect that no test naming the
     /// other would ever see.
     public func debugTapCommentsChip() -> Bool {
-        for pill in [closingCommentsPill] as [PostMetaPillView?] {
-            guard let pill, !pill.isHidden, pill.window != nil || pill.superview != nil,
-                  pill.superviewChainIsVisible else { continue }
-            if pill.debugTap() { return true }
-        }
-        return false
+        Self.debugPress(commentsAction)
     }
 
     /// Presses the like chip — a stake of the tap amount, when wired.
     public func debugTapLikesChip() -> Bool {
-        closingLikesPill.debugTap()
+        Self.debugPress(likesAction)
+    }
+
+    /// Presses `action` as a finger would, reporting whether it is a control
+    /// that is shown — "did nothing" and "is not a control" differ.
+    private static func debugPress(_ action: AppButton) -> Bool {
+        guard !action.isHidden, action.isUserInteractionEnabled, action.superviewChainIsVisible,
+              action.acceptsTaps else { return false }
+        action.debugTap()
+        return true
     }
     #endif
 
@@ -1572,7 +1576,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// answer, not the presence of a provider, the same rule the "..." follows.
     public var onRepostTapped: (() -> Void)? {
         didSet {
-            repostPill.isHidden = onRepostTapped == nil
+            repostAction.isHidden = onRepostTapped == nil
             syncClosingLine()
         }
     }
@@ -1580,7 +1584,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The closing row's save control. Nil hides it.
     public var onBookmarkTapped: (() -> Void)? {
         didSet {
-            bookmarkPill.isHidden = onBookmarkTapped == nil
+            bookmarkAction.isHidden = onBookmarkTapped == nil
             syncClosingLine()
         }
     }
@@ -1602,7 +1606,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     /// The menu a held like chip raises (`StakeMenu`), built when raised.
     public var stakeMenu: (() -> UIMenu?)? {
-        didSet { closingLikesPill.setMenuProvider(stakeMenu) }
+        didSet { likesAction.menuProvider = stakeMenu }
     }
 
     /// What the VIEWER has staked on this post: the heart turns the points'
@@ -1622,14 +1626,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public func setViewerStake(_ total: Int) {
         guard total != viewerStake else { return }
         viewerStake = total
-        applyReactionCount()
+        applyReactionCount(animated: true)
     }
 
     /// The stake landed: "+N" rises off the chip in the points' red and the
     /// heart pops — the rail's confirmation, on a card.
     public func playStakeConfirmation(amount: Int) {
         floatReceipt("+\(amount)", color: PointsSymbol.tint, rising: true)
-        StakeReceipt.pop(reactions.icon)
+        StakeReceipt.pop(likesAction.imageView ?? likesAction)
     }
 
     /// An undo's receipt: "−N" sinking, in grey — an undo is not a payout.
@@ -1642,14 +1646,14 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// capsule. Pure theatre over state the wallet already changed, so it can
     /// be dropped (hidden chip, mid-reuse) without anything going wrong.
     private func floatReceipt(_ text: String, color: UIColor, rising: Bool) {
-        guard !closingLikesPill.isHidden, closingLikesPill.window != nil else { return }
-        StakeReceipt.float(text, color: color, rising: rising, from: closingLikesPill, in: contentView)
+        guard !likesAction.isHidden, likesAction.window != nil else { return }
+        StakeReceipt.float(text, color: color, rising: rising, from: likesAction, in: contentView)
     }
 
     /// The wallet refused (balance, or the post's cap): the chip shakes its
     /// head. Additive, so it composes with the press still springing back.
     public func playStakeDenied() {
-        StakeReceipt.shake(closingLikesPill)
+        StakeReceipt.shake(likesAction)
     }
 
     private var baseReactionCount: Int64?
@@ -1664,7 +1668,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     public func showLikeCount(_ count: Int64) {
         guard !likeCountsHidden, baseReactionCount != nil, baseReactionCount != count else { return }
         baseReactionCount = count
-        applyReactionCount()
+        applyReactionCount(animated: true)
     }
 
     #if DEBUG
@@ -1674,14 +1678,13 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
 
     private func applyStakeWiring() {
         let stakes = onStake != nil
-        reactions.keepsGlyphWhenEmpty = stakes
-        closingLikesPill.syncVisibilityToContents()
-        closingLikesPill.setTapHandler(stakes ? { [weak self] in
-            guard let self else { return }
-            onStake?(stakeTapAmount)
-        } : nil)
-        closingLikesPill.accessibilityLabel = stakes ? "Like, stakes \(StakeMenu.points(stakeTapAmount))" : nil
-        applyReactionCount()
+        likesKeepsGlyph = stakes
+        // A counter until the host stakes through it: with no stake the
+        // touch is the card's, and opens the post.
+        likesAction.isUserInteractionEnabled = stakes
+        likesAction.holdFreezesScrolling = stakes
+        likesAction.accessibilityLabel = stakes ? "Like, stakes \(StakeMenu.points(stakeTapAmount))" : "Likes"
+        applyReactionCount(animated: false)
         // A count-less post's heart may have just appeared at the line's end,
         // and the end hangs by what is there.
         syncClosingLine()
@@ -1695,20 +1698,33 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// is a capsule's text.
     public func updateCounts(from post: GalleryPost) {
         baseReactionCount = post.reactionCount
-        applyReactionCount()
-        comments.set(post.commentCount)
-        closingCommentsPill.syncVisibilityToContents()
-        closingCommentsPill.accessibilityValue = post.commentCount.map(PostMetadata.count)
+        applyReactionCount(animated: true)
+        applyCommentCount(post.commentCount, animated: true)
     }
 
-    private func applyReactionCount() {
-        reactions.set(baseReactionCount)
-        reactions.setGlyph(
-            systemName: viewerStake > 0 ? PointsSymbol.glyph : ActionSymbol.like,
-            color: viewerStake > 0 ? PointsSymbol.tint : PostCardPillView.ink
+    /// The likes: the post's count, and the heart turned to the points' red
+    /// glyph once the viewer has a stake — a symbol replace and the state
+    /// tint, the count rolling (#934). Animated only for news on the post the
+    /// row is already showing, never for a row bound to a new one.
+    private func applyReactionCount(animated: Bool) {
+        let staked = viewerStake > 0
+        let content = AppButton.Content(
+            symbol: staked ? PointsSymbol.glyph : ActionSymbol.like,
+            count: baseReactionCount.map { Int(clamping: $0) }
         )
-        closingLikesPill.accessibilityValue = baseReactionCount.map(PostMetadata.count)
-        closingLikesPill.syncVisibilityToContents()
+        let animates = animated && actionsAnimate && likesAction.window != nil && !likesAction.isHidden
+        likesAction.setContent(content, animated: animates)
+        likesAction.setSelected(staked, animated: animates)
+        likesAction.isHidden = baseReactionCount == nil && !likesKeepsGlyph
+    }
+
+    /// The comment count, the same way; none hides the action.
+    private func applyCommentCount(_ count: Int64?, animated: Bool) {
+        let animates = animated && actionsAnimate && commentsAction.window != nil && !commentsAction.isHidden
+        commentsAction.setContent(
+            .init(symbol: ActionSymbol.comments, count: count.map { Int(clamping: $0) }), animated: animates
+        )
+        commentsAction.isHidden = count == nil
     }
 
     /// Whether this post is saved. Set by the host from whatever owns the pile;
@@ -1718,9 +1734,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     }
 
     private func applyBookmarkGlyph() {
-        bookmarkButton.configuration?.image =
-            UIImage(systemName: isBookmarked ? ActionSymbol.saved : ActionSymbol.save)
-        bookmarkButton.accessibilityLabel = isBookmarked ? "Saved" : "Save"
+        let animates = actionsAnimate && bookmarkAction.window != nil && !bookmarkAction.isHidden
+        bookmarkAction.setContent(.symbol(isBookmarked ? ActionSymbol.saved : ActionSymbol.save), animated: animates)
+        bookmarkAction.setSelected(isBookmarked, animated: animates)
+        bookmarkAction.accessibilityLabel = isBookmarked ? "Saved" : "Save"
     }
 
     /// Draws the band's "..." without wiring it — for a transition's stand-in
@@ -1740,8 +1757,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// pill — the one visible difference between the window and the row it
     /// lands on.
     public func showRowActionsAsScenery(repost: Bool, bookmark: Bool, saved: Bool) {
-        repostPill.isHidden = !repost
-        bookmarkPill.isHidden = !bookmark
+        repostAction.isHidden = !repost
+        bookmarkAction.isHidden = !bookmark
         isBookmarked = saved
         syncClosingLine()
     }
@@ -1752,9 +1769,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// — the landing frame swaps the stand-in for the row, and a heart
     /// changing colour in it is the pop.
     public func showStakeAsScenery(viewerStake: Int) {
-        reactions.keepsGlyphWhenEmpty = true
+        likesKeepsGlyph = true
         setViewerStake(viewerStake)
-        applyReactionCount()
+        applyReactionCount(animated: false)
         syncClosingLine()
     }
 
@@ -1781,7 +1798,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// What the row's closing line is actually drawing, so a test can compare
     /// a stand-in against a row rather than against a literal.
     public var visibleRowActions: (repost: Bool, bookmark: Bool, saved: Bool) {
-        (!repostPill.isHidden, !bookmarkPill.isHidden, isBookmarked)
+        (!repostAction.isHidden, !bookmarkAction.isHidden, isBookmarked)
     }
 
     /// Makes this cell show `text` as its age.
@@ -1832,18 +1849,20 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The closing line's counters — the card's PRIMARY actions, ranked by
     /// carrying a count and holding the line's end rather than by a darker
     /// ink: glyph and count in the line's one ink (`PostCardPillView.ink`).
-    private let reactions = PostMetricLabel(
-        symbol: ActionSymbol.like, font: PostMetaPillView.font,
-        color: PostCardPillView.ink,
-        glyphPointSize: PostActionPillView.glyphPointSize
-    )
-    private let comments = PostMetricLabel(
-        symbol: ActionSymbol.comments, font: PostMetaPillView.font,
-        color: PostCardPillView.ink,
-        glyphPointSize: PostActionPillView.glyphPointSize
-    )
-    private var closingLikesPill: PostCardPillView!
-    private var closingCommentsPill: PostCardPillView!
+    /// The app's one button since #934 (`PostCardAction`).
+    private let likesAction = PostCardAction.make(symbol: ActionSymbol.like, label: "Likes", selectedTint: PointsSymbol.tint)
+    private let commentsAction = PostCardAction.make(symbol: ActionSymbol.comments, label: "Comments")
+    /// Whether the likes keep their heart with no count: a staking card's
+    /// like is a door even before the post has a number.
+    private var likesKeepsGlyph = false
+    /// The post the row is bound to.
+    private var boundPostID: PostID?
+    /// Whether the actions animate a change: off from `configure` until the
+    /// next turn of the run loop, so the host's first answers for a newly
+    /// bound post (its stake, its saved state, set right after `configure`)
+    /// land as they are; a change after that is news and moves (#934).
+    private var actionsAnimate = false
+
     /// The closing row's date — drawn only when the band above is BARE, so a
     /// profile's own cards still say when. On a card with an identity the
     /// date is on the handle's line instead.
@@ -1851,16 +1870,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The closing row's two SECONDARY actions, each its own plain control,
     /// leading the line: `[save][repost][pages] ······ [comments][likes]`. One
     /// control per verb, so a hidden one closes its own slot.
-    private let repostButton = PostActionPillView.makeGlyphControl(
-        systemName: ActionSymbol.repost, label: "Repost",
-        width: PostActionPillView.plainControlWidth
-    )
-    private let bookmarkButton = PostActionPillView.makeGlyphControl(
-        systemName: ActionSymbol.save, label: "Save",
-        width: PostActionPillView.plainControlWidth
-    )
-    private var repostPill: PostActionPillView!
-    private var bookmarkPill: PostActionPillView!
+    private let repostAction = PostCardAction.make(symbol: ActionSymbol.repost, label: "Repost")
+    private let bookmarkAction = PostCardAction.make(symbol: ActionSymbol.save, label: "Save")
 
     /// The preview wears ONE piece of furniture, the page indicator: what the
     /// viewer can press about a post lives in the closing row under the
@@ -2039,14 +2050,19 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // Card actions, not media pills: PLAIN, ink on the card's own fill
         // (no capsule since 2026-09-30 — see `PostCardPillView`). Comments
         // and likes are the primary pair, repost and save the secondary one.
-        closingLikesPill = PostCardPillView(contents: [reactions])
-        closingCommentsPill = PostCardPillView(contents: [comments])
-        repostPill = PostActionPillView(control: repostButton)
-        bookmarkPill = PostActionPillView(control: bookmarkButton)
-        repostButton.addTarget(self, action: #selector(repostPressed), for: .touchUpInside)
-        bookmarkButton.addTarget(self, action: #selector(bookmarkPressed), for: .touchUpInside)
-        repostPill.isHidden = true
-        bookmarkPill.isHidden = true
+        likesAction.addAction(UIAction { [weak self] _ in
+            guard let self, let onStake else { return }
+            onStake(stakeTapAmount)
+        }, for: .primaryActionTriggered)
+        likesAction.isUserInteractionEnabled = false
+        likesAction.isHidden = true
+        commentsAction.addAction(UIAction { [weak self] _ in self?.onCommentsTapped?() }, for: .primaryActionTriggered)
+        commentsAction.isHidden = true
+        repostAction.addAction(UIAction { [weak self] _ in self?.onRepostTapped?() }, for: .primaryActionTriggered)
+        bookmarkAction.addAction(UIAction { [weak self] _ in self?.onBookmarkTapped?() }, for: .primaryActionTriggered)
+        bookmarkAction.isToggle = true
+        repostAction.isHidden = true
+        bookmarkAction.isHidden = true
         closingAgeLabel.font = .appFont(forTextStyle: .footnote)
         closingAgeLabel.adjustsFontForContentSizeCategory = true
         closingAgeLabel.textColor = .secondaryLabel
@@ -2066,8 +2082,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         pageIndicator.isHidden = true
         let metaRow = UIStackView(
             arrangedSubviews: [
-                bookmarkPill, repostPill, closingAgeLabel, pageIndicator,
-                spacer, closingCommentsPill, closingLikesPill
+                bookmarkAction, repostAction, closingAgeLabel, pageIndicator,
+                spacer, commentsAction, likesAction
             ]
         )
         self.metaRow = metaRow
@@ -2170,13 +2186,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     var closingLineHang: (leading: CGFloat, trailing: CGFloat) {
         let shown = metaRow.arrangedSubviews.filter { !$0.isHidden && $0 !== lineSpacer }
         return (
-            (shown.first as? PostCardPillView)?.inkLeading ?? 0,
-            (shown.last as? PostCardPillView)?.inkTrailing ?? 0
+            (shown.first as? AppButton).map(PostCardAction.inkLeading) ?? 0,
+            (shown.last as? AppButton).map(PostCardAction.inkTrailing) ?? 0
         )
     }
-
-    @objc private func repostPressed() { onRepostTapped?() }
-    @objc private func bookmarkPressed() { onBookmarkTapped?() }
 
     /// The carousel, built on first use — most posts have one piece of media and
     /// should not pay for a scroll view they will never scroll.
@@ -2466,15 +2479,19 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         NSLayoutConstraint.deactivate(hasMedia ? [] : mediaConstraints)
         NSLayoutConstraint.activate(hasMedia ? mediaConstraints : [])
 
+        boundPostID = post.id
+        actionsAnimate = false
+        let bound = post.id
+        DispatchQueue.main.async { [weak self] in
+            guard let self, boundPostID == bound else { return }
+            actionsAnimate = true
+        }
         baseReactionCount = post.reactionCount
         configuredReactionCount = post.reactionCount
         likeCountsHidden = post.likeCountsHidden
-        applyReactionCount()
-        comments.set(post.commentCount)
-        // A number the post does not have leaves an empty capsule on the card,
-        // exactly as it would on a photograph.
-        closingLikesPill.syncVisibilityToContents()
-        closingCommentsPill.syncVisibilityToContents()
+        applyReactionCount(animated: false)
+        // A number the post does not have draws no action at all.
+        applyCommentCount(post.commentCount, animated: false)
         // ⚠️ THE COUNT IS A CONTROL ON EVERY CARD, TEXT POSTS INCLUDED.
         //
         // It used to be switched off on a text post, on the argument that its
@@ -2485,9 +2502,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // work". One affordance, one answer: the chip always presses, and the
         // HOST decides where a text post's comments are — its own page, by
         // its own reveal, which is the route the argument was protecting.
-        closingCommentsPill.setTapHandler { [weak self] in self?.onCommentsTapped?() }
-        closingCommentsPill.accessibilityLabel = "Comments"
-        closingCommentsPill.accessibilityValue = post.commentCount.map(PostMetadata.count)
+        commentsAction.accessibilityLabel = "Comments"
         // ⚠️ AFTER the indicator has been configured below, since it is on the
         // line too — see the end of this method.
 

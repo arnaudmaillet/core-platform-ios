@@ -173,7 +173,7 @@ public final class PressFeedback {
     public private(set) var isPressed = false
 
     /// Told when a press starts (true) and ends (false) — for a host that
-    /// dresses the press further, e.g. `ActionAffordance`'s contrast step, so
+    /// dresses the press further, e.g. `AppButton`'s wash (`washesOnPress`), so
     /// the extra layer follows the SAME finger decisions as the scale rather
     /// than a second opinion on them.
     public var onPressChanged: ((Bool) -> Void)?
