@@ -113,7 +113,10 @@ public final class WelcomeGift: @unchecked Sendable {
             return (amount, true)
         }
         // Credit after the gift settles, so a re-entrant settle can't pay twice.
-        wallet.credit(outcome.credited)
+        // ⚠️ NOT WHEN THE WALLET IS THE SERVER'S (#1008): the server credits
+        // the gift itself when the guest's session ends into a member's, and
+        // a local credit would be a second one the next read takes back.
+        if wallet.server == nil { wallet.credit(outcome.credited) }
         if outcome.changed { postDidChange() }
         return outcome.credited
     }

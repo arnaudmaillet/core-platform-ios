@@ -697,6 +697,12 @@ final class AppContainer {
         // it — 10 s after the last tap, on leaving the post, on going to the
         // background — retrying with the batch's key.
         store.likeOutbox = likeOutbox
+        // A member's balance and hourly claim are the server's (#1098):
+        // wallet.v1 GetWallet / ClaimReward, read by `walletServerSync`.
+        store.server = ServerWallet(
+            walletClient: Wallet_V1_WalletServiceClient(client: authenticatedRPCClient),
+            viewer: viewerSession
+        )
         let sender = LikeOutboxSender(outbox: likeOutbox, wallet: store, staking: likeStaking)
         sender.start()
         likeOutboxSender = sender
@@ -708,6 +714,18 @@ final class AppContainer {
         }
         return store
     }()
+
+    /// Reads the member's wallet from the server at the moments it can have
+    /// moved (#1098); started once, from the scene.
+    private var walletServerSync: WalletServerSync?
+
+    @MainActor
+    func startWalletServerSync() {
+        guard walletServerSync == nil else { return }
+        let sync = WalletServerSync(wallet: walletStore)
+        sync.start()
+        walletServerSync = sync
+    }
 
     /// The likes a guest is handed before they have an account, locked in
     /// the balance badge until they sign up (guest mode decision 11). The app
