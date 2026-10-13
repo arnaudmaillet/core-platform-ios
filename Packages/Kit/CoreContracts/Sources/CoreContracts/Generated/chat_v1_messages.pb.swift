@@ -43,9 +43,29 @@ public nonisolated struct Chat_V1_MessageView: Sendable {
 
   public var createdAtMs: Int64 = 0
 
+  /// #919: the media asset a MEDIA message shows, when sent with one — a
+  /// stable cache key. Its delivery is SIGNED: GetHistory carries it in
+  /// `media`; on the live streams resolve it (GetHistory, or media's
+  /// ResolveDelivery) as the signed URLs expire.
+  public var mediaAssetID: String = String()
+
+  /// #919: GetHistory only — the blurhash and, once READY, every rendition
+  /// (signed URL, size, expiry). Absent when media could not answer in time
+  /// (fail-open).
+  public var media: Media_V1_DeliveredMedia {
+    get {_media ?? Media_V1_DeliveredMedia()}
+    set {_media = newValue}
+  }
+  /// Returns true if `media` has been explicitly set.
+  public var hasMedia: Bool {self._media != nil}
+  /// Clears the value of `media`. Subsequent reads from it will return its default value.
+  public mutating func clearMedia() {self._media = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+
+  fileprivate var _media: Media_V1_DeliveredMedia? = nil
 }
 
 /// Projection of a member-roster entry.
@@ -279,6 +299,14 @@ public nonisolated struct Chat_V1_SendMessageRequest: Sendable {
   /// While that first send is still in flight a repeat fails ABORTED
   /// (CHT-1013): retry it. Empty: no deduplication.
   public var idempotencyKey: String = String()
+
+  /// #919: the media asset a MEDIA message shows (media IssueUploadTicket's
+  /// asset_id). Optional; media_ref may then stay empty. It must be an image
+  /// or video of the sender's account, not failed, quarantined or deleted
+  /// (FAILED_PRECONDITION, CHT-2011). Chat media is SIGNED: a READY image is
+  /// made SIGNED, one still processing must have been uploaded SIGNED
+  /// (CHT-2012). Media unreachable ⇒ UNAVAILABLE (CHT-5002).
+  public var mediaAssetID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -793,7 +821,7 @@ fileprivate nonisolated let _protobuf_package = "chat.v1"
 
 nonisolated extension Chat_V1_MessageView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".MessageView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}sender_id\0\u{3}content_type\0\u{1}body\0\u{3}media_ref\0\u{3}reply_to\0\u{3}created_at_ms\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}message_id\0\u{3}sender_id\0\u{3}content_type\0\u{1}body\0\u{3}media_ref\0\u{3}reply_to\0\u{3}created_at_ms\0\u{3}media_asset_id\0\u{1}media\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -808,12 +836,18 @@ nonisolated extension Chat_V1_MessageView: SwiftProtobuf.Message, SwiftProtobuf.
       case 5: try { try decoder.decodeSingularStringField(value: &self.mediaRef) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.replyTo) }()
       case 7: try { try decoder.decodeSingularInt64Field(value: &self.createdAtMs) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.mediaAssetID) }()
+      case 9: try { try decoder.decodeSingularMessageField(value: &self._media) }()
       default: break
       }
     }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
     if !self.messageID.isEmpty {
       try visitor.visitSingularStringField(value: self.messageID, fieldNumber: 1)
     }
@@ -835,6 +869,12 @@ nonisolated extension Chat_V1_MessageView: SwiftProtobuf.Message, SwiftProtobuf.
     if self.createdAtMs != 0 {
       try visitor.visitSingularInt64Field(value: self.createdAtMs, fieldNumber: 7)
     }
+    if !self.mediaAssetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.mediaAssetID, fieldNumber: 8)
+    }
+    try { if let v = self._media {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -846,6 +886,8 @@ nonisolated extension Chat_V1_MessageView: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs.mediaRef != rhs.mediaRef {return false}
     if lhs.replyTo != rhs.replyTo {return false}
     if lhs.createdAtMs != rhs.createdAtMs {return false}
+    if lhs.mediaAssetID != rhs.mediaAssetID {return false}
+    if lhs._media != rhs._media {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1309,7 +1351,7 @@ nonisolated extension Chat_V1_RespondToMessageRequestRequest: SwiftProtobuf.Mess
 
 nonisolated extension Chat_V1_SendMessageRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SendMessageRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{3}sender_id\0\u{3}content_type\0\u{1}body\0\u{3}media_ref\0\u{3}reply_to\0\u{3}idempotency_key\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}conversation_id\0\u{3}sender_id\0\u{3}content_type\0\u{1}body\0\u{3}media_ref\0\u{3}reply_to\0\u{3}idempotency_key\0\u{3}media_asset_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1324,6 +1366,7 @@ nonisolated extension Chat_V1_SendMessageRequest: SwiftProtobuf.Message, SwiftPr
       case 5: try { try decoder.decodeSingularStringField(value: &self.mediaRef) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.replyTo) }()
       case 7: try { try decoder.decodeSingularStringField(value: &self.idempotencyKey) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.mediaAssetID) }()
       default: break
       }
     }
@@ -1351,6 +1394,9 @@ nonisolated extension Chat_V1_SendMessageRequest: SwiftProtobuf.Message, SwiftPr
     if !self.idempotencyKey.isEmpty {
       try visitor.visitSingularStringField(value: self.idempotencyKey, fieldNumber: 7)
     }
+    if !self.mediaAssetID.isEmpty {
+      try visitor.visitSingularStringField(value: self.mediaAssetID, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1362,6 +1408,7 @@ nonisolated extension Chat_V1_SendMessageRequest: SwiftProtobuf.Message, SwiftPr
     if lhs.mediaRef != rhs.mediaRef {return false}
     if lhs.replyTo != rhs.replyTo {return false}
     if lhs.idempotencyKey != rhs.idempotencyKey {return false}
+    if lhs.mediaAssetID != rhs.mediaAssetID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

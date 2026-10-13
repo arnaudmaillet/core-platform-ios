@@ -9,7 +9,7 @@ import Testing
 @testable import Auth
 
 /// Two-step sign-in's second step (#383, backend #649), through the whole
-/// client stack against the mock: the password (or an emailed code) is proven
+/// client stack against the mock: an emailed code is proven
 /// but no session exists until the authenticator's code or a backup code.
 struct SecondStepTests {
     private func makeManager() -> (SessionManager, InMemorySessionStore) {
@@ -25,53 +25,55 @@ struct SecondStepTests {
         return (manager, store)
     }
 
-    private func passwordChallenge(_ manager: SessionManager) async throws -> SecondStepChallenge {
-        let outcome = try await manager.login(
-            username: MockAuthService.defaultCredentials.username,
-            password: MockAuthService.defaultCredentials.password
-        )
-        guard case .needsSecondStep(let challenge) = outcome else {
-            Issue.record("the password signed in without a second step")
+    private func codeChallenge(_ manager: SessionManager) async throws -> SecondStepChallenge {
+        guard let challenge = try await manager.demoSecondStep() else {
+            Issue.record("the code signed in without a second step")
             throw CancellationError()
         }
         return challenge
     }
 
+    /// The second step's account becomes the session.
+    private func finish(_ manager: SessionManager, _ challenge: SecondStepChallenge, code: String) async throws {
+        let account = try await manager.completeSecondStep(challenge, code: code)
+        await manager.completeSignIn(account)
+    }
+
     /// Done when: a user with two-step on signs in with a code.
-    @Test func thePasswordAloneIsNotASession() async throws {
+    @Test func theCodeAloneIsNotASession() async throws {
         let (manager, store) = makeManager()
-        let challenge = try await passwordChallenge(manager)
+        let challenge = try await codeChallenge(manager)
         #expect(challenge.expiresIn > 0)
         #expect(await manager.currentState() == .unauthenticated)
         #expect(try store.load() == nil)
 
         await #expect(throws: AuthError.wrongSecondStepCode) {
-            try await manager.completeLogin(challenge, code: "000000")
+            try await finish(manager, challenge, code: "000000")
         }
         // A wrong code leaves the challenge usable.
-        try await manager.completeLogin(challenge, code: MockAuthService.verificationCode)
+        try await finish(manager, challenge, code: MockAuthService.verificationCode)
         #expect(await manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
         #expect(try store.load() != nil)
     }
 
     @Test func fiveWrongCodesLockTheSignIn() async throws {
         let (manager, _) = makeManager()
-        let challenge = try await passwordChallenge(manager)
+        let challenge = try await codeChallenge(manager)
         for _ in 0..<5 {
-            await #expect(throws: AuthError.wrongSecondStepCode) { try await manager.completeLogin(challenge, code: "000000") }
+            await #expect(throws: AuthError.wrongSecondStepCode) { try await finish(manager, challenge, code: "000000") }
         }
         await #expect(throws: AuthError.secondStepLocked) {
-            try await manager.completeLogin(challenge, code: MockAuthService.verificationCode)
+            try await finish(manager, challenge, code: MockAuthService.verificationCode)
         }
     }
 
     /// A used or unknown challenge means signing in again.
     @Test func aUsedChallengeMeansSigningInAgain() async throws {
         let (manager, _) = makeManager()
-        let challenge = try await passwordChallenge(manager)
-        try await manager.completeLogin(challenge, code: MockAuthService.verificationCode)
+        let challenge = try await codeChallenge(manager)
+        try await finish(manager, challenge, code: MockAuthService.verificationCode)
         await #expect(throws: AuthError.secondStepExpired) {
-            try await manager.completeLogin(challenge, code: MockAuthService.verificationCode)
+            try await finish(manager, challenge, code: MockAuthService.verificationCode)
         }
     }
 

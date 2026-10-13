@@ -16,13 +16,31 @@ private struct StubTokenProvider: AuthTokenProviding {
 }
 
 struct CoreNetworkingTests {
-    private func makeLoginRequest() -> Auth_V1_LoginRequest {
-        var grant = Auth_V1_PasswordGrant()
-        grant.username = MockAuthService.defaultCredentials.username
-        grant.password = MockAuthService.defaultCredentials.password
+    /// A sign-in request whose content is moot — the tests that only look at
+    /// headers, faults and conditions.
+    private func carrierLoginRequest() -> Auth_V1_LoginRequest {
+        var grant = Auth_V1_VerificationCodeGrant()
+        grant.challengeID = "vc-any"
+        grant.code = MockAuthService.verificationCode
         var request = Auth_V1_LoginRequest()
-        request.grantType = .password
-        request.credential = .password(grant)
+        request.grantType = .verificationCode
+        request.credential = .verificationCode(grant)
+        return request
+    }
+
+    /// A code sign-in for the demo account — the only way in since
+    /// passwords went (#840): `StartVerification`, then `Login`.
+    private func makeLoginRequest(_ client: Auth_V1_AuthServiceClient) async throws -> Auth_V1_LoginRequest {
+        var start = Auth_V1_StartVerificationRequest()
+        start.channel = .email
+        start.destination = MockAuthService.demoEmail
+        let challenge = try await client.startVerification(request: start, headers: [:]).result.get()
+        var grant = Auth_V1_VerificationCodeGrant()
+        grant.challengeID = challenge.challengeID
+        grant.code = MockAuthService.verificationCode
+        var request = Auth_V1_LoginRequest()
+        request.grantType = .verificationCode
+        request.credential = .verificationCode(grant)
         return request
     }
 
@@ -33,12 +51,12 @@ struct CoreNetworkingTests {
             client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         )
 
-        let response = await client.login(request: makeLoginRequest(), headers: [:])
+        let response = await client.login(request: try await makeLoginRequest(client), headers: [:])
 
         let body = try response.result.get()
         #expect(body.accountID == MockAuthService.accountID)
         #expect(body.tokens.tokenType == "Bearer")
-        #expect(bff.recordedRequests.map(\.path) == ["/auth.v1.AuthService/Login"])
+        #expect(bff.recordedRequests.map(\.path) == ["/auth.v1.AuthService/StartVerification", "/auth.v1.AuthService/Login"])
     }
 
     @Test func unroutedPathReturnsUnimplemented() async {
@@ -63,7 +81,7 @@ struct CoreNetworkingTests {
             )
         )
 
-        _ = await client.login(request: makeLoginRequest(), headers: [:])
+        _ = await client.login(request: carrierLoginRequest(), headers: [:])
 
         let headers = try #require(bff.recordedRequests.first?.headers)
         #expect(headers["Authorization"] == ["Bearer edge-token-42"])
@@ -82,7 +100,7 @@ struct CoreNetworkingTests {
             )
         )
 
-        _ = await client.login(request: makeLoginRequest(), headers: ["Authorization": ["Bearer pending-account-token"]])
+        _ = await client.login(request: carrierLoginRequest(), headers: ["Authorization": ["Bearer pending-account-token"]])
 
         let headers = try #require(bff.recordedRequests.first?.headers)
         #expect(headers["Authorization"] == ["Bearer pending-account-token"])
@@ -99,7 +117,7 @@ struct CoreNetworkingTests {
             )
         )
 
-        let response = await client.login(request: makeLoginRequest(), headers: [:])
+        let response = await client.login(request: try await makeLoginRequest(client), headers: [:])
 
         #expect(response.error == nil)
         let headers = try #require(bff.recordedRequests.first?.headers)
@@ -117,7 +135,7 @@ struct CoreNetworkingTests {
             )
         )
 
-        let response = await client.login(request: makeLoginRequest(), headers: [:])
+        let response = await client.login(request: carrierLoginRequest(), headers: [:])
 
         // Offline, so `unavailable` — not the `unauthenticated` an expired
         // session gives (#791).
@@ -185,7 +203,7 @@ struct CoreNetworkingTests {
             )
         )
 
-        let response = await client.login(request: makeLoginRequest(), headers: [:])
+        let response = await client.login(request: carrierLoginRequest(), headers: [:])
 
         #expect(response.error?.code == .unavailable)
         #expect(response.error.flatMap { NetworkFailure.of($0) } == .offline)
@@ -204,7 +222,7 @@ struct CoreNetworkingTests {
             client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         )
 
-        let response = await client.login(request: makeLoginRequest(), headers: [:])
+        let response = await client.login(request: carrierLoginRequest(), headers: [:])
 
         #expect(response.error?.code == .unavailable)
         // The request still hits the transport (so interceptors are exercised).
@@ -221,7 +239,7 @@ struct CoreNetworkingTests {
             client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         )
 
-        let response = await client.login(request: makeLoginRequest(), headers: [:])
+        let response = await client.login(request: try await makeLoginRequest(client), headers: [:])
 
         let body = try response.result.get()
         #expect(body.accountID == MockAuthService.accountID)
@@ -237,7 +255,7 @@ struct CoreNetworkingTests {
 
         let clock = ContinuousClock()
         let start = clock.now
-        let response = await client.login(request: makeLoginRequest(), headers: [:])
+        let response = await client.login(request: try await makeLoginRequest(client), headers: [:])
         let elapsed = clock.now - start
 
         #expect(response.error == nil)
@@ -274,7 +292,7 @@ struct CoreNetworkingTests {
         let backend = MockBackend()
         let client = Auth_V1_AuthServiceClient(client: backend.makeRPCClient())
 
-        let response = await client.login(request: makeLoginRequest(), headers: [:])
+        let response = await client.login(request: try await makeLoginRequest(client), headers: [:])
 
         let body = try response.result.get()
         #expect(body.accountID == MockAuthService.accountID)

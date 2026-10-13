@@ -37,43 +37,42 @@ struct DeactivateAccountTests {
         MockAccountService(lifecycle: lifecycle).register(on: bff)
         let host = "https://mock.bff.local"
         let anonymous = Auth_V1_AuthServiceClient(client: ConnectClientFactory.makeUnauthenticated(host: host, httpClient: bff))
-        let login: () async -> Auth_V1_LoginResponse? = {
-            var grant = Auth_V1_PasswordGrant()
-            grant.username = MockAuthService.defaultCredentials.username
-            grant.password = MockAuthService.defaultCredentials.password
-            var request = Auth_V1_LoginRequest()
-            request.grantType = .password
-            request.credential = .password(grant)
-            return try? await anonymous.login(request: request, headers: [:]).result.get()
-        }
+        let login: () async -> Auth_V1_LoginResponse? = { await MockCodeSignIn.login(anonymous) }
         let session = Session()
         let first = try #require(await login())
         await session.set(first.tokens.accessToken)
+        // The sign-in that minted it was long ago: a gated call needs a
+        // fresh proof (#840).
+        lifecycle.forgetRecentProofs()
         let client = ConnectClientFactory.makeAuthenticated(host: host, tokenProvider: session, httpClient: bff)
+        let account = AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session)
         return Fixture(
-            sessions: AccountSessionsRepository(authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session),
-            account: AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session),
+            sessions: AccountSessionsRepository(
+                authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session,
+                account: account, reauthenticator: CodeReauthenticator(anonymous: anonymous, session: session)
+            ),
+            account: account,
             login: login
         )
     }
 
-    /// The server gates it: without a fresh step-up the app is told to ask
-    /// for the password, not that something broke.
-    @Test func deactivatingWithoutAStepUpAsksForThePassword() async throws {
+    /// The server gates it: without a fresh proof the app is told to confirm
+    /// it's the holder, not that something broke.
+    @Test func deactivatingWithoutAFreshProofAsksToConfirm() async throws {
         let fixture = try await fixture()
         await #expect(throws: AccountError.stepUpRequired) { try await fixture.account.deactivate() }
     }
 
-    @Test func aWrongPasswordIsSaidAsSuch() async throws {
+    @Test func aWrongCodeIsSaidAsSuch() async throws {
         let fixture = try await fixture()
-        await #expect(throws: StepUpError.wrongPassword) { try await fixture.sessions.stepUp(password: "nope") }
+        await #expect(throws: StepUpError.wrongCode) { try await fixture.sessions.reconfirmWithTheSentCode("000000") }
     }
 
     /// Step-up, deactivate, and the next login reactivates the account and
     /// says so, once.
     @Test func aSteppedUpDeactivationIsUndoneByLoggingBackIn() async throws {
         let fixture = try await fixture()
-        try await fixture.sessions.stepUp(password: MockAuthService.defaultCredentials.password)
+        try await fixture.sessions.reconfirmWithTheSentCode()
         try await fixture.account.deactivate()
         let back = try #require(await fixture.login())
         #expect(back.reactivated)
@@ -86,7 +85,7 @@ struct DeactivateAccountTests {
     @Test func deletionIsGatedByTheStepUpToo() async throws {
         let fixture = try await fixture()
         await #expect(throws: AccountError.stepUpRequired) { try await fixture.account.requestDeletion() }
-        try await fixture.sessions.stepUp(password: MockAuthService.defaultCredentials.password)
+        try await fixture.sessions.reconfirmWithTheSentCode()
         try await fixture.account.requestDeletion()
         let status = try await fixture.account.gdprStatus()
         #expect(status.deletionRequestedAt != nil)

@@ -100,24 +100,53 @@ extension AccountSessionsError: NetworkFailureCarrying {
     }
 }
 
-/// Settings → Security and Login → Change Password (#382), on
-/// `auth.v1.ChangePassword`: the current password is proved with the IdP and
-/// the new one set there; neither is stored by the app.
-public protocol AccountPasswordChanging: Sendable {
-    /// Returns how many OTHER sessions were signed out (0 unless asked).
-    func changePassword(current: String, new: String, signOutOtherSessions: Bool) async throws -> Int
+/// Step-up (`auth.v1.VerifyCredentials`, #648): re-prove the holder before
+/// a destructive action (deactivation, deletion, contact changes). There is
+/// no password any more (#840):
+/// - two-step sign-in on: the authenticator's code or a backup code
+///   (`stepUp(code:)`), whose fresh access token is installed for the session;
+/// - otherwise — and for anyone, from the destructive actions — a code sent
+///   to the account's address signs the holder in again
+///   (`sendReconfirmationCode` → `reconfirm`), a sign-in's token being the
+///   proof the server accepts; with two-step on, the authenticator's code
+///   finishes it (`completeReconfirmation`).
+public protocol CredentialStepUp: Sendable {
+    func stepUp(code: String) async throws
+    func sendReconfirmationCode() async throws -> Reconfirmation
+    func reconfirm(_ reconfirmation: Reconfirmation, code: String) async throws -> ReconfirmationStep
+    func completeReconfirmation(secondStepCode: String) async throws
 }
 
-/// Step-up (`auth.v1.VerifyCredentials`, #648): re-prove the holder with
-/// their password before a destructive action (deactivation, deletion,
-/// contact changes). The fresh access token it mints is installed for the
-/// session; the gated call that follows carries it.
-public protocol CredentialStepUp: Sendable {
-    func stepUp(password: String) async throws
-    /// With two-step sign-in on (#383): the authenticator's code or a backup
-    /// code proves the holder too — the only way for an account without a
-    /// password.
-    func stepUp(code: String) async throws
+/// A code on its way to the account's address, to prove the holder again.
+public struct Reconfirmation: Equatable, Sendable {
+    public let challengeID: String
+    /// Where it went, as the prompt names it.
+    public let destination: String
+
+    public init(challengeID: String, destination: String) {
+        self.challengeID = challengeID
+        self.destination = destination
+    }
+}
+
+public enum ReconfirmationStep: Equatable, Sendable {
+    case done
+    /// Two-step sign-in is on: the authenticator's code finishes it.
+    case needsSecondStep
+}
+
+/// Whoever holds the session (the app's `SessionManager`): signs the holder
+/// in again with a code and adopts the fresh session in place of the
+/// current one (#840).
+public protocol SessionReauthenticating: Sendable {
+    /// `.needsSecondStep` hands back the second step's token.
+    func reauthenticate(challengeID: String, code: String) async throws -> ReauthenticationResult
+    func completeReauthentication(secondStepToken: String, expiresIn: TimeInterval, code: String) async throws
+}
+
+public enum ReauthenticationResult: Equatable, Sendable {
+    case done
+    case needsSecondStep(token: String, expiresIn: TimeInterval)
 }
 
 /// Whoever vends the session's access token (the app's `SessionManager`):
@@ -127,9 +156,11 @@ public protocol AccessTokenInstalling: Sendable {
 }
 
 public enum StepUpError: Error, Equatable {
-    case wrongPassword
-    /// The two-step code didn't match (AUT-5017).
+    /// The code didn't match: the one sent to the address, or the two-step
+    /// one (AUT-5017).
     case wrongCode
+    /// The account has no address to send a code to.
+    case noAddress
     /// The call failed on the way to or at the server. `failure` keeps WHY
     /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
     /// not come from the network. Defaulted, so every `.transport(message:)`
@@ -143,51 +174,35 @@ extension StepUpError: NetworkFailureCarrying {
     }
 }
 
-public enum PasswordChangeError: Error, Equatable {
-    /// The current password didn't match (UNAUTHENTICATED, AUT-5002).
-    case wrongCurrentPassword
-    /// The new password was refused — too short or long, unchanged, or the
-    /// IdP's policy (FAILED_PRECONDITION). `reason` is the server's rule,
-    /// without its error code, ready to show.
-    case rejected(reason: String)
-    /// The call failed on the way to or at the server. `failure` keeps WHY
-    /// (#794): offline, a timeout, a refusal, a server fault; nil when it did
-    /// not come from the network. Defaulted, so every `.transport(message:)`
-    /// still builds and every `case .transport:` still matches.
-    case transport(message: String, failure: NetworkFailure? = nil)
-
-    /// "AUT-VAL-024: the new password must be…" → "The new password must be…".
-    static func readable(_ message: String?) -> String {
-        guard var text = message?.trimmingCharacters(in: .whitespaces), !text.isEmpty else {
-            return "Choose a different password."
-        }
-        if let colon = text.firstIndex(of: ":"), text[..<colon].allSatisfy({ $0.isUppercase || $0.isNumber || $0 == "-" }) {
-            text = text[text.index(after: colon)...].trimmingCharacters(in: .whitespaces)
-        }
-        return text.prefix(1).uppercased() + text.dropFirst() + (text.hasSuffix(".") ? "" : ".")
-    }
-}
-
-extension PasswordChangeError: NetworkFailureCarrying {
-    public var networkFailure: NetworkFailure? {
-        if case .transport(_, let failure) = self { failure } else { nil }
-    }
-}
-
 /// `auth.v1` session management on the AUTHENTICATED client: the RPCs act on
 /// the calling principal's account (empty `account_id`), so the bearer token
 /// is what says whose sessions these are.
-public actor AccountSessionsRepository: AccountSessionsManaging, AccountPasswordChanging, CredentialStepUp {
+public actor AccountSessionsRepository: AccountSessionsManaging, CredentialStepUp {
     let authClient: any Auth_V1_AuthServiceClientInterface
     /// Hands a step-up's fresh access token to whoever vends tokens (the
     /// app's `SessionManager`), so the next authenticated call carries it.
     private let tokenInstaller: (any AccessTokenInstalling)?
 
-    /// `tokenInstaller` nil: a step-up proves the password but its token goes
-    /// nowhere (tests that don't exercise gated calls).
-    public init(authClient: any Auth_V1_AuthServiceClientInterface, tokenInstaller: (any AccessTokenInstalling)? = nil) {
+    /// The account's address, for the code that proves the holder again.
+    private let account: (any AccountProviding)?
+    /// Signs the holder in again with that code (#840).
+    private let reauthenticator: (any SessionReauthenticating)?
+    /// The second step of a reconfirmation in progress.
+    private var pendingSecondStep: (token: String, expiresIn: TimeInterval)?
+
+    /// `tokenInstaller` nil: a step-up proves the holder but its token goes
+    /// nowhere (tests that don't exercise gated calls). `account` and
+    /// `reauthenticator` nil: no reconfirmation by code.
+    public init(
+        authClient: any Auth_V1_AuthServiceClientInterface,
+        tokenInstaller: (any AccessTokenInstalling)? = nil,
+        account: (any AccountProviding)? = nil,
+        reauthenticator: (any SessionReauthenticating)? = nil
+    ) {
         self.authClient = authClient
         self.tokenInstaller = tokenInstaller
+        self.account = account
+        self.reauthenticator = reauthenticator
     }
 
     public func stepUp(code: String) async throws {
@@ -203,20 +218,56 @@ public actor AccountSessionsRepository: AccountSessionsManaging, AccountPassword
         }
     }
 
-    public func stepUp(password: String) async throws {
-        var request = Auth_V1_VerifyCredentialsRequest()
-        request.credential = .password(password)
-        let response = await authClient.verifyCredentials(request: request, headers: [:])
+    /// Sends a code to the account's email — its phone when it has none.
+    public func sendReconfirmationCode() async throws -> Reconfirmation {
+        guard let account else { throw StepUpError.noAddress }
+        let details: AccountDetails
+        do {
+            details = try await account.currentAccount()
+        } catch {
+            throw StepUpError.transport(message: "\(error)", failure: (error as? any NetworkFailureCarrying)?.networkFailure)
+        }
+        var request = Auth_V1_StartVerificationRequest()
+        if !details.email.isEmpty {
+            request.channel = .email
+            request.destination = details.email
+        } else if !details.phone.isEmpty {
+            request.channel = .sms
+            request.destination = details.phone
+        } else {
+            throw StepUpError.noAddress
+        }
+        request.locale = Locale.current.identifier(.bcp47)
+        let response = await authClient.startVerification(request: request, headers: [:])
         switch response.result {
         case .success(let body):
-            await tokenInstaller?.installStepUpToken(body.accessToken, expiresIn: body.expiresIn)
+            pendingSecondStep = nil
+            return Reconfirmation(challengeID: body.challengeID, destination: request.destination)
         case .failure(let error):
-            if error.code == .unauthenticated,
-               (error.message ?? "").contains("AUT-5002") || !(error.message ?? "").contains("AUT-") {
-                throw StepUpError.wrongPassword
-            }
             throw StepUpError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
+    }
+
+    public func reconfirm(_ reconfirmation: Reconfirmation, code: String) async throws -> ReconfirmationStep {
+        guard let reauthenticator else { throw StepUpError.noAddress }
+        switch try await reauthenticator.reauthenticate(
+            challengeID: reconfirmation.challengeID, code: code.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) {
+        case .done:
+            return .done
+        case .needsSecondStep(let token, let expiresIn):
+            pendingSecondStep = (token, expiresIn)
+            return .needsSecondStep
+        }
+    }
+
+    public func completeReconfirmation(secondStepCode: String) async throws {
+        guard let reauthenticator, let step = pendingSecondStep else { throw StepUpError.noAddress }
+        try await reauthenticator.completeReauthentication(
+            secondStepToken: step.token, expiresIn: step.expiresIn,
+            code: secondStepCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        pendingSecondStep = nil
     }
 
     public func activeSessions() async throws -> [AccountSession] {
@@ -242,27 +293,6 @@ public actor AccountSessionsRepository: AccountSessionsManaging, AccountPassword
         let response = await authClient.logoutAllSessions(request: Auth_V1_LogoutAllSessionsRequest(), headers: [:])
         if case .failure(let error) = response.result {
             throw AccountSessionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
-        }
-    }
-
-    public func changePassword(current: String, new: String, signOutOtherSessions: Bool) async throws -> Int {
-        var request = Auth_V1_ChangePasswordRequest()
-        request.currentPassword = current
-        request.newPassword = new
-        request.signOutOtherSessions = signOutOtherSessions
-        let response = await authClient.changePassword(request: request, headers: [:])
-        switch response.result {
-        case .success(let body):
-            return Int(body.sessionsRevoked)
-        case .failure(let error):
-            switch error.code {
-            // AUT-5002 is the wrong current password; another AUT code under
-            // UNAUTHENTICATED (an expired session) is not the viewer's typo.
-            case .unauthenticated where (error.message ?? "").contains("AUT-5002") || !(error.message ?? "").contains("AUT-"):
-                throw PasswordChangeError.wrongCurrentPassword
-            case .failedPrecondition, .invalidArgument: throw PasswordChangeError.rejected(reason: PasswordChangeError.readable(error.message))
-            default: throw PasswordChangeError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
-            }
         }
     }
 

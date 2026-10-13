@@ -2,8 +2,9 @@ import CoreNetworking
 import DesignSystem
 import UIKit
 
-/// Settings → Security and Login: the Security Checkup, Change Password
-/// (#382), Two-Step Sign-In with its backup codes (#383), where the account
+/// Settings → Security and Login: the Security Checkup, Two-Step Sign-In
+/// with its backup codes (#383) — there is no password to change any more
+/// (#840) — where the account
 /// is signed in and the two ways out — one other device, or every device at
 /// once (#384) — and App Lock (#418).
 ///
@@ -11,12 +12,11 @@ import UIKit
 /// (backend #808), the app's contracts and associated domain don't yet.
 final class SecuritySettingsViewController: UIViewController {
     private enum Section: Hashable {
-        case checkup, password, sessions, global, appLock, comingSoon
+        case checkup, signIn, sessions, global, appLock, comingSoon
     }
 
     enum Item: Hashable {
         case checkup
-        case changePassword
         case twoStep
         case requireLock
         case lockDelay
@@ -34,7 +34,6 @@ final class SecuritySettingsViewController: UIViewController {
     private let onSignedOutEverywhere: () -> Void
     private let authenticator: any DeviceAuthenticating
     private let makeCheckup: (() -> UIViewController)?
-    private let makeChangePassword: (() -> UIViewController)?
     private let makeTwoStep: (() -> UIViewController)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -47,7 +46,6 @@ final class SecuritySettingsViewController: UIViewController {
         onSignedOutEverywhere: @escaping () -> Void,
         authenticator: any DeviceAuthenticating = DeviceAuthenticator(),
         makeCheckup: (() -> UIViewController)? = nil,
-        makeChangePassword: (() -> UIViewController)? = nil,
         makeTwoStep: (() -> UIViewController)? = nil
     ) {
         self.viewModel = viewModel
@@ -55,7 +53,6 @@ final class SecuritySettingsViewController: UIViewController {
         self.onSignedOutEverywhere = onSignedOutEverywhere
         self.authenticator = authenticator
         self.makeCheckup = makeCheckup
-        self.makeChangePassword = makeChangePassword
         super.init(nibName: nil, bundle: nil)
         title = SettingsSection.security.title
         hidesBottomBarWhenPushed = true
@@ -80,8 +77,8 @@ final class SecuritySettingsViewController: UIViewController {
         Task { await viewModel.load() }
     }
 
-    /// Coming back (from Change Password, which can log the other devices
-    /// out, or from the checkup) re-reads the sessions. The list on screen
+    /// Coming back (from two-step sign-in or the checkup) re-reads the
+    /// sessions. The list on screen
     /// stays until the new one arrives, so nothing flashes.
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -148,7 +145,7 @@ final class SecuritySettingsViewController: UIViewController {
     private static func headerText(_ section: Section) -> String? {
         switch section {
         case .checkup: nil
-        case .password: nil
+        case .signIn: nil
         case .sessions: "Where You're Logged In"
         case .global: nil
         case .appLock: "App Lock"
@@ -159,7 +156,7 @@ final class SecuritySettingsViewController: UIViewController {
     private static func footerText(_ section: Section) -> String? {
         switch section {
         case .checkup: nil
-        case .password: nil
+        case .signIn: nil
         case .sessions: "Tap another device to log it out."
         case .global: "Ends every session, including this one. You'll need to log in again."
         case .appLock: "Applies to this iPhone. When it's on, opening the app asks for Face ID or your passcode, and the app is hidden in the app switcher."
@@ -175,10 +172,9 @@ final class SecuritySettingsViewController: UIViewController {
             snapshot.appendSections([.checkup])
             snapshot.appendItems([.checkup], toSection: .checkup)
         }
-        let passwordRows: [Item] = (makeChangePassword != nil ? [.changePassword] : []) + (makeTwoStep != nil ? [.twoStep] : [])
-        if !passwordRows.isEmpty {
-            snapshot.appendSections([.password])
-            snapshot.appendItems(passwordRows, toSection: .password)
+        if makeTwoStep != nil {
+            snapshot.appendSections([.signIn])
+            snapshot.appendItems([.twoStep], toSection: .signIn)
         }
         snapshot.appendSections([.sessions, .global, .appLock, .comingSoon])
         let sessionItems = Self.sessionItems(for: viewModel.phase)
@@ -261,13 +257,6 @@ final class SecuritySettingsViewController: UIViewController {
         switch item {
         case .checkup, .requireLock, .lockDelay:
             break
-        case .changePassword:
-            var content = UIListContentConfiguration.cell()
-            content.text = "Change Password"
-            content.image = UIImage(systemName: "key")
-            content.imageProperties.tintColor = .label
-            cell.contentConfiguration = content
-            cell.accessories = [.disclosureIndicator()]
         case .twoStep:
             var content = UIListContentConfiguration.cell()
             content.text = "Two-Step Sign-In"
@@ -459,7 +448,7 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .session(let session): !session.isCurrent
-        case .failed, .logOutEverywhere, .checkup, .changePassword, .twoStep: true
+        case .failed, .logOutEverywhere, .checkup, .twoStep: true
         case .skeleton, .planned, .requireLock, .lockDelay, nil: false
         }
     }
@@ -476,10 +465,6 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
         case .checkup:
             if let checkup = makeCheckup?() {
                 navigationController?.pushViewController(checkup, animated: true)
-            }
-        case .changePassword:
-            if let screen = makeChangePassword?() {
-                navigationController?.pushViewController(screen, animated: true)
             }
         case .twoStep:
             if let screen = makeTwoStep?() {

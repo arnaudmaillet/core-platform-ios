@@ -41,12 +41,14 @@ enum AppEnvironment: Equatable {
         }
     }
 
-    /// Seeded first-party credentials used by the `-mock-auto-login` dev flow.
-    /// The fleet IdP authenticates on the bare username (not the email).
-    var demoCredentials: (username: String, password: String) {
+    /// The address and code the `-mock-auto-login` dev flow signs in with
+    /// (#840: no password any more). The mock answers every code with
+    /// `MockAuthService.verificationCode`; the fleet's codes are random (in
+    /// its auth server's log), so there it signs in by hand.
+    var autoLoginCode: (email: String, code: String)? {
         switch self {
-        case .mock: ("demo", "password123")
-        case .localFleet: ("alice", "password")
+        case .mock: ("demo@example.com", "123456") // MockAuthService.demoEmail / .verificationCode
+        case .localFleet: nil
         }
     }
 }

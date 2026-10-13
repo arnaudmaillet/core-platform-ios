@@ -84,6 +84,10 @@ public nonisolated enum Wallet_V1_TransactionKind: SwiftProtobuf.Enum, Swift.Cas
   /// Likes staked on a post or a comment (points); `ref_id` is
   /// `post:<id>` or `comment:<id>`.
   case stake // = 5
+
+  /// The likes a guest collected (50, then 25 a day for 3 days), credited
+  /// once when its device became a member (points; #827).
+  case welcomeGift // = 6
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -98,6 +102,7 @@ public nonisolated enum Wallet_V1_TransactionKind: SwiftProtobuf.Enum, Swift.Cas
     case 3: self = .stakePack
     case 4: self = .countryUnlock
     case 5: self = .stake
+    case 6: self = .welcomeGift
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -110,6 +115,7 @@ public nonisolated enum Wallet_V1_TransactionKind: SwiftProtobuf.Enum, Swift.Cas
     case .stakePack: return 3
     case .countryUnlock: return 4
     case .stake: return 5
+    case .welcomeGift: return 6
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -122,6 +128,7 @@ public nonisolated enum Wallet_V1_TransactionKind: SwiftProtobuf.Enum, Swift.Cas
     .stakePack,
     .countryUnlock,
     .stake,
+    .welcomeGift,
   ]
 
 }
@@ -137,6 +144,10 @@ public nonisolated enum Wallet_V1_ClaimOutcome: SwiftProtobuf.Enum, Swift.CaseIt
 
   /// Today's claims reached the daily cap (UTC day): next at 00:00 UTC.
   case dailyCapReached // = 3
+
+  /// The points balance is at `wallet.points_cap`: nothing credited. Spending
+  /// points (staking) opens the claim again; no time does.
+  case balanceFull // = 4
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -149,6 +160,7 @@ public nonisolated enum Wallet_V1_ClaimOutcome: SwiftProtobuf.Enum, Swift.CaseIt
     case 1: self = .claimed
     case 2: self = .tooEarly
     case 3: self = .dailyCapReached
+    case 4: self = .balanceFull
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -159,6 +171,7 @@ public nonisolated enum Wallet_V1_ClaimOutcome: SwiftProtobuf.Enum, Swift.CaseIt
     case .claimed: return 1
     case .tooEarly: return 2
     case .dailyCapReached: return 3
+    case .balanceFull: return 4
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -169,6 +182,7 @@ public nonisolated enum Wallet_V1_ClaimOutcome: SwiftProtobuf.Enum, Swift.CaseIt
     .claimed,
     .tooEarly,
     .dailyCapReached,
+    .balanceFull,
   ]
 
 }
@@ -347,6 +361,151 @@ public nonisolated enum Wallet_V1_StakeOutcome: SwiftProtobuf.Enum, Swift.CaseIt
 
 }
 
+/// Which of the caller's stakes to list (#886).
+public nonisolated enum Wallet_V1_StakeStatusFilter: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Both.
+  case unspecified // = 0
+
+  /// Not settled yet.
+  case active // = 1
+  case settled // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .active
+    case 2: self = .settled
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .active: return 1
+    case .settled: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Wallet_V1_StakeStatusFilter] = [
+    .unspecified,
+    .active,
+    .settled,
+  ]
+
+}
+
+/// A stake's verdict (#886).
+public nonisolated enum Wallet_V1_StakeVerdict: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// Not settled yet.
+  case unspecified // = 0
+
+  /// Settled; the day's result is not computed yet.
+  case pending // = 1
+
+  /// The target made the day's top: the stake is rewarded (gems once minting
+  /// is on).
+  case rewarded // = 2
+  case notRewarded // = 3
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .pending
+    case 2: self = .rewarded
+    case 3: self = .notRewarded
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .pending: return 1
+    case .rewarded: return 2
+    case .notRewarded: return 3
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Wallet_V1_StakeVerdict] = [
+    .unspecified,
+    .pending,
+    .rewarded,
+    .notRewarded,
+  ]
+
+}
+
+/// How sure the curator is that the target ends the day in the top (#888,
+/// charter §6–§9): a frozen prediction, scored later against the outcome. The
+/// probability each level stands for is server policy
+/// (`Wallet.conviction_probabilities`).
+public nonisolated enum Wallet_V1_Conviction: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+
+  /// The quick stake: no level chosen (its default is decided by scoring).
+  case unspecified // = 0
+  case c1 // = 1
+  case c2 // = 2
+  case c3 // = 3
+  case c4 // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .c1
+    case 2: self = .c2
+    case 3: self = .c3
+    case 4: self = .c4
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .c1: return 1
+    case .c2: return 2
+    case .c3: return 3
+    case .c4: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Wallet_V1_Conviction] = [
+    .unspecified,
+    .c1,
+    .c2,
+    .c3,
+    .c4,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Wallet_V1_Currency: SwiftProtobuf._ProtoNameProviding {
@@ -354,11 +513,11 @@ nonisolated extension Wallet_V1_Currency: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Wallet_V1_TransactionKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TRANSACTION_KIND_UNSPECIFIED\0\u{1}TRANSACTION_KIND_CLAIM\0\u{1}TRANSACTION_KIND_STARTER_GIFT\0\u{1}TRANSACTION_KIND_STAKE_PACK\0\u{1}TRANSACTION_KIND_COUNTRY_UNLOCK\0\u{1}TRANSACTION_KIND_STAKE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TRANSACTION_KIND_UNSPECIFIED\0\u{1}TRANSACTION_KIND_CLAIM\0\u{1}TRANSACTION_KIND_STARTER_GIFT\0\u{1}TRANSACTION_KIND_STAKE_PACK\0\u{1}TRANSACTION_KIND_COUNTRY_UNLOCK\0\u{1}TRANSACTION_KIND_STAKE\0\u{1}TRANSACTION_KIND_WELCOME_GIFT\0")
 }
 
 nonisolated extension Wallet_V1_ClaimOutcome: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CLAIM_OUTCOME_UNSPECIFIED\0\u{1}CLAIM_OUTCOME_CLAIMED\0\u{1}CLAIM_OUTCOME_TOO_EARLY\0\u{1}CLAIM_OUTCOME_DAILY_CAP_REACHED\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CLAIM_OUTCOME_UNSPECIFIED\0\u{1}CLAIM_OUTCOME_CLAIMED\0\u{1}CLAIM_OUTCOME_TOO_EARLY\0\u{1}CLAIM_OUTCOME_DAILY_CAP_REACHED\0\u{1}CLAIM_OUTCOME_BALANCE_FULL\0")
 }
 
 nonisolated extension Wallet_V1_StakePackOutcome: SwiftProtobuf._ProtoNameProviding {
@@ -371,4 +530,16 @@ nonisolated extension Wallet_V1_SpendGemsOutcome: SwiftProtobuf._ProtoNameProvid
 
 nonisolated extension Wallet_V1_StakeOutcome: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0STAKE_OUTCOME_UNSPECIFIED\0\u{1}STAKE_OUTCOME_STAKED\0\u{1}STAKE_OUTCOME_INSUFFICIENT_BALANCE\0\u{1}STAKE_OUTCOME_TARGET_NOT_STAKEABLE\0\u{1}STAKE_OUTCOME_RATE_LIMITED\0\u{1}STAKE_OUTCOME_TARGET_CAP_REACHED\0\u{1}STAKE_OUTCOME_NO_STAKE_SHOTS\0\u{1}STAKE_OUTCOME_SHOT_DOES_NOT_FIT\0\u{1}STAKE_OUTCOME_EXPIRED\0\u{1}STAKE_OUTCOME_OWN_CONTENT\0")
+}
+
+nonisolated extension Wallet_V1_StakeStatusFilter: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0STAKE_STATUS_FILTER_UNSPECIFIED\0\u{1}STAKE_STATUS_FILTER_ACTIVE\0\u{1}STAKE_STATUS_FILTER_SETTLED\0")
+}
+
+nonisolated extension Wallet_V1_StakeVerdict: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0STAKE_VERDICT_UNSPECIFIED\0\u{1}STAKE_VERDICT_PENDING\0\u{1}STAKE_VERDICT_REWARDED\0\u{1}STAKE_VERDICT_NOT_REWARDED\0")
+}
+
+nonisolated extension Wallet_V1_Conviction: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0CONVICTION_UNSPECIFIED\0\u{1}CONVICTION_C1\0\u{1}CONVICTION_C2\0\u{1}CONVICTION_C3\0\u{1}CONVICTION_C4\0")
 }

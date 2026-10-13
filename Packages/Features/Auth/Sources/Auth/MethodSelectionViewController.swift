@@ -8,7 +8,8 @@ import UIKit
 /// coordinator decides where to go.
 final class MethodSelectionViewController: BottomAnchoredTableViewController {
     var onMethodSelected: ((SignInMethod) -> Void)?
-    /// "Already have an account? Log in": straight to the email login.
+    /// "Already have an account? Log in": the email code, which signs an
+    /// address with an account straight in (#840).
     var onLogIn: (() -> Void)?
     /// Why the flow opened, when a guest's gated action opened it ("Sign up to
     /// like this post"): set as the headline over the methods. Nil from a

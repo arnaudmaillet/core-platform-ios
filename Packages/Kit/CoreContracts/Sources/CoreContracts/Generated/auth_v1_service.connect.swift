@@ -9,28 +9,29 @@ import Connect
 import Foundation
 import SwiftProtobuf
 
-/// AuthService is the platform's issuance / session / IdP-broker boundary. It
-/// brokers authentication to an external IdP, tracks the resulting session, mints
-/// short-lived edge tokens, and revokes them.
+/// AuthService is the platform's issuance / session boundary. Nothing signs in
+/// with a password (#879): members prove an identity with Sign in with Apple /
+/// Google (verified here against the provider's keys), a one-time code sent to
+/// their email or phone, or a passkey; staff with a staff passkey only (#880).
+/// It tracks the resulting session, mints short-lived edge tokens, and revokes
+/// them.
 ///
-/// IdP-agnosticism is a hard contract: this surface exposes only NORMALIZED
-/// identity types (account_id, session_id, generation, permissions). No
-/// Keycloak/Cognito/Okta-specific field appears here — migrating IdP is an
-/// infrastructure-adapter swap with zero change to this contract.
-///
-/// Identity records (who a person is) are owned by AccountService; credentials
-/// (passwords/MFA) are owned by the IdP. This service owns the authentication act
-/// and its lifecycle only.
+/// This surface exposes only NORMALIZED identity types (account_id, session_id,
+/// generation, permissions). Identity records (who a person is) are owned by
+/// AccountService; this service owns the credentials it checks (passkeys,
+/// two-step seeds live in account) and the authentication act and its
+/// lifecycle.
 ///
 /// Token model: `access_token` is verified LOCALLY by downstream services via the
 /// `auth-context` library (pure CPU, no call to this service on the hot path);
 /// `refresh_token` is opaque, single-use, and rotated on every Refresh.
 public protocol Auth_V1_AuthServiceClientInterface: Sendable {
 
-    /// Broker credentials/authorization-code to the IdP, establish a session, and
-    /// return an edge access token + opaque refresh token. Resolves (or, on first
-    /// login, creates) the IdP-subject → account link and gates issuance on the
-    /// account being active. With two-step sign-in on (#649) no session is
+    /// Prove an identity (an Apple / Google id_token, a one-time code, a
+    /// passkey), establish a session, and return an edge access token + opaque
+    /// refresh token. The identity must already be linked to an account (else
+    /// AUT-6004: SignUp), and the account must be active. With two-step sign-in
+    /// on (#649) no session is
     /// issued yet: the response carries `mfa_required` and an `mfa_token`, and
     /// CompleteLogin finishes the sign-in.
     @available(iOS 13, *)
@@ -92,20 +93,13 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `logout`(request: Auth_V1_LogoutRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LogoutResponse>
 
-    /// Global sign-out: bump the account's session generation so every previously
-    /// minted edge token is rejected at the edge within one cache read.
+    /// Global sign-out: bump the account's session generation and revoke every
+    /// session. Refresh and Introspect reject every previously minted edge token
+    /// at once; the client edge of every service within its revocation cache
+    /// window when the revocation check is configured, else when the token
+    /// expires (at most the access-token lifetime).
     @available(iOS 13, *)
     func `logoutAllSessions`(request: Auth_V1_LogoutAllSessionsRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LogoutAllSessionsResponse>
-
-    /// Change the password the holder signs in with: the current password is
-    /// proved with the IdP, then the new one is set there (it never crosses into
-    /// account or auth storage). Optionally signs every other session out; the
-    /// caller's own stays. A weak or refused new password fails with
-    /// FAILED_PRECONDITION: AUT-VAL-024/025/026 (length, unchanged) or AUT-5006
-    /// (the IdP's password policy, its rule in the message). A wrong current
-    /// password is UNAUTHENTICATED (AUT-5002).
-    @available(iOS 13, *)
-    func `changePassword`(request: Auth_V1_ChangePasswordRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangePasswordResponse>
 
     /// Step-up: re-prove a credential before a destructive action. Returns a
     /// fresh access token for the caller's session whose `auth_time` claim is
@@ -118,8 +112,8 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     /// Change the caller's email or phone (#651) to the address a
     /// StartVerification code proved (send the code there first). Needs a recent
     /// credential proof (VerifyCredentials), like any takeover-prone action.
-    /// Everything that signs the holder in follows: the account, the password
-    /// account's IdP email, the passwordless code sign-in. The address on file
+    /// Everything that signs the holder in follows: the account and the code
+    /// sign-in. The address on file
     /// before is told. Another account's address: AUT-6006 / AUT-6007.
     @available(iOS 13, *)
     func `changeContact`(request: Auth_V1_ChangeContactRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangeContactResponse>
@@ -159,13 +153,15 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     /// The authenticator's response: verified (challenge, origin, RP id, user
     /// verification, ES256 key) and stored. The account's email is told.
     /// AUT-5023 bad / used / expired challenge; AUT-5024 not accepted;
-    /// AUT-5026 this authenticator's passkey is already registered.
+    /// AUT-5026 this authenticator's passkey is already registered. With a
+    /// staff enrollment grant the passkey is a staff passkey (#880); AUT-5032
+    /// when the grant is unknown, another account's, expired or used.
     @available(iOS 13, *)
     func `finishPasskeyRegistration`(request: Auth_V1_FinishPasskeyRegistrationRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_Passkey>
 
     /// A challenge to sign in with a passkey (single use, 5 minutes), then
     /// Login { passkey } (first factor: no second step), CompleteLogin
-    /// { passkey } (the second step after a password) or VerifyCredentials
+    /// { passkey } (the second step after a code) or VerifyCredentials
     /// { passkey } (step-up). Public.
     @available(iOS 13, *)
     func `startPasskeySignIn`(request: Auth_V1_StartPasskeySignInRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_PasskeySignInOptions>
@@ -179,6 +175,15 @@ public protocol Auth_V1_AuthServiceClientInterface: Sendable {
     /// told. AUT-5027 when the account has no such passkey.
     @available(iOS 13, *)
     func `removePasskey`(request: Auth_V1_RemovePasskeyRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ListPasskeysResponse>
+
+    /// INTERNAL (mesh only, staff tooling): a staff enrollment grant for
+    /// another account — single use, 24 hours — that FinishPasskeyRegistration
+    /// turns into a staff passkey. The caller presents its own token
+    /// (`authorization: Bearer`): an `admin` / `super_admin` in a staff passkey
+    /// session, never for itself (AUT-5033). Recorded on the audit plane. The
+    /// first grant comes from `auth-server bootstrap-staff`.
+    @available(iOS 13, *)
+    func `issueStaffPasskeyEnrollment`(request: Auth_V1_IssueStaffPasskeyEnrollmentRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_IssueStaffPasskeyEnrollmentResponse>
 
     /// The apps the caller authorised (partners' "Sign in with"), most recently
     /// granted first. Empty while no partner integration exists.
@@ -273,11 +278,6 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     }
 
     @available(iOS 13, *)
-    public func `changePassword`(request: Auth_V1_ChangePasswordRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_ChangePasswordResponse> {
-        return await self.client.unary(path: "/auth.v1.AuthService/ChangePassword", idempotencyLevel: .unknown, request: request, headers: headers)
-    }
-
-    @available(iOS 13, *)
     public func `verifyCredentials`(request: Auth_V1_VerifyCredentialsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_VerifyCredentialsResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/VerifyCredentials", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -333,6 +333,11 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `issueStaffPasskeyEnrollment`(request: Auth_V1_IssueStaffPasskeyEnrollmentRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_IssueStaffPasskeyEnrollmentResponse> {
+        return await self.client.unary(path: "/auth.v1.AuthService/IssueStaffPasskeyEnrollment", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `listAuthorizedApps`(request: Auth_V1_ListAuthorizedAppsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Auth_V1_ListAuthorizedAppsResponse> {
         return await self.client.unary(path: "/auth.v1.AuthService/ListAuthorizedApps", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -374,7 +379,6 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
             public static let startGuestSession = Connect.MethodSpec(name: "StartGuestSession", service: "auth.v1.AuthService", type: .unary)
             public static let logout = Connect.MethodSpec(name: "Logout", service: "auth.v1.AuthService", type: .unary)
             public static let logoutAllSessions = Connect.MethodSpec(name: "LogoutAllSessions", service: "auth.v1.AuthService", type: .unary)
-            public static let changePassword = Connect.MethodSpec(name: "ChangePassword", service: "auth.v1.AuthService", type: .unary)
             public static let verifyCredentials = Connect.MethodSpec(name: "VerifyCredentials", service: "auth.v1.AuthService", type: .unary)
             public static let changeContact = Connect.MethodSpec(name: "ChangeContact", service: "auth.v1.AuthService", type: .unary)
             public static let startMfaEnrollment = Connect.MethodSpec(name: "StartMfaEnrollment", service: "auth.v1.AuthService", type: .unary)
@@ -386,6 +390,7 @@ public final class Auth_V1_AuthServiceClient: Auth_V1_AuthServiceClientInterface
             public static let startPasskeySignIn = Connect.MethodSpec(name: "StartPasskeySignIn", service: "auth.v1.AuthService", type: .unary)
             public static let listPasskeys = Connect.MethodSpec(name: "ListPasskeys", service: "auth.v1.AuthService", type: .unary)
             public static let removePasskey = Connect.MethodSpec(name: "RemovePasskey", service: "auth.v1.AuthService", type: .unary)
+            public static let issueStaffPasskeyEnrollment = Connect.MethodSpec(name: "IssueStaffPasskeyEnrollment", service: "auth.v1.AuthService", type: .unary)
             public static let listAuthorizedApps = Connect.MethodSpec(name: "ListAuthorizedApps", service: "auth.v1.AuthService", type: .unary)
             public static let revokeAppAuthorization = Connect.MethodSpec(name: "RevokeAppAuthorization", service: "auth.v1.AuthService", type: .unary)
             public static let recordAppAuthorization = Connect.MethodSpec(name: "RecordAppAuthorization", service: "auth.v1.AuthService", type: .unary)

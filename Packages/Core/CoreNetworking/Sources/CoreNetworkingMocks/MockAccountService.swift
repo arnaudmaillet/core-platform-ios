@@ -135,7 +135,7 @@ public final class MockAccountService: @unchecked Sendable {
         let bearer = headers.first { $0.key.lowercased() == "authorization" }?.value.first ?? ""
         let token = bearer.hasPrefix("Bearer ") ? String(bearer.dropFirst("Bearer ".count)) : bearer
         return lifecycle.isSteppedUp(accessToken: token)
-            ? nil : ConnectError(code: .permissionDenied, message: "step_up_required: verify your password again")
+            ? nil : ConnectError(code: .permissionDenied, message: "step_up_required: confirm it's you again")
     }
 
     private func requestExport(_ request: Account_V1_RequestDataExportRequest) -> Result<Account_V1_CommandResponse, ConnectError> {

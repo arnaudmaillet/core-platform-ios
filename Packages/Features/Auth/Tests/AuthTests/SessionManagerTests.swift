@@ -65,9 +65,6 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
         return response(from: lock.withLock { guestResult })
     }
 
-    func changePassword(request: Auth_V1_ChangePasswordRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_ChangePasswordResponse> {
-        response(from: .failure(.init(code: .unimplemented, message: nil)))
-    }
 
     func verifyCredentials(request: Auth_V1_VerifyCredentialsRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_VerifyCredentialsResponse> {
         response(from: .failure(.init(code: .unimplemented, message: nil)))
@@ -92,6 +89,10 @@ private final class FakeAuthClient: Auth_V1_AuthServiceClientInterface, @uncheck
         request: Auth_V1_StartVerificationRequest, headers: Connect.Headers
     ) async -> ResponseMessage<Auth_V1_StartVerificationResponse> {
         ResponseMessage(result: .success(Auth_V1_StartVerificationResponse()))
+    }
+
+    func issueStaffPasskeyEnrollment(request: Auth_V1_IssueStaffPasskeyEnrollmentRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_IssueStaffPasskeyEnrollmentResponse> {
+        response(from: .failure(.init(code: .unimplemented, message: nil)))
     }
 
     func completeLogin(request: Auth_V1_CompleteLoginRequest, headers: Connect.Headers) async -> ResponseMessage<Auth_V1_LoginResponse> {
@@ -214,7 +215,7 @@ struct SessionManagerTests {
         let store = InMemorySessionStore()
         let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
 
-        try await manager.login(username: "demo", password: "pw")
+        try await manager.signInWithCode()
 
         #expect(try store.load()?.accessToken == "at-1")
         #expect(await manager.currentState() == .authenticated(AccountID("acct-1")))
@@ -231,7 +232,7 @@ struct SessionManagerTests {
         client.loginResult = .success(body)
         let store = InMemorySessionStore()
         let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
-        try await manager.login(username: "demo", password: "pw")
+        try await manager.signInWithCode()
 
         await manager.installStepUpToken("at-stepped-up", expiresIn: 900)
         #expect(try await manager.validAccessToken() == "at-stepped-up")
@@ -251,12 +252,12 @@ struct SessionManagerTests {
         client.loginResult = .success(body)
         let manager = SessionManager(authClient: client, store: InMemorySessionStore(), configuration: Self.config)
         #expect(await !manager.consumeReactivationNotice())
-        try await manager.login(username: "demo", password: "pw")
+        try await manager.signInWithCode()
         #expect(await manager.consumeReactivationNotice())
         #expect(await !manager.consumeReactivationNotice())
     }
 
-    @Test func invalidCredentialsSurfaceAsAuthError() async {
+    @Test func aRefusedCodeSurfacesAsAuthError() async {
         let client = FakeAuthClient()
         client.loginResult = .failure(ConnectError(code: .unauthenticated, message: "nope"))
         let manager = SessionManager(
@@ -265,8 +266,8 @@ struct SessionManagerTests {
             configuration: Self.config
         )
 
-        await #expect(throws: AuthError.invalidCredentials) {
-            try await manager.login(username: "demo", password: "wrong")
+        await #expect(throws: AuthError.self) {
+            try await manager.signInWithCode(code: "000000")
         }
     }
 
@@ -335,7 +336,7 @@ struct SessionManagerTests {
         let store = InMemorySessionStore()
         let manager = SessionManager(authClient: client, store: store, configuration: Self.config)
 
-        try await manager.login(username: "demo", password: "pw")
+        try await manager.signInWithCode()
         await manager.logout()
 
         #expect(await manager.currentState() == .unauthenticated)
@@ -353,7 +354,7 @@ struct SessionManagerTests {
         client.loginResult = .success(body)
         let manager = SessionManager(authClient: client, store: InMemorySessionStore(), configuration: Self.config)
 
-        try await manager.login(username: "demo", password: "pw")
+        try await manager.signInWithCode()
         await manager.logout()
 
         #expect(client.logoutHeaders.map { $0["Authorization"] } == [["Bearer at-1"]])
@@ -525,8 +526,11 @@ struct SessionManagerTests {
         #expect(try await manager.validAccessToken() == nil)
     }
 
-    /// A member's token wins; signing out falls back to the guest's.
-    @Test func aMemberOutranksTheGuestAndLeavesItBehind() async throws {
+    /// A member's token wins; signing out falls back to a guest's. A code
+    /// sign-in — the only kind since passwords went (#840) — hands the
+    /// guest session to the server, which ends it (the guest becomes the
+    /// member, #449), so signing out starts a new one.
+    @Test func aMemberOutranksTheGuestAndAGuestComesBackAfter() async throws {
         let client = FakeAuthClient()
         client.guestResult = .success(guestResponse(access: "gt-1"))
         var login = Auth_V1_LoginResponse()
@@ -536,11 +540,11 @@ struct SessionManagerTests {
         let manager = guestManager(client)
 
         #expect(try await manager.validAccessToken() == "gt-1")
-        try await manager.login(username: "demo", password: "pw")
+        try await manager.signInWithCode()
         #expect(try await manager.validAccessToken() == "at-1")
         await manager.logout()
         #expect(try await manager.validAccessToken() == "gt-1")
-        #expect(client.guestRequests.count == 1, "the guest session outlived the member's")
+        #expect(client.guestRequests.count == 2, "the ended guest session was reused")
     }
 
     /// #523: a challenge, then an attestation bound to it, on the request.

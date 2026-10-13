@@ -36,19 +36,20 @@ struct ChangeContactTests {
         MockAccountService(lifecycle: lifecycle).register(on: bff)
         let host = "https://mock.bff.local"
         let anonymous = Auth_V1_AuthServiceClient(client: ConnectClientFactory.makeUnauthenticated(host: host, httpClient: bff))
-        var grant = Auth_V1_PasswordGrant()
-        grant.username = MockAuthService.defaultCredentials.username
-        grant.password = MockAuthService.defaultCredentials.password
-        var request = Auth_V1_LoginRequest()
-        request.grantType = .password
-        request.credential = .password(grant)
-        let login = try await anonymous.login(request: request, headers: [:]).result.get()
+        let login = try #require(await MockCodeSignIn.login(anonymous))
         let session = Session()
         await session.set(login.tokens.accessToken)
+        // The sign-in that minted it was long ago: a gated call needs a
+        // fresh proof (#840).
+        lifecycle.forgetRecentProofs()
         let client = ConnectClientFactory.makeAuthenticated(host: host, tokenProvider: session, httpClient: bff)
+        let account = AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session)
         return Fixture(
-            sessions: AccountSessionsRepository(authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session),
-            account: AccountRepository(accountClient: Account_V1_AccountServiceClient(client: client), authSession: session)
+            sessions: AccountSessionsRepository(
+                authClient: Auth_V1_AuthServiceClient(client: client), tokenInstaller: session,
+                account: account, reauthenticator: CodeReauthenticator(anonymous: anonymous, session: session)
+            ),
+            account: account
         )
     }
 
@@ -62,7 +63,7 @@ struct ChangeContactTests {
         await #expect(throws: ContactChangeError.stepUpRequired) {
             _ = try await fixture.sessions.changeContact(challenge, code: MockAuthService.verificationCode)
         }
-        try await fixture.sessions.stepUp(password: MockAuthService.defaultCredentials.password)
+        try await fixture.sessions.reconfirmWithTheSentCode()
         await #expect(throws: ContactChangeError.wrongCode) {
             _ = try await fixture.sessions.changeContact(challenge, code: "000000")
         }
@@ -80,7 +81,7 @@ struct ChangeContactTests {
         let fixture = try await fixture()
         #expect(try await !fixture.account.currentAccount().phoneVerified)
         let number = try #require(ContactAddress.normalized("+33 6 12 34 56 78", kind: .phone))
-        try await fixture.sessions.stepUp(password: MockAuthService.defaultCredentials.password)
+        try await fixture.sessions.reconfirmWithTheSentCode()
         let challenge = try await fixture.sessions.sendContactCode(.phone, to: number)
         _ = try await fixture.sessions.changeContact(challenge, code: MockAuthService.verificationCode)
 
@@ -91,7 +92,7 @@ struct ChangeContactTests {
 
     @Test func anotherAccountsAddressIsRefused() async throws {
         let fixture = try await fixture()
-        try await fixture.sessions.stepUp(password: MockAuthService.defaultCredentials.password)
+        try await fixture.sessions.reconfirmWithTheSentCode()
         let challenge = try await fixture.sessions.sendContactCode(.email, to: MockAuthService.takenEmail)
         await #expect(throws: ContactChangeError.addressTaken) {
             _ = try await fixture.sessions.changeContact(challenge, code: MockAuthService.verificationCode)

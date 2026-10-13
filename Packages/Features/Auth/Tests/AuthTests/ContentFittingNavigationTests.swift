@@ -5,11 +5,6 @@ import UIKit
 
 // The sign-in sheet sized to its step (#563).
 
-private struct NoLogin: LoginPerforming {
-    func login(username: String, password: String) async throws -> LoginOutcome { .signedIn }
-    func completeLogin(_ challenge: SecondStepChallenge, code: String) async throws {}
-}
-
 /// A step with a fixed number of fixed-height rows.
 private final class FixedRowsStep: UITableViewController {
     var rows = 3
@@ -34,7 +29,7 @@ private final class FixedRowsStep: UITableViewController {
 struct ContentFittingNavigationTests {
     /// The flow's stack is the fitting one, so the app can size its sheet.
     @Test func theFlowIsAContentFittingStack() {
-        let flow = LoginFlowCoordinator(loginService: NoLogin()).start(prompt: nil) {}
+        let flow = LoginFlowCoordinator().start(prompt: nil) {}
         #expect(flow is ContentFittingNavigationController)
     }
 

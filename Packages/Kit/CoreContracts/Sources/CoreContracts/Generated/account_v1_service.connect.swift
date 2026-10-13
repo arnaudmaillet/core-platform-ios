@@ -44,10 +44,6 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `changePhone`(request: Account_V1_ChangePhoneRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
-    /// Replace the stored Argon2id password hash.
-    @available(iOS 13, *)
-    func `changePassword`(request: Account_V1_ChangePasswordRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
-
     /// Store an encrypted TOTP seed and its backup codes: MFA is on (ACC-5001
     /// when it already is).
     @available(iOS 13, *)
@@ -96,13 +92,9 @@ public protocol Account_V1_AccountServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `resumeDeactivatedAccount`(request: Account_V1_ResumeDeactivatedAccountRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
-    /// Record a successful login; resets failed_login_attempts and updates last_login_at.
+    /// Record a successful sign-in: updates last_login_at.
     @available(iOS 13, *)
     func `recordLogin`(request: Account_V1_RecordLoginRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
-
-    /// Increment failed_login_attempts; may set locked_until if threshold reached.
-    @available(iOS 13, *)
-    func `recordFailedLogin`(request: Account_V1_RecordFailedLoginRequest, headers: Connect.Headers) async -> ResponseMessage<Account_V1_CommandResponse>
 
     /// Record the holder's date of birth when none is on file (accounts created
     /// before it was collected). On the client edge, the caller's own only.
@@ -278,11 +270,6 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
     }
 
     @available(iOS 13, *)
-    public func `changePassword`(request: Account_V1_ChangePasswordRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
-        return await self.client.unary(path: "/account.v1.AccountService/ChangePassword", idempotencyLevel: .unknown, request: request, headers: headers)
-    }
-
-    @available(iOS 13, *)
     public func `enrollMfa`(request: Account_V1_EnrollMfaRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
         return await self.client.unary(path: "/account.v1.AccountService/EnrollMfa", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -335,11 +322,6 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
     @available(iOS 13, *)
     public func `recordLogin`(request: Account_V1_RecordLoginRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
         return await self.client.unary(path: "/account.v1.AccountService/RecordLogin", idempotencyLevel: .unknown, request: request, headers: headers)
-    }
-
-    @available(iOS 13, *)
-    public func `recordFailedLogin`(request: Account_V1_RecordFailedLoginRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Account_V1_CommandResponse> {
-        return await self.client.unary(path: "/account.v1.AccountService/RecordFailedLogin", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -479,7 +461,6 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
             public static let verifyPhone = Connect.MethodSpec(name: "VerifyPhone", service: "account.v1.AccountService", type: .unary)
             public static let changeEmail = Connect.MethodSpec(name: "ChangeEmail", service: "account.v1.AccountService", type: .unary)
             public static let changePhone = Connect.MethodSpec(name: "ChangePhone", service: "account.v1.AccountService", type: .unary)
-            public static let changePassword = Connect.MethodSpec(name: "ChangePassword", service: "account.v1.AccountService", type: .unary)
             public static let enrollMfa = Connect.MethodSpec(name: "EnrollMfa", service: "account.v1.AccountService", type: .unary)
             public static let revokeMfa = Connect.MethodSpec(name: "RevokeMfa", service: "account.v1.AccountService", type: .unary)
             public static let getMfaSecret = Connect.MethodSpec(name: "GetMfaSecret", service: "account.v1.AccountService", type: .unary)
@@ -491,7 +472,6 @@ public final class Account_V1_AccountServiceClient: Account_V1_AccountServiceCli
             public static let deactivateAccount = Connect.MethodSpec(name: "DeactivateAccount", service: "account.v1.AccountService", type: .unary)
             public static let resumeDeactivatedAccount = Connect.MethodSpec(name: "ResumeDeactivatedAccount", service: "account.v1.AccountService", type: .unary)
             public static let recordLogin = Connect.MethodSpec(name: "RecordLogin", service: "account.v1.AccountService", type: .unary)
-            public static let recordFailedLogin = Connect.MethodSpec(name: "RecordFailedLogin", service: "account.v1.AccountService", type: .unary)
             public static let setDateOfBirth = Connect.MethodSpec(name: "SetDateOfBirth", service: "account.v1.AccountService", type: .unary)
             public static let requestGdprDeletion = Connect.MethodSpec(name: "RequestGdprDeletion", service: "account.v1.AccountService", type: .unary)
             public static let cancelGdprDeletion = Connect.MethodSpec(name: "CancelGdprDeletion", service: "account.v1.AccountService", type: .unary)

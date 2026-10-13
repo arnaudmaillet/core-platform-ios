@@ -123,8 +123,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
                 self?.observeAuthState()
                 guard let signInAfter else { return }
                 try? await Task.sleep(for: .seconds(signInAfter))
-                let credentials = MockAuthService.defaultCredentials
-                _ = try? await sessionManager.login(username: credentials.username, password: credentials.password)
+                await Self.signInWithCode(sessionManager, email: MockAuthService.demoEmail, code: MockAuthService.verificationCode)
                 guard let signOutAfter else { return }
                 try? await Task.sleep(for: .seconds(signOutAfter))
                 await sessionManager.logout()
@@ -162,6 +161,25 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         }
     }
 
+    /// Signs in the way a member does since passwords went (#840): a code to
+    /// `email`, then `code`. Two-step on (`-mock-two-step`): the same code
+    /// finishes it — the mock answers every code with one. An address with
+    /// no account does nothing.
+    private static func signInWithCode(_ sessionManager: SessionManager, email: String, code: String) async {
+        guard let challenge = try? await sessionManager.startVerification(.email, to: email),
+              let outcome = try? await sessionManager.signIn(challengeID: challenge.id, code: code) else { return }
+        switch outcome {
+        case .existing(let account):
+            await sessionManager.completeSignIn(account)
+        case .needsSecondStep(let step):
+            if let account = try? await sessionManager.completeSecondStep(step, code: code) {
+                await sessionManager.completeSignIn(account)
+            }
+        case .needsSignUp:
+            break
+        }
+    }
+
     #if DEBUG
     /// Signs into the mock BFF fixture account, then starts observing.
     ///
@@ -181,19 +199,14 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// trip instead of flashing the login form on the way past.
     private func startWithMockAutoLogin() {
         let sessionManager = container.sessionManager
-        let credentials = container.environment.demoCredentials
+        let autoLogin = container.environment.autoLoginCode
         let composeDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-demo")
         let composeVideoDemo = ProcessInfo.processInfo.arguments.contains("-mock-compose-video-demo")
         let composer = container.postComposer
         Task { [weak self] in
             await sessionManager.logout()
-            let outcome = try? await sessionManager.login(
-                username: credentials.username,
-                password: credentials.password
-            )
-            // Two-step sign-in on (`-mock-two-step`): the mock's code finishes it.
-            if case .needsSecondStep(let challenge)? = outcome {
-                try? await sessionManager.completeLogin(challenge, code: MockAuthService.verificationCode)
+            if let autoLogin {
+                await Self.signInWithCode(sessionManager, email: autoLogin.email, code: autoLogin.code)
             }
             self?.observeAuthState()
             // Exercises the real upload+create+publish flow so the compose

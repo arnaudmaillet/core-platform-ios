@@ -142,41 +142,6 @@ public nonisolated struct Auth_V1_SessionView: Sendable {
   fileprivate var _absoluteExpiry: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
 }
 
-/// OIDC authorization-code grant (with PKCE). The code is obtained by the client
-/// from the IdP's authorize endpoint; this service exchanges it via the broker.
-public nonisolated struct Auth_V1_AuthorizationCodeGrant: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var code: String = String()
-
-  public var redirectUri: String = String()
-
-  /// PKCE verifier matching the challenge sent to the authorize endpoint.
-  public var codeVerifier: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-/// Resource-owner password grant (first-party trusted clients only).
-public nonisolated struct Auth_V1_PasswordGrant: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var username: String = String()
-
-  /// Transits TLS to the IdP broker; never persisted by this service.
-  public var password: String = String()
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
 /// A native Sign in with Apple / Google id_token. Verified here against the
 /// provider's published keys: signature, issuer, audience (the app's client
 /// ids), expiry, and the nonce.
@@ -234,22 +199,6 @@ public nonisolated struct Auth_V1_LoginRequest: Sendable {
   /// Exactly one credential variant must be set, matching `grant_type`.
   public var credential: Auth_V1_LoginRequest.OneOf_Credential? = nil
 
-  public var authorizationCode: Auth_V1_AuthorizationCodeGrant {
-    get {
-      if case .authorizationCode(let v)? = credential {return v}
-      return Auth_V1_AuthorizationCodeGrant()
-    }
-    set {credential = .authorizationCode(newValue)}
-  }
-
-  public var password: Auth_V1_PasswordGrant {
-    get {
-      if case .password(let v)? = credential {return v}
-      return Auth_V1_PasswordGrant()
-    }
-    set {credential = .password(newValue)}
-  }
-
   /// An id_token whose identity has no account yet fails NOT_FOUND
   /// (AUT-6004): the app goes on with SignUp with the same token and
   /// nonce (the nonce is only redeemed by a sign-in that succeeds).
@@ -292,8 +241,6 @@ public nonisolated struct Auth_V1_LoginRequest: Sendable {
 
   /// Exactly one credential variant must be set, matching `grant_type`.
   public nonisolated enum OneOf_Credential: Equatable, Sendable {
-    case authorizationCode(Auth_V1_AuthorizationCodeGrant)
-    case password(Auth_V1_PasswordGrant)
     /// An id_token whose identity has no account yet fails NOT_FOUND
     /// (AUT-6004): the app goes on with SignUp with the same token and
     /// nonce (the nonce is only redeemed by a sign-in that succeeds).
@@ -332,17 +279,13 @@ public nonisolated struct Auth_V1_LoginResponse: Sendable {
   /// Clears the value of `tokens`. Subsequent reads from it will return its default value.
   public mutating func clearTokens() {self._tokens = nil}
 
-  /// True when this login established the IdP-subject → account link for the
-  /// first time (a SubjectLinked event was emitted).
-  public var firstLink: Bool = false
-
   /// True when the account had been deactivated by its holder and this login
   /// reactivated it (its profiles become visible again) — the app can welcome
   /// the user back. A suspended account is never reactivated by a login.
   public var reactivated: Bool = false
 
   /// Two-step sign-in is on (#649): the credential is proven but no session
-  /// exists yet (`tokens` unset, `first_link` / `reactivated` false). Send
+  /// exists yet (`tokens` unset, `reactivated` false). Send
   /// the holder's code with `mfa_token` to CompleteLogin.
   public var mfaRequired: Bool = false
 
@@ -890,38 +833,6 @@ public nonisolated struct Auth_V1_ListSessionsResponse: Sendable {
   public init() {}
 }
 
-public nonisolated struct Auth_V1_ChangePasswordRequest: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  public var currentPassword: String = String()
-
-  /// 8–128 characters, different from the current one; the IdP's password
-  /// policy may ask for more.
-  public var newPassword: String = String()
-
-  /// Sign every other session of the account out (recommended).
-  public var signOutOtherSessions: Bool = false
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
-public nonisolated struct Auth_V1_ChangePasswordResponse: Sendable {
-  // SwiftProtobuf.Message conformance is added in an extension below. See the
-  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
-  // methods supported on all messages.
-
-  /// Other sessions signed out (0 unless asked).
-  public var sessionsRevoked: Int32 = 0
-
-  public var unknownFields = SwiftProtobuf.UnknownStorage()
-
-  public init() {}
-}
-
 public nonisolated struct Auth_V1_VerifyCredentialsRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -929,16 +840,8 @@ public nonisolated struct Auth_V1_VerifyCredentialsRequest: Sendable {
 
   public var credential: Auth_V1_VerifyCredentialsRequest.OneOf_Credential? = nil
 
-  public var password: String {
-    get {
-      if case .password(let v)? = credential {return v}
-      return String()
-    }
-    set {credential = .password(newValue)}
-  }
-
   /// A TOTP or backup code (#649): the step-up of an account with
-  /// two-step sign-in on, password or not. AUT-5020 when it is off.
+  /// two-step sign-in on. AUT-5020 when it is off.
   public var mfaCode: String {
     get {
       if case .mfaCode(let v)? = credential {return v}
@@ -959,9 +862,8 @@ public nonisolated struct Auth_V1_VerifyCredentialsRequest: Sendable {
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Credential: Equatable, Sendable {
-    case password(String)
     /// A TOTP or backup code (#649): the step-up of an account with
-    /// two-step sign-in on, password or not. AUT-5020 when it is off.
+    /// two-step sign-in on. AUT-5020 when it is off.
     case mfaCode(String)
     /// One of the account's passkeys (#808).
     case passkey(Auth_V1_PasskeyAssertion)
@@ -1135,6 +1037,10 @@ public nonisolated struct Auth_V1_FinishPasskeyRegistrationRequest: Sendable {
   /// The holder's name for it (≤ 64 chars); empty ⇒ "Passkey".
   public var name: String = String()
 
+  /// A staff enrollment grant (#880): the passkey becomes a staff passkey.
+  /// Empty: a member passkey.
+  public var staffEnrollmentGrant: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -1172,12 +1078,53 @@ public nonisolated struct Auth_V1_Passkey: Sendable {
   /// Synced across the holder's devices (e.g. iCloud Keychain).
   public var synced: Bool = false
 
+  /// A staff passkey (#880): sessions opened with it carry staff permissions.
+  public var staff: Bool = false
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _createdAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
   fileprivate var _lastUsedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
+public nonisolated struct Auth_V1_IssueStaffPasskeyEnrollmentRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The staff member's account (not the caller's).
+  public var accountID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Auth_V1_IssueStaffPasskeyEnrollmentResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The grant: a secret handed to the staff member once, presented as
+  /// FinishPasskeyRegistrationRequest.staff_enrollment_grant.
+  public var grant: String = String()
+
+  public var expiresAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_expiresAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_expiresAt = newValue}
+  }
+  /// Returns true if `expiresAt` has been explicitly set.
+  public var hasExpiresAt: Bool {self._expiresAt != nil}
+  /// Clears the value of `expiresAt`. Subsequent reads from it will return its default value.
+  public mutating func clearExpiresAt() {self._expiresAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _expiresAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
 }
 
 public nonisolated struct Auth_V1_StartPasskeySignInRequest: Sendable {
@@ -1589,81 +1536,6 @@ nonisolated extension Auth_V1_SessionView: SwiftProtobuf.Message, SwiftProtobuf.
   }
 }
 
-nonisolated extension Auth_V1_AuthorizationCodeGrant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".AuthorizationCodeGrant"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}code\0\u{3}redirect_uri\0\u{3}code_verifier\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.code) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.redirectUri) }()
-      case 3: try { try decoder.decodeSingularStringField(value: &self.codeVerifier) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.code.isEmpty {
-      try visitor.visitSingularStringField(value: self.code, fieldNumber: 1)
-    }
-    if !self.redirectUri.isEmpty {
-      try visitor.visitSingularStringField(value: self.redirectUri, fieldNumber: 2)
-    }
-    if !self.codeVerifier.isEmpty {
-      try visitor.visitSingularStringField(value: self.codeVerifier, fieldNumber: 3)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Auth_V1_AuthorizationCodeGrant, rhs: Auth_V1_AuthorizationCodeGrant) -> Bool {
-    if lhs.code != rhs.code {return false}
-    if lhs.redirectUri != rhs.redirectUri {return false}
-    if lhs.codeVerifier != rhs.codeVerifier {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Auth_V1_PasswordGrant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".PasswordGrant"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}username\0\u{1}password\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.username) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.password) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.username.isEmpty {
-      try visitor.visitSingularStringField(value: self.username, fieldNumber: 1)
-    }
-    if !self.password.isEmpty {
-      try visitor.visitSingularStringField(value: self.password, fieldNumber: 2)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Auth_V1_PasswordGrant, rhs: Auth_V1_PasswordGrant) -> Bool {
-    if lhs.username != rhs.username {return false}
-    if lhs.password != rhs.password {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
 nonisolated extension Auth_V1_IdTokenGrant: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".IdTokenGrant"
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}provider\0\u{3}id_token\0\u{1}nonce\0")
@@ -1741,7 +1613,7 @@ nonisolated extension Auth_V1_VerificationCodeGrant: SwiftProtobuf.Message, Swif
 
 nonisolated extension Auth_V1_LoginRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".LoginRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}device\0\u{3}grant_type\0\u{3}authorization_code\0\u{1}password\0\u{3}id_token\0\u{3}guest_refresh_token\0\u{3}verification_code\0\u{1}passkey\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}device\0\u{3}grant_type\0\u{4}\u{3}id_token\0\u{3}guest_refresh_token\0\u{3}verification_code\0\u{1}passkey\0\u{b}authorization_code\0\u{b}password\0\u{c}\u{3}\u{1}\u{c}\u{4}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1751,32 +1623,6 @@ nonisolated extension Auth_V1_LoginRequest: SwiftProtobuf.Message, SwiftProtobuf
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._device) }()
       case 2: try { try decoder.decodeSingularEnumField(value: &self.grantType) }()
-      case 3: try {
-        var v: Auth_V1_AuthorizationCodeGrant?
-        var hadOneofValue = false
-        if let current = self.credential {
-          hadOneofValue = true
-          if case .authorizationCode(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.credential = .authorizationCode(v)
-        }
-      }()
-      case 4: try {
-        var v: Auth_V1_PasswordGrant?
-        var hadOneofValue = false
-        if let current = self.credential {
-          hadOneofValue = true
-          if case .password(let m) = current {v = m}
-        }
-        try decoder.decodeSingularMessageField(value: &v)
-        if let v = v {
-          if hadOneofValue {try decoder.handleConflictingOneOf()}
-          self.credential = .password(v)
-        }
-      }()
       case 5: try {
         var v: Auth_V1_IdTokenGrant?
         var hadOneofValue = false
@@ -1833,21 +1679,9 @@ nonisolated extension Auth_V1_LoginRequest: SwiftProtobuf.Message, SwiftProtobuf
     if self.grantType != .unspecified {
       try visitor.visitSingularEnumField(value: self.grantType, fieldNumber: 2)
     }
-    switch self.credential {
-    case .authorizationCode?: try {
-      guard case .authorizationCode(let v)? = self.credential else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
-    }()
-    case .password?: try {
-      guard case .password(let v)? = self.credential else { preconditionFailure() }
-      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
-    }()
-    case .idToken?: try {
-      guard case .idToken(let v)? = self.credential else { preconditionFailure() }
+    try { if case .idToken(let v)? = self.credential {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
-    }()
-    default: break
-    }
+    } }()
     if !self.guestRefreshToken.isEmpty {
       try visitor.visitSingularStringField(value: self.guestRefreshToken, fieldNumber: 6)
     }
@@ -1877,7 +1711,7 @@ nonisolated extension Auth_V1_LoginRequest: SwiftProtobuf.Message, SwiftProtobuf
 
 nonisolated extension Auth_V1_LoginResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".LoginResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}tokens\0\u{3}first_link\0\u{1}reactivated\0\u{3}mfa_required\0\u{3}mfa_token\0\u{3}mfa_expires_in\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}tokens\0\u{2}\u{2}reactivated\0\u{3}mfa_required\0\u{3}mfa_token\0\u{3}mfa_expires_in\0\u{b}first_link\0\u{c}\u{3}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1887,7 +1721,6 @@ nonisolated extension Auth_V1_LoginResponse: SwiftProtobuf.Message, SwiftProtobu
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
       case 2: try { try decoder.decodeSingularMessageField(value: &self._tokens) }()
-      case 3: try { try decoder.decodeSingularBoolField(value: &self.firstLink) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self.reactivated) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self.mfaRequired) }()
       case 6: try { try decoder.decodeSingularStringField(value: &self.mfaToken) }()
@@ -1908,9 +1741,6 @@ nonisolated extension Auth_V1_LoginResponse: SwiftProtobuf.Message, SwiftProtobu
     try { if let v = self._tokens {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
     } }()
-    if self.firstLink != false {
-      try visitor.visitSingularBoolField(value: self.firstLink, fieldNumber: 3)
-    }
     if self.reactivated != false {
       try visitor.visitSingularBoolField(value: self.reactivated, fieldNumber: 4)
     }
@@ -1929,7 +1759,6 @@ nonisolated extension Auth_V1_LoginResponse: SwiftProtobuf.Message, SwiftProtobu
   public static func ==(lhs: Auth_V1_LoginResponse, rhs: Auth_V1_LoginResponse) -> Bool {
     if lhs.accountID != rhs.accountID {return false}
     if lhs._tokens != rhs._tokens {return false}
-    if lhs.firstLink != rhs.firstLink {return false}
     if lhs.reactivated != rhs.reactivated {return false}
     if lhs.mfaRequired != rhs.mfaRequired {return false}
     if lhs.mfaToken != rhs.mfaToken {return false}
@@ -2880,79 +2709,9 @@ nonisolated extension Auth_V1_ListSessionsResponse: SwiftProtobuf.Message, Swift
   }
 }
 
-nonisolated extension Auth_V1_ChangePasswordRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ChangePasswordRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}current_password\0\u{3}new_password\0\u{3}sign_out_other_sessions\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularStringField(value: &self.currentPassword) }()
-      case 2: try { try decoder.decodeSingularStringField(value: &self.newPassword) }()
-      case 3: try { try decoder.decodeSingularBoolField(value: &self.signOutOtherSessions) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if !self.currentPassword.isEmpty {
-      try visitor.visitSingularStringField(value: self.currentPassword, fieldNumber: 1)
-    }
-    if !self.newPassword.isEmpty {
-      try visitor.visitSingularStringField(value: self.newPassword, fieldNumber: 2)
-    }
-    if self.signOutOtherSessions != false {
-      try visitor.visitSingularBoolField(value: self.signOutOtherSessions, fieldNumber: 3)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Auth_V1_ChangePasswordRequest, rhs: Auth_V1_ChangePasswordRequest) -> Bool {
-    if lhs.currentPassword != rhs.currentPassword {return false}
-    if lhs.newPassword != rhs.newPassword {return false}
-    if lhs.signOutOtherSessions != rhs.signOutOtherSessions {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
-nonisolated extension Auth_V1_ChangePasswordResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".ChangePasswordResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}sessions_revoked\0")
-
-  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    while let fieldNumber = try decoder.nextFieldNumber() {
-      // The use of inline closures is to circumvent an issue where the compiler
-      // allocates stack space for every case branch when no optimizations are
-      // enabled. https://github.com/apple/swift-protobuf/issues/1034
-      switch fieldNumber {
-      case 1: try { try decoder.decodeSingularInt32Field(value: &self.sessionsRevoked) }()
-      default: break
-      }
-    }
-  }
-
-  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
-    if self.sessionsRevoked != 0 {
-      try visitor.visitSingularInt32Field(value: self.sessionsRevoked, fieldNumber: 1)
-    }
-    try unknownFields.traverse(visitor: &visitor)
-  }
-
-  public static func ==(lhs: Auth_V1_ChangePasswordResponse, rhs: Auth_V1_ChangePasswordResponse) -> Bool {
-    if lhs.sessionsRevoked != rhs.sessionsRevoked {return false}
-    if lhs.unknownFields != rhs.unknownFields {return false}
-    return true
-  }
-}
-
 nonisolated extension Auth_V1_VerifyCredentialsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".VerifyCredentialsRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}password\0\u{3}mfa_code\0\u{1}passkey\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{4}\u{2}mfa_code\0\u{1}passkey\0\u{b}password\0\u{c}\u{1}\u{1}")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -2960,14 +2719,6 @@ nonisolated extension Auth_V1_VerifyCredentialsRequest: SwiftProtobuf.Message, S
       // allocates stack space for every case branch when no optimizations are
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
-      case 1: try {
-        var v: String?
-        try decoder.decodeSingularStringField(value: &v)
-        if let v = v {
-          if self.credential != nil {try decoder.handleConflictingOneOf()}
-          self.credential = .password(v)
-        }
-      }()
       case 2: try {
         var v: String?
         try decoder.decodeSingularStringField(value: &v)
@@ -3000,10 +2751,6 @@ nonisolated extension Auth_V1_VerifyCredentialsRequest: SwiftProtobuf.Message, S
     // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
     // https://github.com/apple/swift-protobuf/issues/1182
     switch self.credential {
-    case .password?: try {
-      guard case .password(let v)? = self.credential else { preconditionFailure() }
-      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
-    }()
     case .mfaCode?: try {
       guard case .mfaCode(let v)? = self.credential else { preconditionFailure() }
       try visitor.visitSingularStringField(value: v, fieldNumber: 2)
@@ -3339,7 +3086,7 @@ nonisolated extension Auth_V1_PasskeyRegistrationOptions: SwiftProtobuf.Message,
 
 nonisolated extension Auth_V1_FinishPasskeyRegistrationRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".FinishPasskeyRegistrationRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}challenge\0\u{3}client_data_json\0\u{3}attestation_object\0\u{1}name\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}challenge\0\u{3}client_data_json\0\u{3}attestation_object\0\u{1}name\0\u{3}staff_enrollment_grant\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3351,6 +3098,7 @@ nonisolated extension Auth_V1_FinishPasskeyRegistrationRequest: SwiftProtobuf.Me
       case 2: try { try decoder.decodeSingularBytesField(value: &self.clientDataJson) }()
       case 3: try { try decoder.decodeSingularBytesField(value: &self.attestationObject) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.staffEnrollmentGrant) }()
       default: break
       }
     }
@@ -3369,6 +3117,9 @@ nonisolated extension Auth_V1_FinishPasskeyRegistrationRequest: SwiftProtobuf.Me
     if !self.name.isEmpty {
       try visitor.visitSingularStringField(value: self.name, fieldNumber: 4)
     }
+    if !self.staffEnrollmentGrant.isEmpty {
+      try visitor.visitSingularStringField(value: self.staffEnrollmentGrant, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3377,6 +3128,7 @@ nonisolated extension Auth_V1_FinishPasskeyRegistrationRequest: SwiftProtobuf.Me
     if lhs.clientDataJson != rhs.clientDataJson {return false}
     if lhs.attestationObject != rhs.attestationObject {return false}
     if lhs.name != rhs.name {return false}
+    if lhs.staffEnrollmentGrant != rhs.staffEnrollmentGrant {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -3384,7 +3136,7 @@ nonisolated extension Auth_V1_FinishPasskeyRegistrationRequest: SwiftProtobuf.Me
 
 nonisolated extension Auth_V1_Passkey: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Passkey"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}credential_id\0\u{1}name\0\u{3}created_at\0\u{3}last_used_at\0\u{1}synced\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}credential_id\0\u{1}name\0\u{3}created_at\0\u{3}last_used_at\0\u{1}synced\0\u{1}staff\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -3397,6 +3149,7 @@ nonisolated extension Auth_V1_Passkey: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 3: try { try decoder.decodeSingularMessageField(value: &self._createdAt) }()
       case 4: try { try decoder.decodeSingularMessageField(value: &self._lastUsedAt) }()
       case 5: try { try decoder.decodeSingularBoolField(value: &self.synced) }()
+      case 6: try { try decoder.decodeSingularBoolField(value: &self.staff) }()
       default: break
       }
     }
@@ -3422,6 +3175,9 @@ nonisolated extension Auth_V1_Passkey: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.synced != false {
       try visitor.visitSingularBoolField(value: self.synced, fieldNumber: 5)
     }
+    if self.staff != false {
+      try visitor.visitSingularBoolField(value: self.staff, fieldNumber: 6)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -3431,6 +3187,76 @@ nonisolated extension Auth_V1_Passkey: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs._createdAt != rhs._createdAt {return false}
     if lhs._lastUsedAt != rhs._lastUsedAt {return false}
     if lhs.synced != rhs.synced {return false}
+    if lhs.staff != rhs.staff {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Auth_V1_IssueStaffPasskeyEnrollmentRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".IssueStaffPasskeyEnrollmentRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Auth_V1_IssueStaffPasskeyEnrollmentRequest, rhs: Auth_V1_IssueStaffPasskeyEnrollmentRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Auth_V1_IssueStaffPasskeyEnrollmentResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".IssueStaffPasskeyEnrollmentResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}grant\0\u{3}expires_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.grant) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._expiresAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.grant.isEmpty {
+      try visitor.visitSingularStringField(value: self.grant, fieldNumber: 1)
+    }
+    try { if let v = self._expiresAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Auth_V1_IssueStaffPasskeyEnrollmentResponse, rhs: Auth_V1_IssueStaffPasskeyEnrollmentResponse) -> Bool {
+    if lhs.grant != rhs.grant {return false}
+    if lhs._expiresAt != rhs._expiresAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

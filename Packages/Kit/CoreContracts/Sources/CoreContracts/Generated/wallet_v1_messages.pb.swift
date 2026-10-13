@@ -80,7 +80,8 @@ public nonisolated struct Wallet_V1_Wallet: @unchecked Sendable {
   /// Clears the value of `nextClaimAt`. Subsequent reads from it will return its default value.
   public mutating func clearNextClaimAt() {_uniqueStorage()._nextClaimAt = nil}
 
-  /// What the next claim pays (streak multiplier and daily cap applied).
+  /// What the next claim pays (streak multiplier, daily cap and the room
+  /// under `points_cap` applied).
   public var claimAmount: Int32 {
     get {_storage._claimAmount}
     set {_uniqueStorage()._claimAmount = newValue}
@@ -139,6 +140,21 @@ public nonisolated struct Wallet_V1_Wallet: @unchecked Sendable {
   public var pointsPerShot: Int32 {
     get {_storage._pointsPerShot}
     set {_uniqueStorage()._pointsPerShot = newValue}
+  }
+
+  /// The points balance a claim never takes past (server policy): a claim is
+  /// clamped to what fits, and at the cap `claim_available` is false with no
+  /// `next_claim_at` (ClaimReward answers CLAIM_OUTCOME_BALANCE_FULL).
+  public var pointsCap: Int64 {
+    get {_storage._pointsCap}
+    set {_uniqueStorage()._pointsCap = newValue}
+  }
+
+  /// The probability each conviction level C1–C4 stands for (#888, server
+  /// policy; C1 first): shown when the curator picks a level.
+  public var convictionProbabilities: [Double] {
+    get {_storage._convictionProbabilities}
+    set {_uniqueStorage()._convictionProbabilities = newValue}
   }
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -389,6 +405,10 @@ public nonisolated struct Wallet_V1_StakeRequest: Sendable {
   /// Clears the value of `firstTapAt`. Subsequent reads from it will return its default value.
   public mutating func clearFirstTapAt() {self._firstTapAt = nil}
 
+  /// How sure the curator is (#888): recorded with the batch, frozen, and
+  /// scored later; no effect on the stake. UNSPECIFIED: a quick stake.
+  public var conviction: Wallet_V1_Conviction = .unspecified
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Target: Equatable, Sendable {
@@ -561,6 +581,13 @@ public nonisolated struct Wallet_V1_StakePosition: @unchecked Sendable {
   /// Clears the value of `settlement`. Subsequent reads from it will return its default value.
   public mutating func clearSettlement() {_uniqueStorage()._settlement = nil}
 
+  /// The conviction of the position's first batch (#888); UNSPECIFIED for a
+  /// quick stake or a position from before.
+  public var firstConviction: Wallet_V1_Conviction {
+    get {_storage._firstConviction}
+    set {_uniqueStorage()._firstConviction = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public nonisolated enum OneOf_Target: Equatable, Sendable {
@@ -686,13 +713,133 @@ public nonisolated struct Wallet_V1_ListStakePositionsResponse: Sendable {
   public init() {}
 }
 
+public nonisolated struct Wallet_V1_ListMyStakesRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// The caller's account (edge: must be the token's).
+  public var accountID: String = String()
+
+  public var status: Wallet_V1_StakeStatusFilter = .unspecified
+
+  /// Default 50, capped at 100.
+  public var pageSize: Int32 = 0
+
+  /// The `next_page_token` of the previous page (empty: the first).
+  public var pageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// One of the caller's stakes: all its likes on one post or comment (#886).
+public nonisolated struct Wallet_V1_MyStake: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var target: Wallet_V1_MyStake.OneOf_Target? = nil
+
+  public var postID: String {
+    get {
+      if case .postID(let v)? = target {return v}
+      return String()
+    }
+    set {target = .postID(newValue)}
+  }
+
+  public var commentID: String {
+    get {
+      if case .commentID(let v)? = target {return v}
+      return String()
+    }
+    set {target = .commentID(newValue)}
+  }
+
+  /// Points staked on it, all batches together.
+  public var points: Int64 = 0
+
+  public var firstAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_firstAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_firstAt = newValue}
+  }
+  /// Returns true if `firstAt` has been explicitly set.
+  public var hasFirstAt: Bool {self._firstAt != nil}
+  /// Clears the value of `firstAt`. Subsequent reads from it will return its default value.
+  public mutating func clearFirstAt() {self._firstAt = nil}
+
+  public var lastAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_lastAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_lastAt = newValue}
+  }
+  /// Returns true if `lastAt` has been explicitly set.
+  public var hasLastAt: Bool {self._lastAt != nil}
+  /// Clears the value of `lastAt`. Subsequent reads from it will return its default value.
+  public mutating func clearLastAt() {self._lastAt = nil}
+
+  /// When it settles: a day after its first stake (server policy).
+  public var settlesAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_settlesAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_settlesAt = newValue}
+  }
+  /// Returns true if `settlesAt` has been explicitly set.
+  public var hasSettlesAt: Bool {self._settlesAt != nil}
+  /// Clears the value of `settlesAt`. Subsequent reads from it will return its default value.
+  public mutating func clearSettlesAt() {self._settlesAt = nil}
+
+  /// Set once settled.
+  public var settledAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_settledAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_settledAt = newValue}
+  }
+  /// Returns true if `settledAt` has been explicitly set.
+  public var hasSettledAt: Bool {self._settledAt != nil}
+  /// Clears the value of `settledAt`. Subsequent reads from it will return its default value.
+  public mutating func clearSettledAt() {self._settledAt = nil}
+
+  public var verdict: Wallet_V1_StakeVerdict = .unspecified
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public nonisolated enum OneOf_Target: Equatable, Sendable {
+    case postID(String)
+    case commentID(String)
+
+  }
+
+  public init() {}
+
+  fileprivate var _firstAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+  fileprivate var _lastAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+  fileprivate var _settlesAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+  fileprivate var _settledAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
+public nonisolated struct Wallet_V1_ListMyStakesResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Newest first stake first.
+  public var stakes: [Wallet_V1_MyStake] = []
+
+  /// Empty on the last page.
+  public var nextPageToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "wallet.v1"
 
 nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Wallet"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}points\0\u{1}gems\0\u{3}points_earned\0\u{3}points_spent\0\u{3}gems_earned\0\u{3}gems_spent\0\u{3}claim_available\0\u{3}next_claim_at\0\u{3}claim_amount\0\u{3}claimed_today\0\u{3}daily_claim_cap\0\u{3}streak_days\0\u{3}last_claim_at\0\u{3}stake_shots\0\u{3}gem_spending_restricted\0\u{3}stake_pack_price\0\u{3}stake_pack_shots\0\u{3}points_per_shot\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}points\0\u{1}gems\0\u{3}points_earned\0\u{3}points_spent\0\u{3}gems_earned\0\u{3}gems_spent\0\u{3}claim_available\0\u{3}next_claim_at\0\u{3}claim_amount\0\u{3}claimed_today\0\u{3}daily_claim_cap\0\u{3}streak_days\0\u{3}last_claim_at\0\u{3}stake_shots\0\u{3}gem_spending_restricted\0\u{3}stake_pack_price\0\u{3}stake_pack_shots\0\u{3}points_per_shot\0\u{3}points_cap\0\u{3}conviction_probabilities\0")
 
   fileprivate class _StorageClass {
     var _accountID: String = String()
@@ -714,6 +861,8 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _stakePackPrice: Int64 = 0
     var _stakePackShots: Int32 = 0
     var _pointsPerShot: Int32 = 0
+    var _pointsCap: Int64 = 0
+    var _convictionProbabilities: [Double] = []
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -743,6 +892,8 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
       _stakePackPrice = source._stakePackPrice
       _stakePackShots = source._stakePackShots
       _pointsPerShot = source._pointsPerShot
+      _pointsCap = source._pointsCap
+      _convictionProbabilities = source._convictionProbabilities
     }
   }
 
@@ -780,6 +931,8 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 17: try { try decoder.decodeSingularInt64Field(value: &_storage._stakePackPrice) }()
         case 18: try { try decoder.decodeSingularInt32Field(value: &_storage._stakePackShots) }()
         case 19: try { try decoder.decodeSingularInt32Field(value: &_storage._pointsPerShot) }()
+        case 20: try { try decoder.decodeSingularInt64Field(value: &_storage._pointsCap) }()
+        case 21: try { try decoder.decodeRepeatedDoubleField(value: &_storage._convictionProbabilities) }()
         default: break
         }
       }
@@ -849,6 +1002,12 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
       if _storage._pointsPerShot != 0 {
         try visitor.visitSingularInt32Field(value: _storage._pointsPerShot, fieldNumber: 19)
       }
+      if _storage._pointsCap != 0 {
+        try visitor.visitSingularInt64Field(value: _storage._pointsCap, fieldNumber: 20)
+      }
+      if !_storage._convictionProbabilities.isEmpty {
+        try visitor.visitPackedDoubleField(value: _storage._convictionProbabilities, fieldNumber: 21)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -877,6 +1036,8 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._stakePackPrice != rhs_storage._stakePackPrice {return false}
         if _storage._stakePackShots != rhs_storage._stakePackShots {return false}
         if _storage._pointsPerShot != rhs_storage._pointsPerShot {return false}
+        if _storage._pointsCap != rhs_storage._pointsCap {return false}
+        if _storage._convictionProbabilities != rhs_storage._convictionProbabilities {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -1265,7 +1426,7 @@ nonisolated extension Wallet_V1_SpendGemsResponse: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension Wallet_V1_StakeRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".StakeRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}profile_id\0\u{3}post_id\0\u{3}comment_id\0\u{1}points\0\u{3}use_stake_shot\0\u{3}idempotency_key\0\u{3}first_tap_at\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}profile_id\0\u{3}post_id\0\u{3}comment_id\0\u{1}points\0\u{3}use_stake_shot\0\u{3}idempotency_key\0\u{3}first_tap_at\0\u{1}conviction\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1295,6 +1456,7 @@ nonisolated extension Wallet_V1_StakeRequest: SwiftProtobuf.Message, SwiftProtob
       case 6: try { try decoder.decodeSingularBoolField(value: &self.useStakeShot) }()
       case 7: try { try decoder.decodeSingularStringField(value: &self.idempotencyKey) }()
       case 8: try { try decoder.decodeSingularMessageField(value: &self._firstTapAt) }()
+      case 9: try { try decoder.decodeSingularEnumField(value: &self.conviction) }()
       default: break
       }
     }
@@ -1334,6 +1496,9 @@ nonisolated extension Wallet_V1_StakeRequest: SwiftProtobuf.Message, SwiftProtob
     try { if let v = self._firstTapAt {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 8)
     } }()
+    if self.conviction != .unspecified {
+      try visitor.visitSingularEnumField(value: self.conviction, fieldNumber: 9)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1345,6 +1510,7 @@ nonisolated extension Wallet_V1_StakeRequest: SwiftProtobuf.Message, SwiftProtob
     if lhs.useStakeShot != rhs.useStakeShot {return false}
     if lhs.idempotencyKey != rhs.idempotencyKey {return false}
     if lhs._firstTapAt != rhs._firstTapAt {return false}
+    if lhs.conviction != rhs.conviction {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1540,7 +1706,7 @@ nonisolated extension Wallet_V1_ListStakePositionsRequest: SwiftProtobuf.Message
 
 nonisolated extension Wallet_V1_StakePosition: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".StakePosition"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}comment_id\0\u{1}points\0\u{3}first_at\0\u{3}last_at\0\u{1}settlement\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}comment_id\0\u{1}points\0\u{3}first_at\0\u{3}last_at\0\u{1}settlement\0\u{3}first_conviction\0")
 
   fileprivate class _StorageClass {
     var _target: Wallet_V1_StakePosition.OneOf_Target?
@@ -1548,6 +1714,7 @@ nonisolated extension Wallet_V1_StakePosition: SwiftProtobuf.Message, SwiftProto
     var _firstAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
     var _lastAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
     var _settlement: Wallet_V1_StakeSettlement? = nil
+    var _firstConviction: Wallet_V1_Conviction = .unspecified
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -1563,6 +1730,7 @@ nonisolated extension Wallet_V1_StakePosition: SwiftProtobuf.Message, SwiftProto
       _firstAt = source._firstAt
       _lastAt = source._lastAt
       _settlement = source._settlement
+      _firstConviction = source._firstConviction
     }
   }
 
@@ -1601,6 +1769,7 @@ nonisolated extension Wallet_V1_StakePosition: SwiftProtobuf.Message, SwiftProto
         case 4: try { try decoder.decodeSingularMessageField(value: &_storage._firstAt) }()
         case 5: try { try decoder.decodeSingularMessageField(value: &_storage._lastAt) }()
         case 6: try { try decoder.decodeSingularMessageField(value: &_storage._settlement) }()
+        case 7: try { try decoder.decodeSingularEnumField(value: &_storage._firstConviction) }()
         default: break
         }
       }
@@ -1636,6 +1805,9 @@ nonisolated extension Wallet_V1_StakePosition: SwiftProtobuf.Message, SwiftProto
       try { if let v = _storage._settlement {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
       } }()
+      if _storage._firstConviction != .unspecified {
+        try visitor.visitSingularEnumField(value: _storage._firstConviction, fieldNumber: 7)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -1650,6 +1822,7 @@ nonisolated extension Wallet_V1_StakePosition: SwiftProtobuf.Message, SwiftProto
         if _storage._firstAt != rhs_storage._firstAt {return false}
         if _storage._lastAt != rhs_storage._lastAt {return false}
         if _storage._settlement != rhs_storage._settlement {return false}
+        if _storage._firstConviction != rhs_storage._firstConviction {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -1772,6 +1945,173 @@ nonisolated extension Wallet_V1_ListStakePositionsResponse: SwiftProtobuf.Messag
 
   public static func ==(lhs: Wallet_V1_ListStakePositionsResponse, rhs: Wallet_V1_ListStakePositionsResponse) -> Bool {
     if lhs.positions != rhs.positions {return false}
+    if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_ListMyStakesRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListMyStakesRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}status\0\u{3}page_size\0\u{3}page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.status) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.pageSize) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.pageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if self.status != .unspecified {
+      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 2)
+    }
+    if self.pageSize != 0 {
+      try visitor.visitSingularInt32Field(value: self.pageSize, fieldNumber: 3)
+    }
+    if !self.pageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.pageToken, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_ListMyStakesRequest, rhs: Wallet_V1_ListMyStakesRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.status != rhs.status {return false}
+    if lhs.pageSize != rhs.pageSize {return false}
+    if lhs.pageToken != rhs.pageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_MyStake: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".MyStake"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}comment_id\0\u{1}points\0\u{3}first_at\0\u{3}last_at\0\u{3}settles_at\0\u{3}settled_at\0\u{1}verdict\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.target != nil {try decoder.handleConflictingOneOf()}
+          self.target = .postID(v)
+        }
+      }()
+      case 2: try {
+        var v: String?
+        try decoder.decodeSingularStringField(value: &v)
+        if let v = v {
+          if self.target != nil {try decoder.handleConflictingOneOf()}
+          self.target = .commentID(v)
+        }
+      }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.points) }()
+      case 4: try { try decoder.decodeSingularMessageField(value: &self._firstAt) }()
+      case 5: try { try decoder.decodeSingularMessageField(value: &self._lastAt) }()
+      case 6: try { try decoder.decodeSingularMessageField(value: &self._settlesAt) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._settledAt) }()
+      case 8: try { try decoder.decodeSingularEnumField(value: &self.verdict) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    switch self.target {
+    case .postID?: try {
+      guard case .postID(let v)? = self.target else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 1)
+    }()
+    case .commentID?: try {
+      guard case .commentID(let v)? = self.target else { preconditionFailure() }
+      try visitor.visitSingularStringField(value: v, fieldNumber: 2)
+    }()
+    case nil: break
+    }
+    if self.points != 0 {
+      try visitor.visitSingularInt64Field(value: self.points, fieldNumber: 3)
+    }
+    try { if let v = self._firstAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 4)
+    } }()
+    try { if let v = self._lastAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 5)
+    } }()
+    try { if let v = self._settlesAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 6)
+    } }()
+    try { if let v = self._settledAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
+    if self.verdict != .unspecified {
+      try visitor.visitSingularEnumField(value: self.verdict, fieldNumber: 8)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_MyStake, rhs: Wallet_V1_MyStake) -> Bool {
+    if lhs.target != rhs.target {return false}
+    if lhs.points != rhs.points {return false}
+    if lhs._firstAt != rhs._firstAt {return false}
+    if lhs._lastAt != rhs._lastAt {return false}
+    if lhs._settlesAt != rhs._settlesAt {return false}
+    if lhs._settledAt != rhs._settledAt {return false}
+    if lhs.verdict != rhs.verdict {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_ListMyStakesResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListMyStakesResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}stakes\0\u{3}next_page_token\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.stakes) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.nextPageToken) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.stakes.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.stakes, fieldNumber: 1)
+    }
+    if !self.nextPageToken.isEmpty {
+      try visitor.visitSingularStringField(value: self.nextPageToken, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_ListMyStakesResponse, rhs: Wallet_V1_ListMyStakesResponse) -> Bool {
+    if lhs.stakes != rhs.stakes {return false}
     if lhs.nextPageToken != rhs.nextPageToken {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true

@@ -436,7 +436,7 @@ final class AccountSettingsViewController: UIViewController {
             title: "Deactivate your account?", message: Self.deactivationExplanation, preferredStyle: .actionSheet
         )
         sheet.addAction(UIAlertAction(title: "Continue", style: .destructive) { [weak self] _ in
-            self?.askPasswordAndDeactivate()
+            self?.confirmItsYouAndDeactivate()
         })
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
         if let popover = sheet.popoverPresentationController {
@@ -447,9 +447,10 @@ final class AccountSettingsViewController: UIViewController {
         present(sheet, animated: true)
     }
 
-    /// The server gates deactivation behind a fresh step-up, so the password
-    /// comes first; the deactivation runs on the token it mints.
-    private func askPasswordAndDeactivate() {
+    /// The server gates deactivation behind a fresh proof of the holder
+    /// (#648): a code to the account's address first (#840), then the
+    /// deactivation on the fresh token.
+    private func confirmItsYouAndDeactivate() {
         guard let stepUp, let deactivator else { return }
         StepUpPrompt.present(
             on: self,
@@ -463,14 +464,14 @@ final class AccountSettingsViewController: UIViewController {
                         self?.presentDeactivated()
                     } catch AccountError.stepUpRequired {
                         // The proof expired between the two calls: ask again.
-                        self?.askPasswordAndDeactivate()
+                        self?.confirmItsYouAndDeactivate()
                     } catch {
                         self?.presentInfo("Couldn't deactivate your account. Try again.")
                     }
                 }
             },
             onFailure: { [weak self] _ in
-                self?.presentInfo("Couldn't confirm your password. Check your connection and try again.")
+                self?.presentInfo("Couldn't confirm it's you. Check your connection and try again.")
             }
         )
     }

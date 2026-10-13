@@ -3,11 +3,6 @@ import Testing
 import UIKit
 @testable import Auth
 
-private struct NoLogin: LoginPerforming {
-    func login(username: String, password: String) async throws -> LoginOutcome { .signedIn }
-    func completeLogin(_ challenge: SecondStepChallenge, code: String) async throws {}
-}
-
 @MainActor
 struct LoginFlowCoordinatorTests {
     private func firstScreen(of flow: UIViewController) throws -> UIViewController {
@@ -18,7 +13,7 @@ struct LoginFlowCoordinatorTests {
     /// Presented over the app for a guest, the flow can be closed.
     @Test func presentedOverTheAppItCarriesAWorkingCloseButton() throws {
         var closed = false
-        let flow = LoginFlowCoordinator(loginService: NoLogin()).start { closed = true }
+        let flow = LoginFlowCoordinator().start { closed = true }
 
         let close = try #require(try firstScreen(of: flow).navigationItem.leftBarButtonItem)
         close.primaryAction?.performWithSender(nil, target: nil)
@@ -28,14 +23,14 @@ struct LoginFlowCoordinatorTests {
 
     /// Installed without a way out, it offers none.
     @Test func withoutACloseHandlerItHasNoCloseButton() throws {
-        let flow = LoginFlowCoordinator(loginService: NoLogin()).start()
+        let flow = LoginFlowCoordinator().start()
 
         #expect(try firstScreen(of: flow).navigationItem.leftBarButtonItem == nil)
     }
 
     /// Opened by a gated action, the flow leads with the reason.
     @Test func aGatedActionsPromptIsTheHeadline() throws {
-        let flow = LoginFlowCoordinator(loginService: NoLogin()).start(prompt: "Sign up to like this post") {}
+        let flow = LoginFlowCoordinator().start(prompt: "Sign up to like this post") {}
 
         let methods = try #require(try firstScreen(of: flow) as? MethodSelectionViewController)
         #expect(methods.prompt == "Sign up to like this post")
@@ -135,7 +130,7 @@ struct SignUpFlowTests {
         apple: FakeApple? = nil, profileSetup: FakeProfileSetup? = nil
     ) throws -> UINavigationController {
         let flow = LoginFlowCoordinator(
-            loginService: NoLogin(), signUp: signUp, federated: apple, profileSetup: profileSetup, homeCountry: { "FR" }
+            signUp: signUp, federated: apple, profileSetup: profileSetup, homeCountry: { "FR" }
         ).start()
         let navigation = try #require(flow as? UINavigationController)
         let methods = try #require(navigation.viewControllers.first as? MethodSelectionViewController)

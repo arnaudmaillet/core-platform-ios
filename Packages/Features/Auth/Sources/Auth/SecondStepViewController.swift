@@ -3,7 +3,7 @@ import UIKit
 
 /// Two-step sign-in's second step (#383): the six digits from the holder's
 /// authenticator app, or one of their backup codes. The credential before it
-/// (password, emailed code, Apple) is already proven; this code finishes the
+/// (emailed code, SMS code, Apple) is already proven; this code finishes the
 /// sign-in (`auth.v1.CompleteLogin`).
 ///
 /// Six digits submit on the last one, like the emailed code. A backup code

@@ -15,9 +15,8 @@ struct SecurityCheckupTests {
 
     @Test func aWellProtectedAccountIsAllDoneExceptWhatTheAppCantDo() {
         let items = SecurityCheckup.items(account: .content(account()), sessionCount: .content(1), appLockOn: true, lockMethod: "Face ID")
-        #expect(items.map(\.id) == ["email", "phone", "sessions", "appLock", "password", "twoFactor"])
+        #expect(items.map(\.id) == ["email", "phone", "sessions", "appLock", "twoFactor"])
         #expect(SecurityCheckup.summary(items) == "4 of 4 done")
-        #expect(state("password", in: items) == .info)
         #expect(state("twoFactor", in: items) == .unavailable)
     }
 
@@ -46,10 +45,10 @@ struct SecurityCheckupTests {
     /// lines out: there is nothing to say about it yet.
     @Test func absentSourcesAndRunningReadsAreLeftOut() {
         let absent = SecurityCheckup.items(account: nil, sessionCount: nil, appLockOn: false, lockMethod: "Passcode")
-        #expect(absent.map(\.id) == ["appLock", "password", "twoFactor"])
+        #expect(absent.map(\.id) == ["appLock", "twoFactor"])
         #expect(absent.first?.title == "Turn on App Lock")
         let running = SecurityCheckup.items(account: .loading, sessionCount: .loading, appLockOn: false, lockMethod: "Passcode")
-        #expect(running.map(\.id) == ["appLock", "password", "twoFactor"])
+        #expect(running.map(\.id) == ["appLock", "twoFactor"])
     }
 
     /// #799: a failed read keeps its line, as a failed line, and the summary
@@ -59,7 +58,7 @@ struct SecurityCheckupTests {
             account: .failed(message: SecurityCheckup.failedAccountTitle), sessionCount: .failed(message: "x"),
             appLockOn: true, lockMethod: "Face ID"
         )
-        #expect(items.map(\.id) == ["account", "sessions", "appLock", "password", "twoFactor"])
+        #expect(items.map(\.id) == ["account", "sessions", "appLock", "twoFactor"])
         #expect(state("account", in: items) == .failed)
         #expect(state("sessions", in: items) == .failed)
         #expect(items.first?.title == SecurityCheckup.failedAccountTitle)

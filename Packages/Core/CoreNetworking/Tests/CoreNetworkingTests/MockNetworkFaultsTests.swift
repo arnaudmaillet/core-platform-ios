@@ -27,12 +27,13 @@ struct MockNetworkFaultsTests {
         let client = Auth_V1_AuthServiceClient(
             client: ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
         )
-        var grant = Auth_V1_PasswordGrant()
-        grant.username = MockAuthService.defaultCredentials.username
-        grant.password = MockAuthService.defaultCredentials.password
+        // Its handler is the test's own: what the request carries is moot.
+        var grant = Auth_V1_VerificationCodeGrant()
+        grant.challengeID = "vc-any"
+        grant.code = MockAuthService.verificationCode
         var request = Auth_V1_LoginRequest()
-        request.grantType = .password
-        request.credential = .password(grant)
+        request.grantType = .verificationCode
+        request.credential = .verificationCode(grant)
         return await client.login(request: request, headers: [:])
     }
 

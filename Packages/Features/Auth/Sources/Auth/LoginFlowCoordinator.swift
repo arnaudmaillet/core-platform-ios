@@ -17,9 +17,9 @@ enum AuthLegalLink: CaseIterable {
 }
 
 /// Orchestrates the sign-in flow on its own navigation stack: an explicit
-/// method-selection menu branching to the email or phone credentials screen
-/// (or a federated placeholder). Owns the shared `LoginViewModel` — the auth
-/// core stays a single seam over `LoginPerforming` — while the screens stay
+/// method-selection menu branching to a code sent by email or SMS, or to
+/// Sign in with Apple. There is no password any more (#840): a code proves
+/// the address, and an address with an account signs in. The screens stay
 /// dumb and report upward through closures.
 ///
 /// Lifetime: the root screen's closures strongly capture the coordinator, so
@@ -31,12 +31,11 @@ final class LoginFlowCoordinator {
     /// pushes it; until then the flow lands on a native placeholder.
     var makeRegistrationViewController: (@MainActor () -> UIViewController)?
 
-    private let viewModel: LoginViewModel
-    private let loginService: any LoginPerforming
     private weak var navigationController: UINavigationController?
 
-    /// Sign-up and sign-in by code (guest mode B4, #449). Nil keeps the
-    /// password screen behind "email" and the unavailable phone path.
+    /// Sign-up and sign-in by code (guest mode B4, #449) — the only way in
+    /// since passwords went (#840). Nil (tests of the shell alone): the
+    /// methods say they are unavailable.
     private let signUp: (any SignUpPerforming)?
     /// Native Sign in with Apple. Nil keeps the provider rows unavailable.
     private let federated: (any FederatedSignInProviding)?
@@ -127,14 +126,11 @@ final class LoginFlowCoordinator {
     }
 
     init(
-        loginService: any LoginPerforming,
         signUp: (any SignUpPerforming)? = nil,
         federated: (any FederatedSignInProviding)? = nil,
         profileSetup: (any AccountProfileSetup)? = nil,
         homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" }
     ) {
-        viewModel = LoginViewModel(loginService: loginService)
-        self.loginService = loginService
         self.signUp = signUp
         self.federated = federated
         self.profileSetup = profileSetup
@@ -156,11 +152,10 @@ final class LoginFlowCoordinator {
         methodSelection.onMethodSelected = { [self] method in
             select(method)
         }
+        // An account signs in the way it signs up: a code proves the
+        // address, and an address with an account goes straight in.
         methodSelection.onLogIn = { [self] in
-            showEmailAuth()
-        }
-        viewModel.onSecondStep = { [weak self] challenge in
-            self?.showSecondStep(challenge, finishing: .password)
+            select(.email)
         }
         methodSelection.flowToolbarItems = flowToolbarItems
 
@@ -187,7 +182,7 @@ final class LoginFlowCoordinator {
         case .provider(let provider):
             presentFederatedUnavailable(provider)
         case .email:
-            if signUp != nil { showEmailCode() } else { showEmailAuth() }
+            if signUp != nil { showEmailCode() } else { presentCodesUnavailable() }
         case .phone:
             showPhoneAuth()
         }
@@ -332,7 +327,7 @@ final class LoginFlowCoordinator {
                     await self?.finishSignIn(account, from: step)
                 case .needsSecondStep(let challenge):
                     step?.setWorking(false)
-                    self?.showSecondStep(challenge, finishing: .pendingAccount)
+                    self?.showSecondStep(challenge)
                 case .needsSignUp:
                     step?.setWorking(false)
                     self?.credential = credential
@@ -374,7 +369,7 @@ final class LoginFlowCoordinator {
                     await self?.finishSignIn(account, from: nil)
                 case .needsSecondStep(let challenge):
                     self?.suggestedName = result.displayName
-                    self?.showSecondStep(challenge, finishing: .pendingAccount)
+                    self?.showSecondStep(challenge)
                 case .needsSignUp:
                     self?.credential = credential
                     self?.suggestedName = result.displayName
@@ -403,37 +398,24 @@ final class LoginFlowCoordinator {
 
     // MARK: - Two-step sign-in (#383)
 
-    /// How a second step finishes: a password sign-in becomes the session at
-    /// once; a code or Apple sign-in hands back its account, which goes
-    /// through `finishSignIn` like any other (the profile check, #548).
-    enum SecondStepFinish {
-        case password, pendingAccount
-    }
-
-    private func showSecondStep(_ challenge: SecondStepChallenge, finishing: SecondStepFinish) {
+    /// A code or Apple sign-in's second step hands back its account, which
+    /// goes through `finishSignIn` like any other (the profile check, #548).
+    private func showSecondStep(_ challenge: SecondStepChallenge) {
         let step = SecondStepViewController()
         step.onSubmit = { [weak self, weak step] code in
-            self?.completeSecondStep(challenge, code: code, finishing: finishing, from: step)
+            self?.completeSecondStep(challenge, code: code, from: step)
         }
         prepare(step)
         push(step)
     }
 
-    private func completeSecondStep(
-        _ challenge: SecondStepChallenge, code: String, finishing: SecondStepFinish, from step: SecondStepViewController?
-    ) {
+    private func completeSecondStep(_ challenge: SecondStepChallenge, code: String, from step: SecondStepViewController?) {
         step?.setWorking(true)
         Task { [weak self] in
-            guard let self else { return }
+            guard let self, let signUp else { return }
             do {
-                switch finishing {
-                case .password:
-                    try await loginService.completeLogin(challenge, code: code)
-                case .pendingAccount:
-                    guard let signUp else { return }
-                    let account = try await signUp.completeSecondStep(challenge, code: code)
-                    await finishSignIn(account, from: step)
-                }
+                let account = try await signUp.completeSecondStep(challenge, code: code)
+                await finishSignIn(account, from: step)
             } catch AuthError.secondStepExpired {
                 // The challenge is gone: back to where the sign-in began.
                 step?.setWorking(false)
@@ -448,7 +430,7 @@ final class LoginFlowCoordinator {
 
     private func presentSecondStepExpired() {
         let alert = UIAlertController(
-            title: "Sign In Again", message: LoginViewModel.message(for: .secondStepExpired), preferredStyle: .alert
+            title: "Sign In Again", message: AuthMessages.message(for: .secondStepExpired), preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
             guard let navigation = self?.navigationController,
@@ -537,7 +519,6 @@ final class LoginFlowCoordinator {
         let how = switch method {
         case .apple: "Sign in with Apple"
         case .google: "Sign in with Google"
-        case .password: "Log in with your password"
         case .emailCode: "Continue with email"
         case .phoneCode: "Continue with your phone"
         case .unknown: "Sign in"
@@ -570,40 +551,18 @@ final class LoginFlowCoordinator {
             step.present(error: error)
             return
         }
-        let message = (error as? AuthError).map(LoginViewModel.message(for:)) ?? "Something went wrong. Try again."
+        let message = (error as? AuthError).map(AuthMessages.message(for:)) ?? "Something went wrong. Try again."
         let alert = UIAlertController(title: "Couldn\u{2019}t Continue", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "OK", style: .default))
         navigationController?.topViewController?.present(alert, animated: true)
     }
 
-    private func showEmailAuth() {
-        let credentials = CredentialsAuthViewController(viewModel: viewModel)
-        credentials.onForgotPassword = { [self] in
-            showPasswordReset()
-        }
-        credentials.flowToolbarItems = flowToolbarItems
-        credentials.navigationItem.rightBarButtonItem = makeLanguageNavItem()
-        push(credentials)
-    }
-
-    /// The reset-dispatch seam: there is no reset plane on the BFF yet —
-    /// when it exists, the request call goes here and the alert becomes the
-    /// "check your inbox" confirmation. The screen never changes.
-    private func showPasswordReset() {
-        let reset = PasswordResetViewController()
-        reset.onSubmit = { [self] identifier in
-            _ = identifier // The dispatch payload, unused until the backend exists.
-            presentPasswordResetUnavailable()
-        }
-        reset.flowToolbarItems = flowToolbarItems
-        reset.navigationItem.rightBarButtonItem = makeLanguageNavItem()
-        push(reset)
-    }
-
-    private func presentPasswordResetUnavailable() {
+    /// No signing-up seam (tests of the shell alone): nothing proves an
+    /// address.
+    private func presentCodesUnavailable() {
         let alert = UIAlertController(
-            title: "Password Reset Isn\u{2019}t Available Yet",
-            message: "Sending reset links requires backend support that isn\u{2019}t live.",
+            title: "Sign-In Isn\u{2019}t Available",
+            message: "Sending sign-in codes isn\u{2019}t set up here.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -684,7 +643,7 @@ final class LoginFlowCoordinator {
     private func presentFederatedUnavailable(_ provider: IdentityProvider) {
         let alert = UIAlertController(
             title: "\u{201C}\(provider.displayName)\u{201D} Isn\u{2019}t Available Yet",
-            message: "Sign in with your email and password instead.",
+            message: "Continue with your email or phone instead.",
             preferredStyle: .alert
         )
         alert.addAction(UIAlertAction(title: "OK", style: .default))
@@ -692,12 +651,10 @@ final class LoginFlowCoordinator {
     }
 
     #if DEBUG
-    /// Sim QA scripts (no tap injection available):
-    /// `-login-demo-error` — email screen, demo/wrong-password, submits into
-    /// the failure alert. `-login-demo-phone` — phone screen, types a French
-    /// number (live formatting), Send Code into the verification sheet,
-    /// auto-verifies into the unavailable alert. `-login-demo-signup` /
-    /// `-login-demo-forgot` — land on the respective placeholders.
+    /// Sim QA scripts (no tap injection available): `-login-demo-phone` —
+    /// phone screen, types a French number (live formatting), Send Code into
+    /// the verification sheet. `-login-demo-signup` — lands on the
+    /// registration placeholder.
     ///
     /// ⚠️ EVERY STEP WAITS FOR A STACK AT REST, not for a clock. The 1s used to
     /// start when `start()` BUILT the root — before the shell had installed it,
@@ -708,16 +665,7 @@ final class LoginFlowCoordinator {
     /// when that never happens. The 1s stays as a beat before the first push.
     private func runQAHooksIfNeeded() {
         let arguments = ProcessInfo.processInfo.arguments
-        if arguments.contains("-login-demo-error") {
-            qaWhenSettled("login-demo-error", on: MethodSelectionViewController.self) { [self] in
-                showEmailAuth()
-                guard let top = navigationController?.topViewController as? CredentialsAuthViewController else {
-                    QAWait.fail("login-demo-error", "the email screen is not on top after the push")
-                    return
-                }
-                top.qaAutoSubmit = (identifier: "demo", password: "wrong-password")
-            }
-        } else if arguments.contains("-login-demo-phone") {
+        if arguments.contains("-login-demo-phone") {
             qaWhenSettled("login-demo-phone", on: MethodSelectionViewController.self) { [self] in
                 showPhoneAuth()
                 guard let top = navigationController?.topViewController as? PhoneAuthViewController else {
@@ -729,21 +677,6 @@ final class LoginFlowCoordinator {
         } else if arguments.contains("-login-demo-signup") {
             qaWhenSettled("login-demo-signup", on: MethodSelectionViewController.self) { [self] in
                 showRegistration()
-            }
-        } else if arguments.contains("-login-demo-forgot") {
-            qaWhenSettled("login-demo-forgot email", on: MethodSelectionViewController.self) { [self] in
-                showEmailAuth()
-                // The second push waits for the first to LAND, not for 1s.
-                QAWait.until("login-demo-forgot reset", { [self] in
-                    qaStackIsAtRest(on: CredentialsAuthViewController.self)
-                }) { [self] in
-                    showPasswordReset()
-                    guard let top = navigationController?.topViewController as? PasswordResetViewController else {
-                        QAWait.fail("login-demo-forgot", "the reset screen is not on top after the push")
-                        return
-                    }
-                    top.qaAutoSubmit = "demo"
-                }
             }
         }
     }

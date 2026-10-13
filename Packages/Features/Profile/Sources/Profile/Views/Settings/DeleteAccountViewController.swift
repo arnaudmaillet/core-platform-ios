@@ -6,10 +6,8 @@ import UIKit
 /// Art. 17): what goes, when it becomes permanent, one button, one final
 /// confirmation, then sign-out.
 ///
-/// No password step. There is no verify-credentials RPC, and re-running
-/// `auth.v1.Login` would open a new session the client cannot name (it does
-/// not know the IdP username). The guard is two explicit confirmations and a
-/// 30-day window instead; a step-up RPC can slot in before the request later.
+/// The guard is two explicit confirmations, a fresh proof of the holder (a
+/// code to the account's address, #840) and a 30-day window.
 ///
 /// No cancel button either: `account.v1` has no RPC to withdraw a request, so
 /// the screen says to contact support rather than offering an undo it cannot
@@ -311,8 +309,9 @@ final class DeleteAccountViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    /// The server gates deletion behind a fresh step-up (#648): the password
-    /// first, then the request on the token it mints.
+    /// The server gates deletion behind a fresh proof of the holder (#648):
+    /// a code to the account's address first (#840), then the request on
+    /// the fresh token.
     private func verifyThenRequestDeletion() {
         guard let stepUp else { requestDeletion(); return }
         StepUpPrompt.present(
@@ -323,7 +322,7 @@ final class DeleteAccountViewController: UIViewController {
             onVerified: { [weak self] in self?.requestDeletion() },
             onFailure: { [weak self] _ in
                 let failed = UIAlertController(
-                    title: nil, message: "Couldn't confirm your password. Check your connection and try again.", preferredStyle: .alert
+                    title: nil, message: "Couldn't confirm it's you. Check your connection and try again.", preferredStyle: .alert
                 )
                 failed.addAction(UIAlertAction(title: "OK", style: .default))
                 self?.present(failed, animated: true)
