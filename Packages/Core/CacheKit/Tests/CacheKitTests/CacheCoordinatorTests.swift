@@ -105,7 +105,7 @@ final class CacheCoordinatorTests {
         #expect(report.bytes(in: .images, medium: .disk) == 100)
         #expect(report.bytes(in: .videos) == 300)
         #expect(report.bytes(in: .messages) == 7)
-        #expect(report.bytesByCategory == [.images: 140, .videos: 300, .messages: 7, .other: 0])
+        #expect(report.bytesByCategory == [.images: 140, .videos: 300, .sounds: 0, .messages: 7, .other: 0])
         #expect(report.totalBytes(medium: .memory) == 47)
         #expect(report.totalBytes() == 447)
     }

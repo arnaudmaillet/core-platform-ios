@@ -90,6 +90,7 @@ final class StorageSettingsViewController: UIViewController {
         switch category {
         case .images: "Images"
         case .videos: "Videos"
+        case .sounds: "Music & Sounds"
         case .messages: "Messages"
         case .other: "Other"
         }
@@ -99,6 +100,7 @@ final class StorageSettingsViewController: UIViewController {
         switch category {
         case .images: "photo"
         case .videos: "play.rectangle"
+        case .sounds: "music.note"
         case .messages: "bubble.left.and.bubble.right"
         case .other: "square.stack.3d.up"
         }
@@ -237,7 +239,7 @@ final class StorageSettingsViewController: UIViewController {
         let what = category.map { Self.title($0).lowercased() }
         let sheet = UIAlertController(
             title: what.map { "Clear \($0)?" } ?? "Clear all cached data?",
-            message: (what.map { "\($0.prefix(1).uppercased() + $0.dropFirst()) are" } ?? "Images, videos, messages and pages are")
+            message: (what.map { "\($0.prefix(1).uppercased() + $0.dropFirst()) are" } ?? "Images, videos, sounds, messages and pages are")
                 + " downloaded again when you next see them. Drafts, posts and your settings aren't affected.",
             preferredStyle: .actionSheet
         )
