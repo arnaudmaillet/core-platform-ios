@@ -143,7 +143,6 @@ public final class ShopStorefrontViewController: UIViewController {
         // landed (owner's recording, 2026-10-13). This page never scrolls
         // sideways: only its scrolling axis is adjusted.
         scroll.contentInsetAdjustmentBehavior = .scrollableAxes
-        scroll.delegate = self
         scroll.backgroundColor = .clear
         scroll.topEdgeEffect.style = .soft
         view.addSubview(scroll)
@@ -182,9 +181,6 @@ public final class ShopStorefrontViewController: UIViewController {
         // changes, not per scroll.
         let width = view.bounds.width
         guard width > 0, width != laidOutWidth else {
-            // A heading insets from its scroll surface, which a sheet's
-            // presentation moves under it: laid out again with the page.
-            relayHeadings()
             return
         }
         laidOutWidth = width
@@ -192,19 +188,6 @@ public final class ShopStorefrontViewController: UIViewController {
     }
 
     private var laidOutWidth: CGFloat = 0
-
-    /// ⚠️ A heading insets its title from its scroll surface — this page —
-    /// measured when it lays out. Measured while the page sat off its rest
-    /// (a push still settling, a back swipe let go), it kept a title ~200pt
-    /// in until something laid it out again (owner, 2026-10-13). So every
-    /// time the page moves or settles, the headings measure again: cheap,
-    /// two views.
-    private func relayHeadings() {
-        for shelf in [boostsShelf, countriesShelf] {
-            shelf?.heading.setNeedsLayout()
-            shelf?.heading.layoutIfNeeded()
-        }
-    }
 
     override public func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
@@ -214,7 +197,6 @@ public final class ShopStorefrontViewController: UIViewController {
 
     override public func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        relayHeadings()
         updatePreview()
         guard !hasShownFocus, focus == .boosts else { return }
         hasShownFocus = true
@@ -490,6 +472,10 @@ final class ShopShelfView: UIView, UIScrollViewDelegate {
 
     init(heading content: SectionTitleView.Content, items: [(UIView, CGFloat)], vertical: Bool) {
         heading = SectionTitleView(content: content)
+        // A shelf spans the page: its title stands the surface's 20pt in,
+        // said rather than measured — measured, it read the page's position
+        // while a push was still placing it, and kept 221pt (2026-10-13).
+        heading.fixedInset = SectionTitleView.Metrics.surfaceInset
         super.init(frame: .zero)
         self.items = items.map(\.0)
         let column = UIStackView(arrangedSubviews: [heading])
@@ -1364,11 +1350,5 @@ final class ShopShelfRowScrollView: UIScrollView {
         let end = max(start, contentSize.width + adjustedContentInset.right - bounds.width)
         if velocity.x > 0 { return contentOffset.x > start + 0.5 }
         return contentOffset.x < end - 0.5
-    }
-}
-
-extension ShopStorefrontViewController: UIScrollViewDelegate {
-    public func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        relayHeadings()
     }
 }
