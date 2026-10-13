@@ -37,8 +37,15 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
     static var cornerRadius: CGFloat { PostGridListRowCell.mediaCornerRadius }
 
     private let imageView = UIImageView()
+    /// The cover and the live surface over it (#1088): the cover's arrival on
+    /// the loading ladder, the surface's plumbing shared with the grid's tile.
+    private lazy var media: MediaSurface = {
+        let media = MediaSurface(cover: imageView, in: contentView, coverSize: .full)
+        media.debugLabel = "rail-card"
+        media.onCoverLoaded = { [weak self] in self?.onCoverLoaded?() }
+        return media
+    }()
     private var overlay: ForYouCardCaptionOverlay?
-    private var loadTask: Task<Void, Never>?
     private(set) var post: GalleryPost?
 
     override init(frame: CGRect) {
@@ -68,9 +75,7 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         onReuse = nil
         onCoverLoaded = nil
         endVideoPreview()
-        loadTask?.cancel()
-        loadTask = nil
-        imageView.image = nil
+        media.reset()
         overlay?.removeFromSuperview()
         overlay = nil
         post = nil
@@ -94,22 +99,10 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
         self.overlay = overlay
         accessibilityLabel = [post.authorName, post.caption].compactMap { $0 }.joined(separator: ", ")
 
-        imageView.image = nil
-        guard let url = post.thumbnailURL else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
-            imageView.image = cached
-            return
-        }
-        loadTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url), !Task.isCancelled,
-                  let self, self.post?.id == post.id else { return }
-            UIView.transition(
-                with: imageView, duration: 0.25,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) { self.imageView.image = image }
-            loadedVideoRenderView?.setPoster(image)
-            onCoverLoaded?()
-        }
+        // The cover: at once from the pipeline's memory, else dissolved in
+        // and handed to the live surface as its poster; a late one for a
+        // recycled card lands nowhere.
+        media.loadCover(post.thumbnailURL, pipeline: imagePipeline, item: post.id)
     }
 
     // MARK: - The like
@@ -217,71 +210,20 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
 
     var onCoverLoaded: (() -> Void)?
     var onReuse: (() -> Void)?
-    private(set) var loadedVideoRenderView: VideoRenderView?
+    var loadedVideoRenderView: VideoRenderView? { media.video }
 
-    var renderedCover: UIImage? { imageView.image }
+    var renderedCover: UIImage? { media.renderedCover }
     /// The card IS its media, edge to edge.
     var videoMediaRect: CGRect { bounds }
     var isRenderingCurrentMedia: Bool { loadedVideoRenderView != nil }
 
-    func applyCover(_ image: UIImage) {
-        guard imageView.image == nil else { return }
-        imageView.image = image
-        loadedVideoRenderView?.setPoster(image)
-    }
-
-    func showReturnStill(_ image: UIImage) {
-        imageView.image = image
-        loadedVideoRenderView?.setPoster(image)
-    }
-
-    func makeVideoRenderViewIfNeeded() -> VideoRenderView {
-        if let loadedVideoRenderView { return loadedVideoRenderView }
-        let view = VideoRenderView()
-        #if DEBUG
-        view.debugLabel = "rail-card"
-        #endif
-        view.isHidden = true
-        view.isUserInteractionEnabled = false
-        view.frame = contentView.bounds
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        // Above the still, BELOW the overlay: the words read over moving video
-        // exactly as they do over a poster.
-        contentView.insertSubview(view, aboveSubview: imageView)
-        loadedVideoRenderView = view
-        return view
-    }
-
-    func adoptVideoRenderView(_ view: VideoRenderView) {
-        if let existing = loadedVideoRenderView, existing !== view {
-            existing.detachForReplacement()
-            existing.removeFromSuperview()
-        }
-        view.transform = .identity
-        view.frame = contentView.bounds
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.isHidden = false
-        contentView.insertSubview(view, aboveSubview: imageView)
-        loadedVideoRenderView = view
-    }
-
-    func donateVideoRenderView() -> VideoRenderView? {
-        guard let view = loadedVideoRenderView else { return nil }
-        loadedVideoRenderView = nil
-        view.removeFromSuperview()
-        return view
-    }
-
-    func beginVideoPreview() {
-        let view = makeVideoRenderViewIfNeeded()
-        view.setPoster(imageView.image)
-        // The cover keeps the card until there is a frame to replace it with.
-        view.revealOnFirstFrame()
-    }
-
-    func endVideoPreview() {
-        loadedVideoRenderView?.hideCrossFading()
-    }
+    func applyCover(_ image: UIImage) { media.applyCover(image) }
+    func showReturnStill(_ image: UIImage) { media.showReturnStill(image) }
+    func makeVideoRenderViewIfNeeded() -> VideoRenderView { media.makeVideoRenderViewIfNeeded() }
+    func adoptVideoRenderView(_ view: VideoRenderView) { media.adopt(view) }
+    func donateVideoRenderView() -> VideoRenderView? { media.donate() }
+    func beginVideoPreview() { media.beginPreview() }
+    func endVideoPreview() { media.endPreview() }
 }
 
 extension ForYouFollowingCardCell: GridPlaybackCell {}

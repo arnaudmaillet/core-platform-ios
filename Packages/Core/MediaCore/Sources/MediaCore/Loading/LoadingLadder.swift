@@ -239,6 +239,10 @@ public final class LoadingLadder {
     /// Whether `token` is the current item's.
     public func isCurrent(_ token: Token) -> Bool { token.generation == generation }
 
+    /// The current item's token — for an answer that comes from outside the
+    /// item's own load (a parked frame, a seeded cover).
+    public var currentToken: Token { Token(generation: generation) }
+
     /// Shows `rung` for the item `token` names.
     ///
     /// - Parameter warm: the answer was at hand when the item was configured
