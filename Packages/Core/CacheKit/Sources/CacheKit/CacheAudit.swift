@@ -219,7 +219,7 @@ public final class CacheAudit: Sendable {
         let classText: String = name(of: line.namespace.priorityClass)
         let hitRateText: String = percent(statistics.hitRate)
         let wasteText: String = percent(fates.wasteRatio)
-        let fields: [String] = [
+        var fields: [String] = [
             "ns=\(line.namespace.name)",
             "medium=\(line.medium.rawValue)",
             "class=\(classText)",
@@ -235,6 +235,10 @@ public final class CacheAudit: Sendable {
             "speculative=\(speculativeText)",
             "waste=\(wasteText)"
         ]
+        // What the disk index costs (#1079): a memory cache has none.
+        if line.medium == .disk {
+            fields.append("indexWrites=\(statistics.indexWrites)(delayed:\(statistics.delayedIndexWrites))")
+        }
         return fields.joined(separator: " ")
     }
 

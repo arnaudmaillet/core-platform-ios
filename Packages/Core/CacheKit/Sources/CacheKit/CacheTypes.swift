@@ -288,6 +288,11 @@ public struct CacheStatistics: Sendable, Equatable {
     /// Bytes removed per reason.
     public var removedBytes: [CacheEvictionReason: Int] = [:]
     public var speculative = CacheSpeculativeStatistics()
+    /// Index files a disk store wrote (#1079): what its flushes cost.
+    public var indexWrites = 0
+    /// Of those, the ones written a few seconds after the last change rather
+    /// than by the change count, a background or a wipe.
+    public var delayedIndexWrites = 0
 
     public init() {}
 
