@@ -58,7 +58,10 @@ public final class MediaSurface {
         self.host = host
         load = ImageLoadSlot(size: coverSize)
         ladder = LoadingLadder(policy: policy, clock: clock)
-        ladder.setView(cover, for: .preview, permanent: true)
+        // The cover's alpha is not the ladder's: a hero source's cover is
+        // read and concealed by the transitions (hook 2), so its arrival is a
+        // dissolve of the picture, not a fade of the view.
+        ladder.setView(cover, for: .preview, drivesAlpha: false, permanent: true)
     }
 
     // MARK: - The cover
@@ -75,8 +78,9 @@ public final class MediaSurface {
             guard let self, ladder.isCurrent(token) else { return }
             // A parked frame put meanwhile is the better picture (hook 7).
             guard ladder.previewSource != .parked else { return }
-            cover.image = image
+            // Unhidden first, so the picture dissolves in on a visible view.
             ladder.show(.preview, token: token, warm: transition == .none)
+            transition.perform(on: cover) { [cover] in cover.image = image }
             video?.setPoster(image)
             if transition != .none { onCoverLoaded?() }
         } failed: { [weak self] in
@@ -101,6 +105,9 @@ public final class MediaSurface {
         ladder.show(.preview, token: ladder.currentToken, warm: true, source: .parked)
         video?.setPoster(image)
     }
+
+    /// Whether a cover load is in flight.
+    public var isLoadingCover: Bool { load.isLoading }
 
     /// What the host draws as its still now.
     public var renderedCover: UIImage? { cover.image }

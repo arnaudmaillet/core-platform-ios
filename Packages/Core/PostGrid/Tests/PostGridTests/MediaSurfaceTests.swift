@@ -54,6 +54,22 @@ struct MediaSurfaceTests {
         #expect(media.ladder.transitions.last?.1 == .pictureArrives)
     }
 
+    /// ⚠️ THE COVER'S ALPHA IS NEVER THE LADDER'S (hook 2): the transitions
+    /// read and conceal a hero source's cover by it, so a load in flight or a
+    /// late landing leaves it opaque — the arrival dissolves the picture.
+    @Test func theCoversAlphaIsLeftToTheTransitions() async throws {
+        let (media, cover, _) = makeRig()
+        var loaded = 0
+        media.onCoverLoaded = { loaded += 1 }
+        media.loadCover(try #require(URL(string: "mock://cover/alpha")), pipeline: makePipeline(), item: "p1")
+        #expect(cover.alpha == 1)
+        for _ in 0..<200 where loaded == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(loaded == 1)
+        #expect(cover.alpha == 1 && !cover.isHidden)
+        media.reset()
+        #expect(cover.alpha == 1)
+    }
+
     /// ⚠️ THE PARKED FRAME WINS (hook 7): a closing hero lands the tile on its
     /// frame, and the pipeline's thumbnail landing afterwards does not replace
     /// it.

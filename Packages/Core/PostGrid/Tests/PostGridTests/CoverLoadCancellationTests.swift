@@ -111,11 +111,9 @@ struct CoverLoadCancellationTests {
         let cell = PostGridTileCell(frame: CGRect(x: 0, y: 0, width: 120, height: 120))
 
         cell.configure(with: first, imagePipeline: pipeline)
-        let firstLoad = try #require(cell.loadTask)
+        #expect(cell.media.isLoadingCover)
         cell.configure(with: second, imagePipeline: pipeline)
-
-        #expect(firstLoad.isCancelled)
-        #expect(cell.loadTask != nil)
+        #expect(cell.media.isLoadingCover)
 
         // The old cover lands first, then the right one.
         let landings = CoverLandings()

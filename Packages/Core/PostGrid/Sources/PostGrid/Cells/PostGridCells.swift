@@ -2592,7 +2592,7 @@ public final class PostGridTileCell: UICollectionViewCell {
 
     /// The image the brick is currently showing — see `PostGridListRowCell`'s
     /// note for why a hero reads this rather than the image pipeline.
-    public var renderedCover: UIImage? { imageView.image }
+    public var renderedCover: UIImage? { media.renderedCover }
 
     /// A tile IS its media, edge to edge, so the whole cell is the rect
     /// visibility is measured against.
@@ -2609,24 +2609,13 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// playing (`loadedVideoRenderView`) without the question itself allocating
     /// the layer, which is exactly what touching a lazy var would do.
     public func makeVideoRenderViewIfNeeded() -> VideoRenderView {
-        if let loadedVideoRenderView { return loadedVideoRenderView }
-        let view = VideoRenderView()
-        #if DEBUG
-        view.debugLabel = "tile"
-        #endif
-        view.isHidden = true
-        view.isUserInteractionEnabled = false
-        view.frame = contentView.bounds
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         // Above the still, below the badge and counters, so the furniture keeps
         // reading over moving video exactly as it does over a poster.
-        contentView.insertSubview(view, aboveSubview: imageView)
-        loadedVideoRenderView = view
-        return view
+        media.makeVideoRenderViewIfNeeded()
     }
 
     /// The video surface if one was ever built, else nil — never allocates.
-    public private(set) var loadedVideoRenderView: VideoRenderView?
+    public var loadedVideoRenderView: VideoRenderView? { media.video }
 
     /// Installs a flight card's live surface as this tile's own, at landing.
     ///
@@ -2635,16 +2624,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// just as the card is removed, which is the flash at the end of a
     /// dismissal.
     public func adoptVideoRenderView(_ view: VideoRenderView) {
-        if let existing = loadedVideoRenderView, existing !== view {
-            existing.detachForReplacement()
-            existing.removeFromSuperview()
-        }
-        view.transform = .identity
-        view.frame = contentView.bounds
-        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        view.isHidden = false
-        contentView.insertSubview(view, aboveSubview: imageView)
-        loadedVideoRenderView = view
+        media.adopt(view)
     }
 
     /// Gives up the live surface so a hero flight can fly the *same* layer.
@@ -2657,10 +2637,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     ///
     /// The cell drops its reference; a later play builds a fresh surface.
     public func donateVideoRenderView() -> VideoRenderView? {
-        guard let view = loadedVideoRenderView else { return nil }
-        loadedVideoRenderView = nil
-        view.removeFromSuperview()
-        return view
+        media.donate()
     }
 
     /// Called when the collection view recycles this cell, so whoever loaned it
@@ -2687,9 +2664,17 @@ public final class PostGridTileCell: UICollectionViewCell {
     private let likes = PostMetricLabel(
         symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
     )
-    /// The cover load in flight. Readable inside the package so a test can
-    /// ask whether a reconfigure cancelled it (#781).
-    private(set) var loadTask: Task<Void, Never>?
+    /// The cover and the live surface over it (#1088): the cover's arrival
+    /// on the loading ladder — a reconfigure cancelling the load in flight
+    /// (#781), a parked frame outranking a late thumbnail — and the surface's
+    /// plumbing shared with every other hero source. Readable inside the
+    /// package so a test can ask what is in flight.
+    private(set) lazy var media: MediaSurface = {
+        let media = MediaSurface(cover: imageView, in: contentView, coverSize: .full)
+        media.debugLabel = "tile"
+        media.onCoverLoaded = { [weak self] in self?.onCoverLoaded?() }
+        return media
+    }()
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
@@ -2741,9 +2726,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         onReuse = nil
         onCoverLoaded = nil
         endVideoPreview()
-        loadTask?.cancel()
-        loadTask = nil
-        imageView.image = nil
+        media.reset()
         // The viewer's stake was the last post's; the next host reads its own.
         setViewerStake(0)
         // The words were this post's; the next host says whether it wants
@@ -2773,14 +2756,11 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// blank face anyway — which is the exact failure the gate exists to
     /// prevent.
     public func applyCover(_ image: UIImage) {
-        guard imageView.image == nil else { return }
-        imageView.image = image
-        loadedVideoRenderView?.setPoster(image)
+        media.applyCover(image)
     }
 
     public func showReturnStill(_ image: UIImage) {
-        imageView.image = image
-        loadedVideoRenderView?.setPoster(image)
+        media.showReturnStill(image)
     }
 
     /// Fired when the cover lands from an async load.
@@ -2795,13 +2775,11 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// stays underneath as the poster, so the first frame replaces it rather
     /// than flashing black.
     public func beginVideoPreview() {
-        let view = makeVideoRenderViewIfNeeded()
-        view.setPoster(imageView.image)
         // The cover keeps the tile until there is video to replace it with.
         // Unhiding here put an empty surface over the cover for the whole
         // decode start-up — measured at ~1.2s on a cold tile — which is a tile
         // going dark at rest, before any transition is involved.
-        view.revealOnFirstFrame()
+        media.beginPreview()
         #if DEBUG
         // Whether the tile had a cover AT THE MOMENT playback started. Holding
         // the surface back is only worth anything if there is something behind
@@ -2809,7 +2787,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         // does, and the fix belongs in the cover pipeline rather than here.
         if ProcessInfo.processInfo.arguments.contains("-avsbdl-log") {
             print(String(format: "[avsbdl] %.3f tile beginVideoPreview cover=%@",
-                         CACurrentMediaTime(), imageView.image == nil ? "NIL" : "present"))
+                         CACurrentMediaTime(), media.renderedCover == nil ? "NIL" : "present"))
         }
         #endif
     }
@@ -2820,7 +2798,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         // stops as a flight leaves, and a binary hide snaps each of their
         // covers back in a single frame — several thumbnails popping at once,
         // on the grid, at exactly the moment the viewer is watching the flight.
-        loadedVideoRenderView?.hideCrossFading()
+        media.endPreview()
     }
 
     #if DEBUG
@@ -2998,11 +2976,6 @@ public final class PostGridTileCell: UICollectionViewCell {
         with post: GalleryPost, imagePipeline: ImagePipeline,
         showsInfo: Bool = false, infoReferenceSize: CGSize? = nil
     ) {
-        // ⚠️ The previous cover load goes first: a reconfigure without a reuse
-        // otherwise left it racing the new one, and an old cover could land
-        // over the right one (#781). See the list row's `configure`.
-        loadTask?.cancel()
-        loadTask = nil
         // Video tiles keep a dark floor: their poster may be unrenderable
         // (or plain black in the simulator), and the glyph needs a stage.
         contentView.backgroundColor = Self.fillColor(for: post)
@@ -3019,30 +2992,13 @@ public final class PostGridTileCell: UICollectionViewCell {
         infoDecidedSize = nil
         refreshInfoOverlay()
 
-        imageView.image = nil
-        guard let url = post.thumbnailURL else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
-            imageView.image = cached
-            return
-        }
-        loadTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url), !Task.isCancelled else { return }
-            guard let self else { return }
-            UIView.transition(
-                with: self.imageView, duration: 0.25,
-                options: [.transitionCrossDissolve, .allowUserInteraction]
-            ) {
-                self.imageView.image = image
-            }
-            // A tile can start playing before its cover arrives, and
-            // `beginVideoPreview` reads the cover exactly once — so a cover
-            // that lands afterwards never reached the surface, leaving it with
-            // no poster to fall back on for the rest of its life. That is the
-            // difference between a cold flight showing the thumbnail and
-            // showing nothing.
-            self.loadedVideoRenderView?.setPoster(image)
-            self.onCoverLoaded?()
-        }
+        // ⚠️ A new post's cover cancels the previous load: a reconfigure
+        // without a reuse otherwise left it racing the new one, and an old
+        // cover could land over the right one (#781). A cover that lands after
+        // the tile started playing becomes the surface's poster — the
+        // difference between a cold flight showing the thumbnail and showing
+        // nothing — and is announced, for the autoplay gate.
+        media.loadCover(post.thumbnailURL, pipeline: imagePipeline, item: post.id)
     }
 }
 
