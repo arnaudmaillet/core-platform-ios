@@ -804,11 +804,11 @@ final class SearchViewController: UIViewController {
     /// face off the right row.
     private func loadAvatar(_ url: URL?, into cell: PersonListCell, stillShowing item: SearchItem) {
         guard let url else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
+        if let cached = imagePipeline.cachedImage(for: url, size: .avatar) {
             return cell.setAvatarImage(cached)
         }
         Task { [weak self, weak cell] in
-            guard let image = try? await self?.imagePipeline.image(for: url) else { return }
+            guard let image = try? await self?.imagePipeline.image(for: url, size: .avatar) else { return }
             guard let self, let cell,
                   let indexPath = self.collectionView.indexPath(for: cell),
                   self.dataSource.itemIdentifier(for: indexPath) == item

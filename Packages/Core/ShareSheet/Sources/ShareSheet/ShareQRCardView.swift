@@ -281,7 +281,7 @@ public final class ShareQRCardView: UIView {
         avatarView.image = nil
         guard let url, let imagePipeline else { return }
         avatarTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url) else { return }
+            guard let image = try? await imagePipeline.image(for: url, size: .px256) else { return }
             guard let self, !Task.isCancelled else { return }
             self.avatarView.image = image
         }

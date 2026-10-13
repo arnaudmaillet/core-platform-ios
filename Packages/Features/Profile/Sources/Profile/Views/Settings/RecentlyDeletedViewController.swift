@@ -85,7 +85,7 @@ final class RecentlyDeletedViewController: UIViewController {
                 content.imageProperties.cornerRadius = 8
                 if let url = deleted.post.thumbnailURL, let pipeline = imagePipeline {
                     Task { [weak cell] in
-                        guard let image = try? await pipeline.image(for: url),
+                        guard let image = try? await pipeline.image(for: url, size: .px256),
                               var current = cell?.contentConfiguration as? UIListContentConfiguration else { return }
                         current.image = image
                         cell?.contentConfiguration = current

@@ -1009,14 +1009,25 @@ final class ProfileHeaderView: UIView {
         // picture is usually already decoded (the origin drew it — a chat
         // pill, a feed row), and an await here put the initials on screen for
         // the frames it took to come back with it.
-        if let cached = pipeline.cachedImage(for: url) {
+        //
+        // ⚠️ AT ITS SIZE, NOT FULL (#1086): 96 pt is a 512 px decode. The
+        // origin's rows decode at the avatar bucket, which this one does not
+        // answer; that face stands in (soft for a beat, never the initials)
+        // while the sharp one decodes.
+        if let cached = pipeline.cachedImage(for: url, size: .px512) {
             avatarView.image = cached
             monogramLabel.isHidden = true
             return
         }
-        isAvatarSettled = false
+        // The face is drawn, so a push does not wait for the sharper one.
+        let standIn = pipeline.cachedImage(for: url, size: .avatar)
+        if let standIn {
+            avatarView.image = standIn
+            monogramLabel.isHidden = true
+        }
+        isAvatarSettled = standIn != nil
         avatarTask = Task { [weak self] in
-            let image = try? await pipeline.image(for: url)
+            let image = try? await pipeline.image(for: url, size: .px512)
             guard let self, !Task.isCancelled, self.currentAvatarURL == url else { return }
             // A failure settles too: the initials are what stays.
             defer {

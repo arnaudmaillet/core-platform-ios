@@ -264,7 +264,7 @@ final class RelationshipListCell: UICollectionViewListCell {
 
         guard let url, let pipeline = imagePipeline else { return }
         avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let image = try? await pipeline.image(for: url, size: .avatar) else { return }
             guard let self, !Task.isCancelled, self.currentAvatarURL == url else { return }
             UIView.transition(
                 with: self.avatarView, duration: 0.25,

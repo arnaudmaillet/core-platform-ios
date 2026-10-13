@@ -100,7 +100,7 @@ final class NotificationCell: UICollectionViewListCell {
         thumbnailView.image = nil
         guard let url, let pipeline = imagePipeline else { return }
         thumbnailTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
+            guard let image = try? await pipeline.image(for: url, size: .px256) else { return }
             guard let self, !Task.isCancelled, self.thumbnailURL == url else { return }
             UIView.transition(
                 with: self.thumbnailView, duration: 0.2,

@@ -1086,7 +1086,7 @@ final class CommentsInputBar: UIView {
         applyPlaceholder()
         guard let url = identity?.avatarURL, let imagePipeline else { return }
         avatarTask = Task { [weak self] in
-            let image = try? await imagePipeline.image(for: url)
+            let image = try? await imagePipeline.image(for: url, size: .avatar)
             guard let self, let image, !Task.isCancelled,
                   self.representedAvatarURL == url else { return }
             self.avatarImageView.image = image

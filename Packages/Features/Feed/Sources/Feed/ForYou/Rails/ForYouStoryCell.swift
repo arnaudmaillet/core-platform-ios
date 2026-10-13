@@ -161,13 +161,13 @@ final class ForYouStoryCell: UICollectionViewCell {
         picture.isHidden = true
         monogram.isCovered = false
         guard let url = story.avatarURL else { return }
-        if let cached = imagePipeline.cachedImage(for: url) {
+        if let cached = imagePipeline.cachedImage(for: url, size: .px256) {
             showPicture(cached)
             return
         }
         let author = story.authorID
         pictureTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url), !Task.isCancelled,
+            guard let image = try? await imagePipeline.image(for: url, size: .px256), !Task.isCancelled,
                   let self, shownAuthor == author else { return }
             showPicture(image)
         }
