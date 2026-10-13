@@ -80,6 +80,42 @@ struct NotificationPreferencesTests {
         #expect(try await repository.notificationPreferences().mutedCategories.isEmpty)
     }
 
+    /// Email per category (#392): off by default; a switch sets only it,
+    /// and the push of that category keeps its value — the server sets both
+    /// channels of a category it is sent.
+    @Test func anEmailSwitchLeavesItsPushAlone() async throws {
+        let repository = makeRepository()
+        #expect(try await repository.notificationPreferences().emailCategories.isEmpty)
+
+        _ = try await repository.updateNotificationPreferences(.push(.comments, false))
+        let next = try await repository.updateNotificationPreferences(.email(.comments, true))
+
+        #expect(next.emailCategories == [.comments])
+        #expect(next.mutedCategories == [.comments], "the email switch turned the push back on")
+        let reread = try await repository.notificationPreferences()
+        #expect(reread.emailCategories == [.comments])
+        #expect(reread.mutedCategories == [.comments])
+    }
+
+    /// The other way: a push switch keeps the category's email.
+    @Test func aPushSwitchLeavesItsEmailAlone() async throws {
+        let repository = makeRepository()
+        _ = try await repository.updateNotificationPreferences(.email(.mentions, true))
+
+        let next = try await repository.updateNotificationPreferences(.push(.mentions, false))
+
+        #expect(next.emailCategories == [.mentions], "the push switch turned the email off")
+        #expect(next.mutedCategories == [.mentions])
+    }
+
+    /// The screen draws an email switch per category once loaded.
+    @Test func theScreenHasAnEmailSwitchPerCategory() {
+        let loaded = NotificationSettingsViewController.layout(permission: .authorized, phase: .loaded(NotificationPreferences()))
+        let email = loaded.first { $0.0 == .email }?.1 ?? []
+        #expect(email == NotificationCategory.allCases.map { .emailCategory($0) })
+        #expect(!loaded.contains { $0.0 == .comingSoon }, "nothing is planned any more")
+    }
+
     /// A pause runs until it ends or is resumed; more than 8 h is refused.
     @Test func aPauseHoldsUntilResumed() async throws {
         let repository = makeRepository()
