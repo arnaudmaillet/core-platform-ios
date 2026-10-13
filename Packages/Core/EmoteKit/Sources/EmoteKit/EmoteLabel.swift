@@ -467,7 +467,7 @@ open class EmoteLabel: UILabel {
                     player.view.isHidden = false
                     player.awaitsSlot = true
                     player.isShowing = true
-                    player.skeleton.hide(fading: true)
+                    player.skeleton.reveal(player.view)
                 }
                 return
             }
@@ -477,7 +477,8 @@ open class EmoteLabel: UILabel {
         player.view.setArt(art)
         player.view.isHidden = false
         player.isShowing = true
-        player.skeleton.hide(fading: true)
+        // Over a skeleton, the arrival every emote place plays (#1071).
+        player.skeleton.reveal(player.view)
     }
 
     private func release(_ player: EmotePlayer) {
@@ -568,6 +569,10 @@ open class EmoteLabel: UILabel {
     var skeletons: [EmoteSkeleton] {
         players.keys.sorted().compactMap { players[$0]?.skeleton }.filter(\.isShowing)
     }
+    /// Every player's skeleton, on show or not, in mark order.
+    var placeSkeletons: [EmoteSkeleton] { players.keys.sorted().compactMap { players[$0]?.skeleton } }
+    /// The players' views — the art — in mark order.
+    var artViews: [UIView] { players.keys.sorted().compactMap { players[$0]?.view } }
     /// The squares the players occupy, in the label's coordinates.
     var emoteFrames: [CGRect] { players.keys.sorted().compactMap { players[$0]?.view.frame } }
     var coveredMarkIndices: Set<Int> { coveredMarks }

@@ -132,10 +132,10 @@ public final class EmoteTileView: UIView {
         guard prefersAnimation || !emote.isUnicodeEmoji else { return }
         // ⚠️ NO GLYPH BEHIND AN ANIMATED EMOTE ON ITS WAY (#731): the slot
         // holds a skeleton (#987) — no system glyph standing in, which would
-        // flash between the two — and the art arrives with a bounce. The
-        // glyph comes back only if no art does.
+        // flash between the two — and the art bounces in over it
+        // (`EmoteSkeleton.reveal`, #1071). The glyph comes back only if no
+        // art does.
         glyphLabel.isHidden = true
-        var answeredAtOnce = true
         var answered = false
         request = engine.requestArt(for: emote, pixelSide: Self.pixelSide, motion: motion) { [weak self] art in
             answered = true
@@ -143,13 +143,11 @@ public final class EmoteTileView: UIView {
             self.request = nil
             if let art {
                 self.present(art, motion: motion)
-                if !answeredAtOnce { self.bounceIn() }
             } else {
                 self.skeleton.hide(fading: true)
                 self.glyphLabel.isHidden = false
             }
         }
-        answeredAtOnce = false
         guard !answered else { return }
         skeleton.frame = square
         skeleton.show(
@@ -158,29 +156,10 @@ public final class EmoteTileView: UIView {
         )
     }
 
-    /// The art arriving after the tile showed: from nothing, past its size
-    /// and back, fading in (#731).
-    private func bounceIn() {
-        guard window != nil, !UIAccessibility.isReduceMotionEnabled else { return }
-        isBouncingIn = true
-        bounceInCount += 1
-        player.layer.removeAllAnimations()
-        player.alpha = 0
-        player.transform = CGAffineTransform(scaleX: 0.3, y: 0.3)
-        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.55,
-                       initialSpringVelocity: 0.6, options: [.allowUserInteraction]) {
-            self.player.alpha = 1
-            self.player.transform = .identity
-        } completion: { _ in
-            self.isBouncingIn = false
-        }
-    }
-
-    /// Whether the art is arriving with its bounce. Internal for tests.
-    private(set) var isBouncingIn = false
-    /// How many times the art has bounced in — what a test reads, rather
-    /// than catching the half-second bounce in flight. Internal for tests.
-    private(set) var bounceInCount = 0
+    /// How many times the art has bounced in over its skeleton — what a test
+    /// reads, rather than catching the half-second bounce in flight. Internal
+    /// for tests.
+    var bounceInCount: Int { skeleton.revealCount }
     /// Whether the system glyph shows. Internal for tests.
     var showsGlyph: Bool { !glyphLabel.isHidden }
     /// Whether a skeleton holds the square (#987). Internal for tests.
@@ -193,7 +172,9 @@ public final class EmoteTileView: UIView {
         player.isHidden = false
         glyphLabel.isHidden = true
         isShowingArt = true
-        skeleton.hide(fading: true)
+        // Over a skeleton, the arrival every emote place plays (#1071): the
+        // bounce this tile introduced (#731), now shared.
+        skeleton.reveal(player)
         artMoves = motion == .loop && art.frameCount > 1
         if isPlaying { play() }
     }
@@ -281,10 +262,6 @@ public final class EmoteTileView: UIView {
         skeleton.hide()
         player.setArt(nil)
         player.isHidden = true
-        player.layer.removeAllAnimations()
-        player.alpha = 1
-        player.transform = .identity
-        isBouncingIn = false
         glyphLabel.isHidden = false
         isShowingArt = false
         artMoves = false
