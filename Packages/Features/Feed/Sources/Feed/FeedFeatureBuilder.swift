@@ -106,8 +106,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         localCache: FeedLocalCache? = nil,
         /// The app's entity store. Nil: this builder's screens share one of
         /// their own.
-        entities: EntityStore? = nil
+        entities: EntityStore? = nil,
+        /// A place's posts past the map's pins (#643). Nil: a place page shows
+        /// the pins it was handed.
+        placePosts: (any PlacePostsListing)? = nil
     ) {
+        self.placePosts = placePosts
         self.entities = entities ?? EntityStore()
         self.discovery = discovery
         self.localCache = localCache
@@ -274,6 +278,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     #endif
 
     private let counterClient: (any Counter_V1_CounterServiceClientInterface)?
+    private let placePosts: (any PlacePostsListing)?
     private let discovery: (any FeedProviding)?
     private let localCache: FeedLocalCache?
 
@@ -678,45 +683,24 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             wallet: wallet,
             makeWalletSheet: makeWalletSheet,
             entities: entities,
-            loadPosts: {
+            loadPosts: { [counterClient] in
                 // One hydration over the same provider shape the feed above
                 // uses, so every member is a cache hit. Unranked: the
                 // profile applies its own popularity order
                 // (`PlaceProfileViewController.ranked`).
-                let provider = FixedPostsFeedProvider(base: base, ids: postIDs)
-                var members = try await ForYouRepository(feed: provider).firstPage().posts
-                // ⚠️ THE TIMELINE READ HYDRATES LIKES ONLY, and a count this
-                // page never asked for is a control this page never draws.
-                //
-                // The place's VIEWS aggregate needed one projection, so this
-                // used to batch that alone — and the COMMENT count stayed
-                // absent, which `PostMetricLabel.set(nil)` renders as a hidden
-                // chip. The row therefore wore a likes pill and no comment
-                // pill, and the shortcut to a media post's thread did not exist
-                // on this screen at all. Filmed.
-                //
-                // One batched read of likes and comments instead (the views
-                // aggregate itself went on 2026-09-30: the header counts
-                // likes), through the same `PostCounterReader` For You and the
-                // profile gallery use — the counter is the number the rest of
-                // the app reads, so three surfaces asking three different ways
-                // is how they come to disagree. Fail-open: a missing read
-                // leaves every count as the timeline gave it.
-                if let counterClient {
-                    let byPostID = await PostCounterReader.counters(
-                        forPostIDs: members.map(\.id.rawValue), using: counterClient
-                    )
-                    if !byPostID.isEmpty {
-                        members = members.map { post in
-                            guard let counts = byPostID[post.id.rawValue] else { return post }
-                            var decorated = post
-                            decorated.reactionCount = counts.likes ?? post.reactionCount
-                            decorated.commentCount = counts.comments
-                            return decorated
-                        }
+                try await Self.placeGalleryPosts(postIDs, base: base, counterClient: counterClient)
+            },
+            // Past the pins (#643): the place's own pages, hydrated the same way.
+            loadMore: identity?.query.flatMap { query in
+                placePosts.map { listing in
+                    { [counterClient] token in
+                        let page = try await listing.placePostIDs(query, after: token)
+                        let posts = page.ids.isEmpty
+                            ? []
+                            : try await Self.placeGalleryPosts(page.ids, base: base, counterClient: counterClient)
+                        return PlacePostsPage(posts: posts, nextPageToken: page.next)
                     }
                 }
-                return members
             },
             openPost: { presenter, origin, ids in
                 presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
@@ -737,6 +721,36 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         gallery.mapReturn = mapReturn
         gallery.markerClose = markerClose
         return gallery
+    }
+
+    /// A place's posts as its page draws them: the feed's hydration (so
+    /// every post the feed above holds is a cache hit), then one batched read
+    /// of likes and comments.
+    ///
+    /// ⚠️ THE TIMELINE READ HYDRATES LIKES ONLY, and a count this page never
+    /// asked for is a control this page never draws. The COMMENT count stayed
+    /// absent, which `PostMetricLabel.set(nil)` renders as a hidden chip — so
+    /// one batched read of likes and comments, through the same
+    /// `PostCounterReader` For You and the profile gallery use. Fail-open: a
+    /// missing read leaves every count as the timeline gave it.
+    static func placeGalleryPosts(
+        _ ids: [PostID], base: any FeedProviding, counterClient: (any Counter_V1_CounterServiceClientInterface)?
+    ) async throws -> [GalleryPost] {
+        let provider = FixedPostsFeedProvider(base: base, ids: ids)
+        var members = try await ForYouRepository(feed: provider).firstPage().posts
+        if let counterClient {
+            let byPostID = await PostCounterReader.counters(forPostIDs: members.map(\.id.rawValue), using: counterClient)
+            if !byPostID.isEmpty {
+                members = members.map { post in
+                    guard let counts = byPostID[post.id.rawValue] else { return post }
+                    var decorated = post
+                    decorated.reactionCount = counts.likes ?? post.reactionCount
+                    decorated.commentCount = counts.comments
+                    return decorated
+                }
+            }
+        }
+        return members
     }
 
     /// The plain push, for a caller with no origin to describe.

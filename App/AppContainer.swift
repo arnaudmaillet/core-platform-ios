@@ -5,6 +5,7 @@ import CacheKit
 import Chat
 import ChatInterface
 import Connect
+import CoreLocation
 import CoreContracts
 import CoreNavigation
 import MediaCore
@@ -66,7 +67,11 @@ final class AppContainer {
             // A guest's write is refused here as at the fleet's edge, so a missing
             // gate shows up in mock mode (`[edge] REFUSED` in the console).
             // `-mock-open-edge` turns it off for QA that predates guest mode.
-            enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge")
+            enforcesEdgePolicy: !ProcessInfo.processInfo.arguments.contains("-mock-open-edge"),
+            // A place page asked by country code (#643): the map's borders.
+            countryOf: { latitude, longitude in
+                CountryAtlas.shared.country(owning: CLLocationCoordinate2D(latitude: latitude, longitude: longitude))?.code
+            }
         )
         backend.bff.faults = mockNetworkFaults
         return backend
@@ -925,7 +930,9 @@ final class AppContainer {
         useSound: { [unowned self] sound in self.onUseSound?(sound) },
         discovery: discoveryRepository,
         localCache: feedLocalCache,
-        entities: entityStore
+        entities: entityStore,
+        // A place page pages the place's posts past the map's pins (#643).
+        placePosts: PlacePostsRepository(geoClient: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient))
     )
 
     /// Discover's pool (`timeline.v1.GetDiscoveryFeed`, backend B3 / #512):
