@@ -388,4 +388,66 @@ struct CountryShopViewControllerTests {
         #expect(CountryShopEntry.symbolName == "storefront")
         #expect(UIImage(systemName: CountryShopEntry.symbolName) != nil)
     }
+
+    // MARK: - Prices on the app's button (#935)
+
+    private func laidOut(_ shop: CountryShopViewController) {
+        shop.view.frame = CGRect(x: 0, y: 0, width: 402, height: 800)
+        shop.view.layoutIfNeeded()
+    }
+
+    /// A price out of reach is the button's disabled state — greyed, a tap
+    /// does nothing — and it comes back once the balance covers it.
+    @Test func anUnaffordablePriceIsDisabledUntilTheBalanceCoversIt() throws {
+        let access = FakeAccess()
+        access.gems = 0
+        let shop = makeShop(access)
+        laidOut(shop)
+        let price = try #require(shop.debugPriceButton(for: "CN"))
+        #expect(price.currentGround == .tinted)
+        #expect(price.content.symbol == "diamond.fill")
+        #expect(price.content.title == access.standing(of: "CN")?.price.formatted())
+        #expect(!price.isEnabled)
+        #expect(!price.acceptsTaps, "an unaffordable price takes the tap")
+        #expect(price.accessibilityTraits.contains(.notEnabled))
+
+        access.gems = 10_000
+        NotificationCenter.default.post(name: .countryAccessDidChange, object: access)
+        shop.view.layoutIfNeeded()
+        let covered = try #require(shop.debugPriceButton(for: "CN"))
+        #expect(covered.isEnabled, "the balance covers the price and it stayed disabled")
+        #expect(covered.accessibilityLabel == "Unlock China for \(access.standing(of: "CN")?.price ?? 0) gems")
+    }
+
+    /// The price is the button as a list accessory — measured, so the slot
+    /// is never empty and the tap reaches it (the hand-made host is gone).
+    @Test func thePriceIsAMeasuredAccessory() throws {
+        let shop = makeShop()
+        laidOut(shop)
+        let price = try #require(shop.debugPriceButton(for: "IT"))
+        let host = try #require(price.superview)
+        #expect(host.bounds.width > 30, "the price's slot came out empty: \(host.bounds)")
+        #expect(sequence(first: host, next: \.superview).contains { $0 is CountryShopRowCell }, "the price is not in its row")
+    }
+
+    /// The pack's price follows the same rule; an account that may not buy
+    /// keeps it and reads why in its menu.
+    @Test func thePacksPriceIsDisabledOutOfReach() throws {
+        let access = FakeAccess()
+        access.gems = 10
+        let shop = CountryShopViewController(access: access, stakePacks: FakePacks(access: access))
+        shop.loadViewIfNeeded()
+        _ = try packRow(shop)
+        let price = try #require(shop.debugPackPriceButton)
+        #expect(!price.isEnabled)
+        #expect(price.showsMenuAsPrimaryAction)
+
+        let teen = FakeAccess()
+        teen.gems = 10
+        teen.purchasesRestricted = true
+        let teenShop = CountryShopViewController(access: teen, stakePacks: FakePacks(access: teen))
+        teenShop.loadViewIfNeeded()
+        _ = try packRow(teenShop)
+        #expect(teenShop.debugPackPriceButton?.isEnabled == true, "a teen could not read why")
+    }
 }

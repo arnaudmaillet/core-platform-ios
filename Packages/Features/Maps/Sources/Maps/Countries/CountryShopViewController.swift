@@ -364,8 +364,10 @@ public final class CountryShopViewController: UIViewController {
             posts: CountryStanding.compact(Int64(standing.posts))
         )
 
-        let trailing: UIView
-        if access.isUnlocked(code) {
+        let accessory: UICellAccessory
+        let unlocked = access.isUnlocked(code)
+        if unlocked {
+            priceButtons[code] = nil
             let label = UILabel()
             label.font = .appFont(forTextStyle: .subheadline)
             if code == access.homeCountry {
@@ -384,62 +386,67 @@ public final class CountryShopViewController: UIViewController {
                 label.attributedText = text
                 label.textColor = .secondaryLabel
             }
-            trailing = label
+            label.sizeToFit()
+            accessory = .customView(configuration: .init(
+                customView: label, placement: .trailing(), reservedLayoutWidth: .actual
+            ))
         } else {
-            trailing = priceButton(for: country, price: standing.price)
+            let button = priceButton(for: country, price: standing.price)
+            priceButtons[code] = button
+            accessory = button.cellAccessory()
         }
-        trailing.sizeToFit()
-        cell.accessories = [.customView(configuration: .init(
-            customView: trailing, placement: .trailing(), reservedLayoutWidth: .actual
-        ))]
+        // A country unlocked while its row is on screen: the price fades into
+        // "Unlocked" rather than being cut over (#935).
+        let unlocks = shownUnlocked[code] == false && unlocked && cell.window != nil
+        shownUnlocked[code] = unlocked
+        if unlocks {
+            UIView.transition(with: cell, duration: AppButton.Metrics.fadeDuration, options: [.transitionCrossDissolve, .allowUserInteraction]) {
+                cell.accessories = [accessory]
+            }
+        } else {
+            cell.accessories = [accessory]
+        }
         cell.accessibilityLabel = "\(country.name), rank \(standing.rank), \(standing.likes) likes"
             + (access.isUnlocked(code) ? ", unlocked" : ", \(standing.price) gems")
     }
 
-    /// "◆ 50": blue in reach, grey out of it — tapping either opens the offer,
-    /// which says how many gems are missing.
-    private func priceButton(for country: CountryAtlas.Country, price: Int) -> UIView {
-        let host = priceButton(price: price, accessibilityLabel: "Unlock \(country.name) for \(price) gems")
-        (host.subviews.first as? UIButton)?.addAction(
-            UIAction { [weak self] _ in self?.offer(country) }, for: .primaryActionTriggered
-        )
-        return host
+    /// "◆ 50", the tap opening the offer. Out of reach it is the button's
+    /// DISABLED state — greyed, a tap does nothing (owner, 2026-10-11, #935) —
+    /// and it comes back the moment the balance covers it (the shop
+    /// reconfigures its rows on every balance change).
+    private func priceButton(for country: CountryAtlas.Country, price: Int) -> AppButton {
+        let button = priceButton(price: price, accessibilityLabel: "Unlock \(country.name) for \(price) gems")
+        button.isEnabled = access.gems >= price
+        button.addAction(UIAction { [weak self] _ in self?.offer(country) }, for: .primaryActionTriggered)
+        return button
     }
 
-    /// A price capsule in the host that receives its taps (see below). With a
-    /// `menu`, the tap raises it.
-    private func priceButton(price: Int, accessibilityLabel: String, menu: UIMenu? = nil) -> UIView {
-        var configuration = UIButton.Configuration.tinted()
-        configuration.cornerStyle = .capsule
-        configuration.image = UIImage(systemName: "diamond.fill")?
-            .applyingSymbolConfiguration(.init(pointSize: 11, weight: .bold))
-        configuration.imagePadding = 4
-        configuration.title = "\(price)"
-        configuration.contentInsets = .init(top: 6, leading: 12, bottom: 6, trailing: 12)
-        configuration.titleTextAttributesTransformer = .init { attributes in
-            var attributes = attributes
-            attributes.font = .scaledMonospacedDigitSystemFont(
-                ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20
-            )
-            return attributes
-        }
-        let button = UIButton(configuration: configuration)
-        button.tintColor = access.gems >= price ? .systemBlue : .systemGray
+    /// A price on the app's button (#931): the tinted pill, a diamond and the
+    /// price. As a list accessory it goes through `AppButton.cellAccessory`,
+    /// whose measured host is what receives the taps (the hand-made host this
+    /// replaced). With a `menu`, the tap raises it.
+    private func priceButton(price: Int, accessibilityLabel: String, menu: UIMenu? = nil) -> AppButton {
+        let button = AppButton(
+            aspect: .pill(.tinted), size: .row,
+            content: AppButton.Content(title: price.formatted(), symbol: "diamond.fill")
+        )
         button.accessibilityLabel = accessibilityLabel
         if let menu {
             button.menu = menu
             button.showsMenuAsPrimaryAction = true
         }
-        // A bare button as a list accessory never gets its taps (the cell's
-        // selection eats them): a sized host is what receives them.
-        let host = UIView()
-        button.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(button)
-        let size = button.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
-        host.frame = CGRect(origin: .zero, size: size)
-        button.pin(to: host)
-        return host
+        return button
     }
+
+    /// The price buttons on screen, by country — for the tests.
+    private var priceButtons: [String: AppButton] = [:]
+    /// Whether each row was last drawn unlocked: an unlock on screen fades.
+    private var shownUnlocked: [String: Bool] = [:]
+    /// The pack's price button, while it shows one — for the tests.
+    private(set) weak var debugPackPriceButton: AppButton?
+
+    /// A locked country's price button. Internal for tests.
+    func debugPriceButton(for code: String) -> AppButton? { priceButtons[code] }
 
     // MARK: - Boosts
 
@@ -449,20 +456,20 @@ public final class CountryShopViewController: UIViewController {
         guard let stakePacks else { return }
         let offer = stakePacks.offer
         cell.configure(offer)
-        let trailing: UIView
         if offer.isActive {
             let label = UILabel()
             label.font = .appFont(forTextStyle: .subheadline)
             label.textColor = .secondaryLabel
             label.text = Self.activeText(offer)
-            trailing = label
+            label.sizeToFit()
+            cell.accessories = [.customView(configuration: .init(
+                customView: label, placement: .trailing(), reservedLayoutWidth: .actual
+            ))]
         } else {
-            trailing = packPriceButton(offer)
+            let button = packPriceButton(offer)
+            debugPackPriceButton = button
+            cell.accessories = [button.cellAccessory()]
         }
-        trailing.sizeToFit()
-        cell.accessories = [.customView(configuration: .init(
-            customView: trailing, placement: .trailing(), reservedLayoutWidth: .actual
-        ))]
         cell.accessibilityLabel = "\(StakePackRowCell.title(offer)), \(StakePackRowCell.detail(offer))"
         cell.accessibilityValue = offer.isActive ? Self.activeText(offer) : "\(offer.price) gems"
     }
@@ -470,10 +477,12 @@ public final class CountryShopViewController: UIViewController {
     /// "Active — 7 left".
     static func activeText(_ offer: StakePackOffer) -> String { "Active — \(offer.shotsLeft) left" }
 
-    /// "◆ 20", as a country's price — and in the same colours: blue in reach,
-    /// grey out of it. The tap raises a one-line confirmation: the pack is
-    /// bought on the spot, so the gems never go on a stray touch.
-    private func packPriceButton(_ offer: StakePackOffer) -> UIView {
+    /// "◆ 20", as a country's price — and the same rule: out of reach it is
+    /// disabled (#935). In reach, the tap raises a one-line confirmation: the
+    /// pack is bought on the spot, so the gems never go on a stray touch. An
+    /// account that may not buy (a teen, #803) keeps the button and reads why
+    /// in the menu.
+    private func packPriceButton(_ offer: StakePackOffer) -> AppButton {
         let gems = access.gems
         let buy = UIAction(
             title: "Buy for \(offer.price) gems",
@@ -492,11 +501,13 @@ public final class CountryShopViewController: UIViewController {
         let menu = UIMenu(
             title: "\(StakePackRowCell.title(offer)) — \(StakePackRowCell.detail(offer))", children: [buy]
         )
-        return priceButton(
+        let button = priceButton(
             price: offer.price,
             accessibilityLabel: "Buy \(StakePackRowCell.title(offer)) for \(offer.price) gems",
             menu: menu
         )
+        button.isEnabled = access.purchasesRestricted || gems >= offer.price
+        return button
     }
 
     /// Buys the pack. Internal for tests — the confirmation menu cannot be
