@@ -21,7 +21,6 @@ struct UnsizedImageDecodesGuardTests {
         "PostGridCells.swift": "grid and card covers: the picture a post's hero flies from",
         "MapsViewController.swift": "the pin cover a marker's hero flies from",
         "MapClusterAnnotationView.swift": "a cluster's cover, the hero source of its gallery",
-        "MapAnnotationView.swift": "a pin's cover, the hero source of its post",
         "ProfileGalleryGridView.swift": "gallery covers, the profile grid's hero sources",
         "ForYouRowOrigins.swift": "a row's cover handed to the hero as its origin",
         "ForYouViewController.swift": "the page picture a For You hero lands on",

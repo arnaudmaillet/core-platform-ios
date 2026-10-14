@@ -46,13 +46,19 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
     #if DEBUG
     private var representedKind = "-"
     #endif
-    private var imageTask: Task<Void, Never>?
-    /// Separate from `imageTask`: a media pin loads its COVER and its PREVIEW,
+    /// The cover's and the text pin's author's loads (#1088): a cache hit
+    /// drawn in the configure pass — the marker arrives dressed and pops at
+    /// once — a recycled view cancelling the load in flight, a late answer
+    /// for another pin landing nowhere. No dissolve, as before: a marker's
+    /// face cuts in (`arrival: .none`).
+    private let coverLoad = ImageLoadSlot(size: .full, arrival: .none)
+    private let avatarLoad = ImageLoadSlot(size: .avatar, arrival: .none)
+    /// Separate from the cover's load: a media pin loads its COVER and its PREVIEW,
     /// and one task handle for two loads cancels whichever started first.
     private var previewTask: Task<Void, Never>?
     /// Separate again, and for the same reason `previewTask` is: an icon pin now
     /// loads its ICON and, underneath it, its AUTHOR — the floor the card falls
-    /// back to when the artwork never arrives. Sharing `imageTask` between them
+    /// back to when the artwork never arrives. Sharing one task between them
     /// would have the second assignment cancel the first, and which one lost
     /// would depend on which resolved faster.
     private var iconTask: Task<Void, Never>?
@@ -244,7 +250,8 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // it off again — and get its square back.
         applyFace(PinCardView.Face.of(pin))
 
-        imageTask?.cancel()
+        coverLoad.cancel()
+        avatarLoad.cancel()
         iconTask?.cancel()
         card.imageView.image = nil
         // ⚠️ CLEARED ON EVERY CONFIGURE, like the cover above it: this view is
@@ -305,11 +312,8 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // `RadarPin` carries an author (`dev/issues/BACKEND_MAP_PIN_AUTHOR.md`),
         // and the glyph is what the face shows without it.
         if pin.isText, let avatar = pin.authorAvatarURL {
-            let id = pin.postID
-            imageTask = Task { [weak self] in
-                guard let image = try? await imagePipeline.image(for: avatar, size: .avatar) else { return }
-                guard let self, self.representedID == id else { return }
-                self.card.setTextAvatar(image)
+            avatarLoad.load(avatar, using: imagePipeline) { [weak self] image, _ in
+                self?.card.setTextAvatar(image)
             }
             return
         }
@@ -331,20 +335,18 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         // So the ladder is honest at last: the sheet wins where it lands, the
         // thumbnail stands in where it does not, and the two are one picture.
         guard !pin.isText, let url = pin.thumbnailURL else { return }
-        let id = pin.postID
-        imageTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url) else { return }
-            guard let self, self.representedID == id else { return }
+        coverLoad.load(url, using: imagePipeline) { [weak self] image, _ in
+            guard let self else { return }
             // The sheet outranks it, and may have landed while this was in
             // flight — its frame zero is already in the cover.
-            guard self.card.wornPreview == nil else { return }
-            self.card.imageView.image = image
-            self.reportDressed()
+            guard card.wornPreview == nil else { return }
+            card.imageView.image = image
+            reportDressed()
             // If a live preview started before the thumbnail finished loading,
             // give it a poster now so the pin shows the still until the first
             // video frame — instead of a black square.
-            if !self.card.videoRenderView.isHidden {
-                self.card.videoRenderView.setPoster(image)
+            if !card.videoRenderView.isHidden {
+                card.videoRenderView.setPoster(image)
             }
         }
     }
@@ -405,8 +407,8 @@ final class MapAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerDressing
         onReuse?()
         onReuse = nil
         endVideoPreview()
-        imageTask?.cancel()
-        imageTask = nil
+        coverLoad.cancel()
+        avatarLoad.cancel()
         previewTask?.cancel()
         previewTask = nil
         representedID = nil
