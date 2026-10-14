@@ -107,4 +107,11 @@ struct PaletteTests {
         #expect(Self.hex(light[0], Self.light) == 0xC76300)
         #expect(Self.contrast(light[0], on: .white, Self.light) >= 3)
     }
+
+    /// The hues the palette took over (#1124): gems are violet, a warning's
+    /// glyph is yellow — orange is the tint's now.
+    @Test func gemsAreVioletAndWarningsYellow() {
+        #expect(GemSymbol.tint === Palette.secondary)
+        #expect(ToastView.Style.warning.glyphTint == .systemYellow)
+    }
 }

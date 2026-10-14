@@ -763,7 +763,7 @@ final class CountryShopRowCell: UICollectionViewListCell {
             label.font = detailFont
             label.textColor = .secondaryLabel
         }
-        heartView.tintColor = .systemRed
+        heartView.tintColor = PointsSymbol.tint
         heartView.setContentHuggingPriority(.required, for: .horizontal)
         rankLabel.setContentHuggingPriority(.required, for: .horizontal)
 
