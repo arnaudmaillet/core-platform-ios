@@ -58,12 +58,18 @@ final class ForYouStoryCell: UICollectionViewCell {
         }
     }
 
-    /// The ring a face wears while there is something unseen: the brand's
-    /// tint, solid (#1124, decision 8) — the yellow → orange → pink gradient
-    /// it used to wear was Instagram's ring, and the brand's gradient stays
-    /// off recurring chrome. Still a gradient layer with two equal stops, so
-    /// the mask and geometry are untouched; re-resolved on a style flip.
+    /// The ring a face wears while there is something unseen: the icon's
+    /// gradient, pink → orange (#1169, the owner's call 2026-10-14 — it was
+    /// #1124's solid tint). `-theme-rings accent` compares the solid accent.
+    /// A gradient layer either way, so the mask and geometry are untouched;
+    /// re-resolved on a style flip.
     private func applyRingColors() {
+        // #1169 compares the solid accent with the brand's gradient on the
+        // device (`Palette.rules.storyRing`).
+        if Palette.rules.storyRing == .gradient {
+            ring.colors = Palette.accentGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
+            return
+        }
         let tint = Palette.tint.resolvedColor(with: traitCollection).cgColor
         ring.colors = [tint, tint]
     }

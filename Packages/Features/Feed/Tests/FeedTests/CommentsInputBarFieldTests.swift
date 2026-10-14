@@ -125,8 +125,14 @@ struct CommentsInputBarFieldTests {
 
     /// The brand's tangerine (#1124), light #C76300 or dark #FFAD66: a
     /// strong red channel well above the blue.
+    /// A pixel of the app's tint, in either appearance — measured against
+    /// `Palette.tint` itself, so the test follows the palette (#1169).
     private static func isTint(_ pixel: (CGFloat, CGFloat, CGFloat)) -> Bool {
-        pixel.0 > 0.7 && pixel.0 - pixel.2 > 0.35
+        [UIUserInterfaceStyle.light, .dark].contains { style in
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            Palette.tint.resolvedColor(with: UITraitCollection(userInterfaceStyle: style)).getRed(&r, green: &g, blue: &b, alpha: &a)
+            return abs(pixel.0 - r) < 0.12 && abs(pixel.1 - g) < 0.12 && abs(pixel.2 - b) < 0.12
+        }
     }
 
     private static func isGrey(_ pixel: (CGFloat, CGFloat, CGFloat)) -> Bool {

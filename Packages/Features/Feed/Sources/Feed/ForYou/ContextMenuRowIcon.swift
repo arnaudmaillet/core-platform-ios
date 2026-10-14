@@ -109,7 +109,7 @@ enum ContextMenuRowIcon {
     }
 
     private static func drawPill(_ count: Int, in rect: CGRect, context: CGContext) {
-        context.setFillColor(UIColor.systemRed.cgColor)
+        context.setFillColor(Palette.counter.cgColor)
         UIBezierPath(roundedRect: rect, cornerRadius: rect.height / 2).fill()
         let text = String(count) as NSString
         let attributes: [NSAttributedString.Key: Any] = [

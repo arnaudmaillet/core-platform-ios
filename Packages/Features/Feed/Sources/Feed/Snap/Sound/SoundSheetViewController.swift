@@ -673,11 +673,12 @@ final class SoundSheetViewController: UIViewController {
         return [use, .fixedSpace()] + trailing
     }
 
-    /// The prominent red capsule, as tall as the bar's bubbles.
+    /// The prominent capsule in the theme's pink, as tall as the bar's
+    /// bubbles — the sheet's one primary action (#1169).
     private func makeUseButton() -> UIButton {
         var configuration = UIButton.Configuration.prominentGlass()
         configuration.title = "Use this sound"
-        configuration.baseBackgroundColor = .systemRed
+        configuration.baseBackgroundColor = Palette.prominentGlassTint
         configuration.baseForegroundColor = .white
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
