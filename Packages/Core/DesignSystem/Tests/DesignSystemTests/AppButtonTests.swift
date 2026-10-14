@@ -61,6 +61,8 @@ struct AppButtonTests {
         button.isEnabled = false
         #expect(!button.usesGradient, "greyed")
         button.isEnabled = true
+        button.setPhase(.loading, animated: false)
+        #expect(button.usesGradient, "a busy Follow keeps its ground under the white spinner (#1180)")
         button.setPhase(.placeholder, animated: false)
         #expect(!button.usesGradient, "the bone is the whole picture")
     }

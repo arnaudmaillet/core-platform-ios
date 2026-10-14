@@ -1011,9 +1011,10 @@ open class AppButton: UIButton {
     }
 
     /// Whether the prominent gradient is the ground now: not when greyed, nor
-    /// as a placeholder's bone.
+    /// as a placeholder's bone. A busy button keeps it (#1180): its fill is
+    /// clear, so without the gradient its white spinner would stand on nothing.
     public var usesGradient: Bool {
-        currentGround == .prominent && isEnabled && phase == .content
+        currentGround == .prominent && isEnabled && phase != .placeholder
     }
 
     private var usesMaterial: Bool {
