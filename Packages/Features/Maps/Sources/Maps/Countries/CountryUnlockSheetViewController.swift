@@ -265,7 +265,9 @@ final class CountryUnlockSheetViewController: UIViewController {
             return attributes
         }
         unlockButton.configuration = configuration
-        unlockButton.tintColor = .systemBlue
+        // The brand's prominent glass (#1124): its white label reads on the
+        // deep tangerine in both appearances.
+        unlockButton.tintColor = Palette.prominentGlassTint
         unlockButton.accessibilityIdentifier = "country.unlock.button"
         unlockButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }

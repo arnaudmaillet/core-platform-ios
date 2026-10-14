@@ -43,7 +43,6 @@ struct RawHueGuardTests {
         "BlockedAccountsViewController.swift": "a swipe action's ground under its white label",
         "RestrictedAccountsViewController.swift": "a swipe action's ground under its white label",
         "RecentlyDeletedViewController.swift": "a swipe action's ground under its white label",
-        "CountryUnlockSheetViewController.swift": "the prominent glass unlock button's white label",
         // Not the brand's meaning, and not decided yet.
         "MediaPickerViewController.swift": "an album's count badge: information, not an action",
         "WalletClaimViews.swift": "the streak's flame: fire, not a warning",

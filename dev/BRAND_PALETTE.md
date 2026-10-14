@@ -18,6 +18,7 @@ The app's colours come from its icon (#1120): **tangerine** is primary and **vio
 | `tint` | interactive glyphs, text buttons, switches, selection | `#C76300` | `#FFAD66` | `#8B4600` / `#FFD0AA` |
 | `brandText` | links, @mentions, #hashtags in body text | `#B75F00` | `#FFAD66` | `#8B4600` / `#FFD0AA` |
 | `primaryFill` / `onPrimary` | prominent filled button and its label | `#FF8D28` / `#2B1607` | `#FFAD66` / `#2B1607` | — |
+| `prominentGlassTint` | a prominent glass button (Claim, Unlock): the glass draws its label white in either appearance | `#C76300` | `#C76300` | — |
 | `primaryFillPressed` | pressed fill | `#F1800E` | `#F09F58` | — |
 | `primaryContainer` / `onPrimaryContainer` | soft selected grounds, banners | `#FFECE0` / `#9F5100` | `#331B08` / `#FFA664` | — |
 | `secondary` | gems, secondary emphasis | `#6852C6` | `#A78BFA` | `#5C44B7` / `#B59EFF` |

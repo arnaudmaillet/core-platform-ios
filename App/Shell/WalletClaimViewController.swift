@@ -462,6 +462,9 @@ final class WalletClaimViewController: UIViewController {
         claimBar.addInteraction(bottomEdge)
 
         claimButton.configuration?.cornerStyle = .capsule
+        // The brand's prominent glass (#1124): on the window's dark-mode
+        // tint the glass's white label was 1.9:1.
+        claimButton.tintColor = Palette.prominentGlassTint
         claimButton.addAction(UIAction { [weak self] _ in self?.claimTapped() }, for: .primaryActionTriggered)
         PressFeedback.attach(to: claimButton, sound: nil)
         claimButton.translatesAutoresizingMaskIntoConstraints = false

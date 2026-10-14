@@ -128,4 +128,12 @@ struct PaletteTests {
         #expect(ink == .secondaryLabel)
         #expect(note.string.hasSuffix("Full"))
     }
+
+    /// A prominent glass button's white label reads on its tint in both
+    /// appearances (the glass draws it white whatever the ink).
+    @Test func whiteReadsOnTheProminentGlassTint() {
+        for traits in [Self.light, Self.dark] {
+            #expect(Self.contrast(.white, on: Palette.prominentGlassTint, traits) >= 4)
+        }
+    }
 }
