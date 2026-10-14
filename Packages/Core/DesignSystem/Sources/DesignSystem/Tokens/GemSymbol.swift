@@ -6,7 +6,7 @@ import UIKit
 /// told apart at a glance: a red heart you commit, a violet diamond you earn.
 public enum GemSymbol {
     public static let glyph = "diamond.fill"
-    /// The brand's secondary, violet (#1124): it was `.systemCyan`, which
+    /// The brand's secondary, violet (#1124): it was the system cyan, which
     /// clashed with nothing but said nothing either.
     public static let tint: UIColor = Palette.secondary
     /// The display name.
