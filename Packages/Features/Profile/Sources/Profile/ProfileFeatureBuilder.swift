@@ -1,3 +1,4 @@
+import AuthInterface
 import CacheKit
 import MediaCore
 import CoreModels
@@ -264,6 +265,17 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                             makeTwoStep: (sessions as? any TwoStepManaging & CredentialStepUp).map { twoStep in
                                                 { TwoStepViewController(account: account, manager: twoStep, stepUp: twoStep) }
                                             },
+                                            makePasskeys: (sessions as? any PasskeysManaging & CredentialStepUp).map { passkeys in
+                                                { [makePasskeyAuthorizer] in
+                                                    PasskeysViewController(
+                                                        model: PasskeysModel(manager: passkeys, authorizer: makePasskeyAuthorizer()),
+                                                        stepUp: passkeys
+                                                    )
+                                                }
+                                            },
+                                            passkeysAvailable: (sessions as? any PasskeysManaging).map { passkeys in
+                                                { await passkeys.passkeysAvailable() }
+                                            },
                                             makeAuthorizedApps: (sessions as? any AuthorizedAppsManaging).map { apps in
                                                 { [imagePipeline] in
                                                     AuthorizedAppsViewController(
@@ -479,6 +491,11 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// the cellular choice (#899). Nil leaves Storage with the caches it
     /// names itself.
     public var cacheCoordinator: CacheCoordinator?
+
+    /// Makes the device's passkeys for Settings → Passkeys (#551): the
+    /// system sheet by default; the app hands in a simulated one in mock mode,
+    /// whose relying party no device is associated with.
+    public var makePasskeyAuthorizer: @MainActor () -> any PasskeyAuthorizing = { PlatformPasskeyAuthorizer() }
 
     /// Settings → Storage, on the app's coordinator.
     private func makeStorageSettings() -> StorageSettingsViewController {
