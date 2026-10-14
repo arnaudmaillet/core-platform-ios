@@ -269,7 +269,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                                                 { [makePasskeyAuthorizer] in
                                                     PasskeysViewController(
                                                         model: PasskeysModel(manager: passkeys, authorizer: makePasskeyAuthorizer()),
-                                                        stepUp: passkeys
+                                                        stepUp: passkeys,
+                                                        passkeyStepUp: passkeys as? any PasskeyStepUp
                                                     )
                                                 }
                                             },

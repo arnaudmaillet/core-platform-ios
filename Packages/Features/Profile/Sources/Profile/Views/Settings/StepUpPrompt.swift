@@ -1,3 +1,4 @@
+import AuthInterface
 import UIKit
 
 /// Proves the holder again before a destructive action, and runs the step-up
@@ -56,6 +57,38 @@ enum StepUpPrompt {
                 } catch {
                     onFailure(error)
                 }
+            }
+        }
+    }
+
+    /// The device's passkey first (#964, `VerifyCredentials { passkey }`) —
+    /// one Face ID instead of a code, and a staff session's only way (its
+    /// step-up refuses a code, AUT-5031). Closed, or no passkey for it on
+    /// this device, the usual prompt follows (`present`).
+    static func presentPreferringPasskey(
+        _ passkey: (stepUp: any PasskeyStepUp, authorizer: any PasskeyAuthorizing)?,
+        on host: UIViewController,
+        message: String,
+        actionTitle: String,
+        stepUp: any CredentialStepUp,
+        onVerified: @escaping () -> Void,
+        onFailure: @escaping (Error) -> Void
+    ) {
+        let fallBack = {
+            present(
+                on: host, message: message, actionTitle: actionTitle, stepUp: stepUp,
+                onVerified: onVerified, onFailure: onFailure
+            )
+        }
+        guard let passkey else { return fallBack() }
+        Task { @MainActor in
+            do {
+                let request = try await passkey.stepUp.passkeyStepUpRequest()
+                let assertion = try await passkey.authorizer.assertPasskey(request)
+                try await passkey.stepUp.stepUp(passkey: assertion)
+                onVerified()
+            } catch {
+                fallBack()
             }
         }
     }

@@ -73,19 +73,19 @@ struct PasskeysTests {
 
         let authorizer = SimulatedPasskeyAuthorizer()
         let attestation = try await authorizer.createPasskey(request)
-        let added = try await sessions.finishPasskeyRegistration(request, attestation: attestation, name: "My iPhone")
+        let added = try await sessions.finishPasskeyRegistration(request, attestation: attestation, name: "My iPhone", staffGrant: nil)
         #expect(added.name == "My iPhone")
         #expect(added.lastUsedAt == nil)
         #expect(try await sessions.listPasskeys().map(\.id).contains(added.id))
 
         // A challenge is single use.
         await #expect(throws: PasskeyError.restart) {
-            _ = try await sessions.finishPasskeyRegistration(request, attestation: attestation, name: "")
+            _ = try await sessions.finishPasskeyRegistration(request, attestation: attestation, name: "", staffGrant: nil)
         }
         // The same authenticator twice.
         let again = try await sessions.startPasskeyRegistration()
         await #expect(throws: PasskeyError.alreadyRegistered) {
-            _ = try await sessions.finishPasskeyRegistration(again, attestation: attestation, name: "")
+            _ = try await sessions.finishPasskeyRegistration(again, attestation: attestation, name: "", staffGrant: nil)
         }
     }
 
@@ -108,6 +108,60 @@ struct PasskeysTests {
         let sessions = try await repository(passkeysUnavailable: true)
         await #expect(throws: PasskeyError.unavailable) { _ = try await sessions.listPasskeys() }
         #expect(await !sessions.passkeysAvailable())
+    }
+
+    // MARK: - Staff passkeys (#964)
+
+    /// A grant makes the passkey a staff one, once; an unknown or spent
+    /// grant is refused (AUT-5032) and makes nothing.
+    @Test func aGrantMakesAStaffPasskeyOnce() async throws {
+        let sessions = try await repository()
+        try await sessions.reconfirmWithTheSentCode()
+        let authorizer = SimulatedPasskeyAuthorizer()
+
+        let staffRequest = try await sessions.startPasskeyRegistration()
+        let staff = try await sessions.finishPasskeyRegistration(
+            staffRequest, attestation: try await authorizer.createPasskey(staffRequest), name: "",
+            staffGrant: " \(MockAuthService.staffEnrollmentGrant) "
+        )
+        #expect(staff.staff)
+        #expect(try await sessions.listPasskeys().filter(\.staff).map(\.id) == [staff.id])
+
+        for grant in [MockAuthService.staffEnrollmentGrant, "made-up"] {
+            let request = try await sessions.startPasskeyRegistration()
+            let attestation = try await authorizer.createPasskey(request)
+            await #expect(throws: PasskeyError.grantRejected) {
+                _ = try await sessions.finishPasskeyRegistration(request, attestation: attestation, name: "", staffGrant: grant)
+            }
+        }
+        #expect(try await sessions.listPasskeys().count == 2, "a refused grant made a passkey")
+    }
+
+    @Test func aStaffPasskeySaysSoInTheList() {
+        let staff = PasskeySummary(id: "s", name: "Staff passkey", createdAt: nil, lastUsedAt: nil, synced: true, staff: true)
+        #expect(PasskeysViewController.subtitle(for: staff).hasPrefix("Staff"))
+        let member = PasskeySummary(id: "m", name: "Key", createdAt: nil, lastUsedAt: nil, synced: true)
+        #expect(!PasskeysViewController.subtitle(for: member).hasPrefix("Staff"))
+    }
+
+    /// A passkey proves the holder again (`VerifyCredentials { passkey }`):
+    /// the gated call goes through without a code.
+    @Test func aPasskeyStepsUp() async throws {
+        let sessions = try await repository()
+        await #expect(throws: PasskeyError.stepUpRequired) { _ = try await sessions.startPasskeyRegistration() }
+
+        let authorizer = SimulatedPasskeyAuthorizer(
+            signInCredentialID: try #require(Data(base64URL: MockAuthService.seededPasskeyID))
+        )
+        let request = try await sessions.passkeyStepUpRequest()
+        try await sessions.stepUp(passkey: try await authorizer.assertPasskey(request))
+        _ = try await sessions.startPasskeyRegistration()
+
+        // A passkey the account does not hold proves nothing.
+        authorizer.signInCredentialID = Data("someone-else".utf8)
+        let again = try await sessions.passkeyStepUpRequest()
+        let foreign = try await authorizer.assertPasskey(again)
+        await #expect(throws: (any Error).self) { try await sessions.stepUp(passkey: foreign) }
     }
 
     @Test func base64URLRoundTrips() {
