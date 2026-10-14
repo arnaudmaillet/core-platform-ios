@@ -156,20 +156,3 @@ extension AccountSessionsRepository: PasskeysManaging {
         return .transport(message: message.isEmpty ? "code \(error.code)" : message, failure: NetworkFailure(error))
     }
 }
-
-extension Data {
-    /// base64url, padding optional (the contract sends none).
-    init?(base64URL text: String) {
-        var base64 = text.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-        while base64.count % 4 != 0 { base64 += "=" }
-        self.init(base64Encoded: base64)
-    }
-
-    /// base64url without padding.
-    var base64URLString: String {
-        base64EncodedString()
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "=", with: "")
-    }
-}

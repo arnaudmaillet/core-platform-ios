@@ -36,6 +36,11 @@ public enum AuthError: Error, Equatable, Sendable {
     /// The sign-in waited too long for its code, or it was already used
     /// (AUT-5021): sign in again.
     case secondStepExpired
+    /// The server has no passkeys configured (UNAVAILABLE, #551).
+    case passkeysUnavailable
+    /// The passkey did not sign in (AUT-5028): removed from the account, or
+    /// no account any more.
+    case passkeyRejected
 
     static func loginFailure(_ error: ConnectError) -> AuthError {
         switch error.code {

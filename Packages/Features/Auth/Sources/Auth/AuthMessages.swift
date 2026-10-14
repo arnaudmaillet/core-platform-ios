@@ -26,6 +26,10 @@ enum AuthMessages {
             "Too many wrong codes. Wait a few minutes, then try again."
         case .secondStepExpired:
             "This sign-in timed out. Sign in again."
+        case .passkeysUnavailable:
+            "Signing in with a passkey isn\u{2019}t available yet. Use your email instead."
+        case .passkeyRejected:
+            "That passkey didn\u{2019}t work. It may have been removed from your account \u{2014} sign in with your email instead."
         }
     }
 }

@@ -50,6 +50,9 @@ public enum SignInCredential: Equatable, Sendable {
     /// A native Sign in with Apple / Google id_token, minted for the RAW
     /// `nonce` from `startFederatedSignIn` (single use, #507).
     case idToken(FederatedProvider, token: String, nonce: String)
+    /// One of the account's passkeys (#551): a first factor that needs no
+    /// second step. It signs in only — an account is never made with one.
+    case passkey(PasskeyAssertion)
 }
 
 /// How an existing account signs in — SignUp's "you already have an account".
@@ -132,6 +135,25 @@ extension SessionManager {
         }
     }
 
+    /// The options for one passkey sign-in (#551): a challenge (single use,
+    /// five minutes) for the device's authenticator to sign. UNAVAILABLE:
+    /// the server has no passkeys, and the sign-in screen says so.
+    public func startPasskeySignIn() async throws -> PasskeyAssertionRequest {
+        bootstrapIfNeeded()
+        let response = await authClient.startPasskeySignIn(request: Auth_V1_StartPasskeySignInRequest(), headers: [:])
+        switch response.result {
+        case .success(let body):
+            guard let challenge = Data(base64URL: body.challenge) else {
+                throw AuthError.transport(message: "unreadable passkey sign-in options")
+            }
+            return PasskeyAssertionRequest(challenge: body.challenge, challengeData: challenge, relyingPartyID: body.rpID)
+        case .failure(let error) where error.code == .unavailable:
+            throw AuthError.passkeysUnavailable
+        case .failure(let error):
+            throw AuthError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        }
+    }
+
     /// Signs in with a code.
     public func signIn(challengeID: String, code: String) async throws -> CodeSignIn {
         try await signIn(.code(challengeID: challengeID, code: code))
@@ -157,6 +179,9 @@ extension SessionManager {
         case .idToken:
             request.grantType = .idToken
             request.credential = .idToken(Self.idTokenGrant(credential))
+        case .passkey(let assertion):
+            request.grantType = .passkey
+            request.credential = .passkey(Self.passkeyAssertion(assertion))
         }
         request.device = deviceContext()
         request.guestRefreshToken = guestSession?.refreshToken ?? ""
@@ -167,6 +192,8 @@ extension SessionManager {
         case .success(let body):
             return .existing(pendingAccount(body))
         case .failure(let error) where error.code == .notFound:
+            // A passkey names its account: none means it is no one's any more.
+            if case .passkey = credential { throw AuthError.passkeyRejected }
             return .needsSignUp
         case .failure(let error):
             throw Self.failure(error, for: credential)
@@ -193,6 +220,9 @@ extension SessionManager {
             request.verificationCode = grant
         case .idToken:
             request.idToken = Self.idTokenGrant(credential)
+        case .passkey:
+            // A passkey belongs to an account already: nothing to sign up.
+            throw AuthError.passkeyRejected
         }
         request.dateOfBirth = Self.isoDate(details.dateOfBirth)
         request.consent.policyVersion = details.policyVersion
@@ -280,7 +310,26 @@ extension SessionManager {
         return grant
     }
 
+    static func passkeyAssertion(_ assertion: PasskeyAssertion) -> Auth_V1_PasskeyAssertion {
+        var message = Auth_V1_PasskeyAssertion()
+        message.challenge = assertion.challenge
+        message.credentialID = assertion.credentialID
+        message.clientDataJson = assertion.clientDataJSON
+        message.authenticatorData = assertion.authenticatorData
+        message.signature = assertion.signature
+        message.userHandle = assertion.userHandle
+        return message
+    }
+
     private static func failure(_ error: ConnectError, for credential: SignInCredential) -> AuthError {
+        if case .passkey = credential {
+            switch error.code {
+            case .unavailable: return .passkeysUnavailable
+            // AUT-5028: it did not verify (removed, or an old challenge).
+            case .invalidArgument, .unauthenticated, .permissionDenied, .failedPrecondition: return .passkeyRejected
+            default: return .transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+            }
+        }
         guard case .idToken = credential else { return codeFailure(error) }
         switch error.code {
         case .invalidArgument, .unauthenticated, .permissionDenied:

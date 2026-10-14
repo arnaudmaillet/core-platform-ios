@@ -25,8 +25,8 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
         case logIn
     }
 
-    private let sections: [Section] =
-        SignInMethod.all.map(Section.method) + [.logIn]
+    private let methods: [SignInMethod]
+    private let sections: [Section]
 
     private lazy var logInCell = makeLinkCell(title: "Already have an account? Log in")
 
@@ -34,7 +34,9 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
     /// carries a spinner until the call ends (#827).
     private(set) var workingMethod: SignInMethod?
 
-    init() {
+    init(methods: [SignInMethod] = SignInMethod.all) {
+        self.methods = methods
+        sections = methods.map(Section.method) + [.logIn]
         super.init(style: .insetGrouped)
     }
 
@@ -129,7 +131,7 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
     override func tableView(_ tableView: UITableView, heightForHeaderInSection section: Int) -> CGFloat {
         switch sections[section] {
         case .method(let method):
-            if method == SignInMethod.all.first {
+            if method == methods.first {
                 // The prompt sizes itself; without one, breathing room under
                 // the nav bar.
                 return prompt == nil ? Spacing.xl : UITableView.automaticDimension
@@ -174,6 +176,7 @@ private extension SignInMethod {
         case .provider(.google): UIImage(systemName: "g.circle")
         case .email: UIImage(systemName: "envelope")
         case .phone: UIImage(systemName: "phone")
+        case .passkey: UIImage(systemName: "person.badge.key")
         }
     }
 }

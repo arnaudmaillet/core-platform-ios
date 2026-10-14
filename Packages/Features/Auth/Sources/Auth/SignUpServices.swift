@@ -1,3 +1,4 @@
+import AuthInterface
 import Foundation
 
 /// What the sign-up steps ask of the session — `SessionManager`'s, faked in
@@ -5,6 +6,7 @@ import Foundation
 public protocol SignUpPerforming: Sendable {
     func startVerification(_ channel: VerificationChannel, to destination: String, locale: String) async throws -> VerificationChallenge
     func startFederatedSignIn() async throws -> String
+    func startPasskeySignIn() async throws -> PasskeyAssertionRequest
     func signIn(_ credential: SignInCredential) async throws -> CodeSignIn
     func completeSecondStep(_ challenge: SecondStepChallenge, code: String) async throws -> PendingAccount
     func signUp(_ credential: SignInCredential, details: SignUpDetails) async throws -> SignUpOutcome
@@ -13,6 +15,13 @@ public protocol SignUpPerforming: Sendable {
 }
 
 extension SessionManager: SignUpPerforming {}
+
+extension SignUpPerforming {
+    /// A sign-up service without passkeys (the tests' fakes).
+    public func startPasskeySignIn() async throws -> PasskeyAssertionRequest {
+        throw AuthError.passkeysUnavailable
+    }
+}
 
 /// A native provider's sign-in sheet (Sign in with Apple): an id_token
 /// minted for `nonce`, and the name the person shared, if any.
