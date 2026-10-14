@@ -173,7 +173,7 @@ open class EmoteLabel: UILabel {
                 setEmoteText(newValue)
                 return
             }
-            if let newValue, textEntityStyle != nil, !TextEntityScanner.entities(in: newValue).isEmpty {
+            if let newValue, textEntityStyle != nil, TextEntityScanner.hasStyledRanges(in: newValue) {
                 setEmoteText(newValue)
                 return
             }

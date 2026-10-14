@@ -24,51 +24,43 @@ struct TextEntityStyleTests {
         #expect(string.attribute(.textEntity, at: 0, effectiveRange: nil) == nil)
     }
 
-    /// On a plain surface the token runs the icon's gradient (#1172): the
-    /// sigil is the first stop, the last letter the last, the letters between
-    /// in between — semibold, never the system blue, the rest untouched.
-    @Test func aLinkRunsTheGradientAcrossItsLettersAndIsSemibold() {
+    /// On a plain surface the token is the quiet slate (#1174): semibold,
+    /// never the accent, never the system blue; the rest untouched.
+    @Test func aLinkIsTheSlateAndSemiboldTheRestUntouched() {
         let body = UIFont.appFont(forTextStyle: .body)
         let string = styled("hi @alex", font: body, style: .link)
-        func colour(at index: Int) -> UIColor? {
-            string.attribute(.foregroundColor, at: index, effectiveRange: nil) as? UIColor
-        }
+        let colour = try? #require(string.attribute(.foregroundColor, at: 4, effectiveRange: nil) as? UIColor)
+        #expect(colour == Palette.entityInk)
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
-            func resolved(_ colour: UIColor?) -> UIColor? { colour?.resolvedColor(with: traits) }
-            #expect(resolved(colour(at: 3)) == resolved(Palette.entityGradient[0]), "the sigil starts it")
-            #expect(resolved(colour(at: 7)) == resolved(Palette.entityGradient[1]), "the last letter ends it")
-            #expect(resolved(colour(at: 5)) != resolved(colour(at: 3)) && resolved(colour(at: 5)) != resolved(colour(at: 7)),
-                    "a middle letter sits between")
-            #expect(resolved(colour(at: 4)) != UIColor.systemBlue.resolvedColor(with: traits))
+            #expect(colour?.resolvedColor(with: traits) != UIColor.systemBlue.resolvedColor(with: traits),
+                    "the token is the system blue in \(style.rawValue)")
+            #expect(colour?.resolvedColor(with: traits) != Palette.tint.resolvedColor(with: traits),
+                    "the token is the accent in \(style.rawValue)")
         }
-        #expect(colour(at: 0) == .white, "the text around keeps its own colour")
+        #expect(string.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor == .white)
         let tokenFont = try? #require(string.attribute(.font, at: 4, effectiveRange: nil) as? UIFont)
         #expect(tokenFont.map(weight(of:)) == UIFont.Weight.semibold.rawValue)
         #expect(tokenFont?.pointSize == body.pointSize, "the size is the text's own")
     }
 
-    /// A letter is a composed sequence: an accented letter is one step.
-    @Test func aComposedLetterTakesOneColour() {
-        let string = styled("#cafe\u{301}", font: .appFont(forTextStyle: .body), style: .link)
-        let last = string.attribute(.foregroundColor, at: 4, effectiveRange: nil) as? UIColor
-        let mark = string.attribute(.foregroundColor, at: 5, effectiveRange: nil) as? UIColor
-        let traits = UITraitCollection(userInterfaceStyle: .light)
-        #expect(last?.resolvedColor(with: traits) == mark?.resolvedColor(with: traits))
-        #expect(last?.resolvedColor(with: traits) == Palette.entityGradient[1].resolvedColor(with: traits))
-    }
-
-    /// Over a photograph or a video: the washed gradient (#1172).
-    @Test func onMediaRunsTheWashedGradient() {
-        let string = styled("hi @alex", font: .appFont(forTextStyle: .footnote), style: .onMedia)
-        let traits = UITraitCollection(userInterfaceStyle: .dark)
-        let first = (string.attribute(.foregroundColor, at: 3, effectiveRange: nil) as? UIColor)?.resolvedColor(with: traits)
-        #expect(first == Palette.entityGradientOnMedia[0].resolvedColor(with: traits))
+    /// A web address is dressed like a token (#1174) but carries no
+    /// `.textEntity`: a tap on it routes nowhere.
+    @Test func aLinkInTheTextIsDressedAndRoutesNothing() {
+        let text = "menu at example.com/ramen tonight"
+        let string = styled(text, font: .appFont(forTextStyle: .body), style: .link)
+        let link = (text as NSString).range(of: "example.com/ramen")
+        #expect(string.attribute(.foregroundColor, at: link.location, effectiveRange: nil) as? UIColor == Palette.entityInk)
+        #expect(string.attribute(.foregroundColor, at: NSMaxRange(link) - 1, effectiveRange: nil) as? UIColor == Palette.entityInk)
+        #expect(string.attribute(.textEntity, at: link.location, effectiveRange: nil) == nil)
         #expect(string.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor == .white)
+        let font = string.attribute(.font, at: link.location, effectiveRange: nil) as? UIFont
+        #expect(font.map(weight(of:)) == UIFont.Weight.semibold.rawValue)
+        #expect(TextEntityScanner.hasStyledRanges(in: text))
+        #expect(!TextEntityScanner.hasStyledRanges(in: "nothing to dress here."))
     }
 
-    /// Over a hero banner, whose ink the text chose: only the weight.
-    @Test func overABannerOnlyTheWeightChanges() {
+    @Test func overMediaOnlyTheWeightChanges() {
         let string = styled("hi @alex", font: .appFont(forTextStyle: .footnote), style: .emphasis)
         #expect(string.attribute(.foregroundColor, at: 4, effectiveRange: nil) as? UIColor == .white)
         let tokenFont = string.attribute(.font, at: 4, effectiveRange: nil) as? UIFont
