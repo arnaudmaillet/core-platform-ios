@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The mark a stopped clip wears: a play triangle in the middle of the picture.
@@ -12,10 +13,20 @@ import UIKit
 /// Deliberately inert. The mark says a clip is stopped; starting it again is a
 /// tap anywhere on the picture, which is a target the size of the media rather
 /// than a 56pt glyph.
+///
+/// It comes and goes with the app's one appear motion (`AppearMotion`,
+/// #1151) — a bounce in with a fade on pause, a scale out with a fade on
+/// play, a fade under Reduce Motion — the same as `AppButton`'s. The view
+/// covers the picture with the glyph centred, so the scale is about the
+/// glyph.
 public final class PausedClipMarkView: UIImageView {
-    /// How long the mark takes to arrive or leave. Short — it is the receipt
-    /// for a tap that has already happened.
-    public static let fadeDuration: TimeInterval = 0.15
+    /// Reduce Motion, as every animation asks it; swappable for tests.
+    public var reducesMotion: @MainActor () -> Bool = { MotionPreference.reducesMotion }
+    /// The motions it played, last last — the decision a test reads.
+    public private(set) var motions: [AppearMotion.Kind] = []
+    /// What was last asked for: true from the start of an appear, false from
+    /// the start of a disappear — while it still scales out on screen.
+    private var wantsVisible = false
 
     public init() {
         super.init(frame: .zero)
@@ -36,20 +47,40 @@ public final class PausedClipMarkView: UIImageView {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// Shows or hides the mark, crossfading. A no-op when it is already in the
-    /// asked-for state, so a reconcile that runs on every page change cannot
-    /// restart the fade.
+    /// Shows or hides the mark. A no-op when it is already in the asked-for
+    /// state, so a reconcile that runs on every page change cannot restart
+    /// the motion. Asked the other way mid-motion — pause, play, pause inside
+    /// it — it reverses from where it is.
     public func setVisible(_ visible: Bool, animated: Bool = true) {
-        guard isHidden == visible else { return }
-        guard animated else {
+        guard wantsVisible != visible else { return }
+        wantsVisible = visible
+        guard animated, window != nil else {
+            layer.removeAllAnimations()
             isHidden = !visible
+            alpha = 1
+            transform = .identity
             return
         }
-        UIView.transition(with: self, duration: Self.fadeDuration,
-                          options: .transitionCrossDissolve) {
-            self.isHidden = !visible
+        if visible {
+            isHidden = false
+            record(AppearMotion.appear(self, reducesMotion: reducesMotion()))
+        } else {
+            record(AppearMotion.disappear(self, reducesMotion: reducesMotion(), completion: { [weak self] finished in
+                // An appear that took over keeps the mark.
+                guard let self, finished, !wantsVisible else { return }
+                isHidden = true
+                alpha = 1
+                transform = .identity
+            }))
         }
     }
 
-    public var isShowing: Bool { !isHidden }
+    /// Whether the mark is asked for — true from the start of its appear,
+    /// false from the start of its disappear.
+    public var isShowing: Bool { wantsVisible }
+
+    private func record(_ motion: AppearMotion.Kind) {
+        if motions.count >= 16 { motions.removeFirst() }
+        motions.append(motion)
+    }
 }

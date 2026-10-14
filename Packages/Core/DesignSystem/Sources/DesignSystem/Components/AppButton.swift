@@ -131,10 +131,11 @@ open class AppButton: UIButton {
         public static let minimumHitSide: CGFloat = 44
         /// A card's corner radius.
         public static let cardRadius: CGFloat = 12
-        /// The bounce-in's starting scale.
-        public static let appearScale: CGFloat = 0.6
-        public static let appearDuration: TimeInterval = 0.42
-        public static let disappearDuration: TimeInterval = 0.24
+        /// The bounce-in's starting scale — the app's one appear motion
+        /// (`AppearMotion`, #1151).
+        public static let appearScale: CGFloat = AppearMotion.appearScale
+        public static let appearDuration: TimeInterval = AppearMotion.appearDuration
+        public static let disappearDuration: TimeInterval = AppearMotion.disappearDuration
         /// The content change: blur out, swap, unblur in (the 0.36 s the
         /// profile's Follow morphed in before it became this button).
         public static let morphDuration: TimeInterval = 0.36
@@ -821,37 +822,21 @@ open class AppButton: UIButton {
 
     // MARK: - Motion
 
-    /// Comes in: a bounce from small, or a fade under Reduce Motion. Its
-    /// neighbours make room in the same beat.
+    /// Comes in: a bounce from small, or a fade under Reduce Motion — the
+    /// shared `AppearMotion`. Its neighbours make room in the same beat.
     public func appear(animated: Bool) {
-        let wasHidden = isHidden
         guard animated, window != nil else {
             isHidden = false
             alpha = 1
             transform = .identity
             return
         }
-        let reduced = reducesMotion()
-        record(reduced ? .fadeIn : .bounceIn)
-        alpha = 0
-        if !reduced, wasHidden || transform == .identity {
-            transform = CGAffineTransform(scaleX: Metrics.appearScale, y: Metrics.appearScale)
-        }
         let host = superview
-        if reduced {
-            UIView.animate(withDuration: Metrics.fadeDuration, delay: 0, options: [.allowUserInteraction, .beginFromCurrentState]) {
-                self.isHidden = false
-                self.alpha = 1
-                host?.layoutIfNeeded()
-            }
-        } else {
-            UIView.animate(springDuration: Metrics.appearDuration, bounce: 0.32, options: [.allowUserInteraction, .beginFromCurrentState]) {
-                self.isHidden = false
-                self.alpha = 1
-                self.transform = .identity
-                host?.layoutIfNeeded()
-            }
+        let kind = AppearMotion.appear(self, reducesMotion: reducesMotion()) {
+            self.isHidden = false
+            host?.layoutIfNeeded()
         }
+        record(Self.event(kind))
     }
 
     /// Goes: scales out and fades, the stack closing the gap in the same
@@ -862,23 +847,27 @@ open class AppButton: UIButton {
             completion?()
             return
         }
-        let reduced = reducesMotion()
-        record(reduced ? .fadeOut : .scaleOut)
         let host = superview
-        UIView.animate(
-            withDuration: reduced ? Metrics.fadeDuration : Metrics.disappearDuration, delay: 0,
-            options: [.curveEaseIn, .beginFromCurrentState]
-        ) {
-            self.alpha = 0
-            if !reduced {
-                self.transform = CGAffineTransform(scaleX: Metrics.appearScale, y: Metrics.appearScale)
-            }
+        let kind = AppearMotion.disappear(self, reducesMotion: reducesMotion()) {
             self.isHidden = true
             host?.layoutIfNeeded()
-        } completion: { _ in
-            self.transform = .identity
-            self.alpha = 1
+        } completion: { finished in
+            // An appear that took over mid-flight owns the alpha and scale.
+            if finished {
+                self.transform = .identity
+                self.alpha = 1
+            }
             completion?()
+        }
+        record(Self.event(kind))
+    }
+
+    private static func event(_ kind: AppearMotion.Kind) -> Event {
+        switch kind {
+        case .bounceIn: .bounceIn
+        case .fadeIn: .fadeIn
+        case .scaleOut: .scaleOut
+        case .fadeOut: .fadeOut
         }
     }
 
