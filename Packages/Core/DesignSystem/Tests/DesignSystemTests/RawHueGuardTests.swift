@@ -46,7 +46,6 @@ struct RawHueGuardTests {
         // Not the brand's meaning, and not decided yet.
         "MediaPickerViewController.swift": "an album's count badge: information, not an action",
         "WalletClaimViews.swift": "the streak's flame: fire, not a warning",
-        "CommentRowView.swift": "a comment's like: not Points (yet)",
     ]
 
     static let patterns = [

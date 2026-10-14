@@ -193,6 +193,8 @@ final class PostDetailViewController: UIViewController {
     private let mediaView = UIImageView()
     private let timestampLabel = UILabel()
     private let likeButton = UIButton(configuration: .plain())
+    /// The liked heart in the points gradient, over the button's glyph.
+    private let likeHeart = PointsHeartOverlay()
     private let likeCountLabel = UILabel()
 
     private let commentsHeaderLabel = UILabel()
@@ -345,6 +347,8 @@ final class PostDetailViewController: UIViewController {
     /// per layout, because a height that changes after frame 0 is the jump.
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        likeButton.layoutIfNeeded()
+        likeHeart.layout(on: likeButton)
         remeasureStreamOnWidthChange()
         refitEmptyPageOnHeightChange()
         syncDayUnderHeader()
@@ -1335,9 +1339,12 @@ final class PostDetailViewController: UIViewController {
     private func renderEngagement(_ state: PostDetailViewModel.EngagementState) {
         likeCountLabel.text = state.likeCount > 0 && !state.countHidden ? "\(state.likeCount)" : ""
         var config = likeButton.configuration
-        config?.image = (state.isLiked ? AppSymbol.liked : AppSymbol.like).image()
-        config?.baseForegroundColor = state.isLiked ? .systemRed : .secondaryLabel
+        // Liked, the Points heart in its gradient draws it (#1128).
+        let glyph = UIImage.SymbolConfiguration(textStyle: .body)
+        config?.image = state.isLiked ? PointsHeartOverlay.clearGlyph(glyph) : AppSymbol.like.image()
+        config?.baseForegroundColor = .secondaryLabel
         likeButton.configuration = config
+        likeHeart.update(on: likeButton, liked: state.isLiked, configuration: glyph)
         // The caption row carries the same number in its closing line, and it
         // is a LIVE one: the viewer can like the post from the toolbar with
         // that row on screen.

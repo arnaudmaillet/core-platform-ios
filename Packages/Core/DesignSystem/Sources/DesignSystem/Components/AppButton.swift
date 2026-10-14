@@ -176,6 +176,13 @@ open class AppButton: UIButton {
     public var selectedTint: UIColor? { didSet { refresh() } }
     /// The ink at rest. Nil: the ground's own.
     public var inkColor: UIColor? { didSet { refresh() } }
+    /// Selected, the symbol is the POINTS HEART (#1128): the heart in the
+    /// points gradient (`PointsHeartView`) drawn over the button's own glyph,
+    /// which goes clear — the button still lays it out, so nothing moves. At
+    /// rest the glyph is the button's own, in its ink. Off by default.
+    public var drawsPointsHeart = false { didSet { refresh() } }
+    /// The gradient heart, while it is shown.
+    public private(set) var pointsHeart: PointsHeartView?
 
     /// Played on a tap. Off by default.
     public var haptic: Haptic = .none
@@ -338,6 +345,10 @@ open class AppButton: UIButton {
         flash.frame = bounds
         flash.layer.cornerRadius = radius
         bone?.frame = bounds
+        if let pointsHeart, let imageView {
+            pointsHeart.frame = imageView.convert(imageView.bounds, to: self)
+            bringSubviewToFront(pointsHeart)
+        }
         bringSubviewToFront(flash)
         bringSubviewToFront(veil)
         if let bone { bringSubviewToFront(bone) }
@@ -883,7 +894,7 @@ open class AppButton: UIButton {
             }
         } else {
             record(.symbolBounce)
-            imageView.addSymbolEffect(.bounce)
+            if let pointsHeart { pointsHeart.bounce() } else { imageView.addSymbolEffect(.bounce) }
         }
     }
 
@@ -966,8 +977,14 @@ open class AppButton: UIButton {
 
     // MARK: - Configuration
 
+    /// Whether the gradient heart stands for the glyph now.
+    private var showsPointsHeart: Bool {
+        drawsPointsHeart && isSelected && content.symbol != nil && phase == .content && isEnabled
+    }
+
     private func refresh() {
         configuration = configuration(for: content, phase: phase)
+        refreshPointsHeart()
         materialGround.effect = usesMaterial ? UIBlurEffect(style: .systemThinMaterial) : nil
         materialGround.isHidden = !usesMaterial
         refreshAccessibility()
@@ -1019,6 +1036,11 @@ open class AppButton: UIButton {
         if let inkColor { config.baseForegroundColor = inkColor }
         if isSelected, case .bare = aspect, let selectedTint {
             config.imageColorTransformer = UIConfigurationColorTransformer { _ in selectedTint }
+        }
+        if showsPointsHeart {
+            // The gradient heart draws it (`pointsHeart`); the button's own
+            // glyph only holds the place.
+            config.imageColorTransformer = UIConfigurationColorTransformer { _ in .clear }
         }
 
         switch shape {
@@ -1208,3 +1230,28 @@ private final class HoldDelegate: NSObject, UIGestureRecognizerDelegate {
         return view.isDescendant(of: button)
     }
 }
+
+// MARK: - The points heart
+
+extension AppButton {
+    /// Mounts or removes the gradient heart for the current state, sized as
+    /// the button sizes its glyph.
+    fileprivate func refreshPointsHeart() {
+        guard showsPointsHeart, let symbol = content.symbol else {
+            pointsHeart?.removeFromSuperview()
+            pointsHeart = nil
+            return
+        }
+        let heart = pointsHeart ?? {
+            let view = PointsHeartView()
+            addSubview(view)
+            pointsHeart = view
+            return view
+        }()
+        heart.configuration = configuration?.preferredSymbolConfigurationForImage ?? AppSymbol.fixed(15)
+        heart.setLiked(symbol == PointsSymbol.glyph || symbol == AppSymbol.liked.rawValue, animated: false)
+        heart.ink = configuration?.baseForegroundColor ?? .label
+        setNeedsLayout()
+    }
+}
+
