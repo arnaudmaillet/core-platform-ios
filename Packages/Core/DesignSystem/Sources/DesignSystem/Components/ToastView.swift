@@ -154,7 +154,7 @@ public final class ToastView: UIView {
             case .failure: .systemRed
             // Yellow, not orange (#1124): orange is the brand's tint now,
             // and a warning in it would read as a button.
-            case .warning: .systemYellow
+            case .warning: Warning.glyphTint
             }
         }
     }

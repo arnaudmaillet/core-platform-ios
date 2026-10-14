@@ -135,8 +135,16 @@ final class TwoStepViewController: UIViewController {
                 content.textProperties.color = .tintColor
             case .codesLeft(let count):
                 content.text = "Codes Left"
-                content.secondaryText = String(count)
-                content.secondaryTextProperties.color = count <= Self.lowOnCodes ? .systemOrange : .secondaryLabel
+                if count <= Self.lowOnCodes {
+                    // Running low warns (#1124): the yellow triangle, the
+                    // number in the row's neutral ink.
+                    content.secondaryAttributedText = Warning.note(
+                        String(count), font: content.secondaryTextProperties.font
+                    )
+                } else {
+                    content.secondaryText = String(count)
+                    content.secondaryTextProperties.color = .secondaryLabel
+                }
             case .newBackupCodes:
                 content = .cell()
                 content.text = "Get New Backup Codes"

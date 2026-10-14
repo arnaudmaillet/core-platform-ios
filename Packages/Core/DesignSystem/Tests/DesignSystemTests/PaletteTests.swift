@@ -114,4 +114,18 @@ struct PaletteTests {
         #expect(GemSymbol.tint === Palette.secondary)
         #expect(ToastView.Style.warning.glyphTint == .systemYellow)
     }
+
+    /// A warning (#1124, owner 2026-10-14): a yellow glyph, the words in the
+    /// neutral ink — never yellow or orange text.
+    @Test func aWarningNoteIsAYellowGlyphAndNeutralWords() {
+        let note = Warning.note("Full", font: .systemFont(ofSize: 12))
+        var sawGlyph = false
+        note.enumerateAttribute(.attachment, in: NSRange(location: 0, length: note.length)) { value, _, _ in
+            if value is NSTextAttachment { sawGlyph = true }
+        }
+        #expect(sawGlyph)
+        let ink = note.attribute(.foregroundColor, at: note.length - 1, effectiveRange: nil) as? UIColor
+        #expect(ink == .secondaryLabel)
+        #expect(note.string.hasSuffix("Full"))
+    }
 }

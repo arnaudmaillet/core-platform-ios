@@ -129,3 +129,34 @@ public enum Palette {
         }
     }
 }
+
+/// HOW A WARNING IS DRAWN (#1124, the owner's call 2026-10-14): a yellow
+/// glyph, and the words in a neutral ink.
+///
+/// Orange is the brand's tint, so a warning in orange reads as a button; and
+/// `systemYellow` as text is about 1.5:1 on white, unreadable. So the colour
+/// rides the GLYPH alone — the triangle says "warning" by its shape too — and
+/// the text stays the row's own secondary ink.
+public enum Warning {
+    /// A warning glyph's colour.
+    public static let glyphTint: UIColor = .systemYellow
+    /// A warning's words.
+    public static let textColor: UIColor = .secondaryLabel
+    /// The glyph a warning wears beside its words.
+    public static let symbol = "exclamationmark.triangle.fill"
+
+    /// `text` led by the yellow triangle, the words in the neutral ink — for
+    /// a label that has room for one line and no image view of its own.
+    public static func note(_ text: String, font: UIFont) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let configuration = UIImage.SymbolConfiguration(font: font, scale: .small)
+        if let glyph = UIImage(systemName: symbol, withConfiguration: configuration)?
+            .withTintColor(glyphTint, renderingMode: .alwaysOriginal) {
+            result.append(NSAttributedString(attachment: NSTextAttachment(image: glyph)))
+            result.append(NSAttributedString(string: " "))
+        }
+        result.append(NSAttributedString(string: text))
+        result.addAttributes([.font: font, .foregroundColor: textColor], range: NSRange(location: 0, length: result.length))
+        return result
+    }
+}

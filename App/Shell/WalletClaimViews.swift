@@ -137,8 +137,14 @@ final class WalletBalanceTile: UIView {
 
     /// The line under the figure, and its tone.
     func setNote(_ note: String, color: UIColor = .tertiaryLabel) {
+        noteLabel.attributedText = nil
         noteLabel.text = note
         noteLabel.textColor = color
+    }
+
+    /// A note that warns: the yellow triangle, the words neutral (#1124).
+    func setWarningNote(_ note: String) {
+        noteLabel.attributedText = Warning.note(note, font: noteLabel.font)
     }
 
     /// The claim's payoff: the new number pops.
@@ -290,7 +296,7 @@ final class WalletSummaryView: UIView {
         // balance, and — at it — that only spending opens the claim again.
         if let cap = snapshot.pointsCap {
             if snapshot.balance >= cap {
-                pointsTile.setNote("Full — stake to claim again", color: .systemOrange)
+                pointsTile.setWarningNote("Full — stake to claim again")
             } else {
                 pointsTile.setNote("Up to \(cap.formatted())")
             }
