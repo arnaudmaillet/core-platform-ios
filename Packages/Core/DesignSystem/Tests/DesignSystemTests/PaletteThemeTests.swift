@@ -99,7 +99,9 @@ struct PaletteThemeTests {
         let rules = Palette.resolve(arguments: [])
         #expect(rules == Palette.Rules())
         #expect(rules.selectedTabIsNeutral)
-        #expect(rules.counters == .red, "unread marks stay the system red (decided)")
+        #expect(rules.counters == .violet, "unread marks are the violet (decided, #1178)")
+        #expect(Palette.rgb(0x7C5CF0) == Palette.counterViolet)
+        #expect(Self.contrast(.white, Palette.counterViolet) >= 4.5, "a white count on the violet")
         #expect(rules.storyRing == .gradient, "the ring wears the icon's gradient (decided)")
         #expect(rules.heroButton == .accent)
     }

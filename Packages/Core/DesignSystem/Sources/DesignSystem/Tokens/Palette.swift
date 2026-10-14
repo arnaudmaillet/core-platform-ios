@@ -30,9 +30,9 @@ import UIKit
 /// - **The accent marks what matters**: a screen's one primary action, the
 ///   system controls (the app's tint — `AccentColor`, the window's
 ///   `tintColor` — so switches, the cursor and selection follow without
-///   per-site code) and the unseen-story ring. Unread counts, the bell's
-///   dot and the hearts stay the system red (`counter`, the owner's call
-///   2026-10-14).
+///   per-site code) and the unseen-story ring. The hearts are the pink;
+///   unread counts and the bell's dot the violet (`counter`, #1178, the
+///   owner 2026-10-15) — the system red is for errors and destruction only.
 /// - **A filled button wears white** (`onPrimary`, 4.53:1 on the fill) in
 ///   the light, a dark ink on the brighter dark-mode fill.
 /// - **Violet is secondary** (#1176, the icon redrawn pink → violet on
@@ -87,12 +87,20 @@ public enum Palette {
     public static let onPrimaryContainer = dynamic(light: 0xB8296C, dark: 0xF8ABCF)
 
     /// Every solid unread mark — the tab bar's badges, the Messages
-    /// selector's, the bell's dot (#1169: one colour everywhere): the system
-    /// red (the owner's call 2026-10-14), or the accent under the `.accent`
-    /// rule to compare.
+    /// selector's, the bell's dot, a menu row's count (#1169: one colour
+    /// everywhere): the violet (#1178, the owner 2026-10-15: "UIKit's reds
+    /// in violet"), the same in both appearances, where a white count reads
+    /// at 4.5:1. The `.accent` and `.red` rules compare the pink and the
+    /// system red.
     public static var counter: UIColor {
-        rules.counters == .accent ? tint : .systemRed
+        switch rules.counters {
+        case .violet: counterViolet
+        case .accent: tint
+        case .red: .systemRed
+        }
     }
+
+    static let counterViolet = rgb(0x7C5CF0)
 
     /// THE ICON'S GRADIENT (#1169; pink → violet since the icon was redrawn,
     /// #1176): pink at the bottom-left → violet at the top-right, as the icon
@@ -102,7 +110,7 @@ public enum Palette {
     /// red badge's 3.55:1). The same in both appearances: a badge is a
     /// coloured mark on any ground. Worn by the unread pills on the inbox's
     /// avatars and by the unseen-story ring — NOT by the tab bar's badges, the
-    /// selector's nor the bell's dot: those stay the solid red (`counter`).
+    /// selector's nor the bell's dot: those stay solid (`counter`).
     public static let accentGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xA78BFA)]
 
     /// `@mentions`, `#hashtags` and links in text on a plain surface (#1174,
@@ -123,7 +131,7 @@ public enum Palette {
     /// neutral). The defaults are the decision; the DEBUG flags still
     /// compare the two undecided ones on the device.
     public struct Rules: Equatable, Sendable {
-        public enum Counters: String, Sendable { case accent, red }
+        public enum Counters: String, Sendable { case violet, accent, red }
         public enum Ring: String, Sendable { case accent, gradient }
         public enum Hero: String, Sendable { case accent, gradient }
 
@@ -131,7 +139,7 @@ public enum Palette {
         public var selectedTabIsNeutral = true
         /// The solid unread marks: the system red (decided), or the accent to
         /// compare.
-        public var counters = Counters.red
+        public var counters = Counters.violet
         /// The unseen-story ring: the icon's gradient (decided 2026-10-14), or
         /// the solid accent to compare.
         public var storyRing = Ring.gradient
@@ -146,7 +154,7 @@ public enum Palette {
     nonisolated(unsafe) public static var rules = Rules()
 
     /// The rule flags a DEBUG launch asks for: `-theme-tab accent|neutral`,
-    /// `-theme-counters accent|red`, `-theme-rings accent|gradient`,
+    /// `-theme-counters violet|accent|red`, `-theme-rings accent|gradient`,
     /// `-theme-hero accent|gradient`.
     public static func configure(arguments: [String]) {
         rules = resolve(arguments: arguments)
