@@ -109,14 +109,14 @@ struct PlainCardActionsTests {
         #expect(comments.content.count == 12 && likes.content.count == 160)
     }
 
-    /// A staked heart is still the points' red — the line's ink is the
-    /// heart at rest, not a heart the viewer has filled.
-    @Test func aStakedHeartIsStillRed() throws {
+    /// A staked heart is the Points heart, in its gradient (#1128) — the
+    /// line's ink is the heart at rest, not a heart the viewer has filled.
+    @Test func aStakedHeartIsThePointsHeart() throws {
         let cell = row()
         let likes = try #require(actions(in: cell).last)
         cell.setViewerStake(10)
         #expect(likes.isSelected)
-        #expect(likes.configuration?.imageColorTransformer?(.secondaryLabel) == PointsSymbol.tint)
+        #expect(likes.pointsHeart?.isLiked == true, "the staked heart is not the gradient one")
         #expect(likes.configuration?.baseForegroundColor == .secondaryLabel, "the count stays the line's ink")
         #expect(likes.content.symbol == PointsSymbol.glyph)
         cell.setViewerStake(0)
@@ -279,9 +279,10 @@ struct PlainCardActionsTests {
         [action.configuration?.baseForegroundColor].compactMap { $0 }
     }
 
-    /// ⚠️ A STAKED heart flies home red — filmed without this: the stand-in's
-    /// heart at rest, the row's red, the colour changing in the landing frame.
-    @Test func aStakedHeartFliesHomeRed() throws {
+    /// ⚠️ A STAKED heart flies home as the Points heart — filmed without this
+    /// (when it was red): the stand-in's heart at rest, the row's colour, the
+    /// colour changing in the landing frame.
+    @Test func aStakedHeartFliesHomeAsThePointsHeart() throws {
         func heart(_ view: UIView) throws -> AppButton {
             try #require(walk(view, AppButton.self)
                 .filter { !$0.isHidden && $0.superviewChainIsVisible }
@@ -295,7 +296,7 @@ struct PlainCardActionsTests {
             actions: .init(repost: true, bookmark: true, saved: false, stake: 10)
         )
         let card = try #require(view.subviews.first as? PostGridListRowCell)
-        #expect(try heart(card).configuration?.imageColorTransformer?(.secondaryLabel) == PointsSymbol.tint)
+        #expect(try heart(card).pointsHeart?.isLiked == true, "the flying card's heart is not the gradient one")
         #expect(try heart(card).isSelected == heart(wired.contentView).isSelected)
 
         // And a staking row with no count yet keeps its heart on both.

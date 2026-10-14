@@ -414,16 +414,17 @@ final class CommentRowView: UIView {
     @objc private func avatarTapped() { onAvatarTap?() }
     @objc private func rowTapped() { onReplyTap?() }
 
-    /// Renders the like control's state: filled pink heart when liked,
-    /// quiet outline otherwise; the counter shows only a real number
-    /// (zero renders bare — no lying "0").
+    /// Renders the like control's state: the Points heart, in its gradient,
+    /// when liked (#1128, the owner's call 2026-10-14: a comment's like is a
+    /// like like any other); the quiet outline otherwise. The counter shows
+    /// only a real number (zero renders bare — no lying "0").
     func setLiked(_ liked: Bool, count: Int) {
         var config = likeButton.configuration
-        config?.image = UIImage.symbol(
-            named: (liked ? AppSymbol.liked : AppSymbol.like).rawValue,
-            configuration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        )
-        config?.baseForegroundColor = liked ? .systemPink : .secondaryLabel
+        let glyph = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        config?.image = liked
+            ? PointsHeartOverlay.clearGlyph(glyph)
+            : UIImage.symbol(named: AppSymbol.like.rawValue, configuration: glyph)
+        config?.baseForegroundColor = .secondaryLabel
         if count > 0 {
             var title = AttributedString(SnapSubtitleView.countText(count))
             title.font = UIFont.appFont(forTextStyle: .caption1)
@@ -432,6 +433,16 @@ final class CommentRowView: UIView {
             config?.attributedTitle = nil
         }
         likeButton.configuration = config
+        likeHeart.update(on: likeButton, liked: liked, configuration: glyph)
+    }
+
+    /// The liked heart in the points gradient, over the button's glyph.
+    private let likeHeart = PointsHeartOverlay()
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        likeButton.layoutIfNeeded()
+        likeHeart.layout(on: likeButton)
     }
 
     // MARK: - The time, or the loader in its place (#719, #725, #919)

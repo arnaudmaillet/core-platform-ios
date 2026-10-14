@@ -1845,7 +1845,12 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// carrying a count and holding the line's end rather than by a darker
     /// ink: glyph and count in the line's one ink (`PostCardPillView.ink`).
     /// The app's one button since #934 (`PostCardAction`).
-    private let likesAction = PostCardAction.make(symbol: ActionSymbol.like, label: "Likes", selectedTint: PointsSymbol.tint)
+    private let likesAction: AppButton = {
+        let button = PostCardAction.make(symbol: ActionSymbol.like, label: "Likes", selectedTint: PointsSymbol.tint)
+        // Staked, the heart is the points gradient (#1128).
+        button.drawsPointsHeart = true
+        return button
+    }()
     private let commentsAction = PostCardAction.make(symbol: ActionSymbol.comments, label: "Comments")
     /// Whether the likes keep their heart with no count: a staking card's
     /// like is a door even before the post has a number.

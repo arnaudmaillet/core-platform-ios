@@ -128,3 +128,53 @@ private final class GradientFill: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
+
+/// The gradient heart laid over a plain `UIButton`'s glyph (#1128) — for a
+/// button that is not an `AppButton` (which has `drawsPointsHeart`): the
+/// Snap like pill, the comment composer's. The button keeps laying out its
+/// glyph, drawn clear (`clearGlyph`), and the heart sits exactly on it.
+///
+/// The host calls `update(on:liked:)` when the state changes and
+/// `layout(on:)` from a layout pass.
+@MainActor
+public final class PointsHeartOverlay {
+    public private(set) var heart: PointsHeartView?
+
+    public init() {}
+
+    /// The filled heart as the button lays it out but does not draw: the
+    /// gradient heart draws it.
+    public static func clearGlyph(_ configuration: UIImage.SymbolConfiguration) -> UIImage? {
+        PointsSymbol.glyphImage(configuration)?.withTintColor(.clear, renderingMode: .alwaysOriginal)
+    }
+
+    /// Shows the gradient heart over `button`'s glyph while `liked`.
+    public func update(on button: UIButton, liked: Bool, configuration: UIImage.SymbolConfiguration) {
+        guard liked else {
+            heart?.removeFromSuperview()
+            heart = nil
+            return
+        }
+        let view = heart ?? {
+            let view = PointsHeartView(configuration: configuration)
+            button.addSubview(view)
+            heart = view
+            return view
+        }()
+        view.configuration = configuration
+        view.setLiked(true, animated: false)
+        button.setNeedsLayout()
+    }
+
+    /// Places the heart on the glyph — call after the button's layout.
+    public func layout(on button: UIButton) {
+        guard let heart, let imageView = button.imageView else { return }
+        heart.frame = imageView.convert(imageView.bounds, to: button)
+        button.bringSubviewToFront(heart)
+    }
+
+    /// The like's bounce, on the heart when it is shown.
+    public func bounce() {
+        heart?.bounce()
+    }
+}

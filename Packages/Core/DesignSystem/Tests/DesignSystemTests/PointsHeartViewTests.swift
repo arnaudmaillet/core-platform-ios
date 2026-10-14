@@ -74,3 +74,27 @@ struct PointsHeartViewTests {
         #expect(heart.drawnColours == colours)
     }
 }
+
+/// The button's side (#1128): selected, the gradient heart stands for the
+/// glyph; at rest there is none.
+@MainActor
+struct AppButtonPointsHeartTests {
+    @Test func aSelectedLikeDrawsTheGradientHeart() {
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(PointsSymbol.glyph))
+        button.drawsPointsHeart = true
+        #expect(button.pointsHeart == nil, "at rest the glyph is the button's own")
+        button.setSelected(true, animated: false)
+        #expect(button.pointsHeart?.isLiked == true)
+        button.frame = CGRect(x: 0, y: 0, width: 60, height: 30)
+        button.layoutIfNeeded()
+        #expect(button.pointsHeart?.frame.isEmpty == false)
+        button.setSelected(false, animated: false)
+        #expect(button.pointsHeart == nil)
+    }
+
+    @Test func offByDefault() {
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(PointsSymbol.glyph))
+        button.setSelected(true, animated: false)
+        #expect(button.pointsHeart == nil)
+    }
+}

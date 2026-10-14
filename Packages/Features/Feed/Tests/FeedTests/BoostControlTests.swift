@@ -243,12 +243,10 @@ struct BoostControlTests {
     private static func drawn(_ image: UIImage?) -> Data? { image?.pngData() }
 
     /// A heart either way: an OUTLINE in the page's ink while the viewer has
-    /// staked nothing, the points' red, filled, once they have — never a
-    /// number in its place (#680).
-    @Test func railHeartIsAnInkOutlineAtRestRedOnceStakedNeverANumber() {
+    /// staked nothing, the Points heart in its gradient once they have
+    /// (#1128) — never a number in its place (#680).
+    @Test func railHeartIsAnInkOutlineAtRestTheGradientOnceStakedNeverANumber() {
         let white = Self.drawn(PointsSymbol.likeImage(staked: false, Self.railGlyph))
-        let red = Self.drawn(PointsSymbol.likeImage(staked: true, Self.railGlyph))
-        #expect(white != red, "the two hearts must differ")
 
         let button = SnapRailBoostButton()
         #expect(Self.drawn(button.configuration?.image) == white)
@@ -258,12 +256,14 @@ struct BoostControlTests {
         #expect(button.configuration?.attributedTitle == nil)
 
         button.setSpentTotal(60)
-        #expect(Self.drawn(button.configuration?.image) == red)
-        #expect(button.configuration?.image?.renderingMode == .alwaysOriginal, "the staked heart lost its red")
+        #expect(button.pointsHeart.heart?.isLiked == true, "the staked heart is not the gradient one")
+        #expect(Self.drawn(button.configuration?.image) == Self.drawn(PointsHeartOverlay.clearGlyph(Self.railGlyph)),
+                "the button's own glyph should only hold the place")
         #expect(button.configuration?.attributedTitle == nil, "the spend came back as a number")
 
         button.setSpentTotal(0)
         #expect(Self.drawn(button.configuration?.image) == white)
+        #expect(button.pointsHeart.heart == nil)
     }
 
     /// VoiceOver reads the like state and both counts.
