@@ -181,7 +181,7 @@ public actor AccountSessionsRepository: AccountSessionsManaging, CredentialStepU
     let authClient: any Auth_V1_AuthServiceClientInterface
     /// Hands a step-up's fresh access token to whoever vends tokens (the
     /// app's `SessionManager`), so the next authenticated call carries it.
-    private let tokenInstaller: (any AccessTokenInstalling)?
+    let tokenInstaller: (any AccessTokenInstalling)?
 
     /// The account's address, for the code that proves the holder again.
     private let account: (any AccountProviding)?

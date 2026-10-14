@@ -15,13 +15,17 @@ public struct PasskeySummary: Hashable, Sendable, Identifiable {
     public let lastUsedAt: Date?
     /// Synced across the holder's devices (iCloud Keychain).
     public let synced: Bool
+    /// A staff passkey (#964, backend #880): sessions it opens carry staff
+    /// permissions.
+    public let staff: Bool
 
-    public init(id: String, name: String, createdAt: Date?, lastUsedAt: Date?, synced: Bool) {
+    public init(id: String, name: String, createdAt: Date?, lastUsedAt: Date?, synced: Bool, staff: Bool = false) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
         self.lastUsedAt = lastUsedAt
         self.synced = synced
+        self.staff = staff
     }
 }
 
@@ -42,6 +46,9 @@ public enum PasskeyError: Error, Equatable {
     case alreadyRegistered
     /// Already removed, somewhere else (AUT-5027): the list is stale.
     case notFound
+    /// The staff enrollment grant is unknown, another account's, expired or
+    /// used (AUT-5032).
+    case grantRejected
     /// The call failed on the way to or at the server. `failure` keeps WHY
     /// (#794).
     case transport(message: String, failure: NetworkFailure? = nil)
@@ -58,12 +65,59 @@ extension PasskeyError: NetworkFailureCarrying {
 public protocol PasskeysManaging: Sendable {
     func listPasskeys() async throws -> [PasskeySummary]
     func startPasskeyRegistration() async throws -> PasskeyCreationRequest
-    /// `name` empty: the server names it "Passkey".
+    /// `name` empty: the server names it "Passkey". `staffGrant` (#964): a
+    /// staff enrollment grant makes it a staff passkey; nil, a member one.
+    /// ⚠️ The grant is a secret: never logged, never kept past this call.
     func finishPasskeyRegistration(
-        _ request: PasskeyCreationRequest, attestation: PasskeyAttestation, name: String
+        _ request: PasskeyCreationRequest, attestation: PasskeyAttestation, name: String, staffGrant: String?
     ) async throws -> PasskeySummary
     /// The passkeys left.
     func removePasskey(id: String) async throws -> [PasskeySummary]
+}
+
+/// Proving the holder again WITH A PASSKEY (#964, `VerifyCredentials
+/// { passkey }`): a staff session's only way — its step-up refuses a code
+/// (AUT-5031) — and, for anyone with a passkey, quicker than a code.
+public protocol PasskeyStepUp: Sendable {
+    /// A challenge for the authenticator (the sign-in one: single use, five
+    /// minutes).
+    func passkeyStepUpRequest() async throws -> PasskeyAssertionRequest
+    /// The authenticator's answer: the session gets a fresh proof.
+    func stepUp(passkey: PasskeyAssertion) async throws
+}
+
+extension AccountSessionsRepository: PasskeyStepUp {
+    public func passkeyStepUpRequest() async throws -> PasskeyAssertionRequest {
+        let response = await authClient.startPasskeySignIn(request: Auth_V1_StartPasskeySignInRequest(), headers: [:])
+        switch response.result {
+        case .success(let body):
+            guard let challenge = Data(base64URL: body.challenge) else {
+                throw PasskeyError.transport(message: "unreadable passkey options")
+            }
+            return PasskeyAssertionRequest(challenge: body.challenge, challengeData: challenge, relyingPartyID: body.rpID)
+        case .failure(let error):
+            throw Self.passkeyError(error)
+        }
+    }
+
+    public func stepUp(passkey: PasskeyAssertion) async throws {
+        var assertion = Auth_V1_PasskeyAssertion()
+        assertion.challenge = passkey.challenge
+        assertion.credentialID = passkey.credentialID
+        assertion.clientDataJson = passkey.clientDataJSON
+        assertion.authenticatorData = passkey.authenticatorData
+        assertion.signature = passkey.signature
+        assertion.userHandle = passkey.userHandle
+        var request = Auth_V1_VerifyCredentialsRequest()
+        request.credential = .passkey(assertion)
+        let response = await authClient.verifyCredentials(request: request, headers: [:])
+        switch response.result {
+        case .success(let body):
+            await tokenInstaller?.installStepUpToken(body.accessToken, expiresIn: body.expiresIn)
+        case .failure(let error):
+            throw Self.passkeyError(error)
+        }
+    }
 }
 
 extension PasskeysManaging {
@@ -110,13 +164,14 @@ extension AccountSessionsRepository: PasskeysManaging {
     }
 
     public func finishPasskeyRegistration(
-        _ request: PasskeyCreationRequest, attestation: PasskeyAttestation, name: String
+        _ request: PasskeyCreationRequest, attestation: PasskeyAttestation, name: String, staffGrant: String?
     ) async throws -> PasskeySummary {
         var body = Auth_V1_FinishPasskeyRegistrationRequest()
         body.challenge = request.challenge
         body.clientDataJson = attestation.clientDataJSON
         body.attestationObject = attestation.attestationObject
         body.name = String(name.prefix(64))
+        body.staffEnrollmentGrant = staffGrant?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let response = await authClient.finishPasskeyRegistration(request: body, headers: [:])
         switch response.result {
         case .success(let passkey): return Self.summary(passkey)
@@ -140,7 +195,8 @@ extension AccountSessionsRepository: PasskeysManaging {
             name: passkey.name.isEmpty ? "Passkey" : passkey.name,
             createdAt: passkey.hasCreatedAt ? passkey.createdAt.date : nil,
             lastUsedAt: passkey.hasLastUsedAt ? passkey.lastUsedAt.date : nil,
-            synced: passkey.synced
+            synced: passkey.synced,
+            staff: passkey.staff
         )
     }
 
@@ -153,6 +209,7 @@ extension AccountSessionsRepository: PasskeysManaging {
         if message.contains("AUT-5025") { return .limitReached }
         if message.contains("AUT-5026") { return .alreadyRegistered }
         if message.contains("AUT-5027") { return .notFound }
+        if message.contains("AUT-5032") { return .grantRejected }
         return .transport(message: message.isEmpty ? "code \(error.code)" : message, failure: NetworkFailure(error))
     }
 }

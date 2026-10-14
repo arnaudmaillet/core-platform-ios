@@ -64,6 +64,9 @@ public final class MockAuthService: @unchecked Sendable {
     private var passkeyChallenges: Set<String> = []
     /// Sign-in challenges handed out and not yet used.
     private var passkeySignInChallenges: Set<String> = []
+    /// Staff enrollment grants not yet used (#964): the one an admin would
+    /// hand out — `staffEnrollmentGrant` — until a registration spends it.
+    private var staffGrants: Set<String> = [MockAuthService.staffEnrollmentGrant]
     /// No relying party configured: every passkey RPC is UNAVAILABLE, as on
     /// a fleet without `AUTH_WEBAUTHN_RP_ID`.
     private let passkeysUnavailable: Bool
@@ -577,6 +580,12 @@ public final class MockAuthService: @unchecked Sendable {
                 return .failure(ConnectError(code: .unauthenticated, message: "AUT-5001: sign in first"))
             }
             switch request.credential {
+            case .passkey(let assertion)?:
+                // One of the account's passkeys, signed over a challenge the
+                // mock handed out (#964); the user handle is optional here.
+                guard passkeyVerifiesLocked(assertion, requiresHandle: false) else {
+                    return .failure(ConnectError(code: .unauthenticated, message: "AUT-5028: the passkey did not verify"))
+                }
             case .mfaCode(let code)?:
                 guard lifecycle.isTwoStepOn else {
                     return .failure(ConnectError(code: .failedPrecondition, message: "AUT-5020: two-step sign-in is off"))
@@ -734,6 +743,8 @@ public final class MockAuthService: @unchecked Sendable {
     /// The relying party the mock's options name.
     public static let passkeyRelyingParty = "core-platform.example"
     public static let seededPasskeyID = "c2VlZGVkLXBhc3NrZXk"
+    /// The staff enrollment grant the mock accepts, once (#964).
+    public static let staffEnrollmentGrant = "staff-grant-demo"
     /// The fleet's cap (AUT-5025).
     public static let passkeyLimit = 10
 
@@ -795,6 +806,12 @@ public final class MockAuthService: @unchecked Sendable {
             guard !request.clientDataJson.isEmpty, !request.attestationObject.isEmpty else {
                 return .failure(ConnectError(code: .invalidArgument, message: "AUT-5024: the passkey was not accepted"))
             }
+            let isStaff = !request.staffEnrollmentGrant.isEmpty
+            if isStaff, staffGrants.remove(request.staffEnrollmentGrant) == nil {
+                return .failure(ConnectError(
+                    code: .permissionDenied, message: "AUT-5032: the enrollment grant is unknown, expired or used"
+                ))
+            }
             let id = Data(request.attestationObject.prefix(32)).base64URLForMock
             guard !passkeys.contains(where: { $0.credentialID == id }) else {
                 return .failure(ConnectError(code: .alreadyExists, message: "AUT-5026: this passkey is already registered"))
@@ -804,6 +821,7 @@ public final class MockAuthService: @unchecked Sendable {
             passkey.name = request.name.isEmpty ? "Passkey" : String(request.name.prefix(64))
             passkey.createdAt = Google_Protobuf_Timestamp(date: Date())
             passkey.synced = true
+            passkey.staff = isStaff
             passkeys.append(passkey)
             return .success(passkey)
         }
@@ -837,11 +855,7 @@ public final class MockAuthService: @unchecked Sendable {
         }
         return lock.withLock {
             let id = assertion.credentialID.base64URLForMock
-            guard passkeySignInChallenges.remove(assertion.challenge) != nil,
-                  passkeys.contains(where: { $0.credentialID == id }),
-                  assertion.userHandle == Data(Self.accountID.utf8),
-                  !assertion.signature.isEmpty
-            else {
+            guard passkeyVerifiesLocked(assertion, requiresHandle: true) else {
                 return .failure(ConnectError(code: .unauthenticated, message: "AUT-5028: the passkey did not verify"))
             }
             if let index = passkeys.firstIndex(where: { $0.credentialID == id }) {
@@ -853,6 +867,16 @@ public final class MockAuthService: @unchecked Sendable {
             response.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
             return .success(response)
         }
+    }
+
+    /// What the mock can check of an assertion without keys: a challenge it
+    /// handed out (spent here), one of the account's passkeys, a signature,
+    /// and — to sign in — the account's user handle.
+    private func passkeyVerifiesLocked(_ assertion: Auth_V1_PasskeyAssertion, requiresHandle: Bool) -> Bool {
+        guard passkeySignInChallenges.remove(assertion.challenge) != nil else { return false }
+        let id = assertion.credentialID.base64URLForMock
+        guard passkeys.contains(where: { $0.credentialID == id }), !assertion.signature.isEmpty else { return false }
+        return !requiresHandle || assertion.userHandle == Data(Self.accountID.utf8)
     }
 
     private func removePasskey(

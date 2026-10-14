@@ -22,16 +22,21 @@ final class PasskeysViewController: UIViewController {
         case loading, failed, unavailable, empty
         case passkey(PasskeySummary)
         case add
+        /// Discreet (#964): staff only, with a grant handed out of band.
+        case addStaff
     }
 
     let model: PasskeysModel
     private let stepUp: any CredentialStepUp
+    /// The passkey step-up (#964), tried first once the account has one.
+    private let passkeyStepUp: (any PasskeyStepUp)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(model: PasskeysModel, stepUp: any CredentialStepUp) {
+    init(model: PasskeysModel, stepUp: any CredentialStepUp, passkeyStepUp: (any PasskeyStepUp)? = nil) {
         self.model = model
         self.stepUp = stepUp
+        self.passkeyStepUp = passkeyStepUp
         super.init(nibName: nil, bundle: nil)
         title = Self.title
         hidesBottomBarWhenPushed = true
@@ -72,9 +77,9 @@ final class PasskeysViewController: UIViewController {
     static let footer = "A passkey lets you confirm it\u{2019}s you with Face ID or Touch ID instead of a code. It\u{2019}s saved in your iCloud Keychain, so it works on your other Apple devices too."
     static let unavailableText = "Passkeys aren\u{2019}t available yet."
 
-    /// "Added 3 Oct 2026 · Last used yesterday" — or "Never used".
+    /// "Staff · Added 3 Oct 2026 · Last used yesterday" — or "Never used".
     static func subtitle(for passkey: PasskeySummary, now: Date = Date()) -> String {
-        var parts: [String] = []
+        var parts: [String] = passkey.staff ? ["Staff"] : []
         if let created = passkey.createdAt {
             parts.append("Added " + created.formatted(date: .abbreviated, time: .omitted))
         }
@@ -114,11 +119,15 @@ final class PasskeysViewController: UIViewController {
                 content.text = passkey.name
                 content.secondaryText = Self.subtitle(for: passkey)
                 content.secondaryTextProperties.color = .secondaryLabel
-                content.image = UIImage(systemName: "person.badge.key")
+                content.image = UIImage(systemName: passkey.staff ? "person.badge.shield.checkmark" : "person.badge.key")
                 content.imageProperties.tintColor = .label
             case .add:
                 content.text = "Add a Passkey"
                 content.textProperties.color = .tintColor
+            case .addStaff:
+                content.text = "Register a Staff Passkey\u{2026}"
+                content.textProperties.color = .secondaryLabel
+                content.textProperties.font = .appFont(forTextStyle: .footnote)
             }
             cell.contentConfiguration = content
         }
@@ -151,7 +160,7 @@ final class PasskeysViewController: UIViewController {
         case .loaded(let passkeys):
             snapshot.appendItems(passkeys.isEmpty ? [.empty] : passkeys.map(Item.passkey), toSection: .passkeys)
             snapshot.appendSections([.add])
-            snapshot.appendItems([.add], toSection: .add)
+            snapshot.appendItems([.add, .addStaff], toSection: .add)
         }
         snapshot.reloadSections(snapshot.sectionIdentifiers)
         dataSource.apply(snapshot, animatingDifferences: false)
@@ -164,6 +173,35 @@ final class PasskeysViewController: UIViewController {
             { await $0.add() },
             stepUpMessage: "To add a passkey, confirm it\u{2019}s you.", actionTitle: "Continue"
         )
+    }
+
+    /// A staff passkey (#964): the grant an admin handed out, pasted, then
+    /// the usual registration with it. ⚠️ The grant is a secret: it lives in
+    /// this alert and the call, nowhere else.
+    private func addStaff() {
+        let alert = UIAlertController(
+            title: "Register a Staff Passkey",
+            message: "Paste the enrollment code you were given. It works once, for 24 hours.",
+            preferredStyle: .alert
+        )
+        alert.addTextField { field in
+            field.placeholder = "Enrollment code"
+            field.isSecureTextEntry = true
+            field.autocorrectionType = .no
+            field.autocapitalizationType = .none
+            field.textContentType = .oneTimeCode
+        }
+        let register = UIAlertAction(title: "Continue", style: .default) { [weak self, weak alert] _ in
+            let grant = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard let self, !grant.isEmpty else { return }
+            run(
+                { await $0.add(staffGrant: grant) },
+                stepUpMessage: "To add a passkey, confirm it\u{2019}s you.", actionTitle: "Continue"
+            )
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(register)
+        present(alert, animated: true)
     }
 
     private func remove(_ passkey: PasskeySummary) {
@@ -196,7 +234,8 @@ final class PasskeysViewController: UIViewController {
             case .done, .cancelled:
                 break
             case .needsStepUp where !afterStepUp:
-                StepUpPrompt.present(
+                StepUpPrompt.presentPreferringPasskey(
+                    model.hasPasskeys ? passkeyStepUp.map { ($0, model.authorizer) } : nil,
                     on: self,
                     message: stepUpMessage,
                     actionTitle: actionTitle,
@@ -224,7 +263,7 @@ final class PasskeysViewController: UIViewController {
 extension PasskeysViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
-        case .failed, .add, .passkey: true
+        case .failed, .add, .addStaff, .passkey: true
         default: false
         }
     }
@@ -234,6 +273,7 @@ extension PasskeysViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed: Task { await model.load() }
         case .add: add()
+        case .addStaff: addStaff()
         case .passkey(let passkey): remove(passkey)
         default: break
         }
@@ -267,6 +307,8 @@ final class PasskeysModel {
     /// What a new passkey is called: Apple's passkeys live in iCloud
     /// Keychain, which is what the holder will recognise.
     static let newPasskeyName = "iCloud Keychain"
+    /// A staff passkey's name, beside its badge.
+    static let staffPasskeyName = "Staff passkey"
 
     private(set) var phase: Phase = .loading {
         didSet { onChange?() }
@@ -277,7 +319,12 @@ final class PasskeysModel {
     private var isWorking = false
 
     private let manager: any PasskeysManaging
-    private let authorizer: any PasskeyAuthorizing
+    let authorizer: any PasskeyAuthorizing
+
+    /// The account holds at least one passkey — one to step up with.
+    var hasPasskeys: Bool {
+        if case .loaded(let passkeys) = phase { !passkeys.isEmpty } else { false }
+    }
 
     init(manager: any PasskeysManaging, authorizer: any PasskeyAuthorizing) {
         self.manager = manager
@@ -296,7 +343,7 @@ final class PasskeysModel {
         }
     }
 
-    func add() async -> Outcome {
+    func add(staffGrant: String? = nil) async -> Outcome {
         guard !isWorking else { return .cancelled }
         isWorking = true
         defer { isWorking = false }
@@ -304,7 +351,8 @@ final class PasskeysModel {
             let request = try await manager.startPasskeyRegistration()
             let attestation = try await authorizer.createPasskey(request)
             let passkey = try await manager.finishPasskeyRegistration(
-                request, attestation: attestation, name: Self.newPasskeyName
+                request, attestation: attestation, name: staffGrant == nil ? Self.newPasskeyName : Self.staffPasskeyName,
+                staffGrant: staffGrant
             )
             if case .loaded(let passkeys) = phase {
                 phase = .loaded(passkeys + [passkey])
@@ -358,6 +406,7 @@ final class PasskeysModel {
         case .limitReached: "You can have up to 10 passkeys. Remove one to add another."
         case .alreadyRegistered: "This device already has a passkey for your account."
         case .notFound: "That passkey was already removed."
+        case .grantRejected: "That enrollment code didn\u{2019}t work. It may have expired or already been used \u{2014} ask for a new one."
         case .unavailable: unavailableText
         default: FailureCopy.message(for: error, fallback: "Couldn\u{2019}t change your passkeys. Try again.")
         }
