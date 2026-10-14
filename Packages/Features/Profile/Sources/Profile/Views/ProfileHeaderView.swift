@@ -319,7 +319,7 @@ final class ProfileHeaderView: UIView {
         let body = inkTones.body
         bioLabel.textColor = HeroInk.blend(page: .label, picture: body.primary, onPicture: bodyOnPicture)
         HeroInk.applyShadow(to: bioLabel, tone: body, onPicture: bodyOnPicture)
-        // The link wears the text links' slate on the page (#1174); on a
+        // The link wears the text links' ink on the page (#1174); on a
         // picture a hue is the ink sure to sink into it, so it wears the
         // picture's ink.
         websiteButton.configuration?.baseForegroundColor = HeroInk.blend(

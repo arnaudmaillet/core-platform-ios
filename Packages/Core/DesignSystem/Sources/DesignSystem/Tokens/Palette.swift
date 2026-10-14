@@ -35,7 +35,10 @@ import UIKit
 ///   2026-10-14).
 /// - **A filled button wears white** (`onPrimary`, 4.53:1 on the fill) in
 ///   the light, a dark ink on the brighter dark-mode fill.
-/// - **Violet is secondary**: gems and secondary emphasis.
+/// - **Violet is secondary** (#1176, the icon redrawn pink → violet on
+///   2026-10-14): the accent's companion — gems, secondary emphasis, the
+///   gradients' far stop and, greyed, the ink of links and tokens
+///   (`entityInk`). Filled buttons stay pink.
 /// - **Dark mode is not an inversion**: the dark tint is brighter, not the
 ///   same hex. Every role also has an Increased Contrast value where its
 ///   contrast is close to the line.
@@ -84,23 +87,24 @@ public enum Palette {
         rules.counters == .accent ? tint : .systemRed
     }
 
-    /// THE ICON'S GRADIENT (#1169, the owner's call 2026-10-14): pink at the
-    /// bottom-left → orange at the top-right, as the icon runs, in the icon's
-    /// own pink and orange made vivid enough to mark a pill. The icon's
-    /// pastels (`F7BED2` → `FFBE7D`) carry a white digit at about 1.5:1; these
-    /// carry it at about 1.9–2.6:1 — the owner chose the icon's tone over the
-    /// system red badge's 3.55:1. The same in both appearances: a badge is a
-    /// coloured mark on any ground. Worn by the unread pills on the inbox's avatars and by the
-    /// unseen-story ring — NOT by the tab bar's badges, the selector's nor
-    /// the bell's dot: those stay the solid red (`counter`).
-    public static let accentGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xFFA552)]
+    /// THE ICON'S GRADIENT (#1169; pink → violet since the icon was redrawn,
+    /// #1176): pink at the bottom-left → violet at the top-right, as the icon
+    /// runs, in the icon's own hues made vivid enough to mark a pill — the
+    /// dark tint and the dark secondary. A white digit reads at about
+    /// 2.7:1 on both stops (the owner chose the icon's tone over the system
+    /// red badge's 3.55:1). The same in both appearances: a badge is a
+    /// coloured mark on any ground. Worn by the unread pills on the inbox's
+    /// avatars and by the unseen-story ring — NOT by the tab bar's badges, the
+    /// selector's nor the bell's dot: those stay the solid red (`counter`).
+    public static let accentGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xA78BFA)]
 
     /// `@mentions`, `#hashtags` and links in text on a plain surface (#1174,
     /// the owner 2026-10-14: "the pink as accent, used subtly and
-    /// sparingly"): a quiet slate blue-grey, set apart from the words by its
-    /// cool cast and the semibold — never the accent, never the system blue.
-    /// 6.3:1 on white, 5.8:1 on the grouped grey; 7:1 and more in the dark.
-    public static let entityInk = dynamic(light: 0x4F5F78, dark: 0x9AABC4, lightIC: 0x3E4C63, darkIC: 0xB4C2D6)
+    /// sparingly"): a greyed violet — the secondary, quieted (#1176) — set
+    /// apart from the words by its cast and the semibold; never the accent,
+    /// never the system blue. 6.3:1 on white, 5.8:1 on the grouped grey;
+    /// 7:1 and more in the dark.
+    public static let entityInk = dynamic(light: 0x645A82, dark: 0xAFA3CC, lightIC: 0x4F4669, darkIC: 0xC3B9DD)
 
     /// Where `accentGradient` runs, in a layer's unit space.
     public static let accentGradientStart = CGPoint(x: 0, y: 1)
@@ -191,9 +195,10 @@ public enum Palette {
         return [red, red]
     }
 
-    /// The icon's own gradient, orchid → tangerine, for brand moments only
-    /// (splash, onboarding, empty-state art, the Shop's hero art).
-    public static let brandGradient: [UIColor] = [rgb(0xB959DD), rgb(0xFF8D28)]
+    /// The icon's own gradient, pink → violet (#1176), deep enough to carry a
+    /// white label, for brand moments only (splash, onboarding, empty-state
+    /// art, the Shop's hero art, the wallet's hero rule).
+    public static let brandGradient: [UIColor] = [rgb(0xE0559A), rgb(0x7C5CF0)]
 
     // MARK: - Building
 
