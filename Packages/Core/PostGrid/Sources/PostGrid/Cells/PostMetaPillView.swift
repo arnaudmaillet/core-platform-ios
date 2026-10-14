@@ -421,7 +421,7 @@ public final class PostActionPillView: PostCardPillView {
     /// the closing line's repost and save never outrank the name above them.
     public static func glyphConfiguration(systemName: String) -> UIButton.Configuration {
         var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: systemName)
+        configuration.image = UIImage.symbol(named: systemName)
         configuration.baseForegroundColor = PostCardPillView.ink
         configuration.contentInsets = .zero
         configuration.preferredSymbolConfigurationForImage = glyphSymbolConfiguration

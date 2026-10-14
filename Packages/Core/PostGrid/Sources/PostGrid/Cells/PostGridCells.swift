@@ -1281,10 +1281,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// screen's toolbar cannot drift apart.
     public enum ActionSymbol {
         public static let comments = PostActionSymbol.comments
-        public static let like = "heart"
+        public static let like = AppSymbol.like.rawValue
         public static let repost = PostActionSymbol.repost
-        public static let save = "bookmark"
-        public static let saved = "bookmark.fill"
+        public static let save = AppSymbol.save.rawValue
+        public static let saved = AppSymbol.saved.rawValue
     }
 
     /// How far the preview's own furniture — the metadata pills, the play badge
@@ -2651,7 +2651,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// (`PostGridFlightCard`), in every gallery: For You's chunks and mosaic,
     /// a profile's Media, a place's grid.
     private let likes = PostMetricLabel(
-        symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
+        symbol: PointsSymbol.glyph, font: metaFont, color: .white, shadowed: true
     )
     /// The cover and the live surface over it (#1088): the cover's arrival
     /// on the loading ladder — a reconfigure cancelling the load in flight

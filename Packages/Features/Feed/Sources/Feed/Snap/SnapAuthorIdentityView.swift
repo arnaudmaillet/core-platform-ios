@@ -754,7 +754,7 @@ enum SnapNavControls {
     /// would settle 40×36 — subtly oval).
     private static func makeCircularBarButton(systemName: String, pointSize: CGFloat) -> UIButton {
         var config = UIButton.Configuration.plain()
-        config.image = UIImage(systemName: systemName)?
+        config.image = UIImage.symbol(named: systemName)?
             .withConfiguration(UIImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold))
         config.baseForegroundColor = .label
         config.contentInsets = .zero

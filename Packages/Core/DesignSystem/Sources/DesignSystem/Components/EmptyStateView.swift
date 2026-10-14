@@ -131,7 +131,7 @@ public final class EmptyStateView: UIView {
         actionHandler: (() -> Void)? = nil
     ) {
         configure(
-            image: symbolName.flatMap { UIImage(systemName: $0) },
+            image: symbolName.flatMap { UIImage.symbol(named: $0) },
             title: title,
             subtitle: subtitle,
             actionTitle: actionTitle,

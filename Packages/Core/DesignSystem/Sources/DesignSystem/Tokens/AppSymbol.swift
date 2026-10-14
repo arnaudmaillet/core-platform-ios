@@ -93,3 +93,15 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         UIImage.SymbolConfiguration(pointSize: pointSize, weight: weight)
     }
 }
+
+public extension UIImage {
+    /// A symbol by NAME — the app's own (`core.*`, `AppSymbol`) or the
+    /// system's. Every component that takes a symbol name loads it through
+    /// here, so a token that names a custom glyph (`PointsSymbol.glyph`,
+    /// `PostActionSymbol.repost`…) draws it; `UIImage(systemName:)` would
+    /// find nothing and draw an empty control.
+    static func symbol(named name: String, configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
+        if let custom = AppSymbol(rawValue: name) { return custom.image(configuration) }
+        return configuration.map { UIImage(systemName: name, withConfiguration: $0) } ?? UIImage(systemName: name)
+    }
+}

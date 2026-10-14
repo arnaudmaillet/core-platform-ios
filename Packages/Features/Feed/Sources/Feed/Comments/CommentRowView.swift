@@ -294,9 +294,9 @@ final class CommentRowView: UIView {
     /// and an unknown count draws nothing at all rather than a nought.
     private func setCaptionLikeCount(_ count: Int64?) {
         var config = likeButton.configuration
-        config?.image = UIImage(
-            systemName: "heart",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        config?.image = UIImage.symbol(
+            named: AppSymbol.like.rawValue,
+            configuration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
         )
         config?.baseForegroundColor = .secondaryLabel
         if let count {
@@ -419,9 +419,9 @@ final class CommentRowView: UIView {
     /// (zero renders bare — no lying "0").
     func setLiked(_ liked: Bool, count: Int) {
         var config = likeButton.configuration
-        config?.image = UIImage(
-            systemName: liked ? "heart.fill" : "heart",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
+        config?.image = UIImage.symbol(
+            named: (liked ? AppSymbol.liked : AppSymbol.like).rawValue,
+            configuration: UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
         )
         config?.baseForegroundColor = liked ? .systemPink : .secondaryLabel
         if count > 0 {

@@ -104,7 +104,7 @@ public final class AppButtonGalleryViewController: UIViewController {
         case .row: .title("Follow")
         case .header: AppButton.Content(title: "Message", symbol: "paperplane")
         case .icon: .symbol("qrcode")
-        case .inline: AppButton.Content(symbol: "heart", count: 1_284)
+        case .inline: AppButton.Content(symbol: AppSymbol.like.rawValue, count: 1_284)
         }
     }
 
@@ -118,7 +118,7 @@ public final class AppButtonGalleryViewController: UIViewController {
         header("Card shape")
         row([
             make(.pill(.quiet), .header, .title("Edit profile"), shape: .card),
-            make(.pill(.prominent), .header, AppButton.Content(title: "25", symbol: "diamond.fill"), shape: .card),
+            make(.pill(.prominent), .header, AppButton.Content(title: "25", symbol: GemSymbol.glyph), shape: .card),
         ])
     }
 
@@ -127,7 +127,7 @@ public final class AppButtonGalleryViewController: UIViewController {
         let normal = make(.pill(.prominent), .row, .title("Follow"))
         let selected = make(.pill(.prominent), .row, .title("Following"))
         selected.isSelected = true
-        let disabled = make(.pill(.tinted), .row, AppButton.Content(title: "40", symbol: "diamond.fill"))
+        let disabled = make(.pill(.tinted), .row, AppButton.Content(title: "40", symbol: GemSymbol.glyph))
         disabled.isEnabled = false
         row([normal, selected, disabled])
         let placeholder = make(.pill(.prominent), .row, .title("Follow"))
@@ -136,10 +136,10 @@ public final class AppButtonGalleryViewController: UIViewController {
         let loading = make(.pill(.quiet), .row, .title("Following"))
         loading.busyLabel = "Following…"
         loading.setPhase(.loading, animated: false)
-        let loadingSymbol = make(.pill(.quiet), .header, AppButton.Content(title: "Save", symbol: "bookmark"))
+        let loadingSymbol = make(.pill(.quiet), .header, AppButton.Content(title: "Save", symbol: AppSymbol.save.rawValue))
         loadingSymbol.setPhase(.loading, animated: false)
         row([placeholder, loading, loadingSymbol])
-        let liked = make(.bare, .inline, AppButton.Content(symbol: "heart.fill", count: 1_285))
+        let liked = make(.bare, .inline, AppButton.Content(symbol: AppSymbol.liked.rawValue, count: 1_285))
         liked.selectedTint = .systemRed
         liked.isSelected = true
         row([liked, make(.bare, .inline, AppButton.Content(symbol: "bubble.right", count: 48))])
@@ -154,14 +154,14 @@ public final class AppButtonGalleryViewController: UIViewController {
         demo.haptic = .selection
         demo.addAction(UIAction { [weak self] _ in self?.cycleFollow() }, for: .primaryActionTriggered)
         self.demo = demo
-        let counter = make(.bare, .inline, AppButton.Content(symbol: "heart", count: 99))
+        let counter = make(.bare, .inline, AppButton.Content(symbol: AppSymbol.like.rawValue, count: 99))
         counter.selectedTint = .systemRed
         counter.bouncesSymbolOnTap = true
         counter.haptic = .lightImpact
         counter.holdFreezesScrolling = true
         counter.addAction(UIAction { [weak self] _ in self?.like() }, for: .primaryActionTriggered)
         self.counter = counter
-        let toggled = make(.bare, .inline, .symbol("bookmark"))
+        let toggled = make(.bare, .inline, .symbol(AppSymbol.save.rawValue))
         toggled.addAction(UIAction { [weak self] _ in self?.save() }, for: .primaryActionTriggered)
         self.toggled = toggled
         let vanishing = make(.pill(.quiet), .icon, .symbol("ellipsis"))
@@ -211,13 +211,13 @@ public final class AppButtonGalleryViewController: UIViewController {
         let liked = !counter.isSelected
         counter.setSelected(liked, animated: true)
         let count = (counter.content.count ?? 0) + (liked ? 1 : -1)
-        counter.setContent(AppButton.Content(symbol: liked ? "heart.fill" : "heart", count: count), animated: true)
+        counter.setContent(AppButton.Content(symbol: liked ? AppSymbol.liked.rawValue : AppSymbol.like.rawValue, count: count), animated: true)
     }
 
     private func save() {
         guard let toggled else { return }
-        let saved = toggled.content.symbol == "bookmark"
-        toggled.setContent(.symbol(saved ? "bookmark.fill" : "bookmark"), animated: true)
+        let saved = toggled.content.symbol == AppSymbol.save.rawValue
+        toggled.setContent(.symbol(saved ? AppSymbol.saved.rawValue : AppSymbol.save.rawValue), animated: true)
     }
 
     private func toggleVanishing() {

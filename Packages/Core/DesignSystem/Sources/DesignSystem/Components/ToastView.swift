@@ -820,7 +820,7 @@ public final class ToastView: UIView {
             arranged.append(spinner)
             // The leading mark a collapsed bar item keeps (#1058).
             hasGlyph = true
-        } else if let symbol = content.symbol, let image = UIImage(systemName: symbol) {
+        } else if let symbol = content.symbol, let image = UIImage.symbol(named: symbol) {
             let glyph = UIImageView(image: image)
             glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .medium)
             glyph.tintColor = content.style.glyphTint

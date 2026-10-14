@@ -200,7 +200,7 @@ public final class GlassSegmentRow: UIView, TransitionRestorable {
                 )
             case .symbol(let name, _):
                 // Selection = the filled variant, when the symbol has one.
-                let symbol = isSelected ? (UIImage(systemName: name + ".fill") ?? UIImage(systemName: name)) : UIImage(systemName: name)
+                let symbol = isSelected ? (UIImage.symbol(named: name + ".fill") ?? UIImage(systemName: name)) : UIImage(systemName: name)
                 button.configuration?.image = symbol
                 button.tintColor = color
             }

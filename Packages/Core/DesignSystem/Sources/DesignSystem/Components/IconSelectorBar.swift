@@ -514,7 +514,7 @@ public final class IconSelectorBar: UIView {
             // Selection = the filled variant where the symbol has one, which is
             // the rule `GlassSegmentRow` already follows.
             let name = isSelected ? item.symbolName + ".fill" : item.symbolName
-            let image = UIImage(systemName: name) ?? UIImage(systemName: item.symbolName)
+            let image = UIImage.symbol(named: name) ?? UIImage(systemName: item.symbolName)
             button.configuration?.image = image
             button.accessibilityTraits = isSelected ? [.button, .selected] : [.button]
             let note = restingNotes[index]

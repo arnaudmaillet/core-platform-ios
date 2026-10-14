@@ -468,17 +468,17 @@ struct TextPostComposePageTests {
         try await publish(page)
         try #require(page.composer.debugIsPublished)
         let id = try #require(page.composer.debugPublishedPostID)
-        #expect(page.composer.debugBookmarkGlyph.symbol == "bookmark", "precondition: not saved")
+        #expect(page.composer.debugBookmarkGlyph.symbol == AppSymbol.save.rawValue, "precondition: not saved")
 
         pile.toggle(id.rawValue)
-        #expect(page.composer.debugBookmarkGlyph.symbol == "bookmark.fill", "the glyph fills at once")
+        #expect(page.composer.debugBookmarkGlyph.symbol == AppSymbol.saved.rawValue, "the glyph fills at once")
         #expect(page.composer.debugBookmarkGlyph.label == "Saved")
 
         pile.toggle("post-other")
-        #expect(page.composer.debugBookmarkGlyph.symbol == "bookmark.fill", "another post's unsave is not this glyph")
+        #expect(page.composer.debugBookmarkGlyph.symbol == AppSymbol.saved.rawValue, "another post's unsave is not this glyph")
 
         entities.setSaved(false, for: id)
-        #expect(page.composer.debugBookmarkGlyph.symbol == "bookmark", "and empties when the fact does")
+        #expect(page.composer.debugBookmarkGlyph.symbol == AppSymbol.save.rawValue, "and empties when the fact does")
         #expect(page.composer.debugBookmarkGlyph.label == "Save")
     }
 

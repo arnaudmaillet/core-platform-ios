@@ -76,7 +76,7 @@ public enum PostCardMenuAction {
     var element: UIAction {
         UIAction(
             title: title,
-            image: UIImage(systemName: symbolName),
+            image: UIImage.symbol(named: symbolName),
             attributes: attributes
         ) { _ in handler() }
     }

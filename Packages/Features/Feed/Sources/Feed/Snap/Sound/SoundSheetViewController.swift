@@ -632,7 +632,7 @@ final class SoundSheetViewController: UIViewController {
         share.accessibilityLabel = "Share sound"
         // ⚠️ AN ACTION WITHOUT AN IMAGE, the glyph on the ITEM: an action's
         // image is re-applied to its item when it fires, and put the
-        // "bookmark" outline back over the fill just set (measured: the fill
+        // star outline back over the fill just set (measured: the fill
         // flashed during the press and was gone at rest).
         let bookmark = UIBarButtonItem(primaryAction: UIAction { [weak self] _ in self?.toggleSaved() })
         bookmarkItems.add(bookmark)
@@ -700,12 +700,14 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// The bookmark's glyph for the sound's state — what a test reads.
-    var bookmarkSymbol: String { savedSounds.isSaved(sound.id) ? "bookmark.fill" : "bookmark" }
+    var bookmarkSymbol: String { (savedSounds.isSaved(sound.id) ? AppSymbol.saved : AppSymbol.save).rawValue }
 
     private func refreshBookmark() {
         let saved = savedSounds.isSaved(sound.id)
         for item in bookmarkItems.allObjects {
-            item.image = UIImage(systemName: bookmarkSymbol)
+            // The star, filled gold once saved (#1128, `Palette.saveGold`).
+            let image = UIImage.symbol(named: bookmarkSymbol)
+            item.image = saved ? image?.withTintColor(Palette.saveGold, renderingMode: .alwaysOriginal) : image
             // The label follows the state, like the feed's: "Save" and "Saved"
             // are different offers to a reader who cannot see the fill.
             item.accessibilityLabel = saved ? "Sound saved" : "Save sound"

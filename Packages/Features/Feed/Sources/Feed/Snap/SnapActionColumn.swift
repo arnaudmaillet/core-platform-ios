@@ -130,9 +130,14 @@ enum SnapActionColumn {
     /// viewer has staked (#680).
     static let heartConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
 
-    /// The heart's drawn height at `heartConfiguration`.
+    /// The heart's drawn height at `heartConfiguration` — the taller of the
+    /// two faces it wears (outline at rest, filled once staked), which the
+    /// app's own symbols (#1128) do not draw at exactly one height.
     @MainActor static var heartHeight: CGFloat {
-        UIImage(systemName: PointsSymbol.glyph, withConfiguration: heartConfiguration)?.size.height ?? 15
+        let faces = [PointsSymbol.outlineGlyph, PointsSymbol.glyph].compactMap {
+            UIImage.symbol(named: $0, configuration: heartConfiguration)?.size.height
+        }
+        return faces.max() ?? 15
     }
 
     /// ⚠️ EVEN GAPS INSIDE THE PILL (#680): top → heart, heart → count, count →

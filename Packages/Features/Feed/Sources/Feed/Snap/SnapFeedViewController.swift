@@ -45,7 +45,7 @@ final class SnapFeedViewController: UIViewController {
     private weak var toolbarHost: UINavigationController?
     /// The share bubble's bookmark action; a property because its glyph
     /// (bookmark / bookmark.fill) follows the active page's saved state.
-    private let bookmarkButton = SnapNavControls.makeToolbarActionButton(systemName: "bookmark")
+    private let bookmarkButton = SnapNavControls.makeToolbarActionButton(systemName: AppSymbol.save.rawValue)
 
     /// The engaged toolbar's trailing item: the comments sort selector,
     /// occupying the action territory while comments are engaged (the
@@ -123,7 +123,7 @@ final class SnapFeedViewController: UIViewController {
     /// settled on. Nil before the first.
     private var bookmarkGlyphPostID: PostID?
     /// The glyph's symbol as last drawn.
-    private var drawnBookmarkSymbol = "bookmark"
+    private var drawnBookmarkSymbol = AppSymbol.save.rawValue
 
     /// The viewer's point balance, spent by the rail's boost anchor.
     ///
@@ -2098,7 +2098,7 @@ final class SnapFeedViewController: UIViewController {
         let actions = UIStackView(arrangedSubviews: [bookmarkButton, repost])
         actions.axis = .horizontal
 
-        let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
+        let more = SnapNavControls.makeToolbarActionButton(systemName: AppSymbol.more.rawValue)
         // ⚠️ NAMED, every one: a glyph with no label reads as "button" to
         // VoiceOver, and the composition test needs a handle on it.
         more.accessibilityLabel = "More actions"
@@ -2204,13 +2204,23 @@ final class SnapFeedViewController: UIViewController {
         // different offers, and a reader who cannot see the fill has only this.
         bookmarkButton.accessibilityLabel = saved ? "Saved" : "Save"
         var config = bookmarkButton.configuration
-        config?.image = UIImage(systemName: drawnBookmarkSymbol)?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        config?.image = Self.bookmarkImage(saved: saved)
         bookmarkButton.configuration = config
     }
 
+    /// The save glyph (#1128): the star, outline at rest; filled GOLD once
+    /// saved (`Palette.saveGoldOnMedia`, the 收藏 convention, #1124).
     static func bookmarkSymbol(saved: Bool) -> String {
-        saved ? "bookmark.fill" : "bookmark"
+        (saved ? AppSymbol.saved : AppSymbol.save).rawValue
+    }
+
+    /// The save glyph as drawn on the page's glass bubble.
+    static func bookmarkImage(saved: Bool) -> UIImage? {
+        let image = UIImage.symbol(
+            named: bookmarkSymbol(saved: saved),
+            configuration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        )
+        return saved ? image?.withTintColor(Palette.saveGoldOnMedia, renderingMode: .alwaysOriginal) : image
     }
 
     #if DEBUG
@@ -4937,7 +4947,7 @@ final class SnapFeedViewController: UIViewController {
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
         var actions: [UIMenuElement] = []
         // Share left the toolbar's capsule for here (#671), with the same sheet.
-        actions.append(UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+        actions.append(UIAction(title: "Share", image: AppSymbol.share.image()) { [weak self] _ in
             self?.presentShareSheet(for: id)
         })
         actions.append(UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in

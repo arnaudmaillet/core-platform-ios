@@ -5,7 +5,7 @@ import UIKit
 /// (`dev/economy/`). `PointsSymbol`'s counterpart, so the two currencies are
 /// told apart at a glance: a red heart you commit, a violet diamond you earn.
 public enum GemSymbol {
-    public static let glyph = "diamond.fill"
+    public static let glyph = AppSymbol.gemFilled.rawValue
     /// The brand's secondary, violet (#1124): it was the system cyan, which
     /// clashed with nothing but said nothing either.
     public static let tint: UIColor = Palette.secondary
@@ -14,8 +14,7 @@ public enum GemSymbol {
 
     /// A gem glyph that carries its own tint whatever the control's.
     public static func glyphImage(_ configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
-        let image = configuration.map { UIImage(systemName: glyph, withConfiguration: $0) }
-            ?? UIImage(systemName: glyph)
+        let image = UIImage.symbol(named: glyph, configuration: configuration)
         return image?.withTintColor(tint, renderingMode: .alwaysOriginal)
     }
 }

@@ -282,7 +282,7 @@ struct TileMetaTests {
         // By the symbol's NAME in the image's description: two symbol images
         // are not `==` for being the same glyph.
         let glyph = visible.first?.debugSymbol.map { String(describing: $0) } ?? ""
-        #expect(glyph.contains("system: heart.fill"))
+        #expect(glyph.contains(PointsSymbol.glyph), "\(glyph)")
         // And it closes the row, like the counters on a card.
         let frame = visible[0].convert(visible[0].bounds, to: cell.contentView)
         #expect(cell.contentView.bounds.maxX - frame.maxX < frame.minX)

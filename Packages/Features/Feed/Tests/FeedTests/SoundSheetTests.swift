@@ -236,24 +236,24 @@ struct SoundSheetTests {
         _ = controller.wrappedInSheet()
         controller.loadViewIfNeeded()
         let item = try #require(controller.bookmarkItem)
-        #expect(controller.bookmarkSymbol == "bookmark")
+        #expect(controller.bookmarkSymbol == AppSymbol.save.rawValue)
         #expect(item.accessibilityLabel == "Save sound")
         let unsavedGlyph = item.image
 
         controller.debugToggleSaved()
         #expect(store.isSaved("clip-01"))
-        #expect(controller.bookmarkSymbol == "bookmark.fill")
+        #expect(controller.bookmarkSymbol == AppSymbol.saved.rawValue)
         #expect(item.accessibilityLabel == "Sound saved")
         #expect(item.image !== unsavedGlyph, "the glyph did not change")
 
         let again = sheet(saved: store)
         _ = again.wrappedInSheet()
         again.loadViewIfNeeded()
-        #expect(again.bookmarkSymbol == "bookmark.fill")
+        #expect(again.bookmarkSymbol == AppSymbol.saved.rawValue)
 
         controller.debugToggleSaved()
         #expect(!store.isSaved("clip-01"))
-        #expect(controller.bookmarkSymbol == "bookmark")
+        #expect(controller.bookmarkSymbol == AppSymbol.save.rawValue)
     }
 
     /// Large leaves the clip behind playing, and so does coming back down to

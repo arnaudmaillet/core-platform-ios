@@ -1699,7 +1699,7 @@ final class CommentsInputBar: UIView {
         railMutedBadge.isHidden = true
         railCoverView.layer.setRecordSpinning(false)
         if let symbol, railFaceSymbol != symbol {
-            railButton.configuration?.image = UIImage(systemName: symbol, withConfiguration: Self.glyphConfiguration)
+            railButton.configuration?.image = UIImage.symbol(named: symbol, configuration: Self.glyphConfiguration)
         }
         railFaceSymbol = symbol
         railButton.isEnabled = isRailFaceEnabled

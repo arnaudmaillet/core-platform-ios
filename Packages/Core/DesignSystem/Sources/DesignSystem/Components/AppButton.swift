@@ -961,7 +961,7 @@ open class AppButton: UIButton {
         case .placeholder: accessibilityValue = nil
         }
         largeContentTitle = content.text ?? accessibilityLabel
-        largeContentImage = content.symbol.flatMap { UIImage(systemName: $0) }
+        largeContentImage = content.symbol.flatMap { UIImage.symbol(named: $0) }
     }
 
     // MARK: - Configuration
@@ -1036,7 +1036,7 @@ open class AppButton: UIButton {
         config.preferredSymbolConfigurationForImage = symbolPointSize.map {
             UIImage.SymbolConfiguration(pointSize: $0, weight: .medium, scale: .medium)
         } ?? UIImage.SymbolConfiguration(font: font, scale: size == .icon ? .medium : .small)
-        config.image = content.symbol.flatMap { UIImage(systemName: $0) }
+        config.image = content.symbol.flatMap { UIImage.symbol(named: $0) }
         config.titleLineBreakMode = .byTruncatingTail
         if let text = content.text {
             config.attributedTitle = AttributedString(text, attributes: AttributeContainer([.font: font]))

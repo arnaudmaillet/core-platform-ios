@@ -95,7 +95,7 @@ public enum StakeMenu {
             // A row that reads, not one that acts: disabled.
             actions.append(UIAction(
                 title: stakedLine(state.stakedOnTarget),
-                image: UIImage(systemName: PointsSymbol.glyph),
+                image: UIImage.symbol(named: PointsSymbol.glyph),
                 attributes: .disabled
             ) { _ in })
         }
@@ -103,7 +103,7 @@ public enum StakeMenu {
 
         let tap = UIAction(
             title: points(state.tapAmount),
-            image: UIImage(systemName: PointsSymbol.glyph)
+            image: UIImage.symbol(named: PointsSymbol.glyph)
         ) { _ in stake(state.tapAmount) }
         if !state.canTap { tap.attributes = .disabled }
         actions.append(tap)

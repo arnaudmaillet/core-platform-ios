@@ -256,7 +256,7 @@ final class CountryUnlockSheetViewController: UIViewController {
     /// any bar has is stretched by the bar to exactly what it leaves.
     private func configureUnlockButton() {
         var configuration = UIButton.Configuration.prominentGlass()
-        configuration.image = UIImage(systemName: "diamond.fill")
+        configuration.image = UIImage.symbol(named: GemSymbol.glyph)
         configuration.imagePadding = Spacing.sm
         configuration.cornerStyle = .capsule
         configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in

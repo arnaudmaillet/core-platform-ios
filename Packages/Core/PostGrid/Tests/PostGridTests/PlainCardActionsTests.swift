@@ -138,17 +138,20 @@ struct PlainCardActionsTests {
             PostActionSymbol.comments, PostActionSymbol.commentsFilled, PostActionSymbol.repost
         ]
         for name in names {
-            #expect(UIImage(systemName: name) != nil, "\(name) is not a symbol on this runtime")
+            // The app's own glyphs (#1128): resolved from DesignSystem's
+            // catalog, which `UIImage(systemName:)` never reads.
+            #expect(UIImage.symbol(named: name) != nil, "\(name) is not a symbol on this runtime")
         }
     }
 
-    /// The glyphs asked for on 2026-09-30, by the name the drawn image carries.
+    /// The line's glyphs, by the name the drawn image carries: the app's own
+    /// set (#1128) — the star (save), repost, the comment bubble, the heart.
     @Test func theLineDrawsTheNewGlyphs() {
         let line = actions(in: row())
-        #expect(glyph(of: line[0]).contains("bookmark"))
-        #expect(glyph(of: line[1]).contains("arrow.trianglehead.2.clockwise.rotate.90"))
-        #expect(glyph(of: line[2]).contains("ellipsis.message"))
-        #expect(glyph(of: line[3]).contains("heart"))
+        #expect(glyph(of: line[0]).contains(AppSymbol.save.rawValue))
+        #expect(glyph(of: line[1]).contains(AppSymbol.repost.rawValue))
+        #expect(glyph(of: line[2]).contains(AppSymbol.comment.rawValue))
+        #expect(glyph(of: line[3]).contains("core.heart"))
     }
 
     // MARK: - The ink on the column
