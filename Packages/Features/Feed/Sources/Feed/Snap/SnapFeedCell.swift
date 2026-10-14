@@ -516,7 +516,17 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         surface: { [weak self] in self?.mediaCard.renderView },
         isActive: { [weak self] in self?.isActive ?? false }
     )
-    private var imageTasks: [Task<Void, Never>] = []
+    /// The photograph's and the poster's loads (#1088): a cache hit drawn in
+    /// the configure pass, a new post cancelling the load in flight, a late
+    /// answer for a post this cell no longer shows landing nowhere. Both
+    /// arrive WITHOUT a dissolve — the page's picture cuts in over its black
+    /// floor, as it always has (`arrival: .none`).
+    private let imageLoad = ImageLoadSlot(size: .full, arrival: .none)
+    private let posterLoad = ImageLoadSlot(size: .full, arrival: .none)
+    #if DEBUG
+    /// The photograph the page is drawing, for a test.
+    var debugShownPhoto: UIImage? { mediaCard.imageView.image }
+    #endif
     private var isActive = false
 
     // MARK: Comments engagement
@@ -1783,27 +1793,25 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
         if isImage {
             loadImage(model.mediaURL, expecting: model.id, pipeline: pipeline)
+        } else {
+            imageLoad.cancel()
         }
         if isVideo, let thumbnailURL = model.thumbnailURL {
-            loadPoster(thumbnailURL, expecting: model.id, pipeline: pipeline)
+            loadPoster(thumbnailURL, pipeline: pipeline)
+        } else {
+            posterLoad.cancel()
         }
         refreshMediaLoader()
     }
 
     /// Loads the video poster into the render view; shown under the player until
     /// the first frame is ready (or while an asset is still processing).
-    private func loadPoster(_ url: URL, expecting id: PostID, pipeline: ImagePipeline) {
+    private func loadPoster(_ url: URL, pipeline: ImagePipeline) {
         // Cache hit applied SYNCHRONOUSLY — see `loadImage` for why the async
         // hop is what the viewer sees as a gap.
-        if let cached = pipeline.cachedImage(for: url) {
-            mediaCard.setPoster(cached)
-            return
+        posterLoad.load(url, using: pipeline) { [weak self] image, _ in
+            self?.mediaCard.setPoster(image)
         }
-        imageTasks.append(Task { [weak self] in
-            guard let image = try? await pipeline.image(for: url) else { return }
-            guard let self, self.representedID == id else { return }
-            self.mediaCard.setPoster(image)
-        })
     }
 
     /// Freezes the chrome's layout bounds to the SCREEN's header/footer
@@ -1858,7 +1866,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     }
 
     private func loadImage(_ url: URL?, expecting id: PostID, pipeline: ImagePipeline) {
-        guard let url else { return }
+        guard let url else {
+            imageLoad.cancel()
+            return
+        }
         // A cache hit is applied SYNCHRONOUSLY, in the same turn as the
         // `configure` that just cleared the old image.
         //
@@ -1879,31 +1890,20 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // A genuine cache miss still loads asynchronously and still shows the
         // floor. That is a first load with nothing to display yet, which is a
         // different thing from blanking something we already had.
-        if let cached = pipeline.cachedImage(for: url) {
-            mediaCard.setImage(cached)
-            return
-        }
-        imageTasks.append(Task { [weak self] in
-            let image: UIImage?
-            do {
-                image = try await pipeline.image(for: url)
-            } catch {
-                // A post that HAS a media URL and cannot load it leaves the
-                // card on its floor — visually identical to a text page, and
-                // silent until now. This is the failure the audit is for.
-                #if DEBUG
-                if ProcessInfo.processInfo.arguments.contains("-media-audit") {
-                    print("[media-audit] \(id.rawValue) IMAGE LOAD FAILED"
-                          + " url=\(url.absoluteString) error=\(error)")
-                }
-                #endif
-                return
+        imageLoad.load(url, using: pipeline) { [weak self] image, _ in
+            guard let self else { return }
+            mediaCard.setImage(image)
+            refreshMediaLoader()
+        } failed: {
+            // A post that HAS a media URL and cannot load it leaves the card
+            // on its floor — visually identical to a text page, and silent
+            // until now. This is the failure the audit is for.
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-media-audit") {
+                print("[media-audit] \(id.rawValue) IMAGE LOAD FAILED url=\(url.absoluteString)")
             }
-            guard let image else { return }
-            guard let self, self.representedID == id else { return }
-            self.mediaCard.setImage(image)
-            self.refreshMediaLoader()
-        })
+            #endif
+        }
     }
 
     // MARK: - SnapCellLifecycle
@@ -3115,8 +3115,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // exactly the kind of stranded state reuse produces.
         contentView.backgroundColor = .black
         contentView.overrideUserInterfaceStyle = SnapChromeTheme.style(hasMedia: true)
-        for task in imageTasks { task.cancel() }
-        imageTasks.removeAll()
+        imageLoad.cancel()
+        posterLoad.cancel()
         chrome.reset()
         mediaCard.setImage(nil)
         mediaCard.setPoster(nil)
