@@ -160,8 +160,27 @@ final class AppPreferencesViewController: UIViewController {
     static let backgroundPlayNote = "With Background Play on, a video you're listening to keeps playing when you leave the app or lock your iPhone, with controls on the Lock Screen. With Picture in Picture on, a playing video moves into a small window over your other apps, and videos play their sound even when your iPhone is on silent."
 
     /// What an overridden section says while Power Saving is on.
-    /// Under the player pool slider (#702): what it trades, never a number.
+    /// Under the player pool control (#702): what it trades, never a number.
     static let playerPoolFooter = "How many videos the app keeps ready to play. More makes scrolling smoother but uses more performance and battery; Less saves battery."
+
+    /// The player pool's control (#702, #1133): a segmented control, like
+    /// Autoplay's on the same page — Less / Normal / More, never a number.
+    /// `onChange` hears the pool a segment picked.
+    static func makePlayerPoolControl(
+        selected: MediaPlaybackPreferences.PlayerPool,
+        onChange: @escaping (MediaPlaybackPreferences.PlayerPool) -> Void
+    ) -> UISegmentedControl {
+        let options = MediaPlaybackPreferences.PlayerPool.allCases
+        let control = UISegmentedControl(items: options.map(playerPoolTitle))
+        control.selectedSegmentIndex = options.firstIndex(of: selected) ?? 1
+        control.accessibilityLabel = "Video Players"
+        control.addAction(UIAction { action in
+            guard let control = action.sender as? UISegmentedControl,
+                  options.indices.contains(control.selectedSegmentIndex) else { return }
+            onChange(options[control.selectedSegmentIndex])
+        }, for: .valueChanged)
+        return control
+    }
 
     static func playerPoolTitle(_ pool: MediaPlaybackPreferences.PlayerPool) -> String {
         switch pool {
@@ -336,18 +355,12 @@ final class AppPreferencesViewController: UIViewController {
             }]
         case .playerPool:
             cell.contentConfiguration = nil
-            let slider = NotchedSlider(
-                notches: MediaPlaybackPreferences.PlayerPool.allCases.map(Self.playerPoolTitle),
-                selected: MediaPlaybackPreferences.PlayerPool.allCases.firstIndex(of: playback.preferences.playerPool) ?? 1
-            )
-            slider.accessibilityLabel = "Video Players"
-            slider.addAction(UIAction { [weak self] action in
-                guard let slider = action.sender as? NotchedSlider else { return }
-                let pool = MediaPlaybackPreferences.PlayerPool.allCases[slider.selectedIndex]
+            let control = Self.makePlayerPoolControl(selected: playback.preferences.playerPool) { [weak self] pool in
                 guard self?.playback.preferences.playerPool != pool else { return }
                 self?.playback.update { $0.playerPool = pool }
-            }, for: .valueChanged)
-            install(slider, in: cell, title: nil)
+            }
+            // The section's header already says "Video Players": no caption.
+            install(control, in: cell, title: nil)
         case .bandSwitch:
             cell.contentConfiguration = Self.label("Show Reaction Band", symbol: "text.bubble")
             cell.accessories = [switchAccessory(isOn: preferences.showsReactionBand) { [weak self] isOn in

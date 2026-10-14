@@ -4,7 +4,7 @@ import Testing
 import UIKit
 @testable import Profile
 
-/// Settings' player pool (#702): three notches named Less / Normal / More,
+/// Settings' player pool (#702): three segments named Less / Normal / More,
 /// never a number, and a footer that says what it trades.
 @MainActor
 struct PlayerPoolSettingsTests {
@@ -21,19 +21,18 @@ struct PlayerPoolSettingsTests {
                 == ["Less", "Normal", "More"])
     }
 
-    @Test func theSliderRestsOnItsNotchesAndSaysWhenOneChanges() {
-        let slider = NotchedSlider(notches: ["Less", "Normal", "More"], selected: 1)
-        #expect(slider.debugNotchTitles == ["Less", "Normal", "More"])
-        #expect(slider.selectedIndex == 1)
-        var changes: [Int] = []
-        slider.addAction(UIAction { _ in changes.append(slider.selectedIndex) }, for: .valueChanged)
+    /// A segmented control, like Autoplay's (#1133): it shows the stored
+    /// pool and says which one a segment picked.
+    @Test func theControlShowsTheStoredPoolAndSaysWhichOneWasPicked() {
+        var picked: [MediaPlaybackPreferences.PlayerPool] = []
+        let control = AppPreferencesViewController.makePlayerPoolControl(selected: .more) { picked.append($0) }
+        #expect((0..<control.numberOfSegments).map { control.titleForSegment(at: $0) } == ["Less", "Normal", "More"])
+        #expect(control.selectedSegmentIndex == 2)
+        #expect(control.accessibilityLabel == "Video Players")
 
-        slider.select(2)
-        slider.select(2)
-        slider.select(5)
-        slider.accessibilityDecrement()
-        #expect(changes == [2, 1], "a notch that did not change was announced: \(changes)")
-        #expect(slider.accessibilityValue == "Normal")
+        control.selectedSegmentIndex = 0
+        control.sendActions(for: .valueChanged)
+        #expect(picked == [.less])
     }
 
     /// The playback footer says a post opened full screen always plays.
