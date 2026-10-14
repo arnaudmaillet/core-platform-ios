@@ -130,6 +130,43 @@ struct ProfileSelectorHandoverTests {
         #expect(screen.selectorAccessory == nil, "a pushed profile hung a tab accessory")
     }
 
+    /// ⚠️ **A TAB THAT ARRIVES WHILE ANOTHER SCREEN COVERS THIS ONE PUTS NO
+    /// BAND UP.** The tab root's band is shell-wide (the tab bar controller's
+    /// `bottomAccessory`). Pushing Settings while the gallery was still
+    /// loading found this screen's view still in the window mid-push: the
+    /// Saved tab landed, the band went up over Settings, and nothing ever took
+    /// it down — `viewWillDisappear` had already run with no band to remove.
+    /// It goes up when this screen shows again.
+    @Test func aTabArrivingWhileCoveredWaitsForTheScreenToShow() async throws {
+        guard let screen = await loadedScreen(trayPlacement: .aboveBottomSafeArea, gallery: EmptyGallery())
+        else { return }
+        let tabs = UITabBarController()
+        let navigation = UINavigationController(rootViewController: screen)
+        tabs.viewControllers = [navigation]
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = tabs
+        window.isHidden = false
+        defer { window.isHidden = true }
+        window.layoutIfNeeded()
+        #expect(screen.selectorAccessory == nil, "one tab is no selector")
+
+        // Covered — Settings pushed over it — while the view is still around.
+        screen.beginAppearanceTransition(false, animated: false)
+        screen.endAppearanceTransition()
+        var snapshot = try #require(screen.viewModel.publishedGallery)
+        snapshot.reposts = .content([GalleryPost(
+            id: PostID("r1"), kind: .photo, isRepost: true, thumbnailURL: nil, caption: "r1", publishedAtMS: 1
+        )])
+        screen.viewModel.onGalleryChange?(snapshot)
+        #expect(screen.selectorAccessory != nil, "the second tab built no selector")
+        #expect(tabs.bottomAccessory == nil, "the band went up over the screen covering this one")
+
+        // Shown again: up now.
+        screen.beginAppearanceTransition(true, animated: false)
+        screen.endAppearanceTransition()
+        #expect(tabs.bottomAccessory?.contentView === screen.selectorAccessory?.hostView)
+    }
+
     /// The Profile tab's root keeps the strip in the tab bar's accessory, as
     /// it always had (#728) — no toolbar.
     @Test func theTabRootHostsTheSelectorInTheTabAccessory() async {

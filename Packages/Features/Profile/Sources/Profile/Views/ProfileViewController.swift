@@ -96,6 +96,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// THE TAB ROOT ONLY (#728): a pushed profile hosts the strip as a
     /// bottom-leading toolbar item instead (`selectorItem`).
     private(set) var selectorAccessory: SelectorAccessory?
+    /// Between `viewWillAppear` and `viewWillDisappear`: the only span in
+    /// which this screen may put the shell-wide band up — see `showTabs`.
+    private var isShownOnScreen = false
     /// The strip as a toolbar item at the bottom leading corner, on a pushed
     /// profile (#728) — `SelectorToolbarItem`, the search results' too (#881).
     private var selectorToolbar: SelectorToolbarItem?
@@ -521,6 +524,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        isShownOnScreen = true
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
@@ -618,6 +622,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        isShownOnScreen = false
         selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         // The toolbar is the stack's: put away unless the screen taking over
         // brings items of its own (the relations screen, the feed).
@@ -2339,7 +2344,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         if shown.count > 1 {
             let wasPlaced = selectorAccessory != nil || selectorItem != nil
             placeSelectors()
-            guard !wasPlaced, view.window != nil else { return }
+            // ⚠️ ON SCREEN, NOT IN A WINDOW. A tab that arrives while a pushed
+            // screen (Settings) is covering this one found the view still in
+            // the window mid-push, installed the band, and nothing ever took
+            // it down: this screen's `viewWillDisappear` had already run with
+            // no band to remove. The next `viewWillAppear` puts it up.
+            guard !wasPlaced, isShownOnScreen else { return }
             // Arrived while on screen: up now, not at the next appearance.
             selectorAccessory?.install(into: tabBarController,
                                        minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
