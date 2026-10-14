@@ -661,16 +661,7 @@ final class SnapRailBoostButton: UIButton {
     /// wrong face (the configuration is rebuilt whole each time).
     private func applyFace() {
         configuration = Self.makeConfiguration(glass: hasGlass, spentTotal: spentTotal, likeCount: likeCount)
-        pointsHeart.update(on: self, liked: spentTotal > 0, configuration: SnapActionColumn.heartConfiguration)
         applyAccessibility()
-    }
-
-    /// The staked heart in the points gradient (#1128).
-    let pointsHeart = PointsHeartOverlay()
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        pointsHeart.layout(on: self)
     }
 
     private func applyAccessibility() {

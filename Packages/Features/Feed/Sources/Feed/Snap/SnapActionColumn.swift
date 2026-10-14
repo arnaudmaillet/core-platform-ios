@@ -163,11 +163,12 @@ enum SnapActionColumn {
         _ base: UIButton.Configuration, staked: Bool, count: Int64?, ink: UIColor
     ) -> UIButton.Configuration {
         var config = base
-        // Staked, the gradient heart draws it (`PointsHeartOverlay`, #1128):
-        // the button lays the filled heart out, drawn clear.
-        config.image = staked
-            ? PointsHeartOverlay.clearGlyph(heartConfiguration)
-            : PointsSymbol.likeImage(staked: false, heartConfiguration)
+        // ⚠️ THE HEART IS THE BUTTON'S OWN IMAGE in both faces (#1182): the
+        // filled one carries its own colour (`.alwaysOriginal`). It used to be
+        // a `PointsHeartView` laid over the glass — it read as pasted on, and
+        // smaller than the outline (the owner, on a device). The hearts are
+        // solid since #1178, so no gradient needs the overlay.
+        config.image = PointsSymbol.likeImage(staked: staked, heartConfiguration)
         config.baseForegroundColor = ink
         config.cornerStyle = .capsule
         guard let count else {
