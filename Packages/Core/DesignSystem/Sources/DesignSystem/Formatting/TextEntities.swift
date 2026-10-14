@@ -168,7 +168,7 @@ public struct TextEntityStyle: Equatable, Sendable {
         self.weight = weight
     }
 
-    /// On a plain surface: a quiet slate blue-grey (`Palette.entityInk`),
+    /// On a plain surface: a greyed violet (`Palette.entityInk`, #1176),
     /// semibold (#1174, the owner's call 2026-10-14: the accent is used
     /// sparingly, never spread across text — and never the system blue).
     public static let link = TextEntityStyle(color: Palette.entityInk)

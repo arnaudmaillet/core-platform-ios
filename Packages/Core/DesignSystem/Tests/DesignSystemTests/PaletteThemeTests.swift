@@ -77,11 +77,18 @@ struct PaletteThemeTests {
     }
 
     /// The icon's gradient on the unread pills and the story ring: pink →
-    /// orange, in the icon's tone — the owner's call over 3:1 (2026-10-14).
-    /// A white count still stands out (≥ 1.8:1), never as faint as on the
-    /// icon's own pastels (≈ 1.5:1).
-    @Test func theAccentGradientRunsPinkToOrangeInTheIconsTone() {
-        #expect(Palette.accentGradient == [Palette.rgb(0xF37AB4), Palette.rgb(0xFFA552)])
+    /// violet since the icon was redrawn (#1176), in the icon's tone — the
+    /// owner's call over 3:1. A white count still stands out (≥ 1.8:1).
+    @Test func theAccentGradientRunsPinkToVioletInTheIconsTone() {
+        #expect(Palette.accentGradient == [Palette.rgb(0xF37AB4), Palette.rgb(0xA78BFA)])
+        #expect(Palette.brandGradient == [Palette.rgb(0xE0559A), Palette.rgb(0x7C5CF0)])
+        for gradient in [Palette.accentGradient, Palette.brandGradient] {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            gradient[0].getRed(&r, green: &g, blue: &b, alpha: &a)
+            #expect(r > b, "the start is pink")
+            gradient[1].getRed(&r, green: &g, blue: &b, alpha: &a)
+            #expect(b > r, "the end is violet")
+        }
         for stop in Palette.accentGradient {
             #expect(Self.contrast(.white, stop) >= 1.8, "white on a stop is \(Self.contrast(.white, stop)):1")
         }

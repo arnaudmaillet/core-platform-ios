@@ -24,7 +24,7 @@ struct TextEntityStyleTests {
         #expect(string.attribute(.textEntity, at: 0, effectiveRange: nil) == nil)
     }
 
-    /// On a plain surface the token is the quiet slate (#1174): semibold,
+    /// On a plain surface the token is the greyed violet (#1174, #1176): semibold,
     /// never the accent, never the system blue; the rest untouched.
     @Test func aLinkIsTheSlateAndSemiboldTheRestUntouched() {
         let body = UIFont.appFont(forTextStyle: .body)

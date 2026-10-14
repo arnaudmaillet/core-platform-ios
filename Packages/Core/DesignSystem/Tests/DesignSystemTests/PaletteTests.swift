@@ -109,14 +109,19 @@ struct PaletteTests {
         #expect(PointsSymbol.tint == .systemRed)
     }
 
-    /// Links and tokens in text (#1174) read at 4.5:1 on the page and on
-    /// the grouped grey, in every appearance and contrast.
-    @Test func theEntityInkReadsAsText() {
+    /// Links and tokens in text (#1174): a greyed violet (#1176) — blue over
+    /// green, little chroma — that reads at 4.5:1 on the page and on the
+    /// grouped grey, in every appearance and contrast.
+    @Test func theEntityInkIsAGreyedVioletThatReadsAsText() {
         for traits in [Self.light, Self.dark, Self.traits(.light, high: true), Self.traits(.dark, high: true)] {
             for ground in [UIColor.systemBackground, .secondarySystemBackground] {
                 let ratio = Self.contrast(Palette.entityInk, on: ground, traits)
                 #expect(ratio >= 4.5, "\(ratio):1 in \(traits.userInterfaceStyle.rawValue)")
             }
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            Palette.entityInk.resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
+            #expect(b > r && r > g, "violet: blue, then red, over green")
+            #expect(max(r, g, b) - min(r, g, b) < 0.25, "greyed: little chroma")
         }
     }
 
