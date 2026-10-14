@@ -41,7 +41,9 @@ open class AppButton: UIButton {
 
     /// What a pill stands on.
     public enum Ground: Equatable, Sendable {
-        /// The tint, filled: the one action that matters (Follow).
+        /// The one action that matters (Follow): the quiet grey fill, its
+        /// words in the accent (#1174, the owner 2026-10-14: the pink used
+        /// subtly and sparingly).
         case prominent
         /// The profile tray's quiet fill (`HeroTray.fill`): Message, Following.
         case quiet
@@ -1004,7 +1006,10 @@ open class AppButton: UIButton {
     func configuration(for content: Content, phase: Phase) -> UIButton.Configuration {
         var config: UIButton.Configuration
         switch currentGround {
-        case .prominent?: config = .filled()
+        case .prominent?:
+            config = .filled()
+            config.baseBackgroundColor = HeroTray.fill
+            config.baseForegroundColor = Palette.tint
         case .quiet?:
             config = .filled()
             config.baseBackgroundColor = HeroTray.fill

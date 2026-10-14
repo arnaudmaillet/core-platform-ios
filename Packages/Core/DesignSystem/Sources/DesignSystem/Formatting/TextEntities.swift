@@ -131,10 +131,25 @@ public enum TextEntityScanner {
 
     /// Links and addresses, whose `@` and `#` belong to them.
     private static func linkRanges(in text: String) -> [NSRange] {
-        guard text.contains("."), let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else {
-            return []
-        }
+        guard text.contains("."), let detector = linkDetector else { return [] }
         return detector.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length)).map(\.range)
+    }
+
+    /// Built once: a detector is costly to make, and styled text is scanned
+    /// on every `text` set.
+    nonisolated(unsafe) private static let linkDetector = try? NSDataDetector(
+        types: NSTextCheckingResult.CheckingType.link.rawValue
+    )
+
+    /// The web addresses in `text` (#1174): styled like a token, routed
+    /// nowhere.
+    public static func links(in text: String) -> [NSRange] {
+        linkRanges(in: text)
+    }
+
+    /// Whether `text` holds anything `applyTextEntityStyle` would style.
+    public static func hasStyledRanges(in text: String) -> Bool {
+        !entities(in: text).isEmpty || !links(in: text).isEmpty
     }
 }
 
@@ -142,43 +157,24 @@ public enum TextEntityScanner {
 
 /// How a `@handle` or `#tag` stands out from the text around it (#524).
 public struct TextEntityStyle: Equatable, Sendable {
-    /// The token's colour; nil keeps the text's own (over a hero banner,
-    /// whose ink the text already chose).
+    /// The token's colour; nil keeps the text's own (over media, where a link
+    /// colour would not read).
     public var color: UIColor?
-    /// Stops run across the token's letters, first letter to last (#1172) —
-    /// UIKit text paints no gradient inside a run, so each letter takes its
-    /// own colour between them. Wins over `color`.
-    public var gradient: [UIColor]?
     /// The token's weight, over the text's own font and size.
     public var weight: UIFont.Weight
 
-    public init(color: UIColor?, gradient: [UIColor]? = nil, weight: UIFont.Weight = .semibold) {
+    public init(color: UIColor?, weight: UIFont.Weight = .semibold) {
         self.color = color
-        self.gradient = gradient
         self.weight = weight
     }
 
-    /// On a plain surface: the icon's pink → orange at text strength,
-    /// semibold (#1172, the owner's call 2026-10-14; it was the label's
-    /// colour, #1168 — and never the system blue).
-    public static let link = TextEntityStyle(color: nil, gradient: Palette.entityGradient)
-    /// Over a photograph or a video: the same gradient washed toward white,
-    /// beside the white caption (#1172).
-    public static let onMedia = TextEntityStyle(color: nil, gradient: Palette.entityGradientOnMedia)
-    /// Over a hero banner, whose ink the text already chose: semibold only.
+    /// On a plain surface: a quiet slate blue-grey (`Palette.entityInk`),
+    /// semibold (#1174, the owner's call 2026-10-14: the accent is used
+    /// sparingly, never spread across text — and never the system blue).
+    public static let link = TextEntityStyle(color: Palette.entityInk)
+    /// Over media or a hero banner, whose ink the text already chose:
+    /// semibold only.
     public static let emphasis = TextEntityStyle(color: nil)
-
-    /// The colour of letter `index` of `count` along `stops` — the first
-    /// letter is the first stop, the last letter the last; resolved per
-    /// appearance, as the stops are.
-    static func colour(along stops: [UIColor], at index: Int, of count: Int) -> UIColor {
-        guard stops.count > 1 else { return stops.first ?? .label }
-        let position = count > 1 ? CGFloat(index) / CGFloat(count - 1) : 0
-        let scaled = position * CGFloat(stops.count - 1)
-        let lower = min(Int(scaled), stops.count - 2)
-        let fraction = scaled - CGFloat(lower)
-        return Palette.mix(stops[lower], stops[lower + 1], fraction)
-    }
 }
 
 public extension NSAttributedString.Key {
@@ -188,30 +184,29 @@ public extension NSAttributedString.Key {
 }
 
 public extension NSMutableAttributedString {
-    /// Marks and styles the `@handle`s and `#tag`s in the string, keeping
-    /// every other attribute (emote marks, shadows, paragraph styles).
+    /// Marks and styles the `@handle`s and `#tag`s in the string, and
+    /// styles its links alike, keeping every other attribute (emote marks,
+    /// shadows, paragraph styles).
     func applyTextEntityStyle(_ style: TextEntityStyle) {
         for entity in TextEntityScanner.entities(in: string) {
             let sigil = entity.kind == .mention ? "@" : "#"
             addAttribute(.textEntity, value: sigil + entity.value, range: entity.range)
-            if let stops = style.gradient {
-                // One colour per letter (a composed sequence: an emoji or an
-                // accent stays one letter).
-                var letters: [NSRange] = []
-                (string as NSString).enumerateSubstrings(in: entity.range, options: .byComposedCharacterSequences) { _, range, _, _ in
-                    letters.append(range)
-                }
-                for (index, letter) in letters.enumerated() {
-                    let colour = TextEntityStyle.colour(along: stops, at: index, of: letters.count)
-                    addAttribute(.foregroundColor, value: colour, range: letter)
-                }
-            } else if let color = style.color {
-                addAttribute(.foregroundColor, value: color, range: entity.range)
-            }
-            enumerateAttribute(.font, in: entity.range) { value, range, _ in
-                guard let font = value as? UIFont else { return }
-                addAttribute(.font, value: font.withWeight(style.weight), range: range)
-            }
+            paint(entity.range, with: style)
+        }
+        // Links (#1174): dressed like a token, but carrying no `.textEntity` —
+        // a tap on one routes nowhere.
+        for link in TextEntityScanner.links(in: string) {
+            paint(link, with: style)
+        }
+    }
+
+    private func paint(_ range: NSRange, with style: TextEntityStyle) {
+        if let color = style.color {
+            addAttribute(.foregroundColor, value: color, range: range)
+        }
+        enumerateAttribute(.font, in: range) { value, fontRange, _ in
+            guard let font = value as? UIFont else { return }
+            addAttribute(.font, value: font.withWeight(style.weight), range: fontRange)
         }
     }
 }

@@ -35,6 +35,18 @@ struct EmoteLabelEntityTests {
         #expect(weight(at: 0, in: label) != UIFont.Weight.semibold.rawValue)
     }
 
+    /// A text whose only styled range is a web address is styled too (#1174).
+    @Test func aLinkAloneIsStyled() {
+        let label = EmoteLabel()
+        label.font = .systemFont(ofSize: 17)
+        label.textEntityStyle = .emphasis
+        label.text = "see example.com/menu"
+        #expect(label.text == "see example.com/menu")
+        #expect(weight(at: 6, in: label) == UIFont.Weight.semibold.rawValue)
+        #expect(weight(at: 0, in: label) != UIFont.Weight.semibold.rawValue)
+        #expect(entity(at: 6, in: label) == nil, "a link routes no tap")
+    }
+
     /// `UILabel` applies a new font over the whole string: the label rebuilds
     /// so the tokens keep their weight, at the new size.
     @Test func aNewFontKeepsTheTokensStyled() {

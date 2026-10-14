@@ -45,6 +45,17 @@ struct AppButtonTests {
         #expect(button.configuration?.title == "Message")
     }
 
+    /// Follow is the quiet grey with its words in the accent (#1174);
+    /// Following, the same grey in the label's ink.
+    @Test func followIsGreyWithPinkWordsAndFollowingTheLabel() {
+        let button = follow()
+        #expect(button.configuration?.baseBackgroundColor == HeroTray.fill)
+        #expect(button.configuration?.baseForegroundColor == Palette.tint)
+        button.setSelected(true, animated: false)
+        #expect(button.configuration?.baseBackgroundColor == HeroTray.fill)
+        #expect(button.configuration?.baseForegroundColor == .label)
+    }
+
     @Test func theCardShapeIsARoundedRectangle() {
         let button = AppButton(aspect: .pill(.quiet), size: .header, shape: .card, content: .title("Edit"))
         #expect(button.configuration?.cornerStyle == .fixed)

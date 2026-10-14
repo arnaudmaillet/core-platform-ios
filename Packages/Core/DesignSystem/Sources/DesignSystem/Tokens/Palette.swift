@@ -95,58 +95,16 @@ public enum Palette {
     /// the bell's dot: those stay the solid red (`counter`).
     public static let accentGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xFFA552)]
 
+    /// `@mentions`, `#hashtags` and links in text on a plain surface (#1174,
+    /// the owner 2026-10-14: "the pink as accent, used subtly and
+    /// sparingly"): a quiet slate blue-grey, set apart from the words by its
+    /// cool cast and the semibold — never the accent, never the system blue.
+    /// 6.3:1 on white, 5.8:1 on the grouped grey; 7:1 and more in the dark.
+    public static let entityInk = dynamic(light: 0x4F5F78, dark: 0x9AABC4, lightIC: 0x3E4C63, darkIC: 0xB4C2D6)
+
     /// Where `accentGradient` runs, in a layer's unit space.
     public static let accentGradientStart = CGPoint(x: 0, y: 1)
     public static let accentGradientEnd = CGPoint(x: 1, y: 0)
-
-    /// A `@handle`'s or `#tag`'s letters on a plain surface (#1172): the
-    /// icon's pink → orange, run across the token. In the dark, the icon's
-    /// own stops (6.6:1 and more on the dark grounds); in the light, the
-    /// same family deepened to text strength — the pink text ink
-    /// (`onPrimaryContainer`, 5.27:1 on the grouped grey) to a burnt orange
-    /// (4.64:1 there), every letter between them above 4.5:1. The tint
-    /// itself (4.06:1 on the grey) would not read as text.
-    ///
-    /// Then muted a quarter of the way to a neutral grey of the same depth
-    /// (the owner, on the simulator: "a little greyer, faded") — a token is
-    /// read inside a sentence, not shouted.
-    public static let entityGradient: [UIColor] = [
-        dynamic(light: 0xB8296C, dark: 0xF37AB4),
-        dynamic(light: 0xC2410C, dark: 0xFFA552),
-    ].map { mix($0, entityMute, 0.25) }
-
-    /// The grey a token's colours are muted toward: as deep as they are, so
-    /// muting greys them without costing contrast.
-    static let entityMute = dynamic(light: 0x6E6E73, dark: 0x98989D)
-
-    /// The same token over a photograph or a video (#1172, the owner: "as if
-    /// a white filter sat on top", then "a little greyer"): the icon's stops
-    /// half-way to white, then a quarter of the way to a light grey — a pale,
-    /// faded tint beside the white caption.
-    public static let entityGradientOnMedia: [UIColor] = accentGradient.map {
-        mix(washed($0, by: 0.5), rgb(0xC7C7CC), 0.25)
-    }
-
-    /// `colour` blended toward white by `amount` (0 keeps it, 1 is white).
-    static func washed(_ colour: UIColor, by amount: CGFloat) -> UIColor {
-        mix(colour, .white, amount)
-    }
-
-    /// The colour `fraction` of the way from `from` to `to` (sRGB), resolved
-    /// per appearance as the two are.
-    public static func mix(_ from: UIColor, _ to: UIColor, _ fraction: CGFloat) -> UIColor {
-        // The ends are the stops themselves, exactly — no rounding drift.
-        if fraction <= 0 { return from }
-        if fraction >= 1 { return to }
-        return UIColor { traits in
-            var a = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), alpha: CGFloat(0))
-            var b = a
-            from.resolvedColor(with: traits).getRed(&a.r, green: &a.g, blue: &a.b, alpha: &a.alpha)
-            to.resolvedColor(with: traits).getRed(&b.r, green: &b.g, blue: &b.b, alpha: &b.alpha)
-            func blend(_ x: CGFloat, _ y: CGFloat) -> CGFloat { x + (y - x) * fraction }
-            return UIColor(red: blend(a.r, b.r), green: blend(a.g, b.g), blue: blend(a.b, b.b), alpha: blend(a.alpha, b.alpha))
-        }
-    }
 
     // MARK: - Rules (#1169)
 
