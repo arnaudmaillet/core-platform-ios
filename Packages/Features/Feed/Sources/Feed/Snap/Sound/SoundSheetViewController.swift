@@ -139,10 +139,12 @@ import UIKit
 /// **FROM EXPANDED, A DRAG DOWN COMES BACK TO COLLAPSED**; a second one
 /// closes.
 ///
-/// ⚠️ **THE PREVIEW PAUSES THE CLIP** (`onCoverChanged`), at any detent. Two
-/// sounds at once is noise; listening to the sound is a choice the viewer just
-/// made, so the clip gives way until the preview stops or the sheet goes. A
-/// feed opened from a tile covers it the same way, for the trip.
+/// **THE RECORD IS THE POST'S** (#1148): the sheet only ever opens from a post,
+/// so its sound is the post's sound, and it has no player of its own. The
+/// header's record mirrors the post (`setPostPlayback`) and its tap plays or
+/// pauses the post (`onTogglePlayback`). Opening the sheet never silences or
+/// pauses the post; a feed opened from a tile covers it (`onCoverChanged`),
+/// for the trip.
 final class SoundSheetViewController: UIViewController {
     struct Tile: Hashable, Sendable {
         let postID: PostID
@@ -197,9 +199,39 @@ final class SoundSheetViewController: UIViewController {
         case tile(PostID, SoundSheetSection.Kind)
     }
 
-    /// Whether the clip behind should pause: the preview is playing, or a
-    /// feed opened from a tile covers it. NEVER the detent alone.
+    /// Whether the clip behind should pause: a feed opened from a tile covers
+    /// it. NEVER the detent alone, and never the sheet just being open.
     var onCoverChanged: ((Bool) -> Void)?
+    /// The record's tap: play or pause the post the sheet opened over.
+    var onTogglePlayback: (() -> Void)?
+
+    /// The post's playback, as the record shows it (#1148).
+    struct PostPlayback: Equatable {
+        /// The post plays — muted or not: the record turns, the glyph is ❚❚.
+        var playing = false
+        /// The feed's sound is off: the record wears the mute badge.
+        var muted = false
+        /// The post has something to hear; false shows the record with no
+        /// glyph, refusing taps (the bubble greyed).
+        var available = true
+    }
+
+    private(set) var postPlayback = PostPlayback()
+
+    /// What the post does now — the feed tells the sheet, as it tells the
+    /// post's own bubble.
+    func setPostPlayback(_ playback: PostPlayback) {
+        guard playback != postPlayback else { return }
+        let availabilityChanged = playback.available != postPlayback.available
+        postPlayback = playback
+        guard let header else { return }
+        if availabilityChanged { configure(header) } else { apply(playback, to: header) }
+    }
+
+    private func apply(_ playback: PostPlayback, to header: SoundSheetHeaderView) {
+        header.setPlaying(playback.available && playback.playing)
+        header.setMuted(playback.available && playback.muted)
+    }
     /// A tile was chosen; the sheet is already on its way out.
     var onSelectPost: ((PostID) -> Void)?
     /// Opens a NEW feed of the posts with this sound, flying out of the tapped
@@ -279,6 +311,10 @@ final class SoundSheetViewController: UIViewController {
         return lookahead
     }()
     private weak var header: SoundSheetHeaderView?
+    #if DEBUG
+    /// The header as the sheet last configured it.
+    var debugHeader: SoundSheetHeaderView? { header }
+    #endif
     private weak var shareItem: UIBarButtonItem?
     private weak var useItem: UIBarButtonItem?
     private(set) weak var bookmarkItem: UIBarButtonItem?
@@ -319,12 +355,7 @@ final class SoundSheetViewController: UIViewController {
     /// What lies under the Popular row, fading with the sheet's height.
     let reveal = SoundSheetReveal()
     private var lastTracedReveal: Int?
-    private var isPreviewing = false
     private var isCovering = false
-    private var preview: AVPlayer?
-    private var previewEndObserver: NSObjectProtocol?
-    private var previewTimeObserver: Any?
-    private var raisedSessionForPreview = false
 
     /// The post the sheet opens over (#1147): in no section, but one of the
     /// posts set to the sound, so the header's count includes it.
@@ -565,18 +596,6 @@ final class SoundSheetViewController: UIViewController {
         // back now, on the way out — none is left bound to a sheet nobody
         // sees (#884).
         setAutoplayActive(false)
-        guard isSheetBeingDismissed else { return }
-        stopPreview()
-        tearDownPreview()
-    }
-
-    /// The preview's player and its observers go with the sheet.
-    private func tearDownPreview() {
-        if let previewEndObserver { NotificationCenter.default.removeObserver(previewEndObserver) }
-        if let previewTimeObserver { preview?.removeTimeObserver(previewTimeObserver) }
-        previewEndObserver = nil
-        previewTimeObserver = nil
-        preview = nil
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -604,8 +623,8 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// Down and gone, however high the sheet stands — the same dismissal as a
-    /// swipe down: the preview stops and the feed behind is uncovered on the
-    /// way out (`viewWillDisappear`, `viewDidDisappear`).
+    /// swipe down: the feed behind is uncovered on the way out
+    /// (`viewDidDisappear`).
     func close() {
         (navigationController ?? self).dismiss(animated: true)
     }
@@ -917,7 +936,7 @@ final class SoundSheetViewController: UIViewController {
             else { continue }
             Self.configure(head, for: section)
         }
-        if !isPreviewing { header?.setMeta(Self.meta(duration: sound.duration, posts: postCount)) }
+        header?.setMeta(Self.meta(duration: sound.duration, posts: postCount))
         if let gallery = pushedGallery {
             let ids = newSections.first { $0.kind == gallery.kind }?.all.filter { tileByID[$0] != nil } ?? []
             gallery.update(ids: ids, reconfiguring: Array(changed))
@@ -932,10 +951,14 @@ final class SoundSheetViewController: UIViewController {
             title: sound.title ?? "Original sound",
             subtitle: sound.artist ?? "@\(authorHandle)",
             meta: Self.meta(duration: sound.duration, posts: postCount),
-            canPreview: sound.previewURL != nil
+            canToggle: postPlayback.available
         )
-        header.setPlaying(isPreviewing)
-        header.onTogglePreview = { [weak self] in self?.togglePreview() }
+        apply(postPlayback, to: header)
+        header.onTogglePlayback = { [weak self] in
+            guard let self, postPlayback.available else { return }
+            HapticImpact(style: .light).impactOccurred()
+            onTogglePlayback?()
+        }
         if let url = sound.artworkURL ?? fallbackArtworkURL {
             Task { [weak header, pipeline = imagePipeline] in
                 header?.setArtwork(await Self.image(at: url, pipeline: pipeline))
@@ -1235,7 +1258,7 @@ final class SoundSheetViewController: UIViewController {
                 subtitle: sound.artist ?? "@\(authorHandle)",
                 // The meta line is one line whatever it says.
                 meta: Self.meta(duration: sound.duration, posts: postCount),
-                canPreview: sound.previewURL != nil
+                canToggle: postPlayback.available
             )
         }
         headerHeightCache = (key, height)
@@ -1486,7 +1509,7 @@ final class SoundSheetViewController: UIViewController {
     /// ⚠️ NOT `isExpanded`: the expanded detent leaves the clip behind playing,
     /// like the collapsed one — only a second sound or a second feed covers it.
     private func refreshCover() {
-        setCovering(isPreviewing || isShowingFeed)
+        setCovering(isShowingFeed)
     }
 
     /// A feed opened from a tile covers everything, the page behind the sheet
@@ -1527,7 +1550,6 @@ final class SoundSheetViewController: UIViewController {
         if case .gallery(let pushed) = source { presenter = pushed } else { presenter = self }
         let origin = heroOrigin(for: tile, post: post, stream: stream, source: source)
         trace("open \(id.rawValue) (\(post.kind)) stream \(stream.prefix(3).map(\.id.rawValue))")
-        stopPreview()
         isShowingFeed = true
         refreshCover()
         // The tapped tile's clip is parked for a close that pages on and comes
@@ -1743,71 +1765,6 @@ final class SoundSheetViewController: UIViewController {
         let visible = collectionView.bounds.inset(by: collectionView.adjustedContentInset)
         guard visible.intersects(cell.convert(cell.bounds, to: collectionView)) else { return nil }
         return cell.convert(cell.bounds, to: space)
-    }
-
-    // MARK: - Preview
-
-    private func togglePreview() {
-        isPreviewing ? stopPreview() : startPreview()
-    }
-
-    private func startPreview() {
-        guard let url = sound.previewURL else { return }
-        if preview == nil {
-            let player = makePreviewPlayer(for: url)
-            player.actionAtItemEnd = .pause
-            previewEndObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.stopPreview(rewinding: true) }
-            }
-            previewTimeObserver = player.addPeriodicTimeObserver(
-                forInterval: CMTime(value: 1, timescale: 4), queue: .main
-            ) { [weak self] time in
-                MainActor.assumeIsolated { self?.previewTicked(time.seconds) }
-            }
-            preview = player
-        }
-        // ⚠️ `.playback` while it plays: the viewer asked for this sound, and
-        // an `.ambient` session would keep it silent on a phone set to silent
-        // with nothing on screen to say why. Given back when it stops.
-        let session = AVAudioSession.sharedInstance()
-        if session.category != .playback {
-            try? session.setCategory(.playback, mode: .default)
-            raisedSessionForPreview = true
-        }
-        isPreviewing = true
-        refreshCover()
-        header?.setPlaying(true)
-        preview?.play()
-        HapticImpact(style: .light).impactOccurred()
-    }
-
-    /// The preview's player: through the pool's byte cache when there is one
-    /// (#895), so a sound previewed twice, or a clip's original sound whose
-    /// clip already played, is not fetched again.
-    func makePreviewPlayer(for url: URL) -> AVPlayer {
-        AVPlayer(playerItem: videoPlayback?.soundItem(for: url) ?? AVPlayerItem(url: url))
-    }
-
-    private func stopPreview(rewinding: Bool = false) {
-        guard isPreviewing else { return }
-        preview?.pause()
-        if rewinding { preview?.seek(to: .zero) }
-        if raisedSessionForPreview {
-            raisedSessionForPreview = false
-            try? AVAudioSession.sharedInstance().setCategory(.ambient, mode: .moviePlayback)
-        }
-        isPreviewing = false
-        header?.setPlaying(false)
-        header?.setMeta(Self.meta(duration: sound.duration, posts: postCount))
-        refreshCover()
-    }
-
-    private func previewTicked(_ seconds: Double) {
-        guard isPreviewing, seconds.isFinite else { return }
-        let total = sound.duration.map { " / \(Self.clock($0))" } ?? ""
-        header?.setMeta("\(Self.clock(seconds))\(total)")
     }
 
     // MARK: - Actions

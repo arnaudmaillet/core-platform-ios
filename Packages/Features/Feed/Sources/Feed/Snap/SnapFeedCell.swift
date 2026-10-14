@@ -2786,6 +2786,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
 
     /// Toggles the active video's playback and reflects it in the pause glyph.
     /// No-op for image/text cells (no player).
+    /// Whether the page's own player can be paused — a clip; a photo or text
+    /// page's song is the feed's (#1148).
+    var canTogglePlayback: Bool { playsVideo }
+
     func togglePlayback() {
         guard playsVideo, let paused = playback.toggle() else { return }
         setPauseGlyphVisible(paused)

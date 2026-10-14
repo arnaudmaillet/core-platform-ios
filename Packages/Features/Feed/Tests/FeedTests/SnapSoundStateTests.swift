@@ -69,15 +69,6 @@ struct SnapSoundStateTests {
         #expect(sound.face(for: Self.clip(), playingClip: nil).isMuted == false)
     }
 
-    @Test func theRecordTurnsOnlyWhenPlayingAudibly() {
-        let switches = Switches()
-        let sound = Self.state(switches)
-        #expect(sound.isAudible(playing: true))
-        #expect(!sound.isAudible(playing: false))
-        sound.toggle()
-        #expect(!sound.isAudible(playing: true), "a muted page's record turned")
-    }
-
     // MARK: - A page without audio
 
     @Test func aPhotoWithNoSoundHasNothingToHear() {

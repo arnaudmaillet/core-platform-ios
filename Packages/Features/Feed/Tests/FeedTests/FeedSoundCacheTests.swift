@@ -8,8 +8,8 @@ import Synchronization
 import Testing
 @testable import Feed
 
-/// A page's song and the sound sheet's preview read through the device's
-/// byte cache (#895), as the clips do: both take their item from the playback
+/// A page's song reads through the device's byte cache (#895), as the clips
+/// do: it takes its item from the playback
 /// pool (`soundItem(for:)`), which opens a remote song on the cache's private
 /// scheme, into the sound namespaces (Music & Sounds in Settings → Storage,
 /// #1068). What the cache then does with the bytes is MediaPlayback's
@@ -33,18 +33,6 @@ struct FeedSoundCacheTests {
         VideoPlaybackController(source: IdentitySource(), byteCache: Self.cache)
     }
 
-    private func makeSheet(previewURL: URL, videoPlayback: VideoPlaybackController?) -> SoundSheetViewController {
-        SoundSheetViewController(
-            sound: PostSound(id: "song-1", title: "Song", artist: nil, previewURL: previewURL, artworkURL: nil, duration: 30),
-            authorHandle: "ava",
-            fallbackArtworkURL: nil,
-            sections: [],
-            tiles: [],
-            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            videoPlayback: videoPlayback
-        )
-    }
-
     @Test func aPagesSongReadsThroughTheByteCache() throws {
         let player = FeedSongPlayer(playback: pool())
         player.play(song)
@@ -53,14 +41,7 @@ struct FeedSoundCacheTests {
         #expect(Self.cache.isCached(item.asset), "the page's song opened its URL, not the cache")
     }
 
-    @Test func aSoundPreviewReadsThroughTheByteCache() throws {
-        let player = makeSheet(previewURL: song, videoPlayback: pool()).makePreviewPlayer(for: song)
-        defer { player.replaceCurrentItem(with: nil) }
-        let item = try #require(player.currentItem)
-        #expect(Self.cache.isCached(item.asset), "the sound sheet's preview opened its URL, not the cache")
-    }
-
-    /// No pool (a preview, a test), no cache: the song opens its URL.
+    /// No pool (a test), no cache: the song opens its URL.
     @Test func withoutAPoolASongOpensItsURL() throws {
         let player = FeedSongPlayer(playback: nil)
         player.play(song)
@@ -125,26 +106,6 @@ struct FeedSoundCacheTests {
         #expect(usage.bytes(in: .videos) == 0, "a song counted as Videos")
     }
 
-    /// The sound sheet's preview: a second preview of the same sound starts
-    /// from cached bytes, counted as Music & Sounds.
-    @Test func aSoundPreviewStartsFromCachedBytesCountedAsSounds() async throws {
-        let served = try makeServed("preview")
-        defer { try? FileManager.default.removeItem(at: served.folder) }
-        let sheet = makeSheet(previewURL: served.song, videoPlayback: served.pool)
-        let first = sheet.makePreviewPlayer(for: served.song)
-        try await loadStart(of: try #require(first.currentItem))
-        first.replaceCurrentItem(with: nil)
-        let fetched = served.fetcher.requestCount
-        #expect(fetched > 0)
-
-        let again = sheet.makePreviewPlayer(for: served.song)
-        defer { again.replaceCurrentItem(with: nil) }
-        try await loadStart(of: try #require(again.currentItem))
-        #expect(served.fetcher.requestCount == fetched, "a second preview went back to the network")
-        let usage = served.coordinator.usage()
-        #expect(usage.bytes(in: .sounds) > 0)
-        #expect(usage.bytes(in: .videos) == 0, "a preview counted as Videos")
-    }
 }
 
 /// A 3 s AAC song in an M4A, written once per process.
