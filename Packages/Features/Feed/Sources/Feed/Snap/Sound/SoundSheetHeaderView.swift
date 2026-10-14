@@ -1,8 +1,14 @@
 import DesignSystem
 import UIKit
 
-/// The sound sheet's head: the artwork that plays and pauses the sound, and
-/// what the sound is — nothing else. "Use this sound" and share are bar items
+/// The sound sheet's head: the RECORD of the post the sheet opened over, and
+/// what the sound is — nothing else.
+///
+/// The record mirrors the post (#1148): it turns while the post plays —
+/// muted too — wears the mute badge while the feed's sound is off, and its
+/// tap plays or pauses the POST (`onTogglePlayback`), the glyph following.
+/// It is the column bubble's own component (`SoundRecordGlass`, #1150): the
+/// cover inside its glass, the badge a glass inside the rim. "Use this sound" and share are bar items
 /// of the sheet's native TOOLBAR, and a section of posts that holds more than
 /// it shows opens from its title's chevron (`SectionTitleView`).
 ///
@@ -33,10 +39,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     /// lines end at 334.
     static let closeClearance: CGFloat = 44 + 16 - SoundSheetViewController.headerInset + SoundSheetViewController.gutter
 
-    var onTogglePreview: (() -> Void)?
+    var onTogglePlayback: (() -> Void)?
 
-    private let record = UIView()
-    private let artwork = UIImageView()
+    private let record = Record()
+    private let recordGlass = SoundRecordGlass()
+    private var artwork: UIImageView { recordGlass.cover }
     private let playButton = UIButton(configuration: .glass())
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
@@ -46,21 +53,22 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     override init(frame: CGRect) {
         super.init(frame: frame)
 
-        artwork.contentMode = .scaleAspectFill
-        artwork.clipsToBounds = true
         // ROUND: a sound is a record, not a picture — and a circle reads as
         // "this plays" next to the square tiles of the posts below.
-        artwork.layer.cornerRadius = Self.artworkSide / 2
-        artwork.backgroundColor = .clear
         artwork.accessibilityIgnoresInvertColors = true
-        record.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(togglePreview)))
-        artwork.translatesAutoresizingMaskIntoConstraints = false
-        record.addSubview(artwork)
+        // The badge scaled to the 96 pt record — and no larger: at 22 it
+        // clears the 44 pt play button in the middle (centres 34 apart, radii
+        // 22 + 11).
+        recordGlass.badgeSide = 22
+        recordGlass.badgeGlyphSize = 10
+        record.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(togglePlayback)))
+        recordGlass.translatesAutoresizingMaskIntoConstraints = false
+        record.addSubview(recordGlass)
         NSLayoutConstraint.activate([
-            artwork.topAnchor.constraint(equalTo: record.topAnchor),
-            artwork.leadingAnchor.constraint(equalTo: record.leadingAnchor),
-            artwork.trailingAnchor.constraint(equalTo: record.trailingAnchor),
-            artwork.bottomAnchor.constraint(equalTo: record.bottomAnchor),
+            recordGlass.topAnchor.constraint(equalTo: record.topAnchor),
+            recordGlass.leadingAnchor.constraint(equalTo: record.leadingAnchor),
+            recordGlass.trailingAnchor.constraint(equalTo: record.trailingAnchor),
+            recordGlass.bottomAnchor.constraint(equalTo: record.bottomAnchor),
         ])
         // Under the picture, for a sound that has none.
         let note = UIImageView(image: UIImage(systemName: "music.note"))
@@ -68,7 +76,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         note.preferredSymbolConfiguration = .init(pointSize: 34, weight: .medium)
         note.translatesAutoresizingMaskIntoConstraints = false
         artworkBackdrop.backgroundColor = .tertiarySystemFill
-        artworkBackdrop.layer.cornerRadius = Self.artworkSide / 2
+        artworkBackdrop.layer.cornerRadius = (Self.artworkSide - 2 * SoundRecordGlass.rim) / 2
         artworkBackdrop.translatesAutoresizingMaskIntoConstraints = false
         artworkBackdrop.addSubview(note)
         NSLayoutConstraint.activate([
@@ -78,7 +86,14 @@ final class SoundSheetHeaderView: UICollectionReusableView {
 
         playButton.configuration?.cornerStyle = .capsule
         playButton.configuration?.baseForegroundColor = .white
-        playButton.addAction(UIAction { [weak self] _ in self?.onTogglePreview?() }, for: .primaryActionTriggered)
+        // ⚠️ ONE TOGGLE PER TAP: the glyph is drawn, not tapped — the record's
+        // tap takes it all. A button that also answered toggled the post
+        // twice (paused, then played again) for one tap on the glyph.
+        playButton.isUserInteractionEnabled = false
+        playButton.isAccessibilityElement = false
+        record.isAccessibilityElement = true
+        record.accessibilityTraits = .button
+        record.onActivate = { [weak self] in self?.onTogglePlayback?() }
         playButton.translatesAutoresizingMaskIntoConstraints = false
         // On the RECORD, beside the artwork rather than in it: the artwork
         // turns while the sound plays, the button stays upright.
@@ -143,10 +158,10 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     /// what the sound sheet's collapsed detent counts, and what its layout
     /// then gives the header, so the two cannot disagree.
     static func fittingHeight(
-        width: CGFloat, title: String, subtitle: String, meta: String, canPreview: Bool
+        width: CGFloat, title: String, subtitle: String, meta: String, canToggle: Bool
     ) -> CGFloat {
         let header = SoundSheetHeaderView(frame: CGRect(x: 0, y: 0, width: width, height: 200))
-        header.configure(title: title, subtitle: subtitle, meta: meta, canPreview: canPreview)
+        header.configure(title: title, subtitle: subtitle, meta: meta, canToggle: canToggle)
         return header.systemLayoutSizeFitting(
             CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required,
@@ -154,12 +169,14 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         ).height.rounded(.up)
     }
 
-    func configure(title: String, subtitle: String, meta: String, canPreview: Bool) {
+    /// `canToggle` false — a post with no audio — shows the record without
+    /// its glyph, and it ignores taps.
+    func configure(title: String, subtitle: String, meta: String, canToggle: Bool) {
         titleLabel.text = title
         subtitleLabel.text = subtitle
         metaLabel.text = meta
-        playButton.isHidden = !canPreview
-        record.isUserInteractionEnabled = canPreview
+        playButton.isHidden = !canToggle
+        record.isUserInteractionEnabled = canToggle
     }
 
     func setArtwork(_ image: UIImage?) {
@@ -169,17 +186,44 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         }
     }
 
+    /// The post plays (the record turns, ❚❚) or not (it stops in place, ▶︎).
     func setPlaying(_ playing: Bool) {
         playButton.configuration?.image = UIImage(systemName: playing ? "pause.fill" : "play.fill")
-        playButton.accessibilityLabel = playing ? "Pause sound" : "Play sound"
-        artwork.layer.setRecordSpinning(playing)
+        record.accessibilityLabel = playing ? "Pause post" : "Play post"
+        recordGlass.setSpinning(playing)
     }
+
+    /// The feed's sound is off: the badge, which does not turn.
+    func setMuted(_ muted: Bool) {
+        recordGlass.showsMutedBadge = muted
+    }
+
+    #if DEBUG
+    var debugIsSpinning: Bool { recordGlass.isSpinning }
+    var debugShowsMutedBadge: Bool { recordGlass.showsMutedBadge }
+    /// The glyph says ❚❚ (the post plays) rather than ▶︎.
+    var debugShowsPause: Bool { record.accessibilityLabel == "Pause post" }
+    var debugCanToggle: Bool { record.isUserInteractionEnabled && !playButton.isHidden }
+    func debugTapRecord() { togglePlayback() }
+    #endif
 
     func setMeta(_ meta: String) {
         metaLabel.text = meta
     }
 
-    @objc private func togglePreview() {
-        onTogglePreview?()
+    @objc private func togglePlayback() {
+        onTogglePlayback?()
+    }
+
+    /// The record as VoiceOver reads it: one button, whose activation is the
+    /// tap's toggle.
+    final class Record: UIView {
+        var onActivate: (() -> Void)?
+
+        override func accessibilityActivate() -> Bool {
+            guard isUserInteractionEnabled, let onActivate else { return false }
+            onActivate()
+            return true
+        }
     }
 }

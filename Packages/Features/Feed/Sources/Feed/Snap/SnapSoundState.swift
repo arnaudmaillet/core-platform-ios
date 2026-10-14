@@ -165,12 +165,6 @@ struct SnapSoundState {
         soundOn && !powerSaving
     }
 
-    /// The sound bubble's record turns while the post plays AUDIBLY: the
-    /// player's play and pause, and the mute (#683).
-    func isAudible(playing: Bool) -> Bool {
-        playing && isOn
-    }
-
     // MARK: - The sound sheet
 
     /// What the sound sheet opens with for `model`; nil for a page with

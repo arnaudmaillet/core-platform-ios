@@ -307,6 +307,12 @@ final class SnapFeedViewController: UIViewController {
     private var isAudioYielded = false
     /// Through the pool's byte cache when there is one (#895).
     private lazy var songPlayer = FeedSongPlayer(playback: videoPlayback)
+    /// The page whose song the viewer paused from the sound sheet's record
+    /// (#1148): its song stays paused, where it was, until resumed — another
+    /// page plays its own.
+    private var songPausedFor: PostID?
+    /// The sound sheet open over the page, mirroring it (#1148).
+    private weak var soundSheet: SoundSheetViewController?
     private var coverSpinTimer: Timer?
     private var isForeground = true
     /// Background Play (#483): this screen's clip went on playing when the
@@ -4590,7 +4596,7 @@ final class SnapFeedViewController: UIViewController {
         if isOnScreen, isForeground, !isAudioYielded,
            let owner = playbackOwner, orderedIDs.indices.contains(owner),
            let model = modelsByID[orderedIDs[owner]] {
-            song = soundState.song(for: model, playingClip: playingClip(of: model))
+            song = model.id == songPausedFor ? nil : soundState.song(for: model, playingClip: playingClip(of: model))
         }
         songPlayer.play(song)
     }
@@ -4604,13 +4610,37 @@ final class SnapFeedViewController: UIViewController {
     /// look at the player is one rule where wiring every door would be six.
     private func refreshCoverSpin() {
         let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
-        // The sound bubble's record turns while the post plays AUDIBLY: the
-        // player's play and pause, and the mute (#683) — and so does the
-        // panel's slot, where a TEXT page's sound lives (#692).
-        let audible = soundState.isAudible(playing: playing)
-        activeSnapCell?.setSoundSpinning(audible)
-        (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(audible)
-        (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(audible)
+        // The sound bubble's record turns while the post PLAYS — muted too
+        // (#1148, reversing #683's audible-only turn; the mute is the badge)
+        // — and so does the panel's slot, where a TEXT page's sound lives
+        // (#692), and the sound sheet's record.
+        activeSnapCell?.setSoundSpinning(playing)
+        (commentsContentVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
+        (previewRestingVC as? PostDetailViewController)?.setRailSoundSpinning(playing)
+        if let soundSheet, let model = activeModel {
+            soundSheet.setPostPlayback(postPlayback(of: model, playing: playing))
+        }
+    }
+
+    /// What the sound sheet's record shows of `model`'s page (#1148).
+    private func postPlayback(of model: FeedItemDisplayModel, playing: Bool) -> SoundSheetViewController.PostPlayback {
+        SoundSheetViewController.PostPlayback(
+            playing: playing, muted: !soundState.isOn, available: soundFace(for: model)?.isAvailable ?? false
+        )
+    }
+
+    /// The sound sheet's record, tapped: the page's own playback toggles — a
+    /// clip as a tap on the video does (its paused mark included), a photo or
+    /// text page's song paused or resumed where it was (#1148).
+    private func togglePagePlayback() {
+        guard let model = activeModel else { return }
+        if let cell = activeSnapCell, cell.canTogglePlayback {
+            cell.togglePlayback()
+        } else {
+            songPausedFor = songPausedFor == model.id ? nil : model.id
+            refreshSong()
+        }
+        refreshCoverSpin()
     }
 
     private func setCoverSpinWatch(_ on: Bool) {
@@ -4677,6 +4707,12 @@ final class SnapFeedViewController: UIViewController {
         // The cell that is covered now is the one to uncover, whatever the
         // feed does meanwhile.
         weak var covered = activeSnapCell
+        // The record is the post's (#1148): it mirrors the page, and its tap
+        // plays or pauses the page.
+        let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
+        sheet.setPostPlayback(postPlayback(of: model, playing: playing))
+        sheet.onTogglePlayback = { [weak self] in self?.togglePagePlayback() }
+        soundSheet = sheet
         sheet.onCoverChanged = { [weak self] covering in
             covered?.setCoveredBySheet(covering)
             self?.yieldAudio(covering)

@@ -36,6 +36,15 @@ final class SoundRecordGlass: UIView {
     /// The glass's thickness around the record.
     static let rim: CGFloat = 3
     static let badgeSide: CGFloat = 16
+    /// The badge's side here: 16 on a bubble, larger on the sound sheet's
+    /// 96 pt record (#1148).
+    var badgeSide: CGFloat = SoundRecordGlass.badgeSide {
+        didSet { setNeedsLayout() }
+    }
+    /// The badge glyph's point size.
+    var badgeGlyphSize: CGFloat = 8 {
+        didSet { applyBadgeGlyph() }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -50,10 +59,7 @@ final class SoundRecordGlass: UIView {
 
         badge.cornerConfiguration = .capsule()
         badge.isHidden = true
-        badgeGlyph.image = UIImage(
-            systemName: "speaker.slash.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 8, weight: .bold)
-        )
+        applyBadgeGlyph()
         badgeGlyph.tintColor = .white
         badgeGlyph.contentMode = .center
         badge.contentView.addSubview(badgeGlyph)
@@ -62,6 +68,13 @@ final class SoundRecordGlass: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func applyBadgeGlyph() {
+        badgeGlyph.image = UIImage(
+            systemName: "speaker.slash.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: badgeGlyphSize, weight: .bold)
+        )
+    }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
@@ -84,19 +97,17 @@ final class SoundRecordGlass: UIView {
         glass.frame = bounds
         cover.frame = bounds.insetBy(dx: Self.rim, dy: Self.rim)
         cover.layer.cornerRadius = cover.bounds.width / 2
-        badge.frame = Self.badgeFrame(in: bounds)
+        badge.frame = Self.badgeFrame(in: bounds, side: badgeSide)
         badgeGlyph.frame = badge.bounds
     }
 
     /// The badge's frame: on the circle's bottom-trailing diagonal, its edge
     /// one rim inside the glass's — inside the bubble, never across it.
-    static func badgeFrame(in bounds: CGRect) -> CGRect {
+    static func badgeFrame(in bounds: CGRect, side: CGFloat = badgeSide) -> CGRect {
         let radius = min(bounds.width, bounds.height) / 2
-        let reach = max(0, radius - rim - badgeSide / 2) / 2.squareRoot()
+        let reach = max(0, radius - rim - side / 2) / 2.squareRoot()
         let center = CGPoint(x: bounds.midX + reach, y: bounds.midY + reach)
-        return CGRect(
-            x: center.x - badgeSide / 2, y: center.y - badgeSide / 2, width: badgeSide, height: badgeSide
-        )
+        return CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
     }
 
     /// The press: the glass and the record grow together, and settle back.

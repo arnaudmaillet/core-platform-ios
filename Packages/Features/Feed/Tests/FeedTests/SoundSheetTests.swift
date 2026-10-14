@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreModels
 import CoreNavigation
 import CoreStorage
@@ -179,14 +180,14 @@ struct SoundSheetTests {
         let width: CGFloat = 402 - 2 * Sheet.headerInset
         func height(_ title: String) -> CGFloat {
             SoundSheetHeaderView.fittingHeight(
-                width: width, title: title, subtitle: "Daft Punk", meta: "0:30 · 23 posts", canPreview: true
+                width: width, title: title, subtitle: "Daft Punk", meta: "0:30 · 23 posts", canToggle: true
             )
         }
         let long = String(repeating: "Veridis Quo ", count: 12)
         #expect(height(long) == height("Veridis Quo"), "a long name made the header taller")
 
         let header = SoundSheetHeaderView(frame: CGRect(x: 0, y: 0, width: width, height: height(long)))
-        header.configure(title: long, subtitle: long, meta: "0:30 · 23 posts", canPreview: true)
+        header.configure(title: long, subtitle: long, meta: "0:30 · 23 posts", canToggle: true)
         header.layoutIfNeeded()
         let labels = allSubviews(of: header).compactMap { $0 as? UILabel }.filter { $0.text == long }
         #expect(labels.count == 2)
@@ -699,6 +700,62 @@ struct SoundSheetTests {
         #expect(try !tileIDs(in: .recent, of: controller).contains("p11"))
         // The row keeps p0…p7; Recent is the rest, newest first.
         #expect(try tileIDs(in: .recent, of: controller) == ["p10", "p9", "p8"])
+    }
+
+    // MARK: - The post's record (#1148)
+
+    /// The record mirrors the post: it turns while the post plays — muted
+    /// too — with ❚❚, stops with ▶︎, and wears the mute badge while the
+    /// sound is off.
+    @Test func theRecordFollowsThePost() throws {
+        let controller = sheet(tiles: 3)
+        try laidOut(controller)
+        let header = try #require(controller.debugHeader)
+        #expect(!header.debugIsSpinning && !header.debugShowsPause && !header.debugShowsMutedBadge)
+
+        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
+        #expect(header.debugIsSpinning && header.debugShowsPause)
+        #expect(!header.debugShowsMutedBadge)
+
+        controller.setPostPlayback(.init(playing: true, muted: true, available: true))
+        #expect(header.debugIsSpinning, "a muted post that plays stood still")
+        #expect(header.debugShowsMutedBadge)
+
+        controller.setPostPlayback(.init(playing: false, muted: true, available: true))
+        #expect(!header.debugIsSpinning && !header.debugShowsPause)
+        #expect(header.debugShowsMutedBadge, "pausing took the badge away")
+
+        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
+        #expect(!header.debugShowsMutedBadge, "unmuting left the badge")
+    }
+
+    /// The record's tap toggles the POST, once — the sheet has no player of
+    /// its own any more.
+    @Test func aTapTogglesThePostOnce() throws {
+        let controller = sheet(tiles: 3)
+        try laidOut(controller)
+        var toggles = 0
+        controller.onTogglePlayback = { toggles += 1 }
+        let header = try #require(controller.debugHeader)
+        header.debugTapRecord()
+        #expect(toggles == 1)
+        #expect(!Mirror(reflecting: controller).children.contains { $0.value is AVPlayer },
+                "the sheet holds a player of its own")
+    }
+
+    /// A post with no audio: the record without its glyph, refusing taps, and
+    /// no badge.
+    @Test func aPostWithNoAudioCannotBeToggled() throws {
+        let controller = sheet(tiles: 3)
+        controller.setPostPlayback(.init(playing: false, muted: true, available: false))
+        try laidOut(controller)
+        var toggles = 0
+        controller.onTogglePlayback = { toggles += 1 }
+        let header = try #require(controller.debugHeader)
+        #expect(!header.debugCanToggle)
+        #expect(!header.debugShowsMutedBadge)
+        header.debugTapRecord()
+        #expect(toggles == 0)
     }
 
     // MARK: - Collapsed detent
