@@ -126,10 +126,14 @@ enum ProfileMenuBuilder {
     /// the open menu as the state changes (`refreshVisibleMapRows`), so they
     /// track what was just chosen.
     ///
-    /// ⚠️ A SUBMENU OF SEE-MORE, NOT A STAR (#689, the owner's call
+    /// ⚠️ A SUBMENU OF SEE-MORE, NOT A HEADER BUTTON (#689, the owner's call
     /// 2026-10-08): the star left the header's row. Same rows, same rule —
     /// only a followed profile, Friends only for a mutual, only when the app
     /// wired a pinning service (`ProfileViewModel.MapPinButton`).
+    ///
+    /// ⚠️ A PIN, NOT A STAR (#1129): the star is the app's Save glyph
+    /// (#1128), and pinning a profile to the map is a different verb. An SF
+    /// Symbol, not one of the custom set: pinning is not a signature verb.
     static func mapFavoriteSubmenu(
         _ state: ProfileViewModel.MapPinButton,
         onToggle: @escaping (MapFavoriteCategory) -> Void
@@ -139,7 +143,7 @@ enum ProfileMenuBuilder {
         return UIMenu(
             title: "Map",
             subtitle: mapFavoriteSubtitle(rows),
-            image: UIImage(systemName: state.isFavorited ? "star.circle.fill" : "star.circle"),
+            image: UIImage(systemName: state.isFavorited ? "mappin.circle.fill" : "mappin.circle"),
             identifier: mapMenuIdentifier,
             children: rows
         )

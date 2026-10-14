@@ -173,7 +173,7 @@ struct ProfileBellAndMapMenuTests {
         let after = try #require(mapSubmenu(screen))
         #expect(after.children.compactMap { $0 as? UIAction }.first?.state == .on)
         #expect(after.subtitle == "Map Dock")
-        #expect(after.image == UIImage(systemName: "star.circle.fill"))
+        #expect(after.image == UIImage(systemName: "mappin.circle.fill"))
     }
 
     /// No pinning service wired: no Map submenu even on a followed profile.

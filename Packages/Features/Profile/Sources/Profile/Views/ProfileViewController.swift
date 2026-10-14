@@ -1360,7 +1360,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     }
     func debugMuteMenuElements() -> [UIMenuElement] { muteMenuElements() }
     func debugMoreMenuElements() -> [UIMenuElement] { moreMenuElements() }
-    /// The map star's rows, for `-profile-map-pin-audit` (+QA).
+    /// The map pin's rows, for `-profile-map-pin-audit` (+QA).
     func debugMapFavoriteMenuActions() -> [UIAction] { mapFavoriteMenuActions() }
     /// A gallery card's "..." rows, for `-post-menu-audit` (+QA).
     func debugGalleryMenuActions(
@@ -2693,7 +2693,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 extension ProfileViewController {
     /// Whether the page on screen is the page that stays: the header
     /// has its profile, the follow capsule has its answer (and, for someone
-    /// followed, the map star its rails — it widens the tray), both pictures are
+    /// followed, the map pin its rails — it widens the tray), both pictures are
     /// drawn (or known absent), and the gallery's open page has left its
     /// bones. A failed load is settled too — nothing more is coming.
     ///
