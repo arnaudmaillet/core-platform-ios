@@ -142,24 +142,43 @@ public enum TextEntityScanner {
 
 /// How a `@handle` or `#tag` stands out from the text around it (#524).
 public struct TextEntityStyle: Equatable, Sendable {
-    /// The token's colour; nil keeps the text's own (over media, where a link
-    /// colour would not read).
+    /// The token's colour; nil keeps the text's own (over a hero banner,
+    /// whose ink the text already chose).
     public var color: UIColor?
+    /// Stops run across the token's letters, first letter to last (#1172) —
+    /// UIKit text paints no gradient inside a run, so each letter takes its
+    /// own colour between them. Wins over `color`.
+    public var gradient: [UIColor]?
     /// The token's weight, over the text's own font and size.
     public var weight: UIFont.Weight
 
-    public init(color: UIColor?, weight: UIFont.Weight = .semibold) {
+    public init(color: UIColor?, gradient: [UIColor]? = nil, weight: UIFont.Weight = .semibold) {
         self.color = color
+        self.gradient = gradient
         self.weight = weight
     }
 
-    /// On a plain surface: the LABEL's colour, semibold (#1168, the owner's
-    /// call 2026-10-14 with #1169: the UI is neutral, the accent is not
-    /// spread across text — and never the system blue).
-    public static let link = TextEntityStyle(color: .label)
-    /// Over media or a hero banner, whose ink the text already chose:
-    /// semibold only.
+    /// On a plain surface: the icon's pink → orange at text strength,
+    /// semibold (#1172, the owner's call 2026-10-14; it was the label's
+    /// colour, #1168 — and never the system blue).
+    public static let link = TextEntityStyle(color: nil, gradient: Palette.entityGradient)
+    /// Over a photograph or a video: the same gradient washed toward white,
+    /// beside the white caption (#1172).
+    public static let onMedia = TextEntityStyle(color: nil, gradient: Palette.entityGradientOnMedia)
+    /// Over a hero banner, whose ink the text already chose: semibold only.
     public static let emphasis = TextEntityStyle(color: nil)
+
+    /// The colour of letter `index` of `count` along `stops` — the first
+    /// letter is the first stop, the last letter the last; resolved per
+    /// appearance, as the stops are.
+    static func colour(along stops: [UIColor], at index: Int, of count: Int) -> UIColor {
+        guard stops.count > 1 else { return stops.first ?? .label }
+        let position = count > 1 ? CGFloat(index) / CGFloat(count - 1) : 0
+        let scaled = position * CGFloat(stops.count - 1)
+        let lower = min(Int(scaled), stops.count - 2)
+        let fraction = scaled - CGFloat(lower)
+        return Palette.mix(stops[lower], stops[lower + 1], fraction)
+    }
 }
 
 public extension NSAttributedString.Key {
@@ -175,7 +194,18 @@ public extension NSMutableAttributedString {
         for entity in TextEntityScanner.entities(in: string) {
             let sigil = entity.kind == .mention ? "@" : "#"
             addAttribute(.textEntity, value: sigil + entity.value, range: entity.range)
-            if let color = style.color {
+            if let stops = style.gradient {
+                // One colour per letter (a composed sequence: an emoji or an
+                // accent stays one letter).
+                var letters: [NSRange] = []
+                (string as NSString).enumerateSubstrings(in: entity.range, options: .byComposedCharacterSequences) { _, range, _, _ in
+                    letters.append(range)
+                }
+                for (index, letter) in letters.enumerated() {
+                    let colour = TextEntityStyle.colour(along: stops, at: index, of: letters.count)
+                    addAttribute(.foregroundColor, value: colour, range: letter)
+                }
+            } else if let color = style.color {
                 addAttribute(.foregroundColor, value: color, range: entity.range)
             }
             enumerateAttribute(.font, in: entity.range) { value, range, _ in

@@ -839,9 +839,9 @@ final class SnapChromeView: UIView {
         let marked = NSMutableAttributedString(
             attributedString: EmoteText.attributedString(caption, attributes: captionAttributes(secondary: false))
         )
-        // `@handle`s and `#tag`s in semibold, white like the rest over the
-        // media (#524) — before anything is measured.
-        marked.applyTextEntityStyle(.emphasis)
+        // `@handle`s and `#tag`s in semibold, the icon's gradient washed
+        // toward white over the media (#1172) — before anything is measured.
+        marked.applyTextEntityStyle(.onMedia)
         let captionString: NSAttributedString = marked
         guard let timestamp, !timestamp.isEmpty, width > 0 else { return captionString }
 

@@ -109,6 +109,46 @@ struct PaletteTests {
         #expect(PointsSymbol.tint == .systemRed)
     }
 
+    /// A `@handle`'s letters are TEXT (#1172): every colour along the
+    /// gradient, stops and in between, reads at 4.5:1 on the page and on the
+    /// raised ground, in both appearances.
+    @Test func everyEntityLetterReadsAsText() {
+        for traits in [Self.light, Self.dark] {
+            for step in 0...10 {
+                let letter = TextEntityStyle.colour(along: Palette.entityGradient, at: step, of: 11)
+                for ground in [UIColor.systemBackground, .secondarySystemBackground] {
+                    let ratio = Self.contrast(letter, on: ground, traits)
+                    #expect(ratio >= 4.5, "letter \(step) at \(ratio):1 in \(traits.userInterfaceStyle.rawValue)")
+                }
+            }
+        }
+        // Muted, yet still pink at the start and orange at the end.
+        for traits in [Self.light, Self.dark] {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            Palette.entityGradient[0].resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
+            #expect(r > b && b > g, "the start is pink")
+            Palette.entityGradient[1].resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
+            #expect(r > g && g > b, "the end is orange")
+        }
+    }
+
+    /// Over media the token is a pale tint of the same gradient (#1172) —
+    /// "as if a white filter sat on top": light, yet still pink and orange.
+    @Test func theOnMediaGradientIsTheIconsWashedPale() {
+        let stops = Palette.entityGradientOnMedia
+        #expect(stops.count == 2)
+        for (washed, vivid) in zip(stops, Palette.accentGradient) {
+            #expect(Self.luminance(washed, Self.dark) >= 0.55, "pale")
+            #expect(Self.luminance(washed, Self.dark) > Self.luminance(vivid, Self.dark))
+            #expect(Self.hex(washed, Self.dark) != 0xFFFFFF, "never plain white")
+        }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        stops[0].getRed(&r, green: &g, blue: &b, alpha: &a)
+        #expect(r > b && b > g, "the start is still pink")
+        stops[1].getRed(&r, green: &g, blue: &b, alpha: &a)
+        #expect(r > g && g > b, "the end is still orange")
+    }
+
     /// The hues the palette took over (#1124): gems are violet, a warning's
     /// glyph is yellow — orange is the tint's now.
     @Test func gemsAreVioletAndWarningsYellow() {
