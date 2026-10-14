@@ -16,6 +16,8 @@ final class SettingsLinksViewController: UIViewController {
         let url: URL?
         /// An information row: shows `value`, opens nothing.
         let value: String?
+        /// A row that pushes a page of the app's own (Acknowledgements).
+        var opensAcknowledgements = false
 
         static func link(_ title: String, symbol: String, url: URL?) -> Row {
             Row(title: title, symbolName: symbol, url: url, value: nil)
@@ -25,7 +27,13 @@ final class SettingsLinksViewController: UIViewController {
             Row(title: title, symbolName: symbol, url: nil, value: value)
         }
 
-        var isComingSoon: Bool { value == nil && url == nil }
+        /// The third-party licences (#1128).
+        static let acknowledgements = Row(
+            title: "Acknowledgements", symbolName: "heart.text.square",
+            url: nil, value: nil, opensAcknowledgements: true
+        )
+
+        var isComingSoon: Bool { value == nil && url == nil && !opensAcknowledgements }
     }
 
     private let rows: [Row]
@@ -69,6 +77,7 @@ final class SettingsLinksViewController: UIViewController {
                 .link("Copyright Report", symbol: "c.circle", url: links.copyrightReport),
                 .link("Cookie and SDK Policy", symbol: "list.bullet.rectangle", url: links.cookiePolicy),
                 .link("Transparency Reports", symbol: "chart.bar.doc.horizontal", url: links.transparencyReports),
+                .acknowledgements,
                 .info("Version", symbol: "info.circle", value: version)
             ],
             footer: nil
@@ -144,11 +153,19 @@ final class SettingsLinksViewController: UIViewController {
 
 extension SettingsLinksViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
-        dataSource.itemIdentifier(for: indexPath)?.url != nil
+        guard let row = dataSource.itemIdentifier(for: indexPath) else { return false }
+        return row.url != nil || row.opensAcknowledgements
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: true)
-        if let url = dataSource.itemIdentifier(for: indexPath)?.url { open(url) }
+        guard let row = dataSource.itemIdentifier(for: indexPath) else { return }
+        if let url = row.url {
+            open(url)
+        } else if row.opensAcknowledgements, let acknowledgements = Acknowledgements.bundled {
+            navigationController?.pushViewController(
+                AcknowledgementsViewController(acknowledgements: acknowledgements), animated: true
+            )
+        }
     }
 }

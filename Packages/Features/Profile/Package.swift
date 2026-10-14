@@ -65,7 +65,10 @@ let package = Package(
                 // The share sheet the QR bubble and "..." → Share open — shared
                 // with the place page since 5 October 2026.
                 "ShareSheet"
-            ]
+            ],
+            // Settings → Legal and About → Acknowledgements (#1128): the
+            // third-party licences the app ships under.
+            resources: [.process("Resources/Acknowledgements.json")]
         ),
         .testTarget(
             name: "ProfileTests",
