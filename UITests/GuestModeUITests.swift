@@ -80,7 +80,11 @@ final class GuestModeUITests: XCTestCase {
     /// the guest on the screen they were reading.
     func testClosingTheSignUpSheetLeavesTheGuestWhereTheyWere() {
         let app = launch(["-open-profile", "prof-1"])
-        let follow = app.buttons["Follow"]
+        // By its LABEL, whatever its type (#1154): Follow is a toggle
+        // (`AppButton.isToggle`), which XCUITest lists as a toggle, not a
+        // button — `app.buttons["Follow"]` found nothing.
+        let follow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == 'Follow'")).firstMatch
         XCTAssertTrue(follow.waitForExistence(timeout: 25), "the profile has no Follow button")
         follow.tap()
 
