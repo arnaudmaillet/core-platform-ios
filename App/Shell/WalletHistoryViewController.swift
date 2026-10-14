@@ -152,7 +152,7 @@ final class WalletHistoryViewController: UIViewController {
             content.text = Self.title(for: transaction)
             content.secondaryText = Self.subtitle(for: transaction)
             content.secondaryTextProperties.color = .secondaryLabel
-            content.image = UIImage(systemName: Self.symbol(for: transaction.kind))
+            content.image = UIImage.symbol(named: Self.symbol(for: transaction.kind))
             content.imageProperties.tintColor = .secondaryLabel
             cell.contentConfiguration = content
             let amount = UILabel()
@@ -238,7 +238,7 @@ final class WalletHistoryViewController: UIViewController {
         switch kind {
         case .claim: "clock.arrow.circlepath"
         case .starterGift, .welcomeGift: "gift"
-        case .stake: "heart"
+        case .stake: AppSymbol.like.rawValue
         case .stakePack: "bolt"
         case .countryUnlock: "globe.europe.africa"
         case .other: "circle.dashed"

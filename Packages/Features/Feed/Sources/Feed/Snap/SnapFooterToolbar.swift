@@ -55,7 +55,7 @@ enum SnapFooterToolbar {
     }
 
     static func makeSaveButton() -> UIButton {
-        let button = SnapNavControls.makeToolbarActionButton(systemName: "bookmark")
+        let button = SnapNavControls.makeToolbarActionButton(systemName: AppSymbol.save.rawValue)
         button.accessibilityLabel = "Save"
         return button
     }
@@ -69,7 +69,7 @@ enum SnapFooterToolbar {
     }
 
     static func makeMoreButton(menu: UIMenu) -> UIButton {
-        let button = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
+        let button = SnapNavControls.makeToolbarActionButton(systemName: AppSymbol.more.rawValue)
         button.accessibilityLabel = "More actions"
         button.showsMenuAsPrimaryAction = true
         button.menu = menu

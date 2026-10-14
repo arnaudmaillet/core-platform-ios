@@ -136,7 +136,7 @@ final class PostGridFlightCard: UIView {
     /// count this card lands on, and must draw it in the same type.
     static let metaFont = UIFont.scaledFont(forTextStyle: .caption2, weight: .semibold)
     private let likes = PostMetricLabel(
-        symbol: "heart.fill", font: metaFont, color: .white, shadowed: true
+        symbol: PointsSymbol.glyph, font: metaFont, color: .white, shadowed: true
     )
 
     /// Whether the card's own picture IS the post — every tile and row. False

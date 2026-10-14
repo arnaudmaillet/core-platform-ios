@@ -245,9 +245,9 @@ final class SnapCommentEmptyStateView: UIView {
         label.font = font
         label.textColor = .white
         label.text = Self.promptText
-        glyphView.image = UIImage(
-            systemName: PostActionSymbol.comments,
-            withConfiguration: UIImage.SymbolConfiguration(font: font, scale: .small)
+        glyphView.image = UIImage.symbol(
+            named: PostActionSymbol.comments,
+            configuration: UIImage.SymbolConfiguration(font: font, scale: .small)
         )
     }
 }

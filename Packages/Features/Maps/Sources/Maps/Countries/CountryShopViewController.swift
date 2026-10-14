@@ -416,7 +416,7 @@ public final class CountryShopViewController: UIViewController {
     static func priceButton(price: Int, accessibilityLabel: String, menu: UIMenu? = nil) -> AppButton {
         let button = AppButton(
             aspect: .pill(.tinted), size: .row,
-            content: AppButton.Content(title: price.formatted(), symbol: "diamond.fill")
+            content: AppButton.Content(title: price.formatted(), symbol: GemSymbol.glyph)
         )
         button.accessibilityLabel = accessibilityLabel
         if let menu {
@@ -746,9 +746,7 @@ final class CountryShopRowCell: UICollectionViewListCell {
     private let flagView = UIImageView()
     let nameLabel = UILabel()
     private let rankLabel = UILabel()
-    let heartView = UIImageView(image: UIImage(systemName: "heart.fill")?
-        .applyingSymbolConfiguration(.init(pointSize: 10, weight: .bold))?
-        .withTintColor(.systemRed, renderingMode: .alwaysOriginal))
+    let heartView = UIImageView(image: PointsSymbol.glyphImage(.init(pointSize: 10, weight: .bold)))
     private let statsLabel = UILabel()
 
     override init(frame: CGRect) {

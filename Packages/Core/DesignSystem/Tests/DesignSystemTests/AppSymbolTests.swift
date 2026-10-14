@@ -65,3 +65,23 @@ struct AppSymbolTests {
         #expect(AppSymbol.saved.image()?.accessibilityLabel == "Saved")
     }
 }
+
+/// The custom glyphs sit at the system's size (#1128): a heart that swapped
+/// in for `heart.fill` must not grow the line it sits on.
+@MainActor
+struct AppSymbolSizeTests {
+    @Test(arguments: [
+        (AppSymbol.liked, "heart.fill"), (.save, "star"), (.comment, "ellipsis.message"),
+        (.repost, "arrow.trianglehead.2.clockwise.rotate.90"), (.gemFilled, "diamond.fill"),
+        (.more, "ellipsis"), (.share, "square.and.arrow.up"),
+    ])
+    func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
+        let configuration = AppSymbol.fixed(12, weight: .semibold)
+        let custom = try #require(pair.0.image(configuration))
+        let system = try #require(UIImage(systemName: pair.1, withConfiguration: configuration))
+        print("[symbol-size] \(pair.0) \(custom.size) insets \(custom.alignmentRectInsets) vs \(pair.1) \(system.size) insets \(system.alignmentRectInsets) baseline \(custom.baselineOffsetFromBottom ?? -1) vs \(system.baselineOffsetFromBottom ?? -1)")
+        #expect(abs(custom.size.height - system.size.height) <= max(1, system.size.height * 0.08),
+                "\(pair.0) is \(custom.size.height) tall, \(pair.1) \(system.size.height)")
+    }
+}
+

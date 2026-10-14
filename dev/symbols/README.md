@@ -16,5 +16,5 @@ swift dev/symbols/gen.swift dev/symbols/template-head.svg package/assets \
 
 ## Known limits
 - **One outline, three masters.** Phosphor's thin, regular and bold paths do not share a structure, so they cannot be interpolated. Each template carries the regular outline as its Ultralight, Regular and Black masters, and a glyph draws at one weight whatever the configuration asks. A designer can redraw the masters in the SF Symbols app behind the same names.
-- The art is Phosphor's regular weight, scaled 0.4 onto the template's S scale and centred on the cap height. Retouching for the app's identity (corner radius, stroke against SF's medium) is still to do.
+- The art is Phosphor's regular weight, scaled 0.4 onto the template's S scale, then fitted per glyph (`fit` in `gen.swift`) so each stands as tall as the system glyph it replaces. It sits 2.2 units below the cap height's middle, so its alignment insets match the system's. A filled glyph is placed in its outline's box, so an off/on swap never jumps. Retouching for the app's identity (corner radius, stroke against SF's medium) is still to do.
 - No Draw-On annotations yet. Bounce and replace work on any symbol image.

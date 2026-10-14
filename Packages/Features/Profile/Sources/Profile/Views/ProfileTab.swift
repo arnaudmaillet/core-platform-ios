@@ -111,9 +111,9 @@ extension ProfileTab {
             // text posts — not for the video clips it once claimed.
             ("text.alignleft", "No Text Posts", "Text posts will appear here.")
         case .saved:
-            ("bookmark", "No Saved Posts", "Posts you bookmark will appear here.")
+            (AppSymbol.save.rawValue, "No Saved Posts", "Posts you bookmark will appear here.")
         case .reactions:
-            ("heart", "No Reactions Yet", "Posts you react to or like will show up here.")
+            (AppSymbol.like.rawValue, "No Reactions Yet", "Posts you react to or like will show up here.")
         case .reposts:
             (PostActionSymbol.repost, "No Reposts Yet", "Reposts will appear here.")
         case .tagged:

@@ -9,7 +9,7 @@ import UIKit
 /// one name they all read. NOT the Save star (#1128), which is not a point.
 public enum PointsSymbol {
     /// The glyph on a boost control and beside an amount.
-    public static let glyph = "heart.fill"
+    public static let glyph = AppSymbol.liked.rawValue
     /// The coin: the wallet's balance badge and the claim screen.
     public static let coin = "heart.circle.fill"
     /// Points' colour — a like's red (product decision, 25 September 2026),
@@ -29,8 +29,7 @@ public enum PointsSymbol {
     }
     /// A points glyph that carries its own red whatever the control's tint.
     public static func glyphImage(_ configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
-        let image = configuration.map { UIImage(systemName: glyph, withConfiguration: $0) }
-            ?? UIImage(systemName: glyph)
+        let image = UIImage.symbol(named: glyph, configuration: configuration)
         return image?.withTintColor(tint, renderingMode: .alwaysOriginal)
     }
 
@@ -44,13 +43,12 @@ public enum PointsSymbol {
     /// A heart either way, never a number (#668).
     public static func likeImage(staked: Bool, _ configuration: UIImage.SymbolConfiguration? = nil) -> UIImage? {
         let name = staked ? glyph : outlineGlyph
-        let image = configuration.map { UIImage(systemName: name, withConfiguration: $0) }
-            ?? UIImage(systemName: name)
+        let image = UIImage.symbol(named: name, configuration: configuration)
         return staked
             ? image?.withTintColor(tint, renderingMode: .alwaysOriginal)
             : image?.withRenderingMode(.alwaysTemplate)
     }
 
     /// The like heart at rest: an outline.
-    public static let outlineGlyph = "heart"
+    public static let outlineGlyph = AppSymbol.like.rawValue
 }

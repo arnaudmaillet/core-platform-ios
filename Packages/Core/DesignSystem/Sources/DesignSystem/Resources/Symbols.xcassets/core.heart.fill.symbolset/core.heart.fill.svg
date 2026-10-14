@@ -74,23 +74,23 @@
   </g>
   <line id="Baseline-L" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1556" y2="1556"/>
   <line id="Capline-L" style="fill:none;stroke:#27AAE1;opacity:1;stroke-width:0.5;" x1="263" x2="3036" y1="1485.54" y2="1485.54"/>
-              <line id="left-margin-Ultralight-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="514.911" x2="514.911" y1="600.785" y2="720.121"/>
-  <line id="right-margin-Ultralight-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="604.511" x2="604.511" y1="600.785" y2="720.121"/>
-  <line id="left-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1405.04" x2="1405.04" y1="600.785" y2="720.121"/>
-  <line id="right-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1494.64" x2="1494.64" y1="600.785" y2="720.121"/>
-  <line id="left-margin-Black-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="2888.6" x2="2888.6" y1="600.785" y2="720.121"/>
-  <line id="right-margin-Black-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="2978.2" x2="2978.2" y1="600.785" y2="720.121"/>
+              <line id="left-margin-Ultralight-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="517.868" x2="517.868" y1="600.785" y2="720.121"/>
+  <line id="right-margin-Ultralight-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="601.554" x2="601.554" y1="600.785" y2="720.121"/>
+  <line id="left-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1407.997" x2="1407.997" y1="600.785" y2="720.121"/>
+  <line id="right-margin-Regular-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="1491.683" x2="1491.683" y1="600.785" y2="720.121"/>
+  <line id="left-margin-Black-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="2891.557" x2="2891.557" y1="600.785" y2="720.121"/>
+  <line id="right-margin-Black-S" style="fill:none;stroke:#00AEEF;stroke-width:0.5;opacity:1.0;" x1="2975.243" x2="2975.243" y1="600.785" y2="720.121"/>
  </g>
  
  <g id="Symbols">
-  <g id="Ultralight-S" transform="matrix(1 0 0 1 514.911 696)">
-   <path class="monochrome-0 multicolor-0:tintColor hierarchical-0:primary SFSymbolsPreview000000" d="M89.6 -45.63C89.6 -17.63 48.084 5.034 46.316 5.971C45.369 6.48 44.231 6.48 43.284 5.971C41.516 5.034 0 -17.63 0 -45.63C0.015 -59.32 11.11 -70.414 24.8 -70.43C33.06 -70.43 40.292 -66.878 44.8 -60.874C49.308 -66.878 56.54 -70.43 64.8 -70.43C78.49 -70.414 89.585 -59.32 89.6 -45.63Z"/>
+  <g id="Ultralight-S" transform="matrix(1 0 0 1 517.868 696)">
+   <path class="monochrome-0 multicolor-0:tintColor hierarchical-0:primary SFSymbolsPreview000000" d="M83.686 -45.723C83.686 -19.571 44.91 1.597 43.259 2.471C42.375 2.947 41.311 2.947 40.427 2.471C38.776 1.597 0 -19.571 0 -45.723C0.014 -58.51 10.376 -68.872 23.163 -68.887C30.878 -68.887 37.633 -65.569 41.843 -59.961C46.054 -65.569 52.808 -68.887 60.523 -68.887C73.31 -68.872 83.672 -58.51 83.686 -45.723Z"/>
   </g>
-  <g id="Regular-S" transform="matrix(1 0 0 1 1405.04 696)">
-   <path class="monochrome-0 multicolor-0:tintColor hierarchical-0:primary SFSymbolsPreview000000" d="M89.6 -45.63C89.6 -17.63 48.084 5.034 46.316 5.971C45.369 6.48 44.231 6.48 43.284 5.971C41.516 5.034 0 -17.63 0 -45.63C0.015 -59.32 11.11 -70.414 24.8 -70.43C33.06 -70.43 40.292 -66.878 44.8 -60.874C49.308 -66.878 56.54 -70.43 64.8 -70.43C78.49 -70.414 89.585 -59.32 89.6 -45.63Z"/>
+  <g id="Regular-S" transform="matrix(1 0 0 1 1407.997 696)">
+   <path class="monochrome-0 multicolor-0:tintColor hierarchical-0:primary SFSymbolsPreview000000" d="M83.686 -45.723C83.686 -19.571 44.91 1.597 43.259 2.471C42.375 2.947 41.311 2.947 40.427 2.471C38.776 1.597 0 -19.571 0 -45.723C0.014 -58.51 10.376 -68.872 23.163 -68.887C30.878 -68.887 37.633 -65.569 41.843 -59.961C46.054 -65.569 52.808 -68.887 60.523 -68.887C73.31 -68.872 83.672 -58.51 83.686 -45.723Z"/>
   </g>
-  <g id="Black-S" transform="matrix(1 0 0 1 2888.6 696)">
-   <path class="monochrome-0 multicolor-0:tintColor hierarchical-0:primary SFSymbolsPreview000000" d="M89.6 -45.63C89.6 -17.63 48.084 5.034 46.316 5.971C45.369 6.48 44.231 6.48 43.284 5.971C41.516 5.034 0 -17.63 0 -45.63C0.015 -59.32 11.11 -70.414 24.8 -70.43C33.06 -70.43 40.292 -66.878 44.8 -60.874C49.308 -66.878 56.54 -70.43 64.8 -70.43C78.49 -70.414 89.585 -59.32 89.6 -45.63Z"/>
+  <g id="Black-S" transform="matrix(1 0 0 1 2891.557 696)">
+   <path class="monochrome-0 multicolor-0:tintColor hierarchical-0:primary SFSymbolsPreview000000" d="M83.686 -45.723C83.686 -19.571 44.91 1.597 43.259 2.471C42.375 2.947 41.311 2.947 40.427 2.471C38.776 1.597 0 -19.571 0 -45.723C0.014 -58.51 10.376 -68.872 23.163 -68.887C30.878 -68.887 37.633 -65.569 41.843 -59.961C46.054 -65.569 52.808 -68.887 60.523 -68.887C73.31 -68.872 83.672 -58.51 83.686 -45.723Z"/>
   </g>
  </g>
 </svg>

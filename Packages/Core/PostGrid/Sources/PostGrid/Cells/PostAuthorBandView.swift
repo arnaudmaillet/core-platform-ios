@@ -198,7 +198,7 @@ public final class PostAuthorBandView: UIView {
     private let avatarImage = AvatarImageView()
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
-    private let menuButton = PostActionPillView.makeGlyphControl(systemName: "ellipsis", label: "More actions")
+    private let menuButton = PostActionPillView.makeGlyphControl(systemName: AppSymbol.more.rawValue, label: "More actions")
     private let identityControl = UIControl()
     /// The identity's vertical claim on the band — released for a bare band,
     /// whose height is the control's rather than the disc's.

@@ -407,7 +407,7 @@ struct CountryShopViewControllerTests {
         laidOut(shop)
         let price = try #require(shop.debugPriceButton(for: "CN"))
         #expect(price.currentGround == .tinted)
-        #expect(price.content.symbol == "diamond.fill")
+        #expect(price.content.symbol == GemSymbol.glyph)
         #expect(price.content.title == access.standing(of: "CN")?.price.formatted())
         #expect(!price.isEnabled)
         #expect(!price.acceptsTaps, "an unaffordable price takes the tap")

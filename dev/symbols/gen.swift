@@ -168,11 +168,37 @@ func svgData(_ path: CGPath) -> String {
 /// Phosphor's 256 grid → the template's S scale: content x from 0, the
 /// grid's middle on the cap height's middle.
 let scale: CGFloat = 0.4
-let capMid: CGFloat = -70.459 / 2
+/// A touch below the cap height's middle, so a glyph's alignment insets
+/// match the system's (measured against `heart.fill` at 12 pt: 2/3 pt above,
+/// 1/3 pt below).
+let capMid: CGFloat = -70.459 / 2 + 2.2
 
-func place(_ path: CGPath) -> (CGPath, CGFloat) {
-    let box = path.boundingBoxOfPath
-    var t = CGAffineTransform(translationX: -box.minX * scale, y: capMid - 128 * scale)
+/// Per glyph, so each stands as tall as the system glyph it replaces
+/// (measured at 12 pt semibold against `heart.fill`, `star`,
+/// `ellipsis.message`, `arrow.trianglehead…`, `diamond.fill`, `ellipsis`,
+/// `square.and.arrow.up`): a swap must not grow the line it sits on.
+let fit: [String: CGFloat] = [
+    "core.heart": 0.934, "core.heart.fill": 0.934,
+    "core.star": 0.978, "core.star.fill": 0.978,
+    "core.comment": 0.977, "core.comment.fill": 0.977,
+    "core.repost": 1.0,
+    "core.gem": 1.225, "core.gem.fill": 1.225,
+    "core.more": 1.27,
+    "core.share": 1.11,
+]
+
+/// The frame each glyph was placed in, so a filled variant takes its
+/// outline's: an off / on pair is drawn in one box, or the glyph jumps when
+/// a like or a save swaps one for the other.
+var boxes: [String: CGRect] = [:]
+
+func place(_ path: CGPath, _ name: String) -> (CGPath, CGFloat) {
+    let outline = name.hasSuffix(".fill") ? String(name.dropLast(5)) : name
+    let box = boxes[outline] ?? path.boundingBoxOfPath
+    boxes[name] = box
+    let scale = scale * (fit[name] ?? 1)
+    // The glyph's own middle on the cap height's middle.
+    var t = CGAffineTransform(translationX: -box.minX * scale, y: capMid - box.midY * scale)
         .scaledBy(x: scale, y: scale)
     let placed = path.copy(using: &t)!
     return (placed, box.width * scale)
@@ -181,7 +207,7 @@ func place(_ path: CGPath) -> (CGPath, CGFloat) {
 let columns: [(String, CGFloat)] = [("Ultralight-S", 559.711), ("Regular-S", 1449.84), ("Black-S", 2933.4)]
 
 func write(_ name: String, _ path: CGPath) {
-    let (placed, width) = place(path)
+    let (placed, width) = place(path, name)
     let d = svgData(placed)
     var guides = head
     // Margins for this glyph's width, centred on each weight's column.

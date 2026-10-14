@@ -784,7 +784,7 @@ final class ShopPriceLabel: UIStackView {
         )
         let dim: UIColor = onDark ? UIColor.white.withAlphaComponent(0.45) : .tertiaryLabel
         let color: UIColor = inReach ? GemSymbol.tint : dim
-        let diamond = UIImageView(image: UIImage(systemName: GemSymbol.glyph)?
+        let diamond = UIImageView(image: UIImage.symbol(named: GemSymbol.glyph)?
             .applyingSymbolConfiguration(.init(pointSize: 11, weight: .bold)))
         diamond.tintColor = color
         let number = UILabel()

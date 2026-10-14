@@ -247,7 +247,7 @@ final class PrivacySectionViewController: UIViewController {
                 ? "Others see how many likes your posts get. You always do."
                 : "Others can save your photos and videos."
             content.secondaryTextProperties.color = .secondaryLabel
-            content.image = UIImage(systemName: isLikes ? "heart" : "arrow.down.circle")
+            content.image = UIImage.symbol(named: isLikes ? AppSymbol.like.rawValue : "arrow.down.circle")
             content.imageProperties.tintColor = .label
             let toggle = UISwitch()
             if let sharing = viewModel.postSharing {
@@ -263,11 +263,11 @@ final class PrivacySectionViewController: UIViewController {
         case .tab(let tab):
             content.text = tab.title
             let symbol = switch tab {
-            case .likes: "heart"
-            case .saved: "bookmark"
+            case .likes: AppSymbol.like.rawValue
+            case .saved: AppSymbol.save.rawValue
             case .reposts: PostActionSymbol.repost
             }
-            content.image = UIImage(systemName: symbol)
+            content.image = UIImage.symbol(named: symbol)
             content.imageProperties.tintColor = .label
             let toggle = UISwitch()
             toggle.isOn = viewModel.tabVisibility?[tab] ?? false

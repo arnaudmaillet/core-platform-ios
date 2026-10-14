@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreStorage
 import MediaCore
 import PostGrid
@@ -235,7 +236,7 @@ struct ProfileEmptyStateTests {
     /// the string would notice.
     @Test func everyGlyphIsARealSymbol() {
         for state in ProfileTab.ownTabs.map(\.emptyState) {
-            #expect(UIImage(systemName: state.symbol) != nil, "\(state.symbol) does not resolve")
+            #expect(UIImage.symbol(named: state.symbol) != nil, "\(state.symbol) does not resolve")
         }
     }
 

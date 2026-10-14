@@ -43,7 +43,7 @@ public final class PostMetricLabel: UIView {
         iconColor: UIColor? = nil, shadowed: Bool = false,
         glyphPointSize: CGFloat? = nil
     ) {
-        icon = UIImageView(image: UIImage(systemName: symbol))
+        icon = UIImageView(image: UIImage.symbol(named: symbol))
         super.init(frame: .zero)
         if let glyphPointSize {
             // ⚠️ THE CONTROLS' GLYPH, NOT THE TEXT'S (26 September 2026:
@@ -123,7 +123,7 @@ public final class PostMetricLabel: UIView {
     /// Re-inks the glyph — the like chip's heart fills in the points' red once
     /// the viewer has a stake on the post.
     public func setGlyph(systemName: String, color: UIColor) {
-        icon.image = UIImage(systemName: systemName)
+        icon.image = UIImage.symbol(named: systemName)
         icon.tintColor = color
     }
 }

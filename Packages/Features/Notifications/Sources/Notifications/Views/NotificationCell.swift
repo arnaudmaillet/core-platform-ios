@@ -296,7 +296,7 @@ final class KindBadgeView: UIView {
 
     func configure(_ action: NotificationItem.Action) {
         let (symbol, colour) = Self.style(for: action)
-        glyph.image = UIImage(systemName: symbol)
+        glyph.image = UIImage.symbol(named: symbol)
         disc.backgroundColor = colour
     }
 

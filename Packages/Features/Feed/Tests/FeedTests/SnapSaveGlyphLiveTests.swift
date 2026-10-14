@@ -1,3 +1,4 @@
+import DesignSystem
 import CoreModels
 import CoreStorage
 import EntityStore
@@ -60,16 +61,16 @@ struct SnapSaveGlyphLiveTests {
     @Test func theVerticalPageGlyphFollowsASaveMadeElsewhere() {
         let screen = Self.openScreen()
         Self.settleBars(on: "p1", in: screen)
-        #expect(screen.feed.debugBookmarkGlyph.symbol == "bookmark", "precondition: not saved")
+        #expect(screen.feed.debugBookmarkGlyph.symbol == AppSymbol.save.rawValue, "precondition: not saved")
 
         // Another surface saves it — a card's save, a grid behind a sheet —
         // through the app's one pile, while the page is on screen.
         screen.pile.toggle("p1")
-        #expect(screen.feed.debugBookmarkGlyph.symbol == "bookmark.fill", "the glyph fills at once")
+        #expect(screen.feed.debugBookmarkGlyph.symbol == AppSymbol.saved.rawValue, "the glyph fills at once")
         #expect(screen.feed.debugBookmarkGlyph.label == "Saved")
 
         screen.pile.toggle("p1")
-        #expect(screen.feed.debugBookmarkGlyph.symbol == "bookmark", "and empties on an unsave")
+        #expect(screen.feed.debugBookmarkGlyph.symbol == AppSymbol.save.rawValue, "and empties on an unsave")
         #expect(screen.feed.debugBookmarkGlyph.label == "Save")
     }
 
@@ -82,16 +83,16 @@ struct SnapSaveGlyphLiveTests {
         Self.settleBars(on: "p2", in: screen)
 
         screen.pile.toggle("p1")
-        #expect(screen.feed.debugBookmarkGlyph.symbol == "bookmark", "p1's save is not p2's glyph")
+        #expect(screen.feed.debugBookmarkGlyph.symbol == AppSymbol.save.rawValue, "p1's save is not p2's glyph")
 
         screen.pile.toggle("p2")
-        #expect(screen.feed.debugBookmarkGlyph.symbol == "bookmark.fill", "p2's is")
+        #expect(screen.feed.debugBookmarkGlyph.symbol == AppSymbol.saved.rawValue, "p2's is")
 
         // Back on p1, which was saved while off screen: drawn as it is now.
         Self.settleBars(on: "p1", in: screen)
-        #expect(screen.feed.debugBookmarkGlyph.symbol == "bookmark.fill")
+        #expect(screen.feed.debugBookmarkGlyph.symbol == AppSymbol.saved.rawValue)
         screen.pile.toggle("p2")
-        #expect(screen.feed.debugBookmarkGlyph.symbol == "bookmark.fill", "p2's unsave is not p1's glyph")
+        #expect(screen.feed.debugBookmarkGlyph.symbol == AppSymbol.saved.rawValue, "p2's unsave is not p1's glyph")
     }
 
     /// The observation is the page's own: it does not keep the page alive,

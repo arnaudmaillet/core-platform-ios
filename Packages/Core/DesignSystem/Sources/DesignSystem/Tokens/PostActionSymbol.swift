@@ -10,20 +10,19 @@ import Foundation
 /// same verb with two faces. Same for comments, which were `bubble.right`,
 /// `bubble.left` and `bubble.fill` depending on who drew them.
 ///
-/// Both names are older than the app's iOS 26 floor
-/// (`arrow.trianglehead.2.clockwise.rotate.90` since iOS 18,
-/// `ellipsis.message` since iOS 16, per the system's `name_availability.plist`),
-/// so neither carries a fallback — but a name that does not resolve draws an
-/// empty control and nothing errors, which is why a test asks the runtime.
+/// ⚠️ Both are the app's CUSTOM symbols now (#1128, `AppSymbol`): load them
+/// with `UIImage.symbol(named:)`, never `UIImage(systemName:)` — a name that
+/// does not resolve draws an empty control and nothing errors, which is why
+/// a test asks the runtime.
 ///
 /// NOT the DIRECT-MESSAGE glyphs (the Messages tab, "Message" actions, a DM
 /// thread's empty page): a message to a person is not a comment on a post,
 /// and they keep the `message` / `bubble.left.and.bubble.right` family.
 public enum PostActionSymbol {
     /// Comments on a post: the card's count, the comment system's own mark.
-    public static let comments = "ellipsis.message"
+    public static let comments = AppSymbol.comment.rawValue
     /// The filled variant, for a glyph drawn on a coloured disc.
-    public static let commentsFilled = "ellipsis.message.fill"
+    public static let commentsFilled = AppSymbol.commentFilled.rawValue
     /// Reposting a post, and the reposts it has.
-    public static let repost = "arrow.trianglehead.2.clockwise.rotate.90"
+    public static let repost = AppSymbol.repost.rawValue
 }

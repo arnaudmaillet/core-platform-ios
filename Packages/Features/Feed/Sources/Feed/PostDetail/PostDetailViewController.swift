@@ -657,7 +657,7 @@ final class PostDetailViewController: UIViewController {
         timestampLabel.textColor = .secondaryLabel
 
         var likeConfig = UIButton.Configuration.plain()
-        likeConfig.image = UIImage(systemName: "heart")
+        likeConfig.image = AppSymbol.like.image()
         likeConfig.contentInsets = .zero
         likeButton.configuration = likeConfig
         likeButton.addAction(UIAction { [weak self] _ in
@@ -1335,7 +1335,7 @@ final class PostDetailViewController: UIViewController {
     private func renderEngagement(_ state: PostDetailViewModel.EngagementState) {
         likeCountLabel.text = state.likeCount > 0 && !state.countHidden ? "\(state.likeCount)" : ""
         var config = likeButton.configuration
-        config?.image = UIImage(systemName: state.isLiked ? "heart.fill" : "heart")
+        config?.image = (state.isLiked ? AppSymbol.liked : AppSymbol.like).image()
         config?.baseForegroundColor = state.isLiked ? .systemRed : .secondaryLabel
         likeButton.configuration = config
         // The caption row carries the same number in its closing line, and it
@@ -2076,7 +2076,7 @@ final class PostDetailViewController: UIViewController {
             guard let self, let current = self.streamDataSource.indexPath(for: .comment(id)) else { return }
             self.rowContextMenu.beginTextSelection(at: current)
         }
-        let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
+        let share = UIAction(title: "Share Comment", image: AppSymbol.share.image()) {
             [weak self] _ in self?.presentCommentShare(model)
         }
         // ⚠️ NO MODERATION ROWS UNTIL THEY DO SOMETHING (#801). Block and

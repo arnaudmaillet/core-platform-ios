@@ -557,7 +557,7 @@ final class TextPostComposerViewController: UIViewController {
         bookmarkButton.isEnabled = true
         refreshBookmarkGlyph()
         let more = SnapFooterToolbar.makeMoreButton(menu: UIMenu(children: [
-            UIAction(title: "Share", image: UIImage(systemName: "square.and.arrow.up")) { [weak self] _ in
+            UIAction(title: "Share", image: AppSymbol.share.image()) { [weak self] _ in
                 self?.sharePost()
             },
         ]))
@@ -665,7 +665,7 @@ final class TextPostComposerViewController: UIViewController {
     }
 
     /// The glyph's symbol as last drawn.
-    private var drawnBookmarkSymbol = "bookmark"
+    private var drawnBookmarkSymbol = AppSymbol.save.rawValue
 
     /// Draws the published post's saved state — on publish, on a tap, and
     /// when its saved fact changes anywhere (`savedObservation`).
@@ -675,8 +675,7 @@ final class TextPostComposerViewController: UIViewController {
         drawnBookmarkSymbol = SnapFeedViewController.bookmarkSymbol(saved: saved)
         bookmarkButton.accessibilityLabel = saved ? "Saved" : "Save"
         var config = bookmarkButton.configuration
-        config?.image = UIImage(systemName: drawnBookmarkSymbol)?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
+        config?.image = SnapFeedViewController.bookmarkImage(saved: saved)
         bookmarkButton.configuration = config
     }
 
