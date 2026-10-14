@@ -71,39 +71,10 @@ struct SnapSoundFace: Equatable {
         guard !url.isFileURL else { return nil }
         return try? await pipeline.image(for: url, size: SnapMediaAttributionView.coverBucket)
     }
-
-    /// The cover as a disc of `side` points, drawn once — what a glass
-    /// button's configuration can wear — with the muted badge on its corner
-    /// when `badged`.
-    @MainActor func disc(side: CGFloat, badged: Bool = false) -> UIImage? {
-        guard let cover = cachedCover else { return nil }
-        let image = UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
-            context.cgContext.saveGState()
-            UIBezierPath(ovalIn: CGRect(x: 0, y: 0, width: side, height: side)).addClip()
-            let scale = max(side / max(cover.size.width, 1), side / max(cover.size.height, 1))
-            let size = CGSize(width: cover.size.width * scale, height: cover.size.height * scale)
-            cover.draw(in: CGRect(
-                x: (side - size.width) / 2, y: (side - size.height) / 2, width: size.width, height: size.height
-            ))
-            context.cgContext.restoreGState()
-            guard badged else { return }
-            let badge: CGFloat = 14
-            let frame = CGRect(x: side - badge, y: side - badge, width: badge, height: badge)
-            UIColor.black.withAlphaComponent(0.7).setFill()
-            UIBezierPath(ovalIn: frame).fill()
-            if let glyph = UIImage(
-                systemName: "speaker.slash.fill",
-                withConfiguration: UIImage.SymbolConfiguration(pointSize: 7, weight: .bold)
-            )?.withTintColor(.white, renderingMode: .alwaysOriginal) {
-                glyph.draw(at: CGPoint(x: frame.midX - glyph.size.width / 2, y: frame.midY - glyph.size.height / 2))
-            }
-        }
-        return image.withRenderingMode(.alwaysOriginal)
-    }
 }
 
-/// The column's lower bubble (#671): the sound's cover on the like pill's
-/// glass.
+/// The column's lower bubble (#671): the sound's record IN its glass
+/// (`SoundRecordGlass`, #1150).
 ///
 /// - A TAP opens the sound sheet; a LONG PRESS toggles the feed's sound
 ///   (#683).
@@ -114,38 +85,27 @@ struct SnapSoundFace: Equatable {
 ///   pause and mute, and Reduce Motion — not the idle calm (#650), which
 ///   stopped it on a clip watched to its end and looping (#683).
 ///
-/// Configured PLAIN at init; the glass materializes on first window attach —
-/// the like anchor's doctrine (`SnapRailBoostButton`).
+/// The button keeps the touches (tap, hold, VoiceOver) and draws nothing
+/// itself: the record view inside it is the glass, and the button's
+/// highlight presses it (`isHighlighted`).
 final class SnapSoundBubbleButton: UIButton {
     /// A tap: open the sound sheet.
     var onTap: (() -> Void)?
     /// A long press: toggle the sound.
     var onLongPress: (() -> Void)?
 
-    private let coverView = UIImageView()
-    private let mutedBadge = UIImageView()
-    private var hasGlass = false
+    private let record = SoundRecordGlass()
+    private var coverView: UIImageView { record.cover }
     private(set) var face: SnapSoundFace?
     private var coverTask: Task<Void, Never>?
 
     init() {
         super.init(frame: .zero)
-        applyGlass()
-        coverView.contentMode = .scaleAspectFill
-        coverView.clipsToBounds = true
-        coverView.isUserInteractionEnabled = false
-        addSubview(coverView)
-
-        mutedBadge.image = UIImage(
-            systemName: "speaker.slash.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 8, weight: .bold)
-        )
-        mutedBadge.tintColor = .white
-        mutedBadge.contentMode = .center
-        mutedBadge.backgroundColor = UIColor.black.withAlphaComponent(0.7)
-        mutedBadge.isUserInteractionEnabled = false
-        mutedBadge.isHidden = true
-        addSubview(mutedBadge)
+        var config = UIButton.Configuration.plain()
+        config.contentInsets = .zero
+        config.background.backgroundColor = .clear
+        configuration = config
+        addSubview(record)
 
         addAction(UIAction { [weak self] _ in self?.onTap?() }, for: .primaryActionTriggered)
         // A recognised hold cancels the button's touch, so it never also
@@ -168,31 +128,19 @@ final class SnapSoundBubbleButton: UIButton {
         onLongPress?()
     }
 
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        if window != nil, !hasGlass {
-            hasGlass = true
-            applyGlass()
+    override var isHighlighted: Bool {
+        didSet {
+            guard isHighlighted != oldValue else { return }
+            record.setPressed(isHighlighted)
         }
-    }
-
-    private func applyGlass() {
-        var config: UIButton.Configuration = hasGlass ? .glass() : .plain()
-        config.cornerStyle = .capsule
-        config.contentInsets = .zero
-        configuration = config
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let inset: CGFloat = 5
-        coverView.frame = bounds.insetBy(dx: inset, dy: inset)
-        coverView.layer.cornerRadius = coverView.bounds.width / 2
-        let badge: CGFloat = 16
-        mutedBadge.frame = CGRect(x: bounds.maxX - badge, y: bounds.maxY - badge, width: badge, height: badge)
-        mutedBadge.layer.cornerRadius = badge / 2
-        bringSubviewToFront(coverView)
-        bringSubviewToFront(mutedBadge)
+        // By bounds and centre, not frame: the press transforms the record.
+        record.bounds = CGRect(origin: .zero, size: bounds.size)
+        record.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        bringSubviewToFront(record)
     }
 
     /// Draws `face`; nil hides nothing by itself (the host decides visibility)
@@ -202,7 +150,7 @@ final class SnapSoundBubbleButton: UIButton {
         let coverChanged = face?.coverURL != self.face?.coverURL || self.face == nil
             || face?.isAvailable != self.face?.isAvailable
         self.face = face
-        mutedBadge.isHidden = !(face?.isMuted ?? false) || !(face?.isAvailable ?? false)
+        record.showsMutedBadge = (face?.isMuted ?? false) && (face?.isAvailable ?? false)
         isEnabled = face?.isAvailable ?? false
         alpha = face?.isAvailable == false ? 0.45 : 1
         accessibilityValue = face.map { !$0.isAvailable ? "No audio" : ($0.isMuted ? "Muted" : "On") }
@@ -220,18 +168,17 @@ final class SnapSoundBubbleButton: UIButton {
 
     /// Turns the cover like a record while the post plays audibly.
     func setSpinning(_ spinning: Bool) {
-        coverView.layer.setRecordSpinning(spinning, reducesMotion: MotionPreference.reducesMotion)
+        record.setSpinning(spinning)
     }
 
     #if DEBUG
     /// Whether the record is turning now.
-    var debugIsSpinning: Bool {
-        coverView.layer.animation(forKey: CALayer.recordSpinKey) != nil && coverView.layer.speed != 0
-    }
+    var debugIsSpinning: Bool { record.isSpinning }
     #endif
 
     #if DEBUG
-    var debugIsMutedBadgeShown: Bool { !mutedBadge.isHidden }
+    var debugIsMutedBadgeShown: Bool { record.showsMutedBadge }
+    var debugRecord: SoundRecordGlass { record }
     var debugCoverImage: UIImage? { coverView.image }
     #endif
 }

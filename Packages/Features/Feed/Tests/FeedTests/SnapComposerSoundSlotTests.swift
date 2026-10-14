@@ -136,7 +136,6 @@ struct SnapComposerSoundSlotTests {
 
         let file = SnapSoundFace(coverURL: url, isAvailable: true, isMuted: false)
         #expect(file.cachedCover != nil)
-        #expect(file.disc(side: 36) != nil)
 
         let remote = SnapSoundFace(
             coverURL: URL(string: "https://example.test/\(UUID().uuidString).jpg"),

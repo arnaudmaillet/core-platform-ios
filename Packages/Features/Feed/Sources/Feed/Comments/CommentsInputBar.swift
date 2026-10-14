@@ -165,7 +165,7 @@ final class CommentsInputBar: UIView {
         guard !hostsActionColumn else { return }
         railButton.alpha = 0
         boostButton.alpha = 0
-        railCoverView.layer.setRecordSpinning(false)
+        railRecord.setSpinning(false)
     }
 
     /// Whether the column carries the stake bubble. A conversation's does not:
@@ -335,8 +335,12 @@ final class CommentsInputBar: UIView {
     /// The SOUND face's cover, over the slot's glass rather than as its
     /// image: a record that turns while the song plays (#692) — and the mute
     /// badge beside it, which does not.
-    private let railCoverView = UIImageView()
-    private let railMutedBadge = UIImageView()
+    /// The sound face's record in its own glass (#1150), the column bubble's
+    /// component: while it shows, the rail button's glass steps aside.
+    private let railRecord = SoundRecordGlass()
+    private var railCoverView: UIImageView { railRecord.cover }
+    /// The rail button's glass, put back when the face leaves the sound.
+    private var railGlassConfiguration: UIButton.Configuration?
     /// The field's trailing button, after the emote button: the voice note's
     /// WAVEFORM over an empty field, the SEND arrow over a draft (or while one
     /// is in flight) — one button, its glyph swapped with a symbol replace,
@@ -1685,13 +1689,18 @@ final class CommentsInputBar: UIView {
             // The cover as a disc, the bubble's size less the sound bubble's
             // inset, so the two read as one (#671). Not a symbol: no replace.
             railButton.isHidden = false
-            railButton.configuration?.image = nil
-            railButton.configuration?.contentInsets = .zero
-            if railCoverView.isHidden || railFaceSymbol != Self.soundRailSymbol || railCoverView.image == nil {
+            if railGlassConfiguration == nil {
+                railGlassConfiguration = railButton.configuration
+                var clear = UIButton.Configuration.plain()
+                clear.contentInsets = .zero
+                clear.background.backgroundColor = .clear
+                railButton.configuration = clear
+            }
+            if railRecord.isHidden || railFaceSymbol != Self.soundRailSymbol || railCoverView.image == nil {
                 railCoverView.image = face.cachedCover
             }
-            railCoverView.isHidden = false
-            railMutedBadge.isHidden = !(face.isMuted && face.isAvailable)
+            railRecord.isHidden = false
+            railRecord.showsMutedBadge = face.isMuted && face.isAvailable
             railButton.accessibilityLabel = "Sound"
             railButton.alpha = face.isAvailable ? 1 : 0.45
             railFaceSymbol = Self.soundRailSymbol
@@ -1701,9 +1710,15 @@ final class CommentsInputBar: UIView {
         }
         railButton.alpha = 1
         railButton.isHidden = symbol == nil
-        railCoverView.isHidden = true
-        railMutedBadge.isHidden = true
-        railCoverView.layer.setRecordSpinning(false)
+        railRecord.isHidden = true
+        railRecord.showsMutedBadge = false
+        railRecord.setSpinning(false)
+        if let glass = railGlassConfiguration {
+            // Back to the button's own glass; its glyph is drawn afresh.
+            railButton.configuration = glass
+            railGlassConfiguration = nil
+            railFaceSymbol = nil
+        }
         if let symbol, railFaceSymbol != symbol {
             railButton.configuration?.image = UIImage.symbol(named: symbol, configuration: Self.glyphConfiguration)
         }
@@ -1732,35 +1747,19 @@ final class CommentsInputBar: UIView {
     }
 
     private func installRailCover() {
-        railCoverView.contentMode = .scaleAspectFill
-        railCoverView.clipsToBounds = true
-        railCoverView.isUserInteractionEnabled = false
-        railCoverView.isHidden = true
-        railCoverView.layer.cornerRadius = (SnapActionColumn.bubbleSize - 10) / 2
-        railMutedBadge.image = UIImage(
-            systemName: "speaker.slash.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 8, weight: .bold)
-        )
-        railMutedBadge.tintColor = .white
-        railMutedBadge.contentMode = .center
-        railMutedBadge.backgroundColor = UIColor.black.withAlphaComponent(0.7)
-        railMutedBadge.layer.cornerRadius = 8
-        railMutedBadge.isUserInteractionEnabled = false
-        railMutedBadge.isHidden = true
-        for view in [railCoverView, railMutedBadge] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            railButton.addSubview(view)
-        }
+        railRecord.isHidden = true
+        railRecord.translatesAutoresizingMaskIntoConstraints = false
+        railButton.addSubview(railRecord)
         NSLayoutConstraint.activate([
-            railCoverView.centerXAnchor.constraint(equalTo: railButton.centerXAnchor),
-            railCoverView.centerYAnchor.constraint(equalTo: railButton.centerYAnchor),
-            railCoverView.widthAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize - 10),
-            railCoverView.heightAnchor.constraint(equalToConstant: SnapActionColumn.bubbleSize - 10),
-            railMutedBadge.trailingAnchor.constraint(equalTo: railButton.trailingAnchor),
-            railMutedBadge.bottomAnchor.constraint(equalTo: railButton.bottomAnchor),
-            railMutedBadge.widthAnchor.constraint(equalToConstant: 16),
-            railMutedBadge.heightAnchor.constraint(equalToConstant: 16),
+            railRecord.centerXAnchor.constraint(equalTo: railButton.centerXAnchor),
+            railRecord.centerYAnchor.constraint(equalTo: railButton.centerYAnchor),
+            railRecord.widthAnchor.constraint(equalTo: railButton.widthAnchor),
+            railRecord.heightAnchor.constraint(equalTo: railButton.heightAnchor),
         ])
+        // The button's highlight presses the record with its glass.
+        railButton.configurationUpdateHandler = { [weak self] button in
+            self?.railRecord.setPressed(button.isHighlighted && !(self?.railRecord.isHidden ?? true))
+        }
     }
 
     /// What `debugRailSymbol` reads while the slot wears the sound's cover.
@@ -1774,11 +1773,9 @@ final class CommentsInputBar: UIView {
     /// The rail button, for the specs that read its face and tap it.
     var debugRailButton: UIButton { railButton }
     /// The sound face's cover and whether it is turning now (#692).
-    var debugRailCover: UIImageView { railCoverView }
-    var debugRailIsSpinning: Bool {
-        railCoverView.layer.animation(forKey: CALayer.recordSpinKey) != nil && railCoverView.layer.speed != 0
-    }
-    var debugRailMutedBadgeShown: Bool { !railMutedBadge.isHidden }
+    var debugRailCover: SoundRecordGlass { railRecord }
+    var debugRailIsSpinning: Bool { railRecord.isSpinning }
+    var debugRailMutedBadgeShown: Bool { railRecord.showsMutedBadge }
     /// The waveform / send button inside the field.
     var debugFieldActionButton: UIButton { fieldActionButton }
     /// The symbol the rail button wears.
