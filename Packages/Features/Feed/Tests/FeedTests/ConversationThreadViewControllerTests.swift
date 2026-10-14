@@ -298,7 +298,7 @@ struct ConversationThreadViewControllerTests {
         }
     }
 
-    /// The send arrow is the post's blue (`CommentsInputBar.sendTint`), not
+    /// The send arrow is the post's tint (`CommentsInputBar.sendTint`), not
     /// the conversation's inherited tint.
     @Test func theSendArrowIsThePostsBlue() throws {
         let (screen, _, _, _) = makeScreen()

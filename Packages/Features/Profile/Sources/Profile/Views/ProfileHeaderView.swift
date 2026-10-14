@@ -319,10 +319,11 @@ final class ProfileHeaderView: UIView {
         let body = inkTones.body
         bioLabel.textColor = HeroInk.blend(page: .label, picture: body.primary, onPicture: bodyOnPicture)
         HeroInk.applyShadow(to: bioLabel, tone: body, onPicture: bodyOnPicture)
-        // The link keeps its blue on the page; on a picture blue is the one
-        // ink sure to sink into it, so it wears the picture's ink.
+        // The link keeps the brand's link ink on the page (#1124); on a
+        // picture a hue is the ink sure to sink into it, so it wears the
+        // picture's ink.
         websiteButton.configuration?.baseForegroundColor = HeroInk.blend(
-            page: .systemBlue, picture: body.primary, onPicture: bodyOnPicture
+            page: Palette.brandText, picture: body.primary, onPicture: bodyOnPicture
         )
     }
 
@@ -1276,7 +1277,7 @@ final class ProfileHeaderView: UIView {
         websiteConfig.image = UIImage(systemName: "link")
         websiteConfig.imagePadding = Spacing.xs
         websiteConfig.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .footnote)
-        websiteConfig.baseForegroundColor = .systemBlue
+        websiteConfig.baseForegroundColor = Palette.brandText
         websiteConfig.contentInsets = .zero
         websiteConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes

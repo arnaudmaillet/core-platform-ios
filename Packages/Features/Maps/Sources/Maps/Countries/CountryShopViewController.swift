@@ -831,7 +831,7 @@ final class CountryShopProgressCell: UICollectionViewListCell {
         countLabel.adjustsFontForContentSizeCategory = true
         countLabel.textColor = .secondaryLabel
         countLabel.textAlignment = .right
-        progressView.progressTintColor = .systemBlue
+        progressView.progressTintColor = Palette.tint
 
         let summaryRow = UIStackView(arrangedSubviews: [summaryLabel, countLabel])
         summaryRow.spacing = Spacing.sm

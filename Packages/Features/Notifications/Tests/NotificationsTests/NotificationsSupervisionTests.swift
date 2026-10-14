@@ -4,6 +4,7 @@ import CoreModels
 import CoreNavigation
 import CoreNetworking
 import CoreNetworkingMocks
+import DesignSystem
 import Foundation
 import Testing
 @testable import Notifications
@@ -126,5 +127,19 @@ struct NotificationsSupervisionTests {
         #expect(started.subjectAccountID == "acct-mock-prof-40")
         #expect(started.postSubjectID == nil)
         #expect(items.contains { $0.action == .supervisionEnded })
+    }
+}
+
+/// The kind badges are neutral but the heart (#1124, decision 4).
+@MainActor
+struct KindBadgeHueTests {
+    @Test func everyKindButALikeWearsTheNeutralDisc() {
+        let kinds: [NotificationItem.Action] = [
+            .comment, .reply, .mention, .supervisionStarted, .supervisionEnded, .supervisionCameOfAge, .other,
+        ]
+        for kind in kinds {
+            #expect(KindBadgeView.style(for: kind).1 == KindBadgeView.neutral, "\(kind)")
+        }
+        #expect(KindBadgeView.style(for: .reaction).1 == PointsSymbol.tint)
     }
 }

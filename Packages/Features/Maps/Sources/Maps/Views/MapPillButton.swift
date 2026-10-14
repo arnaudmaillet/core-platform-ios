@@ -276,10 +276,10 @@ final class MapPillButton: UIButton {
         ProcessInfo.processInfo.arguments.contains("-maps-long-titles")
     #endif
 
-    /// The accent, resolved per trait collection: `systemBlue` is already the
-    /// selected content colour here, and it brightens in dark mode, which is
-    /// what keeps the rim legible when the map goes dark.
-    private static let selectionRingColor = UIColor.systemBlue
+    /// The accent, resolved per trait collection: the brand's tint (#1124)
+    /// is the selected content colour here too, and it brightens in dark
+    /// mode, which is what keeps the rim legible when the map goes dark.
+    private static let selectionRingColor = Palette.tint
 
     private func makeConfiguration(glass: Bool, selected: Bool) -> UIButton.Configuration {
         // Selection is carried by the CONTENT, not the material: a selected
@@ -338,7 +338,7 @@ final class MapPillButton: UIButton {
         // symbol image (`.alwaysOriginal`): the glass style applies its own
         // vibrancy to template images and neither `baseForegroundColor` nor
         // an `imageColorTransformer` reliably lands on the glyph.
-        let contentColor: UIColor = selected ? .systemBlue : .secondaryLabel
+        let contentColor: UIColor = selected ? Palette.tint : .secondaryLabel
         config.image = avatarImage ?? UIImage(
             systemName: selected ? content.selectedSymbolName : content.symbolName
         )?.withConfiguration(UIImage.SymbolConfiguration(

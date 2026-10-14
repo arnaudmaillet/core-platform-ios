@@ -753,13 +753,13 @@ final class WalletStakesFailedCell: UICollectionViewCell {
         bodyLabel.textColor = .secondaryLabel
         bodyLabel.numberOfLines = 0
 
-        // A tinted capsule in the Claim button's blue: plain tinted text drew
+        // A tinted capsule in the brand's tint (#1124): plain tinted text drew
         // in the sheet's vibrant ink — black on the glass — and read as one
         // more line of the message, not as a button (filmed, 10 October 2026).
         var button = UIButton.Configuration.tinted()
         button.cornerStyle = .capsule
-        button.baseForegroundColor = .systemBlue
-        button.baseBackgroundColor = .systemBlue
+        button.baseForegroundColor = Palette.tint
+        button.baseBackgroundColor = Palette.tint
         button.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14)
         button.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
