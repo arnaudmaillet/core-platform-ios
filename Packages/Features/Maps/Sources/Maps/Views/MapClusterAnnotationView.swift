@@ -22,7 +22,12 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
 
     /// The cluster's face; also the exact blueprint of the flying card.
     let card = PinCardView(frame: CGRect(x: 0, y: 0, width: side, height: side))
-    private var imageTask: Task<Void, Never>?
+    /// The representative's cover and author loads (#1088), as the lone
+    /// pin's: a cache hit drawn in the configure pass, a re-dress cancelling
+    /// the load in flight, a late answer for an older face landing nowhere,
+    /// no dissolve (`arrival: .none`).
+    private let coverLoad = ImageLoadSlot(size: .full, arrival: .none)
+    private let avatarLoad = ImageLoadSlot(size: .avatar, arrival: .none)
     /// Guards a slow load against reuse (clusters have no stable id, so key on
     /// the URL being shown).
     private var representedURL: URL?
@@ -39,7 +44,7 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
     private var previewCatalog: AnimatedIconCatalog?
     private var representedPreview: String?
     private var previewTask: Task<Void, Never>?
-    /// The icon fetch, held apart from `imageTask` because an icon-led group now
+    /// The icon fetch, held apart from the cover's load because an icon-led group now
     /// loads its icon AND the representative's avatar underneath it — the floor
     /// the card falls back to when the artwork never lands. One handle for both
     /// would let whichever resolved second cancel the first.
@@ -174,7 +179,8 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
             || representedAvatar != avatar || representedIcon != icon
             || representedPreview != preview
         else { return }
-        imageTask?.cancel()
+        coverLoad.cancel()
+        avatarLoad.cancel()
         representedURL = url
         representedFace = face
         representedAvatar = avatar
@@ -213,10 +219,8 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         // the face meant the one face that can end up bare was the one face that
         // never loaded anything to be bare with.
         if face == .text || face == .icon, let avatar {
-            imageTask = Task { [weak self] in
-                guard let image = try? await imagePipeline.image(for: avatar, size: .avatar) else { return }
-                guard let self, self.representedAvatar == avatar else { return }
-                self.card.setTextAvatar(image)
+            avatarLoad.load(avatar, using: imagePipeline) { [weak self] image, _ in
+                self?.card.setTextAvatar(image)
             }
             return
         }
@@ -255,18 +259,17 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         // Where we have the frame, the wire's still is not needed; it is a
         // stand-in for a frame the backend does not generate.
         guard face == .media, let url else { return }
-        imageTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url) else { return }
-            guard let self, self.representedURL == url else { return }
+        coverLoad.load(url, using: imagePipeline) { [weak self] image, _ in
+            guard let self else { return }
             // ⚠️ THE SHEET OUTRANKS THE WIRE, and this guard is the whole of it.
             // Landing the wire cover on top of a sheet replaced that sheet's
             // own frame zero — filmed as a marker showing a photograph of a sky
             // over a post about a build log, and flown to the page as that same
             // photograph. Held back instead, this is the third rung: what the
             // marker falls to when the sheet does not resolve.
-            guard self.card.wornPreview == nil else { return }
-            self.card.imageView.image = image
-            self.reportDressed()
+            guard card.wornPreview == nil else { return }
+            card.imageView.image = image
+            reportDressed()
         }
     }
 
@@ -331,8 +334,8 @@ final class MapClusterAnnotationView: MKAnnotationView, MapVideoHost, MapMarkerD
         alpha = 1
         transform = .identity
         onSelect = nil
-        imageTask?.cancel()
-        imageTask = nil
+        coverLoad.cancel()
+        avatarLoad.cancel()
         representedURL = nil
         representedFace = nil
         representedAvatar = nil
