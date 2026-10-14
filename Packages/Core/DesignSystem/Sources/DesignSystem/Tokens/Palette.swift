@@ -1,112 +1,113 @@
 import UIKit
 
-/// THE BRAND PALETTE (#1124): the app's colours, from its icon — the accent
-/// first, violet second — as roles, never as hex at a call site.
-///
-/// ⚠️ THE ACCENT IS A THEME (#1169). Its roles (`tint` … `onPrimaryContainer`)
-/// read the running `theme`; `-theme current|flame|raspberry|pink|orchid`
-/// (DEBUG) compares the candidates on a device, and Release runs `shipped`.
-/// The table below is `current`'s. How much of the UI the accent reaches is
-/// the `rules` (#1169, decided 2026-10-14): the UI is NEUTRAL — the selected
-/// tab, secondary buttons, chips and in-text mentions wear the label colour —
-/// and the accent marks a screen's one primary action, the system controls
-/// (the window tint), unread counters and the unseen-story ring.
+/// THE BRAND PALETTE (#1124, accent chosen in #1169): the app's colours as
+/// roles, never as hex at a call site.
 ///
 /// ```
 ///   role                light      dark       IC light   IC dark
-///   tint                C76300     FFAD66     8B4600     FFD0AA
-///   brandText           B75F00     FFAD66     8B4600     FFD0AA
-///   primaryFill         FF8D28     FFAD66
-///   onPrimary           2B1607     2B1607
-///   primaryFillPressed  F1800E     F09F58
-///   primaryContainer    FFECE0     331B08     (text 9F5100 / FFA664)
+///   tint                D6337F     F37AB4     B0256A     F8ABCF
+///   brandText           D6337F     F37AB4     B0256A     F8ABCF
+///   primaryFill         D6337F     F37AB4
+///   onPrimary           FFFFFF     2B0716
+///   primaryFillPressed  C02A70     E86AA6
+///   primaryContainer    FDE3EF     3A0A22     (text B8296C / F8ABCF)
 ///   secondary           6852C6     A78BFA     5C44B7     B59EFF
 ///   secondaryContainer  EFEEFF     211944     (text 6852C6 / A78BFA)
 ///   saveGold            A07800     FFC53D     (FFC53D over media)
 /// ```
 ///
-/// The rules the owner settled (2026-10-13/14, #1124):
-/// - **Neutrals stay the system's** (labels, backgrounds, fills, `Surface`):
-///   they already adapt to dark mode, Increased Contrast and glass. This type
-///   holds only the HUES.
-/// - **The accent is the app's tint** (`AccentColor`, the window's
-///   `tintColor`), so every system control and every `.tintColor` read
-///   follows without per-site code. ⚠️ #1169 (pending the device decision)
-///   no longer has it mark every selection: the selected tab is neutral
-///   (`rules`).
-/// - **Tangerine's filled button wears a dark ink** (`onPrimary`), not white:
-///   white on the vivid fill is 2.31:1 and fails, and darkening the fill
-///   until white passes turns the brand brown. The deeper candidates wear
-///   white.
+/// The rules the owner settled (#1124, 2026-10-13/14; #1169, 2026-10-14):
+/// - **The accent is pink** (#1169, chosen on the simulator 2026-10-14):
+///   `D6337F` in the light (4.53:1 on white — it reads as text too), `F37AB4`
+///   in the dark (6.47:1 on black). Magenta (≈331°), clear of the points
+///   heart's pink-red stop (≈348°), so an accent does not read as a like. It
+///   replaces #1124's tangerine.
+/// - **The UI is NEUTRAL** (#1169): neutrals stay the system's (labels,
+///   backgrounds, fills, `Surface`), and so do the selected tab, secondary
+///   buttons, chips, the segmented selection and in-text mentions (#1168).
+///   This supersedes #1124's "the accent marks what is interactive or
+///   selected".
+/// - **The accent marks what matters**: a screen's one primary action, the
+///   system controls (the app's tint — `AccentColor`, the window's
+///   `tintColor` — so switches, the cursor and selection follow without
+///   per-site code), every unread count (`counter`, one colour everywhere)
+///   and the unseen-story ring.
+/// - **A filled button wears white** (`onPrimary`, 4.53:1 on the fill) in
+///   the light, a dark ink on the brighter dark-mode fill.
 /// - **Violet is secondary**: gems and secondary emphasis.
 /// - **Dark mode is not an inversion**: the dark tint is brighter, not the
 ///   same hex. Every role also has an Increased Contrast value where its
 ///   contrast is close to the line.
-/// - **The gradient is for brand moments only** (`brandGradient`): never on
-///   recurring chrome — like buttons, tab items — where it would read as
-///   Instagram's. #1169 puts the unseen-story ring and the hero button to a
-///   device comparison (`rules.storyRing`, `rules.heroButton`).
+/// - **The gradient is the brand's signature, kept to a few places**
+///   (`brandGradient`): launch, onboarding, empty states, celebrations —
+///   never on recurring chrome. Whether the story ring and a key moment's
+///   hero button wear it is still compared on the device (`rules`).
 public enum Palette {
-    // MARK: - Primary: the theme's accent
+    // MARK: - Primary: pink
 
     /// Interactive glyphs, text buttons, switches, selection: the app's tint.
-    /// Held to the 3:1 of a control, not the 4.5:1 of body text (`brandText`
-    /// is). Today's tangerine is 4.03:1 on white, as `systemBlue`'s 4.02:1.
-    public static var tint: UIColor { theme.tint }
+    /// 4.53:1 on white, so it reads as text as well as a control.
+    public static let tint = dynamic(light: 0xD6337F, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
 
-    /// Text that carries the accent: the tint, deepened in the light until it
-    /// reads as text (≥ 4.5:1 on white).
-    public static var brandText: UIColor { theme.brandText }
+    /// Text that carries the accent (≥ 4.5:1): the tint itself, which
+    /// already reads as text. Mentions and hashtags do NOT wear it (#1168).
+    public static let brandText = dynamic(light: 0xD6337F, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
 
     /// A prominent filled button's ground, an active chip.
-    public static var primaryFill: UIColor { theme.primaryFill }
+    public static let primaryFill = dynamic(light: 0xD6337F, dark: 0xF37AB4)
 
-    /// The label on `primaryFill`. Tangerine wears a warm near-black (white
-    /// on it is 2.31:1); a deeper accent wears white.
-    public static var onPrimary: UIColor { theme.onPrimary }
+    /// The label on `primaryFill`: white in the light (4.53:1), a deep ink
+    /// on the brighter dark fill.
+    public static let onPrimary = dynamic(light: 0xFFFFFF, dark: 0x2B0716)
 
     /// `primaryFill` pressed or highlighted.
-    public static var primaryFillPressed: UIColor { theme.primaryFillPressed }
+    public static let primaryFillPressed = dynamic(light: 0xC02A70, dark: 0xE86AA6)
 
     /// A PROMINENT GLASS button's tint (the wallet's Claim, a country's
-    /// Unlock): one deep accent in both appearances. ⚠️ The glass draws its
+    /// Unlock): the deep pink in both appearances. ⚠️ The glass draws its
     /// label white and vibrant in the dark whatever ink is asked for, so the
-    /// light dark-mode fill cannot be used there.
-    public static var prominentGlassTint: UIColor { theme.prominentGlassTint }
+    /// brighter dark-mode fill cannot be used there; white on this is 4.53:1.
+    public static let prominentGlassTint = rgb(0xD6337F)
 
     /// A soft selected background, an info banner, a "New" badge.
-    public static var primaryContainer: UIColor { theme.primaryContainer }
+    public static let primaryContainer = dynamic(light: 0xFDE3EF, dark: 0x3A0A22)
 
     /// Text on `primaryContainer`.
-    public static var onPrimaryContainer: UIColor { theme.onPrimaryContainer }
+    public static let onPrimaryContainer = dynamic(light: 0xB8296C, dark: 0xF8ABCF)
 
     /// Every unread count — the tab bar's badges, the Messages selector's,
     /// an inbox row's (#1169: one colour everywhere): the accent, or the
     /// system red under the `.red` rule.
     public static var counter: UIColor {
-        rules.counters == .accent ? theme.tint : .systemRed
+        rules.counters == .accent ? tint : .systemRed
     }
 
-    // MARK: - Theme (#1169)
+    /// THE ICON'S GRADIENT (#1169, the owner's call 2026-10-14): pink at the
+    /// bottom-left → orange at the top-right, as the icon runs, in the icon's
+    /// own pink and orange made vivid enough to mark a pill. The icon's
+    /// pastels (`F7BED2` → `FFBE7D`) carry a white digit at about 1.5:1; these
+    /// carry it at about 1.9–2.6:1 — the owner chose the icon's tone over the
+    /// system red badge's 3.55:1. The same in both appearances: a badge is a
+    /// coloured mark on any ground. Worn by the unread pills the app draws itself and by the
+    /// unseen-story ring — NOT by the tab bar's badges (UIKit's, which take
+    /// one colour) nor the bell's dot: those stay solid (`counter`).
+    public static let accentGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xFFA552)]
 
-    /// The accent roles, as one value: the theme the app runs. Set ONCE, at
-    /// launch, before any screen reads a role (`-theme <name>`, DEBUG only);
-    /// Release always runs `shipped`.
-    public struct Theme: Sendable {
-        public let name: String
-        public let tint: UIColor
-        public let brandText: UIColor
-        public let primaryFill: UIColor
-        public let onPrimary: UIColor
-        public let primaryFillPressed: UIColor
-        public let prominentGlassTint: UIColor
-        public let primaryContainer: UIColor
-        public let onPrimaryContainer: UIColor
+    /// Where `accentGradient` runs, in a layer's unit space.
+    public static let accentGradientStart = CGPoint(x: 0, y: 1)
+    public static let accentGradientEnd = CGPoint(x: 1, y: 0)
+
+    /// The gradient an unread pill the app draws itself wears — nil under the
+    /// `.red` rule, where it is the solid system red (`counter`).
+    public static var counterGradient: [UIColor]? {
+        rules.counters == .accent ? accentGradient : nil
     }
 
-    /// How the accent is used (#1169, decided 2026-10-14: the UI is neutral,
-    /// the accent kept for what matters). Each rule has a DEBUG flag so the
-    /// candidates can be compared both ways on the device.
+    // MARK: - Rules (#1169)
+
+    /// How far the accent reaches (#1169, decided 2026-10-14: the UI is
+    /// neutral). The defaults are the decision; the DEBUG flags still
+    /// compare the two undecided ones on the device.
     public struct Rules: Equatable, Sendable {
         public enum Counters: String, Sendable { case accent, red }
         public enum Ring: String, Sendable { case accent, gradient }
@@ -115,109 +116,32 @@ public enum Palette {
         /// The selected tab in the label's colour, not the accent.
         public var selectedTabIsNeutral = true
         public var counters = Counters.accent
-        /// The unseen-story ring: the solid accent, or the brand gradient.
-        public var storyRing = Ring.accent
+        /// The unseen-story ring: the icon's gradient (decided 2026-10-14), or
+        /// the solid accent to compare.
+        public var storyRing = Ring.gradient
         /// The hero button of a key moment (the wallet's Claim).
         public var heroButton = Hero.accent
 
         public init() {}
     }
 
-    /// The theme the app runs. ⚠️ Written once at launch (`apply(themeNamed:)`)
-    /// before any UI exists; tests set it and put it back.
-    nonisolated(unsafe) public static var theme: Theme = shipped
+    /// The rules the app runs. ⚠️ Written once at launch (`configure`)
+    /// before any UI exists; tests read `resolve`, never this.
     nonisolated(unsafe) public static var rules = Rules()
 
-    /// What Release builds.
-    public static let shipped = current
-
-    /// Every candidate, by its launch-argument name.
-    public static let themes: [Theme] = [current, flame, raspberry, pink, orchid]
-
-    /// Today's tangerine (#1124): the reference.
-    public static let current = Theme(
-        name: "current",
-        tint: dynamic(light: 0xC76300, dark: 0xFFAD66, lightIC: 0x8B4600, darkIC: 0xFFD0AA),
-        brandText: dynamic(light: 0xB75F00, dark: 0xFFAD66, lightIC: 0x8B4600, darkIC: 0xFFD0AA),
-        primaryFill: dynamic(light: 0xFF8D28, dark: 0xFFAD66),
-        onPrimary: dynamic(light: 0x2B1607, dark: 0x2B1607),
-        primaryFillPressed: dynamic(light: 0xF1800E, dark: 0xF09F58),
-        prominentGlassTint: rgb(0xC76300),
-        primaryContainer: dynamic(light: 0xFFECE0, dark: 0x331B08),
-        onPrimaryContainer: dynamic(light: 0x9F5100, dark: 0xFFA664)
-    )
-
-    /// The gradient's orange end, deepened (3.56:1 on white; white on it for
-    /// a large bold label). Same luminance as `systemRed`.
-    public static let flame = Theme(
-        name: "flame",
-        tint: dynamic(light: 0xE85A0C, dark: 0xFF7A33, lightIC: 0xB23F00, darkIC: 0xFFB08A),
-        brandText: dynamic(light: 0xC24A00, dark: 0xFF8A4D, lightIC: 0x9A3800, darkIC: 0xFFB08A),
-        primaryFill: dynamic(light: 0xE85A0C, dark: 0xFF7A33),
-        onPrimary: dynamic(light: 0xFFFFFF, dark: 0x2B1004),
-        primaryFillPressed: dynamic(light: 0xD14F08, dark: 0xF06B25),
-        prominentGlassTint: rgb(0xE85A0C),
-        primaryContainer: dynamic(light: 0xFFE9DE, dark: 0x3A1A0A),
-        onPrimaryContainer: dynamic(light: 0xB23F00, dark: 0xFF9A66)
-    )
-
-    /// The gradient's rose middle, deepened (4.68:1 on white).
-    public static let raspberry = Theme(
-        name: "raspberry",
-        tint: dynamic(light: 0xD1376F, dark: 0xFF7AA8, lightIC: 0xA0234F, darkIC: 0xFFB3CC),
-        brandText: dynamic(light: 0xC02A60, dark: 0xFF8FB6, lightIC: 0xA0234F, darkIC: 0xFFB3CC),
-        primaryFill: dynamic(light: 0xD1376F, dark: 0xFF7AA8),
-        onPrimary: dynamic(light: 0xFFFFFF, dark: 0x2B0716),
-        primaryFillPressed: dynamic(light: 0xBA2E62, dark: 0xF06A99),
-        prominentGlassTint: rgb(0xD1376F),
-        primaryContainer: dynamic(light: 0xFFE6EF, dark: 0x3A0A1C),
-        onPrimaryContainer: dynamic(light: 0xA0234F, dark: 0xFF8FB6)
-    )
-
-    /// The owner's proposal (2026-10-14), the gradient's pink (3.24:1 on
-    /// white): text takes the deeper `D6337F` (4.53:1). Magenta (≈331°),
-    /// clear of the points heart's pink-red stop (≈348°).
-    public static let pink = Theme(
-        name: "pink",
-        tint: dynamic(light: 0xEE56A0, dark: 0xF37AB4, lightIC: 0xC2307A, darkIC: 0xF8ABCF),
-        brandText: dynamic(light: 0xD6337F, dark: 0xF8ABCF, lightIC: 0xB0256A, darkIC: 0xFBC8E0),
-        primaryFill: dynamic(light: 0xEE56A0, dark: 0xF37AB4),
-        onPrimary: dynamic(light: 0xFFFFFF, dark: 0x2B0716),
-        primaryFillPressed: dynamic(light: 0xD94690, dark: 0xE86AA6),
-        prominentGlassTint: rgb(0xD6337F),
-        primaryContainer: dynamic(light: 0xFDE3EF, dark: 0x3A0A22),
-        onPrimaryContainer: dynamic(light: 0xB8296C, dark: 0xF8ABCF)
-    )
-
-    /// The gradient's orchid end, deepened (5.91:1 on white). With it, gems
-    /// (violet `secondary`) share the accent's family.
-    public static let orchid = Theme(
-        name: "orchid",
-        tint: dynamic(light: 0x8A3FC0, dark: 0xC98BF0, lightIC: 0x6E2BA0, darkIC: 0xE0B8FF),
-        brandText: dynamic(light: 0x8A3FC0, dark: 0xC98BF0, lightIC: 0x6E2BA0, darkIC: 0xE0B8FF),
-        primaryFill: dynamic(light: 0x8A3FC0, dark: 0xC98BF0),
-        onPrimary: dynamic(light: 0xFFFFFF, dark: 0x1E0B2B),
-        primaryFillPressed: dynamic(light: 0x7733AA, dark: 0xB97AE0),
-        prominentGlassTint: rgb(0x8A3FC0),
-        primaryContainer: dynamic(light: 0xF3E8FC, dark: 0x2A1240),
-        onPrimaryContainer: dynamic(light: 0x6E2BA0, dark: 0xD4A6F5)
-    )
-
-    /// The theme and rules a launch asks for: `-theme <name>`, and the rule
-    /// flags `-theme-tab accent|neutral`, `-theme-counters accent|red`,
-    /// `-theme-rings accent|gradient`, `-theme-hero accent|gradient`. An
-    /// unknown name keeps the shipped theme.
+    /// The rule flags a DEBUG launch asks for: `-theme-tab accent|neutral`,
+    /// `-theme-counters accent|red`, `-theme-rings accent|gradient`,
+    /// `-theme-hero accent|gradient`.
     public static func configure(arguments: [String]) {
-        (theme, rules) = resolve(arguments: arguments)
+        rules = resolve(arguments: arguments)
     }
 
     /// What `configure` would set, without setting it — what a test reads.
-    public static func resolve(arguments: [String]) -> (theme: Theme, rules: Rules) {
+    public static func resolve(arguments: [String]) -> Rules {
         func value(_ flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
             return arguments[index + 1]
         }
-        let chosen = value("-theme").flatMap { name in themes.first { $0.name == name } } ?? shipped
         var configured = Rules()
         if let tab = value("-theme-tab") { configured.selectedTabIsNeutral = tab != "accent" }
         if let counters = value("-theme-counters").flatMap(Rules.Counters.init(rawValue:)) {
@@ -225,7 +149,7 @@ public enum Palette {
         }
         if let ring = value("-theme-rings").flatMap(Rules.Ring.init(rawValue:)) { configured.storyRing = ring }
         if let hero = value("-theme-hero").flatMap(Rules.Hero.init(rawValue:)) { configured.heroButton = hero }
-        return (chosen, configured)
+        return configured
     }
 
     // MARK: - Secondary: violet
@@ -255,10 +179,11 @@ public enum Palette {
     /// saved star alone. Drawn by the custom heart (#1128), as a mask over a
     /// gradient layer: SF Symbols do not draw a three-stop gradient.
     public static func pointsGradient(for traits: UITraitCollection) -> [UIColor] {
-        let stops: [UIColor] = traits.userInterfaceStyle == .dark
-            ? [.systemYellow, .systemOrange, .systemPink]
-            : [rgb(0xC76300), .systemOrange, .systemPink]
-        return stops.map { $0.resolvedColor(with: traits) }
+        // ⚠️ SOLID NOW (#1169, the owner's call 2026-10-14: every heart in
+        // the theme's pink). Two equal stops, so the heart's mask and layer —
+        // built for a gradient — are untouched.
+        let pink = tint.resolvedColor(with: traits)
+        return [pink, pink]
     }
 
     /// The icon's own gradient, orchid → tangerine, for brand moments only

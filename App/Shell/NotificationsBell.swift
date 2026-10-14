@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// The notifications bell, as every root header wears it.
@@ -73,7 +74,7 @@ final class NotificationsBell {
     /// to light and dark on their own.
     static func image(unread: Bool) -> UIImage? {
         guard unread else { return UIImage(systemName: "bell") }
-        let config = UIImage.SymbolConfiguration(paletteColors: [.label, .systemRed])
+        let config = UIImage.SymbolConfiguration(paletteColors: [.label, Palette.counter])
         return UIImage(systemName: "bell.badge", withConfiguration: config)?
             .withRenderingMode(.alwaysOriginal)
     }

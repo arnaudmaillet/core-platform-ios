@@ -37,13 +37,15 @@ struct PointsHeartViewTests {
         return Bitmap(width: side, bytes: bytes)
     }
 
-    @Test func likedDrawsTheGradientAndRestTheInk() {
+    /// Liked: the theme's pink (#1169, solid — two equal stops on the layer
+    /// built for a gradient). At rest: the content's ink.
+    @Test func likedDrawsThePinkAndRestTheInk() {
         let heart = PointsHeartView()
         heart.ink = .black
         #expect(heart.drawnColours.count == 2)
         #expect(Set(heart.drawnColours.map { $0.cgColor.components ?? [] }).count == 1, "at rest: one ink")
         heart.setLiked(true, animated: false)
-        #expect(heart.drawnColours.count == 3)
+        #expect(heart.drawnColours.count == 2)
         #expect(heart.drawnColours == Palette.pointsGradient(for: heart.traitCollection))
     }
 

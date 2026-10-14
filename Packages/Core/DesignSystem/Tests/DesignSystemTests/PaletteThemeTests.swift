@@ -2,10 +2,9 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// The accent as a theme (#1169): five candidates to compare on the device,
-/// each resolving every role in light, dark and Increased Contrast, each held
-/// to the contrast its roles need — and a launch that asks for none runs the
-/// shipped one with the decided rules.
+/// The accent (#1169, pink, chosen 2026-10-14): every role resolves in light,
+/// dark and Increased Contrast and holds the contrast its use needs — and a
+/// launch with no flag runs the decided neutral-first rules.
 @MainActor
 struct PaletteThemeTests {
     private static let traits: [UITraitCollection] = [
@@ -18,14 +17,12 @@ struct PaletteThemeTests {
         })
     }
 
-    private static func roles(_ theme: Palette.Theme) -> [(String, UIColor)] {
-        [
-            ("tint", theme.tint), ("brandText", theme.brandText), ("primaryFill", theme.primaryFill),
-            ("onPrimary", theme.onPrimary), ("primaryFillPressed", theme.primaryFillPressed),
-            ("prominentGlassTint", theme.prominentGlassTint), ("primaryContainer", theme.primaryContainer),
-            ("onPrimaryContainer", theme.onPrimaryContainer),
-        ]
-    }
+    private static let roles: [(String, UIColor)] = [
+        ("tint", Palette.tint), ("brandText", Palette.brandText), ("primaryFill", Palette.primaryFill),
+        ("onPrimary", Palette.onPrimary), ("primaryFillPressed", Palette.primaryFillPressed),
+        ("prominentGlassTint", Palette.prominentGlassTint), ("primaryContainer", Palette.primaryContainer),
+        ("onPrimaryContainer", Palette.onPrimaryContainer),
+    ]
 
     /// WCAG relative luminance contrast.
     private static func contrast(_ a: UIColor, _ b: UIColor) -> CGFloat {
@@ -39,65 +36,74 @@ struct PaletteThemeTests {
         return (high + 0.05) / (low + 0.05)
     }
 
-    @Test func everyThemeIsNamedOnce() {
-        #expect(Palette.themes.map(\.name) == ["current", "flame", "raspberry", "pink", "orchid"])
-        #expect(Palette.shipped.name == "current")
+    /// The owner's two values, exactly.
+    @Test func theAccentIsTheChosenPink() {
+        let light = Palette.tint.resolvedColor(with: Self.traits[0])
+        let dark = Palette.tint.resolvedColor(with: Self.traits[1])
+        #expect(light == Palette.rgb(0xD6337F))
+        #expect(dark == Palette.rgb(0xF37AB4))
     }
 
     /// Every role, every appearance, opaque.
-    @Test(arguments: Palette.themes.map(\.name))
-    func everyRoleResolves(_ name: String) throws {
-        let theme = try #require(Palette.themes.first { $0.name == name })
-        for (role, colour) in Self.roles(theme) {
+    @Test func everyRoleResolves() {
+        for (role, colour) in Self.roles {
             for traits in Self.traits {
                 var alpha: CGFloat = 0
                 colour.resolvedColor(with: traits).getRed(nil, green: nil, blue: nil, alpha: &alpha)
-                #expect(alpha == 1, "\(name).\(role) is not opaque in \(traits)")
+                #expect(alpha == 1, "\(role) is not opaque in \(traits)")
             }
         }
     }
 
-    /// The tint is held to a control's 3:1 on white (light) and black
-    /// (dark); text in the accent to 4.5:1; Increased Contrast never lowers
-    /// either.
-    @Test(arguments: Palette.themes.map(\.name))
-    func theAccentReads(_ name: String) throws {
-        let theme = try #require(Palette.themes.first { $0.name == name })
+    /// Text in the accent reads (4.5:1) on white and black, Increased
+    /// Contrast never lowers it, and a filled button's label passes.
+    @Test func theAccentReads() {
         let (light, dark, lightIC, darkIC) = (Self.traits[0], Self.traits[1], Self.traits[2], Self.traits[3])
-        let tintLight = Self.contrast(theme.tint.resolvedColor(with: light), .white)
-        let tintDark = Self.contrast(theme.tint.resolvedColor(with: dark), .black)
-        #expect(tintLight >= 3, "\(name) tint \(tintLight):1 on white")
-        #expect(tintDark >= 3, "\(name) tint \(tintDark):1 on black")
-        #expect(Self.contrast(theme.brandText.resolvedColor(with: light), .white) >= 4.5, "\(name) brandText on white")
-        #expect(Self.contrast(theme.brandText.resolvedColor(with: dark), .black) >= 4.5, "\(name) brandText on black")
-        #expect(Self.contrast(theme.tint.resolvedColor(with: lightIC), .white) >= tintLight)
-        #expect(Self.contrast(theme.tint.resolvedColor(with: darkIC), .black) >= tintDark)
-        // The label on a filled button: 4.5:1 in the light — a large bold
-        // label's 3:1 for the bright pink.
-        let onFill = Self.contrast(theme.onPrimary.resolvedColor(with: light), theme.primaryFill.resolvedColor(with: light))
-        #expect(onFill >= (name == "pink" || name == "flame" ? 3 : 4.5), "\(name) onPrimary \(onFill):1")
+        let tintLight = Self.contrast(Palette.tint.resolvedColor(with: light), .white)
+        let tintDark = Self.contrast(Palette.tint.resolvedColor(with: dark), .black)
+        #expect(tintLight >= 4.5, "tint \(tintLight):1 on white")
+        #expect(tintDark >= 4.5, "tint \(tintDark):1 on black")
+        #expect(Self.contrast(Palette.brandText.resolvedColor(with: light), .white) >= 4.5)
+        #expect(Self.contrast(Palette.brandText.resolvedColor(with: dark), .black) >= 4.5)
+        #expect(Self.contrast(Palette.tint.resolvedColor(with: lightIC), .white) >= tintLight)
+        #expect(Self.contrast(Palette.tint.resolvedColor(with: darkIC), .black) >= tintDark)
+        for traits in [light, dark] {
+            let onFill = Self.contrast(
+                Palette.onPrimary.resolvedColor(with: traits), Palette.primaryFill.resolvedColor(with: traits)
+            )
+            #expect(onFill >= 4.5, "onPrimary \(onFill):1 in \(traits.userInterfaceStyle.rawValue)")
+        }
+        #expect(Self.contrast(.white, Palette.prominentGlassTint) >= 4.5, "the glass's white label")
     }
 
-    @Test func aLaunchWithNoFlagRunsTheShippedThemeAndTheDecidedRules() {
-        let resolved = Palette.resolve(arguments: [])
-        #expect(resolved.theme.name == "current")
-        #expect(resolved.rules == Palette.Rules())
-        #expect(resolved.rules.selectedTabIsNeutral)
-        #expect(resolved.rules.counters == .accent)
-        #expect(resolved.rules.storyRing == .accent)
-        #expect(resolved.rules.heroButton == .accent)
+    /// The icon's gradient on the unread pills and the story ring: pink →
+    /// orange, in the icon's tone — the owner's call over 3:1 (2026-10-14).
+    /// A white count still stands out (≥ 1.8:1), never as faint as on the
+    /// icon's own pastels (≈ 1.5:1).
+    @Test func theAccentGradientRunsPinkToOrangeInTheIconsTone() {
+        #expect(Palette.accentGradient == [Palette.rgb(0xF37AB4), Palette.rgb(0xFFA552)])
+        for stop in Palette.accentGradient {
+            #expect(Self.contrast(.white, stop) >= 1.8, "white on a stop is \(Self.contrast(.white, stop)):1")
+        }
+        #expect(Palette.accentGradientStart == CGPoint(x: 0, y: 1), "pink starts at the bottom-left, as the icon")
     }
 
-    @Test func theFlagsPickAThemeAndItsRules() {
-        let resolved = Palette.resolve(arguments: [
-            "-theme", "pink", "-theme-tab", "accent", "-theme-counters", "red",
-            "-theme-rings", "gradient", "-theme-hero", "gradient",
+    @Test func aLaunchWithNoFlagRunsTheDecidedRules() {
+        let rules = Palette.resolve(arguments: [])
+        #expect(rules == Palette.Rules())
+        #expect(rules.selectedTabIsNeutral)
+        #expect(rules.counters == .accent)
+        #expect(rules.storyRing == .gradient, "the ring wears the icon's gradient (decided)")
+        #expect(rules.heroButton == .accent)
+    }
+
+    @Test func theFlagsPickTheRules() {
+        let rules = Palette.resolve(arguments: [
+            "-theme-tab", "accent", "-theme-counters", "red", "-theme-rings", "accent", "-theme-hero", "gradient",
         ])
-        #expect(resolved.theme.name == "pink")
-        #expect(!resolved.rules.selectedTabIsNeutral)
-        #expect(resolved.rules.counters == .red)
-        #expect(resolved.rules.storyRing == .gradient)
-        #expect(resolved.rules.heroButton == .gradient)
-        #expect(Palette.resolve(arguments: ["-theme", "teal"]).theme.name == "current", "an unknown name is ignored")
+        #expect(!rules.selectedTabIsNeutral)
+        #expect(rules.counters == .red)
+        #expect(rules.storyRing == .accent)
+        #expect(rules.heroButton == .gradient)
     }
 }

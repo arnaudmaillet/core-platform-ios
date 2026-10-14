@@ -79,33 +79,34 @@ struct PaletteTests {
         }
     }
 
-    /// ⚠️ A white label on the vivid fill fails, which is why `onPrimary` is
-    /// a dark ink: pinned, so nobody "fixes" the ink to white.
-    @Test func whiteOnTheVividFillFails() {
-        #expect(Self.contrast(.white, on: Palette.primaryFill, Self.light) < 3)
+    /// The pink fill (#1169) wears a WHITE label in the light — 4.53:1, unlike
+    /// #1124's vivid tangerine, which needed a dark ink.
+    @Test func whiteReadsOnTheFillInTheLight() {
+        #expect(Self.contrast(.white, on: Palette.primaryFill, Self.light) >= 4.5)
+        #expect(Self.hex(Palette.onPrimary, Self.light) == 0xFFFFFF)
     }
 
     /// Increased Contrast resolves to the IC values.
     @Test func increasedContrastResolvesToItsOwnValues() {
-        #expect(Self.hex(Palette.tint, Self.traits(.light)) == 0xC76300)
-        #expect(Self.hex(Palette.tint, Self.traits(.dark)) == 0xFFAD66)
-        #expect(Self.hex(Palette.tint, Self.traits(.light, high: true)) == 0x8B4600)
-        #expect(Self.hex(Palette.tint, Self.traits(.dark, high: true)) == 0xFFD0AA)
+        #expect(Self.hex(Palette.tint, Self.traits(.light)) == 0xD6337F)
+        #expect(Self.hex(Palette.tint, Self.traits(.dark)) == 0xF37AB4)
+        #expect(Self.hex(Palette.tint, Self.traits(.light, high: true)) == 0xB0256A)
+        #expect(Self.hex(Palette.tint, Self.traits(.dark, high: true)) == 0xF8ABCF)
         #expect(Self.hex(Palette.secondary, Self.traits(.light, high: true)) == 0x5C44B7)
         #expect(Self.hex(Palette.secondary, Self.traits(.dark, high: true)) == 0xB59EFF)
         // A role without IC values keeps its ordinary one.
-        #expect(Self.hex(Palette.primaryFill, Self.traits(.light, high: true)) == 0xFF8D28)
+        #expect(Self.hex(Palette.primaryFill, Self.traits(.light, high: true)) == 0xD6337F)
     }
 
-    /// The heart's gradient: three stops, and the light one starts on the
-    /// deeper tangerine (3:1 on white), never yellow — yellow is the saved
-    /// star's.
-    @Test func thePointsGradientStartsDeepInTheLight() {
-        let light = PointsSymbol.gradient(for: Self.light)
-        let dark = PointsSymbol.gradient(for: Self.dark)
-        #expect(light.count == 3 && dark.count == 3)
-        #expect(Self.hex(light[0], Self.light) == 0xC76300)
-        #expect(Self.contrast(light[0], on: .white, Self.light) >= 3)
+    /// The heart is the theme's pink, solid (#1169: every heart pink, no red
+    /// left in the app) — two equal stops, so the gradient layer still draws.
+    @Test func thePointsHeartIsThePink() {
+        for traits in [Self.light, Self.dark] {
+            let stops = PointsSymbol.gradient(for: traits)
+            #expect(stops.count == 2)
+            #expect(stops.allSatisfy { Self.hex($0, traits) == Self.hex(Palette.tint, traits) })
+        }
+        #expect(PointsSymbol.tint === Palette.tint || Self.hex(PointsSymbol.tint, Self.light) == 0xD6337F)
     }
 
     /// The hues the palette took over (#1124): gems are violet, a warning's

@@ -140,7 +140,7 @@ public final class AppButtonGalleryViewController: UIViewController {
         loadingSymbol.setPhase(.loading, animated: false)
         row([placeholder, loading, loadingSymbol])
         let liked = make(.bare, .inline, AppButton.Content(symbol: AppSymbol.liked.rawValue, count: 1_285))
-        liked.selectedTint = .systemRed
+        liked.selectedTint = Palette.tint
         liked.isSelected = true
         row([liked, make(.bare, .inline, AppButton.Content(symbol: "bubble.right", count: 48))])
     }
@@ -155,7 +155,7 @@ public final class AppButtonGalleryViewController: UIViewController {
         demo.addAction(UIAction { [weak self] _ in self?.cycleFollow() }, for: .primaryActionTriggered)
         self.demo = demo
         let counter = make(.bare, .inline, AppButton.Content(symbol: AppSymbol.like.rawValue, count: 99))
-        counter.selectedTint = .systemRed
+        counter.selectedTint = Palette.tint
         counter.bouncesSymbolOnTap = true
         counter.haptic = .lightImpact
         counter.holdFreezesScrolling = true

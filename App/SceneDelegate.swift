@@ -46,7 +46,7 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #else
         let window = UIWindow(windowScene: windowScene)
         #endif
-        // The brand's tangerine (#1124): every system control and every
+        // The brand's pink (#1169): every system control and every
         // `.tintColor` read follows it. The asset catalog's AccentColor carries
         // the same values for what the window does not reach.
         window.tintColor = Palette.tint

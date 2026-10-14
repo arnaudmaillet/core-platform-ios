@@ -85,6 +85,8 @@ final class BadgedAvatarView: UIView {
     /// the fetch, during it, and after one that failed, the initials show.
     private let avatar = AvatarView(size: .avatar)
     private let badge = UIView()
+    /// The pill's fill when it wears the icon's gradient (#1169).
+    private var badgeGradient: CAGradientLayer?
     private let label = UILabel()
     private var badgeWidth: NSLayoutConstraint!
 
@@ -92,8 +94,20 @@ final class BadgedAvatarView: UIView {
         super.init(frame: .zero)
         avatar.pin(to: self)
 
-        // One colour for every unread count (#1169): the tab bar's too.
-        badge.backgroundColor = Palette.counter
+        // Every unread pill the app draws wears the icon's gradient (#1169);
+        // the solid counter colour under the `.red` rule.
+        if let colours = Palette.counterGradient {
+            let gradient = CAGradientLayer()
+            gradient.colors = colours.map(\.cgColor)
+            gradient.startPoint = Palette.accentGradientStart
+            gradient.endPoint = Palette.accentGradientEnd
+            gradient.cornerCurve = .continuous
+            badge.layer.insertSublayer(gradient, at: 0)
+            badge.clipsToBounds = true
+            badgeGradient = gradient
+        } else {
+            badge.backgroundColor = Palette.counter
+        }
         badge.layer.borderWidth = Metrics.ringWidth
         badge.layer.cornerCurve = .continuous
         badge.isHidden = true
@@ -110,11 +124,9 @@ final class BadgedAvatarView: UIView {
         // The same trap `PagedTabBar.BadgeView` documents: a semantic colour
         // can resolve to the wrong end of the spectrum over a tinted fill, so
         // the count's colour is stated outright.
-        label.textColor = UIColor { traits in
-            traits.userInterfaceStyle == .dark
-                ? UIColor(white: 0.06, alpha: 1)
-                : UIColor(white: 1, alpha: 1)
-        }
+        // White in both appearances: the fill — the gradient, or the solid
+        // red — does not flip with them (as `PagedTabBar.BadgeView`'s).
+        label.textColor = .white
         label.isHidden = true
         label.pin(to: badge, insets: NSDirectionalEdgeInsets(
             top: 0, leading: Metrics.labelInset, bottom: 0, trailing: Metrics.labelInset
@@ -141,6 +153,7 @@ final class BadgedAvatarView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         badge.layer.cornerRadius = badge.bounds.height / 2
+        badgeGradient?.frame = badge.bounds
     }
 
     override func traitCollectionDidChange(_ previous: UITraitCollection?) {
