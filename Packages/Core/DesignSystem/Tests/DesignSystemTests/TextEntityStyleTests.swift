@@ -24,10 +24,18 @@ struct TextEntityStyleTests {
         #expect(string.attribute(.textEntity, at: 0, effectiveRange: nil) == nil)
     }
 
-    @Test func aLinkIsColouredAndSemiboldTheRestUntouched() {
+    /// On a plain surface the token is NEUTRAL (#1168): the label's colour,
+    /// semibold — never the accent, never the system blue.
+    @Test func aLinkIsTheLabelsColourAndSemiboldTheRestUntouched() {
         let body = UIFont.appFont(forTextStyle: .body)
         let string = styled("hi @alex", font: body, style: .link)
-        #expect(string.attribute(.foregroundColor, at: 4, effectiveRange: nil) as? UIColor == .link)
+        let colour = try? #require(string.attribute(.foregroundColor, at: 4, effectiveRange: nil) as? UIColor)
+        #expect(colour == .label)
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            #expect(colour?.resolvedColor(with: traits) != UIColor.systemBlue.resolvedColor(with: traits),
+                    "the token is the system blue in \(style.rawValue)")
+        }
         #expect(string.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor == .white)
         let tokenFont = try? #require(string.attribute(.font, at: 4, effectiveRange: nil) as? UIFont)
         #expect(tokenFont.map(weight(of:)) == UIFont.Weight.semibold.rawValue)

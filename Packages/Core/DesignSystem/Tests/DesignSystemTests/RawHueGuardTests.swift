@@ -51,6 +51,10 @@ struct RawHueGuardTests {
     static let patterns = [
         "UIColor(red:", "UIColor(hue:", ".systemBlue", ".systemOrange", ".systemCyan",
         ".systemIndigo", ".systemTeal", ".systemPink", ".systemPurple",
+        // `.link` as a COLOUR is the system blue (#1168). `olor` catches
+        // `color:`, `textColor =`, `foregroundColor:`, and leaves
+        // `dataDetectorTypes = .link` — a type, not a colour — alone.
+        "UIColor.link", "olor: .link", "olor = .link",
     ]
 
     private static var root: URL {
@@ -93,5 +97,9 @@ struct RawHueGuardTests {
         #expect(Self.picksARawHue("label.textColor = .systemBlue"))
         #expect(Self.picksARawHue("UIColor(red: 1, green: 0, blue: 0, alpha: 1)"))
         #expect(!Self.picksARawHue("label.textColor = Palette.tint"))
+        #expect(Self.picksARawHue("TextEntityStyle(color: .link)"))
+        #expect(Self.picksARawHue("label.textColor = .link"))
+        #expect(Self.picksARawHue("[.foregroundColor: UIColor.link]"))
+        #expect(!Self.picksARawHue("textView.dataDetectorTypes = .link"), "a detector type is not a colour")
     }
 }
