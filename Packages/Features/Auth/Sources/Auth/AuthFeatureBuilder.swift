@@ -12,13 +12,18 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
     private let homeCountry: @Sendable () async -> String
     /// Sign in with Apple's sheet. Nil keeps "Continue with Apple" unavailable.
     private let federated: (any FederatedSignInProviding)?
+    /// The device's passkeys (#551). Nil leaves "Sign in with a passkey" off
+    /// the first screen.
+    private let passkeys: (@MainActor () -> any PasskeyAuthorizing)?
 
     public init(
         sessionManager: SessionManager,
         profileSetup: (any AccountProfileSetup)? = nil,
         homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" },
-        federated: (any FederatedSignInProviding)? = nil
+        federated: (any FederatedSignInProviding)? = nil,
+        passkeys: (@MainActor () -> any PasskeyAuthorizing)? = nil
     ) {
+        self.passkeys = passkeys
         self.sessionManager = sessionManager
         self.profileSetup = profileSetup
         self.homeCountry = homeCountry
@@ -30,6 +35,7 @@ public struct AuthFeatureBuilder: AuthFeatureBuilding {
             // Codes are the only way in since passwords went (#840).
             signUp: sessionManager,
             federated: federated,
+            passkeys: passkeys?(),
             profileSetup: profileSetup,
             homeCountry: homeCountry
         )

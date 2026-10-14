@@ -53,6 +53,8 @@ public enum MockEdgePolicy {
         "/auth.v1.AuthService/SignUp",
         // The nonce of a native Apple / Google sign-in (#507).
         "/auth.v1.AuthService/StartFederatedSignIn",
+        // A passkey sign-in's challenge (#551): public, like the nonce.
+        "/auth.v1.AuthService/StartPasskeySignIn",
     ]
 
     static let guestReadablePaths: Set<String> = [

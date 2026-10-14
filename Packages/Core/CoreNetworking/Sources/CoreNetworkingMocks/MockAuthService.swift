@@ -62,6 +62,8 @@ public final class MockAuthService: @unchecked Sendable {
     private var passkeys: [Auth_V1_Passkey]
     /// Registration challenges handed out and not yet used.
     private var passkeyChallenges: Set<String> = []
+    /// Sign-in challenges handed out and not yet used.
+    private var passkeySignInChallenges: Set<String> = []
     /// No relying party configured: every passkey RPC is UNAVAILABLE, as on
     /// a fleet without `AUTH_WEBAUTHN_RP_ID`.
     private let passkeysUnavailable: Bool
@@ -141,6 +143,9 @@ public final class MockAuthService: @unchecked Sendable {
             [self] (request: Auth_V1_FinishPasskeyRegistrationRequest, headers: Headers) in
             finishPasskeyRegistration(request, headers: headers)
         }
+        bff.register(path: "/auth.v1.AuthService/StartPasskeySignIn") { [self] (_: Auth_V1_StartPasskeySignInRequest) in
+            startPasskeySignIn()
+        }
         bff.register(path: "/auth.v1.AuthService/RemovePasskey") { [self] (request: Auth_V1_RemovePasskeyRequest, headers: Headers) in
             removePasskey(request, headers: headers)
         }
@@ -162,7 +167,10 @@ public final class MockAuthService: @unchecked Sendable {
         if case .idToken(let grant) = request.credential {
             return loginWithIdToken(grant, request: request)
         }
-        return .failure(ConnectError(code: .invalidArgument, message: "expected a verification code or an id_token"))
+        if case .passkey(let assertion) = request.credential {
+            return loginWithPasskey(assertion, request: request)
+        }
+        return .failure(ConnectError(code: .invalidArgument, message: "expected a verification code, an id_token or a passkey"))
     }
 
     // MARK: - Codes and sign-up (B4)
@@ -798,6 +806,52 @@ public final class MockAuthService: @unchecked Sendable {
             passkey.synced = true
             passkeys.append(passkey)
             return .success(passkey)
+        }
+    }
+
+    /// Public: a challenge for the device to sign.
+    private func startPasskeySignIn() -> Result<Auth_V1_PasskeySignInOptions, ConnectError> {
+        if passkeysUnavailable {
+            return .failure(ConnectError(code: .unavailable, message: "passkeys are not configured"))
+        }
+        return lock.withLock {
+            tokenCounter += 1
+            let challenge = Data("passkey-sign-in-\(tokenCounter)".utf8).base64URLForMock
+            passkeySignInChallenges.insert(challenge)
+            var options = Auth_V1_PasskeySignInOptions()
+            options.challenge = challenge
+            options.rpID = Self.passkeyRelyingParty
+            options.expiresIn = 300
+            return .success(options)
+        }
+    }
+
+    /// The mock checks what it can without keys: a challenge it handed out,
+    /// one of the account's passkeys, the account's user handle. A passkey
+    /// is two factors: no second step, even with two-step sign-in on.
+    private func loginWithPasskey(
+        _ assertion: Auth_V1_PasskeyAssertion, request: Auth_V1_LoginRequest
+    ) -> Result<Auth_V1_LoginResponse, ConnectError> {
+        if passkeysUnavailable {
+            return .failure(ConnectError(code: .unavailable, message: "passkeys are not configured"))
+        }
+        return lock.withLock {
+            let id = assertion.credentialID.base64URLForMock
+            guard passkeySignInChallenges.remove(assertion.challenge) != nil,
+                  passkeys.contains(where: { $0.credentialID == id }),
+                  assertion.userHandle == Data(Self.accountID.utf8),
+                  !assertion.signature.isEmpty
+            else {
+                return .failure(ConnectError(code: .unauthenticated, message: "AUT-5028: the passkey did not verify"))
+            }
+            if let index = passkeys.firstIndex(where: { $0.credentialID == id }) {
+                passkeys[index].lastUsedAt = Google_Protobuf_Timestamp(date: Date())
+            }
+            var response = Auth_V1_LoginResponse()
+            response.accountID = Self.accountID
+            response.reactivated = lifecycle.resumeIfDeactivated()
+            response.tokens = memberSessionLocked(device: request.device, guestRefreshToken: request.guestRefreshToken)
+            return .success(response)
         }
     }
 

@@ -1,3 +1,4 @@
+import AuthInterface
 import UIKit
 #if DEBUG
 import DesignSystem
@@ -39,6 +40,8 @@ final class LoginFlowCoordinator {
     private let signUp: (any SignUpPerforming)?
     /// Native Sign in with Apple. Nil keeps the provider rows unavailable.
     private let federated: (any FederatedSignInProviding)?
+    /// The device's passkeys (#551). Nil: no passkey row.
+    private let passkeys: (any PasskeyAuthorizing)?
     /// The new account's profile. Nil completes a sign-up without one.
     private let profileSetup: (any AccountProfileSetup)?
     /// The account's home country: the current one, else the storefront's.
@@ -56,7 +59,7 @@ final class LoginFlowCoordinator {
     /// out does nothing, rather than sending a second SMS or opening a second
     /// Apple sheet.
     enum Call: Hashable {
-        case sendCode, resendCode, federatedSignIn
+        case sendCode, resendCode, federatedSignIn, passkeySignIn
     }
 
     /// The calls out right now.
@@ -128,11 +131,13 @@ final class LoginFlowCoordinator {
     init(
         signUp: (any SignUpPerforming)? = nil,
         federated: (any FederatedSignInProviding)? = nil,
+        passkeys: (any PasskeyAuthorizing)? = nil,
         profileSetup: (any AccountProfileSetup)? = nil,
         homeCountry: @escaping @Sendable () async -> String = { Locale.current.region?.identifier ?? "" }
     ) {
         self.signUp = signUp
         self.federated = federated
+        self.passkeys = passkeys
         self.profileSetup = profileSetup
         self.homeCountry = homeCountry
     }
@@ -141,7 +146,9 @@ final class LoginFlowCoordinator {
     /// window's root: the first screen gets a close button, because a guest
     /// who opened it must be able to go back to browsing.
     func start(prompt: String? = nil, onClose: (() -> Void)? = nil) -> UIViewController {
-        let methodSelection = MethodSelectionViewController()
+        let methodSelection = MethodSelectionViewController(
+            methods: SignInMethod.offered(passkeys: passkeys != nil && signUp != nil)
+        )
         methodSelection.prompt = prompt
         if let onClose {
             methodSelection.navigationItem.leftBarButtonItem = UIBarButtonItem(
@@ -185,6 +192,8 @@ final class LoginFlowCoordinator {
             if signUp != nil { showEmailCode() } else { presentCodesUnavailable() }
         case .phone:
             showPhoneAuth()
+        case .passkey:
+            signInWithPasskey(from: method)
         }
     }
 
@@ -376,6 +385,44 @@ final class LoginFlowCoordinator {
                     self?.showBirthday()
                 }
             } catch is FederatedSignInCancelled {
+                return
+            } catch {
+                self?.presentFlowError(error, on: nil)
+            }
+        }
+    }
+
+    /// A passkey sign-in (#551): a challenge from the server, the system's
+    /// passkey sheet, then `Login { passkey }` — no second step, a passkey
+    /// is two factors. Closing the sheet (or having no passkey here) says
+    /// nothing.
+    private func signInWithPasskey(from method: SignInMethod) {
+        guard let signUp, let passkeys, let screen = navigationController?.topViewController,
+              callsInFlight.insert(.passkeySignIn).inserted
+        else { return }
+        let methods = screen as? MethodSelectionViewController
+        methods?.setWorking(method)
+        screen.view.isUserInteractionEnabled = false
+        Task { [weak self] in
+            defer {
+                screen.view.isUserInteractionEnabled = true
+                methods?.setWorking(nil)
+                self?.callsInFlight.remove(.passkeySignIn)
+            }
+            do {
+                let request = try await signUp.startPasskeySignIn()
+                let assertion = try await passkeys.assertPasskey(request)
+                switch try await signUp.signIn(.passkey(assertion)) {
+                case .existing(let account):
+                    await self?.finishSignIn(account, from: nil)
+                case .needsSecondStep(let challenge):
+                    // Not the contract's (a passkey has no second step),
+                    // but a server that asks gets its code.
+                    self?.showSecondStep(challenge)
+                case .needsSignUp:
+                    self?.presentFlowError(AuthError.passkeyRejected, on: nil)
+                }
+            } catch is PasskeyCancelled {
                 return
             } catch {
                 self?.presentFlowError(error, on: nil)

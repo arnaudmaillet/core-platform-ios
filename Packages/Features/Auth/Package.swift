@@ -31,6 +31,8 @@ let package = Package(
             name: "AuthTests",
             dependencies: [
                 "Auth",
+                // The passkey authenticator's seam and its simulated one (#551).
+                "AuthInterface",
                 .product(name: "CoreNetworkingMocks", package: "CoreNetworking")
             ]
         )

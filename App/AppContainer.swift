@@ -323,8 +323,26 @@ final class AppContainer {
         homeCountry: { [weak self] in
             await self?.currentCountry.currentCountry ?? Locale.current.region?.identifier ?? ""
         },
-        federated: federatedSignIn()
+        federated: federatedSignIn(),
+        passkeys: { [environment] in Self.makePasskeyAuthorizer(for: environment) }
     )
+
+    /// The device's passkeys (#551): the system sheet on the fleet. The mock's
+    /// relying party is made up and no device is associated with it — the
+    /// system sheet would fail at once — so mock mode simulates the
+    /// authenticator, signing in with the mock's seeded passkey.
+    @MainActor
+    static func makePasskeyAuthorizer(for environment: AppEnvironment) -> any PasskeyAuthorizing {
+        switch environment {
+        case .mock:
+            SimulatedPasskeyAuthorizer(
+                signInCredentialID: Data(base64URL: MockAuthService.seededPasskeyID) ?? Data(),
+                signInUserHandle: Data(MockAuthService.accountID.utf8)
+            )
+        case .localFleet:
+            PlatformPasskeyAuthorizer()
+        }
+    }
 
     /// Sign in with Apple's sheet (#507); `-mock-apple-sign-in <email>` skips
     /// it in DEBUG.
@@ -1419,12 +1437,8 @@ final class AppContainer {
         // Settings → Storage measures and clears every cache, and applies the
         // storage limit and the cellular choice, through the coordinator (#899).
         builder.cacheCoordinator = cacheCoordinator
-        // Settings → Passkeys (#551): the mock's relying party is made up, and
-        // no device is associated with it — the system sheet would fail at
-        // once. The fleet uses the real one.
-        if environment == .mock {
-            builder.makePasskeyAuthorizer = { SimulatedPasskeyAuthorizer() }
-        }
+        // Settings → Passkeys (#551): the same authenticator as sign-in's.
+        builder.makePasskeyAuthorizer = { [environment] in Self.makePasskeyAuthorizer(for: environment) }
         // What You See → Your Interests (#413).
         builder.interestTags = InterestTagsRepository(
             timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),

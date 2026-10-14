@@ -24,15 +24,25 @@ enum SignInMethod: Equatable, Sendable {
     case provider(IdentityProvider)
     case email
     case phone
+    /// One of the account's passkeys (#551): sign-in only, offered when the
+    /// app has an authenticator to ask.
+    case passkey
 
     static let all: [SignInMethod] =
         IdentityProvider.allCases.map(SignInMethod.provider) + [.email, .phone]
+
+    /// The rows the first screen lists: the passkey under the providers
+    /// when there is one to ask.
+    static func offered(passkeys: Bool) -> [SignInMethod] {
+        IdentityProvider.allCases.map(SignInMethod.provider) + (passkeys ? [.passkey] : []) + [.email, .phone]
+    }
 
     var displayName: String {
         switch self {
         case .provider(let provider): "Continue with \(provider.displayName)"
         case .email: "Continue with email"
         case .phone: "Continue with phone"
+        case .passkey: "Sign in with a passkey"
         }
     }
 }
