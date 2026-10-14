@@ -15,16 +15,14 @@ import UIKit
 ///   │ words words  │   a text post's caption, from the TOP — it reads
 ///   │ words…       │   like the page it opens into, not a centred quote
 ///   │              │
-///   │ ♪ Original   │   the marks, stacked, BOTTOM-leading
-///   │ Watching  ♥ 3│   the likes, BOTTOM-trailing
+///   │              │
+///   │ ♪ Original ♥ 3│   the mark BOTTOM-leading, the likes BOTTOM-trailing
 ///   └──────────────┘
 /// ```
 ///
-/// Two marks, both the same dark capsule — one family of labels on a
-/// thumbnail, stacked when a tile earns both, the last one on the foot:
-/// - **♪ Original**: the post the sound was first published with. The
-///   "Popular" row puts it first (`SoundSheetSections`).
-/// - **Watching**: the post the sheet was opened from — second in "Popular".
+/// One mark, a dark capsule — **♪ Original**: the post the sound was first
+/// published with. The "Popular" row puts it first (`SoundSheetSections`).
+/// The post watched has none: it is not in the sheet (#1147).
 ///
 /// The LIKES close the foot on the other side, exactly as every gallery's
 /// brick does (`PostGridTileCell`'s `likes`: `heart.fill`, caption2
@@ -50,7 +48,6 @@ import UIKit
 final class SoundSheetTileCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private let originalBadge = TileBadge(text: "Original", symbol: "music.note")
-    private let currentBadge = TileBadge(text: "Watching", symbol: nil)
     private let captionLabel = UILabel()
     /// The count over a picture — the galleries' brick's, see the type's note.
     private let pictureLikes = PostMetricLabel(
@@ -89,7 +86,7 @@ final class SoundSheetTileCell: UICollectionViewCell {
     static let cornerRadius: CGFloat = Spacing.md
 
     override init(frame: CGRect) {
-        badges = Self.badgeStack([originalBadge, currentBadge])
+        badges = Self.badgeStack([originalBadge])
         super.init(frame: frame)
         contentView.backgroundColor = .secondarySystemFill
         // ⚠️ A FIXED RADIUS, NEVER `.containerConcentric`. #304 made the tiles
@@ -147,12 +144,10 @@ final class SoundSheetTileCell: UICollectionViewCell {
         return stack
     }
 
-    private static func makeBadgeStack(original: Bool, current: Bool) -> UIStackView {
+    private static func makeBadgeStack(original: Bool) -> UIStackView {
         let originalBadge = TileBadge(text: "Original", symbol: "music.note")
-        let currentBadge = TileBadge(text: "Watching", symbol: nil)
         originalBadge.isHidden = !original
-        currentBadge.isHidden = !current
-        return badgeStack([originalBadge, currentBadge])
+        return badgeStack([originalBadge])
     }
 
     /// The marks on the foot, bottom-leading — the same few points off both
@@ -310,8 +305,8 @@ final class SoundSheetTileCell: UICollectionViewCell {
 
     /// The tile's marks alone, for a FLIGHT card to wear over its picture and
     /// fade as it grows (`SnapFeedHeroOrigin.restingOverlay`) — so a close
-    /// does not land a bare picture and pop "Original" / "Watching" on in the
-    /// frame the card is taken away. Nil for a tile that wears neither.
+    /// does not land a bare picture and pop "Original" on in the
+    /// frame the card is taken away. Nil for a tile that wears none.
     ///
     /// Only the marks: the COUNT is the card's own (`PostGridFlightCard`
     /// draws a `.tile` source's likes itself, at the tile's insets). Laid out
@@ -321,10 +316,10 @@ final class SoundSheetTileCell: UICollectionViewCell {
     static func makeBadgeOverlay(
         for tile: SoundSheetViewController.Tile, size: CGSize
     ) -> UIView? {
-        guard tile.isOriginal || tile.isCurrent else { return nil }
+        guard tile.isOriginal else { return nil }
         let overlay = UIView(frame: CGRect(origin: .zero, size: size))
         overlay.isUserInteractionEnabled = false
-        let badges = makeBadgeStack(original: tile.isOriginal, current: tile.isCurrent)
+        let badges = makeBadgeStack(original: tile.isOriginal)
         // The count the card draws, measured only: the marks stand where the
         // tile's do (`footLift`), decided at the tile's size.
         let likes = PostMetricLabel(
@@ -363,7 +358,6 @@ final class SoundSheetTileCell: UICollectionViewCell {
     private func show(_ tile: SoundSheetViewController.Tile, cover: UIImage?) {
         postID = tile.postID
         originalBadge.isHidden = !tile.isOriginal
-        currentBadge.isHidden = !tile.isCurrent
         showLikes(of: tile)
         captionLabel.text = tile.thumbnailURL == nil ? tile.caption : nil
         imageView.image = cover
@@ -438,11 +432,10 @@ final class SoundSheetTileCell: UICollectionViewCell {
         }
         postID = tile.postID
         originalBadge.isHidden = !tile.isOriginal
-        currentBadge.isHidden = !tile.isCurrent
         showLikes(of: tile)
         accessibilityLabel = [
             tile.isOriginal ? "Original" : nil,
-            tile.isCurrent ? "This post" : "Post",
+            "Post",
             tile.likeCount.map { "\(PostMetadata.count($0)) likes" },
         ].compactMap { $0 }.joined(separator: ", ")
         isAccessibilityElement = true

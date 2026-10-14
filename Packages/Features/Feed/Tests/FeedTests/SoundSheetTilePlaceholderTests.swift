@@ -44,7 +44,6 @@ struct SoundSheetTilePlaceholderTests {
             postID: PostID(id),
             thumbnailURL: loaded ? URL(string: "https://cdn.example/\(id).jpg") : nil,
             caption: nil,
-            isCurrent: false,
             isLoaded: loaded,
             likeCount: loaded ? 12 : nil
         )
@@ -102,7 +101,7 @@ struct SoundSheetTilePlaceholderTests {
 
         cell.configure(
             SoundSheetViewController.Tile(
-                postID: PostID("p1"), thumbnailURL: nil, caption: "words", isCurrent: false
+                postID: PostID("p1"), thumbnailURL: nil, caption: "words"
             ),
             pipeline: pipeline
         )

@@ -47,7 +47,7 @@ struct SoundSheetAutoplayTests {
         )
         let tiles = (0..<count).map { index in
             Sheet.Tile(
-                postID: PostID("p\(index)"), thumbnailURL: nil, caption: nil, isCurrent: index == 0,
+                postID: PostID("p\(index)"), thumbnailURL: nil, caption: nil,
                 videoURL: isClip(index) ? Self.clip(index) : nil
             )
         }
@@ -268,7 +268,7 @@ struct SoundSheetAutoplayTests {
         let gallery = SoundSheetGalleryViewController(
             kind: .popular, ids: ids,
             tile: { id in
-                Sheet.Tile(postID: id, thumbnailURL: nil, caption: nil, isCurrent: false,
+                Sheet.Tile(postID: id, thumbnailURL: nil, caption: nil,
                            videoURL: URL(string: "mock://video/\(id.rawValue)"))
             },
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
