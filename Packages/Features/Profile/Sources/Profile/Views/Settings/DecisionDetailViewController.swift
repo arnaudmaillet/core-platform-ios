@@ -179,7 +179,7 @@ final class DecisionDetailViewController: UIViewController {
                 content.secondaryText = AccountStatusViewController.period(of: restriction)
                 content.secondaryTextProperties.color = .secondaryLabel
                 content.image = UIImage(systemName: "exclamationmark.triangle")
-                content.imageProperties.tintColor = .systemOrange
+                content.imageProperties.tintColor = Warning.glyphTint
                 cell.contentConfiguration = content
             case .detail(let title, let value):
                 var content = UIListContentConfiguration.valueCell()

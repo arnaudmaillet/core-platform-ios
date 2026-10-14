@@ -87,7 +87,7 @@ final class AccountStatusViewController: UIViewController {
         case .loading: ("Checking your account…", "hourglass", .secondaryLabel)
         case .failed: ("Couldn't check your account status.", "exclamationmark.circle", .secondaryLabel)
         case .loaded(let restrictions) where restrictions.isEmpty: ("No restrictions on your account", "checkmark.shield", .systemGreen)
-        case .loaded: ("Your account has restrictions", "exclamationmark.triangle", .systemOrange)
+        case .loaded: ("Your account has restrictions", "exclamationmark.triangle", Warning.glyphTint)
         }
     }
 

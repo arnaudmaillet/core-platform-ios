@@ -247,7 +247,7 @@ final class SecurityCheckupViewController: UIViewController {
     private static func badgeColor(_ state: SecurityCheckupItem.State) -> UIColor {
         switch state {
         case .done: .systemGreen
-        case .recommended: .systemOrange
+        case .recommended: Warning.glyphTint
         case .unavailable: .tertiaryLabel
         case .info, .failed: .secondaryLabel
         }

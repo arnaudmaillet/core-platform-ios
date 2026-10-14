@@ -142,7 +142,7 @@ public final class ToastView: UIView {
         /// second material or a coloured capsule.
         case failure
         /// It happened, but with a catch the viewer should know ("Saved
-        /// without its sound"). The glyph takes the system orange.
+        /// without its sound"). The glyph takes the system yellow.
         case warning
         /// Under way ("Posting…"): a spinner instead of a glyph, until the
         /// same `id` updates it to its outcome.
@@ -152,7 +152,9 @@ public final class ToastView: UIView {
             switch self {
             case .confirmation, .loading: .label
             case .failure: .systemRed
-            case .warning: .systemOrange
+            // Yellow, not orange (#1124): orange is the brand's tint now,
+            // and a warning in it would read as a button.
+            case .warning: Warning.glyphTint
             }
         }
     }

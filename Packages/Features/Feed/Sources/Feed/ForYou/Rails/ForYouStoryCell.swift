@@ -58,11 +58,15 @@ final class ForYouStoryCell: UICollectionViewCell {
         }
     }
 
-    /// The warm gradient the ring wears while there is something unseen —
-    /// the stories convention the viewer already reads, so it needs no legend.
-    private static let ringColors: [CGColor] = [
-        UIColor.systemYellow.cgColor, UIColor.systemOrange.cgColor, UIColor.systemPink.cgColor
-    ]
+    /// The ring a face wears while there is something unseen: the brand's
+    /// tint, solid (#1124, decision 8) — the yellow → orange → pink gradient
+    /// it used to wear was Instagram's ring, and the brand's gradient stays
+    /// off recurring chrome. Still a gradient layer with two equal stops, so
+    /// the mask and geometry are untouched; re-resolved on a style flip.
+    private func applyRingColors() {
+        let tint = Palette.tint.resolvedColor(with: traitCollection).cgColor
+        ring.colors = [tint, tint]
+    }
 
     private let disc = UIView()
     private let ring = CAGradientLayer()
@@ -79,7 +83,12 @@ final class ForYouStoryCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.addSubview(disc)
-        ring.colors = Self.ringColors
+        applyRingColors()
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
+        ) { (cell: Self, _: UITraitCollection) in
+            cell.applyRingColors()
+        }
         ring.startPoint = CGPoint(x: 0, y: 1)
         ring.endPoint = CGPoint(x: 1, y: 0)
         ringMask.fillColor = UIColor.clear.cgColor
