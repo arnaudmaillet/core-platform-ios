@@ -153,8 +153,10 @@ public struct TextEntityStyle: Equatable, Sendable {
         self.weight = weight
     }
 
-    /// On a plain surface: the link colour, semibold.
-    public static let link = TextEntityStyle(color: .link)
+    /// On a plain surface: the LABEL's colour, semibold (#1168, the owner's
+    /// call 2026-10-14 with #1169: the UI is neutral, the accent is not
+    /// spread across text — and never the system blue).
+    public static let link = TextEntityStyle(color: .label)
     /// Over media or a hero banner, whose ink the text already chose:
     /// semibold only.
     public static let emphasis = TextEntityStyle(color: nil)
