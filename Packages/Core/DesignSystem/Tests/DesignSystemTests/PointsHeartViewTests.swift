@@ -37,9 +37,8 @@ struct PointsHeartViewTests {
         return Bitmap(width: side, bytes: bytes)
     }
 
-    /// Liked: the system red (#1169, solid — two equal stops on the layer
-    /// built for a gradient). At rest: the content's ink.
-    @Test func likedDrawsTheRedAndRestTheInk() {
+    /// Liked: the pink, solid (#1178). At rest: the content's ink.
+    @Test func likedDrawsThePinkAndRestTheInk() {
         let heart = PointsHeartView()
         heart.ink = .black
         #expect(heart.drawnColours.count == 2)
@@ -57,8 +56,8 @@ struct PointsHeartViewTests {
         let image = render(heart)
         let middle = image.pixel(20, 22)
         #expect(middle.a > 0.9, "nothing painted inside the heart")
-        // Warm: red well above blue, as every stop of the gradient is.
-        #expect(middle.r > middle.b + 0.2, "the heart is not the gradient: \(middle)")
+        // Pink: red and blue both well above green (#1178).
+        #expect(middle.r > middle.g + 0.2 && middle.b > middle.g + 0.2, "the heart is not the gradient: \(middle)")
         #expect(image.pixel(1, 1).a < 0.1, "the gradient leaked outside the heart")
     }
 

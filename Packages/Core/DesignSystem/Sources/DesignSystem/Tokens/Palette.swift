@@ -76,6 +76,13 @@ public enum Palette {
     /// A soft selected background, an info banner, a "New" badge.
     public static let primaryContainer = dynamic(light: 0xFDE3EF, dark: 0x3A0A22)
 
+    /// The prominent button's fill (#1178, the owner 2026-10-15: "pink, a
+    /// pink-to-white gradient"): the tint at the bottom-left lightening
+    /// toward a pale pink at the top-right, under white words — 4.53:1 where
+    /// the words start, lighter toward the far corner. The same in both
+    /// appearances.
+    public static let primaryGradient: [UIColor] = [rgb(0xD6337F), rgb(0xEFA6C9)]
+
     /// Text on `primaryContainer`.
     public static let onPrimaryContainer = dynamic(light: 0xB8296C, dark: 0xF8ABCF)
 
@@ -188,11 +195,11 @@ public enum Palette {
     /// saved star alone. Drawn by the custom heart (#1128), as a mask over a
     /// gradient layer: SF Symbols do not draw a three-stop gradient.
     public static func pointsGradient(for traits: UITraitCollection) -> [UIColor] {
-        // ⚠️ SOLID NOW (#1169, the owner's call 2026-10-14: every heart the
-        // system red). Two equal stops, so the heart's mask and layer — built
+        // ⚠️ SOLID: the pink (#1178, the owner 2026-10-15, after a pink →
+        // violet pass). Two equal stops, so the heart's mask and layer — built
         // for a gradient — are untouched.
-        let red = UIColor.systemRed.resolvedColor(with: traits)
-        return [red, red]
+        let pink = tint.resolvedColor(with: traits)
+        return [pink, pink]
     }
 
     /// The icon's own gradient, pink → violet (#1176), deep enough to carry a

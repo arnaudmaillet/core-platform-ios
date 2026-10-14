@@ -45,15 +45,24 @@ struct AppButtonTests {
         #expect(button.configuration?.title == "Message")
     }
 
-    /// Follow is the quiet grey with its words in the accent (#1174);
-    /// Following, the same grey in the label's ink.
-    @Test func followIsGreyWithPinkWordsAndFollowingTheLabel() {
+    /// Follow is the pink-to-white gradient with white words (#1178);
+    /// Following, the quiet grey in the label's ink; a greyed button and a
+    /// placeholder wear no gradient.
+    @Test func followIsThePinkGradientWithWhiteWordsAndFollowingTheQuietGrey() {
         let button = follow()
-        #expect(button.configuration?.baseBackgroundColor == HeroTray.fill)
-        #expect(button.configuration?.baseForegroundColor == Palette.tint)
+        #expect(button.usesGradient)
+        #expect(button.configuration?.baseBackgroundColor == .clear, "the gradient view is the ground")
+        #expect(button.configuration?.baseForegroundColor == .white)
         button.setSelected(true, animated: false)
+        #expect(!button.usesGradient)
         #expect(button.configuration?.baseBackgroundColor == HeroTray.fill)
         #expect(button.configuration?.baseForegroundColor == .label)
+        button.setSelected(false, animated: false)
+        button.isEnabled = false
+        #expect(!button.usesGradient, "greyed")
+        button.isEnabled = true
+        button.setPhase(.placeholder, animated: false)
+        #expect(!button.usesGradient, "the bone is the whole picture")
     }
 
     @Test func theCardShapeIsARoundedRectangle() {

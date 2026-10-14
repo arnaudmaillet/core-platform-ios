@@ -41,9 +41,9 @@ open class AppButton: UIButton {
 
     /// What a pill stands on.
     public enum Ground: Equatable, Sendable {
-        /// The one action that matters (Follow): the quiet grey fill, its
-        /// words in the accent (#1174, the owner 2026-10-14: the pink used
-        /// subtly and sparingly).
+        /// The one action that matters (Follow): a pink-to-white gradient
+        /// (`Palette.primaryGradient`), white words (#1178, the owner
+        /// 2026-10-15) — the same in both appearances.
         case prominent
         /// The profile tray's quiet fill (`HeroTray.fill`): Message, Following.
         case quiet
@@ -250,6 +250,8 @@ open class AppButton: UIButton {
 
     private let veil = UIVisualEffectView(effect: nil)
     private let materialGround = UIVisualEffectView(effect: nil)
+    /// The prominent ground's gradient (#1178), under the content.
+    private let gradientGround = BrandGradientView(colors: Palette.primaryGradient)
     private let flash = UIView()
     private var bone: SkeletonBoneView?
     /// The size an in-flight action holds: the spinner is taller than a
@@ -302,6 +304,10 @@ open class AppButton: UIButton {
         materialGround.clipsToBounds = true
         insertSubview(materialGround, at: 0)
 
+        gradientGround.clipsToBounds = true
+        gradientGround.alpha = 0
+        insertSubview(gradientGround, aboveSubview: materialGround)
+
         veil.isUserInteractionEnabled = false
         veil.clipsToBounds = true
         veil.isHidden = true
@@ -339,10 +345,14 @@ open class AppButton: UIButton {
         materialGround.layer.cornerRadius = radius
         materialGround.layer.cornerCurve = .continuous
         sendSubviewToBack(materialGround)
+        gradientGround.frame = bounds
+        gradientGround.layer.cornerRadius = radius
+        gradientGround.layer.cornerCurve = .continuous
+        insertSubview(gradientGround, aboveSubview: materialGround)
         wash.frame = bounds
         wash.layer.cornerRadius = radius
         wash.layer.cornerCurve = .continuous
-        insertSubview(wash, aboveSubview: materialGround)
+        insertSubview(wash, aboveSubview: gradientGround)
         veil.frame = bounds
         veil.layer.cornerRadius = radius
         flash.frame = bounds
@@ -978,6 +988,9 @@ open class AppButton: UIButton {
         refreshPointsHeart()
         materialGround.effect = usesMaterial ? UIBlurEffect(style: .systemThinMaterial) : nil
         materialGround.isHidden = !usesMaterial
+        // An alpha, not `isHidden`: Follow → Following inside a morph fades
+        // the gradient into the quiet fill.
+        gradientGround.alpha = usesGradient ? 1 : 0
         refreshAccessibility()
     }
 
@@ -997,6 +1010,12 @@ open class AppButton: UIButton {
         }
     }
 
+    /// Whether the prominent gradient is the ground now: not when greyed, nor
+    /// as a placeholder's bone.
+    public var usesGradient: Bool {
+        currentGround == .prominent && isEnabled && phase == .content
+    }
+
     private var usesMaterial: Bool {
         currentGround == .material && isEnabled && phase != .placeholder
     }
@@ -1008,8 +1027,10 @@ open class AppButton: UIButton {
         switch currentGround {
         case .prominent?:
             config = .filled()
-            config.baseBackgroundColor = HeroTray.fill
-            config.baseForegroundColor = Palette.tint
+            // The gradient view is the ground (#1178); the fill stays clear
+            // over it.
+            config.baseBackgroundColor = .clear
+            config.baseForegroundColor = .white
         case .quiet?:
             config = .filled()
             config.baseBackgroundColor = HeroTray.fill
