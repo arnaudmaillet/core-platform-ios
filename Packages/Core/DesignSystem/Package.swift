@@ -10,7 +10,7 @@ let package = Package(
     targets: [
         .target(
             name: "DesignSystem",
-            resources: [.copy("Resources/Sounds")]
+            resources: [.copy("Resources/Sounds"), .process("Resources/Symbols.xcassets")]
         ),
         .testTarget(name: "DesignSystemTests", dependencies: ["DesignSystem"])
     ]
