@@ -14,7 +14,7 @@ import Testing
 /// then `Login { passkey }` — no second step.
 @MainActor
 struct PasskeySignInTests {
-    private func manager(passkeysUnavailable: Bool = false) async throws -> SessionManager {
+    private func makeManager(passkeysUnavailable: Bool = false) async throws -> SessionManager {
         let backend = MockBackend(enforcesEdgePolicy: true)
         MockAuthService(passkeysUnavailable: passkeysUnavailable).register(on: backend.bff)
         let manager = SessionManager(
@@ -38,7 +38,7 @@ struct PasskeySignInTests {
 
     /// Done when: a passkey signs the account in, with no second step.
     @Test func aPasskeySignsIn() async throws {
-        let manager = try await manager()
+        let manager = try await makeManager()
         let request = try await manager.startPasskeySignIn()
         #expect(request.relyingPartyID == MockAuthService.passkeyRelyingParty)
         #expect(String(decoding: request.challengeData, as: UTF8.self).hasPrefix("passkey-sign-in-"))
@@ -58,7 +58,7 @@ struct PasskeySignInTests {
 
     /// A passkey the account no longer has does not sign in.
     @Test func anUnknownPasskeyIsRejected() async throws {
-        let manager = try await manager()
+        let manager = try await makeManager()
         let authenticator = seededAuthenticator()
         authenticator.signInCredentialID = Data("someone-else".utf8)
         let assertion = try await authenticator.assertPasskey(try await manager.startPasskeySignIn())
@@ -67,13 +67,13 @@ struct PasskeySignInTests {
 
     /// A server without passkeys says so before any sheet.
     @Test func unavailableSaysSo() async throws {
-        let manager = try await manager(passkeysUnavailable: true)
+        let manager = try await makeManager(passkeysUnavailable: true)
         await #expect(throws: AuthError.passkeysUnavailable) { _ = try await manager.startPasskeySignIn() }
     }
 
     /// An account is never made with a passkey.
     @Test func aPasskeyDoesNotSignUp() async throws {
-        let manager = try await manager()
+        let manager = try await makeManager()
         let assertion = try await seededAuthenticator().assertPasskey(try await manager.startPasskeySignIn())
         let details = SignUpDetails(
             dateOfBirth: DateComponents(year: 1990, month: 4, day: 12),
