@@ -16,14 +16,17 @@ import XCTest
 final class PillDragUITests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    /// For You: three tabs in the bottom accessory, indices into `AppTab`.
+    /// Messages: three tabs (All, Requests, Suggestions) in the bottom
+    /// accessory. For You had three too, until it became one page
+    /// (2026-09-29) and lost its selector — which is what these tests then
+    /// reported as "no selector" (#1154). Indices into `AppTab`.
     /// ⚠️ `-select-tab` takes an INDEX; a name is a silent no-op that lands on
     /// Explore and fakes a missing selector.
-    private static let forYou = "1"
+    private static let selectorTab = "2"
 
     func testTheFingerOnThePillPagesAndTheFingerBesideItDoesNot() {
         let app = XCUIApplication()
-        app.launchArguments = ["-mock-auto-login", "-pill-drag-probe", "-select-tab", Self.forYou]
+        app.launchArguments = ["-mock-auto-login", "-pill-drag-probe", "-select-tab", Self.selectorTab]
         app.launch()
 
         guard let resting = probe(in: app, timeout: 25, matches: { $0.hasBar && $0.tabs >= 2 }) else {
@@ -72,7 +75,7 @@ final class PillDragUITests: XCTestCase {
     /// this is the check that it does not swallow the tap it begins under.
     func testTappingAnotherTabStillChangesIt() {
         let app = XCUIApplication()
-        app.launchArguments = ["-mock-auto-login", "-pill-drag-probe", "-select-tab", Self.forYou]
+        app.launchArguments = ["-mock-auto-login", "-pill-drag-probe", "-select-tab", Self.selectorTab]
         app.launch()
 
         guard let resting = probe(in: app, timeout: 25, matches: { $0.hasBar && $0.tabs >= 2 }) else {
