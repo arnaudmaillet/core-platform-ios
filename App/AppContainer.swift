@@ -1419,6 +1419,12 @@ final class AppContainer {
         // Settings → Storage measures and clears every cache, and applies the
         // storage limit and the cellular choice, through the coordinator (#899).
         builder.cacheCoordinator = cacheCoordinator
+        // Settings → Passkeys (#551): the mock's relying party is made up, and
+        // no device is associated with it — the system sheet would fail at
+        // once. The fleet uses the real one.
+        if environment == .mock {
+            builder.makePasskeyAuthorizer = { SimulatedPasskeyAuthorizer() }
+        }
         // What You See → Your Interests (#413).
         builder.interestTags = InterestTagsRepository(
             timelineClient: Timeline_V1_TimelineServiceClient(client: authenticatedRPCClient),

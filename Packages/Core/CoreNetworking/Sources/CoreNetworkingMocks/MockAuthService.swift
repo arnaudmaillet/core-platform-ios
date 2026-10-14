@@ -57,14 +57,25 @@ public final class MockAuthService: @unchecked Sendable {
     private var sessionByAccessToken: [String: String] = [:]
     private var generation: Int64 = 1
     private var tokenCounter = 0
+    /// The account's passkeys (#551), oldest first; one seeded, so Settings
+    /// has a row to show and remove.
+    private var passkeys: [Auth_V1_Passkey]
+    /// Registration challenges handed out and not yet used.
+    private var passkeyChallenges: Set<String> = []
+    /// No relying party configured: every passkey RPC is UNAVAILABLE, as on
+    /// a fleet without `AUTH_WEBAUTHN_RP_ID`.
+    private let passkeysUnavailable: Bool
 
     public init(
         accessTokenLifetimeSeconds: Int64 = 900,
-        lifecycle: MockAccountLifecycle = MockAccountLifecycle()
+        lifecycle: MockAccountLifecycle = MockAccountLifecycle(),
+        passkeysUnavailable: Bool = false
     ) {
         self.accessTokenLifetime = accessTokenLifetimeSeconds
         self.lifecycle = lifecycle
+        self.passkeysUnavailable = passkeysUnavailable
         self.sessions = Self.seededOtherSessions(now: Date())
+        self.passkeys = [Self.seededPasskey(now: Date())]
     }
 
     public func register(on bff: MockBFF) {
@@ -118,6 +129,20 @@ public final class MockAuthService: @unchecked Sendable {
         }
         bff.register(path: "/auth.v1.AuthService/RegenerateBackupCodes") { [self] (_: Auth_V1_RegenerateBackupCodesRequest, headers: Headers) in
             regenerateBackupCodes(headers)
+        }
+        bff.register(path: "/auth.v1.AuthService/ListPasskeys") { [self] (_: Auth_V1_ListPasskeysRequest, headers: Headers) in
+            listPasskeys(headers)
+        }
+        bff.register(path: "/auth.v1.AuthService/StartPasskeyRegistration") {
+            [self] (_: Auth_V1_StartPasskeyRegistrationRequest, headers: Headers) in
+            startPasskeyRegistration(headers)
+        }
+        bff.register(path: "/auth.v1.AuthService/FinishPasskeyRegistration") {
+            [self] (request: Auth_V1_FinishPasskeyRegistrationRequest, headers: Headers) in
+            finishPasskeyRegistration(request, headers: headers)
+        }
+        bff.register(path: "/auth.v1.AuthService/RemovePasskey") { [self] (request: Auth_V1_RemovePasskeyRequest, headers: Headers) in
+            removePasskey(request, headers: headers)
         }
     }
 
@@ -696,6 +721,101 @@ public final class MockAuthService: @unchecked Sendable {
         return .success(response)
     }
 
+    // MARK: - Passkeys (#551, backend #808)
+
+    /// The relying party the mock's options name.
+    public static let passkeyRelyingParty = "core-platform.example"
+    public static let seededPasskeyID = "c2VlZGVkLXBhc3NrZXk"
+    /// The fleet's cap (AUT-5025).
+    public static let passkeyLimit = 10
+
+    private static func seededPasskey(now: Date) -> Auth_V1_Passkey {
+        var passkey = Auth_V1_Passkey()
+        passkey.credentialID = seededPasskeyID
+        passkey.name = "iCloud Keychain"
+        passkey.createdAt = Google_Protobuf_Timestamp(date: now.addingTimeInterval(-21 * 86_400))
+        passkey.lastUsedAt = Google_Protobuf_Timestamp(date: now.addingTimeInterval(-2 * 86_400))
+        passkey.synced = true
+        return passkey
+    }
+
+    private func passkeyRefusal(_ headers: Headers, needsStepUp: Bool) -> ConnectError? {
+        if passkeysUnavailable {
+            return ConnectError(code: .unavailable, message: "passkeys are not configured")
+        }
+        return settingsRefusal(headers, needsStepUp: needsStepUp)
+    }
+
+    private func listPasskeys(_ headers: Headers) -> Result<Auth_V1_ListPasskeysResponse, ConnectError> {
+        if let refusal = passkeyRefusal(headers, needsStepUp: false) { return .failure(refusal) }
+        var response = Auth_V1_ListPasskeysResponse()
+        response.passkeys = lock.withLock { passkeys }
+        return .success(response)
+    }
+
+    private func startPasskeyRegistration(_ headers: Headers) -> Result<Auth_V1_PasskeyRegistrationOptions, ConnectError> {
+        if let refusal = passkeyRefusal(headers, needsStepUp: true) { return .failure(refusal) }
+        return lock.withLock {
+            guard passkeys.count < Self.passkeyLimit else {
+                return .failure(ConnectError(code: .resourceExhausted, message: "AUT-5025: ten passkeys already"))
+            }
+            tokenCounter += 1
+            let challenge = Data("passkey-challenge-\(tokenCounter)".utf8).base64URLForMock
+            passkeyChallenges.insert(challenge)
+            var options = Auth_V1_PasskeyRegistrationOptions()
+            options.challenge = challenge
+            options.rpID = Self.passkeyRelyingParty
+            options.userID = Data(Self.accountID.utf8).base64URLForMock
+            options.userName = Self.demoEmail
+            options.excludeCredentials = passkeys.map(\.credentialID)
+            options.expiresIn = 300
+            return .success(options)
+        }
+    }
+
+    /// Accepts any non-empty answer to a challenge it handed out; the
+    /// credential id is derived from the attestation, so the same answer
+    /// twice is the same authenticator (AUT-5026).
+    private func finishPasskeyRegistration(
+        _ request: Auth_V1_FinishPasskeyRegistrationRequest, headers: Headers
+    ) -> Result<Auth_V1_Passkey, ConnectError> {
+        if let refusal = passkeyRefusal(headers, needsStepUp: false) { return .failure(refusal) }
+        return lock.withLock {
+            guard passkeyChallenges.remove(request.challenge) != nil else {
+                return .failure(ConnectError(code: .failedPrecondition, message: "AUT-5023: start the registration again"))
+            }
+            guard !request.clientDataJson.isEmpty, !request.attestationObject.isEmpty else {
+                return .failure(ConnectError(code: .invalidArgument, message: "AUT-5024: the passkey was not accepted"))
+            }
+            let id = Data(request.attestationObject.prefix(32)).base64URLForMock
+            guard !passkeys.contains(where: { $0.credentialID == id }) else {
+                return .failure(ConnectError(code: .alreadyExists, message: "AUT-5026: this passkey is already registered"))
+            }
+            var passkey = Auth_V1_Passkey()
+            passkey.credentialID = id
+            passkey.name = request.name.isEmpty ? "Passkey" : String(request.name.prefix(64))
+            passkey.createdAt = Google_Protobuf_Timestamp(date: Date())
+            passkey.synced = true
+            passkeys.append(passkey)
+            return .success(passkey)
+        }
+    }
+
+    private func removePasskey(
+        _ request: Auth_V1_RemovePasskeyRequest, headers: Headers
+    ) -> Result<Auth_V1_ListPasskeysResponse, ConnectError> {
+        if let refusal = passkeyRefusal(headers, needsStepUp: true) { return .failure(refusal) }
+        return lock.withLock {
+            guard let index = passkeys.firstIndex(where: { $0.credentialID == request.credentialID }) else {
+                return .failure(ConnectError(code: .notFound, message: "AUT-5027: no such passkey"))
+            }
+            passkeys.remove(at: index)
+            var response = Auth_V1_ListPasskeysResponse()
+            response.passkeys = passkeys
+            return .success(response)
+        }
+    }
+
     private func makeTokenPair(sessionID: String, refreshToken: String) -> Auth_V1_TokenPair {
         var tokens = Auth_V1_TokenPair()
         tokens.accessToken = (sessions[sessionID]?.isGuest == true ? "gt-" : "at-") + "\(tokenCounter)"
@@ -705,5 +825,15 @@ public final class MockAuthService: @unchecked Sendable {
         tokens.expiresIn = accessTokenLifetime
         tokens.sessionID = sessionID
         return tokens
+    }
+}
+
+extension Data {
+    /// base64url without padding, as the contract carries binary values.
+    var base64URLForMock: String {
+        base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }

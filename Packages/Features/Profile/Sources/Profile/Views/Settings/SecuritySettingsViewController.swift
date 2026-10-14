@@ -8,8 +8,9 @@ import UIKit
 /// is signed in and the two ways out — one other device, or every device at
 /// once (#384) — and App Lock (#418).
 ///
-/// Passkeys are listed under Coming Soon (#405): the server has them
-/// (backend #808), the app's contracts and associated domain don't yet.
+/// Passkeys (#551) sit beside two-step sign-in once the server says it has
+/// them: a fleet without a relying party answers UNAVAILABLE, and the row
+/// stays away rather than lead to a screen that cannot work.
 final class SecuritySettingsViewController: UIViewController {
     private enum Section: Hashable {
         case checkup, signIn, apps, sessions, global, appLock, comingSoon
@@ -18,6 +19,7 @@ final class SecuritySettingsViewController: UIViewController {
     enum Item: Hashable {
         case checkup
         case twoStep
+        case passkeys
         /// Apps and Websites (#485).
         case authorizedApps
         case requireLock
@@ -30,13 +32,18 @@ final class SecuritySettingsViewController: UIViewController {
         case planned(String)
     }
 
-    private static let planned = ["Passkeys", "New sign-in alerts"]
+    private static let planned = ["New sign-in alerts"]
 
     private let viewModel: SecuritySettingsViewModel
     private let onSignedOutEverywhere: () -> Void
     private let authenticator: any DeviceAuthenticating
     private let makeCheckup: (() -> UIViewController)?
     private let makeTwoStep: (() -> UIViewController)?
+    private let makePasskeys: (() -> UIViewController)?
+    /// Whether the server has passkeys (not UNAVAILABLE): asked once the
+    /// screen loads; the row appears when it says yes.
+    private let passkeysAvailable: (() async -> Bool)?
+    private var showsPasskeys = false
     private let makeAuthorizedApps: (() -> UIViewController)?
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
@@ -50,8 +57,12 @@ final class SecuritySettingsViewController: UIViewController {
         authenticator: any DeviceAuthenticating = DeviceAuthenticator(),
         makeCheckup: (() -> UIViewController)? = nil,
         makeTwoStep: (() -> UIViewController)? = nil,
+        makePasskeys: (() -> UIViewController)? = nil,
+        passkeysAvailable: (() async -> Bool)? = nil,
         makeAuthorizedApps: (() -> UIViewController)? = nil
     ) {
+        self.makePasskeys = makePasskeys
+        self.passkeysAvailable = passkeysAvailable
         self.viewModel = viewModel
         self.makeAuthorizedApps = makeAuthorizedApps
         self.makeTwoStep = makeTwoStep
@@ -80,6 +91,14 @@ final class SecuritySettingsViewController: UIViewController {
         }
         applySnapshot()
         Task { await viewModel.load() }
+        if makePasskeys != nil, let passkeysAvailable {
+            Task { [weak self] in
+                let available = await passkeysAvailable()
+                guard let self, available else { return }
+                showsPasskeys = true
+                applySnapshot()
+            }
+        }
     }
 
     /// Coming back (from two-step sign-in or the checkup) re-reads the
@@ -179,9 +198,10 @@ final class SecuritySettingsViewController: UIViewController {
             snapshot.appendSections([.checkup])
             snapshot.appendItems([.checkup], toSection: .checkup)
         }
-        if makeTwoStep != nil {
+        let signIn: [Item] = (makeTwoStep != nil ? [.twoStep] : []) + (showsPasskeys ? [.passkeys] : [])
+        if !signIn.isEmpty {
             snapshot.appendSections([.signIn])
-            snapshot.appendItems([.twoStep], toSection: .signIn)
+            snapshot.appendItems(signIn, toSection: .signIn)
         }
         if makeAuthorizedApps != nil {
             snapshot.appendSections([.apps])
@@ -272,6 +292,13 @@ final class SecuritySettingsViewController: UIViewController {
             var content = UIListContentConfiguration.cell()
             content.text = "Two-Step Sign-In"
             content.image = UIImage(systemName: "lock.shield")
+            content.imageProperties.tintColor = .label
+            cell.contentConfiguration = content
+            cell.accessories = [.disclosureIndicator()]
+        case .passkeys:
+            var content = UIListContentConfiguration.cell()
+            content.text = PasskeysViewController.title
+            content.image = UIImage(systemName: "person.badge.key")
             content.imageProperties.tintColor = .label
             cell.contentConfiguration = content
             cell.accessories = [.disclosureIndicator()]
@@ -466,7 +493,7 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .session(let session): !session.isCurrent
-        case .failed, .logOutEverywhere, .checkup, .twoStep, .authorizedApps: true
+        case .failed, .logOutEverywhere, .checkup, .twoStep, .passkeys, .authorizedApps: true
         case .skeleton, .planned, .requireLock, .lockDelay, nil: false
         }
     }
@@ -486,6 +513,10 @@ extension SecuritySettingsViewController: UICollectionViewDelegate {
             }
         case .twoStep:
             if let screen = makeTwoStep?() {
+                navigationController?.pushViewController(screen, animated: true)
+            }
+        case .passkeys:
+            if let screen = makePasskeys?() {
                 navigationController?.pushViewController(screen, animated: true)
             }
         case .authorizedApps:
