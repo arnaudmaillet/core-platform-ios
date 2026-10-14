@@ -92,7 +92,8 @@ final class BadgedAvatarView: UIView {
         super.init(frame: .zero)
         avatar.pin(to: self)
 
-        badge.backgroundColor = .tintColor
+        // One colour for every unread count (#1169): the tab bar's too.
+        badge.backgroundColor = Palette.counter
         badge.layer.borderWidth = Metrics.ringWidth
         badge.layer.cornerCurve = .continuous
         badge.isHidden = true

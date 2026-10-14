@@ -465,6 +465,18 @@ final class WalletClaimViewController: UIViewController {
         // The brand's prominent glass (#1124): on the window's dark-mode
         // tint the glass's white label was 1.9:1.
         claimButton.tintColor = Palette.prominentGlassTint
+        if Palette.rules.heroButton == .gradient {
+            // The brand's signature on the key moment (#1169's rule to compare
+            // on the device): the gradient as the ground, a white bold label.
+            var gradient = UIButton.Configuration.filled()
+            gradient.cornerStyle = .capsule
+            gradient.background.customView = BrandGradientView()
+            gradient.baseForegroundColor = .white
+            claimButton.configuration = gradient
+            claimButton.configurationUpdateHandler = { button in
+                button.configuration?.background.customView?.alpha = button.isEnabled ? 1 : 0.4
+            }
+        }
         claimButton.addAction(UIAction { [weak self] _ in self?.claimTapped() }, for: .primaryActionTriggered)
         PressFeedback.attach(to: claimButton, sound: nil)
         claimButton.translatesAutoresizingMaskIntoConstraints = false

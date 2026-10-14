@@ -102,6 +102,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         )
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
+        // One colour for every unread count (#1169): the tab bar's and the
+        // rows' too.
+        categoryBar.badgeTint = Palette.counter
     }
 
     private let initialIndex: Int

@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// Process-level lifecycle only: launch, push registration, background tasks.
@@ -25,6 +26,10 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
         if ProcessInfo.processInfo.arguments.contains(where: { $0.hasSuffix("-log") }) {
             setvbuf(stdout, nil, _IONBF, 0)
         }
+        // The theme to compare (#1169): `-theme <name>` and its rule flags,
+        // before any screen reads a palette role. Release runs the shipped
+        // theme, with no switch.
+        Palette.configure(arguments: ProcessInfo.processInfo.arguments)
         #endif
         // Before any cache fills: every release signal reaches the one
         // device cache from the first frame (#890).

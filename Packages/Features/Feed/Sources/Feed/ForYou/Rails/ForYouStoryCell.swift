@@ -64,6 +64,12 @@ final class ForYouStoryCell: UICollectionViewCell {
     /// off recurring chrome. Still a gradient layer with two equal stops, so
     /// the mask and geometry are untouched; re-resolved on a style flip.
     private func applyRingColors() {
+        // #1169 compares the solid accent with the brand's gradient on the
+        // device (`Palette.rules.storyRing`).
+        if Palette.rules.storyRing == .gradient {
+            ring.colors = Palette.brandGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
+            return
+        }
         let tint = Palette.tint.resolvedColor(with: traitCollection).cgColor
         ring.colors = [tint, tint]
     }

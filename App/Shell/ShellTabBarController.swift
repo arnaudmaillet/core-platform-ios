@@ -26,6 +26,25 @@ final class ShellTabBarController: UITabBarController, StakeShopOpening, MemberG
     /// any screen can ask for it.
     var memberGate: any MemberGating = MemberGate()
 
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // The selected tab is NEUTRAL (#1169, decided 2026-10-14): the label's
+        // colour on the glass selection, the accent kept for what matters.
+        tabBar.tintColor = Palette.rules.selectedTabIsNeutral ? .label : Palette.tint
+        // One colour for every unread count (#1169) — the Messages selector's
+        // and the inbox rows' too. `UITab` has no badge colour of its own:
+        // the bar's item appearances carry it, on a copy of what UIKit set up
+        // so its glass is untouched.
+        let appearance = tabBar.standardAppearance.copy()
+        for item in [appearance.stackedLayoutAppearance, appearance.inlineLayoutAppearance,
+                     appearance.compactInlineLayoutAppearance] {
+            item.normal.badgeBackgroundColor = Palette.counter
+            item.selected.badgeBackgroundColor = Palette.counter
+        }
+        tabBar.standardAppearance = appearance
+        tabBar.scrollEdgeAppearance = appearance
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         onLayout?()
