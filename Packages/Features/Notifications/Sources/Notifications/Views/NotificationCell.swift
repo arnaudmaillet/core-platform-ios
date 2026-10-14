@@ -300,16 +300,26 @@ final class KindBadgeView: UIView {
         disc.backgroundColor = colour
     }
 
+    /// The kind's glyph and its disc. ⚠️ NEUTRAL BUT THE HEART (#1124,
+    /// decision 4): a hue per kind was a rainbow down the list that said
+    /// nothing the glyph did not, and blue and orange now mean "interactive".
+    /// The glyph tells the kinds apart; only a like keeps a colour — the
+    /// Points heart's, which becomes its gradient with the custom heart
+    /// (#1128).
     static func style(for action: NotificationItem.Action) -> (String, UIColor) {
         switch action {
         case .reaction: (PointsSymbol.glyph, PointsSymbol.tint)
-        case .comment: (PostActionSymbol.commentsFilled, .systemBlue)
-        case .reply: ("arrowshape.turn.up.left.fill", .systemGreen)
-        case .mention: ("at", .systemIndigo)
-        case .supervisionStarted: ("figure.2.and.child.holdinghands", .systemTeal)
-        case .supervisionEnded: ("xmark", .systemGray)
-        case .supervisionCameOfAge: ("party.popper.fill", .systemOrange)
-        case .other: ("bell.fill", .systemGray)
+        case .comment: (PostActionSymbol.commentsFilled, neutral)
+        case .reply: ("arrowshape.turn.up.left.fill", neutral)
+        case .mention: ("at", neutral)
+        case .supervisionStarted: ("figure.2.and.child.holdinghands", neutral)
+        case .supervisionEnded: ("xmark", neutral)
+        case .supervisionCameOfAge: ("party.popper.fill", neutral)
+        case .other: ("bell.fill", neutral)
         }
     }
+
+    /// The disc every kind but a like wears: an opaque grey the white glyph
+    /// reads on in both appearances.
+    static let neutral: UIColor = .systemGray
 }

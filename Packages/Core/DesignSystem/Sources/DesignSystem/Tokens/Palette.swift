@@ -55,6 +55,13 @@ public enum Palette {
     /// `primaryFill` pressed or highlighted.
     public static let primaryFillPressed = dynamic(light: 0xF1800E, dark: 0xF09F58)
 
+    /// A PROMINENT GLASS button's tint (the wallet's Claim, a country's
+    /// Unlock): the deep tangerine in both appearances. ⚠️ The glass draws
+    /// its label white and vibrant in the dark whatever ink is asked for, so
+    /// the dark `primaryFill` (white on it 1.9:1) cannot be used there; white
+    /// on this is 4.03:1 in either appearance.
+    public static let prominentGlassTint = rgb(0xC76300)
+
     /// A soft selected background, an info banner, a "New" badge.
     public static let primaryContainer = dynamic(light: 0xFFECE0, dark: 0x331B08)
 

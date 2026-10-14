@@ -390,11 +390,12 @@ final class CommentsInputBar: UIView {
     static let waveformConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
     static let sendConfiguration = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
     static let emoteToggleConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-    /// The send arrow's colour, on every host: system blue, NAMED rather than
-    /// inherited. It was `.tintColor`, which resolves against the button's
-    /// ancestors — and came out grey in a conversation while the post's was
-    /// blue (asked 2026-10-02: one blue for every composer).
-    static let sendTint: UIColor = .systemBlue
+    /// The send arrow's colour, on every host: the brand's tint (#1124),
+    /// NAMED rather than inherited. It was `.tintColor`, which resolves
+    /// against the button's ancestors — and came out grey in a conversation
+    /// while the post's was coloured (asked 2026-10-02: one colour for every
+    /// composer).
+    static let sendTint: UIColor = Palette.tint
     /// The waveform's ink: the field's quiet one, the emote button's.
     static let waveformTint: UIColor = .secondaryLabel
 

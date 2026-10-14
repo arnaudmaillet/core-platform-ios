@@ -1,3 +1,4 @@
+import DesignSystem
 import Symbols
 import Testing
 import UIKit
@@ -53,9 +54,10 @@ struct CommentsInputBarFieldTests {
     // MARK: - Send tint
 
     /// ⚠️ NAMED, NOT INHERITED. The arrow was `.tintColor`, which resolves
-    /// against the button's ancestors — grey in a conversation, blue on the
-    /// post. A host tinting its view grey leaves it blue now.
-    @Test func theSendArrowIsSystemBlueWhateverTheHostsTint() throws {
+    /// against the button's ancestors — grey in a conversation, coloured on
+    /// the post. A host tinting its view grey leaves it the brand's tint now
+    /// (#1124).
+    @Test func theSendArrowIsTheBrandTintWhateverTheHostsTint() throws {
         for tint in [nil, UIColor.systemGray, UIColor.label] as [UIColor?] {
             let (bar, _, window) = hostedBar(hostTint: tint)
             defer { window.isHidden = true }
@@ -64,24 +66,24 @@ struct CommentsInputBarFieldTests {
             let action = bar.debugFieldActionButton
             let color = action.configuration?.baseForegroundColor
             for style in [UIUserInterfaceStyle.light, .dark] {
-                #expect(Self.resolved(color, style) == Self.resolved(.systemBlue, style),
+                #expect(Self.resolved(color, style) == Self.resolved(Palette.tint, style),
                         "send is \(String(describing: color)) under a \(String(describing: tint)) host")
             }
             // What the glyph is DRAWN in — `.tintColor` as a configuration
-            // colour resolves to blue on its own and only turns grey here,
+            // colour resolves to the tint on its own and only turns grey here,
             // against the button's ancestors.
             action.layoutIfNeeded()
             let drawn = try #require(
                 Self.descendants(of: action).compactMap { $0 as? UIImageView }.first { $0.image != nil }
             )
             #expect(drawn.tintColor.resolvedColor(with: action.traitCollection)
-                == UIColor.systemBlue.resolvedColor(with: action.traitCollection),
+                == Palette.tint.resolvedColor(with: action.traitCollection),
                     "drawn in \(String(describing: drawn.tintColor)) under a \(String(describing: tint)) host")
             // The waveform stays the field's quiet ink.
             bar.draftText = ""
             #expect(bar.debugFieldActionButton.configuration?.baseForegroundColor == .secondaryLabel)
         }
-        #expect(CommentsInputBar.sendTint == .systemBlue)
+        #expect(CommentsInputBar.sendTint === Palette.tint)
     }
 
     // MARK: - The waveform ↔ send swap
@@ -121,8 +123,10 @@ struct CommentsInputBarFieldTests {
         return pixels
     }
 
-    private static func isBlue(_ pixel: (CGFloat, CGFloat, CGFloat)) -> Bool {
-        pixel.2 > 0.8 && pixel.2 - pixel.0 > 0.5
+    /// The brand's tangerine (#1124), light #C76300 or dark #FFAD66: a
+    /// strong red channel well above the blue.
+    private static func isTint(_ pixel: (CGFloat, CGFloat, CGFloat)) -> Bool {
+        pixel.0 > 0.7 && pixel.0 - pixel.2 > 0.35
     }
 
     private static func isGrey(_ pixel: (CGFloat, CGFloat, CGFloat)) -> Bool {
@@ -146,7 +150,7 @@ struct CommentsInputBarFieldTests {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let sendInk = try Self.ink(of: send, style)
             try #require(!sendInk.isEmpty)
-            #expect(sendInk.allSatisfy(Self.isBlue), "\(style.rawValue): send drawn \(sendInk.prefix(3))")
+            #expect(sendInk.allSatisfy(Self.isTint), "\(style.rawValue): send drawn \(sendInk.prefix(3))")
             let waveInk = try Self.ink(of: waveform, style)
             try #require(!waveInk.isEmpty)
             #expect(waveInk.allSatisfy(Self.isGrey), "\(style.rawValue): waveform drawn \(waveInk.prefix(3))")
@@ -193,7 +197,7 @@ struct CommentsInputBarFieldTests {
                 == (sends ? CommentsInputBar.sendSymbol : CommentsInputBar.waveformSymbol))
             let ink = try drawnInk()
             try #require(!ink.isEmpty)
-            #expect(ink.allSatisfy(sends ? Self.isBlue : Self.isGrey),
+            #expect(ink.allSatisfy(sends ? Self.isTint : Self.isGrey),
                     "\(draft.debugDescription): drawn \(ink.prefix(3))")
             // The spinner's ink agrees with the face.
             let base = action.configuration?.baseForegroundColor

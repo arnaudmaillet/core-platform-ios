@@ -1,5 +1,7 @@
 # App icon explorations
 
+> **Historical (2026-10-14):** the Aurora palette and the wand icon below are past directions. The current icon is the play on a purple → orange blob (#1120), and the app's colours are the brand palette in `dev/BRAND_PALETTE.md` (#1124).
+
 The shipped icon is `App/Resources/AppIcon.icon`: a magic wand bent into an exact half circle (hollow ends, solid band in the middle) with three bubbles, on an Aurora-blue background. It was composed by hand in Icon Composer from the SVGs in `wand/`. Everything here is the working material behind it, kept so a direction can be revisited.
 
 - `wand/` — the layers of the shipped icon, each on the same 1024 canvas so they stack in place: `wand.svg`, `bubble-large.svg`, `bubble-medium.svg`, `bubble-small.svg`. `v1-wand-sparkles-circles.svg` is the first take (a gently bent wand after the composition of SF Symbol `wand.and.sparkles.inverse`, its sparkles redrawn as circles). `./wand.py half` rebuilds `wand.svg`; pass a number instead to bow the wand by that many points.
