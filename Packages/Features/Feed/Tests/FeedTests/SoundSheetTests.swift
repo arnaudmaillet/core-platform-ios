@@ -52,25 +52,27 @@ struct SoundSheetTests {
 
     /// Two different orders over `count` posts: popular = p0, p1, …; recent =
     /// the reverse. Without `popular`, the provider gives no Popular section.
+    /// The post the fixture's sheet opens over: in no ranking.
+    private static let watched = PostID("watched")
+
     private static func rankings(_ count: Int, popular: Bool = true) -> PostSoundRankings {
         let ids = ids(count)
         return PostSoundRankings(popular: popular ? ids : [], recent: ids.reversed())
     }
 
-    /// The sections over `count` posts, p0 the post watched, and a tile for
-    /// each post. With `popular`, the row takes p0…p7 and "Recent" the rest —
+    /// The sections over `count` posts, opened over a post outside them (the
+    /// post watched is in no section, #1147), and a tile for each post. With `popular`, the row takes p0…p7 and "Recent" the rest —
     /// a sound of 8 posts or fewer has none left for "Recent", and so no row.
     private static func content(
         _ count: Int, popular: Bool = true, original: Int? = nil, loaded: (Int) -> Bool = { _ in true }
     ) -> (sections: [SoundSheetSection], tiles: [SoundSheetViewController.Tile]) {
         let dealt = SoundSheetSections.make(
-            rankings: rankings(count, popular: popular), current: PostID("p0"),
+            rankings: rankings(count, popular: popular), current: Self.watched,
             original: original.map { PostID("p\($0)") }, isMedia: { _ in true }
         )
         let tiles = (0..<count).map { (index: Int) in
             SoundSheetViewController.Tile(
-                postID: PostID("p\(index)"), thumbnailURL: nil, caption: nil,
-                isCurrent: index == 0, isOriginal: dealt.original == PostID("p\(index)"),
+                postID: PostID("p\(index)"), thumbnailURL: nil, caption: nil, isOriginal: dealt.original == PostID("p\(index)"),
                 isLoaded: loaded(index)
             )
         }
@@ -342,34 +344,31 @@ struct SoundSheetTests {
         return try #require(card.subviews.first as? SoundSheetTileCell)
     }
 
-    /// "Original" and "Watching" stand BOTTOM-leading, the last one on the
-    /// foot, and the likes close the foot BOTTOM-trailing at the flight
-    /// card's own insets — asked for 2026-09-30 (evening).
+    /// "Original" stands BOTTOM-leading on the foot, and the likes close the
+    /// foot BOTTOM-trailing at the flight card's own insets — asked for
+    /// 2026-09-30 (evening). No "Watching" any more (#1147).
     @Test func theMarksAndTheLikesStandOnTheFoot() throws {
         let tile = Sheet.Tile(
-            postID: PostID("m"), thumbnailURL: URL(string: "https://example.com/m.jpg"), caption: nil,
-            isCurrent: true, isOriginal: true, likeCount: 3
+            postID: PostID("m"), thumbnailURL: URL(string: "https://example.com/m.jpg"), caption: nil, isOriginal: true, likeCount: 3
         )
         let cell = try Self.restingTile(tile)
         let size = cell.bounds.size
         let original = try #require(Self.mark("Original", in: cell.contentView))
-        let watching = try #require(Self.mark("Watching", in: cell.contentView))
+        #expect(Self.mark("Watching", in: cell.contentView) == nil, "a tile still says Watching")
         let likes = try #require(Self.likes(in: cell.contentView))
         #expect(cell.debugLikes == "3")
         #expect(cell.debugFootLift == 0, "a short count shares the foot with the marks")
-        #expect(abs(watching.maxY - (size.height - 6)) < 0.5, "Watching at \(watching)")
-        #expect(original.maxY < watching.minY, "the marks stack upwards from the foot")
-        #expect(abs(original.minX - 6) < 0.5 && abs(watching.minX - 6) < 0.5)
+        #expect(abs(original.maxY - (size.height - 6)) < 0.5, "Original at \(original)")
+        #expect(abs(original.minX - 6) < 0.5)
         #expect(abs(likes.maxX - (size.width - 8)) < 0.5 && abs(likes.maxY - (size.height - 7)) < 0.5)
-        #expect(!likes.intersects(watching))
+        #expect(!likes.intersects(original))
     }
 
     /// A text post's words read from the TOP, not the middle; its count is
     /// on the foot too.
     @Test func aTextTilesWordsStartAtItsHead() throws {
         let tile = Sheet.Tile(
-            postID: PostID("t"), thumbnailURL: nil, caption: "A few words about the sound",
-            isCurrent: false, likeCount: 12
+            postID: PostID("t"), thumbnailURL: nil, caption: "A few words about the sound", likeCount: 12
         )
         let cell = try Self.restingTile(tile)
         let caption = try #require(Self.views(UILabel.self, in: cell.contentView).first { $0.text == tile.caption })
@@ -387,8 +386,7 @@ struct SoundSheetTests {
     @Test func aNarrowTileLiftsItsMarksAndTheFlightCardAgrees() throws {
         let size = CGSize(width: 104, height: 139)
         let tile = Sheet.Tile(
-            postID: PostID("r"), thumbnailURL: URL(string: "https://example.com/r.jpg"), caption: nil,
-            isCurrent: false, isOriginal: true, likeCount: 12_345
+            postID: PostID("r"), thumbnailURL: URL(string: "https://example.com/r.jpg"), caption: nil, isOriginal: true, likeCount: 12_345
         )
         let cell = try Self.restingTile(tile, size: size)
         let original = try #require(Self.mark("Original", in: cell.contentView))
@@ -420,8 +418,7 @@ struct SoundSheetTests {
 
     private static func tile(for post: GalleryPost) -> Sheet.Tile {
         Sheet.Tile(
-            postID: post.id, thumbnailURL: post.thumbnailURL, caption: post.caption,
-            isCurrent: false, isOriginal: true
+            postID: post.id, thumbnailURL: post.thumbnailURL, caption: post.caption, isOriginal: true
         )
     }
 
@@ -502,7 +499,6 @@ struct SoundSheetTests {
         original: String?, using: [String], unknown: Set<String> = []
     ) -> (ids: [String], original: String?) {
         let result = SoundSheetViewController.gridPostIDs(
-            current: PostID("cur"),
             original: original.map { PostID($0) },
             using: using.map { PostID($0) },
             isMedia: { (id: PostID) -> Bool? in
@@ -512,23 +508,28 @@ struct SoundSheetTests {
         return (result.ids.map { (id: PostID) in id.rawValue }, result.original?.rawValue)
     }
 
-    @Test func theOriginalMediaPostComesFirstThenTheCurrentOne() {
-        let result = order(original: "orig", using: ["a", "orig", "cur", "b"])
-        #expect(result.ids == ["orig", "cur", "a", "b"])
+    @Test func theOriginalMediaPostComesFirst() {
+        let result = order(original: "orig", using: ["a", "orig", "b"])
+        #expect(result.ids == ["orig", "a", "b"])
         #expect(result.original == "orig")
     }
 
-    @Test func theCurrentPostCanBeItsOwnOriginal() {
-        let result = order(original: "cur", using: ["a", "cur"])
-        #expect(result.ids == ["cur", "a"])
-        #expect(result.original == "cur")
+    /// Opened from the original itself, the sheet leaves it out like any
+    /// post watched (#1147): unmarked, in no section.
+    @Test func theWatchedOriginalIsLeftOut() {
+        let dealt = SoundSheetSections.make(
+            rankings: Self.rankings(12), current: PostID("p3"), original: PostID("p3"), isMedia: { _ in true }
+        )
+        #expect(dealt.original == nil)
+        #expect(!dealt.sections.contains { $0.all.contains(PostID("p3")) })
+        #expect(dealt.sections.first?.ids.first == PostID("p0"), "the ranking leads once the original is out")
     }
 
     /// A text post is no "original" of a sound: it keeps its place among the
-    /// others, unmarked, and the current post leads.
+    /// others, unmarked.
     @Test func aTextOriginalIsNotMarked() {
         let text = order(original: "text", using: ["a", "text"])
-        #expect(text.ids == ["cur", "a", "text"])
+        #expect(text.ids == ["a", "text"])
         #expect(text.original == nil)
     }
 
@@ -536,15 +537,15 @@ struct SoundSheetTests {
     /// not loaded yet holds the first place, unmarked until it is known.
     @Test func anUnloadedOriginalLeadsUnmarked() {
         let result = order(original: "orig", using: ["orig", "a", "b"], unknown: ["orig", "b"])
-        #expect(result.ids == ["orig", "cur", "a", "b"])
+        #expect(result.ids == ["orig", "a", "b"])
         #expect(result.original == nil)
     }
 
     // MARK: - Sections
 
-    /// 23 posts, a row of 8: Popular is the original, the post watched, then
-    /// the most engaged; Recent is every OTHER post, newest first — a post
-    /// shows once. Popular's chevron is its whole ranking; Recent — which
+    /// 23 posts, a row of 8: Popular is the original, then the most engaged;
+    /// Recent is every OTHER post, newest first — a post shows once — and
+    /// the post watched is in neither (#1147). Popular's chevron is its whole ranking; Recent — which
     /// shows everything it holds — has none.
     @Test func recentLeavesOutWhatTheRowShows() throws {
         let rankings = Self.rankings(23)
@@ -554,15 +555,17 @@ struct SoundSheetTests {
         #expect(dealt.sections.map(\.kind) == [.popular, .recent])
         #expect(dealt.original == PostID("p9"))
         let popular = dealt.sections[0], recent = dealt.sections[1]
-        #expect(popular.ids.map(\.rawValue) == ["p9", "p5", "p0", "p1", "p2", "p3", "p4", "p6"])
-        #expect(popular.all.count == 23 && popular.all.prefix(8) == popular.ids.prefix(8))
-        #expect(recent.ids == rankings.recent.filter { !popular.ids.contains($0) },
+        #expect(popular.ids.map(\.rawValue) == ["p9", "p0", "p1", "p2", "p3", "p4", "p6", "p7"])
+        #expect(popular.all.count == 22 && popular.all.prefix(8) == popular.ids.prefix(8))
+        #expect(recent.ids == rankings.recent.filter { !popular.ids.contains($0) && $0 != PostID("p5") },
                 "Recent is not every other post in date order")
-        #expect(recent.ids.count == 15)
+        #expect(recent.ids.count == 14)
         #expect(recent.ids.first == PostID("p22"))
         #expect(recent.all == recent.ids)
         #expect(Set(popular.ids).isDisjoint(with: Set(recent.ids)), "a post the row shows is in Recent too")
-        #expect(Set(popular.ids).union(recent.ids) == Set(Self.ids(23)), "a post is on neither")
+        #expect(Set(popular.ids).union(recent.ids) == Set(Self.ids(23)).subtracting([PostID("p5")]),
+                "a post is on neither")
+        #expect(!popular.all.contains(PostID("p5")), "the post watched is in the pushed ranking")
         #expect(popular.hasMore)
         #expect(!recent.hasMore, "the grid offers a chevron")
         #expect(SoundSheetSection.Kind.allCases == [.popular, .recent])
@@ -570,17 +573,17 @@ struct SoundSheetTests {
         #expect(SoundSheetSection.Kind.popular.isRow && !SoundSheetSection.Kind.recent.isRow)
     }
 
-    /// No Popular from the provider, no Popular on the sheet: every post in
-    /// "Recent", newest first — the post watched and the original included,
-    /// the original still marked.
-    @Test func withoutPopularFromTheProviderRecentHoldsEveryPost() {
+    /// No Popular from the provider, no Popular on the sheet: every OTHER
+    /// post in "Recent", newest first — the original included and still
+    /// marked, the post watched left out (#1147).
+    @Test func withoutPopularFromTheProviderRecentHoldsEveryOtherPost() {
         let rankings = Self.rankings(7, popular: false)
         #expect(!rankings.hasPopular)
         let dealt = SoundSheetSections.make(
             rankings: rankings, current: PostID("p5"), original: PostID("p2"), isMedia: { _ in true }
         )
         #expect(dealt.sections.map(\.kind) == [.recent])
-        #expect(dealt.sections.first?.ids == rankings.recent)
+        #expect(dealt.sections.first?.ids == rankings.recent.filter { $0 != PostID("p5") })
         #expect(dealt.original == PostID("p2"))
     }
 
@@ -592,26 +595,32 @@ struct SoundSheetTests {
             rankings: PostSoundRankings(popular: popular, recent: Array(popular.dropLast().reversed())),
             current: PostID("p0"), original: nil, isMedia: { _ in true }, rowLimit: 8
         )
-        // The row: p0…p7. Recent: p10, p9, p8 by date, then p11.
+        // The row: p1…p8 (p0 is watched). Recent: p10, p9 by date, then p11.
         #expect(dealt.sections.last?.kind == .recent)
-        #expect(dealt.sections.last?.ids.map(\.rawValue) == ["p10", "p9", "p8", "p11"])
+        #expect(dealt.sections.last?.ids.map(\.rawValue) == ["p10", "p9", "p11"])
     }
 
-    /// Recent is never empty, and always there: a row that would show every
-    /// post goes instead, and with no provider at all the post watched is
-    /// Recent's one post.
-    @Test func recentIsNeverEmpty() {
+    /// A section with nothing to show is not there (#1147): every other post
+    /// fits the row, so no "Recent"; no other post at all, no section — the
+    /// sheet is the sound alone.
+    @Test func aSectionWithNothingToShowIsNotThere() {
         let dealt = SoundSheetSections.make(
             rankings: Self.rankings(5), current: PostID("p0"), original: nil, isMedia: { _ in true }, rowLimit: 8
         )
-        #expect(dealt.sections.map(\.kind) == [.recent], "a row holding every post left Recent empty")
-        #expect(dealt.sections.last?.ids.count == 5)
+        #expect(dealt.sections.map(\.kind) == [.popular], "an empty Recent is still there")
+        #expect(dealt.sections.first?.ids.map(\.rawValue) == ["p1", "p2", "p3", "p4"])
 
         let alone = SoundSheetSections.make(
             rankings: .empty, current: PostID("cur"), original: nil, isMedia: { _ in true }
         )
-        #expect(alone.sections.map(\.kind) == [.recent])
-        #expect(alone.sections.first?.ids == [PostID("cur")])
+        #expect(alone.sections.isEmpty)
+
+        let onlyTheWatched = SoundSheetSections.make(
+            rankings: PostSoundRankings(popular: [PostID("cur")], recent: [PostID("cur")]),
+            current: PostID("cur"), original: PostID("cur"), isMedia: { _ in true }
+        )
+        #expect(onlyTheWatched.sections.isEmpty, "the sound's only post is the one watched")
+        #expect(onlyTheWatched.original == nil)
     }
 
     /// A post that could not be loaded leaves every section, and the row
@@ -622,8 +631,8 @@ struct SoundSheetTests {
             excluding: [PostID("p2"), PostID("p22")], rowLimit: 8
         )
         #expect(!dealt.sections.contains { $0.all.contains(PostID("p2")) || $0.all.contains(PostID("p22")) })
-        #expect(dealt.sections[0].ids.map(\.rawValue) == ["p0", "p1", "p3", "p4", "p5", "p6", "p7", "p8"])
-        #expect(dealt.sections[1].ids.count == 13)
+        #expect(dealt.sections[0].ids.map(\.rawValue) == ["p1", "p3", "p4", "p5", "p6", "p7", "p8", "p9"])
+        #expect(dealt.sections[1].ids.count == 12)
         #expect(dealt.sections[1].ids.first == PostID("p21"))
     }
 
@@ -677,12 +686,12 @@ struct SoundSheetTests {
 
         // p11 could not be loaded: it leaves; the others are filled in.
         let dealt = SoundSheetSections.make(
-            rankings: Self.rankings(12), current: PostID("p0"), original: nil, isMedia: { _ in true },
+            rankings: Self.rankings(12), current: Self.watched, original: nil, isMedia: { _ in true },
             excluding: [PostID("p11")]
         )
         controller.update(sections: dealt.sections, tiles: (0..<11).map { (index: Int) in
             SoundSheetViewController.Tile(
-                postID: PostID("p\(index)"), thumbnailURL: nil, caption: "post \(index)", isCurrent: index == 0
+                postID: PostID("p\(index)"), thumbnailURL: nil, caption: "post \(index)"
             )
         })
         #expect(controller.tiles.count == 11)
@@ -749,6 +758,21 @@ struct SoundSheetTests {
         #expect(Sheet.fittedDetentHeight(alone, recentCount: 4)
                 == Sheet.collapsedDetentHeight(alone) + 164 + Sheet.gutter)
         #expect(Sheet.collapsedDetentHeight(alone) < Sheet.collapsedDetentHeight(metrics))
+
+        // The sound alone (#1147): the collapsed sheet ends under the sound
+        // with the usual gutter, and growing it reveals nothing.
+        var soundOnly = alone
+        soundOnly.hasRecent = false
+        #expect(Sheet.foldBottom(soundOnly) == Sheet.topInset + 96 + Sheet.contentBottom)
+        #expect(Sheet.revealLine(soundOnly) == 96 + Sheet.contentBottom, "something below the sound fades")
+        #expect(Sheet.fittedDetentHeight(soundOnly, recentCount: 0) == Sheet.collapsedDetentHeight(soundOnly) + 1)
+
+        // The row alone: the sound and the whole row, then the gutter.
+        var rowOnly = metrics
+        rowOnly.hasRecent = false
+        #expect(Sheet.foldBottom(rowOnly) == Sheet.topInset + 96 + gap + 44 + 144 + Sheet.contentBottom)
+        #expect(Sheet.fittedDetentHeight(rowOnly, recentCount: 0) == Sheet.collapsedDetentHeight(rowOnly) + 1)
+        #expect(Sheet.collapsedDetentHeight(soundOnly) < Sheet.collapsedDetentHeight(rowOnly))
 
         // Expanded is the fitted detent or large, never collapsed.
         #expect(Sheet.isExpanded(.large) && Sheet.isExpanded(Sheet.fittedDetent))
@@ -854,11 +878,14 @@ struct SoundSheetTests {
     /// the grabber and the toolbar's band; and it follows the post count, in
     /// both shapes.
     @Test func theFittedHeightIsTheLaidOutContent() throws {
-        for (count, popular) in [(1, false), (7, false), (5, true), (23, true)] {
+        // (0, _): the sound alone; (5, true): the row alone (#1147).
+        for (count, popular) in [(0, false), (1, false), (7, false), (5, true), (23, true)] {
             let controller = sheet(tiles: count, popular: popular)
             try laidOut(controller)
             let metrics = try #require(controller.detentMetrics)
-            let recentCount = try tileIDs(in: .recent, of: controller).count
+            let snapshot = try dataSource(of: controller).snapshot()
+            let recentCount = snapshot.sectionIdentifiers.contains(.posts(.recent))
+                ? snapshot.numberOfItems(inSection: .posts(.recent)) : 0
             let content = try grid(of: controller).collectionViewLayout.collectionViewContentSize.height
             #expect(abs(content - Sheet.contentHeight(metrics, recentCount: recentCount)) < 0.5, """
                 \(count) posts (popular \(metrics.hasPopular)): laid out \(content), \
@@ -952,10 +979,10 @@ struct SoundSheetTests {
         #expect(many.fittedHeight == Sheet.fittedDetentHeight(metrics, recentCount: 4))
     }
 
-    /// The two SHAPES differ, and only a change of shape re-asks the
-    /// collapsed detent: posts that could not be loaded leaving the row with
-    /// every post, the row goes — an input, answered once.
-    @Test func losingThePopularRowReasksTheCollapsedDetentOnce() throws {
+    /// The SHAPES differ, and only a change of shape re-asks the collapsed
+    /// detent: posts that could not be loaded leaving the row with every
+    /// other post, "Recent" goes (#1147) — an input, answered once.
+    @Test func losingRecentReasksTheCollapsedDetentOnce() throws {
         let controller = sheet(tiles: 12)
         _ = controller.wrappedInSheet()
         controller.loadViewIfNeeded()
@@ -964,15 +991,14 @@ struct SoundSheetTests {
 
         let content = Self.content(8)
         controller.update(sections: content.sections, tiles: content.tiles)
-        #expect(content.sections.map(\.kind) == [.recent])
+        #expect(content.sections.map(\.kind) == [.popular])
         let metrics = try #require(controller.detentMetrics)
-        #expect(!metrics.hasPopular)
+        #expect(metrics.hasPopular && !metrics.hasRecent)
         #expect(controller.collapsedHeight == Sheet.collapsedDetentHeight(metrics))
         #expect(controller.collapsedHeight != before)
         #expect(controller.detentInvalidations > invalidations, "the new shape did not re-ask the detents")
-        #expect(Sheet.revealLine(metrics)
-                == Sheet.recentTitleTop(metrics) + metrics.sectionHeaderHeight + Sheet.tileHeight(width: metrics.width),
-                "the reveal's line did not move to the first row's foot")
+        #expect(Sheet.revealLine(metrics) == Sheet.popularRowBottom(metrics) + Sheet.contentBottom,
+                "something under the row still fades")
     }
 
     // MARK: - Reveal

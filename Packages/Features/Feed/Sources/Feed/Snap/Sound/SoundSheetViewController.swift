@@ -22,7 +22,7 @@ import UIKit
 ///  │  ╰────╯  0:30 · 23 posts             │  bar's close item
 ///  │                                      │  the section gap under it
 ///  │Popular ›                             │  ONLY when the backend gives one:
-///  │▢♪Original ▢Watching ▢ ▢┆→            │  a row; its title + chevron push
+///  │▢♪Original ▢ ▢ ▢┆→                    │  a row; its title + chevron push
 ///  │                                      │  the section gap
 ///  │Recent                                │  ← faint at collapsed, with the
 ///  │▢ ▢ ▢                                 │  ← top of its first row, above…
@@ -149,8 +149,6 @@ final class SoundSheetViewController: UIViewController {
         let thumbnailURL: URL?
         /// What a text post shows in its tile, having no picture.
         let caption: String?
-        /// The post the sheet was opened from.
-        let isCurrent: Bool
         /// The post the sound was first published with — first in "Popular".
         let isOriginal: Bool
         /// Whether the post itself is known yet. The sheet lists EVERY post set
@@ -168,14 +166,13 @@ final class SoundSheetViewController: UIViewController {
         let videoURL: URL?
 
         init(
-            postID: PostID, thumbnailURL: URL?, caption: String?, isCurrent: Bool,
+            postID: PostID, thumbnailURL: URL?, caption: String?,
             isOriginal: Bool = false, isLoaded: Bool = true, likeCount: Int64? = nil,
             videoURL: URL? = nil
         ) {
             self.postID = postID
             self.thumbnailURL = thumbnailURL
             self.caption = caption
-            self.isCurrent = isCurrent
             self.isOriginal = isOriginal
             self.isLoaded = isLoaded
             self.likeCount = likeCount
@@ -329,6 +326,12 @@ final class SoundSheetViewController: UIViewController {
     private var previewTimeObserver: Any?
     private var raisedSessionForPreview = false
 
+    /// The post the sheet opens over (#1147): in no section, but one of the
+    /// posts set to the sound, so the header's count includes it.
+    private let watchedPosts: Int
+    /// "N posts" in the header: every tile, and the post watched.
+    private var postCount: Int { tiles.count + watchedPosts }
+
     init(
         sound: PostSound,
         authorHandle: String,
@@ -337,8 +340,10 @@ final class SoundSheetViewController: UIViewController {
         tiles: [Tile],
         imagePipeline: ImagePipeline,
         savedSounds: SavedSoundStore = SavedSoundStore(),
-        videoPlayback: VideoPlaybackController? = nil
+        videoPlayback: VideoPlaybackController? = nil,
+        watchedPosts: Int = 0
     ) {
+        self.watchedPosts = watchedPosts
         self.sound = sound
         self.authorHandle = authorHandle
         self.fallbackArtworkURL = fallbackArtworkURL
@@ -728,7 +733,10 @@ final class SoundSheetViewController: UIViewController {
             // estimate, and the fold would move with it. The gap above a
             // title is the bottom inset of the section before it.
             let metrics = self?.detentMetrics
-            let gap = metrics?.sectionGap ?? 18
+            // The LAST section closes the content with the gutter, whichever
+            // it is — the sound alone, or the row with no "Recent" (#1147).
+            let isLast = index == (self?.dataSource?.snapshot().numberOfSections ?? 1) - 1
+            let gap = isLast ? Self.contentBottom : (metrics?.sectionGap ?? 18)
             switch self?.dataSource?.sectionIdentifier(for: index) ?? .sound {
             case .sound:
                 return Self.soundSection(height: metrics?.headerHeight ?? 112, bottom: gap)
@@ -909,7 +917,7 @@ final class SoundSheetViewController: UIViewController {
             else { continue }
             Self.configure(head, for: section)
         }
-        if !isPreviewing { header?.setMeta(Self.meta(duration: sound.duration, posts: tiles.count)) }
+        if !isPreviewing { header?.setMeta(Self.meta(duration: sound.duration, posts: postCount)) }
         if let gallery = pushedGallery {
             let ids = newSections.first { $0.kind == gallery.kind }?.all.filter { tileByID[$0] != nil } ?? []
             gallery.update(ids: ids, reconfiguring: Array(changed))
@@ -923,7 +931,7 @@ final class SoundSheetViewController: UIViewController {
         header.configure(
             title: sound.title ?? "Original sound",
             subtitle: sound.artist ?? "@\(authorHandle)",
-            meta: Self.meta(duration: sound.duration, posts: tiles.count),
+            meta: Self.meta(duration: sound.duration, posts: postCount),
             canPreview: sound.previewURL != nil
         )
         header.setPlaying(isPreviewing)
@@ -953,6 +961,9 @@ final class SoundSheetViewController: UIViewController {
         var toolbarBand: CGFloat
         /// Whether the Popular row stands between the sound and "Recent".
         var hasPopular: Bool
+        /// Whether "Recent" is there (#1147): not when every other post fits
+        /// the row, or when there is none.
+        var hasRecent: Bool = true
     }
 
     /// The collapsed detent's value: the fold (`foldBottom`), then the
@@ -983,6 +994,9 @@ final class SoundSheetViewController: UIViewController {
     /// every sound of one shape at a width and text size — "Recent" always
     /// has a first row (`SoundSheetSections`: it is never empty).
     static func foldBottom(_ metrics: DetentMetrics) -> CGFloat {
+        // No "Recent" (#1147): the content is whole at collapsed — the sound
+        // and the row, if any, then the gutter. Nothing below to glimpse.
+        guard metrics.hasRecent else { return topInset + contentHeight(metrics, recentCount: 0) }
         guard metrics.hasPopular else { return topInset + revealLine(metrics) + gutter }
         return topInset + recentTitleTop(metrics) + metrics.sectionHeaderHeight
             + recentPeekHeight(width: metrics.width)
@@ -1021,6 +1035,7 @@ final class SoundSheetViewController: UIViewController {
     /// - without, the FOOT of the grid's first row — the title and that row
     ///   are what the collapsed sheet is for; the rows after it fade.
     static func revealLine(_ metrics: DetentMetrics) -> CGFloat {
+        guard metrics.hasRecent else { return contentHeight(metrics, recentCount: 0) }
         guard metrics.hasPopular else {
             return recentTitleTop(metrics) + metrics.sectionHeaderHeight + tileHeight(width: metrics.width)
         }
@@ -1040,7 +1055,11 @@ final class SoundSheetViewController: UIViewController {
     /// row when there is one, the Recent title and grid, the gutter under its
     /// last row.
     static func contentHeight(_ metrics: DetentMetrics, recentCount: Int) -> CGFloat {
-        guard recentCount > 0 else { return popularRowBottom(metrics) + contentBottom }
+        guard recentCount > 0 else {
+            // The sound alone ends at its header, not at the gap a section
+            // title would stand on.
+            return (metrics.hasPopular ? popularRowBottom(metrics) : metrics.headerHeight) + contentBottom
+        }
         return recentTitleTop(metrics) + metrics.sectionHeaderHeight
             + gridHeight(width: metrics.width, count: recentCount) + contentBottom
     }
@@ -1087,7 +1106,8 @@ final class SoundSheetViewController: UIViewController {
             sectionHeaderHeight: SectionTitleView.barHeight(traits: traits),
             sectionGap: SectionTitleView.gapAbove(traits: traits),
             toolbarBand: Self.measuredToolbarBand ?? estimatedToolbarBand(width: width),
-            hasPopular: hasPopular
+            hasPopular: hasPopular,
+            hasRecent: recentCount > 0
         )
         if metrics != detentMetrics {
             let heightsMoved = metrics.headerHeight != detentMetrics?.headerHeight
@@ -1099,7 +1119,7 @@ final class SoundSheetViewController: UIViewController {
             collapsedHeight = height
             trace("""
                 \(reason): width \(metrics.width) header \(metrics.headerHeight) title \(metrics.sectionHeaderHeight) \
-                band \(metrics.toolbarBand) popular \(metrics.hasPopular) → \(height) \
+                band \(metrics.toolbarBand) popular \(metrics.hasPopular) recent \(metrics.hasRecent) → \(height) \
                 (was \(previous.map { "\($0)" } ?? "nil"))
                 """)
             if heightsMoved, isViewLoaded { collectionView.collectionViewLayout.invalidateLayout() }
@@ -1214,7 +1234,7 @@ final class SoundSheetViewController: UIViewController {
                 title: sound.title ?? "Original sound",
                 subtitle: sound.artist ?? "@\(authorHandle)",
                 // The meta line is one line whatever it says.
-                meta: Self.meta(duration: sound.duration, posts: tiles.count),
+                meta: Self.meta(duration: sound.duration, posts: postCount),
                 canPreview: sound.previewURL != nil
             )
         }
@@ -1348,17 +1368,16 @@ final class SoundSheetViewController: UIViewController {
     /// 1. the post the sound was first published with, unless it is known to
     ///    be a text post (a text post's words are no "original" of a sound: it
     ///    then keeps its place among the others);
-    /// 2. the post the sheet was opened from;
-    /// 3. every other post set to the sound, as the provider ranks them —
+    /// 2. every other post set to the sound, as the provider ranks them —
     ///    across the whole corpus, not only the feed behind the sheet.
-    /// Each post once.
+    /// Each post once. The post watched is the caller's to leave out
+    /// (`SoundSheetSections`, #1147).
     ///
     /// `isMedia` is nil for a post not loaded yet. An unknown original still
     /// leads — it is a clip's post far more often than not, and holding its
     /// place keeps the row from reshuffling when it loads — but it is marked
     /// only once it is KNOWN to be a media post.
     static func gridPostIDs(
-        current: PostID,
         original: PostID?,
         using: [PostID],
         isMedia: (PostID) -> Bool?
@@ -1366,7 +1385,7 @@ final class SoundSheetViewController: UIViewController {
         let leading = original.flatMap { isMedia($0) == false ? nil : $0 }
         var ids: [PostID] = []
         var seen = Set<PostID>()
-        for id in [leading, current].compactMap({ $0 }) + using where seen.insert(id).inserted {
+        for id in [leading].compactMap({ $0 }) + using where seen.insert(id).inserted {
             ids.append(id)
         }
         return (ids, leading.flatMap { isMedia($0) == true ? $0 : nil })
@@ -1781,7 +1800,7 @@ final class SoundSheetViewController: UIViewController {
         }
         isPreviewing = false
         header?.setPlaying(false)
-        header?.setMeta(Self.meta(duration: sound.duration, posts: tiles.count))
+        header?.setMeta(Self.meta(duration: sound.duration, posts: postCount))
         refreshCover()
     }
 

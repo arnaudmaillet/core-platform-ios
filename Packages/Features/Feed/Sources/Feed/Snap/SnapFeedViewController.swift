@@ -4666,7 +4666,9 @@ final class SnapFeedViewController: UIViewController {
             tiles: content.tiles,
             imagePipeline: imagePipeline,
             // The tiles play on the app's one pool, beside this page (#884).
-            videoPlayback: videoPlayback
+            videoPlayback: videoPlayback,
+            // This post: set to the sound, counted, shown nowhere (#1147).
+            watchedPosts: 1
         )
         // Only a sound the device HOLDS can go under a new clip.
         if inputs.offersUseSound, let useSound {
@@ -4747,7 +4749,7 @@ final class SnapFeedViewController: UIViewController {
             let post = known(id)
             return SoundSheetViewController.Tile(
                 postID: id, thumbnailURL: post?.thumbnailURL, caption: post?.caption,
-                isCurrent: id == current, isOriginal: id == dealt.original, isLoaded: post != nil,
+                isOriginal: id == dealt.original, isLoaded: post != nil,
                 likeCount: post?.likes, videoURL: post?.video
             )
         }
