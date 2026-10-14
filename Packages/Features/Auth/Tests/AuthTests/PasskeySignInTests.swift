@@ -51,6 +51,7 @@ struct PasskeySignInTests {
         #expect(account.accountID == AccountID(MockAuthService.accountID))
         await manager.completeSignIn(account)
         #expect(await manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
+        #expect(await manager.consumePasskeyOffer() == nil, "a passkey sign-in offers no passkey (#840)")
 
         // The challenge is single use.
         await #expect(throws: AuthError.passkeyRejected) { _ = try await manager.signIn(.passkey(assertion)) }
@@ -82,9 +83,10 @@ struct PasskeySignInTests {
         await #expect(throws: AuthError.passkeyRejected) { _ = try await manager.signUp(.passkey(assertion), details: details) }
     }
 
-    @Test func thePasskeyRowSitsUnderTheProvidersWhenOffered() {
+    @Test func thePasskeyRowComesFirstWhenOffered() {
         #expect(SignInMethod.offered(passkeys: false) == SignInMethod.all)
-        #expect(SignInMethod.offered(passkeys: true) == [.provider(.apple), .provider(.google), .passkey, .email, .phone])
+        // Passkeys are promoted (#840): first when offered.
+        #expect(SignInMethod.offered(passkeys: true) == [.passkey, .provider(.apple), .provider(.google), .email, .phone])
         #expect(SignInMethod.passkey.displayName == "Sign in with a passkey")
     }
 }

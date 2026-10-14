@@ -6,6 +6,7 @@ import CoreRealtime
 import CoreStorage
 import DesignSystem
 import MediaPlayback
+import Profile
 import UIKit
 #if DEBUG
 import CoreNetworkingMocks
@@ -424,13 +425,30 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         }
     }
 
-    /// A sign-up asks the new member about notifications, once (#666): after
-    /// the sign-up flow has gone, over the shell. A sign-in never asks.
-    private func askForNotificationsAfterSignUp() {
+    /// After the sign-in flow has gone, over the shell: a passkey offer
+    /// (#840 — after a sign-up, or a code / Apple sign-in while the account
+    /// has none, at most monthly), THEN the notifications question a sign-up
+    /// asks once (#666) — one after the other, never two prompts at once.
+    /// A sign-in never asks about notifications.
+    private func offerPasskeyThenAskForNotifications() {
         Task { @MainActor [weak self] in
-            guard let self, await container.sessionManager.consumeSignUpNotice() else { return }
+            guard let self else { return }
+            let sessionManager = container.sessionManager
+            let afterSignUp = await sessionManager.consumeSignUpNotice()
+            let offer = await sessionManager.consumePasskeyOffer()
             try? await Task.sleep(for: .milliseconds(600))
-            container.pushNotifications.askAfterSignUp()
+            if offer != nil {
+                await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                    PasskeyOffer.presentIfDue(
+                        on: { [weak self] in self?.mainTabCoordinator?.activeNavigationController?.topViewController },
+                        afterSignUp: offer == .signUp,
+                        manager: container.accountSessions,
+                        authorizer: AppContainer.makePasskeyAuthorizer(for: container.environment),
+                        completion: { done.resume() }
+                    )
+                }
+            }
+            if afterSignUp { container.pushNotifications.askAfterSignUp() }
         }
     }
 
@@ -461,7 +479,7 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         }
         finishSignUp(signedIn: true)
         welcomeBackIfReactivated()
-        askForNotificationsAfterSignUp()
+        offerPasskeyThenAskForNotifications()
         #if DEBUG
         // `-mock-likes-still`: no ticking like counts — so a refresh can
         // come back with exactly what it had (`-profile-stretch-sweep`'s

@@ -61,6 +61,11 @@ public actor SessionManager {
     /// The last session came from a sign-up (#666), and nobody has asked
     /// the new member about notifications yet.
     var pendingSignUpNotice = false
+    /// The last session came from a sign-up or a sign-in without a passkey,
+    /// and nobody has offered one yet (#840).
+    var pendingPasskeyOffer: PasskeyOfferMoment?
+    /// The last `signIn(_:)` was a passkey's: its session needs no offer.
+    var lastSignInUsedPasskey = false
 
     public init(
         authClient: any Auth_V1_AuthServiceClientInterface,
@@ -108,6 +113,14 @@ public actor SessionManager {
     public func consumeSignUpNotice() -> Bool {
         defer { pendingSignUpNotice = false }
         return pendingSignUpNotice
+    }
+
+    /// Once after a session landed, when to offer a passkey (#840): after a
+    /// sign-up, or a sign-in by code or Apple / Google. Nil after a passkey
+    /// sign-in, and from then on.
+    public func consumePasskeyOffer() -> PasskeyOfferMoment? {
+        defer { pendingPasskeyOffer = nil }
+        return pendingPasskeyOffer
     }
 
     /// Step-up (`auth.v1.VerifyCredentials`, #648): the server re-proved the

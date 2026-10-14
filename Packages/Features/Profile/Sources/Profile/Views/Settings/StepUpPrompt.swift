@@ -11,7 +11,8 @@ import UIKit
 /// for the authenticator's code or a backup code alone.
 ///
 /// Alerts with the action's own verb on the button. A wrong code asks again,
-/// saying so; Cancel ends the flow quietly.
+/// saying so; Cancel ends the flow quietly (`onCancel`, for a caller that
+/// waits on the flow's end).
 @MainActor
 enum StepUpPrompt {
     enum Credential {
@@ -34,14 +35,15 @@ enum StepUpPrompt {
         credential: Credential = .signInAgain,
         retryMessage: String? = nil,
         onVerified: @escaping () -> Void,
-        onFailure: @escaping (Error) -> Void
+        onFailure: @escaping (Error) -> Void,
+        onCancel: (() -> Void)? = nil
     ) {
         switch credential {
         case .code:
             askForSecondStep(
                 on: host, title: title ?? credential.defaultTitle, message: retryMessage ?? message,
                 actionTitle: actionTitle, verify: { try await stepUp.stepUp(code: $0) },
-                onVerified: onVerified, onFailure: onFailure
+                onVerified: onVerified, onFailure: onFailure, onCancel: onCancel
             )
         case .signInAgain:
             Task { @MainActor in
@@ -49,7 +51,7 @@ enum StepUpPrompt {
                     let reconfirmation = try await stepUp.sendReconfirmationCode()
                     askForSentCode(
                         reconfirmation, on: host, title: title ?? credential.defaultTitle, message: message,
-                        actionTitle: actionTitle, stepUp: stepUp, onVerified: onVerified, onFailure: onFailure
+                        actionTitle: actionTitle, stepUp: stepUp, onVerified: onVerified, onFailure: onFailure, onCancel: onCancel
                     )
                 } catch {
                     onFailure(error)
@@ -68,7 +70,8 @@ enum StepUpPrompt {
         stepUp: any CredentialStepUp,
         retry: Bool = false,
         onVerified: @escaping () -> Void,
-        onFailure: @escaping (Error) -> Void
+        onFailure: @escaping (Error) -> Void,
+        onCancel: (() -> Void)? = nil
     ) {
         let sentTo = "We sent a code to \(reconfirmation.destination)."
         let alert = codeAlert(
@@ -76,7 +79,7 @@ enum StepUpPrompt {
             message: retry ? "\(wrongCodeMessage)\n\(sentTo)" : "\(message)\n\(sentTo)",
             placeholder: "6-digit code", accessibilityLabel: "Code"
         )
-        addActions(to: alert, actionTitle: actionTitle) { code in
+        addActions(to: alert, actionTitle: actionTitle, onCancel: onCancel) { code in
             Task { @MainActor in
                 do {
                     switch try await stepUp.reconfirm(reconfirmation, code: code) {
@@ -87,13 +90,13 @@ enum StepUpPrompt {
                             on: host, title: Credential.code.defaultTitle,
                             message: "Two-step sign-in is on: enter the code from your authenticator app, or a backup code.",
                             actionTitle: actionTitle, verify: { try await stepUp.completeReconfirmation(secondStepCode: $0) },
-                            onVerified: onVerified, onFailure: onFailure
+                            onVerified: onVerified, onFailure: onFailure, onCancel: onCancel
                         )
                     }
                 } catch StepUpError.wrongCode {
                     askForSentCode(
                         reconfirmation, on: host, title: title, message: message, actionTitle: actionTitle,
-                        stepUp: stepUp, retry: true, onVerified: onVerified, onFailure: onFailure
+                        stepUp: stepUp, retry: true, onVerified: onVerified, onFailure: onFailure, onCancel: onCancel
                     )
                 } catch {
                     onFailure(error)
@@ -111,13 +114,14 @@ enum StepUpPrompt {
         actionTitle: String,
         verify: @escaping @MainActor (String) async throws -> Void,
         onVerified: @escaping () -> Void,
-        onFailure: @escaping (Error) -> Void
+        onFailure: @escaping (Error) -> Void,
+        onCancel: (() -> Void)? = nil
     ) {
         let alert = codeAlert(
             title: title, message: message,
             placeholder: "6-digit code or backup code", accessibilityLabel: "Two-step code"
         )
-        addActions(to: alert, actionTitle: actionTitle) { code in
+        addActions(to: alert, actionTitle: actionTitle, onCancel: onCancel) { code in
             Task { @MainActor in
                 do {
                     try await verify(code)
@@ -125,7 +129,7 @@ enum StepUpPrompt {
                 } catch StepUpError.wrongCode {
                     askForSecondStep(
                         on: host, title: title, message: wrongSecondStepMessage, actionTitle: actionTitle,
-                        verify: verify, onVerified: onVerified, onFailure: onFailure
+                        verify: verify, onVerified: onVerified, onFailure: onFailure, onCancel: onCancel
                     )
                 } catch {
                     onFailure(error)
@@ -148,12 +152,14 @@ enum StepUpPrompt {
         return alert
     }
 
-    private static func addActions(to alert: UIAlertController, actionTitle: String, submit: @escaping (String) -> Void) {
+    private static func addActions(
+        to alert: UIAlertController, actionTitle: String, onCancel: (() -> Void)?, submit: @escaping (String) -> Void
+    ) {
         let confirm = UIAlertAction(title: actionTitle, style: .destructive) { [weak alert] _ in
             submit(alert?.textFields?.first?.text ?? "")
         }
         confirm.isEnabled = false
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in onCancel?() })
         alert.addAction(confirm)
         if let field = alert.textFields?.first {
             field.addAction(UIAction { [weak field, weak confirm] _ in

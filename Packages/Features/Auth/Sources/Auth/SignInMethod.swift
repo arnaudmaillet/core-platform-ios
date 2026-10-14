@@ -31,10 +31,10 @@ enum SignInMethod: Equatable, Sendable {
     static let all: [SignInMethod] =
         IdentityProvider.allCases.map(SignInMethod.provider) + [.email, .phone]
 
-    /// The rows the first screen lists: the passkey under the providers
-    /// when there is one to ask.
+    /// The rows the first screen lists: the passkey FIRST when there is one
+    /// to ask (#840 — passkeys are promoted), then the providers, then codes.
     static func offered(passkeys: Bool) -> [SignInMethod] {
-        IdentityProvider.allCases.map(SignInMethod.provider) + (passkeys ? [.passkey] : []) + [.email, .phone]
+        (passkeys ? [.passkey] : []) + IdentityProvider.allCases.map(SignInMethod.provider) + [.email, .phone]
     }
 
     var displayName: String {

@@ -167,6 +167,9 @@ struct AuthEndToEndTests {
         await stack.manager.completeSignIn(account)
         #expect(await stack.manager.currentState() == .authenticated(AccountID(MockAuthService.accountID)))
         #expect(await !stack.manager.consumeSignUpNotice(), "a sign-in never asks about notifications (#666)")
+        // A code sign-in may offer a passkey, once (#840).
+        #expect(await stack.manager.consumePasskeyOffer() == .signIn)
+        #expect(await stack.manager.consumePasskeyOffer() == nil)
         #expect(try await stack.manager.validAccessToken()?.hasPrefix("at-") == true)
         #expect(try stack.guestStore.load() == nil, "the guest became the member")
         // The server ended the guest session it was handed.
@@ -218,6 +221,9 @@ struct AuthEndToEndTests {
         // The shell asks the new member about notifications, once (#666).
         #expect(await stack.manager.consumeSignUpNotice())
         #expect(await !stack.manager.consumeSignUpNotice())
+        // …and offers a passkey, once (#840).
+        #expect(await stack.manager.consumePasskeyOffer() == .signUp)
+        #expect(await stack.manager.consumePasskeyOffer() == nil)
     }
 
     @Test func underThirteenCreatesNothing() async throws {
