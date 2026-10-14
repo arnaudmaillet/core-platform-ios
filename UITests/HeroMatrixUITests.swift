@@ -27,10 +27,11 @@ final class HeroMatrixUITests: XCTestCase {
         launchHeroApp(arguments: ["-select-tab", "1"] + extra)
     }
 
-    /// The grid's first tile, once its content landed. The grid is the one
-    /// collection view on the For You root.
+    /// The first POST on the For You root, once its content landed: a
+    /// Following card (#1154). The list's first cell is the Friends rail's
+    /// first face now, which opens a profile, not a post — no flight home.
     private func firstTile(in app: XCUIApplication) -> XCUIElement {
-        app.collectionViews.firstMatch.cells.firstMatch
+        app.cells.matching(identifier: "foryou.following-card").firstMatch
     }
 
     @discardableResult

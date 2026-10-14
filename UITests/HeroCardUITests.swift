@@ -75,20 +75,16 @@ final class HeroCardUITests: XCTestCase {
 
     // MARK: - A tile on the Media grid, tapped for real
 
-    /// The mosaic: Discover is a list of cards with mosaic chunks now
-    /// (2026-09-28), and the whole mosaic is a screen of its own behind a
-    /// chunk's "View all" (`DiscoverGalleryViewController`). So: Discover,
-    /// "View all", then a tile of the pushed grid. A tile is a rect whatever
-    /// the post, so EVERY tile flies; tap one, come home by the back button,
-    /// twice, because the second open is where reuse bugs live.
+    /// The mosaic: For You is ONE page now (2026-09-29) — a list of cards
+    /// with mosaic chunks — and the whole mosaic is a screen of its own
+    /// behind a chunk's "View all". So: "View all", then a tile of the pushed
+    /// grid (#1154: this used to tap a Discover tab that no longer exists). A
+    /// tile is a rect whatever the post, so EVERY tile flies; tap one, come
+    /// home by the back button, twice, because the second open is where
+    /// reuse bugs live.
     func testATileOnTheMediaGridFliesUnderARealFinger() throws {
         let app = launchHeroApp(arguments: ["-select-tab", "1"])
         waitForHeroSettle(in: app, after: 0)
-
-        let mediaTab = app.staticTexts["Discover"].firstMatch
-        XCTAssertTrue(mediaTab.waitForExistence(timeout: 15),
-                      "no Discover tab in the For You header")
-        mediaTab.tap()
 
         // The first chunk sits under three cards; scroll until its
         // "View all" can be pressed.
@@ -98,9 +94,9 @@ final class HeroCardUITests: XCTestCase {
             app.swipeUp()
             scrolls += 1
         }
-        XCTAssertTrue(viewAll.isHittable, "no View all under a Discover chunk")
+        XCTAssertTrue(viewAll.isHittable, "no View all under a mosaic chunk")
         viewAll.tap()
-        XCTAssertTrue(app.navigationBars["Discover"].waitForExistence(timeout: 10),
+        XCTAssertTrue(app.navigationBars.buttons.firstMatch.waitForExistence(timeout: 10),
                       "View all did not push the mosaic")
 
         for round in 1...2 {

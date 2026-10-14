@@ -35,6 +35,8 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
     /// flight out of it can be the list's own card style (`.listMedia`) and
     /// land on the same curve it left.
     static var cornerRadius: CGFloat { PostGridListRowCell.mediaCornerRadius }
+    /// The card's identifier for UI tests.
+    static let accessibilityIdentifier = "foryou.following-card"
 
     private let imageView = UIImageView()
     /// The cover and the live surface over it (#1088): the cover's arrival on
@@ -50,6 +52,9 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        // What a UI test reaches a post by (#1154): the Friends rail's faces
+        // come first in the list and open a profile, not a post.
+        accessibilityIdentifier = Self.accessibilityIdentifier
         contentView.clipsToBounds = true
         contentView.layer.cornerRadius = Self.cornerRadius
         contentView.layer.cornerCurve = .continuous

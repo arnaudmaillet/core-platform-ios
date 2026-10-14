@@ -19,7 +19,9 @@ final class HeroSoakUITests: XCTestCase {
 
         var playersAtRest: [Int] = []
         for cycle in 1...10 {
-            let tile = app.collectionViews.firstMatch.cells.firstMatch
+            // A post (#1154): a Following card, not the Friends rail's face
+            // that comes first in the list and opens a profile.
+            let tile = app.cells.matching(identifier: "foryou.following-card").firstMatch
             XCTAssertTrue(tile.waitForExistence(timeout: 20), "cycle \(cycle): no tile")
             let before = heroProbe(in: app)?.sequence ?? 0
             tile.tap()
@@ -107,7 +109,7 @@ final class HeroSoakUITests: XCTestCase {
     func testCancelledGrabsUnderTheLegacyBackingKeepThePageAlive() {
         let app = launchHeroApp(arguments: ["-select-tab", "1", "-avplayer-render"])
         waitForHeroSettle(in: app, after: 0)
-        let tile = app.collectionViews.firstMatch.cells.firstMatch
+        let tile = app.cells.matching(identifier: "foryou.following-card").firstMatch
         XCTAssertTrue(tile.waitForExistence(timeout: 20))
         let baseline = heroProbe(in: app)?.sequence ?? 0
         tile.tap()
@@ -140,11 +142,11 @@ final class HeroSoakUITests: XCTestCase {
     func testMemoryAcrossOpenCloseCycles() {
         let app = launchHeroApp(arguments: ["-select-tab", "1"])
         waitForHeroSettle(in: app, after: 0)
-        XCTAssertTrue(app.collectionViews.firstMatch.cells.firstMatch
+        XCTAssertTrue(app.cells.matching(identifier: "foryou.following-card").firstMatch
             .waitForExistence(timeout: 20))
 
         measure(metrics: [XCTMemoryMetric(application: app)]) {
-            let tile = app.collectionViews.firstMatch.cells.firstMatch
+            let tile = app.cells.matching(identifier: "foryou.following-card").firstMatch
             guard tile.waitForExistence(timeout: 10) else { return }
             let before = heroProbe(in: app)?.sequence ?? 0
             tile.tap()
