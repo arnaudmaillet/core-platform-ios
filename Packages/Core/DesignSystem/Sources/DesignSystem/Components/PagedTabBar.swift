@@ -1375,19 +1375,10 @@ public final class PagedTabBar: UIControl {
     /// the segments and with them their badges, so a colour stated once would
     /// leave with the segment that wore it — exactly the trap the counts
     /// themselves carry. `buildSegments` states it again for each new segment.
-    public var badgeTint: UIColor = Palette.tint {
+    public var badgeTint: UIColor = .systemRed {
         didSet {
             guard badgeTint != oldValue else { return }
             for segment in segments { segment.setBadgeTint(badgeTint) }
-        }
-    }
-
-    /// A gradient for every badge on this bar instead of `badgeTint` — the
-    /// unread pills wear the icon's (`Palette.counterGradient`, #1169). Nil
-    /// keeps the solid tint.
-    public var badgeGradient: [UIColor]? {
-        didSet {
-            for segment in segments { segment.setBadgeGradient(badgeGradient) }
         }
     }
 
@@ -2036,7 +2027,6 @@ public final class PagedTabBar: UIControl {
                 for: .primaryActionTriggered
             )
             segment.setBadgeTint(badgeTint)
-            segment.setBadgeGradient(badgeGradient)
             row.addArrangedSubview(segment)
             return segment
         }
@@ -2569,10 +2559,6 @@ private final class SegmentView: UIButton {
         badge.setTint(color)
     }
 
-    func setBadgeGradient(_ colours: [UIColor]?) {
-        badge.setGradient(colours)
-    }
-
     func setBadge(_ style: PagedTabBar.BadgeStyle) {
         badge.apply(style)
         badge.isHidden = !style.isVisible
@@ -2726,29 +2712,6 @@ private final class BadgeView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         layer.cornerRadius = bounds.height / 2
-        gradientLayer?.frame = bounds
-        gradientLayer?.cornerRadius = bounds.height / 2
-    }
-
-    /// The gradient the fill is, when the host states one (`badgeGradient`).
-    private var gradientLayer: CAGradientLayer?
-
-    func setGradient(_ colours: [UIColor]?) {
-        guard let colours else {
-            gradientLayer?.removeFromSuperlayer()
-            gradientLayer = nil
-            applyFill()
-            return
-        }
-        let gradient = gradientLayer ?? CAGradientLayer()
-        gradient.colors = colours.map(\.cgColor)
-        gradient.startPoint = Palette.accentGradientStart
-        gradient.endPoint = Palette.accentGradientEnd
-        gradient.cornerCurve = .continuous
-        if gradientLayer == nil { layer.insertSublayer(gradient, at: 0) }
-        gradientLayer = gradient
-        setNeedsLayout()
-        applyFill()
     }
 
     /// The style currently rendered, because the FILL depends on it and the
@@ -2759,7 +2722,7 @@ private final class BadgeView: UIView {
     /// that is what the two hosts this was written for are saying: something is
     /// waiting for you. A host counting things that are merely THERE — the
     /// photographs in an album — wants a different colour, and says so.
-    private var tint: UIColor = Palette.tint
+    private var tint: UIColor = .systemRed
 
     func setTint(_ color: UIColor) {
         tint = color
@@ -2825,7 +2788,7 @@ private final class BadgeView: UIView {
     /// away, not a quieter thing — so there is one statement rather than a
     /// switch whose arms had become identical.
     private func applyFill() {
-        backgroundColor = gradientLayer == nil ? tint : .clear
+        backgroundColor = tint
     }
 }
 

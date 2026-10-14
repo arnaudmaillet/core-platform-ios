@@ -94,20 +94,15 @@ final class BadgedAvatarView: UIView {
         super.init(frame: .zero)
         avatar.pin(to: self)
 
-        // Every unread pill the app draws wears the icon's gradient (#1169);
-        // the solid counter colour under the `.red` rule.
-        if let colours = Palette.counterGradient {
-            let gradient = CAGradientLayer()
-            gradient.colors = colours.map(\.cgColor)
-            gradient.startPoint = Palette.accentGradientStart
-            gradient.endPoint = Palette.accentGradientEnd
-            gradient.cornerCurve = .continuous
-            badge.layer.insertSublayer(gradient, at: 0)
-            badge.clipsToBounds = true
-            badgeGradient = gradient
-        } else {
-            badge.backgroundColor = Palette.counter
-        }
+        // An inbox avatar's unread pill wears the icon's gradient (#1169).
+        let gradient = CAGradientLayer()
+        gradient.colors = Palette.accentGradient.map(\.cgColor)
+        gradient.startPoint = Palette.accentGradientStart
+        gradient.endPoint = Palette.accentGradientEnd
+        gradient.cornerCurve = .continuous
+        badge.layer.insertSublayer(gradient, at: 0)
+        badge.clipsToBounds = true
+        badgeGradient = gradient
         badge.layer.borderWidth = Metrics.ringWidth
         badge.layer.cornerCurve = .continuous
         badge.isHidden = true

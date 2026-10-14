@@ -98,15 +98,15 @@ struct PaletteTests {
         #expect(Self.hex(Palette.primaryFill, Self.traits(.light, high: true)) == 0xD6337F)
     }
 
-    /// The heart is the theme's pink, solid (#1169: every heart pink, no red
-    /// left in the app) — two equal stops, so the gradient layer still draws.
-    @Test func thePointsHeartIsThePink() {
+    /// The heart is the system red, solid (#1169, kept red under the pink
+    /// accent) — two equal stops, so the gradient layer still draws.
+    @Test func thePointsHeartIsTheSystemRed() {
         for traits in [Self.light, Self.dark] {
             let stops = PointsSymbol.gradient(for: traits)
             #expect(stops.count == 2)
-            #expect(stops.allSatisfy { Self.hex($0, traits) == Self.hex(Palette.tint, traits) })
+            #expect(stops.allSatisfy { Self.hex($0, traits) == Self.hex(.systemRed, traits) })
         }
-        #expect(PointsSymbol.tint === Palette.tint || Self.hex(PointsSymbol.tint, Self.light) == 0xD6337F)
+        #expect(PointsSymbol.tint == .systemRed)
     }
 
     /// The hues the palette took over (#1124): gems are violet, a warning's

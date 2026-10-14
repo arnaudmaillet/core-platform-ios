@@ -92,17 +92,17 @@ struct PaletteThemeTests {
         let rules = Palette.resolve(arguments: [])
         #expect(rules == Palette.Rules())
         #expect(rules.selectedTabIsNeutral)
-        #expect(rules.counters == .accent)
+        #expect(rules.counters == .red, "unread marks stay the system red (decided)")
         #expect(rules.storyRing == .gradient, "the ring wears the icon's gradient (decided)")
         #expect(rules.heroButton == .accent)
     }
 
     @Test func theFlagsPickTheRules() {
         let rules = Palette.resolve(arguments: [
-            "-theme-tab", "accent", "-theme-counters", "red", "-theme-rings", "accent", "-theme-hero", "gradient",
+            "-theme-tab", "accent", "-theme-counters", "accent", "-theme-rings", "accent", "-theme-hero", "gradient",
         ])
         #expect(!rules.selectedTabIsNeutral)
-        #expect(rules.counters == .red)
+        #expect(rules.counters == .accent)
         #expect(rules.storyRing == .accent)
         #expect(rules.heroButton == .gradient)
     }

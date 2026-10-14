@@ -102,10 +102,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         )
         initialIndex = surfaces.firstIndex { $0.category == initialCategory } ?? 0
         super.init(nibName: nil, bundle: nil)
-        // One colour for every unread count (#1169): the tab bar's and the
-        // rows' too.
-        // A selector's indicators wear the theme's pink, solid (the owner's
-        // call 2026-10-14); the rows' avatars wear the icon's gradient.
+        // One colour for the solid unread marks (#1169): the tab bar's and
+        // the bell's too. The rows' avatars wear the icon's gradient.
         categoryBar.badgeTint = Palette.counter
     }
 

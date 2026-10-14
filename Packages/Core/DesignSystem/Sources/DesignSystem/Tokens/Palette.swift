@@ -30,8 +30,9 @@ import UIKit
 /// - **The accent marks what matters**: a screen's one primary action, the
 ///   system controls (the app's tint — `AccentColor`, the window's
 ///   `tintColor` — so switches, the cursor and selection follow without
-///   per-site code), every unread count (`counter`, one colour everywhere)
-///   and the unseen-story ring.
+///   per-site code) and the unseen-story ring. Unread counts, the bell's
+///   dot and the hearts stay the system red (`counter`, the owner's call
+///   2026-10-14).
 /// - **A filled button wears white** (`onPrimary`, 4.53:1 on the fill) in
 ///   the light, a dark ink on the brighter dark-mode fill.
 /// - **Violet is secondary**: gems and secondary emphasis.
@@ -75,9 +76,10 @@ public enum Palette {
     /// Text on `primaryContainer`.
     public static let onPrimaryContainer = dynamic(light: 0xB8296C, dark: 0xF8ABCF)
 
-    /// Every unread count — the tab bar's badges, the Messages selector's,
-    /// an inbox row's (#1169: one colour everywhere): the accent, or the
-    /// system red under the `.red` rule.
+    /// Every solid unread mark — the tab bar's badges, the Messages
+    /// selector's, the bell's dot (#1169: one colour everywhere): the system
+    /// red (the owner's call 2026-10-14), or the accent under the `.accent`
+    /// rule to compare.
     public static var counter: UIColor {
         rules.counters == .accent ? tint : .systemRed
     }
@@ -88,20 +90,14 @@ public enum Palette {
     /// pastels (`F7BED2` → `FFBE7D`) carry a white digit at about 1.5:1; these
     /// carry it at about 1.9–2.6:1 — the owner chose the icon's tone over the
     /// system red badge's 3.55:1. The same in both appearances: a badge is a
-    /// coloured mark on any ground. Worn by the unread pills the app draws itself and by the
-    /// unseen-story ring — NOT by the tab bar's badges (UIKit's, which take
-    /// one colour) nor the bell's dot: those stay solid (`counter`).
+    /// coloured mark on any ground. Worn by the unread pills on the inbox's avatars and by the
+    /// unseen-story ring — NOT by the tab bar's badges, the selector's nor
+    /// the bell's dot: those stay the solid red (`counter`).
     public static let accentGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xFFA552)]
 
     /// Where `accentGradient` runs, in a layer's unit space.
     public static let accentGradientStart = CGPoint(x: 0, y: 1)
     public static let accentGradientEnd = CGPoint(x: 1, y: 0)
-
-    /// The gradient an unread pill the app draws itself wears — nil under the
-    /// `.red` rule, where it is the solid system red (`counter`).
-    public static var counterGradient: [UIColor]? {
-        rules.counters == .accent ? accentGradient : nil
-    }
 
     // MARK: - Rules (#1169)
 
@@ -115,7 +111,9 @@ public enum Palette {
 
         /// The selected tab in the label's colour, not the accent.
         public var selectedTabIsNeutral = true
-        public var counters = Counters.accent
+        /// The solid unread marks: the system red (decided), or the accent to
+        /// compare.
+        public var counters = Counters.red
         /// The unseen-story ring: the icon's gradient (decided 2026-10-14), or
         /// the solid accent to compare.
         public var storyRing = Ring.gradient
@@ -179,11 +177,11 @@ public enum Palette {
     /// saved star alone. Drawn by the custom heart (#1128), as a mask over a
     /// gradient layer: SF Symbols do not draw a three-stop gradient.
     public static func pointsGradient(for traits: UITraitCollection) -> [UIColor] {
-        // ⚠️ SOLID NOW (#1169, the owner's call 2026-10-14: every heart in
-        // the theme's pink). Two equal stops, so the heart's mask and layer —
-        // built for a gradient — are untouched.
-        let pink = tint.resolvedColor(with: traits)
-        return [pink, pink]
+        // ⚠️ SOLID NOW (#1169, the owner's call 2026-10-14: every heart the
+        // system red). Two equal stops, so the heart's mask and layer — built
+        // for a gradient — are untouched.
+        let red = UIColor.systemRed.resolvedColor(with: traits)
+        return [red, red]
     }
 
     /// The icon's own gradient, orchid → tangerine, for brand moments only

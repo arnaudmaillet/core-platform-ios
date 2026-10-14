@@ -37,9 +37,9 @@ struct PointsHeartViewTests {
         return Bitmap(width: side, bytes: bytes)
     }
 
-    /// Liked: the theme's pink (#1169, solid — two equal stops on the layer
+    /// Liked: the system red (#1169, solid — two equal stops on the layer
     /// built for a gradient). At rest: the content's ink.
-    @Test func likedDrawsThePinkAndRestTheInk() {
+    @Test func likedDrawsTheRedAndRestTheInk() {
         let heart = PointsHeartView()
         heart.ink = .black
         #expect(heart.drawnColours.count == 2)

@@ -12,10 +12,10 @@ public enum PointsSymbol {
     public static let glyph = AppSymbol.liked.rawValue
     /// The coin: the wallet's balance badge and the claim screen.
     public static let coin = "heart.circle.fill"
-    /// Points' colour: the theme's pink (#1169, the owner's call 2026-10-14 —
-    /// "no more red in the app"). It was a like's red (25 September 2026).
-    public static var tint: UIColor { Palette.tint }
-    /// The heart's fill for an appearance — the theme's pink, solid (#1169;
+    /// Points' colour: a like's red (25 September 2026; kept red under the
+    /// pink accent, the owner's call 2026-10-14).
+    public static let tint: UIColor = .systemRed
+    /// The heart's fill for an appearance — the system red, solid (#1169;
     /// it was #1124's yellow → orange → pink).
     public static func gradient(for traits: UITraitCollection) -> [UIColor] {
         Palette.pointsGradient(for: traits)
