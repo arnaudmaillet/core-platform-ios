@@ -6,8 +6,7 @@ import UIKit
 /// 2026: "boost, j'aime, points sont la même chose"). They were a star, and
 /// the star was spelled out at every surface that drew one — the wallet badge,
 /// the claim screen, the comment bar's boost and the rail's — so this is the
-/// one name they all read. NOT the profile's favourite star (pin to map), which
-/// is not a point.
+/// one name they all read. NOT the Save star (#1128), which is not a point.
 public enum PointsSymbol {
     /// The glyph on a boost control and beside an amount.
     public static let glyph = "heart.fill"

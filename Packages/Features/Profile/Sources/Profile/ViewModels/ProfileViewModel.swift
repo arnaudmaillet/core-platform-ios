@@ -48,13 +48,13 @@ public final class ProfileViewModel {
         }
     }
 
-    /// The map-favorite star beside Message.
+    /// The map-favorite pin (the "Map" submenu).
     ///
     /// Carries the RAILS the profile is on rather than a bare on/off, because
     /// a mutual can be on Friends, on Following, on both, or on neither, and
     /// the menu that edits that has to show which. `hidden` is a third state
     /// on purpose: "no button" and "an unfavorited button" are different
-    /// products — the star is offered ONLY for a profile the viewer follows
+    /// products — the pin is offered ONLY for a profile the viewer follows
     /// (the map's people rails are a shortcut through the people you already
     /// keep up with), and only when the app was wired with somewhere to keep
     /// them.
@@ -66,12 +66,12 @@ public final class ProfileViewModel {
         /// no rail); `includesFriends` is true for a MUTUAL, the only viewer
         /// for whom the Friends row exists at all.
         ///
-        /// The star always opens the checklist now: with three rails, even
+        /// The pin always opens the checklist now: with three rails, even
         /// someone merely followed has two of them (the dock and the Following
         /// row), and a single toggle could not say which.
         case shown(categories: Set<MapFavoriteCategory>, includesFriends: Bool)
 
-        /// Whether the star reads as filled — on ANY rail counts.
+        /// Whether the pin reads as filled — on ANY rail counts.
         public var isFavorited: Bool {
             if case .shown(let categories, _) = self { return !categories.isEmpty }
             return false
@@ -279,7 +279,7 @@ public final class ProfileViewModel {
             // ⚠️ AN ANSWER THAT AGREES WITH THE SCREEN SAYS NOTHING. Every
             // refresh reads the relationship again, and each identical answer
             // used to re-pose the tray's capsule, cross-dissolve the whole
-            // navigation bar and re-ask the map star — a landing turn's worth
+            // navigation bar and re-ask the map pin — a landing turn's worth
             // of work, on a pull-to-refresh, to arrive where it already was.
             guard followButton != oldValue else { return }
             onFollowButtonChange?(followButton)
@@ -301,7 +301,7 @@ public final class ProfileViewModel {
     /// `nil` until it has been asked.
     ///
     /// Optional so the button is not shown wearing a guess: resolving the
-    /// never-curated fallbacks can take a round trip, and an outline star that
+    /// never-curated fallbacks can take a round trip, and an outline pin that
     /// silently fills in is a worse first impression than a button that
     /// arrives a frame late. Kept apart from `mapPinButton` so the answer
     /// survives the button being hidden and shown again — unfollowing does NOT
@@ -779,9 +779,9 @@ public final class ProfileViewModel {
         }
     }
 
-    /// Whether the star's answer is in: not offered at all, or offered with
+    /// Whether the pin's answer is in: not offered at all, or offered with
     /// its rails read. False only while a followed profile's rails are still
-    /// being asked for — the star would otherwise land beside Message after
+    /// being asked for — the pin would otherwise land beside Message after
     /// the screen is up and squeeze the tray's capsules to make room.
     public var isMapPinSettled: Bool {
         !(mapPinning != nil && profile != nil && followButton == .following && mapCategories == nil)

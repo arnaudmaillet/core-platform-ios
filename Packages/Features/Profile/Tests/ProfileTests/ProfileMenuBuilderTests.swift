@@ -148,7 +148,7 @@ struct ProfileMenuBuilderTests {
         let rows = submenu.children.compactMap { $0 as? UIAction }
         #expect(rows.map(\.state) == [.on, .on, .off])
         #expect(submenu.subtitle == "Map Dock, Following Filter")
-        #expect(submenu.image == UIImage(systemName: "star.circle.fill"))
+        #expect(submenu.image == UIImage(systemName: "mappin.circle.fill"))
     }
 
     @Test func anUnfavoritedProfileWearsTheOutlineStarAndNoSubtitle() throws {
@@ -156,7 +156,7 @@ struct ProfileMenuBuilderTests {
             .shown(categories: [], includesFriends: false)
         ) { _ in })
         #expect(submenu.subtitle == nil)
-        #expect(submenu.image == UIImage(systemName: "star.circle"))
+        #expect(submenu.image == UIImage(systemName: "mappin.circle"))
     }
 
     @Test func aRailRowTogglesItsOwnCategory() {
