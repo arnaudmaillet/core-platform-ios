@@ -27,7 +27,6 @@ struct UnsizedImageDecodesGuardTests {
         "ForYouViewController.swift": "the page picture a For You hero lands on",
         "ForYouGridPage.swift": "For You's grid covers and their warm-up, hero sources",
         "ForYouRailsView.swift": "rail covers, hero sources",
-        "SnapFeedCell.swift": "the full-screen post and its video poster",
         "SnapFeedViewController.swift": "the lock-screen artwork of the post playing",
         "SoundSheetAutoplay.swift": "sound sheet covers, hero sources",
         "SoundSheetTileCell.swift": "sound sheet covers, hero sources",
