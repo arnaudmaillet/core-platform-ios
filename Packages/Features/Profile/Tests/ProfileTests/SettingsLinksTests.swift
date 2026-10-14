@@ -23,6 +23,32 @@ struct SettingsLinksTests {
         #expect(titles.contains("Legal Notice"))
         #expect(titles.contains("Transparency Reports"))
         #expect(titles.last == "Version")
+        // The third-party licences (#1128), an app page, never "Coming Soon".
+        let acknowledgements = try #require(try rows(of: screen).first { $0.title == "Acknowledgements" })
+        #expect(acknowledgements.opensAcknowledgements && !acknowledgements.isComingSoon)
+    }
+
+    /// Every package the app ships carries its licence; Phosphor's MIT notice
+    /// is there in full (the art behind the custom glyphs, #1128), and an
+    /// Apache package shows its NOTICE before the licence.
+    @Test func theAcknowledgementsCarryEveryLicence() throws {
+        let acknowledgements = try #require(Acknowledgements.bundled)
+        let names = acknowledgements.packages.map(\.name)
+        for name in ["Phosphor Icons", "GRDB.swift", "Connect-Swift", "Lottie", "SwiftProtobuf", "SwiftNIO"] {
+            #expect(names.contains(name), "\(name) is missing")
+        }
+        let phosphor = try #require(acknowledgements.packages.first { $0.name == "Phosphor Icons" })
+        #expect(phosphor.license == "MIT")
+        #expect(acknowledgements.licenseText(for: phosphor).contains("Copyright (c) 2023 Phosphor Icons"))
+        #expect(acknowledgements.apache2.contains("Apache License"))
+        let nio = try #require(acknowledgements.packages.first { $0.name == "SwiftNIO" })
+        let text = acknowledgements.licenseText(for: nio)
+        #expect(text.contains("Apache License"))
+        #expect(try #require(nio.notice).isEmpty == false)
+        let notice = Acknowledgements.reflowed(try #require(nio.notice))
+        #expect(text.range(of: notice)!.lowerBound < text.range(of: "Apache License")!.lowerBound)
+        // Reflowed: a paragraph is one line, not the file's 80 columns.
+        #expect(Acknowledgements.reflowed("a\nb\n\nc") == "a b\n\nc")
     }
 
     @Test func aRowWithoutAPageIsComingSoonAndOneWithAPageIsNot() {
