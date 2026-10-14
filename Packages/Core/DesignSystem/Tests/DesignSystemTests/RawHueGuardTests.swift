@@ -19,6 +19,7 @@ struct RawHueGuardTests {
     /// File name → why its raw hue stays.
     static let allowed: [String: String] = [
         // The palette itself.
+        "Palette.swift": "the palette mixes its own stops (`mix`)",
         // User content and measured inks — not the theme (#1124, out of scope).
         "MediaTextStyleBar.swift": "the user's text inks drawn on media",
         "FlagPalette.swift": "colours read from a country's flag",
