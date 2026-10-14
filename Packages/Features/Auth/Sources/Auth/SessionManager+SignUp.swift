@@ -38,6 +38,16 @@ public enum CodeSignIn: Equatable, Sendable {
     case needsSecondStep(SecondStepChallenge)
 }
 
+/// When the shell offers to create a passkey (#840).
+public enum PasskeyOfferMoment: Equatable, Sendable {
+    /// Right after a sign-up: the new token's `auth_time` is fresh, so
+    /// registering needs no step-up.
+    case signUp
+    /// After a sign-in by code or Apple / Google: offered when the account
+    /// has none, at most once in a while.
+    case signIn
+}
+
 /// A provider that signs people in natively and hands back an id_token.
 public enum FederatedProvider: Equatable, Sendable {
     case apple, google
@@ -185,6 +195,7 @@ extension SessionManager {
         }
         request.device = deviceContext()
         request.guestRefreshToken = guestSession?.refreshToken ?? ""
+        if case .passkey = credential { lastSignInUsedPasskey = true } else { lastSignInUsedPasskey = false }
         let response = await authClient.login(request: request, headers: [:])
         switch response.result {
         case .success(let body) where body.mfaRequired:
@@ -268,6 +279,7 @@ extension SessionManager {
     /// An account that has its profile becomes the app's session.
     public func completeSignIn(_ account: PendingAccount) {
         pendingSignUpNotice = false
+        pendingPasskeyOffer = lastSignInUsedPasskey ? nil : .signIn
         install(account.session)
         pendingReactivationNotice = account.reactivated
     }
@@ -284,6 +296,7 @@ extension SessionManager {
         case .success(let body):
             // Before the broadcast: the shell reads it on `.authenticated`.
             pendingSignUpNotice = true
+            pendingPasskeyOffer = .signUp
             install(Self.makeSession(accountID: pending.accountID, tokens: body.tokens, now: now()))
         case .failure(let error):
             throw AuthError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))

@@ -1312,6 +1312,10 @@ final class AppContainer {
 
     /// "Where you're logged in": `auth.v1` ListSessions / Logout / LogoutAllSessions
     /// on the AUTHENTICATED client — they act on the calling principal's account.
+    /// The account's credentials and sessions, for the shell's passkey offer
+    /// after a sign-in (#840).
+    var accountSessions: AccountSessionsRepository { accountSessionsRepository }
+
     private lazy var accountSessionsRepository = AccountSessionsRepository(
         authClient: Auth_V1_AuthServiceClient(client: authenticatedRPCClient),
         // A step-up's fresh access token replaces the session's, so the

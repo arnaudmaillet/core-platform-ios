@@ -133,6 +133,11 @@ final class GuestModeUITests: XCTestCase {
         app.buttons["Create Account"].tap()
 
         XCTAssertTrue(prompt.waitForNonExistence(timeout: 15), "signing up did not close the sheet")
+        // A new member is offered a passkey once the sheet has gone (#840).
+        let offer = app.alerts["Sign In Faster With a Passkey"]
+        XCTAssertTrue(offer.waitForExistence(timeout: 10), "the sign-up did not offer a passkey")
+        offer.buttons["Not Now"].tap()
+        XCTAssertTrue(offer.waitForNonExistence(timeout: 5), "Not Now did not put the offer away")
         assertLikeLanded(like, before: before, in: app)
     }
 
