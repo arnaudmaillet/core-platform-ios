@@ -1375,7 +1375,7 @@ public final class PagedTabBar: UIControl {
     /// the segments and with them their badges, so a colour stated once would
     /// leave with the segment that wore it — exactly the trap the counts
     /// themselves carry. `buildSegments` states it again for each new segment.
-    public var badgeTint: UIColor = .systemRed {
+    public var badgeTint: UIColor = Palette.counter {
         didSet {
             guard badgeTint != oldValue else { return }
             for segment in segments { segment.setBadgeTint(badgeTint) }
@@ -2722,7 +2722,7 @@ private final class BadgeView: UIView {
     /// that is what the two hosts this was written for are saying: something is
     /// waiting for you. A host counting things that are merely THERE — the
     /// photographs in an album — wants a different colour, and says so.
-    private var tint: UIColor = .systemRed
+    private var tint: UIColor = Palette.counter
 
     func setTint(_ color: UIColor) {
         tint = color

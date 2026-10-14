@@ -98,15 +98,17 @@ struct PaletteTests {
         #expect(Self.hex(Palette.primaryFill, Self.traits(.light, high: true)) == 0xD6337F)
     }
 
-    /// The heart is the system red, solid (#1169, kept red under the pink
-    /// accent) — two equal stops, so the gradient layer still draws.
-    @Test func thePointsHeartIsTheSystemRed() {
+    /// The heart is the pink, solid (#1178) — two equal stops, so the
+    /// gradient layer still draws — a glyph that reads at 3:1 on the page.
+    @Test func thePointsHeartIsThePink() {
+        #expect(PointsSymbol.gradient(for: Self.light).map { Self.hex($0, Self.light) } == [0xD6337F, 0xD6337F])
+        #expect(PointsSymbol.gradient(for: Self.dark).map { Self.hex($0, Self.dark) } == [0xF37AB4, 0xF37AB4])
         for traits in [Self.light, Self.dark] {
-            let stops = PointsSymbol.gradient(for: traits)
-            #expect(stops.count == 2)
-            #expect(stops.allSatisfy { Self.hex($0, traits) == Self.hex(.systemRed, traits) })
+            for stop in PointsSymbol.gradient(for: traits) {
+                #expect(Self.contrast(stop, on: .systemBackground, traits) >= 3)
+            }
         }
-        #expect(PointsSymbol.tint == .systemRed)
+        #expect(PointsSymbol.tint === Palette.tint)
     }
 
     /// Links and tokens in text (#1174): a greyed violet (#1176) — blue over

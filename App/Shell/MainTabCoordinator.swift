@@ -281,6 +281,12 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.textCompletions = container.textCompletions
         // The gate every write asks before it runs, found up the chain.
         tabBarController.memberGate = container.memberGate
+        // The badged bell is a baked bitmap per appearance (#1178): the bars
+        // pick the variant when the image is set, so a light/dark switch sets
+        // it again.
+        tabBarController.view.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIView, _) in
+            self?.notificationsBell.repaint()
+        }
         createHold.install()
         // ⚠️ **iOS 27 STOPPED DETACHING A SEARCH TAB BY ITS TYPE ALONE.** It now
         // gives the separate bubble — its "prominent" treatment — to the tab

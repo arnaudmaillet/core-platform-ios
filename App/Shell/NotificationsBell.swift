@@ -63,19 +63,42 @@ final class NotificationsBell {
     func setUnread(_ unread: Bool) {
         guard unread != isUnread else { return }
         isUnread = unread
-        let image = Self.image(unread: unread)
+        repaint()
+    }
+
+    /// Sets every live bell's image again — the badged one is baked per
+    /// appearance, so a light/dark switch asks for it anew.
+    func repaint() {
+        let image = Self.image(unread: isUnread)
         for item in items.allObjects { item.image = image }
     }
 
     /// The bell glyph for an unread state. When unread, a palette `bell.badge`
-    /// (bell in `.label`, badge in red) rendered `.alwaysOriginal` so the
-    /// item's `.label` tint can't flatten the badge; otherwise a plain template
-    /// `bell` that the tint draws dark. Both keep dynamic colours, so they adapt
-    /// to light and dark on their own.
+    /// (badge in `Palette.counter`, bell in `.label`); otherwise a plain
+    /// template `bell` that the tint draws dark.
+    ///
+    /// ⚠️ BAKED, per appearance (#1178). A bar item re-renders a SYMBOL image
+    /// with its own configuration: the palette was dropped and the badge came
+    /// out in the system red whatever `counter` said. So the badged bell is
+    /// drawn into bitmaps — one per appearance, registered in an image asset
+    /// so it still follows light and dark.
     static func image(unread: Bool) -> UIImage? {
         guard unread else { return UIImage(systemName: "bell") }
-        let config = UIImage.SymbolConfiguration(paletteColors: [.label, Palette.counter])
-        return UIImage(systemName: "bell.badge", withConfiguration: config)?
-            .withRenderingMode(.alwaysOriginal)
+        // `bell.badge`'s first layer is the BADGE, its second the bell.
+        let config = UIImage.SymbolConfiguration(paletteColors: [Palette.counter, .label])
+        guard let symbol = UIImage(systemName: "bell.badge", withConfiguration: config) else { return nil }
+        let asset = UIImageAsset()
+        for style in [UIUserInterfaceStyle.light, .dark] {
+            let traits = UITraitCollection(userInterfaceStyle: style)
+            let format = UIGraphicsImageRendererFormat(for: traits)
+            let baked = UIGraphicsImageRenderer(size: symbol.size, format: format).image { _ in
+                traits.performAsCurrent { symbol.draw(at: .zero) }
+            }
+            asset.register(
+                baked.withBaselineOffset(fromBottom: symbol.baselineOffsetFromBottom ?? 0),
+                with: UITraitCollection(traitsFrom: [traits, UITraitCollection(displayScale: format.scale)])
+            )
+        }
+        return asset.image(with: UITraitCollection.current).withRenderingMode(.alwaysOriginal)
     }
 }

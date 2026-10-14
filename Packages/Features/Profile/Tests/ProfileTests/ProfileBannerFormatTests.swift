@@ -263,10 +263,10 @@ struct ProfileBannerFormatTests {
         let message = header.debugTrayButtons[1]
         #expect(follow.configuration?.title == "Follow")
         #expect(follow.configuration?.background.visualEffect == nil)
-        // Follow is the one prominent capsule: the quiet grey the others
-        // wear, its words in the accent (#1174).
-        #expect(follow.configuration?.baseBackgroundColor == HeroTray.fill)
-        #expect(follow.configuration?.baseForegroundColor == Palette.tint)
+        // Follow is the one prominent capsule: the pink-to-white gradient,
+        // white words (#1178).
+        #expect(follow.usesGradient)
+        #expect(follow.configuration?.baseForegroundColor == .white)
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
             for button in header.debugTrayButtons where button !== follow {
