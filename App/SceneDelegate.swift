@@ -46,6 +46,10 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         #else
         let window = UIWindow(windowScene: windowScene)
         #endif
+        // The brand's tangerine (#1124): every system control and every
+        // `.tintColor` read follows it. The asset catalog's AccentColor carries
+        // the same values for what the window does not reach.
+        window.tintColor = Palette.tint
         // Taps in a bar's area never reach the content under it; pans still
         // scroll it (#562).
         window.addGestureRecognizer(BarTapShield())

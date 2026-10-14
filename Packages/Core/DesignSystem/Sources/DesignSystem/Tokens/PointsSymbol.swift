@@ -16,6 +16,13 @@ public enum PointsSymbol {
     /// Points' colour — a like's red (product decision, 25 September 2026),
     /// where points used to be wallet gold.
     public static let tint: UIColor = .systemRed
+    /// The heart's gradient stops for an appearance (#1124, decision 7):
+    /// yellow → orange → pink, with a deeper start in the light. `tint`
+    /// stays the plain red until the custom heart that draws this lands
+    /// (#1128).
+    public static func gradient(for traits: UITraitCollection) -> [UIColor] {
+        Palette.pointsGradient(for: traits)
+    }
     /// The coin as drawn: a white heart on a red disc — a token that reads at
     /// badge size, where a red heart alone on the bar's glass would not.
     public static var coinPalette: UIImage.SymbolConfiguration {
