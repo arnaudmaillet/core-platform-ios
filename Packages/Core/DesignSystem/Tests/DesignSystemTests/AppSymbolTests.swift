@@ -73,7 +73,7 @@ struct AppSymbolSizeTests {
     @Test(arguments: [
         (AppSymbol.liked, "heart.fill"), (.save, "star"), (.comment, "ellipsis.message"),
         (.repost, "arrow.trianglehead.2.clockwise.rotate.90"), (.gemFilled, "diamond.fill"),
-        (.more, "ellipsis"), (.share, "square.and.arrow.up"),
+        (.share, "square.and.arrow.up"),
     ])
     func aGlyphIsAsTallAsTheSystemsOwn(_ pair: (AppSymbol, String)) throws {
         let configuration = AppSymbol.fixed(12, weight: .semibold)

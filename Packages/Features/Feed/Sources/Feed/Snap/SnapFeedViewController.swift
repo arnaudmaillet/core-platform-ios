@@ -2121,7 +2121,7 @@ final class SnapFeedViewController: UIViewController {
         let actions = UIStackView(arrangedSubviews: [bookmarkButton, repost])
         actions.axis = .horizontal
 
-        let more = SnapNavControls.makeToolbarActionButton(systemName: AppSymbol.more.rawValue)
+        let more = SnapNavControls.makeToolbarActionButton(systemName: "ellipsis")
         // ⚠️ NAMED, every one: a glyph with no label reads as "button" to
         // VoiceOver, and the composition test needs a handle on it.
         more.accessibilityLabel = "More actions"
