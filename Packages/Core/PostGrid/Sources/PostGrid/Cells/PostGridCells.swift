@@ -1872,8 +1872,9 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// leading the line: `[save][repost][pages] ······ [comments][likes]`. One
     /// control per verb, so a hidden one closes its own slot.
     private let repostAction = PostCardAction.make(symbol: ActionSymbol.repost, label: "Repost")
-    /// Saved, the star is the save gold, as on the full-screen post (#1182).
-    private let bookmarkAction = PostCardAction.make(symbol: ActionSymbol.save, label: "Save", selectedTint: Palette.saveGold)
+    /// Saved, the star is the full-screen post's gold — the reference, the
+    /// owner's call (#1182, #1188): one gold in both appearances.
+    private let bookmarkAction = PostCardAction.make(symbol: ActionSymbol.save, label: "Save", selectedTint: Palette.saveGoldOnMedia)
 
     /// The preview wears ONE piece of furniture, the page indicator: what the
     /// viewer can press about a post lives in the closing row under the
