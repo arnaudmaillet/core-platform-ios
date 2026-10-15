@@ -206,7 +206,7 @@ final class SnapShortcutRailView: UIScrollView {
         }
         // On screen: dress what the window shows — none of it while a flight
         // is in the air in that window (a page staged under a zoom).
-        concealForFlight(FlightActivity.isActive(for: self))
+        concealForFlight(FlightActivity.isActive(for: self), animated: false)
         setNeedsLayout()
         // The system's scroll-edge effects manage `layer.mask` themselves
         // and silently evict the custom edge-fade gradient (the feed's
@@ -296,7 +296,7 @@ final class SnapShortcutRailView: UIScrollView {
         }
         dressed = Array(repeating: false, count: emotes.count)
         for icon in icons { addSubview(icon) }
-        concealForFlight(FlightActivity.isActive(for: self))
+        concealForFlight(FlightActivity.isActive(for: self), animated: false)
         isHidden = emotes.isEmpty
         needsContentRebuild = true
         needsRestReset = true
@@ -309,23 +309,113 @@ final class SnapShortcutRailView: UIScrollView {
     /// 2026-10-15, on a device): the page's wheel was laid out inside the
     /// zoom's animation block, so its emotes grew in from the rail's corner
     /// and showed twice — once on the flying page, once at their resting
-    /// place. Hidden while any flight is in the air, shown at rest, outside
-    /// any animation, when the last one lands.
+    /// place. Gone while any flight is in the air, back when the last one
+    /// lands.
+    ///
+    /// ## Bounce in, bounce out (the owner, 2026-10-15)
+    ///
+    /// A flight taking off over a shown wheel — a grab's intent to dismiss,
+    /// a close — sends the shown shortcuts out: each swells a touch, then
+    /// shrinks and fades, the TOP one first. A landing brings them in: each
+    /// bounces up from small as it fades in, the BOTTOM one first, the top
+    /// one last. A wheel that joins its window mid-flight (the page a zoom
+    /// opens) is simply out until the landing.
+    ///
+    /// Posed on the TILES, not the buttons: the buttons' alpha and transform
+    /// are the wheel's top exit, re-posed on every scrolled frame.
     @objc private func flightActivityChanged(_ note: Notification) {
         guard let window, note.object as? UIWindow === window else { return }
-        concealForFlight(FlightActivity.isActive(for: self))
+        concealForFlight(FlightActivity.isActive(for: self), animated: true)
     }
 
-    private func concealForFlight(_ concealed: Bool) {
+    /// Whether the shortcuts are out for a flight.
+    private(set) var isConcealedForFlight = false
+
+    /// The gap between two shortcuts' starts.
+    static let staggerStep: TimeInterval = 0.05
+    /// How small a shortcut is when it is out.
+    static let outScale: CGFloat = 0.35
+
+    /// Each shown shortcut's delay, top to bottom: arriving, the top one
+    /// waits longest; leaving, it goes first.
+    static func staggerDelays(count: Int, entering: Bool) -> [TimeInterval] {
+        (0..<count).map { slot in
+            TimeInterval(entering ? count - 1 - slot : slot) * staggerStep
+        }
+    }
+
+    private func concealForFlight(_ concealed: Bool, animated: Bool) {
+        let changed = concealed != isConcealedForFlight
+        isConcealedForFlight = concealed
+        // At rest before it comes in: in place, dressed for what it shows.
+        if !concealed { UIView.performWithoutAnimation { layoutIfNeeded() } }
+        let shown = animated && changed && window != nil ? tiles.indices.filter { dressed[$0] } : []
+        let delays = Self.staggerDelays(count: shown.count, entering: !concealed)
+        for (index, tile) in tiles.enumerated() {
+            tile.layer.removeAllAnimations()
+            guard let slot = shown.firstIndex(of: index) else {
+                UIView.performWithoutAnimation {
+                    tile.alpha = concealed ? 0 : 1
+                    tile.transform = .identity
+                }
+                continue
+            }
+            if concealed {
+                Self.bounceOut(tile, delay: delays[slot])
+            } else {
+                Self.bounceIn(tile, delay: delays[slot])
+            }
+        }
+    }
+
+    /// ⚠️ ANIMATIONS FORCED ON: a flight stages with view animations off
+    /// (`ZoomAnimator`), and takes off — posting the change — inside that.
+    private static func animating(_ body: () -> Void) {
+        let wereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(true)
+        body()
+        UIView.setAnimationsEnabled(wereEnabled)
+    }
+
+    private static func bounceIn(_ tile: UIView, delay: TimeInterval) {
         UIView.performWithoutAnimation {
-            for icon in icons { icon.isHidden = concealed }
-            if !concealed { layoutIfNeeded() }
+            tile.alpha = 0
+            tile.transform = CGAffineTransform(scaleX: outScale, y: outScale)
+        }
+        animating {
+            UIView.animate(
+                withDuration: 0.5, delay: delay, usingSpringWithDamping: 0.55, initialSpringVelocity: 0,
+                options: [.allowUserInteraction]
+            ) {
+                tile.alpha = 1
+                tile.transform = .identity
+            }
+        }
+    }
+
+    private static func bounceOut(_ tile: UIView, delay: TimeInterval) {
+        animating {
+            UIView.animateKeyframes(
+                withDuration: 0.26, delay: delay, options: [.beginFromCurrentState, .allowUserInteraction]
+            ) {
+                UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.3) {
+                    tile.transform = CGAffineTransform(scaleX: 1.12, y: 1.12)
+                }
+                UIView.addKeyframe(withRelativeStartTime: 0.3, relativeDuration: 0.7) {
+                    tile.transform = CGAffineTransform(scaleX: outScale, y: outScale)
+                    tile.alpha = 0
+                }
+            }
         }
     }
 
     #if DEBUG
-    /// Whether the shortcuts are hidden for a flight.
-    var debugConcealedForFlight: Bool { icons.contains { $0.isHidden } }
+    /// Whether the shortcuts are out for a flight.
+    var debugConcealedForFlight: Bool { isConcealedForFlight }
+    /// Each tile's drawn alpha, top to bottom.
+    var debugTileAlphas: [CGFloat] { tiles.map(\.alpha) }
+    /// The animations running on each dressed tile, top to bottom.
+    var debugDressedTileLayers: [CALayer] { tiles.indices.filter { dressed[$0] }.map { tiles[$0].layer } }
     #endif
 
     /// Back to the resting window (cell reuse). Also releases any feed lock

@@ -756,6 +756,33 @@ struct SnapShortcutRailFlightTests {
         #expect(!rail.debugConcealedForFlight, "the shortcuts did not come back at the landing")
     }
 
+    /// Arriving, the top shortcut waits longest; leaving, it goes first
+    /// (the owner, 2026-10-15).
+    @Test func theStaggerRunsBottomUpInAndTopDownOut() {
+        let step = SnapShortcutRailView.staggerStep
+        #expect(SnapShortcutRailView.staggerDelays(count: 3, entering: true) == [2 * step, step, 0])
+        #expect(SnapShortcutRailView.staggerDelays(count: 3, entering: false) == [0, step, 2 * step])
+        #expect(SnapShortcutRailView.staggerDelays(count: 0, entering: true).isEmpty)
+    }
+
+    /// A grab over a shown wheel sends the shortcuts out, animated; the
+    /// landing bounces them back in, animated — the model at rest at once.
+    @Test func aFlightSendsTheShownShortcutsOutAndTheLandingBouncesThemIn() {
+        let (rail, window) = hostedRail()
+        defer { window.isHidden = true }
+        let layers = rail.debugDressedTileLayers
+        #expect(!layers.isEmpty, "precondition: the resting window shows shortcuts")
+
+        let flight = FlightActivity.begin(in: window)
+        #expect(rail.debugTileAlphas.allSatisfy { $0 == 0 }, "a shortcut stayed on through the flight")
+        #expect(layers.allSatisfy { !($0.animationKeys() ?? []).isEmpty }, "a shortcut left without its bounce out")
+
+        flight.release()
+        #expect(rail.debugTileAlphas.allSatisfy { $0 == 1 }, "a shortcut did not come back")
+        #expect(rail.debugDressedTileLayers.allSatisfy { !($0.animationKeys() ?? []).isEmpty },
+                "a shortcut came back without its bounce in")
+    }
+
     /// A page staged under a zoom joins the window mid-flight: hidden from
     /// its first frame there.
     @Test func aWheelJoiningAWindowMidFlightArrivesHidden() {
