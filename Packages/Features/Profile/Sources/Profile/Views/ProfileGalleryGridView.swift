@@ -239,6 +239,11 @@ final class ProfileGalleryGridView: UIView {
     private(set) var debugRecountedItems = 0
     /// The empty state's fitting passes — which a scroll must not add to.
     private(set) var debugEmptyStateMeasureCount = 0
+    /// How far the page can scroll, in the travelled space (0 at rest).
+    var debugMaximumTravel: CGFloat {
+        collectionView.contentSize.height + collectionView.contentInset.bottom
+            - collectionView.bounds.height + collectionView.contentInset.top
+    }
     /// Discover's stretches as planned.
     var debugSegments: [DiscoverSegment] { segments }
     /// Where a post is drawn, for a test that scrolls to it.
@@ -480,6 +485,13 @@ final class ProfileGalleryGridView: UIView {
             apply([], skeleton: false)
         }
         lookahead.setNeedsPlan()
+        // An empty page offers no travel (`offeredTravel`): a page that
+        // became one while scrolled comes back to the top, its message
+        // centred under the header.
+        applyBottomInset()
+        if !emptyStateView.isHidden, verticalOffset > offeredTravel + 0.5 {
+            setVerticalOffset(offeredTravel)
+        }
     }
 
     /// Whether `new` is `old` with other counters — the one change a cell can
@@ -1723,8 +1735,19 @@ extension ProfileGalleryGridView {
         applyBottomInset()
     }
 
+    /// The travel this page offers: the header's whole run with rows to show;
+    /// with only its empty state — nothing posted, a private profile, a
+    /// failure — none at all (the owner, 2026-10-15: there is nothing to
+    /// scroll to), or just what brings a block taller than the room left
+    /// under the header into view (a small phone).
+    private var offeredTravel: CGFloat {
+        guard !emptyStateView.isHidden else { return minimumTravel }
+        let roomBottom = bounds.height - baseBottomInset
+        return max(0, collectionView.contentInset.top + emptyStateHeight - roomBottom)
+    }
+
     private func applyBottomInset() {
-        let needed = minimumTravel
+        let needed = offeredTravel
             + collectionView.bounds.height
             - collectionView.contentSize.height
             - collectionView.contentInset.top

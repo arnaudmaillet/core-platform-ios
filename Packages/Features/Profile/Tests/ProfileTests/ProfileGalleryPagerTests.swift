@@ -368,6 +368,28 @@ struct ProfileGalleryTravelFloorTests {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
+    /// ⚠️ NOTHING TO SCROLL TO, NOTHING TO SCROLL (the owner, 2026-10-15): a
+    /// page showing only its empty state — a private profile, an empty tab —
+    /// offers no travel, whatever the header asks of the pages, and its
+    /// message stays centred under the header. With rows, the header's whole
+    /// run is offered again.
+    @Test func anEmptyPageOffersNoTravel() {
+        let page = makePage()
+        page.setContentTopInset(300)
+        page.setMinimumScrollTravel(2_000)
+        page.render(.restricted(title: "This Account Is Private", message: "Follow this account to see their posts."))
+        page.layoutIfNeeded()
+        #expect(abs(page.debugMaximumTravel) < 1, "a private page still scrolls by \(page.debugMaximumTravel)")
+
+        page.render(.empty(message: ""))
+        page.layoutIfNeeded()
+        #expect(abs(page.debugMaximumTravel) < 1, "an empty page still scrolls")
+
+        page.render(.loading)
+        page.layoutIfNeeded()
+        #expect(page.debugMaximumTravel >= 2_000 - 1, "a page with rows lost the header's run")
+    }
+
     private func makePage() -> ProfileGalleryGridView {
         let page = ProfileGalleryGridView(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list, tab: .format(.activity)
