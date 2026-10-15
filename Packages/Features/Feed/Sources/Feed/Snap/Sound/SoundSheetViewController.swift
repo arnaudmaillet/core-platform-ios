@@ -337,6 +337,11 @@ final class SoundSheetViewController: UIViewController {
     /// Whether the expanded detent is the fitted one — the content is shorter
     /// than the screen — rather than UIKit's large.
     private(set) var expandsToFit = false
+    /// Nothing under the sound — no Popular row, no Recent post (the post the
+    /// sheet opened over is never listed, #1161): the sheet has ONE detent,
+    /// the collapsed one. An expanded detent opened an empty band under the
+    /// sound (#1162; the owner, on a device).
+    private(set) var hasNothingBelow = false
     /// The large detent's value, as the sheet's own resolution states it
     /// (`maximumDetentValue`).
     private var largeHeight: CGFloat?
@@ -430,6 +435,7 @@ final class SoundSheetViewController: UIViewController {
             self?.largeHeight = context.maximumDetentValue
             return min(self?.collapsedHeight ?? 420, context.maximumDetentValue)
         }
+        guard !hasNothingBelow else { return [collapsed] }
         guard expandsToFit else { return [collapsed, .large()] }
         let fitted = UISheetPresentationController.Detent.custom(identifier: Self.fittedDetent) {
             [weak self] context in
@@ -441,7 +447,8 @@ final class SoundSheetViewController: UIViewController {
 
     /// The expanded detent as the detents stand now.
     var expandedDetentIdentifier: UISheetPresentationController.Detent.Identifier {
-        expandsToFit ? Self.fittedDetent : .large
+        if hasNothingBelow { return Self.collapsedDetent }
+        return expandsToFit ? Self.fittedDetent : .large
     }
 
     static func isExpanded(_ identifier: UISheetPresentationController.Detent.Identifier?) -> Bool {
@@ -554,9 +561,45 @@ final class SoundSheetViewController: UIViewController {
         // Up, or back from a pushed section: the tiles are the viewer's
         // again — unless a feed opened from one still covers them.
         if !isShowingFeed { setAutoplayActive(true) }
+        installRecordTap()
         #if DEBUG
         debugOpenTileIfRequested()
         #endif
+    }
+
+    // MARK: - The record's tap (#1162)
+
+    /// ⚠️ THE RECORD'S TAP LIVES ON THE SHEET, NOT ON THE RECORD. The record's
+    /// upper half sits under the sheet's navigation bar, and a recognizer on
+    /// the record never fired there — not even with the bar passing the hit
+    /// through: something in the bar's band takes the touch at the gesture
+    /// level (#1162; the owner, on a device: "very hard to pause from the
+    /// cover"). A recognizer on the presented navigation controller's view
+    /// sees every touch in the sheet whichever view is hit, and begins only
+    /// inside the record — the WHOLE disc, not the glyph (#1162).
+    private var recordTap: UITapGestureRecognizer?
+
+    private func installRecordTap() {
+        guard recordTap == nil, let host = navigationController?.view else { return }
+        let tap = UITapGestureRecognizer(target: self, action: #selector(recordTapped))
+        tap.delegate = self
+        tap.cancelsTouchesInView = true
+        host.addGestureRecognizer(tap)
+        recordTap = tap
+    }
+
+    @objc private func recordTapped() {
+        onTogglePlayback?()
+    }
+
+    /// Whether `point`, in `view`'s space, is on the record (and the record
+    /// takes taps: a post with sound).
+    func recordTakesTap(at point: CGPoint, in view: UIView) -> Bool {
+        // A screen pushed over the sheet covers the record; a header a
+        // recycled cell took off the sheet is no record to tap.
+        guard navigationController?.topViewController === self,
+              let header, isViewLoaded, header.isDescendant(of: self.view) else { return false }
+        return header.recordTakesTap(at: view.convert(point, to: header))
     }
 
     /// ⚠️ ONLY WAKES THE REVEAL AND PLACES ITS LINE — never a detent, never a
@@ -1179,11 +1222,13 @@ final class SoundSheetViewController: UIViewController {
         guard let metrics = detentMetrics else { return }
         let height = Self.fittedDetentHeight(metrics, recentCount: recentCount)
         let fits = estimatedLargeHeight().map { height < $0 } ?? false
+        let nothingBelow = recentCount == 0 && !hasPopular
         let previous = fittedHeight
-        guard height != previous || fits != expandsToFit else { return }
+        guard height != previous || fits != expandsToFit || nothingBelow != hasNothingBelow else { return }
         fittedHeight = height
-        let flipped = fits != expandsToFit
+        let flipped = fits != expandsToFit || nothingBelow != hasNothingBelow
         expandsToFit = fits
+        hasNothingBelow = nothingBelow
         trace("""
             \(reason): fitted \(height) for \(recentCount) recent posts \
             (was \(previous.map { "\($0)" } ?? "nil")) → \(fits ? "fitted" : "large")
@@ -1893,5 +1938,20 @@ extension SoundSheetViewController {
         let top = -scrollView.adjustedContentInset.top
         guard scrollView.contentOffset.y > top else { return }
         scrollView.contentOffset.y = top
+    }
+}
+
+extension SoundSheetViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        guard gestureRecognizer === recordTap, let view = gestureRecognizer.view else { return true }
+        return recordTakesTap(at: touch.location(in: view), in: view)
+    }
+
+    /// Alongside whatever the sheet's bar band runs on the same touch.
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer === recordTap
     }
 }
