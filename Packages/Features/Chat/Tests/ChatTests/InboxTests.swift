@@ -991,16 +991,14 @@ struct InboxSurfaceViewModelTests {
         #expect(rows.map(\.isUnread) == [false, true])
     }
 
-    /// The Requests badge counts ARRIVALS SINCE THE APP OPENED, not pending
-    /// totals — and nothing in the session takes it away.
-    ///
-    /// The watermark opens at the view model's `now`, so a `now` before the
-    /// fixtures' activity is what makes them read as having arrived since.
-    @Test func theRequestsBadgeCountsArrivalsAndHoldsThem() async {
+    /// The Requests badge counts UNREAD MESSAGES (#1210, the owner
+    /// 2026-10-15), and falls by a request's own as it is read; a reload
+    /// leaves it be.
+    @Test func theRequestsBadgeCountsUnreadMessagesAndFallsAsTheyAreRead() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [], requests: [
-                conversation("r1", peer: "a"),
-                conversation("r2", peer: "b")
+                conversation("r1", peer: "a", isUnread: true, unreadCount: 3),
+                conversation("r2", peer: "b", isUnread: true, unreadCount: 2)
             ])
         )
         let requests = MessageRequestsViewModel(
@@ -1010,16 +1008,37 @@ struct InboxSurfaceViewModelTests {
         requests.onNewCountChange = { counts.append($0) }
         requests.refresh()
         await settle()
+        #expect(counts == [5])
+        #expect(requests.newCount == 5)
 
-        #expect(counts == [2])
-        #expect(requests.newCount == 2)
+        catalog.markRead(ConversationID("r1"))
+        #expect(requests.newCount == 2, "reading r1 left its 3 messages on the badge")
 
-        // A reload is the closest thing to "the viewer did something": the
-        // count must come back the same.
         requests.refresh()
         await settle()
         #expect(requests.newCount == 2)
-        #expect(counts == [2])
+    }
+
+    /// The Chats badge is the same count: unread messages, falling as a
+    /// conversation is read (#1210). It used to count the conversations new
+    /// since the visit — 3 on a tab holding 4 unread messages.
+    @Test func theChatsBadgeCountsUnreadMessagesAndFallsAsTheyAreRead() async {
+        let catalog = InboxCatalog(
+            repository: StubInboxProvider(conversations: [
+                conversation("c1", peer: "a", isUnread: true, unreadCount: 2),
+                conversation("c2", peer: "b", isUnread: true, unreadCount: 1),
+                conversation("c3", peer: "c", isUnread: true, unreadCount: 1),
+                conversation("c4", peer: "d")
+            ], requests: [])
+        )
+        let chats = ConversationListViewModel(catalog: catalog, now: { Date(timeIntervalSince1970: -1) })
+        chats.refresh()
+        await settle()
+        #expect(chats.newCount == 4)
+
+        catalog.markRead(ConversationID("c1"))
+        #expect(chats.newCount == 2)
+        #expect(MessagesCategory.all.title == "Chats")
     }
 
     /// The badge and the SECTION are the watermark's answer — what arrived
@@ -1029,7 +1048,7 @@ struct InboxSurfaceViewModelTests {
     /// the READ CURSOR now, the same as on the All list, so a request the
     /// fixtures never marked unread is not bold — and the row's section is a
     /// different question with a different answer.
-    @Test func theBadgeAndItsSectionSurviveWhileTheTabIsOpen() async {
+    @Test func theSectionSurvivesWhileTheTabIsOpen() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [], requests: [
                 conversation("r1", peer: "a"),
@@ -1047,7 +1066,9 @@ struct InboxSurfaceViewModelTests {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        #expect(requests.newCount == 2)
+        // Nothing unread in these fixtures: no badge (#1210), the section
+        // still the arrivals'.
+        #expect(requests.newCount == 0)
         #expect(sections.new.count == 2)
         #expect(sections.earlier.isEmpty)
     }
@@ -1334,13 +1355,13 @@ struct InboxListSectionTests {
         }
     }
 
-    /// Section one and the badge come from one watermark in one view model, so
-    /// they cannot disagree — this is the assertion that says so out loud.
-    @Test func theFirstSectionHoldsExactlyWhatTheBadgeCounts() async {
+    /// The sections' header counts — their unread messages (#1210) — add up
+    /// to the badge: one count, read off the same rows.
+    @Test func theSectionCountsAddUpToTheBadge() async {
         let catalog = InboxCatalog(
             repository: StubInboxProvider(conversations: [], requests: [
-                conversation("r1", peer: "a"),
-                conversation("r2", peer: "b")
+                conversation("r1", peer: "a", isUnread: true, unreadCount: 3),
+                conversation("r2", peer: "b", isUnread: true, unreadCount: 2)
             ])
         )
         let requests = MessageRequestsViewModel(
@@ -1355,7 +1376,8 @@ struct InboxListSectionTests {
             Issue.record("expected content, got \(String(describing: phase))")
             return
         }
-        #expect(sections.new.count == requests.newCount)
+        #expect(sections.unreadMessages(in: .new) + sections.unreadMessages(in: .earlier) == requests.newCount)
+        #expect(sections.unreadMessages(in: .new) == 5)
         #expect(sections.earlier.isEmpty)
     }
 

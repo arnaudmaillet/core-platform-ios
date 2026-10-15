@@ -47,6 +47,13 @@ final class InboxSectionHeaderView: UITableViewHeaderFooterView {
         pill.setPillTitle(title)
     }
 
+    /// The section's unread messages, on the title's right as For You's
+    /// sections wear theirs (#1210); none at zero. Set on every configure —
+    /// headers are reused.
+    func setCount(_ count: Int) {
+        pill.setCount(count)
+    }
+
     #if DEBUG
     /// The pill this header hosts — what a test reads.
     var debugPill: SectionHeaderPillButton { pill }

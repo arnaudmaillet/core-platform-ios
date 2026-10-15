@@ -24,15 +24,14 @@ public final class MessageRequestsViewModel {
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
-    /// How many requests have arrived since the tab was last visited, for its
-    /// badge. Emitted on every projection — including while the surface is off
-    /// screen, which is when a badge matters most.
+    /// How many request messages wait unread, for its badge. Emitted on every
+    /// projection — including while the surface is off screen, which is when
+    /// a badge matters most.
     public var onNewCountChange: ((Int) -> Void)?
 
-    /// NOT the pending total. The badge reports arrivals since the last visit
-    /// and clears when the tab is selected — see `InboxTabWatermark`. The
-    /// pending requests themselves stay on the tab until they are answered;
-    /// they simply stop being announced once they have been seen.
+    /// THE UNREAD MESSAGES of the requests (#1210, the owner 2026-10-15),
+    /// falling as one is opened — as the Chats tab's. The watermark still
+    /// splits the list into New and Recent.
     private(set) public var newCount = 0
 
     private let catalog: InboxCatalog
@@ -152,7 +151,9 @@ public final class MessageRequestsViewModel {
         hasMore = snapshot.hasMore.contains(folder)
         // A hidden request announces nothing: the server sends no push for it,
         // and the badge would point at a list it isn't on.
-        publishNewCount(isHiddenFolder ? 0 : watermark.newCount(in: requests))
+        publishNewCount(isHiddenFolder ? 0 : requests.reduce(0) { total, row in
+            total + (snapshot.unreadIDs.contains(row.id) ? row.unreadCount : 0)
+        })
         showsHiddenRequestsRow = !isHiddenFolder
             && (!snapshot.hiddenRequests.isEmpty || snapshot.hasMore.contains(.hiddenRequests))
         switch snapshot.phase {
