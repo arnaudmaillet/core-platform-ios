@@ -1846,10 +1846,11 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// ink: glyph and count in the line's one ink (`PostCardPillView.ink`).
     /// The app's one button since #934 (`PostCardAction`).
     private let likesAction: AppButton = {
-        let button = PostCardAction.make(symbol: ActionSymbol.like, label: "Likes", selectedTint: PointsSymbol.tint)
-        // Staked, the heart is the points gradient (#1128).
-        button.drawsPointsHeart = true
-        return button
+        // Staked, the button's own filled heart in the Points pink — no
+        // `PointsHeartView` laid over it (#1186): that overlay showed the like
+        // twice and left a mark during the hero flight home, and the hearts
+        // are solid since #1178.
+        PostCardAction.make(symbol: ActionSymbol.like, label: "Likes", selectedTint: PointsSymbol.tint)
     }()
     private let commentsAction = PostCardAction.make(symbol: ActionSymbol.comments, label: "Comments")
     /// Whether the likes keep their heart with no count: a staking card's
@@ -2814,6 +2815,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     public func updateCounts(from post: GalleryPost) {
         likes.set(post.reactionCount)
         infoOverlay?.setLikeCount(post.reactionCount)
+        applyCornerLikes()
     }
 
     /// What `configure` drew — `postLikeCount`.
@@ -2832,6 +2834,9 @@ public final class PostGridTileCell: UICollectionViewCell {
         infoPost = post
         likes.set(count)
         infoOverlay?.setLikeCount(count)
+        // ⚠️ `set` shows the readout again (#1186): a like landing on a tile
+        // whose words carry the heart drew a SECOND heart in the corner.
+        applyCornerLikes()
     }
 
     // MARK: - The viewer's like

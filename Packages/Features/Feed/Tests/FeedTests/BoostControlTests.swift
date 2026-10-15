@@ -267,6 +267,16 @@ struct BoostControlTests {
         #expect(Self.drawn(button.configuration?.image) == white)
     }
 
+    /// A like moves the pill by the glass's own press only: the spend's
+    /// receipt adds no dip of its own (#1186 — it read as a tremble).
+    @MainActor @Test func theReceiptLeavesThePillUnscaled() {
+        let chrome = SnapChromeView()
+        chrome.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        chrome.layoutIfNeeded()
+        chrome.playBoostConfirmation(amount: 1)
+        #expect(chrome.debugBoostButtonTransform == .identity)
+    }
+
     /// VoiceOver reads the like state and both counts.
     @Test func railReadsTheLikeAndBothCounts() {
         let button = SnapRailBoostButton()

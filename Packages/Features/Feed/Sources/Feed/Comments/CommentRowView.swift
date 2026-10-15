@@ -414,16 +414,14 @@ final class CommentRowView: UIView {
     @objc private func avatarTapped() { onAvatarTap?() }
     @objc private func rowTapped() { onReplyTap?() }
 
-    /// Renders the like control's state: the Points heart, in its gradient,
-    /// when liked (#1128, the owner's call 2026-10-14: a comment's like is a
-    /// like like any other); the quiet outline otherwise. The counter shows
+    /// Renders the like control's state: the Points heart, the button's own
+    /// filled glyph in its colour, when liked (#1128; no overlay since
+    /// #1186); the quiet outline otherwise. The counter shows
     /// only a real number (zero renders bare — no lying "0").
     func setLiked(_ liked: Bool, count: Int) {
         var config = likeButton.configuration
         let glyph = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        config?.image = liked
-            ? PointsHeartOverlay.clearGlyph(glyph)
-            : UIImage.symbol(named: AppSymbol.like.rawValue, configuration: glyph)
+        config?.image = PointsSymbol.likeImage(staked: liked, glyph)
         config?.baseForegroundColor = .secondaryLabel
         if count > 0 {
             var title = AttributedString(SnapSubtitleView.countText(count))
@@ -433,16 +431,10 @@ final class CommentRowView: UIView {
             config?.attributedTitle = nil
         }
         likeButton.configuration = config
-        likeHeart.update(on: likeButton, liked: liked, configuration: glyph)
     }
-
-    /// The liked heart in the points gradient, over the button's glyph.
-    private let likeHeart = PointsHeartOverlay()
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        likeButton.layoutIfNeeded()
-        likeHeart.layout(on: likeButton)
     }
 
     // MARK: - The time, or the loader in its place (#719, #725, #919)
