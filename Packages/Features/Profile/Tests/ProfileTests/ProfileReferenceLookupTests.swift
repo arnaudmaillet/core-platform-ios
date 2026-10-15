@@ -155,7 +155,9 @@ struct ProfileReferenceLookupTests {
     /// named someone else.
     @Test func aHandleRouteWearsADisabledBellFromTheFirstFrameUntilItNamesSomeoneElse() async {
         let lookup = ScriptedLookup([.found(ProfileID("prof-7"))], held: true)
-        let screen = Self.screen(lookup: lookup, relationship: .other(isFollowing: false, isBlocked: false))
+        // Followed: a profile the viewer does not follow wears no bell once
+        // its relationship lands (the owner, 2026-10-15).
+        let screen = Self.screen(lookup: lookup, relationship: .other(isFollowing: true, isBlocked: false))
 
         screen.loadViewIfNeeded()
         #expect(screen.debugMuteBellItem != nil)
