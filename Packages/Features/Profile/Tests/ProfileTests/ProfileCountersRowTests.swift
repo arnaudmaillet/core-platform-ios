@@ -6,8 +6,9 @@ import UIKit
 @testable import Profile
 
 /// The profile's counter row (#687): the identity column's whole width in
-/// four equal cells, Followers, Following and Likes centred in the first
-/// three, the fourth empty — and a hidden counter leaves its cell empty.
+/// three equal cells (the owner, 2026-10-15; a fourth stood empty),
+/// Followers, Following and Likes centred in them — and a hidden counter
+/// leaves its cell empty.
 @MainActor
 struct ProfileCountersRowTests {
     private struct SilentFetcher: ImageFetching {
@@ -38,10 +39,10 @@ struct ProfileCountersRowTests {
     }
 
     @Test(arguments: [CGFloat(375), 393, 440])
-    func fourEqualCellsSpanTheIdentityColumnAndTheCountersAreCentred(width: CGFloat) throws {
+    func threeEqualCellsSpanTheIdentityColumnAndTheCountersAreCentred(width: CGFloat) throws {
         let header = header(width: width)
         let cells = header.debugStatCellFrames
-        #expect(cells.count == 4)
+        #expect(cells.count == 3)
         let row = header.debugStatsFrame
         let widths = cells.map(\.width)
         #expect((widths.max() ?? 0) - (widths.min() ?? 0) < 0.5, "unequal cells: \(widths)")

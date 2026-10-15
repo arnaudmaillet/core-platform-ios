@@ -120,6 +120,7 @@ final class ProfileBannerView: UIView {
         load.load(url, using: imagePipeline) { [weak self] image, transition in
             guard let self else { return }
             transition.perform(on: picture) { self.picture.image = image }
+            bandTone = Self.prominentDarkTone(of: image)
             onImageResolved?(image)
             // A warm hit settles in this pass, with nothing to announce: only
             // a fetch tells `onPictureSettled`.
@@ -152,13 +153,96 @@ final class ProfileBannerView: UIView {
         self.format = format
         let band = format == .band
         picture.showsBlur = !band
-        let tone: UIColor = band ? Self.bandRampTone : Surface.page
-        ramp.tone = tone
-        picture.pageTone = tone
+        applyRampTone()
     }
 
-    /// The tone a band's ramp lands on: black, fixed.
+    private func applyRampTone() {
+        let tone: UIColor = format == .band ? (bandTone ?? Self.bandRampTone) : Surface.page
+        ramp.tone = tone
+        picture.pageTone = tone
+        onRampToneChange?(tone)
+    }
+
+    /// The ramp's tone changed — a band card's shadow wears it.
+    var onRampToneChange: ((UIColor) -> Void)?
+
+    /// The tone a band's ramp lands on when the picture gives none: black.
     static let bandRampTone = UIColor.black
+
+    /// ⚠️ EXPERIMENT (the owner, 2026-10-15): a band's ramp lands on the
+    /// picture's own prominent DARK colour rather than black.
+    private var bandTone: UIColor? {
+        didSet { if bandTone != oldValue { applyRampTone() } }
+    }
+
+    /// The picture's prominent dark colour: the most common dark shade (in
+    /// coarse buckets) over a small sample. A picture with hardly anything
+    /// dark gives its most common shade, darkened. Nil if it cannot be read.
+    static func prominentDarkTone(of image: UIImage) -> UIColor? {
+        guard let cg = image.cgImage, let space = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        let side = 24
+        var bytes = [UInt8](repeating: 0, count: side * side * 4)
+        let drawn = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: side, height: side, bitsPerComponent: 8,
+                bytesPerRow: side * 4, space: space,
+                bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+            ) else { return false }
+            context.interpolationQuality = .medium
+            context.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+            return true
+        }
+        guard drawn else { return nil }
+        // Buckets of 3 bits per channel: each holds its pixels' sum.
+        var dark: [Int: (count: Int, r: Int, g: Int, b: Int)] = [:]
+        var all: [Int: (count: Int, r: Int, g: Int, b: Int)] = [:]
+        for index in stride(from: 0, to: bytes.count, by: 4) {
+            let r = Int(bytes[index]), g = Int(bytes[index + 1]), b = Int(bytes[index + 2])
+            let key = (r >> 5) << 6 | (g >> 5) << 3 | (b >> 5)
+            let luma = (299 * r + 587 * g + 114 * b) / 1000
+            func add(_ bins: inout [Int: (count: Int, r: Int, g: Int, b: Int)]) {
+                let bin = bins[key] ?? (0, 0, 0, 0)
+                bins[key] = (bin.count + 1, bin.r + r, bin.g + g, bin.b + b)
+            }
+            add(&all)
+            if luma < 90 { add(&dark) }
+        }
+        let darkCount = dark.values.reduce(0) { $0 + $1.count }
+        let usesDark = darkCount * 10 >= side * side // at least a tenth dark
+        guard let top = (usesDark ? dark : all).values.max(by: { $0.count < $1.count }) else { return nil }
+        let colour = UIColor(
+            red: CGFloat(top.r) / CGFloat(top.count * 255),
+            green: CGFloat(top.g) / CGFloat(top.count * 255),
+            blue: CGFloat(top.b) / CGFloat(top.count * 255),
+            alpha: 1
+        )
+        // ⚠️ CAPPED NEAR BLACK, light picture or dark: the ramp is the
+        // ground the name and the handle are read on, and white type holds
+        // AA over any picture only on a ramp as dark as black was
+        // (`ProfileIdentityInkTests`). The picture's hue tints it.
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        guard colour.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else { return nil }
+        // Darkened until its relative luminance is at most `maxToneLuminance`
+        // — a tint of the picture's hue, as dark under the type as black.
+        var tone = UIColor(hue: hue, saturation: min(1, saturation * (usesDark ? 1 : 1.1)), brightness: brightness, alpha: 1)
+        var step = brightness
+        while Self.luminance(of: tone) > Self.maxToneLuminance, step > 0 {
+            step = max(0, step - 0.01)
+            tone = UIColor(hue: hue, saturation: min(1, saturation * (usesDark ? 1 : 1.1)), brightness: step, alpha: 1)
+        }
+        return tone
+    }
+
+    /// The darkest-looking cap on a band's ramp tone: WCAG relative
+    /// luminance.
+    static let maxToneLuminance: CGFloat = 0.006
+
+    static func luminance(of colour: UIColor) -> CGFloat {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        colour.getRed(&r, green: &g, blue: &b, alpha: &a)
+        func linear(_ c: CGFloat) -> CGFloat { c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4) }
+        return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+    }
 
     /// How much slower than the content the picture climbs: it keeps this
     /// share of the travel, so the identity block slides up OVER it rather
@@ -286,7 +370,12 @@ final class ProfileBannerView: UIView {
         let restingTop = restingTopReference.flatMap { reference in
             superview.map { reference.convert(CGPoint.zero, to: $0).y }
         } ?? 0
-        let stretch = max(0, restingTop - frame.minY)
+        // NEGATIVE when the banner's top stands below the header's — a band
+        // card's margin, and its hold as the page climbs (`ProfileHeaderView
+        // .holdBandCardTop`): the picture and the ramp keep the header's
+        // resting layout, clipped by the card, so the fade the header places
+        // in its own space lands where it should.
+        let stretch = restingTop - frame.minY
         picture.stretch = stretch
         ramp.stretch = stretch
         // Sublayer frames don't follow Auto Layout; keep them in step without

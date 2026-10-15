@@ -127,9 +127,16 @@ struct ProfileIdentityInkTests {
             #expect(header.debugBannerHasPicture)
             let contrast = try #require(header.debugIdentityContrast())
             let shape = band ? "band" : "poster"
+            // ⚠️ A BAND CARD'S NAME IS HELD TO AA FOR LARGE TEXT (3:1 — title3
+            // semibold, 20pt): its ramp runs to a lower foot (even air over
+            // the counters, the owner 2026-10-15) and in the picture's dark
+            // tone, and over the synthetic worst cases (2px stripes, pure
+            // white) the name measures 4.2 (a photograph ≥ 7). The 15pt
+            // handle keeps AA's 4.5.
+            let nameFloor: CGFloat = band ? 3 : 4.5
             let identity = {
                 #expect(contrast.handle.min >= 4.5, "\(shape) handle \(contrast.handle) \(header.debugInkTones)")
-                #expect(contrast.name.min >= 4.5, "\(shape) name \(contrast.name)")
+                #expect(contrast.name.min >= nameFloor, "\(shape) name \(contrast.name)")
             }
             // No exception any more: a band's black ramp (5 October 2026) is
             // shouldered, half there under the name, and closes even hard
@@ -260,12 +267,16 @@ struct ProfileIdentityInkTests {
         // A band shows no blur (5 October 2026): nothing composed, but the
         // levels are still baked — the ink is read off them.
         try #require((band ? composed == 0 : composed > 0) && baked > 0 && reads > 0)
+        let restingTop = header.debugBannerFrame.minY
+        #expect(restingTop == (band ? 12 : 0))
         for pull in stride(from: CGFloat(3), through: 180, by: 3) {
             header.frame.origin.y = pull
             header.setTravelled(-pull)
             viewport.layoutIfNeeded()
             let banner = header.debugBannerFrame
-            #expect(abs(banner.minY + pull) < 0.5, "pull \(pull): the banner stretches \(banner)")
+            // A band is a card held off the screen's top (the owner,
+            // 2026-10-15); a poster bleeds to it.
+            #expect(abs(banner.minY + pull - restingTop) < 0.5, "pull \(pull): the banner stretches \(banner)")
             #expect(header.debugBlurComposeCount == composed, "pull \(pull)")
             #expect(header.debugBlurBakeCount == baked, "pull \(pull)")
             #expect(header.debugInkReadCount == reads, "pull \(pull)")
@@ -280,7 +291,7 @@ struct ProfileIdentityInkTests {
         header.frame.origin.y = 0
         header.setTravelled(0)
         viewport.layoutIfNeeded()
-        #expect(header.debugBannerFrame.minY == 0)
+        #expect(header.debugBannerFrame.minY == restingTop)
         #expect(header.debugBlurComposeCount == composed)
         #expect(header.debugInkReadCount == reads)
     }

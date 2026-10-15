@@ -39,7 +39,7 @@ final class ProfileStatView: UIControl {
         // Capped, then fitted (#482): each has a quarter of the identity
         // column (#687), and at accessibility sizes an uncapped headline
         // left "…" in every cell.
-        valueLabel.font = .scaledSystemFont(ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24)
+        valueLabel.font = .scaledSystemFont(ofSize: 19, weight: .semibold, relativeTo: .headline, maximumPointSize: 26)
         valueLabel.adjustsFontForContentSizeCategory = true
         valueLabel.adjustsFontSizeToFitWidth = true
         valueLabel.minimumScaleFactor = 0.6
@@ -76,6 +76,18 @@ final class ProfileStatView: UIControl {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// Where an edge must stand, from this view's top, to leave the same air
+    /// above the number as under it, down to the caption — as drawn: the
+    /// number's cap top, less the gap from its baseline to the caption's cap
+    /// top (the owner, 2026-10-15: a band card's foot).
+    var evenAirEdge: CGFloat {
+        let value = valueLabel.font ?? .systemFont(ofSize: 19)
+        let caption = captionLabel.font ?? .systemFont(ofSize: 12)
+        let capTop = value.ascender - value.capHeight
+        let gapBelow = Spacing.xs - value.descender + (caption.ascender - caption.capHeight)
+        return capTop - gapBelow
+    }
 
     /// A column with no number is not drawn at all.
     ///

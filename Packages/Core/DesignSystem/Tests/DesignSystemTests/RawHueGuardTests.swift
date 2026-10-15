@@ -22,6 +22,7 @@ struct RawHueGuardTests {
         // User content and measured inks — not the theme (#1124, out of scope).
         "MediaTextStyleBar.swift": "the user's text inks drawn on media",
         "FlagPalette.swift": "colours read from a country's flag",
+        "ProfileBannerView.swift": "a band card's ramp tone, read from the profile's own picture",
         "ShareQRCardView.swift": "the QR card is pinned light: its fixed grouped grey",
         // Debug and simulator art.
         "AppButtonGalleryViewController.swift": "the DEBUG button gallery's sample gradient",
