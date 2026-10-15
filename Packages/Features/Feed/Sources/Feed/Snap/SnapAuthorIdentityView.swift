@@ -171,7 +171,7 @@ final class SnapAuthorIdentityView: UIView {
     /// landing nowhere. Its load starts INSIDE the content swap (`draw`), so
     /// a face that arrives late can only land on the new author's content —
     /// never mid-blur on the old one.
-    private let avatar = AvatarView(diameter: AvatarImageView.barDiameter, size: SnapAuthorIdentityView.faceBucket)
+    private let avatar = AvatarView(diameter: AvatarImageView.bubbleDiameter, size: SnapAuthorIdentityView.faceBucket)
     private let nameLabel = UILabel()
     private let metaLabel = UILabel()
     /// The relation's mark over the avatar's bottom-right corner (#925).
@@ -284,7 +284,7 @@ final class SnapAuthorIdentityView: UIView {
         // against the rounded end. The bar self-sizes custom views through
         // Auto Layout; the height pin and width cap are the only external
         // metrics.
-        let avatarBreathing = (Self.barItemWrapperHeight - AvatarImageView.barDiameter) / 2
+        let avatarBreathing = max(0, (Self.barItemWrapperHeight - AvatarImageView.bubbleDiameter) / 2)
         contentView.pin(to: self)
         row.constrain(in: contentView) { parent in
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: avatarBreathing)

@@ -14,7 +14,7 @@ import UIKit
 ///   published text post's footer) it hugs its content under a small cap.
 ///   Either way the `.flexibleSpace()` item next to it owns the spacer role
 ///   natively.
-/// - Rigidity flows one way: the cover is fixed (shared `barDiameter`
+/// - Rigidity flows one way: the cover is fixed (shared `bubbleDiameter`
 ///   circle), the labels compress first (749, one under UIKit's default), so
 ///   a long author name truncates instead of pushing the trailing actions.
 /// - Page-fed, ONE VIEW IN ONE ITEM for the screen's life: a page that draws
@@ -88,8 +88,8 @@ final class SnapMediaAttributionView: UIView {
         // The shared bar-surface circle: same diameter as the identity
         // avatars, perfectly round by construction.
         coverView.backgroundColor = .darkGray
-        coverView.widthAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
-        coverView.heightAnchor.constraint(equalToConstant: AvatarImageView.barDiameter).isActive = true
+        coverView.widthAnchor.constraint(equalToConstant: AvatarImageView.bubbleDiameter).isActive = true
+        coverView.heightAnchor.constraint(equalToConstant: AvatarImageView.bubbleDiameter).isActive = true
 
         titleLabel.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
         titleLabel.textColor = .label
@@ -117,7 +117,7 @@ final class SnapMediaAttributionView: UIView {
         row.alignment = .center
         // The cover's uniform breathing inside the item wrapper, matching the
         // identity pill's inset math on the opposite bar.
-        let breathing = (Self.height - AvatarImageView.barDiameter) / 2
+        let breathing = max(0, (Self.height - AvatarImageView.bubbleDiameter) / 2)
         contentView.pin(to: self)
         row.constrain(in: contentView) { parent in
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: breathing)

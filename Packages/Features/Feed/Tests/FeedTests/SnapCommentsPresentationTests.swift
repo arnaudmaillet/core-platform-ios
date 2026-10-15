@@ -1579,8 +1579,9 @@ struct SnapCommentsPresentationTests {
         // The column's bubble: avatar, field and rail slot are one row (#680).
         #expect(abs(bubble.bounds.width - SnapActionColumn.bubbleSize) < 0.5)
         // ⚠️ INSET, like the sound bubble's cover (#692): a ring of glass
-        // around the face, which is the cover's size and centred.
-        #expect(abs(face.bounds.width - (SnapActionColumn.bubbleSize - 10)) < 0.5, "the face fills its bubble")
+        // around the face, which is the cover's size and centred: the one
+        // bubble face size (the owner, 2026-10-15).
+        #expect(abs(face.bounds.width - AvatarImageView.bubbleDiameter) < 0.5, "the face is not the bubble face size")
         let centre = face.convert(CGPoint(x: face.bounds.midX, y: face.bounds.midY), to: bubble)
         #expect(abs(centre.x - bubble.bounds.midX) < 0.5 && abs(centre.y - bubble.bounds.midY) < 0.5)
 

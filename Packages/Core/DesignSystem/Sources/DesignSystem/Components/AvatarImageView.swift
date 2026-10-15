@@ -13,6 +13,11 @@ import UIKit
 public final class AvatarImageView: UIImageView {
     /// The standard toolbar/identity avatar diameter.
     public static let barDiameter: CGFloat = 32
+    /// THE ONE SIZE OF A FACE OR A COVER INSIDE A GLASS BUBBLE: the comment
+    /// and message composer's avatar, the sound record's cover (the column's
+    /// and the composer's), and the post's author pill (the owner,
+    /// 2026-10-15: they were 34, 38 and 32 pt, and read as three sizes).
+    public static let bubbleDiameter: CGFloat = 36
 
     /// The outline — a disc unless a surface asks for its rounded square.
     public var shape: AvatarShape = .circle {
