@@ -109,8 +109,6 @@ final class SnapChromeView: UIView {
     private var postLikeCount: Int64?
     /// The band's trailing edge: under the like pill's glass, or — a post
     /// whose likes are hidden, which has no like pill (#680) — the screen's.
-    private var tickerUnderPill: NSLayoutConstraint!
-    private var tickerToEdge: NSLayoutConstraint!
     /// The post hides its like count from this reader (#397): no like pill
     /// at all, and the band takes the whole width (#680).
     private var likesHidden = false
@@ -151,11 +149,6 @@ final class SnapChromeView: UIView {
     /// The rail's top edge as a cell-relative constant (see `buildLayout`).
     /// Optional: margins change during `init` before the layout exists.
     private var railTopConstraint: NSLayoutConstraint?
-    /// The subtitle zone's two bottom seats — stacked ON the band, or in the
-    /// band's own seat when it isn't rendering. Exactly one is ever active;
-    /// `applyBandPresence` is the only thing that switches them.
-    private var subtitleAboveBandConstraint: NSLayoutConstraint?
-    private var subtitleInBandSeatConstraint: NSLayoutConstraint?
     /// A zero-content region that RESERVES the caption's locked two-line box
     /// on EVERY post — a real two-line media caption or an (empty) text-only
     /// post alike. The ticker (and, riding it, the rail + "+") pins to this
@@ -205,39 +198,16 @@ final class SnapChromeView: UIView {
 
 
 
-    /// ⚠️ EXPERIMENTAL (the owner, 2026-10-15), launch argument
-    /// `-snap-stream-under-band` in DEBUG builds: the streaming comments
-    /// (`subtitleView`) sit in the band's seat on the caption, and the
-    /// danmaku band rides ABOVE them, beside the rail. The engagement corner
-    /// (the like pill, the rail, the sound bubble) keeps its place either way:
-    /// it hangs off `bandSeat`, the band's default seat, not off the band.
-    let streamsUnderBand: Bool
-
-    static let streamUnderBandLaunchArgument = "-snap-stream-under-band"
-
-    /// The layout a chrome takes when nothing says otherwise.
-    static var streamsUnderBandByDefault: Bool {
-        #if DEBUG
-        ProcessInfo.processInfo.arguments.contains(streamUnderBandLaunchArgument)
-        #else
-        false
-        #endif
-    }
-
-    /// Where the band sits by default — one md above the caption floor, the
-    /// band's height. The engagement corner's height authority, whichever
-    /// way the band and the stream are stacked.
+    /// THE STREAM UNDER THE BAND (the owner, 2026-10-16; the experiment
+    /// `-snap-stream-under-band` of #1244, kept): the streaming comments
+    /// (`subtitleView`) sit on the caption, one md above its floor, and the
+    /// danmaku band rides one md above them, stopping short of the rail
+    /// with its trailing end faded. The engagement corner (the like pill,
+    /// the rail, the sound bubble) hangs off `bandSeat` — the slot one md
+    /// above the caption floor, the band's height — not off the band.
     private let bandSeat = UILayoutGuide()
-    /// The band's bottom: in its seat, or on the stream's top
-    /// (`streamsUnderBand`).
-    private var tickerOverStream: NSLayoutConstraint?
 
-    override convenience init(frame: CGRect) {
-        self.init(frame: frame, streamsUnderBand: Self.streamsUnderBandByDefault)
-    }
-
-    init(frame: CGRect, streamsUnderBand: Bool) {
-        self.streamsUnderBand = streamsUnderBand
+    override init(frame: CGRect) {
         super.init(frame: frame)
 
         // The chrome pins to its margins guide, NOT the safe-area guide
@@ -354,10 +324,6 @@ final class SnapChromeView: UIView {
         // hugging/resistance makes the band unsqueezable and unstretchable.
         commentTicker.setContentHuggingPriority(.required, for: .vertical)
         commentTicker.setContentCompressionResistancePriority(.required, for: .vertical)
-        tickerUnderPill = commentTicker.trailingAnchor.constraint(
-            equalTo: layoutMarginsGuide.trailingAnchor, constant: -Spacing.md - 0.5
-        )
-        tickerToEdge = commentTicker.trailingAnchor.constraint(equalTo: trailingAnchor)
         commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
         }
@@ -375,10 +341,6 @@ final class SnapChromeView: UIView {
             bandSeat.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md),
             bandSeat.heightAnchor.constraint(equalTo: commentTicker.heightAnchor),
         ])
-        if !streamsUnderBand {
-            commentTicker.bottomAnchor.constraint(equalTo: bandSeat.bottomAnchor).isActive = true
-        }
-        tickerUnderPill.isActive = !streamsUnderBand
 
         // NOTE: nothing rides above the ticker any more. The page indicator
         // used to — a chip of dots hung off the band's top edge — and it is the
@@ -486,50 +448,17 @@ final class SnapChromeView: UIView {
             subtitleView.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
             subtitleView.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md)
         }
-        // The zone's bottom has TWO seats, and which one it takes is the
-        // band's presence (`applyBandPresence`).
-        //
-        // A hidden UIView still occupies its frame, so stacking the zone on
-        // the band's top edge left a band-height hole under the pill on
-        // every page the band declines — which is now most of them, since
-        // the zone speaks for sparse posts. The band's height cannot simply
-        // collapse: it is the engagement corner's HEIGHT AUTHORITY (the "+"
-        // pins to its top and bottom edges, the rail's width and reserved
-        // strip derive from it), so shrinking it would take the whole
-        // trailing column with it.
-        //
-        // So the band keeps its frame and the ZONE moves instead: with no
-        // band it drops into the band's own seat, one md above the caption
-        // floor — the same slot the empty-state pill occupies, so all three
-        // comment surfaces render at one position and the corner never
-        // shows a gap it isn't using.
-        //
-        // Both seats are md off their reference — the same inter-container
-        // seam as band→caption, so the stack keeps one breathing rhythm
-        // either way.
-        let aboveBand = subtitleView.bottomAnchor.constraint(
-            equalTo: commentTicker.topAnchor, constant: -Spacing.md
-        )
-        let inBandSeat = subtitleView.bottomAnchor.constraint(
-            equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md
-        )
-        subtitleAboveBandConstraint = aboveBand
-        subtitleInBandSeatConstraint = inBandSeat
-        if streamsUnderBand {
-            // The stream takes the band's seat for good; the band stands on
-            // it, stopping short of the rail like the stream does.
-            inBandSeat.isActive = true
-            let over = commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md)
-            tickerOverStream = over
-            // No glass to nest in beside the rail: the band's end dissolves.
-            commentTicker.fadesTrailingEdge = true
-            NSLayoutConstraint.activate([
-                over,
-                commentTicker.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
-            ])
-        } else {
-            aboveBand.isActive = true
-        }
+        // The zone holds the band's seat, one md above the caption floor —
+        // the slot the empty-state pill occupies too, so every comment
+        // surface starts at one position. The band stands on the zone, md
+        // above it, and stops short of the rail like the zone does: with no
+        // glass to nest in there, its trailing end dissolves.
+        NSLayoutConstraint.activate([
+            subtitleView.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md),
+            commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md),
+            commentTicker.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
+        ])
+        commentTicker.fadesTrailingEdge = true
 
         // The comments empty state sits in the BAND's slot (bottom on the
         // caption's top, leading on the caption's text axis — where a
@@ -632,8 +561,8 @@ final class SnapChromeView: UIView {
         }
 
         let top = layoutMargins.top
-        // Off the band's SEAT, not the band: the experiment moves the band
-        // (`streamsUnderBand`), never the rail.
+        // Off the band's SEAT, not the band: the band rides the stream,
+        // the rail never does.
         let seat = bandSeat.layoutFrame
         guard top <= Self.maxSettledTopMargin, seat.maxY > 0 else { return }
         let base = top + Spacing.sm
@@ -719,7 +648,6 @@ final class SnapChromeView: UIView {
         likesHidden = model.likeCountHidden
         // On every page (#695): a text page's composer reserves its room.
         boostButton.isHidden = likesHidden
-        applyTickerReach()
         // The badge's count, from what the card knew; the screen then pushes
         // the post's live one (`setPostLikeCount`).
         postLikeCount = model.visibleLikeCount
@@ -736,11 +664,6 @@ final class SnapChromeView: UIView {
         // not. The bubbles fade into it when the streams land.
         let knownComments = model.cardMetrics?.comments
         commentTicker.setReservesBand(hasMedia && (knownComments ?? 1) > 0)
-        applyBandPresence()
-        // Every configure, not just the text branch: a recycled scaffold
-        // arrives seated for the PREVIOUS post's band, and a media page
-        // whose stream hasn't landed yet has no band either.
-        applyBandPresence()
         // The reactions rail is seeded for EVERY post — the shared action
         // column. Static chrome, so it loads here (not via
         // `updateCommentStreams`) and the flight replica shows it too; the
@@ -970,10 +893,6 @@ final class SnapChromeView: UIView {
         if streams.isLoaded || streams.commentCount > 0 {
             commentTicker.setReservesBand(!streams.reactions.isEmpty)
         }
-        // Read AFTER the band has resolved its own hidden state — it also
-        // stands down under Reduce Motion, which the queue alone wouldn't
-        // tell us.
-        applyBandPresence()
         subtitleView.setCommentCount(streams.commentCount)
         subtitleView.setCues(streams.subtitles)
         // THE COUNT IS THE WHOLE CONDITION (product rule 2026-08-08): no
@@ -992,41 +911,6 @@ final class SnapChromeView: UIView {
         commentEmptyState.setVisible(streams.isLoaded && streams.commentCount == 0)
     }
 
-    /// Seats the subtitle zone against the band's RESOLVED visibility: on
-    /// top of it when it renders, in its seat when it doesn't. Idempotent
-    /// (no-ops when the seat is already right), and it deactivates before
-    /// activating — both constraints live at once would be an unsatisfiable
-    /// pair, not a preference.
-    private func applyBandPresence() {
-        // Under the experiment the stream never moves: it holds the seat.
-        guard !streamsUnderBand else { return }
-        let bandRenders = !commentTicker.isHidden
-        guard subtitleAboveBandConstraint?.isActive != bandRenders else { return }
-        if bandRenders {
-            subtitleInBandSeatConstraint?.isActive = false
-            subtitleAboveBandConstraint?.isActive = true
-        } else {
-            subtitleAboveBandConstraint?.isActive = false
-            subtitleInBandSeatConstraint?.isActive = true
-        }
-        // Swapping `isActive` does not reliably flag this view for layout,
-        // so a caller that lays out SYNCHRONOUSLY — the flight replica, and
-        // any test — reads the previous seat's frames. The run loop hides
-        // this; an explicit `layoutIfNeeded` does not.
-        setNeedsLayout()
-        // A band that comes or goes while the page is on screen SLIDES the
-        // pill and the caption to their new seat instead of dropping them
-        // there: the change is real (the load disagreed with the guess) and
-        // rare, and a slide is what a viewer forgives. Never on a first
-        // layout (a cell being configured is not in a window yet) and never
-        // while the chrome is held for a flight.
-        if window != nil, alpha > 0, hasLaidOut {
-            UIView.animate(withDuration: 0.25, delay: 0,
-                           options: [.beginFromCurrentState, .allowUserInteraction]) {
-                self.layoutIfNeeded()
-            }
-        }
-    }
 
     private var hasLaidOut = false
 
@@ -1102,8 +986,6 @@ final class SnapChromeView: UIView {
     var debugSoundBubble: SnapSoundBubbleButton { soundBubble }
     /// The comment band, in the chrome's space.
     var debugTickerFrame: CGRect { commentTicker.frame }
-    /// Whether the band runs to the screen's edge, square-ended (#680).
-    var debugTickerRunsToEdge: Bool { commentTicker.runsToTrailingEdge && commentTicker.layer.cornerRadius == 0 }
     var debugCaptionFrame: CGRect { captionLabel.frame }
     var debugPageBar: SnapMediaPageBarView { mediaPageBar }
     var debugScrubPreview: SnapScrubPreviewView { scrubPreview }
@@ -1431,10 +1313,8 @@ final class SnapChromeView: UIView {
         onBoostUndoRequested = nil
         hasMedia = true
         commentTicker.reset()
-        applyBandPresence()
         boostButton.isHidden = true
         likesHidden = false
-        applyTickerReach()
         boostButton.setSpentTotal(0)
         postLikeCount = nil
         applyLikeBadge(animated: false)
@@ -1477,15 +1357,6 @@ final class SnapChromeView: UIView {
     }
 
 
-    /// The band under the pill, or to the edge when there is no pill (#680).
-    private func applyTickerReach() {
-        // Under the experiment the band stops at the rail whatever the pill.
-        guard !streamsUnderBand else { return }
-        let toEdge = likesHidden
-        tickerUnderPill.isActive = !toEdge
-        tickerToEdge.isActive = toEdge
-        commentTicker.runsToTrailingEdge = toEdge
-    }
 
     /// The badge's count: the post's, the viewer's stake included (product
     /// decision 2026-10-08) — and included ONCE, by the store the count

@@ -361,7 +361,9 @@ struct SnapShortcutRailViewTests {
         // absorbs to grid-align the headroom (always less than one step).
         #expect(rail.frame.minY >= Spacing.sm)
         #expect(rail.frame.minY - Spacing.sm < SnapShortcutRailView.step)
-        #expect(abs(rail.frame.maxY - ticker.frame.maxY) < 0.01)
+        // …to the band's SEAT (2026-10-16): the stream holds it, the band
+        // rides above the stream.
+        #expect(abs(rail.frame.maxY - subtitle.frame.maxY) < 0.01)
         // The subtitle zone stops short of the rail — the width reduction.
         #expect(subtitle.frame.maxX == rail.frame.minX - Spacing.md)
         // A media post shows its wheel.
@@ -384,7 +386,7 @@ struct SnapShortcutRailViewTests {
         #expect(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.isEmpty)
         // The like PILL (#669): the band's width, its top on the band's, as
         // tall as the column above the sound bubble lets it be.
-        #expect(compose.frame.minY == ticker.frame.minY)
+        #expect(abs(compose.frame.minY - (subtitle.frame.maxY - ticker.frame.height)) < 0.01)
         #expect(abs(compose.frame.height - SnapActionColumn.likePillHeight) < 0.34, "a pixel of snapping at most")
         #expect(abs(compose.frame.maxX - rail.frame.maxX) < 0.01)
         #expect(abs(compose.frame.width - ticker.frame.height) < 0.01)
@@ -398,22 +400,14 @@ struct SnapShortcutRailViewTests {
         #expect(order.firstIndex(of: rail)! < order.firstIndex(of: column)!)
         #expect(rail.bottomReservedInset == ticker.frame.height)
 
-        // The band's trailing edge sits at the anchor's outer threshold
-        // (and the band clips): bubbles are born under the glass circle
-        // and slide out of its seam — the storytelling alignment. Leading
-        // stays full-bleed, and the clip's RIGHT end is a CAPSULE (radius
-        // = half the band's height) nesting inside the circle's curvature,
-        // so no clipped bubble sliver peeks out of the corner gaps.
-        // (Sub-point tuck inside the anchor — pixel-snapped from 0.5pt —
-        // so independent rounding can't leave a clip-line sliver proud of
-        // the zone's edge. Strictly inside, less than a point.)
-        let tuck = compose.frame.maxX - ticker.frame.maxX
-        #expect(tuck > 0)
-        #expect(tuck < 1)
+        // The band stops md short of the rail, like the stream, and its
+        // trailing end FADES rather than being cut round (2026-10-16): there
+        // is no glass beside it to nest in. Leading stays full-bleed.
+        #expect(abs(ticker.frame.maxX - (rail.frame.minX - Spacing.md)) < 0.01)
         #expect(ticker.frame.minX == 0)
         #expect(ticker.clipsToBounds)
-        #expect(ticker.layer.cornerRadius == ticker.frame.height / 2)
-        #expect(ticker.layer.maskedCorners == [.layerMaxXMinYCorner, .layerMaxXMaxYCorner])
+        #expect(ticker.layer.cornerRadius == 0)
+        #expect(ticker.layer.mask is CAGradientLayer)
 
         // Grid-aligned headroom: the chrome absorbs sub-step excess into
         // the rail's top constant so `contentInset.top` is a whole number

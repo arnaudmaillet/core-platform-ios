@@ -52,68 +52,26 @@ struct SnapCommentZoneLayoutTests {
         (0..<count).map { TickerCommentModel(id: "r\($0)", text: "fire \($0)") }
     }
 
-    /// With no band, the zone drops into the band's own seat — one md above
-    /// the caption floor, exactly where the band's bottom edge would be —
-    /// so the corner shows no gap it isn't using.
-    @Test func theZoneTakesTheBandsSeatWhenTheBandIsHidden() throws {
+    /// The zone holds the band's seat, one md above the caption floor,
+    /// band or no band (2026-10-16: the stream under the band) — so the
+    /// corner never shows a gap it isn't using, and a band arriving with a
+    /// later stream moves nothing below it.
+    @Test func theZoneHoldsTheSeatBandOrNoBand() throws {
         let chrome = Self.chrome()
         let subtitle = try Self.part(chrome, SnapSubtitleView.self)
-        let ticker = try Self.part(chrome, SnapCommentTickerView.self)
-
-        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
-            reactions: [], subtitles: Self.cues(2), commentCount: 2
-        ))
-        chrome.layoutIfNeeded()
-
-        #expect(ticker.isHidden == true)
-        #expect(subtitle.isHidden == false)
-        // Seated where the band's BOTTOM is — the hole is gone.
-        #expect(abs(subtitle.frame.maxY - ticker.frame.maxY) < 0.5)
-    }
-
-    /// With a band, the zone stacks on top of it exactly as before — one md
-    /// above its top edge. Reduce Motion hides the band too, and it is the
-    /// band's RESOLVED state that decides, so the assertion brackets both.
-    @Test func theZoneStacksOnTheBandWhenItRenders() throws {
-        let chrome = Self.chrome()
-        let subtitle = try Self.part(chrome, SnapSubtitleView.self)
-        let ticker = try Self.part(chrome, SnapCommentTickerView.self)
-
-        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
-            reactions: Self.reactions(8), subtitles: Self.cues(2), commentCount: 10
-        ))
-        chrome.layoutIfNeeded()
-
-        let seat = ticker.isHidden ? ticker.frame.maxY : ticker.frame.minY - Spacing.md
-        #expect(abs(subtitle.frame.maxY - seat) < 0.5)
-    }
-
-    /// The seat is a LIVE switch, not a one-shot: a page whose band arrives
-    /// (or leaves) with a later stream re-seats the zone, and a recycled
-    /// scaffold never keeps the previous post's seat.
-    @Test func theSeatFollowsTheBandBothWays() throws {
-        let chrome = Self.chrome()
-        let subtitle = try Self.part(chrome, SnapSubtitleView.self)
-        let ticker = try Self.part(chrome, SnapCommentTickerView.self)
 
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
             reactions: [], subtitles: Self.cues(2), commentCount: 2
         ))
         chrome.layoutIfNeeded()
         let seated = subtitle.frame.maxY
+        #expect(seated < chrome.debugCaptionFrame.minY, "the zone sits on the caption")
 
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
             reactions: Self.reactions(8), subtitles: Self.cues(2), commentCount: 10
         ))
         chrome.layoutIfNeeded()
-        guard !ticker.isHidden else { return } // Reduce Motion: no band either way
-        #expect(subtitle.frame.maxY < seated) // lifted onto the band
-
-        chrome.updateCommentStreams(FeedViewModel.CommentStreams(
-            reactions: [], subtitles: Self.cues(2), commentCount: 2
-        ))
-        chrome.layoutIfNeeded()
-        #expect(abs(subtitle.frame.maxY - seated) < 0.5) // and back down
+        #expect(abs(subtitle.frame.maxY - seated) < 0.5)
     }
 
     /// The band keeps its frame through all of it. It is the corner's height

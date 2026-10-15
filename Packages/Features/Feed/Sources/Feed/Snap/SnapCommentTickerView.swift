@@ -214,20 +214,10 @@ final class SnapCommentTickerView: UIView {
     /// store; a test hands its own.
     var appearanceStore: MediaCommentPreferencesStore = .standard
 
-    /// The band runs to the screen's trailing edge, square-ended (#680): the
-    /// post hides its likes, so there is no like pill for the band to slide
-    /// out from under, and no capsule end to nest in its curve. The host
-    /// moves the band's trailing edge; this drops the rounded clip.
-    var runsToTrailingEdge = false {
-        didSet {
-            guard runsToTrailingEdge != oldValue else { return }
-            setNeedsLayout()
-        }
-    }
     /// The band's trailing end DISSOLVES instead of being cut (the owner,
-    /// 2026-10-15, under `-snap-stream-under-band`): no capsule clip, a
-    /// progressive fade of the content over `trailingFadeLength` instead —
-    /// the band stops short of the rail there, with no glass to nest in.
+    /// 2026-10-15): no capsule clip, a progressive fade of the content over
+    /// `trailingFadeLength` instead — the band stops short of the rail, with
+    /// no glass to nest in (`SnapChromeView`).
     var fadesTrailingEdge = false {
         didSet {
             guard fadesTrailingEdge != oldValue else { return }
@@ -428,9 +418,8 @@ final class SnapCommentTickerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // A capsule end (see init) — or none when the band runs to the
-        // screen's edge with no like pill to nest under (#680).
-        layer.cornerRadius = runsToTrailingEdge || fadesTrailingEdge ? 0 : bounds.height / 2
+        // A capsule end (see init) — or none when the end fades instead.
+        layer.cornerRadius = fadesTrailingEdge ? 0 : bounds.height / 2
         if fadesTrailingEdge {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
