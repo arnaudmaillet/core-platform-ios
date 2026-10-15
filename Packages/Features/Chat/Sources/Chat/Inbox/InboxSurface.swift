@@ -46,7 +46,7 @@ extension MessagesCategory {
     /// The header segment's title.
     var title: String {
         switch self {
-        case .all: "All"
+        case .all: "Chats"
         case .requests: "Requests"
         case .suggestions: "Suggestions"
         }

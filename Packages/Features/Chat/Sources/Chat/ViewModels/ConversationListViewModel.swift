@@ -19,15 +19,15 @@ public final class ConversationListViewModel {
     }
 
     public var onPhaseChange: ((Phase) -> Void)?
-    /// How many conversations have arrived since the tab was last visited,
-    /// published so the container can put the count on the All tab.
+    /// How many messages wait unread, published so the container can put the
+    /// count on the Chats tab.
     public var onNewCountChange: ((Int) -> Void)?
 
-    /// NOT the unread total. This is what the badge reports: new since the last
-    /// visit, cleared by visiting — see `InboxTabWatermark`. The unread total
-    /// still exists and still marks the rows; it simply is not a badge, because
-    /// a number that only goes down when you read everything is a number that
-    /// sits there.
+    /// THE UNREAD MESSAGES (#1210, the owner 2026-10-15): the sum of the
+    /// unread rows' counts, falling as a conversation is read. It counted
+    /// the conversations new since the visit (`InboxTabWatermark`) — 3 on a
+    /// tab holding 4 unread messages, and never lowered by reading. The
+    /// watermark still splits the list into New and Recent.
     public private(set) var newCount = 0
 
     private let catalog: InboxCatalog
@@ -181,7 +181,9 @@ public final class ConversationListViewModel {
     private func project(_ snapshot: InboxCatalog.Snapshot) {
         let rows = snapshot.active
         hasMore = snapshot.hasMore.contains(.inbox)
-        publishNewCount(watermark.newCount(in: rows))
+        publishNewCount(rows.reduce(0) { total, row in
+            total + (snapshot.unreadIDs.contains(row.id) ? row.unreadCount : 0)
+        })
         switch snapshot.phase {
         case .loading:
             phase = .loading

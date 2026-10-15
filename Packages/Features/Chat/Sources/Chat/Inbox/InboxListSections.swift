@@ -5,12 +5,9 @@ import UIKit
 /// An inbox list split in two: what arrived since the viewer last left the
 /// screen, and everything that was already there.
 ///
-/// **The first section and the tab's badge are the same number, by
-/// construction.** Both come from one `InboxTabWatermark` inside one view
-/// model, so a badge reading 3 sits over a section holding exactly three rows —
-/// they cannot drift, because there is nothing to keep in step. A count derived
-/// in the header and a filter applied in the list would be two answers to one
-/// question, and the bug where they disagree is invisible until someone counts.
+/// The split is `InboxTabWatermark`'s. The tab's badge and each section's
+/// header count UNREAD MESSAGES (#1210, the owner 2026-10-15) — read off the
+/// same rows (`unreadMessages(in:)`), so the headers add up to the badge.
 ///
 /// ⚠️ For the All list, "new" is NOT the same as "unread". Unread is server
 /// truth — a read cursor — and a conversation can sit unread for a week without
@@ -37,11 +34,22 @@ public struct InboxListSections: Equatable, Sendable {
     }
 
     public init() {}
+
+    /// The unread messages a section holds: what its header counts (#1210).
+    func unreadMessages(in section: InboxListSection) -> Int {
+        Self.unreadMessages(in: section == .new ? new : earlier)
+    }
+
+    /// The unread messages of `rows` — a row's count is already zero once
+    /// it reads as read (`ConversationDisplayModel.unreadCount`).
+    static func unreadMessages(in rows: [ConversationDisplayModel]) -> Int {
+        rows.reduce(0) { $0 + ($1.isUnread ? $1.unreadCount : 0) }
+    }
 }
 
 /// The two halves of an inbox list, and the titles they wear.
 ///
-/// The first section's count is the tab badge's count — see
+/// Each section's header counts its unread messages — see
 /// `InboxListSections`. A section with nothing in it is not appended at all, so
 /// an inbox with no arrivals renders as one unlabelled list rather than as an
 /// empty header over everything.

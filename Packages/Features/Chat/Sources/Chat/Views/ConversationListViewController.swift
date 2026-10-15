@@ -36,6 +36,17 @@ final class ConversationListViewController: UIViewController {
 
     private var adapter: ConversationListTableAdapter!
     private var modelsByID: [ConversationID: ConversationDisplayModel] = [:]
+    /// The sections as last rendered — what the headers count (#1210).
+    private var renderedSections = InboxListSections()
+
+    /// Each visible section header's unread messages, from the rendered rows.
+    private func refreshHeaderCounts() {
+        for index in 0..<tableView.numberOfSections {
+            guard let section = adapter.headedSection(at: index),
+                  let header = tableView.headerView(forSection: index) as? InboxSectionHeaderView else { continue }
+            header.setCount(renderedSections.unreadMessages(in: section))
+        }
+    }
     private var hasRenderedContent = false
 
     /// Builds the thread screen a context-menu long-press previews — injected
@@ -269,6 +280,10 @@ final class ConversationListViewController: UIViewController {
             statusView.isHidden = true
         case .content(let sections):
             statusView.isHidden = true
+            renderedSections = sections
+            // After this pass's apply: a header on screen whose section stays
+            // is not dequeued again, and reading a row changes its count.
+            DispatchQueue.main.async { [weak self] in self?.refreshHeaderCounts() }
             let models = sections.all
             // Rows whose content changed without moving. Applied straight to
             // the visible cells below — there is no snapshot to reconcile, so
@@ -411,6 +426,7 @@ extension ConversationListViewController: UITableViewDelegate {
         // The separation between sections is the footer's job — see
         // `heightForFooterInSection` — so the header has nothing to pad.
         header?.setTitle(section.title)
+        header?.setCount(renderedSections.unreadMessages(in: section))
         // The section's own first row, so tapping "Recent" puts Recent under
         // the header rather than wherever the list happened to be.
         header?.onTap = { [weak self] in

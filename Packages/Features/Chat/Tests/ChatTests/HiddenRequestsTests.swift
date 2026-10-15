@@ -5,7 +5,7 @@ import Testing
 
 // The Hidden requests folder (#552).
 
-private func row(_ id: String, at seconds: TimeInterval, unread: Bool = true) -> Conversation {
+private func row(_ id: String, at seconds: TimeInterval, unread: Bool = true, unreadCount: Int = 0) -> Conversation {
     Conversation(
         id: ConversationID(id),
         title: id,
@@ -13,7 +13,8 @@ private func row(_ id: String, at seconds: TimeInterval, unread: Bool = true) ->
         lastActivityAt: Date(timeIntervalSince1970: seconds),
         otherMemberIDs: [ProfileID("peer-\(id)")],
         lastMessageID: "\(id)-latest",
-        isUnread: unread
+        isUnread: unread,
+        unreadCount: unreadCount
     )
 }
 
@@ -72,8 +73,10 @@ struct HiddenRequestsTests {
 
     private static let everyFolder: [InboxFolder: [String?: InboxPage]] = [
         .inbox: [nil: InboxPage(conversations: [row("a", at: 50, unread: false)], nextPageToken: nil)],
-        .requests: [nil: InboxPage(conversations: [row("r1", at: 40)], nextPageToken: nil)],
-        .hiddenRequests: [nil: InboxPage(conversations: [row("h1", at: 30), row("h2", at: 20)], nextPageToken: nil)],
+        .requests: [nil: InboxPage(conversations: [row("r1", at: 40, unreadCount: 2)], nextPageToken: nil)],
+        .hiddenRequests: [nil: InboxPage(
+            conversations: [row("h1", at: 30, unreadCount: 3), row("h2", at: 20)], nextPageToken: nil
+        )],
     ]
 
     @Test func aLoadReadsTheHiddenFolderApartFromRequests() async throws {
@@ -95,7 +98,8 @@ struct HiddenRequestsTests {
 
         #expect(requests.showsHiddenRequestsRow)
         #expect(rowIDs(requests.phase) == ["r1"])
-        #expect(requests.newCount == 1)
+        // Its own request's 2 unread messages, none of the hidden one's 3.
+        #expect(requests.newCount == 2)
     }
 
     @Test func noHiddenRequestsMeansNoRow() async throws {
