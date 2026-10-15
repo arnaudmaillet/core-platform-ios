@@ -36,10 +36,10 @@ struct SnapAuthorBadgeInkTests {
         pill.setFollowBadge(badge)
         #expect(pill.drawnBadgeSymbol == badge.symbolName)
         let images = pill.drawnBadgeImages
-        let disc = try #require(images.disc)
+        // ONE image: the disc and the mark are one circled symbol (#1199).
+        #expect(images.disc == nil, "a separate disc animates out of step with the mark")
         let glyph = try #require(images.glyph)
-        #expect(disc.renderingMode != .alwaysTemplate, "the glass can re-tint the disc")
-        #expect(glyph.renderingMode != .alwaysTemplate, "the glass can re-tint the glyph")
+        #expect(glyph.renderingMode != .alwaysTemplate, "the glass can re-tint the badge")
 
         let (discInk, markInk): (UIColor, UIColor) = switch badge {
         case .follow: (.black, .white)
@@ -48,11 +48,12 @@ struct SnapAuthorBadgeInkTests {
         case .none: (.clear, .clear)
         }
         let mode = style == .dark ? "dark" : "light"
-        let discPixels = try Self.opaquePixels(of: [disc], style: style)
-        #expect(discPixels.count > 50, "the disc draws nothing")
-        #expect(discPixels.allSatisfy { Self.near($0, discInk) }, "the \(badge) disc is not its ink in \(mode) mode")
-        let badgePixels = try Self.opaquePixels(of: [disc, glyph], style: style)
-        #expect(badgePixels.filter { Self.near($0, markInk) }.count > 10, "the \(badge) mark is not its ink in \(mode) mode")
+        let badgePixels = try Self.opaquePixels(of: [glyph], style: style)
+        #expect(badgePixels.count > 50, "the badge draws nothing")
+        let disc = badgePixels.filter { Self.near($0, discInk) }.count
+        let mark = badgePixels.filter { Self.near($0, markInk) }.count
+        #expect(disc > mark, "the \(badge) badge does not read as its disc ink in \(mode) mode")
+        #expect(mark > 10, "the \(badge) mark is not its ink in \(mode) mode")
     }
 
     /// The same badge, pixel for pixel, in light and dark mode.
@@ -61,20 +62,20 @@ struct SnapAuthorBadgeInkTests {
         let pill = SnapAuthorIdentityView()
         pill.setFollowBadge(badge)
         let images = pill.drawnBadgeImages
-        let layers = [try #require(images.disc), try #require(images.glyph)]
+        let layers = [try #require(images.glyph)]
         let light = try Self.opaquePixels(of: layers, style: .light)
         let dark = try Self.opaquePixels(of: layers, style: .dark)
         #expect(light.count == dark.count)
         #expect(zip(light, dark).allSatisfy { $0 == $1 }, "the \(badge) badge changes with the appearance")
     }
 
-    /// No badge draws nothing — a clear disc and a clear glyph, so the badge's
+    /// No badge draws nothing — the same symbol in clear ink, so the badge's
     /// arrival is a symbol replace too.
     @Test func noBadgeDrawsNothing() throws {
         let pill = SnapAuthorIdentityView()
         pill.setFollowBadge(.none)
         let images = pill.drawnBadgeImages
-        #expect(try Self.opaquePixels(of: [try #require(images.disc)], style: .light).isEmpty)
+        #expect(images.disc == nil)
         #expect(try Self.opaquePixels(of: [try #require(images.glyph)], style: .light).isEmpty)
     }
 
