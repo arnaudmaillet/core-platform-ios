@@ -1270,7 +1270,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // identity with the poster gone (posters only), the first post.
         galleryPager.setSnapDetents(ProfileScrollDetents.detents(
             for: headerView.bannerFormat,
-            posterFadeOut: headerView.posterFadeOutTravel,
             firstPost: contentTravel,
             bandAvatar: headerView.bandAvatarDetent
         ), catching: headerView.bandAvatarDetent.map { [$0] } ?? [])

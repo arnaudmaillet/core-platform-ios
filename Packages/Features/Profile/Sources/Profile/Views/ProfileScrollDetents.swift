@@ -5,31 +5,22 @@ import CoreGraphics
 /// anywhere in between.
 ///
 /// ```
-///   poster                 band
-///   0    ── top, picture   0    ── top (the avatar is already under the chrome)
-///   188  ── avatar under   ·
-///          the chrome,
-///          poster gone
-///   N    ── first post     N    ── first post under the bar
-///          under the bar
+///   band
+///   0    ── top
+///   N1   ── the avatar 40pt under the bar (a catching notch, #1208)
+///   N    ── first post under the bar
 /// ```
 ///
-/// A poster has three: the picture, the identity with the picture gone
-/// (exactly where the band would hold the avatar, so the two shapes meet),
-/// and the first post. A band has two, since its top IS the second — and so
-/// does a header with no picture at all.
+/// A header with no picture has the top and the first post.
 ///
 /// Past the last detent the offset belongs to the list and is left alone.
 enum ProfileScrollDetents {
     /// The detents, in the header's travelled space (0 at rest).
     static func detents(
-        for format: ProfileBannerFormat, posterFadeOut: CGFloat, firstPost: CGFloat,
+        for format: ProfileBannerFormat, firstPost: CGFloat,
         bandAvatar: CGFloat? = nil
     ) -> [CGFloat] {
         var detents: [CGFloat] = [0]
-        if format == .poster, posterFadeOut > 0, posterFadeOut < firstPost {
-            detents.append(posterFadeOut)
-        }
         // ⚠️ EXPERIMENT (the owner, 2026-10-15): a band card rests with its
         // avatar just under the bar too.
         if format == .band, let bandAvatar, bandAvatar > 0, bandAvatar < firstPost {

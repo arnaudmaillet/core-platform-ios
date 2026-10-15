@@ -5,7 +5,7 @@ import Testing
 import UIKit
 @testable import Profile
 
-/// The banner's two shapes — a strip across the top, or a tall poster — the
+/// The banner — a band card across the top, or none (no poster any more) — the
 /// rule that picks one (the picture, never a setting), and the identity row
 /// both share: the name and the handle on the picture, the counters on the
 /// page, the banner ending on the avatar's midline between them.
@@ -45,21 +45,19 @@ struct ProfileBannerFormatTests {
         return header
     }
 
-    /// Wider than tall is a band; portrait — and square, which a strip would
-    /// crop the head or the feet off — a poster.
-    @Test func thePictureDecidesTheShape() {
-        #expect(ProfileBannerFormat.resolved(forImageSize: CGSize(width: 1600, height: 900)) == .band)
-        #expect(ProfileBannerFormat.resolved(forImageSize: CGSize(width: 1200, height: 1000)) == .band)
-        #expect(ProfileBannerFormat.resolved(forImageSize: CGSize(width: 900, height: 1600)) == .poster)
-        #expect(ProfileBannerFormat.resolved(forImageSize: CGSize(width: 800, height: 800)) == .poster)
-        #expect(ProfileBannerFormat.resolved(forImageSize: CGSize(width: 1000, height: 950)) == .poster)
-        #expect(ProfileBannerFormat.resolved(forImageSize: .zero) == .poster)
+    /// Any picture is a band (no poster any more, the owner 2026-10-15).
+    @Test func everyPictureIsABand() {
+        for size in [CGSize(width: 1600, height: 900), CGSize(width: 900, height: 1600),
+                     CGSize(width: 800, height: 800), .zero] {
+            #expect(ProfileBannerFormat.resolved(forImageSize: size) == .band)
+        }
+        #expect(ProfileBannerFormat.unresolved == .band)
     }
 
     /// Beside the avatar, two halves of its height: the name and the handle
     /// in the top one, the counters in the bottom one — under the name,
     /// leading-aligned with it.
-    @Test(arguments: [ProfileBannerFormat.band, .poster, .none])
+    @Test(arguments: [ProfileBannerFormat.band, .none])
     func theIdentityRowSplitsTheAvatarsHeightInTwo(format: ProfileBannerFormat) {
         let header = header(format: format, picture: format != .none)
         let avatar = header.debugAvatarFrame
@@ -109,7 +107,7 @@ struct ProfileBannerFormatTests {
     /// The blur's container — and the page's fade — run from JUST ABOVE THE
     /// AVATAR (user, 30 September 2026) to the banner's FOOT, where both are
     /// whole; the stage above it is the picture, untouched.
-    @Test(arguments: [ProfileBannerFormat.band, .poster])
+    @Test(arguments: [ProfileBannerFormat.band])
     func theRunOutClimbsFromAboveTheAvatarToTheFoot(format: ProfileBannerFormat) throws {
         let header = header(format: format)
         let fade = try #require(header.debugBannerFade)
@@ -130,54 +128,22 @@ struct ProfileBannerFormatTests {
             #expect(abs((fade.rampShoulder ?? .nan) - fade.blurStart) < 0.5)
             #expect(abs(fade.rampStart - (fade.blurStart - HeroBannerFade.shoulderRise)) < 0.5)
         }
-        #expect(header.debugBannerShowsBlur == (format == .poster))
+        #expect(!header.debugBannerShowsBlur)
         // The blur is next to nothing under the name: sigma under 3.5pt.
         let spans = HeroBannerFade.levelSpans(fade)
         try #require(spans.count > 2)
         #expect(spans[1].full > header.debugNameFrame.midY)
     }
 
-    /// A poster runs to the tray's FOOT — not cut at the midline (user, 30
-    /// September 2026): the whole identity block stands on the picture. It
-    /// wears the blur alone (#688): no page tone fades in under its type.
-    @Test func aPosterRunsPastTheTraysFoot() throws {
-        let header = header(format: .poster)
-        let banner = header.debugBannerFrame
-        let tray = header.debugTrayFrame
-        // Since 5 October 2026 the picture runs to 80% of the screen and the
-        // block starts at 40%, over it: the tray stands on the picture too.
-        #expect(banner.maxY > tray.maxY)
-        let fade = try #require(header.debugBannerFade)
-        #expect(abs(fade.blurFull - banner.maxY) < 0.5)
-        #expect(header.debugBannerShowsBlur)
-    }
-
-    /// ⚠️ A POSTER'S OPAQUE FADE IS ITS FOOT ONLY (#718, the owner's call
-    /// 2026-10-09): clear over the blur's first 70 %, whole at the banner's
-    /// foot, no shoulder under the type.
-    @Test func aPostersFadeCoversTheBlursLastThirtyPercent() throws {
-        let header = header(format: .poster)
-        let fade = try #require(header.debugBannerFade)
-        let run = fade.blurFull - fade.blurStart
-        #expect(abs(fade.rampStart - (fade.blurStart + run * 0.7)) < 0.5)
-        #expect(abs(fade.rampEnd - fade.blurFull) < 0.5)
-        #expect(fade.rampShoulder == nil)
-        #expect(HeroBannerFade.rampAlpha(at: fade.rampStart - 1, geometry: fade) == 0)
-        #expect(HeroBannerFade.rampAlpha(at: header.debugNameFrame.maxY, geometry: fade) == 0,
-                "the page's tone reaches up under the name")
-        #expect(HeroBannerFade.rampAlpha(at: fade.blurFull, geometry: fade) > 0.99)
-        #expect(header.debugBannerShowsRamp)
-    }
-
     /// Every shape keeps its fade layer; a band's is black (#718 brought the
     /// poster's back, at its foot).
-    @Test(arguments: [ProfileBannerFormat.band, .poster, .none])
+    @Test(arguments: [ProfileBannerFormat.band, .none])
     func everyShapeKeepsItsFade(format: ProfileBannerFormat) {
         let header = header(format: format, picture: format != .none)
         #expect(header.debugBannerShowsRamp)
         // `.none` hides the whole banner; its layers are as they always were.
         if format != .none {
-            #expect(header.debugBannerShowsBlur == (format == .poster))
+            #expect(!header.debugBannerShowsBlur)
         }
         if format == .band {
             #expect(header.debugBannerRampTone == ProfileBannerView.bandRampTone)
@@ -196,34 +162,6 @@ struct ProfileBannerFormatTests {
         #expect(header.debugNameFrame.minY >= header.debugBannerFrame.minY)
     }
 
-    /// On the way up the picture lags the content, and a poster is gone by
-    /// the time the avatar's top reaches where a band would hold it.
-    @Test func aPosterFadesOutAsTheAvatarReachesTheBandsLine() {
-        let header = header(format: .poster)
-        let avatarAtRest = header.debugAvatarFrame.minY
-        let bandLine = header.chromeTopInset + 12
-        let fadeOut = avatarAtRest - bandLine
-        #expect(fadeOut > 0)
-
-        header.setTravelled(0)
-        #expect(header.debugBannerAlpha == 1)
-        #expect(header.debugBannerPictureShift == 0)
-
-        header.setTravelled(fadeOut / 2)
-        #expect(abs(header.debugBannerAlpha - 0.5) < 0.01)
-        #expect(abs(header.debugBannerPictureShift - fadeOut / 2 * ProfileBannerView.parallaxShare) < 0.5)
-
-        header.setTravelled(fadeOut)
-        #expect(header.debugBannerAlpha == 0)
-        header.setTravelled(fadeOut * 2)
-        #expect(header.debugBannerAlpha == 0)
-
-        // A pull down neither fades nor shifts: the stretch is the banner's.
-        header.setTravelled(-60)
-        #expect(header.debugBannerAlpha == 1)
-        #expect(header.debugBannerPictureShift == 0)
-    }
-
     /// A band keeps its picture whole on the way up — it scrolls off like
     /// the rest of the header — and lags the content the same way.
     @Test func aBandOnlyLags() {
@@ -233,24 +171,19 @@ struct ProfileBannerFormatTests {
         #expect(abs(header.debugBannerPictureShift - 100 * ProfileBannerView.parallaxShare) < 0.5)
     }
 
-    /// A header with no picture is shorter than a poster by exactly the
-    /// poster's clearance: its column starts on the chrome, the poster's a
-    /// clearance below it — the stage that puts a poster's foot at 80% of the
-    /// screen. A band card stands between them (its foot at 35%).
-    @Test func aBandIsShorterThanAPoster() {
+    /// A header with no picture is the shorter one: its column starts on
+    /// the chrome, a band card's under its picture.
+    @Test func aBareHeaderIsShorterThanABand() {
         let band = header(format: .band)
-        let bare = header(format: .poster, picture: false)
-        let poster = header(format: .poster)
-        #expect(band.bounds.height < poster.bounds.height)
+        let bare = header(format: .band, picture: false)
         #expect(bare.bounds.height < band.bounds.height)
-        #expect(abs((poster.bounds.height - bare.bounds.height) - (poster.posterClearance - 12)) < 1)
     }
 
     /// A profile with no picture has no banner at all: the identity block
     /// starts under the chrome, as a band's does, and nothing is drawn above
     /// it.
     @Test func noPictureMeansNoBanner() {
-        let header = header(format: .poster, picture: false)
+        let header = header(format: .band, picture: false)
         #expect(header.bannerFormat == .none)
         #expect(header.debugBannerIsHidden)
         #expect(abs(header.debugAvatarFrame.minY - (header.chromeTopInset + 12)) < 0.5)
@@ -263,7 +196,7 @@ struct ProfileBannerFormatTests {
     /// one let a poster's picture through), the tone the translucent one
     /// made on the page.
     @Test func theTrayWearsNoGlassAndLetsNothingThrough() {
-        let header = header(format: .poster)
+        let header = header(format: .band)
         for button in header.debugTrayButtons {
             #expect(button.configuration?.background.visualEffect == nil)
         }

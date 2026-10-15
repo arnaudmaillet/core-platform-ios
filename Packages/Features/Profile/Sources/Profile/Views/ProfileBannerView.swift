@@ -260,11 +260,10 @@ final class ProfileBannerView: UIView {
     /// point at which the avatar's top reaches where a band would have put
     /// it, under the chrome. Nothing on a pull down: the stretch there is the
     /// banner's own.
-    func setTravelled(_ travelled: CGFloat, fadeOutTravel: CGFloat) {
+    func setTravelled(_ travelled: CGFloat) {
         let climb = max(0, travelled)
         picture.pictureShift = min(climb * Self.parallaxShare, Self.parallaxReserve)
-        guard format == .poster, fadeOutTravel > 0 else { return setVisibility(1) }
-        setVisibility(max(0, 1 - climb / fadeOutTravel))
+        setVisibility(1)
     }
 
     /// Shows `value` of the banner: the veil at the complement in between;

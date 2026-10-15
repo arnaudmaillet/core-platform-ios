@@ -46,8 +46,7 @@ struct ProfileBannerShapeTests {
             withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
         ).height
         header.layoutIfNeeded()
-        // A poster's stage settles from the block as laid out: fit again, as
-        // the screen does when the header's revision moves.
+        // Fit again, as the screen does when the header's revision moves.
         header.frame.size.height = header.systemLayoutSizeFitting(
             CGSize(width: 402, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
@@ -59,46 +58,19 @@ struct ProfileBannerShapeTests {
 
     private var screenHeight: CGFloat { UIScreen.main.bounds.height }
 
-    @Test func aPosterRunsDownEightyPercentOfTheScreen() {
-        let poster = header(picture: CGSize(width: 900, height: 1600))
-        #expect(poster.bannerFormat == .poster)
-        #expect(abs(poster.debugBannerFrame.maxY - (screenHeight * 0.8).rounded()) < 1,
-                "poster foot \(poster.debugBannerFrame.maxY) of \(screenHeight)")
-    }
-
-    /// The content starts at 40% of the screen, over the picture — not at
-    /// its foot: the identity block stands well inside the banner, and the
-    /// banner runs on below the tray, under the first posts.
-    @Test func aPostersContentStartsAtFortyPercentOverThePicture() {
-        let poster = header(picture: CGSize(width: 900, height: 1600))
-        #expect(abs(poster.debugAvatarFrame.minY - (screenHeight * 0.4).rounded()) < 1,
-                "content at \(poster.debugAvatarFrame.minY) of \(screenHeight)")
-        #expect(poster.debugTrayFrame.maxY < poster.debugBannerFrame.maxY, "the banner stops at the tray")
-        // The header — what the pages are inset by — ends with the content,
-        // not with the picture.
-        #expect(poster.bounds.height < poster.debugBannerFrame.maxY)
-    }
-
-    /// Both stay put whatever the block holds: a longer bio pushes the tray
-    /// down, not the content's start nor the picture's foot.
-    @Test func aLongerBioMovesNeitherTheContentNorThePicture() {
+    /// ⚠️ A PORTRAIT PICTURE IS A BAND TOO (the owner, 2026-10-15: no
+    /// poster any more): cropped to the card, which ends near 35% of the
+    /// screen, its foot unmoved by a longer bio.
+    @Test func aPortraitPictureIsABand() {
         let short = header(picture: CGSize(width: 900, height: 1600), bio: "Hi.")
         let long = header(
             picture: CGSize(width: 900, height: 1600),
             bio: String(repeating: "Building small tools for small teams. ", count: 4)
         )
+        #expect(short.bannerFormat == .band)
+        #expect(short.debugBannerFrame.maxY < screenHeight * 0.5)
         #expect(abs(short.debugBannerFrame.maxY - long.debugBannerFrame.maxY) < 1)
-        #expect(abs(short.posterClearance - long.posterClearance) < 0.5)
         #expect(long.debugTrayFrame.maxY > short.debugTrayFrame.maxY)
-        // The poster fades out over its stage.
-        #expect(abs(short.posterFadeOutTravel - (short.posterClearance - Spacing.md)) < 0.5)
-    }
-
-    /// A poster wears its blur, and an opaque fade at its foot only (#718).
-    @Test func aPosterWearsItsBlurAndAFadeAtItsFoot() {
-        let poster = header(picture: CGSize(width: 900, height: 1600))
-        #expect(poster.debugBannerShowsBlur)
-        #expect(poster.debugBannerShowsRamp, "a poster lost its foot's fade")
     }
 
     /// A band's ramp lands on the picture's own dark tone (the owner,
@@ -111,7 +83,7 @@ struct ProfileBannerShapeTests {
         #expect(ProfileBannerView.luminance(of: band.debugBannerRampTone) <= ProfileBannerView.maxToneLuminance + 0.0005,
                 "the band's ramp is lighter than its cap")
         #expect(band.debugBannerBlurLevels.isEmpty, "blur levels are drawn")
-        // Still a band's height: on the avatar's midline, not the poster's 80%.
+        // A card's height: above the counters, near 35% of the screen.
         #expect(band.debugBannerFrame.maxY < screenHeight * 0.5)
     }
 }
