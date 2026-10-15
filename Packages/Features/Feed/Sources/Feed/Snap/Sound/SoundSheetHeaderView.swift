@@ -59,6 +59,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         // The badge scaled to the 96 pt record — and no larger: at 22 it
         // clears the 44 pt play button in the middle (centres 34 apart, radii
         // 22 + 11).
+        recordGlass.coverSide = nil
         recordGlass.badgeSide = 22
         recordGlass.badgeGlyphSize = 10
         // The record's TAP is the sheet's (`SoundSheetViewController

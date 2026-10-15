@@ -260,8 +260,8 @@ struct SnapAuthorPillItemTests {
             return nil
         }
         let disc = try #require(monogram(in: pill))
-        #expect(disc.bounds.size == CGSize(width: AvatarImageView.barDiameter, height: AvatarImageView.barDiameter))
-        #expect(disc.layer.cornerRadius == AvatarImageView.barDiameter / 2)
+        #expect(disc.bounds.size == CGSize(width: AvatarImageView.bubbleDiameter, height: AvatarImageView.bubbleDiameter))
+        #expect(disc.layer.cornerRadius == AvatarImageView.bubbleDiameter / 2)
         let mask = try #require(disc.layer.mask as? CAShapeLayer)
         #expect(mask.path == UIBezierPath(ovalIn: disc.bounds).cgPath)
         #expect(disc.debugMonogramText == "UQ")
@@ -279,5 +279,34 @@ private final class PillFeedProvider: FeedProviding, @unchecked Sendable {
     }
     func loadPost(_ id: PostID) async throws -> FeedEntry {
         throw URLError(.fileDoesNotExist)
+    }
+}
+
+/// ONE FACE SIZE IN EVERY GLASS BUBBLE (the owner, 2026-10-15): the
+/// composer's avatar, the sound record's cover and the author pill's face
+/// were 34, 38 and 32 pt.
+@MainActor
+struct BubbleFaceSizeTests {
+    @Test func theRecordsCoverIsTheBubbleFaceSize() {
+        let record = SoundRecordGlass()
+        record.frame = CGRect(x: 0, y: 0, width: SnapActionColumn.bubbleSize, height: SnapActionColumn.bubbleSize)
+        record.layoutIfNeeded()
+        let side = AvatarImageView.bubbleDiameter
+        #expect(record.cover.bounds.size == CGSize(width: side, height: side))
+        #expect(abs(record.cover.center.x - record.bounds.midX) < 0.01)
+        #expect(abs(record.cover.center.y - record.bounds.midY) < 0.01)
+    }
+
+    @Test func theComposersAvatarIsTheBubbleFaceSize() {
+        #expect(CommentsInputBar.Metrics.avatarDiameter == AvatarImageView.bubbleDiameter)
+    }
+
+    /// The sound sheet's large record keeps the glass less its rim.
+    @Test func aRecordWithoutACoverSideFillsItsRim() {
+        let record = SoundRecordGlass()
+        record.coverSide = nil
+        record.frame = CGRect(x: 0, y: 0, width: 96, height: 96)
+        record.layoutIfNeeded()
+        #expect(record.cover.bounds.width == 96 - 2 * SoundRecordGlass.rim)
     }
 }

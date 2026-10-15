@@ -290,8 +290,9 @@ final class CommentsInputBar: UIView {
         static let minimumHitSide: CGFloat = 44
         /// The face sits INSET in its glass bubble, a ring of glass around it
         /// — the sound bubble's cover, at the cover's size, so the row's two
-        /// ends read as one family of controls (the owner, 2026-10-08, #692).
-        @MainActor static var avatarDiameter: CGFloat { controlSize - 10 }
+        /// ends read as one family of controls (the owner, 2026-10-08, #692):
+        /// the one bubble face size (`AvatarImageView.bubbleDiameter`).
+        @MainActor static var avatarDiameter: CGFloat { AvatarImageView.bubbleDiameter }
     }
 
     /// The viewer's face, leading the bar — the composer's answer to the

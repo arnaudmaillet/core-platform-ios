@@ -1,3 +1,4 @@
+import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
@@ -26,7 +27,9 @@ struct SoundRecordGlassTests {
         let glass = try? #require(effectViews(in: record).first)
         #expect(glass?.effect is UIGlassEffect, "the glass did not materialize on the window")
         #expect(record.cover.superview === glass?.contentView, "the cover is not inside the glass")
-        #expect(record.cover.frame == record.bounds.insetBy(dx: SoundRecordGlass.rim, dy: SoundRecordGlass.rim))
+        let side = min(AvatarImageView.bubbleDiameter, record.bounds.width - 2 * SoundRecordGlass.rim)
+        #expect(record.cover.bounds.size == CGSize(width: side, height: side), "the cover is not the bubble face size")
+        #expect(record.cover.center == CGPoint(x: record.bounds.midX, y: record.bounds.midY))
         #expect(!record.isUserInteractionEnabled, "the host button keeps the touches")
     }
 

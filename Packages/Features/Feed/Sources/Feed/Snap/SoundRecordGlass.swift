@@ -33,8 +33,15 @@ final class SoundRecordGlass: UIView {
     private let badge = UIVisualEffectView(effect: nil)
     private let badgeGlyph = UIImageView()
 
-    /// The glass's thickness around the record.
+    /// The glass's thickness around the record, at least.
     static let rim: CGFloat = 3
+    /// The record's side: a bubble's face size (`AvatarImageView
+    /// .bubbleDiameter`), centred in the glass, so the cover reads at the
+    /// composer avatar's and the author pill's size. nil: the glass less its
+    /// rim — the sound sheet's large record.
+    var coverSide: CGFloat? = AvatarImageView.bubbleDiameter {
+        didSet { setNeedsLayout() }
+    }
     static let badgeSide: CGFloat = 16
     /// The badge's side here: 16 on a bubble, larger on the sound sheet's
     /// 96 pt record (#1148).
@@ -95,7 +102,9 @@ final class SoundRecordGlass: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         glass.frame = bounds
-        cover.frame = bounds.insetBy(dx: Self.rim, dy: Self.rim)
+        let rimmed = bounds.insetBy(dx: Self.rim, dy: Self.rim)
+        let side = min(coverSide ?? rimmed.width, rimmed.width, rimmed.height)
+        cover.frame = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
         cover.layer.cornerRadius = cover.bounds.width / 2
         badge.frame = Self.badgeFrame(in: bounds, side: badgeSide)
         badgeGlyph.frame = badge.bounds
