@@ -4,18 +4,18 @@ import Testing
 
 /// Where a profile's scroll rests while the header is on screen.
 struct ProfileScrollDetentsTests {
-    /// A poster has three detents, a band two — the band's top already IS the
-    /// poster's second.
-    @Test func aPosterHasThreeDetentsAndABandTwo() {
-        #expect(ProfileScrollDetents.detents(for: .poster, posterFadeOut: 188, firstPost: 600) == [0, 188, 600])
-        #expect(ProfileScrollDetents.detents(for: .band, posterFadeOut: 188, firstPost: 600) == [0, 600])
-        #expect(ProfileScrollDetents.detents(for: .none, posterFadeOut: 188, firstPost: 600) == [0, 600])
+    /// A band has its top, the avatar's notch under the bar, and the first
+    /// post; a header with no picture its top and the first post. (No
+    /// poster any more, the owner 2026-10-15.)
+    @Test func aBandHasItsNotchAndABareHeaderTwoDetents() {
+        #expect(ProfileScrollDetents.detents(for: .band, firstPost: 600, bandAvatar: 188) == [0, 188, 600])
+        #expect(ProfileScrollDetents.detents(for: .none, firstPost: 600, bandAvatar: 188) == [0, 600])
     }
 
-    /// A middle detent past the first post would be a stop the header cannot
-    /// reach; it is dropped rather than ordered wrongly.
-    @Test func aMiddleDetentPastTheFirstPostIsDropped() {
-        #expect(ProfileScrollDetents.detents(for: .poster, posterFadeOut: 700, firstPost: 600) == [0, 600])
+    /// A notch past the first post would be a stop the header cannot reach;
+    /// it is dropped rather than ordered wrongly.
+    @Test func aNotchPastTheFirstPostIsDropped() {
+        #expect(ProfileScrollDetents.detents(for: .band, firstPost: 600, bandAvatar: 700) == [0, 600])
     }
 
     /// The nearest detent to where the scroll would have stopped.
