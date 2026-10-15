@@ -77,7 +77,8 @@ final class NotificationsBell {
     static let barSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .large)
 
     /// The bell glyph for an unread state. When unread, a palette `bell.badge`
-    /// (badge in `Palette.counter`, bell in `.label`); otherwise a plain
+    /// (badge in the accent pink, as the tab bar's badges — #1197 — bell in
+    /// `.label`); otherwise a plain
     /// template `bell` that the tint draws dark.
     ///
     /// ⚠️ BAKED, per appearance (#1178). A bar item re-renders a SYMBOL image
@@ -93,7 +94,7 @@ final class NotificationsBell {
         // much smaller than the plain one. The bar draws its symbols at the
         // body style's large scale.
         let config = barSymbolConfiguration
-            .applying(UIImage.SymbolConfiguration(paletteColors: [Palette.counter, .label]))
+            .applying(UIImage.SymbolConfiguration(paletteColors: [TabGlyph.badgeTint, .label]))
         guard let symbol = UIImage(systemName: "bell.badge", withConfiguration: config) else { return nil }
         return baked(symbol)
     }

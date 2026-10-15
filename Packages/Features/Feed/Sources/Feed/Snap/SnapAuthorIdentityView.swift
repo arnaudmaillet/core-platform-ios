@@ -636,7 +636,7 @@ private final class AvatarStatusBadge: UIButton {
             widthAnchor.constraint(equalToConstant: Self.diameter),
             heightAnchor.constraint(equalToConstant: Self.diameter),
         ])
-        disc.image = Self.discImage(shown: false)
+        disc.image = Self.discImage(for: .none)
         glyph.image = Self.glyphImage(.none)
         apply(interactionFor: .none)
     }
@@ -652,10 +652,10 @@ private final class AvatarStatusBadge: UIButton {
     /// otherwise.
     func show(_ badge: SnapAuthorIdentityView.FollowBadge, animated: Bool) {
         guard badge != drawn else { return }
-        let discChanges = (badge == .none) != (drawn == .none)
+        let discChanges = (badge == .none) != (drawn == .none) || Self.discInk(for: badge) != Self.discInk(for: drawn)
         drawn = badge
         apply(interactionFor: badge)
-        let discImage = Self.discImage(shown: badge != .none)
+        let discImage = Self.discImage(for: badge)
         let glyphImage = Self.glyphImage(badge)
         guard animated else {
             disc.image = discImage
@@ -676,16 +676,40 @@ private final class AvatarStatusBadge: UIButton {
 
     /// The disc's ink and the glyph's: fixed, never resolved per appearance
     /// (#968).
-    static let discInk = UIColor.black
+    static let restingDiscInk = UIColor.black
     static let glyphInk = UIColor.white
 
-    /// The disc, black — or, for no badge, the same symbol in clear ink, so
-    /// the disc's arrival and departure are symbol replaces too.
-    private static func discImage(shown: Bool) -> UIImage {
+    static var accentInk: UIColor { AvatarBadgeInks.accent }
+    static var quietDiscInk: UIColor { AvatarBadgeInks.quietDisc }
+
+    /// The disc's ink for a badge (#1197, the owner 2026-10-15): the "+"
+    /// black; a FOLLOWED check and a pending request grey, their mark pink;
+    /// FRIENDS pink, their mark white; clear for none.
+    static func discInk(for badge: SnapAuthorIdentityView.FollowBadge) -> UIColor {
+        switch badge {
+        case .none: .clear
+        case .follow: restingDiscInk
+        case .following, .pending: quietDiscInk
+        case .friends: accentInk
+        }
+    }
+
+    /// The glyph's ink for a badge: pink on the grey discs, white elsewhere.
+    static func glyphInk(for badge: SnapAuthorIdentityView.FollowBadge) -> UIColor {
+        switch badge {
+        case .none: .clear
+        case .following, .pending: accentInk
+        case .follow, .friends: glyphInk
+        }
+    }
+
+    /// The disc — or, for no badge, the same symbol in clear ink, so the
+    /// disc's arrival and departure are symbol replaces too.
+    private static func discImage(for badge: SnapAuthorIdentityView.FollowBadge) -> UIImage {
         let image = UIImage(systemName: "circle.fill")?
             .applyingSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: diameter - 3))
             ?? UIImage()
-        return image.withTintColor(shown ? discInk : .clear, renderingMode: .alwaysOriginal)
+        return image.withTintColor(discInk(for: badge), renderingMode: .alwaysOriginal)
     }
 
     /// The relation's glyph in white ink — or, for none, a clear "+".
@@ -704,13 +728,13 @@ private final class AvatarStatusBadge: UIButton {
         let ownsDisc = badge == .following || badge == .pending
         var configuration = UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: ownsDisc ? .regular : .bold)
         if ownsDisc {
-            configuration = configuration.applying(UIImage.SymbolConfiguration(paletteColors: [glyphInk, discInk]))
+            configuration = configuration.applying(UIImage.SymbolConfiguration(paletteColors: [glyphInk(for: badge), discInk(for: badge)]))
         }
         let image = UIImage(systemName: badge.symbolName ?? "plus")?
             .applyingSymbolConfiguration(configuration)
             ?? UIImage()
         if ownsDisc { return image }
-        return image.withTintColor(badge == .none ? .clear : glyphInk, renderingMode: .alwaysOriginal)
+        return image.withTintColor(glyphInk(for: badge), renderingMode: .alwaysOriginal)
     }
 
     /// The disc's and the glyph's images as drawn now. Tests.
@@ -846,3 +870,12 @@ extension SnapAuthorIdentityView {
     }
 }
 #endif
+
+/// The author pill badge's fixed inks (#968, #1197): one value in either
+/// appearance.
+enum AvatarBadgeInks {
+    /// The accent pink.
+    static let accent = Palette.tint.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+    /// A quiet grey disc.
+    static let quietDisc = UIColor.systemGray5.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+}

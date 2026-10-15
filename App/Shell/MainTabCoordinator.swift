@@ -435,15 +435,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
 // MARK: - Tab selection
 
 extension MainTabCoordinator: UITabBarControllerDelegate {
-    /// The `UITab` road's selection (the bar is built of `UITab`s, which
-    /// `didSelect viewController:` does not always report): the selected tab
-    /// wears its FILL (#1191).
-    func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
-        refreshTabGlyphs()
-    }
-
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
-        refreshTabGlyphs()
         refreshUnreadBadge()
         syncTabBarVisibility()
         // Selection resizes the tab buttons (the selected one carries the
@@ -481,7 +473,6 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         if let selected = tabBarController.selectedTab, !wanted.contains(where: { $0 === selected }),
            let explore = orderedTabs.first(where: { $0.0 == .explore })?.1.tab {
             tabBarController.selectedTab = explore
-            refreshTabGlyphs()
         }
         let current = tabBarController.tabs
         guard current.count != wanted.count || zip(current, wanted).contains(where: { $0 !== $1 }) else { return }
@@ -495,6 +486,28 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         UIAccessibility.post(notification: .layoutChanged, argument: nil)
     }
 
+    /// Every glyph tab's two faces (#1191, #1197): the OUTLINE as its image,
+    /// the FILL as its selected image — the bar's own lens reveals the fill
+    /// wherever it passes, as WhatsApp's does, and draws the selection's
+    /// transition itself. Each with its badge variant when the tab has
+    /// something unread (the bar draws no count). Run on an unread or
+    /// appearance change only, never on a selection: the bar owns that.
+    ///
+    /// ⚠️ `selectedImage` IS SET BY NAME. `UITab.selectedImage` (iOS 26.1)
+    /// failed to compile on CI's Xcode 26 SDK even behind `#available`, so it
+    /// is reached through KVC, guarded by `responds(to:)`; a system without it
+    /// shows the outline in both states.
+    func refreshTabGlyphs() {
+        for (_, coordinator) in orderedTabs {
+            guard let glyphTab = coordinator as? any GlyphTab else { continue }
+            let tab = glyphTab.tab
+            tab.image = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread)
+            if tab.responds(to: NSSelectorFromString("setSelectedImage:")) {
+                tab.setValue(glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread), forKey: "selectedImage")
+            }
+        }
+    }
+
     /// ⚠️ iOS 27 DRAWS A TAB'S FIRST RENDERING WITHOUT ITS LABEL (#694). An
     /// item shows its title only once it has been UPDATED — a badge, an
     /// avatar, a selection — so at launch the selected Explore tab, and a
@@ -504,20 +517,6 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// the bar's first appearance and after each `setTabs`. Same values, so
     /// nothing flickers. Measured: the label views existed, laid out, before
     /// the redraw; the selected tab's simply did not draw.
-    /// Every glyph tab's image for where the bar stands (#1191): its FILL
-    /// when selected, its badge variant when it has something unread — the
-    /// bar draws no count. Run on every selection, programmatic or not, and on
-    /// every unread change.
-    func refreshTabGlyphs() {
-        let selected = tabBarController.selectedTab
-        for (_, coordinator) in orderedTabs {
-            guard let glyphTab = coordinator as? any GlyphTab else { continue }
-            glyphTab.tab.image = glyphTab.glyph.image(
-                selected: glyphTab.tab === selected, badged: glyphTab.hasUnread
-            )
-        }
-    }
-
     private func refreshTabLabelsIfNeeded() {
         guard tabLabelsNeedRefresh, tabBarController.view.window != nil else { return }
         tabLabelsNeedRefresh = false
@@ -736,7 +735,6 @@ extension MainTabCoordinator: AppNavigating {
             tabBarController.dismiss(animated: true)
         }
         tabBarController.selectedTab = match.1.tab
-        refreshTabGlyphs()
         // Programmatic selection skips `didSelect` — reconcile the bar here.
         syncTabBarVisibility()
     }

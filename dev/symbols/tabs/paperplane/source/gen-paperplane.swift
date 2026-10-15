@@ -166,7 +166,7 @@ func svgData(_ path: CGPath) -> String {
 // MARK: - Placement (same template conventions as gen.swift)
 
 /// Phosphor's 256 grid on the S scale, as in gen.swift (16 stroke → 6.4).
-let fit: CGFloat = 0.87
+let fit: CGFloat = 0.8
 /// Shrunk to look as large as core.chats and core.square.play; the outline
 /// is thickened back (see `dilate`) so its stroke still lands on 6.4.
 let scale: CGFloat = 0.4 * fit
