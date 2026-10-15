@@ -48,6 +48,7 @@ let package = Package(
             name: "EmoteKitTests",
             dependencies: [
                 "EmoteKit",
+                "DesignSystem",
                 "MediaCore",
                 "CacheKit",
                 .product(name: "Lottie", package: "lottie-ios")

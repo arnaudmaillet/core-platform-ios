@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// Holds the interface orientation still while a hero flight is in the air.
@@ -19,12 +20,16 @@ public enum FlightOrientationLock {
     @MainActor
     public final class Lease {
         private(set) var isHeld = true
+        /// The same flight's hold on animated emotes (`FlightActivity`).
+        fileprivate var activity: FlightActivity.Lease?
         fileprivate init() {}
 
         /// Idempotent: every terminal branch of a flight may call it.
         public func release() {
             guard isHeld else { return }
             isHeld = false
+            activity?.release()
+            activity = nil
             FlightOrientationLock.leaseEnded()
         }
     }
@@ -45,6 +50,8 @@ public enum FlightOrientationLock {
     public static func acquire() -> Lease {
         liveLeases += 1
         let lease = Lease()
+        // A flight is in the air: animated emotes sit it out (`FlightActivity`).
+        lease.activity = FlightActivity.begin()
         // STRONG: a lease whose owner was freed without releasing it must
         // still be counted down, and this is the only reference left then.
         DispatchQueue.main.asyncAfter(deadline: .now() + maximumHold) {
