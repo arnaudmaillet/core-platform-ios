@@ -87,6 +87,19 @@ import UIKit
 /// no scale: the glass materialises and the row fades, in place.
 @MainActor
 public final class ToastView: UIView {
+
+    /// The ink a toast's glyph is drawn in: a glyph with a colour of its own
+    /// keeps it — the Points heart its pink, the saved star its gold (#1190:
+    /// a like's toast drew its heart in the label's ink) — on a toast that
+    /// says things went well; any other glyph takes the style's ink.
+    static func glyphTint(symbol: String, style: Style) -> UIColor {
+        guard style == .confirmation else { return style.glyphTint }
+        switch symbol {
+        case PointsSymbol.glyph: return PointsSymbol.tint
+        case SaveStar.glyph: return SaveStar.tint
+        default: return style.glyphTint
+        }
+    }
     enum Metrics {
         /// Gap between the capsule and the edge it stands on (or hangs from).
         static let bottomGap: CGFloat = Spacing.lg
@@ -148,6 +161,8 @@ public final class ToastView: UIView {
         /// same `id` updates it to its outcome.
         case loading
 
+        /// The style's own ink for a glyph — see `ToastView.glyphTint(symbol:style:)`
+        /// for the glyphs that carry their colour.
         var glyphTint: UIColor {
             switch self {
             case .confirmation, .loading: .label
@@ -821,9 +836,14 @@ public final class ToastView: UIView {
             // The leading mark a collapsed bar item keeps (#1058).
             hasGlyph = true
         } else if let symbol = content.symbol, let image = UIImage.symbol(named: symbol) {
-            let glyph = UIImageView(image: image)
+            let tint = Self.glyphTint(symbol: symbol, style: content.style)
+            // A glyph with a colour of its own carries it (`.alwaysOriginal`):
+            // the toast's glass would wash a tinted template out to a pale
+            // version of it (`sheet-glass-vibrancy-ink`).
+            let ownsColour = tint != content.style.glyphTint
+            let glyph = UIImageView(image: ownsColour ? image.withTintColor(tint, renderingMode: .alwaysOriginal) : image)
             glyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .medium)
-            glyph.tintColor = content.style.glyphTint
+            glyph.tintColor = tint
             glyph.contentMode = .scaleAspectFit
             glyph.setContentHuggingPriority(.required, for: .horizontal)
             arranged.append(glyph)
