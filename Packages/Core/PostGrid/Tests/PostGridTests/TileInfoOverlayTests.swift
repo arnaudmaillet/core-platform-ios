@@ -107,6 +107,22 @@ struct TileInfoOverlayTests {
 
     // MARK: - Flag on
 
+    /// ⚠️ A like landing on a tile whose words carry the heart — the live
+    /// count after a like in the full screen — must not bring the corner
+    /// count back: that drew the like twice (#1186, filmed by the owner).
+    @Test func aNewCountKeepsOneHeart() throws {
+        let large = tile(Self.large)
+        _ = try #require(large.debugInfoOverlay)
+        #expect(large.debugShowsCornerLikes == false)
+        large.showLikeCount(1_201)
+        #expect(large.debugShowsCornerLikes == false, "the like drew a second heart in the corner")
+        large.setViewerStake(1)
+        #expect(large.debugShowsCornerLikes == false)
+        let small = tile(Self.small)
+        small.showLikeCount(1_201)
+        #expect(small.debugShowsCornerLikes, "a tile without words keeps its corner count")
+    }
+
     /// A large tile wears the full foot, its likes moved from the corner to
     /// the end of the author line; a medium one a single line; a small one
     /// stays a picture with its corner count.

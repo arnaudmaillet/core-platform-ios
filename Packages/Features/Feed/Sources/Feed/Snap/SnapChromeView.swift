@@ -1426,6 +1426,8 @@ final class SnapChromeView: UIView {
     }
 
     #if DEBUG
+    /// The like pill's transform — identity, always (#1186).
+    var debugBoostButtonTransform: CGAffineTransform { boostButton.transform }
     /// The count under the pill's heart — nil while the pill is not showing.
     var debugLikeBadgeText: String? { boostButton.isHidden ? nil : boostButton.configuration?.title }
     /// Where the heart is drawn, in the chrome's space.
@@ -1450,8 +1452,8 @@ final class SnapChromeView: UIView {
     }
 
     /// The spend's visible receipt: a gold "+N" born on the boost anchor
-    /// that rises and dissolves, plus a quick press-bounce on the anchor
-    /// itself. Pure theatre over state that already changed — the wallet
+    /// that rises and dissolves; the anchor itself moves only by the glass's
+    /// own press. Pure theatre over state that already changed — the wallet
     /// debited synchronously before this runs, so the animation can be
     /// dropped (hidden anchor, mid-reuse) without the count going wrong.
     func playBoostConfirmation(amount: Int) {
@@ -1490,17 +1492,9 @@ final class SnapChromeView: UIView {
             label.removeFromSuperview()
         }
 
-        // The anchor's own acknowledgement: a press-and-release dip, the
-        // spring profile `MapAnnotationPop` uses for the same "it landed"
-        // beat.
-        boostButton.transform = CGAffineTransform(scaleX: 0.82, y: 0.82)
-        UIView.animate(
-            withDuration: 0.5, delay: 0,
-            usingSpringWithDamping: 0.45, initialSpringVelocity: 4,
-            options: [.allowUserInteraction]
-        ) {
-            self.boostButton.transform = .identity
-        }
+        // ⚠️ NO DIP OF ITS OWN (#1186): the pill is a glass button, whose
+        // native press already acknowledges the tap. A spring scale here ran
+        // on top of it and read as a tremble (the owner, on a device).
     }
 
     /// The refund's receipt: a cool "−N" that sinks and dissolves — the
