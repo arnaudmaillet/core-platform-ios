@@ -764,15 +764,15 @@ struct SoundSheetTests {
     }
 
     /// ⚠️ The replace's smoothness (the owner, 2026-10-15: "it lags, as if
-    /// at 30 fps"): the glyph sits OVER the glass button, not in its pass,
-    /// and every symbol it is handed already carries the glyph's size and
-    /// weight — a bare one flew in at the default size and jumped at the end.
-    @Test func theGlyphReplacesAConfiguredSymbolOverTheGlass() throws {
+    /// at 30 fps"): the glyph stays IN the glass (2026-10-16), and every
+    /// symbol it is handed already carries the glyph's size and weight — a
+    /// bare one flew in at the default size and jumped at the end.
+    @Test func theGlyphReplacesAConfiguredSymbolInTheGlass() throws {
         let controller = sheet(tiles: 3)
         controller.setPostPlayback(.init(playing: false, muted: false, available: true))
         try laidOut(controller)
         let header = try #require(controller.debugHeader)
-        #expect(header.debugGlyphIsOverTheGlass)
+        #expect(header.debugGlyphIsInTheGlass)
         func configured(_ name: String) -> CGSize? {
             UIImage(systemName: name, withConfiguration: SoundSheetHeaderView.glyphConfiguration)?.size
         }
