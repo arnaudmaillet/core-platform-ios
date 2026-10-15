@@ -29,13 +29,10 @@ final class ProfileBarIdentityPill: UIView {
     init() {
         super.init(frame: .zero)
         avatar.picture.backgroundColor = .clear
-        nameLabel.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
-        nameLabel.textColor = .label
-        handleLabel.font = .appFont(forTextStyle: .caption2)
-        handleLabel.textColor = .secondaryLabel
-        // The name gives way first (the author pill's order).
-        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        handleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        // The bars' one identity look, the post's author pill's too
+        // (`BarIdentityStyle`): the name at a bar item's title size over the
+        // handle, the name giving way first.
+        BarIdentityStyle.apply(name: nameLabel, handle: handleLabel)
 
         let labels = UIStackView(arrangedSubviews: [nameLabel, handleLabel])
         labels.axis = .vertical
@@ -104,5 +101,7 @@ final class ProfileBarIdentityPill: UIView {
     var debugName: String? { nameLabel.text }
     var debugHandle: String? { handleLabel.text }
     var debugWidthBudget: CGFloat? { maxWidth?.constant }
+    var debugNameFont: UIFont { nameLabel.font }
+    var debugHandleFont: UIFont { handleLabel.font }
     #endif
 }
