@@ -40,7 +40,7 @@ struct ForYouRowsHeroPolishTests {
         overlay.layoutIfNeeded()
         let resting = overlay.debugCaptionFrame
         let restingAuthor = overlay.debugAuthorFrame
-        #expect(abs(resting.maxY - (Self.card.height - 10)) < 0.5, "precondition: the card's own layout")
+        #expect(abs(restingAuthor.maxY - (Self.card.height - 10)) < 0.5, "precondition: the card's own layout")
 
         overlay.frame = CGRect(origin: .zero, size: Self.page)
         overlay.layoutIfNeeded()
@@ -48,10 +48,10 @@ struct ForYouRowsHeroPolishTests {
         let caption = overlay.debugCaptionFrame
 
         #expect(abs(overlay.debugCaptionWrapWidth - resting.width) < 0.5, "the caption re-wrapped at the window's width")
-        #expect(abs(caption.maxY - (Self.page.height - 10 * scale)) < 0.5, "the caption left the window's foot")
+        #expect(abs(overlay.debugAuthorFrame.maxY - (Self.page.height - 10 * scale)) < 0.5, "the author left the window's foot")
         #expect(abs(caption.minX - 10 * scale) < 0.5, "the caption left the window's leading edge")
         #expect(abs(caption.width - resting.width * scale) < 0.5, "the caption is not scaled with the window")
-        #expect(overlay.debugAuthorFrame.maxY < caption.minY, "the author fell under the caption")
+        #expect(caption.maxY < overlay.debugAuthorFrame.minY, "the caption fell under the author")
 
         overlay.frame = CGRect(origin: .zero, size: Self.card)
         overlay.layoutIfNeeded()
@@ -171,7 +171,7 @@ struct ForYouRowsHeroPolishTests {
         }
         let overlay = try #require(card.zoomRestingChrome?.subviews.first as? ForYouCardCaptionOverlay)
         let scale = Self.page.width / Self.card.width
-        #expect(abs(overlay.debugCaptionFrame.maxY - (Self.page.height - 10 * scale)) < 0.5,
+        #expect(abs(overlay.debugAuthorFrame.maxY - (Self.page.height - 10 * scale)) < 0.5,
                 "the page end is not anchored at the foot")
 
         UIView.animate(withDuration: 1) {
@@ -180,7 +180,7 @@ struct ForYouRowsHeroPolishTests {
         }
         #expect(overlay.subviews.contains { !($0.layer.animationKeys() ?? []).isEmpty },
                 "the caption jumped to its landing outside the flight")
-        #expect(abs(overlay.debugCaptionFrame.maxY - (Self.card.height - 10)) < 0.5)
+        #expect(abs(overlay.debugAuthorFrame.maxY - (Self.card.height - 10)) < 0.5)
         card.removeFromSuperview()
     }
 
@@ -194,7 +194,7 @@ struct ForYouRowsHeroPolishTests {
         )
         let overlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
         #expect(overlay.debugCaptionFrame.width > 0, "the stand-in's words meet their first layout in the window")
-        #expect(abs(overlay.debugCaptionFrame.maxY - (Self.card.height - 10)) < 0.5)
+        #expect(abs(overlay.debugAuthorFrame.maxY - (Self.card.height - 10)) < 0.5)
     }
 
     // MARK: - 2. The landing takes the playback
