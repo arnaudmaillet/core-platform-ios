@@ -527,6 +527,17 @@ final class ProfileHeaderView: UIView {
     /// navigation bar: the two are one decision about one person, and a
     /// finger should not have to travel from the bar to the tray to make it.
     var onFollowTapped: (() -> Void)?
+
+    /// The action tray (Follow · Message · QR · ⋯).
+    private weak var actionRowView: UIView?
+
+    /// The action tray's foot in `view`'s space: once it has scrolled under
+    /// the navigation bar, the bar takes the relationship over (the owner,
+    /// 2026-10-15).
+    func actionTrayMaxY(in view: UIView) -> CGFloat? {
+        guard let row = actionRowView else { return nil }
+        return row.convert(row.bounds, to: view).maxY
+    }
     /// Invoked when the Message button is tapped (other users only).
     var onMessageTapped: (() -> Void)?
     /// Invoked when the Edit Profile capsule is tapped (own profile only).
@@ -1200,6 +1211,7 @@ final class ProfileHeaderView: UIView {
         let actionRow = UIStackView(
             arrangedSubviews: [followButton, messageButton, editButton, qrCodeButton, moreButton]
         )
+        actionRowView = actionRow
         actionRow.axis = .horizontal
         actionRow.alignment = .fill
         actionRow.distribution = .fill

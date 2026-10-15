@@ -186,6 +186,26 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// trailing run. Kept as state because that run is REBUILT — see
     /// `applyNavigationState`.
     private var trailingAccessoryItem: UIBarButtonItem?
+    /// Whether the header's action tray has scrolled under the bar: the bar
+    /// then carries the relationship, left of the wallet (the owner,
+    /// 2026-10-15) — a pink Follow while the viewer does not follow, the
+    /// profile's identity pill once they do. Never on the viewer's own
+    /// profile.
+    private(set) var isTrayScrolledAway = false
+    /// The bar's Follow, pink: the tray's prominent capsule, carried up.
+    private lazy var barFollowItem: UIBarButtonItem = {
+        let item = UIBarButtonItem(title: "Follow", style: .prominent, target: self, action: #selector(barFollowTapped))
+        item.tintColor = Palette.prominentGlassTint
+        return item
+    }()
+    /// The profile's identity, once followed — the post's author pill.
+    private lazy var barIdentityPill: ProfileBarIdentityPill = {
+        let pill = ProfileBarIdentityPill()
+        pill.onTap = { [weak self] in self?.galleryPager.scrollActivePageToProfileTop() }
+        return pill
+    }()
+    private lazy var barIdentityItem = UIBarButtonItem(customView: barIdentityPill)
+    private let relationshipSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// The relationship capsule: Follow / Following.
     ///
     /// **A stock titled item — deliberately not `UIBarButtonItem(customView:)`,
@@ -1362,6 +1382,18 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     }
 
     #if DEBUG
+    /// Stands in for the scroll: the tray out of sight, or back.
+    func debugSetTrayScrolledAway(_ away: Bool) {
+        isTrayScrolledAway = away
+        updateActionBarItem(followButtonState)
+    }
+    /// The bar's relationship item, if it shows one: the pink Follow or the
+    /// identity pill.
+    var debugBarRelationshipItem: UIBarButtonItem? {
+        navigationItem.rightBarButtonItems?.first { $0 === barFollowItem || $0 === barIdentityItem }
+    }
+    var debugBarFollowItem: UIBarButtonItem { barFollowItem }
+    var debugBarIdentityPill: ProfileBarIdentityPill { barIdentityPill }
     /// The bell, if the bar shows it.
     var debugMuteBellItem: UIBarButtonItem? {
         navigationItem.rightBarButtonItems?.first { $0 === muteBellItem }
@@ -1795,7 +1827,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // No content-source filter on any profile (#772): its sources are
         // pages at the foot, your own as anyone else's (#696).
         //   tab root  [bell] … [coins][switcher gear]
-        //   pushed    [back] … [bell][coins]
+        //   pushed    [back] … [coins][author / Follow][bell] (the middle
+        //             one once the tray has scrolled away)
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
         let leading = [leadingAccessoryItem].compactMap { $0 }
@@ -1879,7 +1912,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// top of it (a visible "double background" bleed), and `.done`/prominent
     /// styling floods the capsule with tint. The own-profile overflow menu
     /// keeps its slot next to it either way.
-    private func updateActionBarItem(_ state: ProfileViewModel.FollowButton) {
+    private func updateActionBarItem(_ state: ProfileViewModel.FollowButton, animated: Bool = false) {
         // Edit is no longer a bar item — it lives in the header tray beside the
         // avatar (see `ProfileHeaderView.configureAction`), so own-profile keeps
         // only its account overflow menu here.
@@ -1938,18 +1971,32 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // is not in the leading group.
         if let switcherItem { items.append(switcherItem) }
         // The mute bell (#689), someone else's profile only: `[0]` is the
-        // corner, as the gear is on your own — `[bell][coins]`.
+        // corner, as the gear is on your own. On screen, someone else's
+        // profile reads `[coins][relationship][bell]` (the owner,
+        // 2026-10-15), the relationship only once the tray has scrolled away.
         if showsMuteBell {
             muteBellItem.isEnabled = isMuteBellEnabled
             items.append(muteBellItem)
-            if trailingAccessoryItem != nil { items.append(muteBellSpacer) }
+        }
+        // The relationship, between the bell and the balance: it takes the
+        // bar's free width. Fixed spaces keep it its own bubble — adjacent
+        // items share one glass capsule, and the pill and the bell came out
+        // as one.
+        if let relationship = barRelationshipItem(for: followButtonState) {
+            if showsMuteBell { items.append(relationshipSpacer) }
+            items.append(relationship)
         }
         // The shell's accessory LAST, which puts it furthest from the screen
         // edge: `[0]` is the corner, so the gear keeps it and the balance sits
         // inboard — the Explore header's arrangement ([coins] [search]). On a
         // pushed profile, which has neither the gear nor the switcher, the
         // balance is the whole trailing run.
-        if let trailingAccessoryItem { items.append(trailingAccessoryItem) }
+        if let trailingAccessoryItem {
+            if showsMuteBell || items.last === barFollowItem || items.last === barIdentityItem {
+                items.append(muteBellSpacer)
+            }
+            items.append(trailingAccessoryItem)
+        }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
         // what used to tear the capsule down and rebuild it mid-transition.
@@ -1978,7 +2025,64 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 + "state=\(followButtonState) \(phase)")
         }
         #endif
-        navigationItem.rightBarButtonItems = items
+        if animated {
+            navigationItem.setRightBarButtonItems(items, animated: true)
+        } else {
+            navigationItem.rightBarButtonItems = items
+        }
+    }
+
+    /// The bar's relationship item, or nil: none until the tray has scrolled
+    /// away, none on the viewer's own profile.
+    private func barRelationshipItem(for state: ProfileViewModel.FollowButton) -> UIBarButtonItem? {
+        guard isTrayScrolledAway, !viewModel.isOwnProfile, !identityStubIsSelf,
+              makeEditViewController == nil else { return nil }
+        switch state {
+        case .follow:
+            return barFollowItem
+        case .following, .requested:
+            guard let profile = viewModel.profile else { return nil }
+            barIdentityPill.configure(
+                name: profile.displayName, handle: profile.handle,
+                monogram: MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle),
+                avatarURL: profile.avatarURL, pipeline: imagePipeline
+            )
+            barIdentityPill.setWidthBudget(barIdentityWidthBudget())
+            return barIdentityItem
+        default:
+            return nil
+        }
+    }
+
+    /// The bar's width less the back button and the other trailing items,
+    /// with the bar's margins and gaps between them.
+    private func barIdentityWidthBudget() -> CGFloat {
+        let barWidth = navigationController?.navigationBar.bounds.width ?? view.bounds.width
+        var others: CGFloat = Self.barControlSide // the back button
+        if let accessory = trailingAccessoryItem?.customView {
+            others += accessory.intrinsicContentSize.width
+        }
+        if showsMuteBell { others += Self.barControlSide }
+        let gaps = Spacing.md * 4 + Spacing.lg * 2
+        return barWidth - others - gaps
+    }
+
+    private static let barControlSide: CGFloat = 44
+
+    @objc private func barFollowTapped() {
+        headerView.onFollowTapped?()
+    }
+
+    /// Whether the header's action tray is out of sight: under the
+    /// navigation bar, by the header's coming position (`travelled` — the
+    /// constraint moves it on the next layout pass), or faded with the
+    /// identity block. The header stops climbing once its selector docks, so
+    /// the tray's foot can rest at the bar's edge; by then the identity fade
+    /// (`applyIdentityFade`, run first) has taken it out.
+    private func trayIsScrolledAway(travelled: CGFloat) -> Bool {
+        guard let trayFoot = headerView.actionTrayMaxY(in: headerHost) else { return false }
+        let covered = trayFoot - min(travelled, headerTravel) <= view.safeAreaInsets.top
+        return covered || headerView.alpha < 0.5
     }
 
     private func configureViews() {
@@ -2508,6 +2612,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         headerView.setTravelled(travelled)
         applyIdentityFade(travelled: travelled)
         updateBarTransparency(travelled: travelled)
+        let trayGone = trayIsScrolledAway(travelled: travelled)
+        if trayGone != isTrayScrolledAway {
+            isTrayScrolledAway = trayGone
+            updateActionBarItem(followButtonState, animated: view.window != nil && transitionCoordinator == nil)
+        }
     }
 
     /// Fades the identity block out as it reaches the navigation bar, and back
