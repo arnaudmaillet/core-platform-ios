@@ -129,6 +129,15 @@ public final class SectionTitleView: UIView {
         public static let accessoryGap: CGFloat = Spacing.sm
         /// The chevron's size against the title's: 15pt beside a 20pt title.
         static let chevronScale: CGFloat = 0.75
+        /// Bold, like the title and the count it follows.
+        static let chevronWeight: UIFont.Weight = .bold
+        /// The run under a finger (the owner, 2026-10-15: a link answers its
+        /// touch): dimmed, and drawn a little smaller about its centre.
+        static let pressedAlpha: CGFloat = 0.55
+        static let pressedScale: CGFloat = 0.96
+        /// The least a tap shows its press for: a quick tap inside a
+        /// scroll view delivers its touch-down and touch-up together.
+        static let minimumPressShow: CFTimeInterval = 0.1
     }
 
     // MARK: - Vertical rhythm
@@ -297,7 +306,9 @@ public final class SectionTitleView: UIView {
         titleLabel.font = font
         countLabel.font = font
         chevron.preferredSymbolConfiguration = UIImage.SymbolConfiguration(
-            font: .systemFont(ofSize: (font.pointSize * Metrics.chevronScale).rounded(), weight: .semibold)
+            // Bold, like the title and the count beside it (the owner,
+            // 2026-10-15: a semibold chevron read thinner than its run).
+            font: .systemFont(ofSize: (font.pointSize * Metrics.chevronScale).rounded(), weight: Metrics.chevronWeight)
         )
         invalidateIntrinsicContentSize()
         setNeedsLayout()
@@ -345,6 +356,67 @@ public final class SectionTitleView: UIView {
 
     @objc private func tapped() {
         onTap?()
+    }
+
+    // MARK: - Press
+
+    /// Whether a finger is down on the run of a link.
+    private(set) var isPressed = false
+    private var pressBegan: CFTimeInterval = 0
+    private var runViews: [UIView] { [titleLabel, countLabel, chevron] }
+
+    override public func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesBegan(touches, with: event)
+        if tap.isEnabled { setPressed(true) }
+    }
+
+    override public func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesEnded(touches, with: event)
+        setPressed(false)
+    }
+
+    override public func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        super.touchesCancelled(touches, with: event)
+        setPressed(false)
+    }
+
+    /// Dims and shrinks the run on a touch-down, at once; springs it back
+    /// on the touch-up, after it has shown for `minimumPressShow`.
+    func setPressed(_ pressed: Bool) {
+        guard pressed != isPressed else { return }
+        isPressed = pressed
+        if pressed {
+            pressBegan = CACurrentMediaTime()
+            UIView.animate(withDuration: 0.1, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+                self.posePress()
+            }
+            return
+        }
+        let delay = max(0, Metrics.minimumPressShow - (CACurrentMediaTime() - pressBegan))
+        UIView.animate(
+            withDuration: 0.35, delay: delay, usingSpringWithDamping: 0.75, initialSpringVelocity: 0,
+            options: [.beginFromCurrentState, .allowUserInteraction]
+        ) {
+            self.posePress()
+        }
+    }
+
+    /// The run as the press has it: each part dimmed and scaled about the
+    /// run's centre, so the run shrinks as one.
+    private func posePress() {
+        let shown = runViews.filter { !$0.isHidden }
+        let run = shown.map { $0.center }.reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: .zero)) }
+        let centre = CGPoint(x: run.isNull ? bounds.midX : run.midX, y: bounds.midY)
+        let scale = Metrics.pressedScale
+        for view in runViews {
+            view.alpha = isPressed ? Metrics.pressedAlpha : 1
+            view.transform = isPressed
+                ? CGAffineTransform(
+                    translationX: (centre.x - view.center.x) * (1 - scale),
+                    y: (centre.y - view.center.y) * (1 - scale)
+                ).scaledBy(x: scale, y: scale)
+                : .identity
+        }
     }
 
     /// The run — title, count, chevron — with a little slop around it, at
@@ -418,6 +490,10 @@ public final class SectionTitleView: UIView {
 
     override public func layoutSubviews() {
         super.layoutSubviews()
+        // Placed by frame, which a press's transform would skew: laid out
+        // at rest, the press re-posed after.
+        if isPressed { for view in runViews { view.transform = .identity } }
+        defer { if isPressed { UIView.performWithoutAnimation { posePress() } } }
         let insets = isEmbedded
             ? (leading: CGFloat(0), trailing: CGFloat(0))
             : fixedInset.map { (leading: $0, trailing: $0) } ?? Self.surfaceInsets(of: self)
@@ -527,6 +603,13 @@ public final class SectionTitleView: UIView {
     }
     /// The title's font.
     public var debugTitleFont: UIFont? { titleLabel.font }
+    public var debugCountFont: UIFont? { countLabel.font }
+    /// How the run is drawn now: its parts' alpha and scale (the press).
+    public var debugRunPose: (alpha: CGFloat, scale: CGFloat) {
+        (titleLabel.alpha, titleLabel.transform.a)
+    }
+    /// The chevron's symbol configuration, as applied.
+    public var debugChevronConfiguration: UIImage.SymbolConfiguration? { chevron.preferredSymbolConfiguration }
     /// Fires the bar's own recogniser action — the path a finger takes.
     public func debugTap() {
         guard tap.isEnabled, gestureRecognizers?.contains(tap) == true else { return }

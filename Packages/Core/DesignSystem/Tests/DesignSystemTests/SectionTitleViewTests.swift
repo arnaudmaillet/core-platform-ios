@@ -166,6 +166,42 @@ struct SectionTitleViewTests {
         #expect(taps == 2)
     }
 
+    /// A link answers its touch (the owner, 2026-10-15): the run dims and
+    /// shrinks under the finger, and springs back when it lifts.
+    @Test func aPressDimsAndShrinksTheRunUntilItLifts() {
+        let (bar, _) = bar(.init(title: "Friends", newCount: 2, isLink: true))
+        #expect(bar.debugRunPose.alpha == 1)
+        UIView.performWithoutAnimation { bar.setPressed(true) }
+        #expect(bar.isPressed)
+        #expect(abs(bar.debugRunPose.alpha - SectionTitleView.Metrics.pressedAlpha) < 0.001)
+        #expect(abs(bar.debugRunPose.scale - SectionTitleView.Metrics.pressedScale) < 0.001)
+        // A layout pass while pressed keeps the press and the run's place.
+        let pressedFrames = bar.debugFrames
+        bar.setNeedsLayout()
+        bar.layoutIfNeeded()
+        #expect(abs(bar.debugRunPose.alpha - SectionTitleView.Metrics.pressedAlpha) < 0.001)
+        #expect(bar.debugFrames.title == pressedFrames.title)
+        bar.setPressed(false)
+        #expect(!bar.isPressed)
+        #expect(bar.debugRunPose.alpha == 1, "the model is back at rest; only the spring is in flight")
+        #expect(bar.debugRunPose.scale == 1)
+    }
+
+    /// A heading that is not a link shows no press.
+    @Test func aHeadingShowsNoPress() {
+        let (bar, _) = bar(.init(title: "For you"))
+        bar.touchesBegan([], with: nil)
+        #expect(!bar.isPressed)
+    }
+
+    /// The count and the chevron are as bold as the title they follow.
+    @Test func theRunIsBoldThroughout() {
+        let (bar, _) = bar(.init(title: "Following", newCount: 3, isLink: true))
+        #expect(SectionTitleView.Metrics.chevronWeight == .bold)
+        #expect(bar.debugChevronConfiguration != nil)
+        #expect(bar.debugCountFont?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
+    }
+
     /// A heading that is not a way in: no chevron, nothing to tap, its
     /// touches left to the list under it.
     @Test func aHeadingThatIsNotALinkTakesNoTouch() {
