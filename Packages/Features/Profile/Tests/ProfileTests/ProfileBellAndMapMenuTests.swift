@@ -119,11 +119,14 @@ struct ProfileBellAndMapMenuTests {
         #expect((screen.debugMuteMenuElements().first as? UIMenu)?.title == "Mute")
     }
 
-    /// Not followed: the bell is still there (muting needs no follow), and
-    /// see-more has no Map submenu.
-    @Test func anUnfollowedProfileHasTheBellButNoMapSubmenu() async throws {
+    /// Not followed: NO bell (the owner, 2026-10-15 — nothing of theirs to
+    /// mute yet; the corner goes to the bar's Follow), and see-more has no
+    /// Map submenu.
+    @Test func anUnfollowedProfileHasNoBellAndNoMapSubmenu() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
-        try #require(await settle { screen.debugMuteBellItem != nil })
+        try #require(await settle { screen.followButtonState == .follow })
+        #expect(screen.debugMuteBellItem == nil, "a bell on a profile the viewer does not follow")
+        #expect(screen.navigationItem.rightBarButtonItems?.map(\.accessibilityLabel) == ["Balance"])
         #expect(mapSubmenu(screen) == nil)
     }
 
@@ -217,13 +220,15 @@ extension ProfileBellAndMapMenuTests {
         #expect(follow.style == .prominent)
         #expect(follow.tintColor == Palette.prominentGlassTint, "the Follow is not pink")
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        // On screen [coins][Follow][bell]: corner first in the array.
+        // On screen [coins][pill][Follow] (the owner, 2026-10-15): the
+        // Follow in the bell's corner, the pill inboard of it.
         #expect(items.count == 5)
-        #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner")
-        #expect(items[2] === follow, "the Follow is not between the bell and the balance")
+        #expect(items[0] === follow, "the Follow is not in the corner")
+        #expect(items[2].customView === screen.debugBarIdentityPill, "no pill beside the Follow")
         #expect(items[4].accessibilityLabel == "Balance", "the balance is not the inboard end")
+        #expect(screen.debugMuteBellItem == nil)
         for space in [items[1], items[3]] {
-            #expect(space.customView == nil && space.title == nil, "no space keeps the Follow its own bubble")
+            #expect(space.customView == nil && space.title == nil, "no space keeps each its own bubble")
         }
 
         screen.debugSetTrayScrolledAway(false)
