@@ -250,6 +250,9 @@ extension ProfileBellAndMapMenuTests {
         #expect(item.customView === screen.debugBarIdentityPill)
         #expect(screen.debugBarIdentityPill.debugName == "Lena Fischer")
         #expect(screen.debugBarIdentityPill.debugHandle == "@lena")
+        // The bars' one identity look, the post's author pill's too.
+        #expect(screen.debugBarIdentityPill.debugNameFont.pointSize == BarIdentityStyle.nameFont.pointSize)
+        #expect(screen.debugBarIdentityPill.debugHandleFont.pointSize == BarIdentityStyle.handleFont.pointSize)
         let budget = try #require(screen.debugBarIdentityPill.debugWidthBudget)
         #expect(budget > 0 && budget < screen.view.bounds.width, "the pill is not capped by the bar's room")
     }

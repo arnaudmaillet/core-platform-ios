@@ -239,6 +239,17 @@ struct SnapAuthorPillItemTests {
         #expect(Self.labels(in: try #require(landed.customView)).contains("Ada Lovelace"))
     }
 
+    /// The bars' one identity look (`BarIdentityStyle`, the owner
+    /// 2026-10-15): the name at a bar item's title size over the handle.
+    @Test func thePillWearsTheBarsIdentityStyle() {
+        let pill = SnapAuthorIdentityView()
+        pill.setAuthor(Self.model(id: "p1", author: "Ursula Quinn", authorID: "prof-1", meta: "@uq"),
+                       pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), animated: false)
+        #expect(pill.debugShownLines == ["Ursula Quinn", "@uq"])
+        #expect(pill.debugNameFont.pointSize == BarIdentityStyle.nameFont.pointSize)
+        #expect(pill.debugHandleFont.pointSize == BarIdentityStyle.handleFont.pointSize)
+    }
+
     /// A pill (re)installed in the bar is a disc at its FIRST layout: the
     /// plate is its 32pt diameter, round by corner and by mask, before any
     /// later pass has had a chance to fix anything.

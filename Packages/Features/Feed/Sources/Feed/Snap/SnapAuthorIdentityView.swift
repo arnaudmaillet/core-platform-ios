@@ -230,10 +230,9 @@ final class SnapAuthorIdentityView: UIView {
         // Clear: with no picture (yet) the initials behind show through.
         avatar.picture.backgroundColor = .clear
 
-        nameLabel.font = UIFont.scaledFont(forTextStyle: .footnote, weight: .semibold)
-        nameLabel.textColor = .label
-        metaLabel.font = .appFont(forTextStyle: .caption2)
-        metaLabel.textColor = .secondaryLabel
+        // The bars' one identity look (`BarIdentityStyle`, the owner
+        // 2026-10-15): the name at a bar item's title size over the handle.
+        BarIdentityStyle.apply(name: nameLabel, handle: metaLabel)
         // THE ORDER THE PILL GIVES WAY IN, when the bar is too narrow to
         // hold everything: the display NAME truncates first, the handle
         // line only once the name has nothing left to give. A name is the
@@ -241,8 +240,7 @@ final class SnapAuthorIdentityView: UIView {
         // a half-written handle is not an identifier at all. Resistance,
         // not two width rules — Auto Layout squeezes the lower one first
         // and never has to be told about the second.
-        nameLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        metaLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        // (Set by `BarIdentityStyle.apply`.)
 
         // The bar is transparent over arbitrary media; shadows keep the
         // identity legible without a background.
@@ -571,6 +569,7 @@ final class SnapAuthorIdentityView: UIView {
 
     private var isRedacted = true
 
+
     /// The label area's visibility: the real labels once hydrated, the
     /// redaction bars before.
     private func applyLabelVisibility() {
@@ -792,6 +791,12 @@ enum SnapNavControls {
 extension SnapAuthorIdentityView {
     /// The picture on the disc now; nil while the initials show.
     var debugFaceImage: UIImage? { avatar.shownPicture }
+    /// The lines the pill shows, top to bottom, and the name's font.
+    var debugShownLines: [String] {
+        [nameLabel, metaLabel].filter { !$0.isHidden }.compactMap(\.text)
+    }
+    var debugNameFont: UIFont { nameLabel.font }
+    var debugHandleFont: UIFont { metaLabel.font }
 
     /// `-pill-probe`: what the pill's disc actually is at this instant — its
     /// frame in the window, its corner and mask, every transformed ancestor up
