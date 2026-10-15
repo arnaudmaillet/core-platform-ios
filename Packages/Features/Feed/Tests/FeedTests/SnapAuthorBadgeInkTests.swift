@@ -15,29 +15,23 @@ import UIKit
 struct SnapAuthorBadgeInkTests {
     typealias Badge = SnapAuthorIdentityView.FollowBadge
 
-    /// The FOLLOWED check is the accent pink with its white mark (#1197).
-    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
-    func theFollowedCheckIsPink(_ style: UIUserInterfaceStyle) throws {
-        let pill = SnapAuthorIdentityView()
-        pill.setFollowBadge(.following)
-        let images = pill.drawnBadgeImages
-        let disc = try #require(images.disc)
-        let glyph = try #require(images.glyph)
-        let discPixels = try Self.opaquePixels(of: [disc], style: style)
-        #expect(discPixels.count > 50, "the disc draws nothing")
-        var pink = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
-        // One fixed pink in either appearance (#968).
-        Palette.tint.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-            .getRed(&pink.r, green: &pink.g, blue: &pink.b, alpha: &pink.a)
-        #expect(discPixels.allSatisfy { abs($0.r - pink.r) < 0.04 && abs($0.g - pink.g) < 0.04 && abs($0.b - pink.b) < 0.04 },
-                "the followed disc is not the accent pink")
-        let badgePixels = try Self.opaquePixels(of: [disc, glyph], style: style)
-        #expect(badgePixels.filter(Self.isWhite).count > 10, "the check is not white")
+    private static func rgb(_ colour: UIColor) -> Pixel {
+        var c = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+        colour.getRed(&c.r, green: &c.g, blue: &c.b, alpha: &c.a)
+        return (c.r, c.g, c.b)
     }
 
-    @Test(arguments: [Badge.follow, .friends, .pending],
+    private static func near(_ pixel: Pixel, _ colour: UIColor) -> Bool {
+        let c = rgb(colour)
+        return abs(pixel.r - c.r) < 0.05 && abs(pixel.g - c.g) < 0.05 && abs(pixel.b - c.b) < 0.05
+    }
+
+    /// The owner's inks (#1197): the "+" a black disc with a white mark; a
+    /// FOLLOWED check and a PENDING clock a grey disc with a pink mark; FRIENDS
+    /// a pink disc with a white mark — fixed, the same in either appearance.
+    @Test(arguments: [Badge.follow, .following, .friends, .pending],
           [UIUserInterfaceStyle.light, .dark])
-    func theBadgeIsABlackDiscWithAWhiteGlyph(_ badge: Badge, _ style: UIUserInterfaceStyle) throws {
+    func eachBadgeWearsItsInks(_ badge: Badge, _ style: UIUserInterfaceStyle) throws {
         let pill = SnapAuthorIdentityView()
         pill.setFollowBadge(badge)
         #expect(pill.drawnBadgeSymbol == badge.symbolName)
@@ -47,21 +41,18 @@ struct SnapAuthorBadgeInkTests {
         #expect(disc.renderingMode != .alwaysTemplate, "the glass can re-tint the disc")
         #expect(glyph.renderingMode != .alwaysTemplate, "the glass can re-tint the glyph")
 
+        let (discInk, markInk): (UIColor, UIColor) = switch badge {
+        case .follow: (.black, .white)
+        case .following, .pending: (AvatarBadgeInks.quietDisc, AvatarBadgeInks.accent)
+        case .friends: (AvatarBadgeInks.accent, .white)
+        case .none: (.clear, .clear)
+        }
         let mode = style == .dark ? "dark" : "light"
         let discPixels = try Self.opaquePixels(of: [disc], style: style)
         #expect(discPixels.count > 50, "the disc draws nothing")
-        #expect(discPixels.allSatisfy(Self.isBlack), "the \(badge) disc is not black in \(mode) mode")
-
-        // The badge as the eye reads it: the glyph over the disc. The check
-        // and the clock are discs of their own, as large as the badge's — a
-        // white one would read as a white badge — so the WHOLE mark is read:
-        // mostly black, with white on it, and nothing but black and white.
+        #expect(discPixels.allSatisfy { Self.near($0, discInk) }, "the \(badge) disc is not its ink in \(mode) mode")
         let badgePixels = try Self.opaquePixels(of: [disc, glyph], style: style)
-        let black = badgePixels.filter(Self.isBlack).count
-        let white = badgePixels.filter(Self.isWhite).count
-        #expect(white > 10, "the \(badge) glyph is not white in \(mode) mode")
-        #expect(black > white, "the \(badge) badge does not read as a black disc in \(mode) mode")
-        #expect(badgePixels.allSatisfy(Self.isAchromatic), "the \(badge) badge is tinted in \(mode) mode")
+        #expect(badgePixels.filter { Self.near($0, markInk) }.count > 10, "the \(badge) mark is not its ink in \(mode) mode")
     }
 
     /// The same badge, pixel for pixel, in light and dark mode.
