@@ -71,6 +71,9 @@ final class ProfileGalleryGridView: UIView {
     /// Where a release comes to rest while the header is on screen, in the
     /// travelled space — see `ProfileScrollDetents`. Empty means free.
     var snapDetents: [CGFloat] = []
+    /// Detents a release CROSSING them stops on, whatever its momentum —
+    /// see `ProfileScrollDetents.snapped(target:detents:from:catching:)`.
+    var catchDetents: [CGFloat] = []
     /// A snap decided at the release with no momentum behind it, which the
     /// scroll view will not carry out on its own — see
     /// `scrollViewDidEndDragging`.
@@ -1787,7 +1790,9 @@ extension ProfileGalleryGridView: UIScrollViewDelegate {
         pendingSnap = nil
         let inset = scrollView.contentInset.top
         let target = targetContentOffset.pointee.y + inset
-        let snapped = ProfileScrollDetents.snapped(target: target, detents: snapDetents)
+        let snapped = ProfileScrollDetents.snapped(
+            target: target, detents: snapDetents, from: verticalOffset, catching: catchDetents
+        )
         #if DEBUG
         // `-profile-snap-audit`: where a release was heading, and where it
         // was sent instead.

@@ -101,12 +101,15 @@ struct ProfileBannerShapeTests {
         #expect(poster.debugBannerShowsRamp, "a poster lost its foot's fade")
     }
 
-    @Test func aBandDoesNotBlurAndFadesToBlack() {
+    /// A band's ramp lands on the picture's own dark tone (the owner,
+    /// 2026-10-15), capped as dark as black under the type.
+    @Test func aBandDoesNotBlurAndFadesToItsDarkTone() {
         let band = header(picture: CGSize(width: 1600, height: 900))
         #expect(band.bannerFormat == .band)
         #expect(!band.debugBannerShowsBlur, "the band still blurs")
         #expect(band.debugBannerShowsRamp, "a band lost its fade")
-        #expect(band.debugBannerRampTone == .black, "the band's ramp follows the page")
+        #expect(ProfileBannerView.luminance(of: band.debugBannerRampTone) <= ProfileBannerView.maxToneLuminance + 0.0005,
+                "the band's ramp is lighter than its cap")
         #expect(band.debugBannerBlurLevels.isEmpty, "blur levels are drawn")
         // Still a band's height: on the avatar's midline, not the poster's 80%.
         #expect(band.debugBannerFrame.maxY < screenHeight * 0.5)

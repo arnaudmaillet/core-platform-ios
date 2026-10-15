@@ -23,11 +23,17 @@ import CoreGraphics
 enum ProfileScrollDetents {
     /// The detents, in the header's travelled space (0 at rest).
     static func detents(
-        for format: ProfileBannerFormat, posterFadeOut: CGFloat, firstPost: CGFloat
+        for format: ProfileBannerFormat, posterFadeOut: CGFloat, firstPost: CGFloat,
+        bandAvatar: CGFloat? = nil
     ) -> [CGFloat] {
         var detents: [CGFloat] = [0]
         if format == .poster, posterFadeOut > 0, posterFadeOut < firstPost {
             detents.append(posterFadeOut)
+        }
+        // ⚠️ EXPERIMENT (the owner, 2026-10-15): a band card rests with its
+        // avatar just under the bar too.
+        if format == .band, let bandAvatar, bandAvatar > 0, bandAvatar < firstPost {
+            detents.append(bandAvatar)
         }
         if firstPost > 0 { detents.append(firstPost) }
         return detents
@@ -42,8 +48,19 @@ enum ProfileScrollDetents {
     /// fling's momentum, so a short flick that would have stopped just past
     /// a detent lands on it, and a long one that would have cleared the next
     /// lands there.
-    static func snapped(target: CGFloat, detents: [CGFloat]) -> CGFloat? {
+    static func snapped(
+        target: CGFloat, detents: [CGFloat], from: CGFloat? = nil, catching: [CGFloat] = []
+    ) -> CGFloat? {
         guard let last = detents.last, target >= 0, target <= last + beyondSlack else { return nil }
+        // A CATCHING detent stops a release that crosses it, however hard it
+        // was flung (a band card's avatar under the bar — a notch, the owner,
+        // 2026-10-15): the first one met in the direction of travel.
+        if let from {
+            let crossed = catching
+                .filter { (from < $0 && target > $0) || (from > $0 && target < $0) }
+                .sorted { abs($0 - from) < abs($1 - from) }
+            if let stop = crossed.first { return stop }
+        }
         if target >= last { return last }
         return detents.min { abs($0 - target) < abs($1 - target) }
     }

@@ -73,8 +73,10 @@ struct ProfileBannerFormatTests {
         #expect(names.minX > avatar.maxX)
         #expect(abs(stats.minX - names.minX) < 0.5)
         // The name and the handle sit INSIDE their half, the counters inside
-        // theirs.
-        #expect(header.debugNameFrame.minY >= names.minY - 0.5)
+        // theirs. (On a band card the name rides its handle — as much air
+        // under the handle as above it, the owner 2026-10-15 — and may rise
+        // past its half's top.)
+        if format != .band { #expect(header.debugNameFrame.minY >= names.minY - 0.5) }
         #expect(header.debugHandleFrame.maxY <= names.maxY + 0.5)
         #expect(header.debugStatsFrame.minY >= stats.minY - 0.5)
         #expect(header.debugStatsFrame.maxY <= stats.maxY + 0.5)
@@ -85,17 +87,19 @@ struct ProfileBannerFormatTests {
         #expect(header.debugTrayFrame.minY > avatar.maxY)
     }
 
-    /// A band ENDS on the avatar's midline — a few points under it, in the
-    /// air above the counters — and the page's tone is whole there.
-    @Test func aBandEndsOnTheAvatarsMidline() throws {
+    /// A band is a CARD (the owner, 2026-10-15): held 12pt off the screen's
+    /// top, ending in the air above the counters' numbers — below the
+    /// avatar's midline, above the numbers — its ramp whole by the handle's
+    /// foot, and opaque at the edge.
+    @Test func aBandCardEndsAboveTheCounters() throws {
         let header = header(format: .band)
         let banner = header.debugBannerFrame
         let avatar = header.debugAvatarFrame
-        #expect(banner.minY == 0)
-        #expect(banner.maxY > avatar.midY)
-        #expect(banner.maxY <= avatar.midY + 8)
+        #expect(banner.minY == 12)
+        #expect(banner.maxY > header.debugHandleFrame.maxY)
+        #expect(banner.maxY > avatar.midY - 2 && banner.maxY < header.debugStatsFrame.minY + 8)
         let fade = try #require(header.debugBannerFade)
-        #expect(abs(fade.rampEnd - banner.maxY) < 0.5)
+        #expect(abs(fade.rampEnd - header.debugHandleFrame.maxY) < 0.5)
         // The ramp itself: clear, then the page, opaque at the edge.
         let alphas = header.debugBannerRampAlphas
         #expect(alphas.first == 0)
@@ -112,8 +116,12 @@ struct ProfileBannerFormatTests {
         let avatar = header.debugAvatarFrame
         let foot = header.debugBannerFrame.maxY
         #expect(abs(fade.blurFull - foot) < 0.5)
-        #expect(abs(fade.rampEnd - foot) < 0.5)
-        #expect(abs(avatar.minY - fade.blurStart - HeroBannerFade.blurLead) < 0.5)
+        // A band card's ramp is whole by the handle's foot, and its container
+        // starts above the name when the name stands above the avatar.
+        let rampFoot = format == .band ? header.debugHandleFrame.maxY : foot
+        #expect(abs(fade.rampEnd - rampFoot) < 0.5)
+        let identityTop = format == .band ? min(avatar.minY, header.debugNameFrame.minY) : avatar.minY
+        #expect(abs(identityTop - fade.blurStart - HeroBannerFade.blurLead) < 0.5)
         // A band's ramp is shouldered: eased in just above the container,
         // already half there at its top — with no blur (5 October 2026) it is
         // all that closes the picture's spread under the name. A poster's is
@@ -225,14 +233,17 @@ struct ProfileBannerFormatTests {
         #expect(abs(header.debugBannerPictureShift - 100 * ProfileBannerView.parallaxShare) < 0.5)
     }
 
-    /// A band is the shorter header, by exactly the poster's clearance: the
-    /// band's column starts on the chrome, the poster's a clearance below it
-    /// — the stage that puts a poster's foot at 80% of the screen.
+    /// A header with no picture is shorter than a poster by exactly the
+    /// poster's clearance: its column starts on the chrome, the poster's a
+    /// clearance below it — the stage that puts a poster's foot at 80% of the
+    /// screen. A band card stands between them (its foot at 35%).
     @Test func aBandIsShorterThanAPoster() {
         let band = header(format: .band)
+        let bare = header(format: .poster, picture: false)
         let poster = header(format: .poster)
         #expect(band.bounds.height < poster.bounds.height)
-        #expect(abs((poster.bounds.height - band.bounds.height) - (poster.posterClearance - 12)) < 1)
+        #expect(bare.bounds.height < band.bounds.height)
+        #expect(abs((poster.bounds.height - bare.bounds.height) - (poster.posterClearance - 12)) < 1)
     }
 
     /// A profile with no picture has no banner at all: the identity block
@@ -243,8 +254,6 @@ struct ProfileBannerFormatTests {
         #expect(header.bannerFormat == .none)
         #expect(header.debugBannerIsHidden)
         #expect(abs(header.debugAvatarFrame.minY - (header.chromeTopInset + 12)) < 0.5)
-        // And it is as short as a band.
-        #expect(abs(header.bounds.height - self.header(format: .band).bounds.height) < 0.5)
     }
 
     /// ⚠️ THE TRAY IS FLAT AND OPAQUE. Glass is for chrome over content;

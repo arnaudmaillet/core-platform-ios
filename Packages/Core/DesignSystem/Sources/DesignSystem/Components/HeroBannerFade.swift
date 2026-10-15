@@ -354,8 +354,13 @@ public enum HeroBannerFade {
     /// A stretched view's height at rest: its height less the stretch,
     /// snapped to the pixel (see `HeroBannerPictureView.restBounds`). At
     /// rest, the height as it is.
+    ///
+    /// A NEGATIVE stretch is a view whose top stands BELOW its resting top —
+    /// a card inset from it, or one shortening as it holds its place (a
+    /// profile's band card, 2026-10-15): the resting layout runs on above
+    /// the view, clipped by it, and its height at rest is the taller one.
     @MainActor static func restingHeight(of view: UIView, stretch: CGFloat) -> CGFloat {
-        guard stretch > 0 else { return max(0, view.bounds.height) }
+        guard stretch != 0 else { return max(0, view.bounds.height) }
         let scale = view.traitCollection.displayScale > 0 ? view.traitCollection.displayScale : 3
         return max(0, ((view.bounds.height - stretch) * scale).rounded() / scale)
     }

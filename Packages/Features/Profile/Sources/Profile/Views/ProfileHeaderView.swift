@@ -1,5 +1,6 @@
 import MapsInterface
 import MediaCore
+import PostGrid
 import DesignSystem
 import EmoteKit
 import UIKit
@@ -63,6 +64,20 @@ final class ProfileHeaderView: UIView {
         /// counters' half starts at the midline, their type a few points
         /// lower, and the page must be whole by then.
         static let bandFootBelowMidline: CGFloat = 6
+        /// ⚠️ EXPERIMENT (the owner, 2026-10-15): a band is a CARD — inset
+        /// from the screen's sides, held off the screen's top by the same
+        /// margin, behind the status bar, its top corners following the display's and its
+        /// bottom ones the post cards' — and the content starts lower, so
+        /// more of the picture shows.
+        static let bandCardInset: CGFloat = 12
+        /// A band card's foot: 30 % of the screen's height.
+        static let bandScreenFraction: CGFloat = 0.35
+        /// The identity row's own side margins on a band card, inside the
+        /// column's.
+        static let bandRowInset: CGFloat = Spacing.md
+        /// The air between the bar's foot and a band card's avatar at its
+        /// detent.
+        static let bandAvatarDetentGap: CGFloat = 40
         /// The air above the tray, carried by the tray itself so it holds
         /// whether or not a website row sits above it.
         static let trayGap: CGFloat = Spacing.md
@@ -130,7 +145,92 @@ final class ProfileHeaderView: UIView {
     /// controller with its scroll view's `frameLayoutGuide.topAnchor`; the
     /// header stays scroll-view-agnostic.
     func anchorBanner(toViewportTop viewportTop: NSLayoutYAxisAnchor) {
-        bannerView.topAnchor.constraint(lessThanOrEqualTo: viewportTop).isActive = true
+        let pin = bannerView.topAnchor.constraint(lessThanOrEqualTo: viewportTop, constant: bandCardTop)
+        pin.isActive = true
+        viewportPin = pin
+    }
+
+    /// The banner's pin to the viewport's top — a band card's top margin.
+    private var viewportPin: NSLayoutConstraint?
+    /// The banner's edges, for a band card's margins.
+    private var bannerTopEdge: NSLayoutConstraint?
+    private var bannerLeadingEdge: NSLayoutConstraint?
+    private var bannerTrailingEdge: NSLayoutConstraint?
+
+    /// A band card's top: the same margin as its sides, from the screen's
+    /// top — behind the status bar, its corners concentric with the
+    /// display's.
+    private var bandCardTop: CGFloat { bannerFormat == .band ? Metrics.bandCardInset : 0 }
+
+    /// The page's climb, as last handed down.
+    private var travelled: CGFloat = 0
+
+    /// The climb that brings a band card's avatar to rest just under the
+    /// bar, a small gap between them — a scroll detent. Nil off a band.
+    var bandAvatarDetent: CGFloat? {
+        guard bannerFormat == .band else { return nil }
+        let avatarTop = avatarView.convert(avatarView.bounds, to: self).minY
+        return max(0, avatarTop - chromeTopInset - Metrics.bandAvatarDetentGap)
+    }
+
+    /// A band card's shadow: a soft, wide glow in the ramp's tone, drawn by
+    /// a view under the banner (which clips its own content).
+    private let bannerShadow = UIView()
+
+    private func applyBannerShadow(tone: UIColor) {
+        bannerShadow.backgroundColor = tone
+        bannerShadow.layer.shadowColor = tone.cgColor
+        bannerShadow.layer.shadowOpacity = 0.35
+        bannerShadow.layer.shadowRadius = 22
+        bannerShadow.layer.shadowOffset = CGSize(width: 0, height: 10)
+    }
+
+    /// ⚠️ EXPERIMENT (the owner, 2026-10-15): A BAND CARD HOLDS ITS TOP
+    /// MARGIN while the page climbs — its foot rides up with the avatar, so
+    /// the card shortens — until the avatar's top reaches the bar's foot;
+    /// from there it climbs away with the page.
+    private func holdBandCardTop() {
+        let held: CGFloat
+        if bannerFormat == .band {
+            let avatarTop = avatarView.convert(avatarView.bounds, to: self).minY
+            let holdTravel = max(0, avatarTop - chromeTopInset)
+            held = min(max(0, travelled), holdTravel)
+        } else {
+            held = 0
+        }
+        let top = bandCardTop + held
+        guard bannerTopEdge?.constant != top else { return }
+        bannerTopEdge?.constant = top
+        // Asked for: a constant alone did not lay the header out again off a
+        // window, and the scroll's own pass is not this method's to count on.
+        setNeedsLayout()
+    }
+
+    /// The band card's margins and corners, or the banner edge to edge.
+    private func applyBandCard() {
+        let card = bannerFormat == .band
+        let inset = card ? Metrics.bandCardInset : 0
+        bannerTopEdge?.constant = bandCardTop
+        viewportPin?.constant = bandCardTop
+        holdBandCardTop()
+        bannerLeadingEdge?.constant = inset
+        bannerTrailingEdge?.constant = -inset
+        // The top corners concentric with the display's (the card's top is
+        // the screen's), the bottom ones the post cards' below.
+        let foot = UICornerRadius.fixed(PostGridListRowCell.cardCornerRadius)
+        bannerShadow.isHidden = !card
+        bannerShadow.cornerConfiguration = card
+            ? .corners(
+                topLeftRadius: .containerConcentric(), topRightRadius: .containerConcentric(),
+                bottomLeftRadius: foot, bottomRightRadius: foot
+            )
+            : .uniformCorners(radius: .fixed(0))
+        bannerView.cornerConfiguration = card
+            ? .corners(
+                topLeftRadius: .containerConcentric(), topRightRadius: .containerConcentric(),
+                bottomLeftRadius: foot, bottomRightRadius: foot
+            )
+            : .uniformCorners(radius: .fixed(0))
     }
 
     /// Height of the status-bar + navigation chrome the banner runs under,
@@ -170,6 +270,12 @@ final class ProfileHeaderView: UIView {
     private var posterColumnTop: NSLayoutConstraint?
     /// A poster's picture's foot, from the header's top.
     private var posterBannerFoot: NSLayoutConstraint?
+    /// A band card's avatar midline, so its foot (`bandFootBelowMidline`
+    /// under it) lands at `bandScreenFraction` of the screen.
+    private var bandAvatarLine: NSLayoutConstraint?
+    private var bandAvatarLineConstant: CGFloat {
+        (screenHeight * Metrics.bandScreenFraction).rounded() - Metrics.bandFootBelowMidline
+    }
     /// The column never starts higher than a band's.
     private var columnTopFloor: NSLayoutConstraint?
 
@@ -179,6 +285,11 @@ final class ProfileHeaderView: UIView {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        applyBandCard()
+        if let bandAvatarLine, bandAvatarLine.constant != bandAvatarLineConstant {
+            bandAvatarLine.constant = bandAvatarLineConstant
+            layoutRevision += 1
+        }
         guard let posterColumnTop, posterColumnTop.constant != posterColumnTopConstant
             || posterBannerFoot?.constant != posterBannerFootConstant else { return }
         posterColumnTop.constant = posterColumnTopConstant
@@ -198,7 +309,12 @@ final class ProfileHeaderView: UIView {
     /// The header's alpha — the identity's fade at the dock — reaches the
     /// banner too when it stands outside the header (`moveBanner`).
     override var alpha: CGFloat {
-        didSet { if bannerView.superview !== self { bannerView.hostAlpha = alpha } }
+        didSet {
+            if bannerView.superview !== self {
+                bannerView.hostAlpha = alpha
+                bannerShadow.alpha = alpha
+            }
+        }
     }
 
     /// Moves the banner OUT of the header, into `container` below `sibling` —
@@ -228,8 +344,12 @@ final class ProfileHeaderView: UIView {
         columnTopFloor?.constant = columnTopConstant
         // A poster's column is pushed down to its foot; a band's sits on
         // its floor.
-        columnTopConstraint?.isActive = format != .poster
+        columnTopConstraint?.isActive = format != .poster && format != .band
         posterColumnTop?.isActive = format == .poster
+        bandAvatarLine?.isActive = format == .band
+        let rowInset = format == .band ? Metrics.bandRowInset : 0
+        topRow.isLayoutMarginsRelativeArrangement = true
+        topRow.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: rowInset, bottom: 0, trailing: rowInset)
         bannerView.isHidden = format == .none
         activateBannerFoot()
         bannerView.setFormat(format)
@@ -242,6 +362,8 @@ final class ProfileHeaderView: UIView {
     /// avatar's top to where a band would hold it — under the chrome, a gap
     /// below it — so the two shapes meet at the same picture: none.
     func setTravelled(_ travelled: CGFloat) {
+        self.travelled = travelled
+        holdBandCardTop()
         bannerView.setTravelled(travelled, fadeOutTravel: posterFadeOutTravel)
         applyIdentityInk()
     }
@@ -393,12 +515,40 @@ final class ProfileHeaderView: UIView {
 
     private var hasAppliedBannerFormat = false
     private var bannerEndsInAvatar: NSLayoutConstraint?
+    private var bandFootAtCounters: NSLayoutConstraint?
+    /// The name block on its half's top — or, on a band card, the handle's
+    /// baseline as far above the banner's foot as the name's baseline is
+    /// above the handle's cap top (the owner, 2026-10-15).
+    private var nameBlockTop: NSLayoutConstraint?
+    private var bandHandleBaseline: NSLayoutConstraint?
+
+    /// The air between the name's baseline and the handle's cap top, as drawn.
+    private var nameToHandleAir: CGFloat {
+        let name = nameLabel.font ?? .systemFont(ofSize: 22)
+        let handle = handleLabel.font ?? .systemFont(ofSize: 15)
+        return -name.descender + nameBlock.spacing + (handle.ascender - handle.capHeight)
+    }
+
+    private var bandHandleBaselineConstant: CGFloat {
+        followersStat.evenAirEdge - nameToHandleAir
+    }
 
     /// Exactly one foot for the banner, by its shape: a band's on the
     /// avatar's midline, a poster's at 80% of the screen.
     private func activateBannerFoot() {
-        bannerEndsInAvatar?.isActive = bannerFormat != .poster
+        bannerEndsInAvatar?.isActive = bannerFormat != .poster && bannerFormat != .band
+        bandFootAtCounters?.isActive = bannerFormat == .band
+        if bandHandleBaseline == nil {
+            let baseline = handleLabel.lastBaselineAnchor.constraint(
+                equalTo: followersStat.topAnchor, constant: bandHandleBaselineConstant
+            )
+            baseline.priority = .init(999)
+            bandHandleBaseline = baseline
+        }
+        nameBlockTop?.isActive = bannerFormat != .band
+        bandHandleBaseline?.isActive = bannerFormat == .band
         posterBannerFoot?.isActive = bannerFormat == .poster
+        applyBandCard()
     }
 
     /// The banner's place, from the header's own anchors wherever the banner
@@ -410,11 +560,24 @@ final class ProfileHeaderView: UIView {
         let bannerTop = bannerView.topAnchor.constraint(equalTo: topAnchor)
         bannerTop.priority = .defaultHigh
         bannerView.translatesAutoresizingMaskIntoConstraints = false
+        let leading = bannerView.leadingAnchor.constraint(equalTo: leadingAnchor)
+        let trailing = bannerView.trailingAnchor.constraint(equalTo: trailingAnchor)
+        bannerTopEdge = bannerTop
+        bannerLeadingEdge = leading
+        bannerTrailingEdge = trailing
+        NSLayoutConstraint.activate([bannerTop, leading, trailing])
+        // The shadow rides under the banner, wherever it stands, on its edges.
+        bannerShadow.removeFromSuperview()
+        bannerShadow.isUserInteractionEnabled = false
+        bannerShadow.translatesAutoresizingMaskIntoConstraints = false
+        bannerView.superview?.insertSubview(bannerShadow, belowSubview: bannerView)
         NSLayoutConstraint.activate([
-            bannerTop,
-            bannerView.leadingAnchor.constraint(equalTo: leadingAnchor),
-            bannerView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bannerShadow.topAnchor.constraint(equalTo: bannerView.topAnchor),
+            bannerShadow.bottomAnchor.constraint(equalTo: bannerView.bottomAnchor),
+            bannerShadow.leadingAnchor.constraint(equalTo: bannerView.leadingAnchor),
+            bannerShadow.trailingAnchor.constraint(equalTo: bannerView.trailingAnchor),
         ])
+        bannerView.onRampToneChange = { [weak self] tone in self?.applyBannerShadow(tone: tone) }
         // ⚠️ A BAND ENDS ON THE AVATAR'S MIDLINE — the line between the
         // name's half and the counters' half, so the name stands on the strip
         // and the counters on the page. The banner's own edge sits a few
@@ -429,6 +592,11 @@ final class ProfileHeaderView: UIView {
             equalTo: avatarView.centerYAnchor, constant: Metrics.bandFootBelowMidline
         )
         posterBannerFoot = bannerView.bottomAnchor.constraint(equalTo: topAnchor, constant: posterBannerFootConstant)
+        // A band card's foot: as much air above the counters' numbers as
+        // under them (the owner, 2026-10-15).
+        bandFootAtCounters = bannerView.bottomAnchor.constraint(
+            equalTo: followersStat.topAnchor, constant: followersStat.evenAirEdge
+        )
         activateBannerFoot()
     }
     private let topRow = UIStackView()
@@ -1086,16 +1254,16 @@ final class ProfileHeaderView: UIView {
         }
 
         // The counter row (#687, the owner's call 2026-10-08): the identity
-        // column's whole width, beside the avatar and under the name, in FOUR
-        // EQUAL CELLS — Followers, Following and Likes in the first three,
-        // each centred in its cell, the fourth kept for a metric to come.
+        // column's whole width, beside the avatar and under the name, in
+        // THREE EQUAL CELLS — Followers, Following and Likes, each centred in
+        // its cell (the owner, 2026-10-15: the fourth, kept empty for a
+        // metric to come, is gone).
         // Each counter sits in a cell of its own, so one with no value (a
         // hidden like count) leaves its cell empty and the others stay put;
         // a counter never grows past its cell (it shrinks to fit inside it).
         for stat in [followersStat, followingStat, likesStat] {
             statsRow.addArrangedSubview(Self.statCell(holding: stat))
         }
-        statsRow.addArrangedSubview(UIView())
         statsRow.axis = .horizontal
         statsRow.alignment = .center
         statsRow.distribution = .fillEqually
@@ -1255,10 +1423,12 @@ final class ProfileHeaderView: UIView {
         nameBlock.spacing = 2
         let nameHalf = UIView()
         let statsHalf = UIView()
+        let nameTop = nameBlock.topAnchor.constraint(equalTo: nameHalf.topAnchor)
+        nameBlockTop = nameTop
         nameBlock.constrain(in: nameHalf) { half in
             nameBlock.leadingAnchor.constraint(equalTo: half.leadingAnchor)
             nameBlock.trailingAnchor.constraint(equalTo: half.trailingAnchor)
-            nameBlock.topAnchor.constraint(equalTo: half.topAnchor)
+            nameTop
             nameBlock.bottomAnchor.constraint(lessThanOrEqualTo: half.bottomAnchor)
         }
         statsRow.constrain(in: statsHalf) { half in
@@ -1351,6 +1521,9 @@ final class ProfileHeaderView: UIView {
         let posterTop = column.topAnchor.constraint(equalTo: topAnchor, constant: posterColumnTopConstant)
         posterTop.priority = .init(999)
         posterColumnTop = posterTop
+        let bandLine = avatarView.centerYAnchor.constraint(equalTo: topAnchor, constant: bandAvatarLineConstant)
+        bandLine.priority = .init(999)
+        bandAvatarLine = bandLine
         column.constrain(in: self) { parent in
             columnTop
             floor
@@ -1382,6 +1555,13 @@ final class ProfileHeaderView: UIView {
     }
 
     override func layoutSubviews() {
+        // The fonts scale with the text size: the even air follows them.
+        if let foot = bandFootAtCounters, foot.constant != followersStat.evenAirEdge {
+            foot.constant = followersStat.evenAirEdge
+        }
+        if let baseline = bandHandleBaseline, baseline.constant != bandHandleBaselineConstant {
+            baseline.constant = bandHandleBaselineConstant
+        }
         super.layoutSubviews()
         // The nested stacks settle AFTER this pass — the note on
         // `CircleAvatarView` — so they are settled here by hand before the
@@ -1435,7 +1615,19 @@ final class ProfileHeaderView: UIView {
             // crossover — white type over any picture. (Unshouldered, the
             // black arrived only under the handle's foot: a white strip took
             // a dark ink there, then the black came up under it — 1.1:1.)
-            fade = HeroBannerFade.shoulderedGeometry(identityTop: avatar.minY, foot: foot)
+            // The name rides its handle on a band card (even air above the
+            // foot), and can stand above the avatar's top: the ramp starts
+            // from whichever is higher, so the type never stands above it.
+            let name = nameBlock.convert(nameBlock.bounds, to: self)
+            let top = name.height > 0 ? min(avatar.minY, name.minY) : avatar.minY
+            fade = HeroBannerFade.shoulderedGeometry(identityTop: top, foot: foot)
+            // Whole by the handle's foot, as when the band ended there: the
+            // card's foot now stands lower (even air over the counters), and
+            // a ramp stretched to it was too thin under the name for AA.
+            let handleFoot = handleLabel.convert(handleLabel.bounds, to: self).maxY
+            if handleFoot > fade.rampStart, handleFoot < fade.rampEnd {
+                fade.rampEnd = handleFoot
+            }
         }
         bannerView.setFade(fade)
         updateInkTones()

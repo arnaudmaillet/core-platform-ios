@@ -1271,8 +1271,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         galleryPager.setSnapDetents(ProfileScrollDetents.detents(
             for: headerView.bannerFormat,
             posterFadeOut: headerView.posterFadeOutTravel,
-            firstPost: contentTravel
-        ))
+            firstPost: contentTravel,
+            bandAvatar: headerView.bandAvatarDetent
+        ), catching: headerView.bandAvatarDetent.map { [$0] } ?? [])
     }
 
     /// Opens the followers / following lists on the tapped counter's tab.
