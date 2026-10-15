@@ -288,8 +288,12 @@ final class SnapShortcutRailView: UIScrollView {
         for tile in tiles { tile.clear() }
         for icon in icons { icon.removeFromSuperview() }
         self.emotes = emotes
-        tiles = emotes.map { _ in EmoteTileView() }
-        icons = zip(emotes, tiles).map(Self.makeIcon)
+        // Built OUTSIDE ANY ANIMATION: a page configured inside a flight's
+        // block framed each new shortcut from a zero rect, growing it in.
+        UIView.performWithoutAnimation {
+            tiles = emotes.map { _ in EmoteTileView() }
+            icons = zip(emotes, tiles).map(Self.makeIcon)
+        }
         dressed = Array(repeating: false, count: emotes.count)
         for icon in icons { addSubview(icon) }
         concealForFlight(FlightActivity.isActive(for: self))
