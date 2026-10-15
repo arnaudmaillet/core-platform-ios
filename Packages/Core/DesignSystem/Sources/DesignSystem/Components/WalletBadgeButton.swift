@@ -87,17 +87,15 @@ public final class WalletBadgeButton: UIButton {
     public init() {
         super.init(frame: .zero)
 
-        // The points token: a red HEART coin (points are likes), deliberately
+        // The points token: a pink HEART coin (points are likes), deliberately
         // not a currency glyph — a dollar sign promises money the
-        // product doesn't hold. `.alwaysOriginal` because glass vibrancy
-        // ignores tint for palette symbols (the bell badge's rule); the
-        // explicit tint below is the belt for renderers that drop the
-        // palette. Static — only the count ever changes.
-        let palette = PointsSymbol.coinPalette
-            .applying(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
-        coinView.image = UIImage(systemName: PointsSymbol.coin, withConfiguration: palette)?
-            .withRenderingMode(.alwaysOriginal)
-        coinView.tintColor = PointsSymbol.tint
+        // product doesn't hold. BAKED (`PointsSymbol.coinImage`): the bar's
+        // glass dropped a palette symbol's pink and drew the disc red.
+        // Re-baked per appearance; only the count changes otherwise.
+        bakeCoin()
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, UITraitDisplayScale.self]
+        ) { (badge: Self, _: UITraitCollection) in badge.bakeCoin() }
         coinView.isUserInteractionEnabled = false
 
         // Scaled once, at creation, and capped: the badge is a bar item, and a
@@ -156,6 +154,17 @@ public final class WalletBadgeButton: UIButton {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func bakeCoin() {
+        coinView.image = PointsSymbol.coinImage(
+            UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold), traits: traitCollection
+        )
+    }
+
+    #if DEBUG
+    /// The coin as drawn — a test seam.
+    var drawnCoin: UIImage? { coinView.image }
+    #endif
 
     /// The count as currently rendered — a test seam (the label itself is
     /// an implementation detail).

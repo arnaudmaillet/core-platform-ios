@@ -79,9 +79,14 @@ final class WalletBalanceTile: UIView {
     private let valueLabel = UILabel()
     private let noteLabel = UILabel()
 
-    init(icon: UIImage?, name: String, note: String) {
+    /// `icon` draws the token for an appearance: a baked coin is re-baked
+    /// when the appearance changes (`PointsSymbol.coinImage`).
+    init(icon: @escaping (UITraitCollection) -> UIImage?, name: String, note: String) {
         super.init(frame: .zero)
-        iconView.image = icon
+        iconView.image = icon(traitCollection)
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, UITraitDisplayScale.self]
+        ) { (tile: WalletBalanceTile, _: UITraitCollection) in tile.iconView.image = icon(tile.traitCollection) }
         iconView.contentMode = .scaleAspectFit
         nameLabel.text = name
         nameLabel.font = .scaledSystemFont(ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17)
@@ -172,14 +177,11 @@ final class WalletBalanceTile: UIView {
 /// card. The balances get the height — they are what the sheet is for.
 final class WalletSummaryView: UIView {
     let pointsTile = WalletBalanceTile(
-        icon: UIImage(
-            systemName: PointsSymbol.coin,
-            withConfiguration: PointsSymbol.coinPalette
-        )?.withRenderingMode(.alwaysOriginal),
+        icon: { PointsSymbol.coinImage(traits: $0) },
         name: "Points", note: "To stake on posts"
     )
     let gemsTile = WalletBalanceTile(
-        icon: GemSymbol.glyphImage(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)),
+        icon: { _ in GemSymbol.glyphImage(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)) },
         name: GemSymbol.name, note: "Earned by your stakes"
     )
 
