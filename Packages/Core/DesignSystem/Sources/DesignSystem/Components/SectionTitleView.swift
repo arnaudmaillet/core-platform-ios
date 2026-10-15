@@ -99,6 +99,10 @@ public final class SectionTitleView: UIView {
     }
 
     public enum Metrics {
+        /// The run's hit area beyond its letters, either side.
+        public static let runHitSlop: CGFloat = 8
+        /// The run's hit area is never shorter than this.
+        public static let minimumHitHeight: CGFloat = 44
         /// From the surface's leading edge (the screen's, or a sheet's) to the
         /// title's first letter: 20pt, EVERY surface.
         ///
@@ -343,6 +347,26 @@ public final class SectionTitleView: UIView {
         onTap?()
     }
 
+    /// The run — title, count, chevron — with a little slop around it, at
+    /// least `minimumHitHeight` tall: the only part of the bar a finger opens
+    /// the section from (the owner, 2026-10-15: the whole width used to).
+    private var runHitFrame: CGRect = .zero
+
+    /// Touches outside the run (and the trailing accessory) are not the
+    /// title's: they fall through to the list under it.
+    override public func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if let trailingAccessory, !trailingAccessory.isHidden,
+           trailingAccessory.frame.insetBy(dx: -Metrics.runHitSlop, dy: -Metrics.runHitSlop).contains(point) {
+            return true
+        }
+        return runHitFrame.contains(point)
+    }
+
+    #if DEBUG
+    /// Where a tap opens the section, in this view's space.
+    public var debugRunHitFrame: CGRect { runHitFrame }
+    #endif
+
     override public func accessibilityActivate() -> Bool {
         guard content.isLink, !isEmbedded, let onTap else { return false }
         onTap()
@@ -432,8 +456,14 @@ public final class SectionTitleView: UIView {
                 view.frame.origin.x = bounds.width - view.frame.maxX
             }
         }
-        // The run's width, the bar's height: what a finger on the run hits.
-        let run = runFrames.reduce(CGRect.null) { $0.union($1) }
+        // The run's width, the bar's height: what a finger on the run hits —
+        // read after the right-to-left flip, from the views as placed.
+        let shown = [titleLabel, countLabel, chevron].filter { !$0.isHidden && $0.frame.width > 0 }
+        let run = shown.map(\.frame).reduce(CGRect.null) { $0.union($1) }
+        runHitFrame = run.isNull
+            ? .zero
+            : CGRect(x: run.minX, y: 0, width: run.width, height: bounds.height)
+                .insetBy(dx: -Metrics.runHitSlop, dy: min(0, (bounds.height - Metrics.minimumHitHeight) / 2))
         runElement.accessibilityFrameInContainerSpace = run.isNull
             ? .zero
             : CGRect(x: run.minX, y: 0, width: run.width, height: bounds.height)

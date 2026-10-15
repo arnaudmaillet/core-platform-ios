@@ -147,11 +147,15 @@ struct SectionTitleViewTests {
 
     // MARK: - Touch
 
-    /// The whole bar is the target, a button to VoiceOver — and a TAP
-    /// recogniser answers it (#312's `UIControl` never sent its action).
-    @Test func theWholeBarIsATapTarget() {
+    /// The RUN is the target (the owner, 2026-10-15 — the whole bar used to
+    /// be, and a tap far right of the title opened the section), a button to
+    /// VoiceOver, and a TAP recogniser answers it (#312's `UIControl` never
+    /// sent its action).
+    @Test func theRunIsTheTapTarget() {
         let (bar, _) = bar(.init(title: "Friends", isLink: true))
-        #expect(bar.hitTest(CGPoint(x: 360, y: 22), with: nil) === bar, "the empty end still opens")
+        #expect(bar.hitTest(CGPoint(x: 360, y: 22), with: nil) == nil, "the empty end still opens")
+        let run = bar.debugRunHitFrame
+        #expect(bar.hitTest(CGPoint(x: run.midX, y: 22), with: nil) === bar)
         #expect(bar.gestureRecognizers?.contains { $0 is UITapGestureRecognizer } == true)
         #expect(bar.debugShowsChevron)
         var taps = 0
