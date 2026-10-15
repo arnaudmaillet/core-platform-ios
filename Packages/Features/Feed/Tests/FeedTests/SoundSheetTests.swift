@@ -763,6 +763,26 @@ struct SoundSheetTests {
         #expect(!header.debugShowsPause)
     }
 
+    /// ⚠️ The replace's smoothness (the owner, 2026-10-15: "it lags, as if
+    /// at 30 fps"): the glyph sits OVER the glass button, not in its pass,
+    /// and every symbol it is handed already carries the glyph's size and
+    /// weight — a bare one flew in at the default size and jumped at the end.
+    @Test func theGlyphReplacesAConfiguredSymbolOverTheGlass() throws {
+        let controller = sheet(tiles: 3)
+        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
+        try laidOut(controller)
+        let header = try #require(controller.debugHeader)
+        #expect(header.debugGlyphIsOverTheGlass)
+        func configured(_ name: String) -> CGSize? {
+            UIImage(systemName: name, withConfiguration: SoundSheetHeaderView.glyphConfiguration)?.size
+        }
+        // The witness: a bare symbol is drawn at another size.
+        #expect(UIImage(systemName: "pause.fill")?.size != configured("pause.fill"))
+        #expect(header.debugGlyphImage?.size == configured("play.fill"))
+        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
+        #expect(header.debugGlyphImage?.size == configured("pause.fill"))
+    }
+
     /// The record's tap toggles the POST, once — the sheet has no player of
     /// its own any more.
     @Test func aTapTogglesThePostOnce() throws {

@@ -45,11 +45,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let recordGlass = SoundRecordGlass()
     private var artwork: UIImageView { recordGlass.cover }
     private let playButton = UIButton(configuration: .glass())
-    /// ▶︎ / ❚❚, drawn over the glass disc by an image view of its own: its
+    /// ▶︎ / ❚❚, drawn OVER the glass disc by an image view of its own: its
     /// `setSymbolImage(_:contentTransition:)` is UIKit's symbol replace (the
     /// owner, 2026-10-15). The glass button's configured image swapped with
     /// no transition, even with `symbolContentTransition` set.
-    private let playGlyph = UIImageView(image: UIImage(systemName: "play.fill"))
+    private let playGlyph = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: glyphConfiguration))
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let metaLabel = UILabel()
@@ -98,7 +98,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         // the size it drew it.
         playGlyph.tintColor = .label
         playGlyph.contentMode = .center
-        playGlyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        playGlyph.preferredSymbolConfiguration = Self.glyphConfiguration
         playGlyph.isUserInteractionEnabled = false
         playGlyph.translatesAutoresizingMaskIntoConstraints = false
         // ⚠️ ONE TOGGLE PER TAP: the glyph is drawn, not tapped — the record's
@@ -113,7 +113,12 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         // On the RECORD, beside the artwork rather than in it: the artwork
         // turns while the sound plays, the button stays upright.
         record.addSubview(playButton)
-        playButton.addSubview(playGlyph)
+        // ⚠️ OVER the glass button, not inside it (the owner, 2026-10-15, on a
+        // device: the replace "lagged, as if at 30 fps"): a view inside the
+        // glass is drawn into the glass's own pass, and the symbol replace
+        // came out as a cut (measured on the simulator: the glyph changed in
+        // one frame). A sibling above it is a plain layer over the glass.
+        record.addSubview(playGlyph)
         NSLayoutConstraint.activate([
             playGlyph.centerXAnchor.constraint(equalTo: playButton.centerXAnchor),
             playGlyph.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
@@ -194,6 +199,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         subtitleLabel.text = subtitle
         metaLabel.text = meta
         playButton.isHidden = !canToggle
+        playGlyph.isHidden = !canToggle
         record.isUserInteractionEnabled = canToggle
     }
 
@@ -209,11 +215,18 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         let name = playing ? "pause.fill" : "play.fill"
         guard name != shownGlyph else { return applyPlayingRest(playing) }
         shownGlyph = name
-        if let image = UIImage(systemName: name) {
+        // ⚠️ CONFIGURED, not bare: the replace draws the image it is handed,
+        // and a bare symbol flew in at the default size, then jumped to the
+        // view's 22 pt semibold when the transition ended (measured on the
+        // simulator: the "30 fps" lag the owner saw on a device).
+        if let image = UIImage(systemName: name, withConfiguration: Self.glyphConfiguration) {
             playGlyph.setSymbolImage(image, contentTransition: .replace)
         }
         applyPlayingRest(playing)
     }
+
+    /// ▶︎ / ❚❚'s size and weight — the glass button's image as it drew it.
+    static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
 
     /// The glyph shown — so a repeat of the same state replaces nothing.
     private var shownGlyph = "play.fill"
@@ -235,6 +248,10 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     var debugShowsPause: Bool { record.accessibilityLabel == "Pause post" }
     /// The glyph's symbol, as last asked for.
     var debugShownGlyph: String { shownGlyph }
+    /// The glyph's image as drawn, and whether it is drawn over the glass
+    /// button rather than inside it.
+    var debugGlyphImage: UIImage? { playGlyph.image }
+    var debugGlyphIsOverTheGlass: Bool { playGlyph.superview === record && !playGlyph.isDescendant(of: playButton) }
     var debugCanToggle: Bool { record.isUserInteractionEnabled && !playButton.isHidden }
     func debugTapRecord() { togglePlayback() }
     /// The record's frame, in this view's space.
