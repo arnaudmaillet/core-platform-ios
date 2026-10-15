@@ -263,7 +263,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // flight's: it goes before this one stages over it.
         ZoomLandingLeftovers.clear(over: container)
         ZoomLandingLeftovers.clear(over: toView)
-        orientationLease = FlightOrientationLock.acquire()
+        orientationLease = FlightOrientationLock.acquire(in: container.window)
         // Dims the map around the flying card; tail-weighted so the map reads
         // through for most of the flight and recedes to black as the card lands.
         let dim = ZoomFlight.makeDimView(frame: container.bounds)
@@ -554,7 +554,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             var coverLease: ZoomLandingLeftovers.Lease?
             // The cover is a full-screen still of the page it stands for, and
             // rotation waits for it like it waits for the flight.
-            let coverOrientation = FlightOrientationLock.acquire()
+            let coverOrientation = FlightOrientationLock.acquire(in: cover.window)
             for action in ZoomPresentSettlement.onSchedule() {
                 switch action {
                 case .dropShield:
@@ -920,7 +920,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
              finalizeLanding: @escaping () -> Void, deadline: CFTimeInterval) {
             self.card = card
             self.lease = lease
-            self.orientation = FlightOrientationLock.acquire()
+            self.orientation = FlightOrientationLock.acquire(in: card.window)
             self.condition = condition
             self.liveMediaIsDrawing = liveMediaIsDrawing
             self.liveMediaState = liveMediaState
@@ -1075,7 +1075,7 @@ final class ZoomAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         // container are both over.
         ZoomLandingLeftovers.clear(over: fromView)
         ZoomLandingLeftovers.clear(over: container)
-        orientationLease = FlightOrientationLock.acquire()
+        orientationLease = FlightOrientationLock.acquire(in: container.window)
         // Reinstall the presenter (`.to`) behind the departing card — a
         // navigation controller removes non-top views, so it isn't in the
         // hierarchy yet.

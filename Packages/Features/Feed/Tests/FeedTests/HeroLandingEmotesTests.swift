@@ -1,6 +1,5 @@
 import CoreModels
 import CoreNavigation
-import DesignSystem
 import EmoteKit
 import FeedInterface
 import Foundation
@@ -65,9 +64,6 @@ struct HeroLandingEmotesTests {
     /// asked for directly: its timer is not something a test can wait on
     /// under a loaded runner (a full-suite run waited past any deadline).
     private func flown() throws -> Fixture {
-        // Another suite's flight, abandoned in the test host, would still
-        // the label from the start (emotes sit out flights).
-        FlightActivity.debugLandAll()
         let fixture = Fixture()
         try #require(fixture.placedEmotes == 1, "precondition: the emote is placed before the flight")
         fixture.cell.isHidden = true

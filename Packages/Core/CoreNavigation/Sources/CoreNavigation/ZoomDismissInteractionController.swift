@@ -269,7 +269,7 @@ final class ZoomDismissInteractionController: NSObject, UIViewControllerInteract
         ZoomLandingLeftovers.clear(over: container)
         // Rotation waits for the grab (`FlightOrientationLock`).
         orientationLease?.release()
-        orientationLease = FlightOrientationLock.acquire()
+        orientationLease = FlightOrientationLock.acquire(in: container.window)
         // Reinstall the map behind the grabbed card — a navigation controller
         // removes non-top views, so it isn't in the hierarchy yet.
         if let toView = context.view(forKey: .to) {

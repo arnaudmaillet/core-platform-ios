@@ -726,3 +726,65 @@ struct SnapShortcutRailViewTests {
         #expect(abs(chrome.alpha - 0.5) < 0.001)
     }
 }
+
+/// ⚠️ THE SHORTCUTS SIT OUT A FLIGHT (the owner, 2026-10-15, on a device):
+/// the page's wheel grew in from its corner under the zoom and showed twice.
+@MainActor
+struct SnapShortcutRailFlightTests {
+    private func hostedRail() -> (SnapShortcutRailView, UIWindow) {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+        let rail = SnapShortcutRailView(frame: CGRect(x: 340, y: 100, width: 44, height: 520))
+        rail.setEmotes(Array(SnapShortcutRailView.reactionPool().prefix(5)))
+        window.addSubview(rail)
+        rail.layoutIfNeeded()
+        return (rail, window)
+    }
+
+    @Test func aFlightInItsWindowHidesTheShortcutsUntilItLands() {
+        let (rail, window) = hostedRail()
+        defer { window.isHidden = true }
+        #expect(!rail.debugConcealedForFlight)
+
+        let elsewhere = FlightActivity.begin(in: UIWindow(frame: window.frame))
+        #expect(!rail.debugConcealedForFlight, "another window's flight hid this wheel")
+        elsewhere.release()
+
+        let flight = FlightActivity.begin(in: window)
+        #expect(rail.debugConcealedForFlight, "the shortcuts flew with the page")
+        flight.release()
+        #expect(!rail.debugConcealedForFlight, "the shortcuts did not come back at the landing")
+    }
+
+    /// A page staged under a zoom joins the window mid-flight: hidden from
+    /// its first frame there.
+    @Test func aWheelJoiningAWindowMidFlightArrivesHidden() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let flight = FlightActivity.begin(in: window)
+        let rail = SnapShortcutRailView(frame: CGRect(x: 340, y: 100, width: 44, height: 520))
+        rail.setEmotes(Array(SnapShortcutRailView.reactionPool().prefix(5)))
+        window.addSubview(rail)
+        #expect(rail.debugConcealedForFlight)
+        flight.release()
+        #expect(!rail.debugConcealedForFlight)
+    }
+
+    /// Laid out inside an animation block — as a flight lays its page out —
+    /// the shortcuts are placed, never animated in from the rail's corner.
+    @Test func aWheelLaidOutInsideAnAnimationDoesNotFlyIn() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let rail = SnapShortcutRailView(frame: CGRect(x: 340, y: 100, width: 44, height: 520))
+        window.addSubview(rail)
+        UIView.animate(withDuration: 1) {
+            rail.setEmotes(Array(SnapShortcutRailView.reactionPool().prefix(5)))
+            rail.layoutIfNeeded()
+        }
+        let icon = try #require(rail.subviews.first { $0 is UIButton })
+        #expect(icon.layer.animation(forKey: "position") == nil, "a shortcut animates into place")
+        #expect(icon.layer.animation(forKey: "bounds") == nil)
+    }
+}

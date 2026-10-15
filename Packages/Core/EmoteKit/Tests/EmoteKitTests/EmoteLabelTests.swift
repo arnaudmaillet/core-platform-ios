@@ -61,14 +61,21 @@ struct EmoteLabelTests {
     /// flight poses its cards inside its own animation, and an emote placed
     /// then flew in from the label's corner, drawn twice by the copies on
     /// both ends. The glyphs draw plain while it is up; the emotes come back
-    /// when it lands. Synchronous, no `await`: the hold is process-wide.
+    /// when it lands — in the flight's own window only.
     @Test func aFlightInTheAirStillsTheEmotesUntilItLands() throws {
         let engine = try warmEngine(["noto:1f525", "lol"])
         let (label, window) = hostedLabel("hot 🔥 take :lol:", engine: engine)
         defer { window.isHidden = true }
         #expect(label.placedEmoteCount == 2)
 
-        let flight = FlightActivity.begin()
+        // Another window's flight stills nothing here.
+        let elsewhere = UIWindow(frame: window.frame)
+        let other = FlightActivity.begin(in: elsewhere)
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 2, "another window's flight stilled this label")
+        other.release()
+
+        let flight = FlightActivity.begin(in: window)
         label.layoutIfNeeded()
         #expect(label.placedEmoteCount == 0, "an emote played through a flight")
         #expect(label.coveredMarkIndices.isEmpty, "a glyph stayed erased with no emote over it")

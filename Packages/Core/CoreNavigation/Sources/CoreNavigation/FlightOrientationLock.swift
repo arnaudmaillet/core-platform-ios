@@ -47,11 +47,12 @@ public enum FlightOrientationLock {
     /// pin the app's orientation for the rest of the session.
     static let maximumHold: TimeInterval = 10
 
-    public static func acquire() -> Lease {
+    /// - Parameter window: the window the flight is in — its animated
+    ///   emotes sit it out (`FlightActivity`). Nil stills none.
+    public static func acquire(in window: UIWindow? = nil) -> Lease {
         liveLeases += 1
         let lease = Lease()
-        // A flight is in the air: animated emotes sit it out (`FlightActivity`).
-        lease.activity = FlightActivity.begin()
+        lease.activity = FlightActivity.begin(in: window)
         // STRONG: a lease whose owner was freed without releasing it must
         // still be counted down, and this is the only reference left then.
         DispatchQueue.main.asyncAfter(deadline: .now() + maximumHold) {

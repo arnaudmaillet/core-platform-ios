@@ -1319,7 +1319,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
         }
         // A flight in the air: animated emotes sit it out (`FlightActivity`),
         // released in the completion below.
-        let flight = FlightActivity.begin()
+        let flight = FlightActivity.begin(in: container.window)
         let pageFrame = context.finalFrame(for: toVC)
         // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
         // measurement. iOS 26/27 calls this inside an implicit animation
@@ -1712,7 +1712,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
         }
         // A flight in the air: animated emotes sit it out (`FlightActivity`),
         // released in the completion below.
-        let flight = FlightActivity.begin()
+        let flight = FlightActivity.begin(in: container.window)
         // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
         // measurement. iOS 26/27 calls this inside an implicit animation
         // context of the transition's duration, so a frame or a first layout
