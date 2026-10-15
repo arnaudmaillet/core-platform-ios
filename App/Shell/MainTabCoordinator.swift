@@ -257,6 +257,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
             (.profile, profileTab)
         ]
         for (_, tab) in orderedTabs {
+            (tab as? any GlyphTab)?.onUnreadChange = { [weak self] in self?.refreshTabGlyphs() }
             if let accountTab = tab as? any AccountScopedTab {
                 accountTab.show(member: isMember)
             } else {
@@ -286,6 +287,7 @@ final class MainTabCoordinator: NSObject, Coordinator {
         // it again.
         tabBarController.view.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIView, _) in
             self?.notificationsBell.repaint()
+            self?.refreshTabGlyphs()
         }
         createHold.install()
         // ⚠️ **iOS 27 STOPPED DETACHING A SEARCH TAB BY ITS TYPE ALONE.** It now
@@ -433,7 +435,15 @@ final class MainTabCoordinator: NSObject, Coordinator {
 // MARK: - Tab selection
 
 extension MainTabCoordinator: UITabBarControllerDelegate {
+    /// The `UITab` road's selection (the bar is built of `UITab`s, which
+    /// `didSelect viewController:` does not always report): the selected tab
+    /// wears its FILL (#1191).
+    func tabBarController(_ tabBarController: UITabBarController, didSelectTab selectedTab: UITab, previousTab: UITab?) {
+        refreshTabGlyphs()
+    }
+
     func tabBarController(_ tabBarController: UITabBarController, didSelect viewController: UIViewController) {
+        refreshTabGlyphs()
         refreshUnreadBadge()
         syncTabBarVisibility()
         // Selection resizes the tab buttons (the selected one carries the
@@ -471,10 +481,12 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         if let selected = tabBarController.selectedTab, !wanted.contains(where: { $0 === selected }),
            let explore = orderedTabs.first(where: { $0.0 == .explore })?.1.tab {
             tabBarController.selectedTab = explore
+            refreshTabGlyphs()
         }
         let current = tabBarController.tabs
         guard current.count != wanted.count || zip(current, wanted).contains(where: { $0 !== $1 }) else { return }
         tabBarController.setTabs(wanted, animated: animated)
+        refreshTabGlyphs()
         // The re-composed bar draws its items afresh — without their labels
         // (#694): redraw each once it has placed them.
         tabLabelsNeedRefresh = true
@@ -492,6 +504,20 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// the bar's first appearance and after each `setTabs`. Same values, so
     /// nothing flickers. Measured: the label views existed, laid out, before
     /// the redraw; the selected tab's simply did not draw.
+    /// Every glyph tab's image for where the bar stands (#1191): its FILL
+    /// when selected, its badge variant when it has something unread — the
+    /// bar draws no count. Run on every selection, programmatic or not, and on
+    /// every unread change.
+    func refreshTabGlyphs() {
+        let selected = tabBarController.selectedTab
+        for (_, coordinator) in orderedTabs {
+            guard let glyphTab = coordinator as? any GlyphTab else { continue }
+            glyphTab.tab.image = glyphTab.glyph.image(
+                selected: glyphTab.tab === selected, badged: glyphTab.hasUnread
+            )
+        }
+    }
+
     private func refreshTabLabelsIfNeeded() {
         guard tabLabelsNeedRefresh, tabBarController.view.window != nil else { return }
         tabLabelsNeedRefresh = false
@@ -710,6 +736,7 @@ extension MainTabCoordinator: AppNavigating {
             tabBarController.dismiss(animated: true)
         }
         tabBarController.selectedTab = match.1.tab
+        refreshTabGlyphs()
         // Programmatic selection skips `didSelect` — reconcile the bar here.
         syncTabBarVisibility()
     }

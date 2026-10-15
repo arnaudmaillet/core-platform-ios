@@ -548,6 +548,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         }
         // A pushed profile's strip rides the stack's toolbar (#728).
         selectorToolbar?.show(for: self, animated: animated)
+        // The accessory's collapse rides the active page: name it again on
+        // every appearance, as the inbox's pager does (#1191).
+        galleryPager.republishActiveScrollView()
 
         // ⚠️ **The dock is not optional on a tab ROOT.** Whatever hid it — a post
         // that flew out of this grid, a flight caught and reversed, a pop this

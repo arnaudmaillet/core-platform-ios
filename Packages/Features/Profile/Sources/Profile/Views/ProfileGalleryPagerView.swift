@@ -66,7 +66,22 @@ final class ProfileGalleryPagerView: UIView {
     ///
     /// Exact here rather than searched: a gallery page IS a
     /// `ProfileGalleryGridView` and owns its collection view.
-    var onActiveScrollViewChanged: ((UIScrollView) -> Void)?
+    ///
+    /// ⚠️ PUBLISHED AGAIN WHEN WIRED (#1191). The first layout could publish
+    /// before the host set this, and the one-shot guard then never named the
+    /// page again: the Profile root's accessory was armed with no scroll view
+    /// to ride (`-accessory-collapse-probe`: `armed=1;named=0`), and did not
+    /// collapse while the Messages one did.
+    var onActiveScrollViewChanged: ((UIScrollView) -> Void)? {
+        didSet { republishActiveScrollView() }
+    }
+
+    /// Names the active page again, even if it already was — for a host that
+    /// (re)wires the callback or reappears.
+    func republishActiveScrollView() {
+        publishedScroller = nil
+        publishActiveScrollView()
+    }
     /// Fractional page position, emitted on every scroll tick.
     ///
     /// This is what lets the selector's lens track the finger instead of

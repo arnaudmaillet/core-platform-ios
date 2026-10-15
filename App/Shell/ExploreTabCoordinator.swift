@@ -38,7 +38,7 @@ final class ExploreTabCoordinator: TabCoordinator {
     private(set) lazy var tab: UITab = {
         let tab = UITab(
             title: "Explore",
-            image: UIImage(systemName: "location.north.circle"),
+            image: TabGlyph.explore.image(selected: false, badged: false),
             identifier: AppTab.explore.rawValue
         ) { [navigationController] _ in navigationController }
         return tab

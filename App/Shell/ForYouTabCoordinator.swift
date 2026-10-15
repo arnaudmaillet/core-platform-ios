@@ -17,7 +17,11 @@ import UIKit
 /// cannot be rebuilt on every visit without throwing away scroll position and
 /// loaded pages on every tab switch.
 @MainActor
-final class ForYouTabCoordinator: TabCoordinator {
+final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
+    let glyph = TabGlyph.forYou
+    /// Whether For You has something new — its glyph's badge (#1191).
+    private(set) var hasUnread = false
+    var onUnreadChange: (() -> Void)?
     var childCoordinators: [Coordinator] = []
     let navigationController: UINavigationController = ChevronBackNavigationController()
 
@@ -27,7 +31,7 @@ final class ForYouTabCoordinator: TabCoordinator {
 
     private(set) lazy var tab = UITab(
         title: "For You",
-        image: UIImage(systemName: "sparkles"),
+        image: TabGlyph.forYou.image(selected: false, badged: false),
         identifier: AppTab.forYou.rawValue
     ) { [navigationController] _ in navigationController }
 
@@ -91,7 +95,13 @@ final class ForYouTabCoordinator: TabCoordinator {
     /// when the tab is selected.
     private func apply(_ presentation: ForYouTabPresentation) {
         tab.title = presentation.title
-        tab.image = UIImage(systemName: presentation.symbol)
-        tab.badgeValue = presentation.badgeCount > 0 ? String(presentation.badgeCount) : nil
+        // The owner's glyph whatever the mode (#1191), and no count: the
+        // badge variant says there is something new.
+        tab.badgeValue = nil
+        let unread = presentation.badgeCount > 0
+        if unread != hasUnread {
+            hasUnread = unread
+            onUnreadChange?()
+        }
     }
 }

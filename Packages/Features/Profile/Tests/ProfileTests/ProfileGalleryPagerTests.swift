@@ -34,6 +34,20 @@ struct ProfileGalleryScrubTests {
         return pager
     }
 
+    /// ⚠️ A HOST WIRED AFTER THE FIRST LAYOUT STILL HEARS THE ACTIVE PAGE
+    /// (#1191): the first layout published before the Profile root set its
+    /// callback, the one-shot guard never named the page again, and the root's
+    /// accessory had no scroll view to collapse on.
+    @Test func aLateWiredHostHearsTheActivePage() {
+        let pager = makePager()
+        var heard: UIScrollView?
+        pager.onActiveScrollViewChanged = { heard = $0 }
+        #expect(heard != nil, "the callback set after layout heard nothing")
+        heard = nil
+        pager.republishActiveScrollView()
+        #expect(heard != nil, "a reappearing host is told again")
+    }
+
     /// Released without a flick, past the halfway point: it commits forward.
     @Test func aSlowDragPastHalfwayCommits() {
         let pager = makePager()

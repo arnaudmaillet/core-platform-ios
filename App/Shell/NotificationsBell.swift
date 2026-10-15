@@ -73,6 +73,9 @@ final class NotificationsBell {
         for item in items.allObjects { item.image = image }
     }
 
+    /// The size a navigation bar draws a symbol item at.
+    static let barSymbolConfiguration = UIImage.SymbolConfiguration(textStyle: .body, scale: .large)
+
     /// The bell glyph for an unread state. When unread, a palette `bell.badge`
     /// (badge in `Palette.counter`, bell in `.label`); otherwise a plain
     /// template `bell` that the tint draws dark.
@@ -85,8 +88,20 @@ final class NotificationsBell {
     static func image(unread: Bool) -> UIImage? {
         guard unread else { return UIImage(systemName: "bell") }
         // `bell.badge`'s first layer is the BADGE, its second the bell.
-        let config = UIImage.SymbolConfiguration(paletteColors: [Palette.counter, .label])
+        // ⚠️ AT THE BAR'S SIZE (#1191): a bitmap is not re-sized as a symbol
+        // is, so baked at the symbol's default size the badged bell stood
+        // much smaller than the plain one. The bar draws its symbols at the
+        // body style's large scale.
+        let config = barSymbolConfiguration
+            .applying(UIImage.SymbolConfiguration(paletteColors: [Palette.counter, .label]))
         guard let symbol = UIImage(systemName: "bell.badge", withConfiguration: config) else { return nil }
+        return baked(symbol)
+    }
+
+    /// `symbol` drawn into bitmaps, one per appearance, registered in an image
+    /// asset so it follows light and dark — for a bar that would re-render a
+    /// symbol in its own mode (the bell, the tab bar's badged glyphs, #1191).
+    static func baked(_ symbol: UIImage) -> UIImage {
         let asset = UIImageAsset()
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
