@@ -11,14 +11,33 @@ extension TabGlyph {
     /// own mode, and the badge layer came out in the system red whatever the
     /// palette said. Baked at the bar's symbol size, or the bitmap would stand
     /// smaller than its unbadged neighbours.
+    ///
+    /// ⚠️ ONE BOX FOR BOTH STATES (the owner, 2026-10-15): the badge variant
+    /// is a larger symbol — its badge stands out at the top-right — and the
+    /// bar fits each image into the same box, so the glyph shrank as its
+    /// badge came and grew as it went. The unbadged image is the SAME badge
+    /// symbol with its badge layer clear, drawn at the same size and handed
+    /// back as a template the bar inks: the glyph stays put, only the badge
+    /// comes and goes.
     @MainActor
     func image(selected: Bool, badged: Bool) -> UIImage? {
-        let symbol = symbol(selected: selected, badged: badged)
-        guard badged else { return symbol.image() }
+        let symbol = symbol(selected: selected, badged: true)
+        let badge: UIColor = badged ? TabGlyph.badgeTint : .clear
         let config = NotificationsBell.barSymbolConfiguration
-            .applying(UIImage.SymbolConfiguration(paletteColors: [.label, TabGlyph.badgeTint]))
+            .applying(UIImage.SymbolConfiguration(paletteColors: [.label, badge]))
         guard let image = symbol.image(config) else { return nil }
+        guard badged else { return Self.template(image) }
         return NotificationsBell.baked(image)
+    }
+
+    /// `symbol` drawn into a bitmap of its own size, as a template: the bar
+    /// inks every opaque pixel — the glyph — and the clear badge stays clear.
+    @MainActor
+    static func template(_ symbol: UIImage) -> UIImage {
+        let image = UIGraphicsImageRenderer(size: symbol.size).image { _ in symbol.draw(at: .zero) }
+        return image
+            .withBaselineOffset(fromBottom: symbol.baselineOffsetFromBottom ?? 0)
+            .withRenderingMode(.alwaysTemplate)
     }
 }
 
