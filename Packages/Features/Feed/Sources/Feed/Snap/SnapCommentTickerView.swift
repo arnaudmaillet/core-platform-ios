@@ -224,6 +224,26 @@ final class SnapCommentTickerView: UIView {
             setNeedsLayout()
         }
     }
+    /// The band's trailing end DISSOLVES instead of being cut (the owner,
+    /// 2026-10-15, under `-snap-stream-under-band`): no capsule clip, a
+    /// progressive fade of the content over `trailingFadeLength` instead —
+    /// the band stops short of the rail there, with no glass to nest in.
+    var fadesTrailingEdge = false {
+        didSet {
+            guard fadesTrailingEdge != oldValue else { return }
+            layer.mask = fadesTrailingEdge ? trailingFade : nil
+            setNeedsLayout()
+        }
+    }
+    /// How far in from the trailing edge the content starts to fade.
+    static let trailingFadeLength: CGFloat = 40
+    private lazy var trailingFade: CAGradientLayer = {
+        let fade = CAGradientLayer()
+        fade.startPoint = CGPoint(x: 0, y: 0.5)
+        fade.endPoint = CGPoint(x: 1, y: 0.5)
+        fade.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
+        return fade
+    }()
     /// The interaction's own intensity (0 when no scrub or coast is running);
     /// the wash shows the larger of this and the resting level.
     private var kineticFraction: CGFloat = 0
@@ -398,11 +418,27 @@ final class SnapCommentTickerView: UIView {
         alpha = 1 // a reuse mid-entrance-fade must not strand a dim band
     }
 
+    #if DEBUG
+    /// The band's trailing end: its corner radius, and the fade mask's
+    /// stops (nil without one).
+    var debugTrailingEnd: (cornerRadius: CGFloat, fadeLocations: [NSNumber]?) {
+        (layer.cornerRadius, (layer.mask as? CAGradientLayer)?.locations)
+    }
+    #endif
+
     override func layoutSubviews() {
         super.layoutSubviews()
         // A capsule end (see init) — or none when the band runs to the
         // screen's edge with no like pill to nest under (#680).
-        layer.cornerRadius = runsToTrailingEdge ? 0 : bounds.height / 2
+        layer.cornerRadius = runsToTrailingEdge || fadesTrailingEdge ? 0 : bounds.height / 2
+        if fadesTrailingEdge {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            trailingFade.frame = bounds
+            let start = bounds.width > 0 ? max(0, 1 - Self.trailingFadeLength / bounds.width) : 0
+            trailingFade.locations = [0, NSNumber(value: Double(start)), 1]
+            CATransaction.commit()
+        }
         backdropView.frame = bounds
         blurBackdrop?.frame = bounds
         // ⚠️ **A TRAIN LAID AT ONE WIDTH IS RE-LAID AT ANOTHER.** The pre-fill
