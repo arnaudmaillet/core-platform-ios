@@ -1234,22 +1234,21 @@ struct SnapCommentsPresentationTests {
         #expect(feed.toolbarItems ?? [] == resting)
     }
 
-    /// ⚠️ THE EDGE ITEM STAYS, in every state — on a media post it becomes
-    /// the ✕ (#1192): the SAME item and button, its symbol replaced, so the
-    /// bubble stays put and the glyph morphs; on a text post it stays the
-    /// arrow.
+    /// ⚠️ THE EDGE: the ✕ ITEM takes it while a media post's thread is open
+    /// (#1192), swapped for the arrow item through the animated setter so the
+    /// bar draws UIKit's own transition (#1197); a text post keeps its arrow.
     ///
     /// The group GROWS around it — the sort joins inboard while the thread is
-    /// open — so the assertion is that the same item is still at the screen's
-    /// edge, not that the group is untouched.
-    @Test func theEdgeItemStaysThroughTheEngagement() throws {
+    /// open — so the assertion is about the item at the screen's edge, not
+    /// the whole group.
+    @Test func theEdgeItemThroughTheEngagement() throws {
         let (_, feed) = Self.chromeHost()
         let arrow = try #require(feed.navigationItem.leftBarButtonItems?.first)
 
         for hasMedia in [true, false] {
             feed.setEngagedChrome(true, hasMedia: hasMedia, animated: false)
-            #expect(feed.navigationItem.leftBarButtonItems?.first === arrow,
-                    Comment(rawValue: "the edge item was replaced (hasMedia: \(hasMedia))"))
+            #expect((feed.navigationItem.leftBarButtonItems?.first === arrow) == !hasMedia,
+                    Comment(rawValue: "the edge item (hasMedia: \(hasMedia))"))
             #expect(Self.leadingLabels(feed).contains("Close comments") == hasMedia)
         }
 
@@ -1301,7 +1300,8 @@ struct SnapCommentsPresentationTests {
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let engaged = feed.navigationItem.leftBarButtonItems ?? []
         #expect(engaged.count == 3)
-        #expect(engaged[0] === resting.first)   // the arrow keeps the edge
+        // The ✕ item takes the edge on a media post (#1197).
+        #expect((engaged[0].customView as? UIButton)?.accessibilityLabel == "Close comments")
         #expect(engaged[1].customView == nil)   // the fixed space
         #expect(engaged[2].customView is SnapCommentSortButton)
         // …and the trailing run carries no ✕ (#1192).
@@ -1321,7 +1321,8 @@ struct SnapCommentsPresentationTests {
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
 
-        #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting)
+        #expect((feed.navigationItem.leftBarButtonItems ?? []).count == resting.count, "the edge item alone")
+        #expect(!(feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is SnapCommentSortButton })
         #expect(CommentSortPolicy.isAvailable(commentCount: 9) == false)
         #expect(CommentSortPolicy.isAvailable(commentCount: 10))
     }
@@ -1340,7 +1341,9 @@ struct SnapCommentsPresentationTests {
         #expect((feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is SnapCommentSortButton })
 
         feed.setCommentSortAvailable(false)
-        #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting, "withdrawn from the engaged bar at once")
+        #expect(!(feed.navigationItem.leftBarButtonItems ?? []).contains { $0.customView is SnapCommentSortButton },
+                "withdrawn from the engaged bar at once")
+        #expect((feed.navigationItem.leftBarButtonItems ?? []).count == resting.count)
     }
 
     /// ⚠️ THE WHOLE BAR, ENGAGED ON A MEDIA POST: [✕] [⇅ sort] ———

@@ -1,3 +1,4 @@
+import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
@@ -14,7 +15,27 @@ import UIKit
 struct SnapAuthorBadgeInkTests {
     typealias Badge = SnapAuthorIdentityView.FollowBadge
 
-    @Test(arguments: [Badge.follow, .following, .friends, .pending],
+    /// The FOLLOWED check is the accent pink with its white mark (#1197).
+    @Test(arguments: [UIUserInterfaceStyle.light, .dark])
+    func theFollowedCheckIsPink(_ style: UIUserInterfaceStyle) throws {
+        let pill = SnapAuthorIdentityView()
+        pill.setFollowBadge(.following)
+        let images = pill.drawnBadgeImages
+        let disc = try #require(images.disc)
+        let glyph = try #require(images.glyph)
+        let discPixels = try Self.opaquePixels(of: [disc], style: style)
+        #expect(discPixels.count > 50, "the disc draws nothing")
+        var pink = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+        // One fixed pink in either appearance (#968).
+        Palette.tint.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+            .getRed(&pink.r, green: &pink.g, blue: &pink.b, alpha: &pink.a)
+        #expect(discPixels.allSatisfy { abs($0.r - pink.r) < 0.04 && abs($0.g - pink.g) < 0.04 && abs($0.b - pink.b) < 0.04 },
+                "the followed disc is not the accent pink")
+        let badgePixels = try Self.opaquePixels(of: [disc, glyph], style: style)
+        #expect(badgePixels.filter(Self.isWhite).count > 10, "the check is not white")
+    }
+
+    @Test(arguments: [Badge.follow, .friends, .pending],
           [UIUserInterfaceStyle.light, .dark])
     func theBadgeIsABlackDiscWithAWhiteGlyph(_ badge: Badge, _ style: UIUserInterfaceStyle) throws {
         let pill = SnapAuthorIdentityView()

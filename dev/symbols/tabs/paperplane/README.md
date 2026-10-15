@@ -18,7 +18,7 @@ Four custom SF Symbols, in the same template format as the app's `Symbols.xcasse
 
 ## Size
 
-Phosphor's plane fills its square, so at the set's usual scale it looked larger than `core.chats` and `core.square.play`. It is shrunk by `fit` = 0.87 (78.8 units wide, against 80.6 and 70.4). The outline is then thickened back on the grid, so the stroke still matches the rest of the set (6.4 on the S scale). `previews/rendered-beside-chats-and-square.png` shows them side by side.
+Phosphor's plane fills its square, so at the set's usual scale it looked larger than `core.chats` and `core.square.play`. It is shrunk by `fit` = 0.8 (72.9 units wide, against 80.6 and 70.4 — the owner found it larger than the others at 0.87, #1197). The outline is then thickened back on the grid, so the stroke still matches the rest of the set (6.4 on the S scale). `previews/rendered-beside-chats-and-square.png` shows them side by side.
 
 ## UIKit
 

@@ -30,11 +30,8 @@ final class ExploreTabCoordinator: TabCoordinator {
     /// wearing it would read as a link to the browser and break the symbol's
     /// terms. `location.north.circle` is the unrestricted compass needle.
     ///
-    /// No separate selected glyph: measured on the iOS 27 simulator, the bar
-    /// fills a symbol in EVERY state anyway (the other tabs pass outlines —
-    /// `message`, `sparkles` — and show filled glyphs whether selected or
-    /// not). ⚠️ And `UITab.selectedImage` does not exist in CI's Xcode 26.6
-    /// SDK — it failed the build there even behind `#available`.
+    /// The image is the owner's glyph (#1191); its selected face is set by
+    /// the shell (`MainTabCoordinator.refreshTabGlyphs`, #1197).
     private(set) lazy var tab: UITab = {
         let tab = UITab(
             title: "Explore",

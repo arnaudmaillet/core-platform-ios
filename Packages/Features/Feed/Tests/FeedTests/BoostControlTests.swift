@@ -467,35 +467,30 @@ struct BoostControlTests {
         #expect((feed.navigationItem.leftBarButtonItems ?? []).isEmpty, "a tab root has no way back")
     }
 
-    /// A pushed feed's back arrow BECOMES the ✕ while a media post's thread
-    /// is open — the same item and button, its symbol replaced, so the glass
-    /// bubble stays and the glyph morphs (#1192) — and back again after.
-    @Test func thePushedFeedsArrowBecomesTheClose() throws {
+    /// A pushed feed's back arrow gives the edge to the ✕ while a media
+    /// post's thread is open — two ITEMS swapped through the animated setter,
+    /// so the bar draws UIKit's own transition (#1197) — and takes it back
+    /// after. A text post keeps its arrow: its thread IS the page.
+    @Test func thePushedFeedsArrowGivesTheEdgeToTheClose() throws {
         let (feed, _) = Self.walletFeed()
         let nav = UINavigationController(rootViewController: UIViewController())
         nav.pushViewController(feed, animated: false)
         feed.beginAppearanceTransition(true, animated: false)
         feed.endAppearanceTransition()
-        let arrow = try #require(feed.navigationItem.leftBarButtonItems?.first)
-        let button = try #require(feed.debugLeadingButton)
-        #expect(arrow.customView === button)
-        #expect(button.isSymbolAnimationEnabled, "the glyph swap is a symbol replace")
-        let restingImage = button.configuration?.image
+        let arrow = try #require(feed.debugBackItem)
+        #expect(feed.navigationItem.leftBarButtonItems?.first === arrow)
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect(feed.navigationItem.leftBarButtonItems?.first === arrow, "the same item: the bubble stays")
         #expect(feed.debugLeadingIsClose)
-        #expect(button.accessibilityLabel == "Close comments")
-        #expect(button.configuration?.image != restingImage)
+        #expect(feed.navigationItem.leftBarButtonItems?.first !== arrow)
+        #expect((feed.navigationItem.leftBarButtonItems?.first?.customView as? UIButton)?.accessibilityLabel == "Close comments")
         #expect(feed.debugTrailingHasClose == false)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
-        #expect(feed.debugLeadingIsClose == false)
-        #expect(button.accessibilityLabel == "Back")
+        #expect(feed.navigationItem.leftBarButtonItems?.first === arrow)
 
-        // A text post keeps its arrow: its thread IS the page.
         feed.setEngagedChrome(true, hasMedia: false, animated: false)
-        #expect(feed.debugLeadingIsClose == false)
+        #expect(feed.navigationItem.leftBarButtonItems?.first === arrow)
     }
 
     /// No wallet → an empty trailing run at rest: the author pill is the
