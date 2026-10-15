@@ -205,7 +205,39 @@ final class SnapChromeView: UIView {
 
 
 
-    override init(frame: CGRect) {
+    /// ⚠️ EXPERIMENTAL (the owner, 2026-10-15), launch argument
+    /// `-snap-stream-under-band` in DEBUG builds: the streaming comments
+    /// (`subtitleView`) sit in the band's seat on the caption, and the
+    /// danmaku band rides ABOVE them, beside the rail. The engagement corner
+    /// (the like pill, the rail, the sound bubble) keeps its place either way:
+    /// it hangs off `bandSeat`, the band's default seat, not off the band.
+    let streamsUnderBand: Bool
+
+    static let streamUnderBandLaunchArgument = "-snap-stream-under-band"
+
+    /// The layout a chrome takes when nothing says otherwise.
+    static var streamsUnderBandByDefault: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.arguments.contains(streamUnderBandLaunchArgument)
+        #else
+        false
+        #endif
+    }
+
+    /// Where the band sits by default — one md above the caption floor, the
+    /// band's height. The engagement corner's height authority, whichever
+    /// way the band and the stream are stacked.
+    private let bandSeat = UILayoutGuide()
+    /// The band's bottom: in its seat, or on the stream's top
+    /// (`streamsUnderBand`).
+    private var tickerOverStream: NSLayoutConstraint?
+
+    override convenience init(frame: CGRect) {
+        self.init(frame: frame, streamsUnderBand: Self.streamsUnderBandByDefault)
+    }
+
+    init(frame: CGRect, streamsUnderBand: Bool) {
+        self.streamsUnderBand = streamsUnderBand
         super.init(frame: frame)
 
         // The chrome pins to its margins guide, NOT the safe-area guide
@@ -328,16 +360,25 @@ final class SnapChromeView: UIView {
         tickerToEdge = commentTicker.trailingAnchor.constraint(equalTo: trailingAnchor)
         commentTicker.constrain(in: self) { parent in
             commentTicker.leadingAnchor.constraint(equalTo: leadingAnchor)
-            // md, not sm: the band and the caption are separate CONTAINERS
-            // in the bottom stack — inter-container seams breathe at md in
-            // the harmonized rhythm (sm stays the WITHIN-container gap).
-            // Off the caption FLOOR (not the label): the fixed two-line
-            // reservation is what makes this corner format-agnostic — a
-            // collapsed text-only caption reserves the same box a two-line
-            // media caption fills, so the band never sinks toward the bar.
-            commentTicker.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md)
         }
-        tickerUnderPill.isActive = true
+        // The band's seat: md, not sm — the band and the caption are separate
+        // CONTAINERS in the bottom stack, and inter-container seams breathe
+        // at md in the harmonized rhythm (sm stays the WITHIN-container gap).
+        // Off the caption FLOOR (not the label): the fixed two-line
+        // reservation is what makes this corner format-agnostic — a
+        // collapsed text-only caption reserves the same box a two-line media
+        // caption fills, so the band never sinks toward the bar.
+        addLayoutGuide(bandSeat)
+        NSLayoutConstraint.activate([
+            bandSeat.leadingAnchor.constraint(equalTo: leadingAnchor),
+            bandSeat.trailingAnchor.constraint(equalTo: trailingAnchor),
+            bandSeat.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md),
+            bandSeat.heightAnchor.constraint(equalTo: commentTicker.heightAnchor),
+        ])
+        if !streamsUnderBand {
+            commentTicker.bottomAnchor.constraint(equalTo: bandSeat.bottomAnchor).isActive = true
+        }
+        tickerUnderPill.isActive = !streamsUnderBand
 
         // NOTE: nothing rides above the ticker any more. The page indicator
         // used to — a chip of dots hung off the band's top edge — and it is the
@@ -395,9 +436,9 @@ final class SnapChromeView: UIView {
         railTopConstraint = railTop
         shortcutRail.constrain(in: self) { parent in
             shortcutRail.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
-            shortcutRail.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            shortcutRail.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
             railTop
-            shortcutRail.bottomAnchor.constraint(equalTo: commentTicker.bottomAnchor)
+            shortcutRail.bottomAnchor.constraint(equalTo: bandSeat.bottomAnchor)
         }
 
         // The boost anchor fills 100% of the overlap square, above the rail:
@@ -422,8 +463,8 @@ final class SnapChromeView: UIView {
         boostStation.isUserInteractionEnabled = false
         boostStation.constrain(in: self) { parent in
             boostStation.trailingAnchor.constraint(equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -Spacing.md)
-            boostStation.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            boostStation.topAnchor.constraint(equalTo: commentTicker.topAnchor)
+            boostStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
+            boostStation.topAnchor.constraint(equalTo: bandSeat.topAnchor)
             // The like pill (#669) runs down to `gap` above the lower bubble,
             // measured from the margin line rather than off the sound bubble —
             // a text page's station keeps the same frame.
@@ -474,7 +515,19 @@ final class SnapChromeView: UIView {
         )
         subtitleAboveBandConstraint = aboveBand
         subtitleInBandSeatConstraint = inBandSeat
-        aboveBand.isActive = true
+        if streamsUnderBand {
+            // The stream takes the band's seat for good; the band stands on
+            // it, stopping short of the rail like the stream does.
+            inBandSeat.isActive = true
+            let over = commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md)
+            tickerOverStream = over
+            NSLayoutConstraint.activate([
+                over,
+                commentTicker.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
+            ])
+        } else {
+            aboveBand.isActive = true
+        }
 
         // The comments empty state sits in the BAND's slot (bottom on the
         // caption's top, leading on the caption's text axis — where a
@@ -513,8 +566,8 @@ final class SnapChromeView: UIView {
             soundStation.trailingAnchor.constraint(
                 equalTo: parent.layoutMarginsGuide.trailingAnchor, constant: -SnapActionColumn.trailingInset
             )
-            soundStation.widthAnchor.constraint(equalTo: commentTicker.heightAnchor)
-            soundStation.heightAnchor.constraint(equalTo: commentTicker.heightAnchor)
+            soundStation.widthAnchor.constraint(equalTo: bandSeat.heightAnchor)
+            soundStation.heightAnchor.constraint(equalTo: bandSeat.heightAnchor)
             soundStation.bottomAnchor.constraint(
                 equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -SnapActionColumn.inputRestingGap
             )
@@ -566,7 +619,7 @@ final class SnapChromeView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         hasLaidOut = true
-        shortcutRail.bottomReservedInset = commentTicker.bounds.height
+        shortcutRail.bottomReservedInset = bandSeat.layoutFrame.height
 
         // The caption's two-line/timestamp composition is width-dependent —
         // re-resolve it once the label has a (new) real width. Guarded on the
@@ -577,12 +630,15 @@ final class SnapChromeView: UIView {
         }
 
         let top = layoutMargins.top
-        guard top <= Self.maxSettledTopMargin, commentTicker.frame.maxY > 0 else { return }
+        // Off the band's SEAT, not the band: the experiment moves the band
+        // (`streamsUnderBand`), never the rail.
+        let seat = bandSeat.layoutFrame
+        guard top <= Self.maxSettledTopMargin, seat.maxY > 0 else { return }
         let base = top + Spacing.sm
         let fixedZones = SnapShortcutRailView.restingWindowHeight
             + SnapShortcutRailView.edgeFadeLength
-            + commentTicker.bounds.height
-        let headroom = commentTicker.frame.maxY - base - fixedZones
+            + seat.height
+        let headroom = seat.maxY - base - fixedZones
         guard headroom > 0 else { return }
         let aligned = (headroom / SnapShortcutRailView.step).rounded(.down) * SnapShortcutRailView.step
         let constant = base + (headroom - aligned)
@@ -940,6 +996,8 @@ final class SnapChromeView: UIView {
     /// activating — both constraints live at once would be an unsatisfiable
     /// pair, not a preference.
     private func applyBandPresence() {
+        // Under the experiment the stream never moves: it holds the seat.
+        guard !streamsUnderBand else { return }
         let bandRenders = !commentTicker.isHidden
         guard subtitleAboveBandConstraint?.isActive != bandRenders else { return }
         if bandRenders {
@@ -969,6 +1027,13 @@ final class SnapChromeView: UIView {
     }
 
     private var hasLaidOut = false
+
+    #if DEBUG
+    /// The band's and the stream's frames in this chrome's space.
+    var debugBandFrame: CGRect { commentTicker.frame }
+    var debugStreamFrame: CGRect { subtitleView.frame }
+    var debugRailFrame: CGRect { shortcutRail.frame }
+    #endif
 
     #if DEBUG
     /// The caption's frame in `space`, for the landing probe that compares
@@ -1409,6 +1474,8 @@ final class SnapChromeView: UIView {
 
     /// The band under the pill, or to the edge when there is no pill (#680).
     private func applyTickerReach() {
+        // Under the experiment the band stops at the rail whatever the pill.
+        guard !streamsUnderBand else { return }
         let toEdge = likesHidden
         tickerUnderPill.isActive = !toEdge
         tickerToEdge.isActive = toEdge
