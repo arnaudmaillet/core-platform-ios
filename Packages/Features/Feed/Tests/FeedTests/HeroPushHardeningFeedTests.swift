@@ -104,6 +104,31 @@ struct HeroPushHardeningFeedTests {
         #expect(nav.toolbar.overrideUserInterfaceStyle == .unspecified)
     }
 
+    // MARK: - A media page arrives under dark bars
+
+    /// ⚠️ A FEED PUSHED FRESH WITH A SEED (a For You rail card's hero) has no
+    /// active page before its first layout; its bars flew in LIGHT over a
+    /// media post (the owner, on a device, 2026-10-15). The arriving page is
+    /// the seed's: a media one themes the bars dark at appearance, a text
+    /// one leaves them the page's.
+    @Test(arguments: [true, false])
+    func aSeededPageThemesTheBarsAtItsArrival(media: Bool) {
+        let feed = Self.feed()
+        let model = SnapActionColumnLayoutTests.mediaModel(mediaURL: media ? URL(string: "mock://media/1") : nil)
+        feed.seedProjection([model])
+        #expect(feed.arrivalModel?.id == model.id, "the arriving page is not the seed's")
+
+        // In the stack, then appearing BEFORE any layout — the moment the
+        // flight starts, when no page is active yet.
+        let stack = Stack()
+        stack.nav.setViewControllers([stack.presenter, feed], animated: false)
+        feed.beginAppearanceTransition(true, animated: true)
+        defer { feed.endAppearanceTransition() }
+        let expected: UIUserInterfaceStyle = media ? .dark : .unspecified
+        #expect(stack.nav.toolbar.overrideUserInterfaceStyle == expected, "the toolbar arrived in the wrong style")
+        #expect(stack.nav.navigationBar.overrideUserInterfaceStyle == expected)
+    }
+
     // MARK: - Fixtures
 
     private static func feed() -> SnapFeedViewController {

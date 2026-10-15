@@ -827,7 +827,22 @@ final class SnapFeedViewController: UIViewController {
         presentToolbar()
         // Re-borrow the bars for whatever page is settled: they are shared,
         // and anything pushed on top has since reset them.
-        if let model = activeModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
+        //
+        // ⚠️ THE ARRIVING PAGE, NOT ONLY THE ACTIVE ONE (the owner, on a
+        // device, 2026-10-15): a feed pushed fresh with a seed — a For You
+        // rail card's hero — has no active page until its first layout, so
+        // the bars flew in LIGHT over a media post and turned dark after.
+        // The seed says what arrives; a media page wears dark bars from the
+        // push's first frame, a text page the page's.
+        if let model = arrivalModel {
+            applyChromeTheme(hasMedia: model.mediaURL != nil)
+            // Again inside the push, once UIKit has hosted the toolbar's
+            // items: their glass container did not exist a moment ago.
+            transitionCoordinator?.animate(alongsideTransition: { [weak self] _ in
+                guard let self, let model = self.arrivalModel else { return }
+                self.applyChromeTheme(hasMedia: model.mediaURL != nil)
+            })
+        }
         // Returning from a pushed screen with engagement state:
         // `presentToolbar` just re-lit the shared bar, so the engagement's
         // claim on the footer band must be re-arbitrated — enforce or
@@ -883,6 +898,15 @@ final class SnapFeedViewController: UIViewController {
         }
     }
 
+    /// Laid out, its bar items hosted, before the push's first frame: the
+    /// toolbar's glass container now exists (`toolbarGlassHost`), and the
+    /// arriving page's theme reaches it here rather than at `viewDidAppear`
+    /// — filmed, a media post's toolbar flew in light for 0.3s without this.
+    override func viewIsAppearing(_ animated: Bool) {
+        super.viewIsAppearing(animated)
+        if let model = arrivalModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
+    }
+
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         // The backstop, on a return only: whatever a transition left, a feed
@@ -903,7 +927,7 @@ final class SnapFeedViewController: UIViewController {
         observeDeviceAppearance()
         // Again now that the toolbar's items are hosted: during a presentation
         // their glass container may not have existed yet (`toolbarGlassHost`).
-        if let model = activeModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
+        if let model = arrivalModel { applyChromeTheme(hasMedia: model.mediaURL != nil) }
         // The willAppear reconciliation's landing half — by now the bar's
         // containers are in the window and the walk-up reaches them.
         syncEngagementAfterAppearance()
@@ -4960,6 +4984,17 @@ final class SnapFeedViewController: UIViewController {
     private var activeModel: FeedItemDisplayModel? {
         guard let index = lifecycle.activeIndex,
               orderedIDs.indices.contains(index) else { return nil }
+        return modelsByID[orderedIDs[index]]
+    }
+
+    /// The page the screen shows or is about to: the active one, or — before
+    /// the first layout has made one active — the page it will open on (its
+    /// remembered index, or the seed's first). What the bars' theme is
+    /// decided from at arrival (`applyChromeTheme`).
+    var arrivalModel: FeedItemDisplayModel? {
+        if let activeModel { return activeModel }
+        let index = lifecycle.pageIndex ?? 0
+        guard orderedIDs.indices.contains(index) else { return nil }
         return modelsByID[orderedIDs[index]]
     }
 
