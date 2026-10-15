@@ -88,6 +88,12 @@ final class SnapFeedViewController: UIViewController {
     /// opened onto a stack it can leave (never on the tab root). Built on
     /// first appearance, when the stack relationship is finally knowable.
     private var backItem: UIBarButtonItem?
+    /// The leading item's button: the back arrow at rest, the ✕ while a
+    /// media post's comments are open (#1192) — ONE button whose symbol is
+    /// replaced, so the bubble stays and the glyph morphs.
+    private var backButton: UIButton?
+    /// Whether the leading button closes the comments rather than the feed.
+    private var leadingClosesComments = false
     /// The ✕ that collapses a MEDIA post's comments back to the media.
     ///
     /// It takes the TRAILING nav slot while the layout is open — the author
@@ -812,7 +818,9 @@ final class SnapFeedViewController: UIViewController {
         // presentation relationship is known only here, not at viewDidLoad.
         if isClosable, backItem == nil {
             let back = SnapNavControls.makeBackButton()
-            back.addAction(UIAction { [weak self] _ in self?.closeFeed() }, for: .primaryActionTriggered)
+            back.isSymbolAnimationEnabled = true
+            back.addAction(UIAction { [weak self] _ in self?.leadingTapped() }, for: .primaryActionTriggered)
+            backButton = back
             backItem = UIBarButtonItem(customView: back)
         }
         // Install through the same resolver the engagement uses, so
@@ -1634,7 +1642,9 @@ final class SnapFeedViewController: UIViewController {
     /// day chip has gone under the header — the day (#757).
     private func engagedTrailingItems() -> [UIBarButtonItem] {
         guard engagedChromeOnBar else { return restingTrailingItems() }
-        var items: [UIBarButtonItem] = engagedChromeHasMedia ? [closeCommentsItem] : []
+        // The comments' ✕ is the LEADING button now (#1192), not a trailing
+        // item.
+        var items: [UIBarButtonItem] = []
         // The fixed spaces keep the pills apart: iOS 26 groups ADJACENT bar
         // items into one shared glass platter.
         for item in [walletBadgeItem, commentsDayItem].compactMap({ $0 }) {
@@ -1729,6 +1739,20 @@ final class SnapFeedViewController: UIViewController {
         // The pill is the toolbar's (#671): the nav bar holds the points alone.
         walletBadgeItem.map { [$0] } ?? []
     }
+
+    /// The leading button's tap: the comments' ✕ while they are open on a
+    /// media post, the way back otherwise.
+    private func leadingTapped() {
+        if leadingClosesComments { dismissComments() } else { closeFeed() }
+    }
+
+    #if DEBUG
+    /// The leading slot as drawn — tests (#1192).
+    var debugLeadingIsClose: Bool { leadingClosesComments || navigationItem.leftBarButtonItems?.first === closeCommentsItem }
+    var debugTrailingHasClose: Bool { navigationItem.rightBarButtonItems?.contains { $0 === closeCommentsItem } ?? false }
+    var debugLeadingButton: UIButton? { backButton }
+    #endif
+
     /// The leading slot's two faces:
     ///
     ///   media comments open → ✕ (collapse to the media layout)
@@ -1757,7 +1781,22 @@ final class SnapFeedViewController: UIViewController {
     /// end now, in the TRAILING nav slot the author pill holds at rest — so the
     /// two ways out of a post are one at each end of the same bar, and neither
     /// costs the other.
+    ///
+    /// ⚠️ SUPERSEDED (#1192, the owner 2026-10-15): while a MEDIA post's
+    /// comments are open, the leading button IS the ✕ — the same button, its
+    /// symbol replaced, so its glass bubble stays put and the glyph morphs —
+    /// and the trailing ✕ is gone. A tab-root feed, with no arrow, takes the
+    /// ✕ item there instead.
     private func applyLeadingNavItem(engaged: Bool, hasMedia: Bool, animated: Bool) {
+        let closesComments = engaged && hasMedia
+        if let backButton, closesComments != leadingClosesComments {
+            leadingClosesComments = closesComments
+            var config = backButton.configuration
+            config?.image = UIImage.symbol(named: closesComments ? "xmark" : "chevron.backward")?
+                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold))
+            backButton.configuration = config
+            backButton.accessibilityLabel = closesComments ? "Close comments" : "Back"
+        }
         // ⚠️ LEFT TO RIGHT here, unlike the trailing run: `leftBarButtonItems[0]`
         // is the one nearest the screen edge. So this reads [‹ back] [⇅ sort],
         // the sort just inboard of the arrow, with the fixed space that keeps
@@ -1766,7 +1805,7 @@ final class SnapFeedViewController: UIViewController {
         // The sort belongs at this end: it is a control over the thread, and
         // this is the end that carries what the screen is DOING. The trailing
         // end carries who the post is by.
-        var items = [backItem].compactMap { $0 }
+        var items = [backItem ?? (closesComments ? closeCommentsItem : nil)].compactMap { $0 }
         if engaged, isCommentSortAvailable {
             items += items.isEmpty ? [sortItem] : [.fixedSpace(Spacing.sm), sortItem]
         }

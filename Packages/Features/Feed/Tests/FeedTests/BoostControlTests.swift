@@ -441,9 +441,10 @@ struct BoostControlTests {
     // MARK: - The feed header's balance badge
 
     /// With a wallet injected the trailing run is the badge alone at rest —
-    /// the author pill is the toolbar's (#671) — and the ✕ joins it, at the
-    /// edge, while a media post's thread is open, spacer-separated so iOS 26
-    /// keeps the pills apart (`rightBarButtonItems` is indexed right to left).
+    /// the author pill is the toolbar's (#671) — and it stays the badge alone
+    /// while a media post's thread is open: the ✕ is the LEADING item now
+    /// (#1192), in the back arrow's place (a tab-root feed, with no arrow,
+    /// takes the ✕ item there).
     @Test func feedTrailingRunEndsWithTheWalletBadgeWhenAWalletIsWired() throws {
         let (feed, _) = Self.walletFeed()
 
@@ -451,18 +452,50 @@ struct BoostControlTests {
         #expect(resting.count == 1)
         #expect(resting.first?.customView is WalletBadgeButton)
 
-        // ⚠️ THE BADGE HOLDS ITS PLACE THROUGH THE ENGAGEMENT; the ✕ is added
-        // outboard of it, and the sort sits beside the back arrow.
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
         let engaged = feed.navigationItem.rightBarButtonItems ?? []
-        #expect(engaged.count == 3)
-        #expect((engaged.first?.customView as? UIButton)?.accessibilityLabel == "Close comments")
-        #expect(engaged.dropFirst().first?.customView == nil)   // the fixed space
-        #expect(engaged.last == resting.first)                   // …and the same badge
-        #expect(engaged.contains { $0.customView is SnapCommentSortButton } == false)
+        #expect(engaged.count == 1, "no trailing ✕ any more")
+        #expect(engaged.first == resting.first)
+        #expect(feed.debugTrailingHasClose == false)
+        let leading = feed.navigationItem.leftBarButtonItems ?? []
+        #expect((leading.first?.customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(feed.debugLeadingIsClose)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
+        #expect(feed.debugLeadingIsClose == false)
+        #expect((feed.navigationItem.leftBarButtonItems ?? []).isEmpty, "a tab root has no way back")
+    }
+
+    /// A pushed feed's back arrow BECOMES the ✕ while a media post's thread
+    /// is open — the same item and button, its symbol replaced, so the glass
+    /// bubble stays and the glyph morphs (#1192) — and back again after.
+    @Test func thePushedFeedsArrowBecomesTheClose() throws {
+        let (feed, _) = Self.walletFeed()
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        feed.beginAppearanceTransition(true, animated: false)
+        feed.endAppearanceTransition()
+        let arrow = try #require(feed.navigationItem.leftBarButtonItems?.first)
+        let button = try #require(feed.debugLeadingButton)
+        #expect(arrow.customView === button)
+        #expect(button.isSymbolAnimationEnabled, "the glyph swap is a symbol replace")
+        let restingImage = button.configuration?.image
+
+        feed.setEngagedChrome(true, hasMedia: true, animated: false)
+        #expect(feed.navigationItem.leftBarButtonItems?.first === arrow, "the same item: the bubble stays")
+        #expect(feed.debugLeadingIsClose)
+        #expect(button.accessibilityLabel == "Close comments")
+        #expect(button.configuration?.image != restingImage)
+        #expect(feed.debugTrailingHasClose == false)
+
+        feed.setEngagedChrome(false, hasMedia: true, animated: false)
+        #expect(feed.debugLeadingIsClose == false)
+        #expect(button.accessibilityLabel == "Back")
+
+        // A text post keeps its arrow: its thread IS the page.
+        feed.setEngagedChrome(true, hasMedia: false, animated: false)
+        #expect(feed.debugLeadingIsClose == false)
     }
 
     /// No wallet → an empty trailing run at rest: the author pill is the

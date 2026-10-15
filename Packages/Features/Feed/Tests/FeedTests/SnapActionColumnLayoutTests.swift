@@ -739,7 +739,11 @@ struct SnapActionColumnLayoutTests {
         controller.setCommentsDay(today)
         let first = try #require(controller.debugTrailingItems.last, "no day in the bar")
         #expect(first.identifier?.hasPrefix("snap.comments.day.") == true)
-        #expect(controller.debugTrailingItems.first?.identifier?.hasPrefix("snap.comments.day.") != true,
+        // With no wallet and the ✕ at the leading edge since #1192, the day
+        // can be the run's only item; with anything else there, it stands
+        // left of it.
+        #expect(controller.debugTrailingItems.count == 1
+                    || controller.debugTrailingItems.first?.identifier?.hasPrefix("snap.comments.day.") != true,
                 "the day took the corner: it stands left of the rest")
         let budget = try #require(controller.debugCommentsDayPill?.debugMaxWidth, "the day has no width to give way in")
         #expect(budget < 390)
