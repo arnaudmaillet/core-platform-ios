@@ -161,6 +161,15 @@ final class SnapChromeView: UIView {
     /// The floor guide's height constraint — its constant is the caption's
     /// two-line box, refreshed on Dynamic Type changes alongside the caption.
     private var captionFloorHeightConstraint: NSLayoutConstraint?
+    /// The caption's two seats: xl above the bar over a page strip, or down
+    /// in the strip's place without one (`applyCaptionSeat`).
+    private var captionOverStripConstraint: NSLayoutConstraint?
+    private var captionOnBarConstraint: NSLayoutConstraint?
+    /// The caption's bottom above the bar with no strip: xl less the strip's
+    /// footprint (its thickness and its gap to the bar).
+    static var captionToBarWithoutStrip: CGFloat {
+        Spacing.xl - SnapMediaPageBarView.thickness - pageBarToolbarGap
+    }
     /// Top margins beyond this are transition churn (safe-area insets
     /// re-propagating into a cell mid-flight), not a settled state — a real
     /// settled top (status bar + transparent nav bar) stays well under it
@@ -278,8 +287,20 @@ final class SnapChromeView: UIView {
         // the harmonized rhythm's largest breath.
         captionLabel.constrain(in: self) { parent in
             captionLabel.leadingAnchor.constraint(equalTo: parent.layoutMarginsGuide.leadingAnchor, constant: Spacing.lg)
-            captionLabel.bottomAnchor.constraint(equalTo: parent.layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl)
         }
+        // ⚠️ THE CAPTION TAKES THE STRIP'S PLACE when there is none (the
+        // owner, 2026-10-16: a lone photograph's caption sat a strip's height
+        // above the bar, as if the strip were only hidden). Above the strip
+        // it sits xl up; with no strip it drops by the strip's footprint.
+        let captionOverStrip = captionLabel.bottomAnchor.constraint(
+            equalTo: layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl
+        )
+        let captionOnBar = captionLabel.bottomAnchor.constraint(
+            equalTo: layoutMarginsGuide.bottomAnchor, constant: -Self.captionToBarWithoutStrip
+        )
+        captionOverStripConstraint = captionOverStrip
+        captionOnBarConstraint = captionOnBar
+        captionOnBar.isActive = true
 
         // The caption FLOOR: a zero-content region co-located with the
         // caption label (same bottom, same horizontal margins) but with a
@@ -294,7 +315,10 @@ final class SnapChromeView: UIView {
         NSLayoutConstraint.activate([
             captionFloorGuide.leadingAnchor.constraint(equalTo: captionLabel.leadingAnchor),
             captionFloorGuide.trailingAnchor.constraint(equalTo: captionLabel.trailingAnchor),
-            captionFloorGuide.bottomAnchor.constraint(equalTo: captionLabel.bottomAnchor),
+            // A FIXED line, not the label's bottom: the label moves (a short
+            // caption is one line, a lone picture has no strip), the corner
+            // that hangs off this floor does not.
+            captionFloorGuide.bottomAnchor.constraint(equalTo: layoutMarginsGuide.bottomAnchor, constant: -Spacing.xl),
             floorHeight,
         ])
 
@@ -454,7 +478,10 @@ final class SnapChromeView: UIView {
         // above it, and stops short of the rail like the zone does: with no
         // glass to nest in there, its trailing end dissolves.
         NSLayoutConstraint.activate([
-            subtitleView.bottomAnchor.constraint(equalTo: captionFloorGuide.topAnchor, constant: -Spacing.md),
+            // On the caption as it stands — one line or two (the owner,
+            // 2026-10-16: a short caption with its time on one line lets
+            // the stream and the band above it come down a line).
+            subtitleView.bottomAnchor.constraint(equalTo: captionLabel.topAnchor, constant: -Spacing.md),
             commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md),
             commentTicker.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
         ])
@@ -743,11 +770,9 @@ final class SnapChromeView: UIView {
             .foregroundColor: secondary ? UIColor.white.withAlphaComponent(0.6) : UIColor.white,
             .shadow: shadow,
             // GEOMETRY LOCK: every line takes the PRIMARY (body) line height —
-            // identical on every run — so a line holding only the smaller
-            // footnote timestamp (Case A's second line) still occupies a full
-            // body line. The caption block is therefore exactly two body
-            // lines tall whether the timestamp sits inline or drops below,
-            // and its bottom-pinned frame never shifts between states.
+            // identical on every run — so a line ending on the smaller
+            // footnote timestamp is still a full body line: the block is
+            // exactly one or two body lines tall.
             .paragraphStyle: captionParagraphStyle,
         ]
     }
@@ -799,10 +824,11 @@ final class SnapChromeView: UIView {
     /// The single source of caption typography for every media post and both
     /// chrome instances (live cell + flight replica) — a PURE function of
     /// (text, timestamp, width) so both resolve identically. It enforces a
-    /// strict two-line contract with the timestamp always visible:
+    /// two-line contract with the timestamp always visible and always inline:
     ///
-    ///   • Case A — a single-line caption drops the timestamp onto its OWN
-    ///     second line (`caption\n7 weeks`).
+    ///   • Case A — a short caption takes the timestamp on its ONE line
+    ///     (`Golden hour.  7 weeks`), so the block is one line tall (the
+    ///     owner, 2026-10-16).
     ///   • Case B — a caption that fills two lines takes the timestamp inline
     ///     at the end of line two (`…line two  7 weeks`).
     ///   • Case C — a longer caption truncates early on line two so the
@@ -829,15 +855,10 @@ final class SnapChromeView: UIView {
         let timestampString = NSAttributedString(string: timestamp, attributes: captionAttributes(secondary: true))
         let gap = NSAttributedString(string: "  ", attributes: captionAttributes(secondary: false))
 
-        // Case A: a single-line caption pushes the timestamp to its own line.
-        if captionLineCount(captionString, width: width) <= 1 {
-            let out = NSMutableAttributedString(attributedString: captionString)
-            out.append(NSAttributedString(string: "\n", attributes: captionAttributes(secondary: false)))
-            out.append(timestampString)
-            return out
-        }
-
-        // Case B: the whole caption plus an inline timestamp still fits two lines.
+        // Case A: the caption and its time inline, on ONE line when they fit
+        // there (the owner, 2026-10-16: the block is then one line tall, and
+        // the stream above it comes down), else on two — a short caption
+        // whose time wraps keeps it inline on the second line.
         let inline = NSMutableAttributedString(attributedString: captionString)
         inline.append(gap)
         inline.append(timestampString)
@@ -956,6 +977,21 @@ final class SnapChromeView: UIView {
 
     func setMediaPageCount(_ count: Int, current: Int, clipPages: Set<Int> = []) {
         mediaPageBar.configure(count: count, current: current, clipPages: clipPages)
+        applyCaptionSeat()
+    }
+
+    /// Seats the caption over the strip, or in its place when there is none.
+    private func applyCaptionSeat() {
+        let overStrip = !mediaPageBar.isHidden
+        guard captionOverStripConstraint?.isActive != overStrip else { return }
+        if overStrip {
+            captionOnBarConstraint?.isActive = false
+            captionOverStripConstraint?.isActive = true
+        } else {
+            captionOverStripConstraint?.isActive = false
+            captionOnBarConstraint?.isActive = true
+        }
+        setNeedsLayout()
     }
 
     /// Where the page's BOTTOM READOUT begins — the top of the comment band.

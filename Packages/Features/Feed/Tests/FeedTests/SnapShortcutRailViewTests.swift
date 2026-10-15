@@ -361,9 +361,9 @@ struct SnapShortcutRailViewTests {
         // absorbs to grid-align the headroom (always less than one step).
         #expect(rail.frame.minY >= Spacing.sm)
         #expect(rail.frame.minY - Spacing.sm < SnapShortcutRailView.step)
-        // …to the band's SEAT (2026-10-16): the stream holds it, the band
-        // rides above the stream.
-        #expect(abs(rail.frame.maxY - subtitle.frame.maxY) < 0.01)
+        // …to the band's SEAT (2026-10-16), the like pill's square: the band
+        // itself rides the stream.
+        #expect(abs(rail.frame.maxY - (chrome.debugBoostButton.frame.minY + ticker.frame.height)) < 0.5)
         // The subtitle zone stops short of the rail — the width reduction.
         #expect(subtitle.frame.maxX == rail.frame.minX - Spacing.md)
         // A media post shows its wheel.
@@ -386,7 +386,6 @@ struct SnapShortcutRailViewTests {
         #expect(chrome.subviews.compactMap { $0 as? UIVisualEffectView }.isEmpty)
         // The like PILL (#669): the band's width, its top on the band's, as
         // tall as the column above the sound bubble lets it be.
-        #expect(abs(compose.frame.minY - (subtitle.frame.maxY - ticker.frame.height)) < 0.01)
         #expect(abs(compose.frame.height - SnapActionColumn.likePillHeight) < 0.34, "a pixel of snapping at most")
         #expect(abs(compose.frame.maxX - rail.frame.maxX) < 0.01)
         #expect(abs(compose.frame.width - ticker.frame.height) < 0.01)
