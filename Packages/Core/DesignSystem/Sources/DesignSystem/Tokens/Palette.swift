@@ -5,15 +5,15 @@ import UIKit
 ///
 /// ```
 ///   role                light      dark       IC light   IC dark
-///   tint                D6337F     F37AB4     B0256A     F8ABCF
-///   brandText           D6337F     F37AB4     B0256A     F8ABCF
-///   primaryFill         D6337F     F37AB4
+///   tint                F37AB4     F37AB4     B0256A     F8ABCF
+///   brandText           F37AB4     F37AB4     B0256A     F8ABCF
+///   primaryFill         F37AB4     F37AB4
 ///   onPrimary           FFFFFF     2B0716
-///   primaryFillPressed  C02A70     E86AA6
+///   primaryFillPressed  E86AA6     E86AA6
 ///   primaryContainer    FDE3EF     3A0A22     (text B8296C / F8ABCF)
 ///   secondary           6852C6     A78BFA     5C44B7     B59EFF
 ///   secondaryContainer  EFEEFF     211944     (text 6852C6 / A78BFA)
-///   saveGold            A07800     FFC53D     (FFC53D over media)
+///   saveGold            FFC53D     FFC53D     (one gold, #1190)
 /// ```
 ///
 /// The rules the owner settled (#1124, 2026-10-13/14; #1169, 2026-10-14):
@@ -50,28 +50,30 @@ public enum Palette {
     // MARK: - Primary: pink
 
     /// Interactive glyphs, text buttons, switches, selection: the app's tint.
-    /// 4.53:1 on white, so it reads as text as well as a control.
-    public static let tint = dynamic(light: 0xD6337F, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
+    /// ⚠️ LIGHTER IN THE LIGHT since #1190 (the owner, 2026-10-15: the dark
+    /// theme's pink, `F37AB4`, in both appearances): about 2.3:1 on white, a
+    /// mark rather than text strength — chosen knowingly. Increased Contrast
+    /// keeps the deep pink (`B0256A`, 6:1).
+    public static let tint = dynamic(light: 0xF37AB4, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
 
     /// Text that carries the accent (≥ 4.5:1): the tint itself, which
     /// already reads as text. Mentions and hashtags do NOT wear it (#1168).
-    public static let brandText = dynamic(light: 0xD6337F, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
+    public static let brandText = dynamic(light: 0xF37AB4, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
 
     /// A prominent filled button's ground, an active chip.
-    public static let primaryFill = dynamic(light: 0xD6337F, dark: 0xF37AB4)
+    public static let primaryFill = dynamic(light: 0xF37AB4, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
 
     /// The label on `primaryFill`: white in the light (4.53:1), a deep ink
     /// on the brighter dark fill.
     public static let onPrimary = dynamic(light: 0xFFFFFF, dark: 0x2B0716)
 
     /// `primaryFill` pressed or highlighted.
-    public static let primaryFillPressed = dynamic(light: 0xC02A70, dark: 0xE86AA6)
+    public static let primaryFillPressed = dynamic(light: 0xE86AA6, dark: 0xE86AA6, lightIC: 0x9C1F5E, darkIC: 0xE86AA6)
 
     /// A PROMINENT GLASS button's tint (the wallet's Claim, a country's
-    /// Unlock): the deep pink in both appearances. ⚠️ The glass draws its
-    /// label white and vibrant in the dark whatever ink is asked for, so the
-    /// brighter dark-mode fill cannot be used there; white on this is 4.53:1.
-    public static let prominentGlassTint = rgb(0xD6337F)
+    /// Unlock): the primary pink in both appearances (#1190). ⚠️ The glass
+    /// draws its label white and vibrant whatever ink is asked for.
+    public static let prominentGlassTint = rgb(0xF37AB4)
 
     /// A soft selected background, an info banner, a "New" badge.
     public static let primaryContainer = dynamic(light: 0xFDE3EF, dark: 0x3A0A22)
@@ -81,7 +83,7 @@ public enum Palette {
     /// toward a pale pink at the top-right, under white words — 4.53:1 where
     /// the words start, lighter toward the far corner. The same in both
     /// appearances.
-    public static let primaryGradient: [UIColor] = [rgb(0xD6337F), rgb(0xEFA6C9)]
+    public static let primaryGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xFAC8DF)]
 
     /// Text on `primaryContainer`.
     public static let onPrimaryContainer = dynamic(light: 0xB8296C, dark: 0xF8ABCF)
@@ -189,12 +191,13 @@ public enum Palette {
 
     // MARK: - Economy
 
-    /// The saved star (#1128): gold, the 收藏 convention. Deepened in the
-    /// light, where the vivid gold is 1.58:1 on white.
-    public static let saveGold = dynamic(light: 0xA07800, dark: 0xFFC53D)
+    /// The saved star (#1128): gold, the 收藏 convention — ONE gold, the
+    /// full-screen post's, in both appearances and over media (#1188, #1190:
+    /// the owner's reference). Read through `SaveStar`, never directly.
+    public static let saveGold = rgb(0xFFC53D)
 
-    /// The saved star over a photograph or a video, in either appearance.
-    public static let saveGoldOnMedia = rgb(0xFFC53D)
+    /// The same gold — kept as a name for the media surfaces that said so.
+    public static var saveGoldOnMedia: UIColor { saveGold }
 
     /// The Points heart's gradient stops (#1124, decision 7), bottom-left to
     /// top-right: yellow → orange → pink. In the light the yellow start is

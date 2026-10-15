@@ -2214,19 +2214,15 @@ final class SnapFeedViewController: UIViewController {
         bookmarkButton.configuration = config
     }
 
-    /// The save glyph (#1128): the star, outline at rest; filled GOLD once
-    /// saved (`Palette.saveGoldOnMedia`, the 收藏 convention, #1124).
+    /// The save glyph (#1128): the star, outline at rest; filled in the
+    /// save gold once saved (`SaveStar`, the one contract, #1190).
     static func bookmarkSymbol(saved: Bool) -> String {
-        (saved ? AppSymbol.saved : AppSymbol.save).rawValue
+        SaveStar.symbol(saved: saved)
     }
 
     /// The save glyph as drawn on the page's glass bubble.
     static func bookmarkImage(saved: Bool) -> UIImage? {
-        let image = UIImage.symbol(
-            named: bookmarkSymbol(saved: saved),
-            configuration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-        )
-        return saved ? image?.withTintColor(Palette.saveGoldOnMedia, renderingMode: .alwaysOriginal) : image
+        SaveStar.image(saved: saved, UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold))
     }
 
     #if DEBUG

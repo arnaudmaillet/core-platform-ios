@@ -105,6 +105,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // One colour for the solid unread marks (#1169): the tab bar's and
         // the bell's too. The rows' avatars wear the icon's gradient.
         categoryBar.badgeTint = Palette.counter
+        // The selector's badges wear the conversation avatars' gradient (#1190).
+        categoryBar.badgeGradient = Palette.accentGradient
     }
 
     private let initialIndex: Int

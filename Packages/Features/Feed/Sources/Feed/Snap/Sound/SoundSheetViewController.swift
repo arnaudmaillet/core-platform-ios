@@ -725,14 +725,14 @@ final class SoundSheetViewController: UIViewController {
     }
 
     /// The bookmark's glyph for the sound's state — what a test reads.
-    var bookmarkSymbol: String { (savedSounds.isSaved(sound.id) ? AppSymbol.saved : AppSymbol.save).rawValue }
+    var bookmarkSymbol: String { SaveStar.symbol(saved: savedSounds.isSaved(sound.id)) }
 
     private func refreshBookmark() {
         let saved = savedSounds.isSaved(sound.id)
         for item in bookmarkItems.allObjects {
-            // The star, filled gold once saved (#1128, `Palette.saveGold`).
-            let image = UIImage.symbol(named: bookmarkSymbol)
-            item.image = saved ? image?.withTintColor(Palette.saveGold, renderingMode: .alwaysOriginal) : image
+            // The star, filled in the one save gold once saved (`SaveStar`,
+            // #1190 — it had a gold of its own).
+            item.image = SaveStar.image(saved: saved)
             // The label follows the state, like the feed's: "Save" and "Saved"
             // are different offers to a reader who cannot see the fill.
             item.accessibilityLabel = saved ? "Sound saved" : "Save sound"

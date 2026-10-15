@@ -1283,8 +1283,8 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         public static let comments = PostActionSymbol.comments
         public static let like = AppSymbol.like.rawValue
         public static let repost = PostActionSymbol.repost
-        public static let save = AppSymbol.save.rawValue
-        public static let saved = AppSymbol.saved.rawValue
+        public static let save = SaveStar.outlineGlyph
+        public static let saved = SaveStar.glyph
     }
 
     /// How far the preview's own furniture — the metadata pills, the play badge
@@ -1874,7 +1874,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private let repostAction = PostCardAction.make(symbol: ActionSymbol.repost, label: "Repost")
     /// Saved, the star is the full-screen post's gold — the reference, the
     /// owner's call (#1182, #1188): one gold in both appearances.
-    private let bookmarkAction = PostCardAction.make(symbol: ActionSymbol.save, label: "Save", selectedTint: Palette.saveGoldOnMedia)
+    private let bookmarkAction = PostCardAction.make(symbol: ActionSymbol.save, label: "Save", selectedTint: SaveStar.tint)
 
     /// The preview wears ONE piece of furniture, the page indicator: what the
     /// viewer can press about a post lives in the closing row under the

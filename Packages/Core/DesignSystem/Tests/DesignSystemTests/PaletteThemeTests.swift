@@ -36,11 +36,12 @@ struct PaletteThemeTests {
         return (high + 0.05) / (low + 0.05)
     }
 
-    /// The owner's two values, exactly.
+    /// The owner's value, exactly: the dark theme's pink in both
+    /// appearances since #1190.
     @Test func theAccentIsTheChosenPink() {
         let light = Palette.tint.resolvedColor(with: Self.traits[0])
         let dark = Palette.tint.resolvedColor(with: Self.traits[1])
-        #expect(light == Palette.rgb(0xD6337F))
+        #expect(light == Palette.rgb(0xF37AB4))
         #expect(dark == Palette.rgb(0xF37AB4))
     }
 
@@ -55,25 +56,26 @@ struct PaletteThemeTests {
         }
     }
 
-    /// Text in the accent reads (4.5:1) on white and black, Increased
-    /// Contrast never lowers it, and a filled button's label passes.
+    /// Text in the accent reads (4.5:1) on black, and on white under
+    /// Increased Contrast — the light pink is a mark by the owner's choice
+    /// (#1190); Increased Contrast never lowers it, and a filled button's
+    /// label passes where the fill is deep enough to carry it.
     @Test func theAccentReads() {
         let (light, dark, lightIC, darkIC) = (Self.traits[0], Self.traits[1], Self.traits[2], Self.traits[3])
         let tintLight = Self.contrast(Palette.tint.resolvedColor(with: light), .white)
         let tintDark = Self.contrast(Palette.tint.resolvedColor(with: dark), .black)
-        #expect(tintLight >= 4.5, "tint \(tintLight):1 on white")
         #expect(tintDark >= 4.5, "tint \(tintDark):1 on black")
-        #expect(Self.contrast(Palette.brandText.resolvedColor(with: light), .white) >= 4.5)
+        #expect(Self.contrast(Palette.tint.resolvedColor(with: lightIC), .white) >= 4.5)
+        #expect(Self.contrast(Palette.brandText.resolvedColor(with: lightIC), .white) >= 4.5)
         #expect(Self.contrast(Palette.brandText.resolvedColor(with: dark), .black) >= 4.5)
         #expect(Self.contrast(Palette.tint.resolvedColor(with: lightIC), .white) >= tintLight)
         #expect(Self.contrast(Palette.tint.resolvedColor(with: darkIC), .black) >= tintDark)
-        for traits in [light, dark] {
+        for traits in [lightIC, dark] {
             let onFill = Self.contrast(
                 Palette.onPrimary.resolvedColor(with: traits), Palette.primaryFill.resolvedColor(with: traits)
             )
             #expect(onFill >= 4.5, "onPrimary \(onFill):1 in \(traits.userInterfaceStyle.rawValue)")
         }
-        #expect(Self.contrast(.white, Palette.prominentGlassTint) >= 4.5, "the glass's white label")
     }
 
     /// The icon's gradient on the unread pills and the story ring: pink →
