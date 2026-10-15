@@ -66,6 +66,17 @@ final class SnapAuthorIdentityView: UIView {
             }
         }
 
+        /// The symbol the badge draws: the relation's glyph inside its own
+        /// disc (#1199), so the disc and the mark move as one.
+        var circledSymbolName: String {
+            switch self {
+            case .none, .follow: "plus.circle.fill"
+            case .following: "checkmark.circle.fill"
+            case .friends: "person.2.circle.fill"
+            case .pending: "clock.circle.fill"
+            }
+        }
+
         /// Each glyph's size on the badge's disc: the check and the clock are
         /// discs of their own, as large as it (drawn black, their marks white:
         /// `AvatarStatusBadge.glyphImage`); the "+" and the two people sit
@@ -614,7 +625,9 @@ private final class AvatarStatusBadge: UIButton {
     /// The touch area around the disc: a 16pt disc is too small a target.
     private static let touchOutset: CGFloat = 8
 
-    private let disc = UIImageView()
+    /// The badge — its disc and its mark are ONE circled symbol drawn with a
+    /// palette (#1199): two image views, a disc and a mark each with its own
+    /// replace, arrived and left out of step (the owner, on a device).
     private let glyph = UIImageView()
     /// The badge on screen.
     private(set) var drawn: SnapAuthorIdentityView.FollowBadge = .none
@@ -623,7 +636,7 @@ private final class AvatarStatusBadge: UIButton {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        for view in [disc, glyph] {
+        for view in [glyph] {
             view.isUserInteractionEnabled = false
             view.contentMode = .center
             view.constrain(in: self) { parent in
@@ -636,7 +649,6 @@ private final class AvatarStatusBadge: UIButton {
             widthAnchor.constraint(equalToConstant: Self.diameter),
             heightAnchor.constraint(equalToConstant: Self.diameter),
         ])
-        disc.image = Self.discImage(for: .none)
         glyph.image = Self.glyphImage(.none)
         apply(interactionFor: .none)
     }
@@ -652,18 +664,15 @@ private final class AvatarStatusBadge: UIButton {
     /// otherwise.
     func show(_ badge: SnapAuthorIdentityView.FollowBadge, animated: Bool) {
         guard badge != drawn else { return }
-        let discChanges = (badge == .none) != (drawn == .none) || Self.discInk(for: badge) != Self.discInk(for: drawn)
         drawn = badge
         apply(interactionFor: badge)
-        let discImage = Self.discImage(for: badge)
         let glyphImage = Self.glyphImage(badge)
         guard animated else {
-            disc.image = discImage
             glyph.image = glyphImage
             return
         }
         replaceCount += 1
-        if discChanges { disc.setSymbolImage(discImage, contentTransition: .replace) }
+        // ONE replace for the disc and the mark (#1199): they are one symbol.
         glyph.setSymbolImage(glyphImage, contentTransition: .replace)
     }
 
@@ -703,42 +712,24 @@ private final class AvatarStatusBadge: UIButton {
         }
     }
 
-    /// The disc — or, for no badge, the same symbol in clear ink, so the
-    /// disc's arrival and departure are symbol replaces too.
-    private static func discImage(for badge: SnapAuthorIdentityView.FollowBadge) -> UIImage {
-        let image = UIImage(systemName: "circle.fill")?
-            .applyingSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: diameter - 3))
-            ?? UIImage()
-        return image.withTintColor(discInk(for: badge), renderingMode: .alwaysOriginal)
-    }
-
-    /// The relation's glyph in white ink — or, for none, a clear "+".
-    /// Configured first and tinted last: a symbol configuration applied
-    /// after the tint can drop it.
+    /// The badge as one image: the relation's circled symbol — its disc and
+    /// its mark one symbol — in a palette (mark, disc); for none, the same
+    /// symbol in clear ink, so the badge's arrival and departure are replaces
+    /// too.
     ///
-    /// ⚠️ The check and the clock are discs of their own, as large as the
-    /// badge's: one white ink would cover the black disc and read as a WHITE
-    /// badge with a black mark. They are drawn with a palette instead — the
-    /// mark white, their own circle black — so they too are a black disc
-    /// with a white glyph. A palette is fixed ink already (no tint reaches
-    /// it), and must NOT be re-marked `.alwaysOriginal`: that drops the
-    /// palette and draws the whole symbol in the view's tint (measured: the
-    /// system blue).
+    /// ⚠️ A palette is fixed ink already (no tint reaches it), and must NOT
+    /// be re-marked `.alwaysOriginal`: that drops the palette and draws the
+    /// whole symbol in the view's tint (measured: the system blue).
     private static func glyphImage(_ badge: SnapAuthorIdentityView.FollowBadge) -> UIImage {
-        let ownsDisc = badge == .following || badge == .pending
-        var configuration = UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: ownsDisc ? .regular : .bold)
-        if ownsDisc {
-            configuration = configuration.applying(UIImage.SymbolConfiguration(paletteColors: [glyphInk(for: badge), discInk(for: badge)]))
-        }
-        let image = UIImage(systemName: badge.symbolName ?? "plus")?
+        let configuration = UIImage.SymbolConfiguration(pointSize: diameter - 3, weight: .semibold)
+            .applying(UIImage.SymbolConfiguration(paletteColors: [glyphInk(for: badge), discInk(for: badge)]))
+        return UIImage(systemName: badge.circledSymbolName)?
             .applyingSymbolConfiguration(configuration)
             ?? UIImage()
-        if ownsDisc { return image }
-        return image.withTintColor(glyphInk(for: badge), renderingMode: .alwaysOriginal)
     }
 
     /// The disc's and the glyph's images as drawn now. Tests.
-    var drawnImages: (disc: UIImage?, glyph: UIImage?) { (disc.image, glyph.image) }
+    var drawnImages: (disc: UIImage?, glyph: UIImage?) { (nil, glyph.image) }
 }
 
 /// The snap feed's navigation-bar controls, built as *custom views* so their
