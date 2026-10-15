@@ -323,8 +323,6 @@ final class CommentsInputBar: UIView {
     /// smiley sits at the field's trailing end, where iMessage keeps its own.
     private lazy var emotes = EmoteKeyboard(textView: textView)
     private let boostButton = UIButton(configuration: .glass())
-    /// The staked heart in the points gradient (#1128), over the pill's glyph.
-    private let boostHeart = PointsHeartOverlay()
     /// The boost's slot, on a post that does not exist yet: who will see it.
     /// See `visibilityMenu`.
     private let visibilityButton = UIButton(configuration: .glass())
@@ -966,9 +964,6 @@ final class CommentsInputBar: UIView {
         // The field is placed: its height for the draft lands in this same
         // pass too (see `updateFieldHeight`).
         if updateFieldHeight() { super.layoutSubviews() }
-        // The staked heart sits on the pill's glyph, wherever this pass put it.
-        boostButton.layoutIfNeeded()
-        boostHeart.layout(on: boostButton)
     }
 
     private func sendTapped() {
@@ -1450,7 +1445,6 @@ final class CommentsInputBar: UIView {
                     base, staked: total > 0, count: shows ? count : nil, ink: .label
                 )
             }
-            boostHeart.update(on: boostButton, liked: total > 0, configuration: SnapActionColumn.heartConfiguration)
             boostButton.accessibilityLabel = "Like"
             boostButton.accessibilityValue = SnapRailBoostButton.accessibilityValue(
                 likeCount: boostPostLikeCount,

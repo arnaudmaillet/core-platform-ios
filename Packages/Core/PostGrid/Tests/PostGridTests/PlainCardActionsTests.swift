@@ -239,6 +239,20 @@ struct PlainCardActionsTests {
         #expect(likes.isContextMenuInteractionEnabled)
     }
 
+    /// A saved post's star is the save gold, as on the full-screen post
+    /// (#1182); unsaved, it keeps the line's one ink.
+    @Test func aSavedStarIsTheSaveGold() throws {
+        let cell = row()
+        let star = try #require(actions(in: cell).first { glyph(of: $0) == AppSymbol.save.rawValue })
+        #expect(ink(of: star).allSatisfy { $0 == PostCardPillView.ink })
+        cell.isBookmarked = true
+        #expect(star.isSelected)
+        #expect(glyph(of: star) == AppSymbol.saved.rawValue)
+        #expect(star.selectedTint == Palette.saveGold)
+        let drawn = star.configuration?.imageColorTransformer?(.black)
+        #expect(drawn == Palette.saveGold, "the saved star is drawn in \(String(describing: drawn))")
+    }
+
     // MARK: - The flight lands on the same line
 
     /// ⚠️ A hero close lands a stand-in on the row: every action on the line
