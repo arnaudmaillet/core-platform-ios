@@ -7,7 +7,17 @@ import UIKit
 /// promoted from a sub-screen of the feed to a primary root tab. Threads open
 /// by pushing onto this tab's stack (or the current one, via routes).
 @MainActor
-final class MessagesTabCoordinator: TabCoordinator {
+final class MessagesTabCoordinator: TabCoordinator, GlyphTab {
+    let glyph = TabGlyph.messages
+    /// Whether a conversation is unread — the glyph's badge, no count (#1191).
+    private(set) var hasUnread = false
+    var onUnreadChange: (() -> Void)?
+
+    private func setUnread(_ unread: Bool) {
+        guard unread != hasUnread else { return }
+        hasUnread = unread
+        onUnreadChange?()
+    }
     var childCoordinators: [Coordinator] = []
     let navigationController: UINavigationController = ChevronBackNavigationController()
 
@@ -20,7 +30,7 @@ final class MessagesTabCoordinator: TabCoordinator {
 
     private(set) lazy var tab = UITab(
         title: "Messages",
-        image: UIImage(systemName: "message"),
+        image: TabGlyph.messages.image(selected: false, badged: false),
         identifier: AppTab.messages.rawValue
     ) { [navigationController] _ in navigationController }
 
@@ -44,6 +54,7 @@ final class MessagesTabCoordinator: TabCoordinator {
         guard member else {
             walletBadge = nil
             tab.badgeValue = nil
+            setUnread(false)
             navigationController.viewControllers = [GuestSignInViewController(
                 symbolName: "bubble.left.and.bubble.right",
                 title: "Messages",
@@ -57,7 +68,8 @@ final class MessagesTabCoordinator: TabCoordinator {
         // `MessagesInboxViewController.onTotalNewCountChange` for why the sum
         // is published from where its parts already are.
         let inbox = container.chatFeature.makeInboxViewController { [weak self] total in
-            self?.tab.badgeValue = total > 0 ? String(total) : nil
+            // No count on the bar (#1191): the badge variant of the glyph.
+            self?.setUnread(total > 0)
         }
         navigationController.viewControllers = [inbox]
         // The header reads `[bell] … [coins][search]`. Both items reach the bar

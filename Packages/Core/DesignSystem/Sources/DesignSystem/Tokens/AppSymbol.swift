@@ -51,6 +51,22 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// Gems, filled — the glyph beside an amount.
     case gemFilled = "core.gem.fill"
 
+    // The tab bar's own glyphs (#1191), drawn by the owner from Phosphor:
+    // each an outline, a fill (the selected tab), and both with a badge
+    // layer (unread) — palette layer 0 the glyph, layer 1 the badge.
+    case paperplane = "core.paperplane"
+    case paperplaneFill = "core.paperplane.fill"
+    case paperplaneBadge = "core.paperplane.badge"
+    case paperplaneBadgeFill = "core.paperplane.badge.fill"
+    case squarePlay = "core.square.play"
+    case squarePlayFill = "core.square.play.fill"
+    case squarePlayBadge = "core.square.play.badge"
+    case squarePlayBadgeFill = "core.square.play.badge.fill"
+    case chats = "core.chats"
+    case chatsFill = "core.chats.fill"
+    case chatsBadge = "core.chats.badge"
+    case chatsBadgeFill = "core.chats.badge.fill"
+
     /// The glyph as a template image, sized by `configuration` (a text style
     /// for a glyph beside text, a point size for fixed chrome — see
     /// `textStyle(_:)` and `fixed(_:)`).
@@ -73,6 +89,9 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .more: "More"
         case .share: "Share"
         case .gem, .gemFilled: "Gems"
+        case .paperplane, .paperplaneFill, .paperplaneBadge, .paperplaneBadgeFill: "Explore"
+        case .squarePlay, .squarePlayFill, .squarePlayBadge, .squarePlayBadgeFill: "For You"
+        case .chats, .chatsFill, .chatsBadge, .chatsBadgeFill: "Messages"
         }
     }
 
