@@ -567,6 +567,16 @@ final class ProfileGalleryPagerView: UIView {
         page.setVerticalOffset(contentFloor, animated: true)
     }
 
+    /// The bar's identity pill tapped: back to the PROFILE's top — the
+    /// identity block and its action tray at rest, the one place the pill
+    /// stands in for (the owner, 2026-10-15). Unlike a tab reselect
+    /// (`scrollActivePageToTop`), this carries on past the dock line.
+    func scrollActivePageToProfileTop() {
+        let page = pages[activeIndex]
+        guard page.verticalOffset > 0.5 else { return }
+        page.setVerticalOffset(0, animated: true)
+    }
+
     /// Selector tap → smooth page.
     func setActivePage(_ tab: ProfileTab, animated: Bool) {
         guard let index = pageOrder.firstIndex(of: tab), index != activeIndex else { return }

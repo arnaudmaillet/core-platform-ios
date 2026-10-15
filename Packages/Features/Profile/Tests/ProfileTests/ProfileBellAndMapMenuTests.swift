@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 import MapsInterface
 import MediaCore
@@ -9,7 +10,8 @@ import UIKit
 /// **Mute is a bell in the bar; the map star is a "Map" submenu of see-more
 /// (#689, the owner's call 2026-10-08).**
 ///
-/// On someone else's profile the bar reads `[bell][coins]`, the bell opens
+/// On someone else's profile the bar reads `[coins][bell]` (the bell in the
+/// corner), the bell opens
 /// the scoped Mute menu and wears `bell.slash` once anything is muted; the
 /// see-more menu loses Mute and gains Map — Map Dock / Following Filter, and
 /// Friends Filter for a mutual — on a followed profile only. The header's row
@@ -75,8 +77,8 @@ struct ProfileBellAndMapMenuTests {
 
     // MARK: - The bell
 
-    /// `[bell][coins]`: the bell keeps the corner, a fixed space keeps the
-    /// two bubbles apart.
+    /// On screen `[coins][bell]`: the bell keeps the corner, a fixed space
+    /// keeps the two bubbles apart.
     @Test func aFollowedProfileShowsTheBellInTheCorner() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         try #require(await settle { screen.debugMuteBellItem != nil })
@@ -193,6 +195,58 @@ struct ProfileBellAndMapMenuTests {
             .compactMap { $0.configuration?.image?.description }
         #expect(header.debugTrayButtons.count == 5)
         #expect(!symbols.contains { $0.contains("star") }, "\(symbols)")
+    }
+}
+
+// MARK: - The bar's relationship (the owner, 2026-10-15)
+
+/// Once the header's action tray has scrolled out of sight, the bar carries
+/// the relationship, inboard of the balance: a pink Follow while the viewer
+/// does not follow, the profile's identity pill once they do. Never while
+/// the tray shows, never on the viewer's own profile.
+extension ProfileBellAndMapMenuTests {
+    @Test func aStrangersProfileWearsAPinkFollowOnceTheTrayHasGone() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        #expect(screen.debugBarRelationshipItem == nil, "the tray still shows Follow")
+
+        screen.debugSetTrayScrolledAway(true)
+        let follow = try #require(screen.debugBarRelationshipItem)
+        #expect(follow === screen.debugBarFollowItem)
+        #expect(follow.title == "Follow")
+        #expect(follow.style == .prominent)
+        #expect(follow.tintColor == Palette.prominentGlassTint, "the Follow is not pink")
+        let items = try #require(screen.navigationItem.rightBarButtonItems)
+        // On screen [coins][Follow][bell]: corner first in the array.
+        #expect(items.count == 5)
+        #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner")
+        #expect(items[2] === follow, "the Follow is not between the bell and the balance")
+        #expect(items[4].accessibilityLabel == "Balance", "the balance is not the inboard end")
+        for space in [items[1], items[3]] {
+            #expect(space.customView == nil && space.title == nil, "no space keeps the Follow its own bubble")
+        }
+
+        screen.debugSetTrayScrolledAway(false)
+        #expect(screen.debugBarRelationshipItem == nil, "the Follow stayed with the tray back")
+    }
+
+    @Test func aFollowedProfileWearsItsIdentityPill() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .following })
+        screen.debugSetTrayScrolledAway(true)
+        let item = try #require(screen.debugBarRelationshipItem)
+        #expect(item.customView === screen.debugBarIdentityPill)
+        #expect(screen.debugBarIdentityPill.debugName == "Lena Fischer")
+        #expect(screen.debugBarIdentityPill.debugHandle == "@lena")
+        let budget = try #require(screen.debugBarIdentityPill.debugWidthBudget)
+        #expect(budget > 0 && budget < screen.view.bounds.width, "the pill is not capped by the bar's room")
+    }
+
+    @Test func theOwnProfileWearsNothing() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .me, own: true)
+        try #require(await settle { viewModel.isOwnProfile })
+        screen.debugSetTrayScrolledAway(true)
+        #expect(screen.debugBarRelationshipItem == nil)
     }
 }
 
