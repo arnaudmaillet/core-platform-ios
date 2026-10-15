@@ -15,28 +15,37 @@ extension TabGlyph {
     /// ⚠️ ONE BOX FOR BOTH STATES (the owner, 2026-10-15): the badge variant
     /// is a larger symbol — its badge stands out at the top-right — and the
     /// bar fits each image into the same box, so the glyph shrank as its
-    /// badge came and grew as it went. The unbadged image is the SAME badge
-    /// symbol with its badge layer clear, drawn at the same size and handed
-    /// back as a template the bar inks: the glyph stays put, only the badge
-    /// comes and goes.
+    /// badge came and grew as it went. The unbadged image is the PLAIN glyph
+    /// drawn into the badge variant's box, on the same baseline and leading
+    /// edge (measured: the two coincide there), as a template the bar inks.
+    ///
+    /// ⚠️ NOT the badge symbol with its badge clear: its glyph is NOTCHED
+    /// around the badge, and the paper plane showed its tip cut off with no
+    /// badge in sight (the owner, on a device).
     @MainActor
     func image(selected: Bool, badged: Bool) -> UIImage? {
-        let symbol = symbol(selected: selected, badged: true)
-        let badge: UIColor = badged ? TabGlyph.badgeTint : .clear
+        let badge = symbol(selected: selected, badged: true)
+        if badged {
+            let config = NotificationsBell.barSymbolConfiguration
+                .applying(UIImage.SymbolConfiguration(paletteColors: [.label, TabGlyph.badgeTint]))
+            guard let image = badge.image(config) else { return nil }
+            return NotificationsBell.baked(image)
+        }
         let config = NotificationsBell.barSymbolConfiguration
-            .applying(UIImage.SymbolConfiguration(paletteColors: [.label, badge]))
-        guard let image = symbol.image(config) else { return nil }
-        guard badged else { return Self.template(image) }
-        return NotificationsBell.baked(image)
+        guard let box = badge.image(config),
+              let glyph = symbol(selected: selected, badged: false).image(config) else { return nil }
+        return Self.template(glyph, inBoxOf: box)
     }
 
-    /// `symbol` drawn into a bitmap of its own size, as a template: the bar
-    /// inks every opaque pixel — the glyph — and the clear badge stays clear.
+    /// `glyph` drawn into `box`'s size, its leading edge and baseline on the
+    /// box's — the bottom-left corner — as a template.
     @MainActor
-    static func template(_ symbol: UIImage) -> UIImage {
-        let image = UIGraphicsImageRenderer(size: symbol.size).image { _ in symbol.draw(at: .zero) }
+    static func template(_ glyph: UIImage, inBoxOf box: UIImage) -> UIImage {
+        let image = UIGraphicsImageRenderer(size: box.size).image { _ in
+            glyph.draw(at: CGPoint(x: 0, y: box.size.height - glyph.size.height))
+        }
         return image
-            .withBaselineOffset(fromBottom: symbol.baselineOffsetFromBottom ?? 0)
+            .withBaselineOffset(fromBottom: box.baselineOffsetFromBottom ?? 0)
             .withRenderingMode(.alwaysTemplate)
     }
 }
