@@ -1,3 +1,4 @@
+import DesignSystem
 import UIKit
 
 /// **THE TEXT REVEAL**. A hero for a page that has no media to fly.
@@ -1316,6 +1317,9 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             context.completeTransition(false)
             return
         }
+        // A flight in the air: animated emotes sit it out (`FlightActivity`),
+        // released in the completion below.
+        let flight = FlightActivity.begin(in: container.window)
         let pageFrame = context.finalFrame(for: toVC)
         // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
         // measurement. iOS 26/27 calls this inside an implicit animation
@@ -1543,6 +1547,7 @@ final class RevealPresentAnimator: NSObject, UIViewControllerAnimatedTransitioni
             RevealStage.log("present", "landed")
             #endif
             self.geometry.presentationDidEnd(!cancelled)
+            flight.release()
             context.completeTransition(!cancelled)
         }
     }
@@ -1705,6 +1710,9 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             animator.addCompletion { _ in context.completeTransition(false) }
             return animator
         }
+        // A flight in the air: animated emotes sit it out (`FlightActivity`),
+        // released in the completion below.
+        let flight = FlightActivity.begin(in: container.window)
         // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
         // measurement. iOS 26/27 calls this inside an implicit animation
         // context of the transition's duration, so a frame or a first layout
@@ -1900,6 +1908,7 @@ final class RevealPopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
             self.geometry.installDestinationVeil(nil, nil)
             self.geometry.installDestinationAuthorBand(nil)
             self.geometry.dismissalDidEnd(!cancelled)
+            flight.release()
             context.completeTransition(!cancelled)
         }
         return animator

@@ -1,3 +1,4 @@
+import DesignSystem
 import Foundation
 import MediaCore
 import Testing
@@ -54,6 +55,53 @@ struct EmoteLabelTests {
         label.frame = CGRect(x: 10, y: 10, width: width, height: size.height)
         label.layoutIfNeeded()
         return (label, window)
+    }
+
+    /// ⚠️ A FLIGHT IN THE AIR STILLS EVERY EMOTE (the owner, 2026-10-15): a
+    /// flight poses its cards inside its own animation, and an emote placed
+    /// then flew in from the label's corner, drawn twice by the copies on
+    /// both ends. The glyphs draw plain while it is up; the emotes come back
+    /// when it lands — in the flight's own window only.
+    @Test func aFlightInTheAirStillsTheEmotesUntilItLands() throws {
+        let engine = try warmEngine(["noto:1f525", "lol"])
+        let (label, window) = hostedLabel("hot 🔥 take :lol:", engine: engine)
+        defer { window.isHidden = true }
+        #expect(label.placedEmoteCount == 2)
+
+        // Another window's flight stills nothing here.
+        let elsewhere = UIWindow(frame: window.frame)
+        let other = FlightActivity.begin(in: elsewhere)
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 2, "another window's flight stilled this label")
+        other.release()
+
+        let flight = FlightActivity.begin(in: window)
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 0, "an emote played through a flight")
+        #expect(label.coveredMarkIndices.isEmpty, "a glyph stayed erased with no emote over it")
+
+        flight.release()
+        label.layoutIfNeeded()
+        #expect(label.placedEmoteCount == 2, "the emotes did not come back at the landing")
+    }
+
+    /// An emote placed inside an animation block — as a flight lays its
+    /// cards out — is placed, not animated in from the label's corner.
+    @Test func anEmotePlacedInsideAnAnimationDoesNotFlyIn() throws {
+        let engine = try warmEngine(["lol"])
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 400))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let label = EmoteLabel()
+        label.engine = engine
+        label.font = font
+        label.setEmoteText("a :lol: b")
+        window.addSubview(label)
+        label.frame = CGRect(x: 10, y: 10, width: 320, height: 40)
+        UIView.animate(withDuration: 1) { label.layoutIfNeeded() }
+        let emote = try #require(label.subviews.first { $0 is AnimatedIconView })
+        #expect(emote.layer.animation(forKey: "position") == nil, "the emote animates into place")
+        #expect(emote.layer.animation(forKey: "bounds") == nil)
     }
 
     @Test func eachVisibleEmoteGetsAPlayerOverItsGlyph() throws {

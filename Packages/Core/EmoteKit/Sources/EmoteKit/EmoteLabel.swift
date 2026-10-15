@@ -377,7 +377,9 @@ open class EmoteLabel: UILabel {
     /// Places, starts, moves and removes the players for the current layout.
     private func placeEmotes() {
         let textBox = emoteTextRect(forBounds: bounds)
-        let verdict: EmoteVisibility.Verdict = hasEmotes && animatesEmotes
+        // ⚠️ NOT WHILE A FLIGHT IS IN THE AIR (`FlightActivity`): the glyphs
+        // are drawn plain, and the emotes come back when it lands.
+        let verdict: EmoteVisibility.Verdict = hasEmotes && animatesEmotes && !FlightActivity.isActive(for: self)
             ? EmoteVisibility.verdict(for: self) : .invisible
         lastSeenVisible = verdict == .visible
         if verdict == .awaitingPresentation { recheckNextTurn() }
@@ -409,7 +411,15 @@ open class EmoteLabel: UILabel {
                 // one a test can set, and the one every emote surface shares.
                 player.view.playbackPolicy = policy
                 players[index] = player
-                addSubview(player.view)
+                // ⚠️ PLACED BEFORE IT IS SHOWN, OUTSIDE ANY ANIMATION: a
+                // player added at .zero and framed in a layout pass that ran
+                // inside an animation block (a flight poses its cards in one)
+                // flew in from the label's corner.
+                UIView.performWithoutAnimation {
+                    player.view.frame = square
+                    player.skeleton.frame = square
+                    addSubview(player.view)
+                }
                 start(player, index: index)
             }
             player.view.frame = square
@@ -533,6 +543,21 @@ open class EmoteLabel: UILabel {
         }
         center.addObserver(self, selector: #selector(willEnterForeground),
                            name: UIApplication.willEnterForegroundNotification, object: nil)
+        center.addObserver(self, selector: #selector(flightActivityChanged(_:)),
+                           name: FlightActivity.didChangeNotification, object: nil)
+    }
+
+    /// A flight took off — the emotes give their places back, the glyphs
+    /// draw plain — or the last one landed, and they are placed again, at
+    /// rest (`FlightActivity`).
+    @objc private func flightActivityChanged(_ note: Notification) {
+        guard hasEmotes, let window, note.object as? UIWindow === window else { return }
+        if FlightActivity.isActive(for: self) {
+            resetPlayers()
+        } else {
+            lastSeenVisible = false
+            setNeedsLayout()
+        }
     }
 
     /// The policy is read when a player starts, so a change restarts them all

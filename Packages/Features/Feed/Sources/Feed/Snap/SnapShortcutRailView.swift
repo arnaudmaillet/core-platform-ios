@@ -170,6 +170,10 @@ final class SnapShortcutRailView: UIScrollView {
         // observation) and the in-range detent snap. It never clamps
         // out-of-range targets — the edge spring is UIKit's.
         delegate = self
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(flightActivityChanged(_:)),
+            name: FlightActivity.didChangeNotification, object: nil
+        )
 
         // White = shown, clear = dissolved; locations resolved per layout
         // pass (they depend on the rail's height). BOTTOM duty only (the
@@ -200,7 +204,9 @@ final class SnapShortcutRailView: UIScrollView {
             updateDressing()
             return
         }
-        // On screen: dress what the window shows.
+        // On screen: dress what the window shows — none of it while a flight
+        // is in the air in that window (a page staged under a zoom).
+        concealForFlight(FlightActivity.isActive(for: self))
         setNeedsLayout()
         // The system's scroll-edge effects manage `layer.mask` themselves
         // and silently evict the custom edge-fade gradient (the feed's
@@ -282,15 +288,45 @@ final class SnapShortcutRailView: UIScrollView {
         for tile in tiles { tile.clear() }
         for icon in icons { icon.removeFromSuperview() }
         self.emotes = emotes
-        tiles = emotes.map { _ in EmoteTileView() }
-        icons = zip(emotes, tiles).map(Self.makeIcon)
+        // Built OUTSIDE ANY ANIMATION: a page configured inside a flight's
+        // block framed each new shortcut from a zero rect, growing it in.
+        UIView.performWithoutAnimation {
+            tiles = emotes.map { _ in EmoteTileView() }
+            icons = zip(emotes, tiles).map(Self.makeIcon)
+        }
         dressed = Array(repeating: false, count: emotes.count)
         for icon in icons { addSubview(icon) }
+        concealForFlight(FlightActivity.isActive(for: self))
         isHidden = emotes.isEmpty
         needsContentRebuild = true
         needsRestReset = true
         setNeedsLayout()
     }
+
+    // MARK: - Flights
+
+    /// ⚠️ THE SHORTCUTS SIT OUT A FLIGHT (`FlightActivity`; the owner,
+    /// 2026-10-15, on a device): the page's wheel was laid out inside the
+    /// zoom's animation block, so its emotes grew in from the rail's corner
+    /// and showed twice — once on the flying page, once at their resting
+    /// place. Hidden while any flight is in the air, shown at rest, outside
+    /// any animation, when the last one lands.
+    @objc private func flightActivityChanged(_ note: Notification) {
+        guard let window, note.object as? UIWindow === window else { return }
+        concealForFlight(FlightActivity.isActive(for: self))
+    }
+
+    private func concealForFlight(_ concealed: Bool) {
+        UIView.performWithoutAnimation {
+            for icon in icons { icon.isHidden = concealed }
+            if !concealed { layoutIfNeeded() }
+        }
+    }
+
+    #if DEBUG
+    /// Whether the shortcuts are hidden for a flight.
+    var debugConcealedForFlight: Bool { icons.contains { $0.isHidden } }
+    #endif
 
     /// Back to the resting window (cell reuse). Also releases any feed lock
     /// a mid-gesture recycle would otherwise strand.
@@ -405,11 +441,16 @@ final class SnapShortcutRailView: UIScrollView {
 
         let diameter = Self.iconDiameter
         let x = (bounds.width - diameter) / 2
-        for (index, icon) in icons.enumerated() {
-            // Frame under an active exit transform is undefined — reset
-            // first; the interpolation pass right after reapplies it.
-            icon.transform = .identity
-            icon.frame = CGRect(x: x, y: CGFloat(index) * Self.step, width: diameter, height: diameter)
+        // ⚠️ OUTSIDE ANY ANIMATION: a rebuild run inside a flight's block
+        // grew every shortcut out of a zero rect.
+        UIView.performWithoutAnimation {
+            for (index, icon) in icons.enumerated() {
+                // Frame under an active exit transform is undefined — reset
+                // first; the interpolation pass right after reapplies it.
+                icon.transform = .identity
+                icon.frame = CGRect(x: x, y: CGFloat(index) * Self.step, width: diameter, height: diameter)
+                icon.layoutIfNeeded()
+            }
         }
         let contentHeight = icons.isEmpty
             ? 0
