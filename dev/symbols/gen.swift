@@ -183,7 +183,6 @@ let fit: [String: CGFloat] = [
     "core.comment": 0.977, "core.comment.fill": 0.977,
     "core.repost": 1.0,
     "core.gem": 1.225, "core.gem.fill": 1.225,
-    "core.more": 1.27,
     "core.share": 1.11,
 ]
 
@@ -289,7 +288,6 @@ let set: [(String, String)] = [
     ("core.repost", "regular/arrows-clockwise.svg"),
     ("core.star", "regular/star.svg"),
     ("core.star.fill", "fill/star-fill.svg"),
-    ("core.more", "regular/dots-three.svg"),
     ("core.share", "regular/export.svg"),
 ]
 for (name, file) in set { write(name, phosphor(file)) }

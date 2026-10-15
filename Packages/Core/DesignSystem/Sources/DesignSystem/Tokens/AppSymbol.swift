@@ -1,7 +1,7 @@
 import UIKit
 
 /// THE APP'S SIGNATURE GLYPHS (#1128): the verbs and currencies a viewer
-/// meets on every card — like, comment, repost, save, more, share, gems —
+/// meets on every card — like, comment, repost, save, share, gems —
 /// drawn as the app's own custom SF Symbols, by name, never spelled at a
 /// call site.
 ///
@@ -14,8 +14,10 @@ import UIKit
 ///   收藏 convention; the like is the heart.
 /// - **The gem is our own drawing** (side view, rounded), not a Phosphor or
 ///   Sketch glyph.
-/// - **One family per cluster**: the card's whole action row — ⋯ and share
+/// - **One family per cluster**: the card's whole action row — share
 ///   included — is this set. Everything else stays SF Symbols.
+/// - **The ⋯ is the system's `ellipsis`** everywhere (the owner, 2026-10-15:
+///   a custom one was dropped).
 ///
 /// ⚠️ The three weight masters of each template are the SAME outline today:
 /// Phosphor's thin / regular / bold paths do not share a structure, so they
@@ -42,8 +44,6 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     case save = "core.star"
     /// Saved: the star, filled (drawn gold, `Palette.saveGold`).
     case saved = "core.star.fill"
-    /// The card's ⋯ menu.
-    case more = "core.more"
     /// Share.
     case share = "core.share"
     /// Gems, outline.
@@ -86,7 +86,6 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .repost: "Repost"
         case .save: "Save"
         case .saved: "Saved"
-        case .more: "More"
         case .share: "Share"
         case .gem, .gemFilled: "Gems"
         case .paperplane, .paperplaneFill, .paperplaneBadge, .paperplaneBadgeFill: "Explore"
