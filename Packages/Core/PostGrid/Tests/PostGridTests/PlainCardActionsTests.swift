@@ -239,8 +239,8 @@ struct PlainCardActionsTests {
         #expect(likes.isContextMenuInteractionEnabled)
     }
 
-    /// A saved post's star is the save gold, as on the full-screen post
-    /// (#1182); unsaved, it keeps the line's one ink.
+    /// A saved post's star is the full-screen post's gold (#1182, #1188 —
+    /// the reference); unsaved, it keeps the line's one ink.
     @Test func aSavedStarIsTheSaveGold() throws {
         let cell = row()
         let star = try #require(actions(in: cell).first { glyph(of: $0) == AppSymbol.save.rawValue })
@@ -248,9 +248,9 @@ struct PlainCardActionsTests {
         cell.isBookmarked = true
         #expect(star.isSelected)
         #expect(glyph(of: star) == AppSymbol.saved.rawValue)
-        #expect(star.selectedTint == Palette.saveGold)
+        #expect(star.selectedTint == Palette.saveGoldOnMedia)
         let drawn = star.configuration?.imageColorTransformer?(.black)
-        #expect(drawn == Palette.saveGold, "the saved star is drawn in \(String(describing: drawn))")
+        #expect(drawn == Palette.saveGoldOnMedia, "the saved star is drawn in \(String(describing: drawn))")
     }
 
     // MARK: - The flight lands on the same line
