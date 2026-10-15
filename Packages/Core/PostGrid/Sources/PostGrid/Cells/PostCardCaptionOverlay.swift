@@ -61,7 +61,7 @@ import UIKit
 /// (`PostLikeReadoutView`) — the line's trailing end, the name truncating
 /// before it. On a text card that line is the foot, so the heart sits in the
 /// card's bottom-right corner, where a mosaic tile's sits; on a picture it is
-/// the line above the caption's lines. A READOUT, red once the viewer has
+/// the foot too, under the caption's lines (2026-10-15). A READOUT, red once the viewer has
 /// staked, never a control (product call, 3 October 2026): it takes no
 /// touch, so a tap on it opens the post like a tap anywhere on the card.
 /// Part of the overlay rather than of the cell for the reason the overlay is
@@ -233,7 +233,7 @@ public final class PostCardCaptionOverlay: UIView {
     public static var mediaCaptionFont: UIFont { captionFont(onMedia: true) }
 
     /// How tall the words stand over a picture's foot with `captionLines`
-    /// lines of caption — the inset, the lines, the author's line above them.
+    /// lines of caption — the inset, the author's line, the lines above it.
     /// The scrim is not counted: it fades to nothing at its top.
     public static func mediaTextHeight(captionLines: Int) -> CGFloat {
         let caption = captionLines > 0
@@ -353,18 +353,20 @@ public final class PostCardCaptionOverlay: UIView {
         ).height.rounded(.up)
         switch placement {
         case .onMedia:
-            // From the foot up: the caption's lines, the author above them.
-            let caption = CGRect(
-                x: inset, y: size.height - inset - fitted, width: width, height: fitted
-            )
+            // From the foot up: the author's line (and the like) at the
+            // foot, the caption's lines above it — the words first, who said
+            // them under (the owner, 2026-10-15).
             let author = CGRect(
-                x: inset + face, y: caption.minY - 2 - authorHeight, width: authorWidth, height: authorHeight
+                x: inset + face, y: size.height - inset - authorHeight, width: authorWidth, height: authorHeight
             )
-            // The scrim reaches a little above the author, so the text never
-            // sits on the picture's own brightness.
+            let caption = CGRect(
+                x: inset, y: author.minY - (fitted > 0 ? 2 + fitted : 0), width: width, height: fitted
+            )
+            // The scrim reaches a little above the highest words, so the text
+            // never sits on the picture's own brightness.
             return RestingLayout(
                 size: size, caption: caption, author: author, avatar: disc(on: author),
-                like: like(on: author), scrimTop: max(0, author.minY - 36)
+                like: like(on: author), scrimTop: max(0, min(caption.minY, author.minY) - 36)
             )
         case .onCard:
             // The words from the top, the author at the foot.

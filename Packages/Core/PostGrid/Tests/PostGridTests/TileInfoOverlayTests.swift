@@ -160,9 +160,10 @@ struct TileInfoOverlayTests {
         #expect(overlay.debugAuthorText == "Ada Lovelace")
         #expect(overlay.debugCaptionText == Self.longCaption)
         #expect(overlay.debugCaptionRenderedLines == 2, "a long caption is TRUNCATED to two lines")
-        // Anchored at the foot, on the inset; the author just above it.
-        #expect(abs(overlay.debugCaptionFrame.maxY - (Self.large.height - 10)) < 0.5)
-        #expect(overlay.debugAuthorFrame.maxY <= overlay.debugCaptionFrame.minY)
+        // The author's line anchored at the foot, on the inset; the caption
+        // just above it (the owner, 2026-10-15: the words first).
+        #expect(abs(overlay.debugAuthorFrame.maxY - (Self.large.height - 10)) < 0.5)
+        #expect(overlay.debugCaptionFrame.maxY <= overlay.debugAuthorFrame.minY)
         #expect(overlay.debugAvatarFrame.isNull == false, "the author's face leads the name")
 
         let medium = try #require(tile(Self.medium).debugInfoOverlay)
@@ -262,7 +263,7 @@ struct TileInfoOverlayTests {
         copy.layoutIfNeeded()
         let scale = page.width / Self.large.width
         #expect(copy.debugCaptionWrapWidth == wrap)
-        #expect(abs(copy.debugCaptionFrame.maxY - (page.height - 10 * scale)) < 0.5)
+        #expect(abs(copy.debugAuthorFrame.maxY - (page.height - 10 * scale)) < 0.5)
     }
 
     /// The close's stand-in lands wearing the slot's words — decided at the
@@ -284,7 +285,7 @@ struct TileInfoOverlayTests {
             #expect(tile.debugInfoOverlay === overlay, "the variant never changes with the window")
             #expect(overlay.debugCaptionWrapWidth == wrap)
             let scale = size.width / Self.large.width
-            #expect(abs(overlay.debugCaptionFrame.maxY - (size.height - 10 * scale)) < 0.5)
+            #expect(abs(overlay.debugAuthorFrame.maxY - (size.height - 10 * scale)) < 0.5)
         }
 
         // Back at the landing size, the stand-in IS the tile.
