@@ -149,6 +149,24 @@ struct SoundSheetTests {
         #expect(!navigation.isToolbarHidden, "the actions live in the navigation controller's toolbar")
     }
 
+    /// A sound with nothing under it — its one post the one watched — has
+    /// ONE detent: a second opened an empty band under the sound (#1162; the
+    /// owner, on a device). Posts arriving bring the expanded detent back.
+    @Test func aSoundWithNothingBelowHasOneDetent() throws {
+        let controller = sheet(tiles: 0, popular: false)
+        let navigation = controller.wrappedInSheet()
+        controller.loadViewIfNeeded()
+        let presentation = try #require(navigation.sheetPresentationController)
+        #expect(controller.hasNothingBelow)
+        #expect(presentation.detents.map(\.identifier) == [Sheet.collapsedDetent])
+        #expect(controller.expandedDetentIdentifier == Sheet.collapsedDetent)
+
+        let content = Self.content(12)
+        controller.update(sections: content.sections, tiles: content.tiles)
+        #expect(!controller.hasNothingBelow)
+        #expect(presentation.detents.count == 2)
+    }
+
     /// The bar's one item is the close button, at its trailing end; the
     /// content starts BEHIND the bar — no inset from it, the sound
     /// `topInset` under the grabber, as far as from the sheet's side — with no
@@ -741,6 +759,33 @@ struct SoundSheetTests {
         #expect(toggles == 1)
         #expect(!Mirror(reflecting: controller).children.contains { $0.value is AVPlayer },
                 "the sheet holds a player of its own")
+    }
+
+    /// ⚠️ THE WHOLE RECORD TAKES THE TAP (#1162): its upper half, under the
+    /// sheet's bar, never did — the tap is the sheet's now, and it begins
+    /// anywhere on the disc, not only on the glyph; never beside it.
+    @Test func theWholeRecordTakesTheTap() throws {
+        let controller = sheet(tiles: 3)
+        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
+        try laidOut(controller)
+        let header = try #require(controller.debugHeader)
+        let record = header.debugRecordFrame
+        let radius = record.width / 2
+        let centre = CGPoint(x: record.midX, y: record.midY)
+        #expect(controller.recordTakesTap(at: centre, in: header), "the glyph")
+        #expect(controller.recordTakesTap(at: CGPoint(x: centre.x, y: record.minY + 6), in: header), "the upper edge")
+        #expect(controller.recordTakesTap(at: CGPoint(x: record.maxX - 6, y: centre.y), in: header), "the side")
+        #expect(!controller.recordTakesTap(at: CGPoint(x: record.minX + 2, y: record.minY + 2), in: header),
+                "a corner of its square is off the disc")
+        #expect(!controller.recordTakesTap(at: CGPoint(x: centre.x + radius + 20, y: centre.y), in: header), "beside it")
+
+        let navigation = try #require(controller.navigationController)
+        navigation.pushViewController(UIViewController(), animated: false)
+        #expect(!controller.recordTakesTap(at: centre, in: header), "a pushed screen covers the record")
+        navigation.popViewController(animated: false)
+
+        controller.setPostPlayback(.init(playing: false, muted: false, available: false))
+        #expect(!controller.recordTakesTap(at: centre, in: header), "a post with no sound takes no tap")
     }
 
     /// A post with no audio: the record without its glyph, refusing taps, and

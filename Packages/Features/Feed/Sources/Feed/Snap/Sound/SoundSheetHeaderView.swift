@@ -61,7 +61,9 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         // 22 + 11).
         recordGlass.badgeSide = 22
         recordGlass.badgeGlyphSize = 10
-        record.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(togglePlayback)))
+        // The record's TAP is the sheet's (`SoundSheetViewController
+        // .installRecordTap`, #1162): a recognizer here never fired under the
+        // sheet's bar. This view only says where the record is.
         recordGlass.translatesAutoresizingMaskIntoConstraints = false
         record.addSubview(recordGlass)
         NSLayoutConstraint.activate([
@@ -205,7 +207,19 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     var debugShowsPause: Bool { record.accessibilityLabel == "Pause post" }
     var debugCanToggle: Bool { record.isUserInteractionEnabled && !playButton.isHidden }
     func debugTapRecord() { togglePlayback() }
+    /// The record's frame, in this view's space.
+    var debugRecordFrame: CGRect { record.frame }
     #endif
+
+    /// Whether `point`, in this view's space, is on the record — the WHOLE
+    /// disc (#1162) — and the record takes taps.
+    func recordTakesTap(at point: CGPoint) -> Bool {
+        guard record.isUserInteractionEnabled, !record.isHidden else { return false }
+        let local = convert(point, to: record)
+        let radius = min(record.bounds.width, record.bounds.height) / 2
+        let centre = CGPoint(x: record.bounds.midX, y: record.bounds.midY)
+        return hypot(local.x - centre.x, local.y - centre.y) <= radius
+    }
 
     func setMeta(_ meta: String) {
         metaLabel.text = meta
