@@ -644,7 +644,7 @@ struct ConversationThreadSendAndMuteTests {
         graph.releaseReads()
         #expect(await settle { screen.debugPeerFollowBadge == .friends })
         #expect(!pill.isRedrawingWholePill, "the whole pill was redrawn for the relation")
-        #expect(pill.drawnBadgeSymbol == "person.2.fill")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.peopleFilled.rawValue)
         #expect(pill.badgeReplaceCount == 1, "the late relation did not land as a symbol replace")
         let after = try #require(screen.toolbarItems)
         #expect(after.count == items.count)
@@ -663,14 +663,14 @@ struct ConversationThreadSendAndMuteTests {
         let pill = try #require(peerPill(screen))
         #expect(await settle { screen.debugPeerFollowBadge == .follow })
         #expect(await settle { !pill.isRedrawingWholePill })
-        #expect(pill.drawnBadgeSymbol == "plus")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.plus.rawValue)
         let items = try #require(screen.toolbarItems)
         let replaces = pill.badgeReplaceCount
 
         screen.followPeer(ProfileID("them"))
 
         #expect(screen.debugPeerFollowBadge == .friends)
-        #expect(pill.drawnBadgeSymbol == "person.2.fill")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.peopleFilled.rawValue)
         #expect(pill.badgeReplaceCount == replaces + 1, "the badge changed without its symbol replace")
         #expect(!pill.isRedrawingWholePill, "the follow tap blurred the whole pill")
         let after = try #require(screen.toolbarItems)
@@ -699,14 +699,14 @@ struct ConversationThreadSendAndMuteTests {
 
         screen.followPeer(ProfileID("them"))
         #expect(await settle { screen.debugPeerFollowBadge == .pending })
-        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.clock.rawValue)
         #expect(pill.badgeReplaceCount == replaces + 2, "plus → pending was not drawn by symbol replaces alone")
         #expect(!pill.isRedrawingWholePill, "the request blurred the whole pill")
 
         graph.relation = .notFollowing
         screen.resolvePeerRelation(refresh: true)
         #expect(await settle { screen.debugPeerFollowBadge == .follow })
-        #expect(pill.drawnBadgeSymbol == "plus")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.plus.rawValue)
         #expect(pill.badgeReplaceCount == replaces + 3, "pending → plus was not one symbol replace")
         #expect(!pill.isRedrawingWholePill, "pending → plus blurred the whole pill")
         let after = try #require(screen.toolbarItems)

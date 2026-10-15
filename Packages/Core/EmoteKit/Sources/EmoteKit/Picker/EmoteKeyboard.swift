@@ -177,10 +177,11 @@ public final class EmoteKeyboard: NSObject {
 
     private func updateToggle() {
         let panel = isShowingPanel
-        toggleButton.setImage(UIImage(
-            systemName: panel ? "keyboard" : "face.smiling",
-            withConfiguration: UIImage.SymbolConfiguration(weight: .medium)
-        ), for: .normal)
+        // The app's own glyphs (#1184).
+        toggleButton.setImage(
+            (panel ? AppSymbol.keyboard : AppSymbol.smiley).image(UIImage.SymbolConfiguration(weight: .medium)),
+            for: .normal
+        )
         toggleButton.accessibilityLabel = panel ? "Keyboard" : "Emotes"
     }
 

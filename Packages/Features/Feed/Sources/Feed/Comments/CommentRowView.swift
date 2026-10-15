@@ -354,9 +354,9 @@ final class CommentRowView: UIView {
     /// menu — shared by the row's own menu and the stream's.
     static func reviewActions(_ review: @escaping (_ approve: Bool) -> Void) -> UIMenu {
         UIMenu(options: .displayInline, children: [
-            UIAction(title: "Approve Comment", image: UIImage(systemName: "checkmark.circle")) { _ in review(true) },
+            UIAction(title: "Approve Comment", image: AppSymbol.checkCircle.image()) { _ in review(true) },
             UIAction(
-                title: "Decline Comment", image: UIImage(systemName: "xmark.circle"), attributes: .destructive
+                title: "Decline Comment", image: AppSymbol.xCircle.image(), attributes: .destructive
             ) { _ in review(false) },
         ])
     }
@@ -369,12 +369,12 @@ final class CommentRowView: UIView {
         var children: [UIMenuElement] = []
         if let onBlock {
             children.append(UIAction(
-                title: "Block User", image: UIImage(systemName: "hand.raised"), attributes: .destructive
+                title: "Block User", image: AppSymbol.hand.image(), attributes: .destructive
             ) { _ in onBlock() })
         }
         if let onReport {
             children.append(UIAction(
-                title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive
+                title: "Report", image: AppSymbol.flag.image(), attributes: .destructive
             ) { _ in onReport() })
         }
         return children.isEmpty ? nil : UIMenu(options: .displayInline, children: children)
@@ -384,7 +384,7 @@ final class CommentRowView: UIView {
     /// whichever moderation actions are wired.
     func menuElements() -> [UIMenuElement] {
         let review: [UIMenuElement] = onReview.map { [Self.reviewActions($0)] } ?? []
-        let share = UIAction(title: "Share Comment", image: UIImage(systemName: "square.and.arrow.up")) {
+        let share = UIAction(title: "Share Comment", image: AppSymbol.share.image()) {
             [weak self] _ in self?.onShare?()
         }
         let moderation: [UIMenuElement] = Self.moderationMenu(onBlock: onBlock, onReport: onReport).map { [$0] } ?? []
@@ -467,7 +467,7 @@ final class CommentRowView: UIView {
     weak var layoutHost: UIView?
 
     private let sendingSpinner = UIActivityIndicatorView(style: .medium)
-    private let failedMark = UIImageView(image: UIImage(systemName: "exclamationmark.circle.fill"))
+    private let failedMark = UIImageView(image: AppSymbol.warningCircleFilled.image())
 
     /// The spinner is drawn at the time's size, not a control's (#725).
     static let spinnerScale = CGAffineTransform(scaleX: 0.6, y: 0.6)
@@ -974,17 +974,17 @@ final class CommentThreadToggleRow: UIView {
         switch kind {
         case .expand(let hidden):
             label.text = "View \(hidden) more \(hidden == 1 ? "reply" : "replies")…"
-            chevronName = "chevron.down"
+            chevronName = AppSymbol.caretDown.rawValue
         case .collapse:
             label.text = "Hide replies"
-            chevronName = "chevron.up"
+            chevronName = AppSymbol.caretUp.rawValue
         }
         label.font = .appFont(forTextStyle: .footnote)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .secondaryLabel
-        let chevron = UIImageView(image: UIImage(
-            systemName: chevronName,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+        let chevron = UIImageView(image: UIImage.symbol(
+            named: chevronName,
+            configuration: UIImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
         ))
         chevron.tintColor = .secondaryLabel
         chevron.contentMode = .center

@@ -70,9 +70,8 @@ final class SoundRecordGlass: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func applyBadgeGlyph() {
-        badgeGlyph.image = UIImage(
-            systemName: "speaker.slash.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: badgeGlyphSize, weight: .bold)
+        badgeGlyph.image = AppSymbol.speakerSlashFilled.image(
+            UIImage.SymbolConfiguration(pointSize: badgeGlyphSize, weight: .bold)
         )
     }
 

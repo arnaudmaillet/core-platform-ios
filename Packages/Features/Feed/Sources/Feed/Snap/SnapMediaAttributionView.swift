@@ -397,8 +397,7 @@ final class SnapMediaAttributionView: UIView {
         return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
             UIColor.darkGray.setFill()
             context.fill(CGRect(x: 0, y: 0, width: side, height: side))
-            let glyph = UIImage(systemName: "music.note")?
-                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold))
+            let glyph = AppSymbol.musicNote.image(UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold))?
                 .withTintColor(.white, renderingMode: .alwaysOriginal)
             if let glyph {
                 glyph.draw(at: CGPoint(x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2))

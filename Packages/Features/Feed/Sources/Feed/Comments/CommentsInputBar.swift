@@ -387,8 +387,8 @@ final class CommentsInputBar: UIView {
     /// The field button's two faces. Send is the filled arrow in a disc —
     /// iMessage's own, at home inside a field — in `sendTint`; the waveform
     /// is the field's quiet ink, like the emote button beside it.
-    static let waveformSymbol = "waveform"
-    static let sendSymbol = "arrow.up.circle.fill"
+    static let waveformSymbol = AppSymbol.waveform.rawValue
+    static let sendSymbol = AppSymbol.sendFilled.rawValue
     /// Every glyph in the field has a POINT SIZE of its own — see the
     /// trailing buttons' constraints in `init`.
     static let waveformConfiguration = UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
@@ -422,9 +422,9 @@ final class CommentsInputBar: UIView {
     /// and the leaving waveform flashed blue (or the arriving arrow grey) in
     /// the frames between the two.
     static func fieldActionImage(sends: Bool) -> UIImage? {
-        UIImage(
-            systemName: sends ? sendSymbol : waveformSymbol,
-            withConfiguration: sends ? sendConfiguration : waveformConfiguration
+        UIImage.symbol(
+            named: sends ? sendSymbol : waveformSymbol,
+            configuration: sends ? sendConfiguration : waveformConfiguration
         )?.withTintColor(sends ? sendTint : waveformTint, renderingMode: .alwaysOriginal)
     }
 
@@ -534,9 +534,7 @@ final class CommentsInputBar: UIView {
             ]
         )
 
-        visibilityButton.configuration?.image = UIImage(
-            systemName: "globe", withConfiguration: Self.glyphConfiguration
-        )
+        visibilityButton.configuration?.image = AppSymbol.globe.image(Self.glyphConfiguration)
         visibilityButton.configuration?.cornerStyle = .capsule
         visibilityButton.accessibilityLabel = "Post visibility"
         visibilityButton.showsMenuAsPrimaryAction = true
@@ -1677,7 +1675,7 @@ final class CommentsInputBar: UIView {
             symbol = PostActionSymbol.repost
             railButton.accessibilityLabel = "Repost"
         case .pin(let isPinned):
-            symbol = isPinned ? "pin.fill" : "pin"
+            symbol = isPinned ? AppSymbol.pinFilled.rawValue : AppSymbol.pin.rawValue
             railButton.accessibilityLabel = isPinned ? "Unpin conversation" : "Pin conversation"
         case .sound(let face):
             // The cover as a disc, the bubble's size less the sound bubble's

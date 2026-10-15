@@ -51,6 +51,58 @@ public enum AppSymbol: String, CaseIterable, Sendable {
     /// Gems, filled — the glyph beside an amount.
     case gemFilled = "core.gem.fill"
 
+    // The full-screen post's other glyphs (#1184), from the same Phosphor set.
+    /// Sorting a list (the comments' order).
+    case sort = "core.sort"
+    /// "Not interested": a thumb down.
+    case notInterested = "core.not.interested"
+    /// Report: a flag.
+    case flag = "core.flag"
+    /// Add, follow: a plus.
+    case plus = "core.plus"
+    /// Done, followed: a check mark.
+    case check = "core.check"
+    /// Accept, approved: a check in a circle.
+    case checkCircle = "core.check.circle"
+    /// Decline: a cross in a circle.
+    case xCircle = "core.x.circle"
+    /// People, mutuals.
+    case people = "core.people"
+    /// People, mutuals, filled.
+    case peopleFilled = "core.people.fill"
+    /// Pending, requested: a clock.
+    case clock = "core.clock"
+    /// A song.
+    case musicNote = "core.music.note"
+    /// No sound.
+    case speakerSlash = "core.speaker.slash"
+    /// Muted, filled.
+    case speakerSlashFilled = "core.speaker.slash.fill"
+    /// Restrict: a raised hand.
+    case hand = "core.hand"
+    /// A warning: a triangle.
+    case warning = "core.warning"
+    /// Failed: a warning in a circle, filled.
+    case warningCircleFilled = "core.warning.circle.fill"
+    /// Collapse / expand downward.
+    case caretDown = "core.caret.down"
+    /// Collapse / expand upward.
+    case caretUp = "core.caret.up"
+    /// Send: an arrow up in a disc.
+    case sendFilled = "core.send.fill"
+    /// Voice: a waveform.
+    case waveform = "core.waveform"
+    /// Public, everyone: a globe.
+    case globe = "core.globe"
+    /// Pin.
+    case pin = "core.pin"
+    /// Pinned.
+    case pinFilled = "core.pin.fill"
+    /// Emotes: a smiley.
+    case smiley = "core.smiley"
+    /// Back to the keyboard.
+    case keyboard = "core.keyboard"
+
     /// The glyph as a template image, sized by `configuration` (a text style
     /// for a glyph beside text, a point size for fixed chrome — see
     /// `textStyle(_:)` and `fixed(_:)`).
@@ -73,6 +125,27 @@ public enum AppSymbol: String, CaseIterable, Sendable {
         case .more: "More"
         case .share: "Share"
         case .gem, .gemFilled: "Gems"
+        case .sort: "Sort"
+        case .notInterested: "Not interested"
+        case .flag: "Report"
+        case .plus: "Add"
+        case .check, .checkCircle: "Done"
+        case .xCircle: "Decline"
+        case .people, .peopleFilled: "People"
+        case .clock: "Pending"
+        case .musicNote: "Sound"
+        case .speakerSlash, .speakerSlashFilled: "No sound"
+        case .hand: "Block"
+        case .warning, .warningCircleFilled: "Warning"
+        case .caretDown: "Expand"
+        case .caretUp: "Collapse"
+        case .sendFilled: "Send"
+        case .waveform: "Voice"
+        case .globe: "Everyone"
+        case .pin: "Pin"
+        case .pinFilled: "Pinned"
+        case .smiley: "Emotes"
+        case .keyboard: "Keyboard"
         }
     }
 

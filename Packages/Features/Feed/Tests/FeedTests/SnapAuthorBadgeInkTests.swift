@@ -1,3 +1,4 @@
+import DesignSystem
 import Testing
 import UIKit
 @testable import Feed
@@ -69,13 +70,13 @@ struct SnapAuthorBadgeInkTests {
     /// A pending request wears the filled clock (#968), takes no tap of its
     /// own, and says so to VoiceOver.
     @Test func aPendingRequestWearsTheClock() {
-        #expect(Badge.pending.symbolName == "clock.circle.fill")
-        #expect(UIImage(systemName: "clock.circle.fill") != nil)
+        #expect(Badge.pending.symbolName == AppSymbol.clock.rawValue)
+        #expect(AppSymbol.clock.image() != nil)
         #expect(Badge(.requested) == .pending)
         #expect(Badge.pending.accessibilityLabel == "Requested")
         let pill = SnapAuthorIdentityView()
         pill.setFollowBadge(.pending)
-        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.clock.rawValue)
         #expect(!pill.offersFollow, "a pending request is not a follow on offer")
     }
 

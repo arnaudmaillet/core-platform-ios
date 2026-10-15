@@ -183,13 +183,13 @@ struct SnapAuthorFollowTests {
     /// (#968) — and nothing at all for the viewer or someone blocked.
     @Test func eachBadgeWearsItsSymbol() {
         typealias Badge = SnapAuthorIdentityView.FollowBadge
-        #expect(Badge.follow.symbolName == "plus")
-        #expect(Badge.following.symbolName == "checkmark.circle.fill")
-        #expect(Badge.friends.symbolName == "person.2.fill")
-        #expect(Badge.pending.symbolName == "clock.circle.fill")
+        #expect(Badge.follow.symbolName == AppSymbol.plus.rawValue)
+        #expect(Badge.following.symbolName == AppSymbol.check.rawValue)
+        #expect(Badge.friends.symbolName == AppSymbol.peopleFilled.rawValue)
+        #expect(Badge.pending.symbolName == AppSymbol.clock.rawValue)
         #expect(Badge.none.symbolName == nil)
         for name in [Badge.follow, .following, .friends, .pending].compactMap(\.symbolName) {
-            #expect(UIImage(systemName: name) != nil, "\(name) is not a system symbol")
+            #expect(UIImage.symbol(named: name) != nil, "\(name) is not a system symbol")
         }
     }
 
@@ -219,13 +219,13 @@ struct SnapAuthorFollowTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(!pill.isRedrawingWholePill)
-        #expect(pill.drawnBadgeSymbol == "plus")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.plus.rawValue)
         let item = try Self.authorItem(feed)
         let replaces = pill.badgeReplaceCount
 
         feed.followAuthor(ProfileID("prof-2"))
 
-        #expect(pill.drawnBadgeSymbol == "checkmark.circle.fill")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.check.rawValue)
         #expect(pill.badgeReplaceCount == replaces + 1, "the badge changed without its symbol replace")
         #expect(!pill.isRedrawingWholePill, "the follow tap blurred the whole pill")
         #expect(try Self.authorItem(feed) === item, "the follow tap re-minted the item")
@@ -273,7 +273,7 @@ struct SnapAuthorFollowTests {
         defer { window.isHidden = true }
         #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
         #expect(!pill.isRedrawingWholePill)
-        #expect(pill.drawnBadgeSymbol == "plus")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.plus.rawValue)
         let item = try Self.authorItem(feed)
         let replaces = pill.badgeReplaceCount
 
@@ -286,7 +286,7 @@ struct SnapAuthorFollowTests {
 
         #expect(feed.followStore.relation(for: ProfileID("prof-2")) == .requested)
         #expect(pill.followBadge == .pending)
-        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.clock.rawValue)
         #expect(pill.badgeReplaceCount == replaces + 2, "plus → pending was not drawn by symbol replaces alone")
         #expect(!pill.isRedrawingWholePill, "the request blurred the whole pill")
         #expect(try Self.authorItem(feed) === item, "the request re-minted the item")
@@ -302,7 +302,7 @@ struct SnapAuthorFollowTests {
         let (feed, pill, window) = try await Self.onScreenFeed(graph: graph, relation: .requested)
         defer { window.isHidden = true }
         #expect(pill.window != nil, "the pill is not on screen: nothing to prove")
-        #expect(pill.drawnBadgeSymbol == "clock.circle.fill")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.clock.rawValue)
         let item = try Self.authorItem(feed)
         let replaces = pill.badgeReplaceCount
 
@@ -311,7 +311,7 @@ struct SnapAuthorFollowTests {
         graph.answerLookup(.notFollowing)
         await Self.settle { pill.followBadge == .follow }
 
-        #expect(pill.drawnBadgeSymbol == "plus")
+        #expect(pill.drawnBadgeSymbol == AppSymbol.plus.rawValue)
         #expect(pill.badgeReplaceCount == replaces + 1, "pending → plus was not one symbol replace")
         #expect(!pill.isRedrawingWholePill, "pending → plus blurred the whole pill")
         #expect(try Self.authorItem(feed) === item)

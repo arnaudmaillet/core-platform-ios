@@ -54,15 +54,14 @@ struct SnapSoundFace: Equatable {
         return UIGraphicsImageRenderer(size: CGSize(width: side, height: side)).image { context in
             UIColor.darkGray.setFill()
             context.fill(CGRect(x: 0, y: 0, width: side, height: side))
-            let glyph = UIImage(systemName: noSoundSymbol)?
-                .withConfiguration(UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold))
+            let glyph = UIImage.symbol(named: noSoundSymbol, configuration: UIImage.SymbolConfiguration(pointSize: 26, weight: .semibold))?
                 .withTintColor(.lightGray, renderingMode: .alwaysOriginal)
             if let glyph {
                 glyph.draw(at: CGPoint(x: (side - glyph.size.width) / 2, y: (side - glyph.size.height) / 2))
             }
         }
     }()
-    static let noSoundSymbol = "music.note.slash"
+    static let noSoundSymbol = AppSymbol.speakerSlash.rawValue
 
     /// Fetches a remote cover into the pipeline, for a host that has to
     /// redraw once it lands (the composer's slot). Nil for a file, the note,

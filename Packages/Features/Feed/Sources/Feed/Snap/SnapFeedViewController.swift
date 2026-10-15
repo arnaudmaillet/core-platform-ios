@@ -2587,14 +2587,14 @@ final class SnapFeedViewController: UIViewController {
             statusView.isHidden = true
         case .empty:
             statusView.configure(
-                symbolName: "person.2", title: "Nothing here yet", subtitle: "Follow people to fill your timeline."
+                symbolName: AppSymbol.people.rawValue, title: "Nothing here yet", subtitle: "Follow people to fill your timeline."
             )
             statusView.isHidden = false
         case .failed(let message):
             // ⚠️ A WAY OUT (#797): this screen has no pull, so "Pull to
             // retry" was a promise it could not keep.
             statusView.configure(
-                symbolName: "exclamationmark.triangle", title: message,
+                symbolName: AppSymbol.warning.rawValue, title: message,
                 actionTitle: "Try Again", actionHandler: { [weak self] in
                     self?.statusView.setActionBusy(true)
                     self?.viewModel.refresh()
@@ -4988,14 +4988,14 @@ final class SnapFeedViewController: UIViewController {
         actions.append(UIAction(title: "Share", image: AppSymbol.share.image()) { [weak self] _ in
             self?.presentShareSheet(for: id)
         })
-        actions.append(UIAction(title: "Not interested", image: UIImage(systemName: "hand.thumbsdown")) { [weak self] _ in
+        actions.append(UIAction(title: "Not interested", image: AppSymbol.notInterested.image()) { [weak self] _ in
             self?.markNotInterested(id)
         })
         // Withheld rather than disabled when there is nobody to file with — an
         // action that cannot act is not offered.
         if reporting != nil {
             actions.append(UIAction(
-                title: "Report", image: UIImage(systemName: "flag"), attributes: .destructive
+                title: "Report", image: AppSymbol.flag.image(), attributes: .destructive
             ) { [weak self] _ in
                 self?.presentReportReasons(for: id)
             })

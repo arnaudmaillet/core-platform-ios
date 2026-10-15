@@ -68,8 +68,7 @@ final class SnapCommentSortButton: UIButton {
     init() {
         super.init(frame: .zero)
         var config = UIButton.Configuration.plain()
-        config.image = UIImage(systemName: "arrow.up.arrow.down")?
-            .withConfiguration(UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
+        config.image = AppSymbol.sort.image(UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
         config.imagePadding = Spacing.xs
         // SEMANTIC, never `.white`. The bar this rides carries the page's
         // theme (`SnapChromeTheme`, applied to the navigation bar itself so

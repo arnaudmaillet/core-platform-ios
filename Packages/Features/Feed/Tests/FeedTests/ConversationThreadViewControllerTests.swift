@@ -463,7 +463,7 @@ struct ConversationThreadViewControllerTests {
 
         #expect(composer.stake == nil)
         #expect(SnapActionColumnLayoutTests.same(composer.rail, media.sound), "pin \(composer.rail) vs sound \(media.sound)")
-        #expect(composer.bar.debugRailSymbol == "pin")
+        #expect(composer.bar.debugRailSymbol == AppSymbol.pin.rawValue)
         #expect(!composer.bar.debugFieldActionButton.isHidden, "the waveform is in the field")
     }
 
@@ -493,7 +493,7 @@ struct ConversationThreadViewControllerTests {
         screen.view.layoutIfNeeded()
         let up = try SnapActionColumnLayoutTests.composerColumn(in: screen.view, space: window)
         #expect(up.rail == rest.rail, "the pin moved: \(up.rail) vs \(rest.rail)")
-        #expect(up.bar.debugRailSymbol == "pin")
+        #expect(up.bar.debugRailSymbol == AppSymbol.pin.rawValue)
         let keyboardTopInWindow = screen.view.convert(CGPoint(x: 0, y: keyboardTop), to: window).y
         #expect(abs(up.field.maxY - (keyboardTopInWindow - Spacing.sm)) < 0.5)
         #expect(abs(up.field.maxX - up.rail.maxX) < 0.5, "the risen field does not take the pin's width")
@@ -522,19 +522,19 @@ struct ConversationThreadViewControllerTests {
 
         rail.sendActions(for: .primaryActionTriggered)
         #expect(driver.pinned == true)
-        #expect(bar.debugRailSymbol == "pin.fill")
+        #expect(bar.debugRailSymbol == AppSymbol.pinFilled.rawValue)
         #expect(rail.accessibilityLabel == "Unpin conversation")
 
         bar.draftText = "On my way"
-        #expect(bar.debugRailSymbol == "pin.fill", "the pin turned into \(bar.debugRailSymbol ?? "-")")
+        #expect(bar.debugRailSymbol == AppSymbol.pinFilled.rawValue, "the pin turned into \(bar.debugRailSymbol ?? "-")")
         bar.debugFieldActionButton.sendActions(for: .primaryActionTriggered)
         #expect(driver.sent == ["On my way"])
         #expect(driver.pinned == true, "a send is not a pin")
-        #expect(bar.debugRailSymbol == "pin.fill")
+        #expect(bar.debugRailSymbol == AppSymbol.pinFilled.rawValue)
 
         // Unpinned from elsewhere (the inbox's menu): the glyph follows.
         driver.onPinnedChange?(false)
-        #expect(bar.debugRailSymbol == "pin")
+        #expect(bar.debugRailSymbol == AppSymbol.pin.rawValue)
     }
 
     /// A draft conversation has nothing to pin yet: the pin is drawn, quiet —
@@ -543,7 +543,7 @@ struct ConversationThreadViewControllerTests {
         let (screen, driver, _, _) = makeScreen()
         driver.onPinnedChange?(nil)
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
-        #expect(bar.debugRailSymbol == "pin")
+        #expect(bar.debugRailSymbol == AppSymbol.pin.rawValue)
         #expect(bar.debugRailButton.isEnabled == false)
         bar.draftText = "Hi"
         #expect(bar.debugRailButton.isEnabled == false)
@@ -614,7 +614,7 @@ struct ConversationThreadViewControllerTests {
         let nav = screen.navigationItem.rightBarButtonItems ?? []
         #expect(!nav.contains { $0.customView is SnapAuthorIdentityView }, "the peer pill is still in the nav bar")
         let bar = try #require(Self.firstView(CommentsInputBar.self, in: screen.view))
-        #expect(bar.debugRailSymbol == "pin" || bar.debugRailSymbol == "pin.fill")
+        #expect(bar.debugRailSymbol == AppSymbol.pin.rawValue || bar.debugRailSymbol == AppSymbol.pinFilled.rawValue)
     }
 
     @Test func aPeekHasNoComposerNoFooterAndNoMenu() throws {

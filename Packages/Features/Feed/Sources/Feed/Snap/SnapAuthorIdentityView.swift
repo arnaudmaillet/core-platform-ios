@@ -44,37 +44,29 @@ final class SnapAuthorIdentityView: UIView {
         /// is pending (#968).
         case pending
 
-        /// The symbols the owner chose (#925):
-        /// - `plus` — the action;
-        /// - `checkmark.circle.fill` — the viewer follows them;
-        /// - `person.2.fill` — two people: the app already means "Friends" by
-        ///   it (the map's Friends filter), and it is the one symbol that says
-        ///   the relation goes BOTH ways;
-        /// - `clock.circle.fill` — waiting on the other person (#968). Not
-        ///   `clock.fill`: that symbol is ONE layer, a white disc with its
-        ///   hands cut out, so on the badge it can only be a white disc with
-        ///   black hands. `clock.circle.fill` is the same clock in two layers,
-        ///   like the check: its circle draws black and its hands white — and
-        ///   the two marks a "+" can turn into share one construction.
+        /// The glyphs the owner chose (#925, #968), from the app's own set
+        /// since #1184 — each white inside the badge's black disc:
+        /// - a plus — the action;
+        /// - a check — the viewer follows them;
+        /// - two people — the app already means "Friends" by them (the map's
+        ///   Friends filter), the one glyph that says the relation goes BOTH
+        ///   ways;
+        /// - a clock — waiting on the other person (#968).
         var symbolName: String? {
             switch self {
             case .none: nil
-            case .follow: "plus"
-            case .following: "checkmark.circle.fill"
-            case .friends: "person.2.fill"
-            case .pending: "clock.circle.fill"
+            case .follow: AppSymbol.plus.rawValue
+            case .following: AppSymbol.check.rawValue
+            case .friends: AppSymbol.peopleFilled.rawValue
+            case .pending: AppSymbol.clock.rawValue
             }
         }
 
-        /// Each glyph's size on the badge's disc: the check and the clock are
-        /// discs of their own, as large as it (drawn black, their marks white:
-        /// `AvatarStatusBadge.glyphImage`); the "+" and the two people sit
-        /// inside it.
+        /// Each glyph's size inside the badge's disc.
         var pointSize: CGFloat {
             switch self {
-            case .following, .pending: 13
-            case .friends: 7
-            case .none, .follow: 9
+            case .friends: 8
+            case .none, .follow, .following, .pending: 9
             }
         }
 
@@ -688,28 +680,14 @@ private final class AvatarStatusBadge: UIButton {
         return image.withTintColor(shown ? discInk : .clear, renderingMode: .alwaysOriginal)
     }
 
-    /// The relation's glyph in white ink — or, for none, a clear "+".
+    /// The relation's glyph in white ink — or, for none, a clear plus.
     /// Configured first and tinted last: a symbol configuration applied
-    /// after the tint can drop it.
-    ///
-    /// ⚠️ The check and the clock are discs of their own, as large as the
-    /// badge's: one white ink would cover the black disc and read as a WHITE
-    /// badge with a black mark. They are drawn with a palette instead — the
-    /// mark white, their own circle black — so they too are a black disc
-    /// with a white glyph. A palette is fixed ink already (no tint reaches
-    /// it), and must NOT be re-marked `.alwaysOriginal`: that drops the
-    /// palette and draws the whole symbol in the view's tint (measured: the
-    /// system blue).
+    /// after the tint can drop it. Every glyph sits inside the black disc
+    /// (#1184: the app's own single-layer glyphs, so no palette).
     private static func glyphImage(_ badge: SnapAuthorIdentityView.FollowBadge) -> UIImage {
-        let ownsDisc = badge == .following || badge == .pending
-        var configuration = UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: ownsDisc ? .regular : .bold)
-        if ownsDisc {
-            configuration = configuration.applying(UIImage.SymbolConfiguration(paletteColors: [glyphInk, discInk]))
-        }
-        let image = UIImage(systemName: badge.symbolName ?? "plus")?
-            .applyingSymbolConfiguration(configuration)
+        let configuration = UIImage.SymbolConfiguration(pointSize: badge.pointSize, weight: .bold)
+        let image = UIImage.symbol(named: badge.symbolName ?? AppSymbol.plus.rawValue, configuration: configuration)
             ?? UIImage()
-        if ownsDisc { return image }
         return image.withTintColor(badge == .none ? .clear : glyphInk, renderingMode: .alwaysOriginal)
     }
 
