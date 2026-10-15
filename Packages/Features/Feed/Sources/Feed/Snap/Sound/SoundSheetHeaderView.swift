@@ -45,11 +45,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let recordGlass = SoundRecordGlass()
     private var artwork: UIImageView { recordGlass.cover }
     private let playButton = UIButton(configuration: .glass())
-    /// ▶︎ / ❚❚, drawn over the glass disc by an image view of its own: its
-    /// `setSymbolImage(_:contentTransition:)` is UIKit's symbol replace (the
-    /// owner, 2026-10-15). The glass button's configured image swapped with
-    /// no transition, even with `symbolContentTransition` set.
-    private let playGlyph = UIImageView(image: UIImage(systemName: "play.fill"))
+    /// ▶︎ / ❚❚, drawn in the glass disc by an image view of its own, swapped
+    /// by our own bounce and fade (`swapGlyph`). The glass button's
+    /// configured image swapped with no transition, even with
+    /// `symbolContentTransition` set.
+    private let playGlyph = UIImageView(image: UIImage(systemName: "play.fill", withConfiguration: glyphConfiguration))
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let metaLabel = UILabel()
@@ -98,7 +98,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         // the size it drew it.
         playGlyph.tintColor = .label
         playGlyph.contentMode = .center
-        playGlyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        playGlyph.preferredSymbolConfiguration = Self.glyphConfiguration
         playGlyph.isUserInteractionEnabled = false
         playGlyph.translatesAutoresizingMaskIntoConstraints = false
         // ⚠️ ONE TOGGLE PER TAP: the glyph is drawn, not tapped — the record's
@@ -113,6 +113,8 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         // On the RECORD, beside the artwork rather than in it: the artwork
         // turns while the sound plays, the button stays upright.
         record.addSubview(playButton)
+        // IN the glass (the owner, 2026-10-16: the glyph is the glass's
+        // content, not a sticker over it).
         playButton.addSubview(playGlyph)
         NSLayoutConstraint.activate([
             playGlyph.centerXAnchor.constraint(equalTo: playButton.centerXAnchor),
@@ -209,11 +211,55 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         let name = playing ? "pause.fill" : "play.fill"
         guard name != shownGlyph else { return applyPlayingRest(playing) }
         shownGlyph = name
-        if let image = UIImage(systemName: name) {
-            playGlyph.setSymbolImage(image, contentTransition: .replace)
+        if let image = UIImage(systemName: name, withConfiguration: Self.glyphConfiguration) {
+            swapGlyph(to: image, animated: window != nil)
         }
         applyPlayingRest(playing)
     }
+
+    /// ⚠️ NOT THE SYSTEM'S SYMBOL REPLACE (the owner, 2026-10-16): inside
+    /// the glass button, `setSymbolImage(_:contentTransition: .replace)` is
+    /// drawn in the glass's own pass — on a device it stuttered ("as if at
+    /// 30 fps"), on the simulator it was a plain cut, at any `.speed`. The
+    /// glyph stays IN the glass, and the swap is ours: the old symbol shrinks
+    /// and fades on a copy while the new one bounces up from small as it
+    /// fades in — view animations, which the glass composites like any other.
+    private func swapGlyph(to image: UIImage, animated: Bool) {
+        guard animated, let old = playGlyph.image else {
+            playGlyph.image = image
+            return
+        }
+        let outgoing = UIImageView(image: old)
+        outgoing.tintColor = playGlyph.tintColor
+        outgoing.contentMode = .center
+        outgoing.isUserInteractionEnabled = false
+        outgoing.frame = playGlyph.frame
+        playButton.insertSubview(outgoing, belowSubview: playGlyph)
+        UIView.performWithoutAnimation {
+            playGlyph.image = image
+            playGlyph.alpha = 0
+            playGlyph.transform = CGAffineTransform(scaleX: Self.swapScale, y: Self.swapScale)
+        }
+        UIView.animate(withDuration: 0.16, delay: 0, options: [.curveEaseIn, .allowUserInteraction]) {
+            outgoing.alpha = 0
+            outgoing.transform = CGAffineTransform(scaleX: Self.swapScale, y: Self.swapScale)
+        } completion: { _ in
+            outgoing.removeFromSuperview()
+        }
+        UIView.animate(
+            withDuration: 0.42, delay: 0.06, usingSpringWithDamping: 0.55, initialSpringVelocity: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.playGlyph.alpha = 1
+            self.playGlyph.transform = .identity
+        }
+    }
+
+    /// How small a symbol is when it leaves, and when the next one starts.
+    static let swapScale: CGFloat = 0.4
+
+    /// ▶︎ / ❚❚'s size and weight — the glass button's image as it drew it.
+    static let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
 
     /// The glyph shown — so a repeat of the same state replaces nothing.
     private var shownGlyph = "play.fill"
@@ -235,6 +281,10 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     var debugShowsPause: Bool { record.accessibilityLabel == "Pause post" }
     /// The glyph's symbol, as last asked for.
     var debugShownGlyph: String { shownGlyph }
+    /// The glyph's image as drawn, and whether it is drawn in the glass
+    /// button.
+    var debugGlyphImage: UIImage? { playGlyph.image }
+    var debugGlyphIsInTheGlass: Bool { playGlyph.isDescendant(of: playButton) }
     var debugCanToggle: Bool { record.isUserInteractionEnabled && !playButton.isHidden }
     func debugTapRecord() { togglePlayback() }
     /// The record's frame, in this view's space.
