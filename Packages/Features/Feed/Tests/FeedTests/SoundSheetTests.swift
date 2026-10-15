@@ -747,6 +747,22 @@ struct SoundSheetTests {
         #expect(!header.debugShowsMutedBadge, "unmuting left the badge")
     }
 
+    /// ▶︎ ⇄ ❚❚ is one glyph view swapping its symbol (a symbol replace, the
+    /// owner 2026-10-15), and the same state twice swaps nothing.
+    @Test func theRecordsGlyphFollowsThePlayback() throws {
+        let controller = sheet(tiles: 3)
+        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
+        try laidOut(controller)
+        let header = try #require(controller.debugHeader)
+        #expect(header.debugShownGlyph == "play.fill")
+        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
+        #expect(header.debugShownGlyph == "pause.fill")
+        #expect(header.debugShowsPause)
+        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
+        #expect(header.debugShownGlyph == "play.fill")
+        #expect(!header.debugShowsPause)
+    }
+
     /// The record's tap toggles the POST, once — the sheet has no player of
     /// its own any more.
     @Test func aTapTogglesThePostOnce() throws {
