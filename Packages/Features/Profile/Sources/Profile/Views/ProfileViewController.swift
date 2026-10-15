@@ -1384,6 +1384,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     #if DEBUG
     /// Stands in for the scroll: the tray out of sight, or back.
+    /// The scroll's own path: the header placed for `travelled`, the tray's
+    /// visibility decided from it.
+    func debugApplyHeaderOffset(_ travelled: CGFloat) { applyHeaderOffsetNow(travelled) }
     func debugSetTrayScrolledAway(_ away: Bool) {
         isTrayScrolledAway = away
         updateActionBarItem(followButtonState)
@@ -2081,7 +2084,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// the tray's foot can rest at the bar's edge; by then the identity fade
     /// (`applyIdentityFade`, run first) has taken it out.
     private func trayIsScrolledAway(travelled: CGFloat) -> Bool {
-        guard let trayFoot = headerView.actionTrayMaxY(in: headerHost) else { return false }
+        // ⚠️ AT REST THE TRAY IS ON SCREEN, whatever the frames say: a push
+        // reads them before the header has laid out (a tray foot at 0, an
+        // identity not faded in yet), and the pill showed over a profile that
+        // had not moved (the owner, on a device, 2026-10-15).
+        guard travelled > 0, headerView.bounds.height > 0,
+              let trayFoot = headerView.actionTrayMaxY(in: headerHost), trayFoot > 0 else { return false }
         let covered = trayFoot - min(travelled, headerTravel) <= view.safeAreaInsets.top
         return covered || headerView.alpha < 0.5
     }

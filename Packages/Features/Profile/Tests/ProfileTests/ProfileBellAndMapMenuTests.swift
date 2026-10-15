@@ -230,6 +230,18 @@ extension ProfileBellAndMapMenuTests {
         #expect(screen.debugBarRelationshipItem == nil, "the Follow stayed with the tray back")
     }
 
+    /// ⚠️ AT REST THE TRAY IS ON SCREEN: a push placed the header before it
+    /// had laid out, read the tray as gone, and the pill showed over a
+    /// profile that had not moved (the owner, on a device, 2026-10-15).
+    @Test func aProfileAtRestWearsNoRelationshipInTheBar() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .following })
+        screen.debugApplyHeaderOffset(0)
+        #expect(screen.debugBarRelationshipItem == nil, "the pill showed at rest")
+        screen.debugApplyHeaderOffset(-40)
+        #expect(screen.debugBarRelationshipItem == nil, "the pill showed on a pull")
+    }
+
     @Test func aFollowedProfileWearsItsIdentityPill() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         try #require(await settle { screen.followButtonState == .following })
