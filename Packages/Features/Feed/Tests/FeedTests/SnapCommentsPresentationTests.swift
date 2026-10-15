@@ -1195,16 +1195,21 @@ struct SnapCommentsPresentationTests {
         #expect(feed.toolbarItems ?? [] == resting)
     }
 
-    /// ⚠️ THE EXIT TAKES THE NAV BAR'S TRAILING SLOT while a media post's
-    /// thread is open — the way back to the picture. The author pill is the
-    /// toolbar's (#671), so the slot is otherwise empty; a TEXT post's
+    /// ⚠️ THE EXIT TAKES THE NAV BAR'S LEADING SLOT while a media post's
+    /// thread is open (#1192, the owner 2026-10-15): the back arrow BECOMES
+    /// the ✕, and nothing closes at the trailing end any more. A TEXT post's
     /// comments ARE the page, and there is nothing to close.
-    @Test func theExitTakesTheTrailingSlotWhileTheThreadIsOpen() throws {
+    @Test func theExitTakesTheLeadingSlotWhileTheThreadIsOpen() throws {
         let (_, feed) = Self.chromeHost()
-        func trailingFirst() -> UIView? {
-            feed.navigationItem.rightBarButtonItems?.first?.customView
+        func leadingFirst() -> UIView? {
+            feed.navigationItem.leftBarButtonItems?.first?.customView
         }
-        func closes() -> Bool { (trailingFirst() as? UIButton)?.accessibilityLabel == "Close comments" }
+        func closes() -> Bool {
+            #expect(!(feed.navigationItem.rightBarButtonItems ?? []).contains {
+                ($0.customView as? UIButton)?.accessibilityLabel == "Close comments"
+            }, "a ✕ at the trailing end")
+            return (leadingFirst() as? UIButton)?.accessibilityLabel == "Close comments"
+        }
         #expect(!closes())
 
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
@@ -1229,26 +1234,23 @@ struct SnapCommentsPresentationTests {
         #expect(feed.toolbarItems ?? [] == resting)
     }
 
-    /// ⚠️ AND THE BACK ARROW KEEPS THE EDGE, in every state.
-    ///
-    /// The exit used to take this slot on a media post, which cost the screen
-    /// its way OUT while the layout was open: leaving the post meant closing
-    /// the comments first and then going back — two gestures for one
-    /// intention. The two answer different questions (leave the screen vs.
-    /// leave the layout) and now have different places to say so.
+    /// ⚠️ THE EDGE ITEM STAYS, in every state — on a media post it becomes
+    /// the ✕ (#1192): the SAME item and button, its symbol replaced, so the
+    /// bubble stays put and the glyph morphs; on a text post it stays the
+    /// arrow.
     ///
     /// The group GROWS around it — the sort joins inboard while the thread is
-    /// open — so the assertion is that the arrow is still the item at the
-    /// screen's edge, not that the group is untouched.
-    @Test func theBackArrowKeepsTheEdgeThroughTheEngagement() throws {
+    /// open — so the assertion is that the same item is still at the screen's
+    /// edge, not that the group is untouched.
+    @Test func theEdgeItemStaysThroughTheEngagement() throws {
         let (_, feed) = Self.chromeHost()
         let arrow = try #require(feed.navigationItem.leftBarButtonItems?.first)
 
         for hasMedia in [true, false] {
             feed.setEngagedChrome(true, hasMedia: hasMedia, animated: false)
             #expect(feed.navigationItem.leftBarButtonItems?.first === arrow,
-                    Comment(rawValue: "the arrow lost the edge (hasMedia: \(hasMedia))"))
-            #expect(!Self.leadingLabels(feed).contains("Close comments"))
+                    Comment(rawValue: "the edge item was replaced (hasMedia: \(hasMedia))"))
+            #expect(Self.leadingLabels(feed).contains("Close comments") == hasMedia)
         }
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
@@ -1256,13 +1258,7 @@ struct SnapCommentsPresentationTests {
     }
 
     /// A TAB-ROOT feed has no back arrow — and still gains the ✕, at the
-    /// trailing end. The two answer different questions, and only the second is
-    /// always available.
-    ///
-    /// ⚠️ AND THE SORT STANDS ALONE THERE, with no spacer: the leading group's
-    /// fixed space exists to keep the arrow and the sort two pills, and with no
-    /// arrow there is nothing to keep apart. A leading run that opened with a
-    /// spacer would indent the sort off the screen's edge for no reason.
+    /// LEADING edge (#1192), the sort inboard of it.
     @Test func aTabRootFeedWithNoBackArrowStillGetsTheExit() throws {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: EmptyFeedProvider()),
@@ -1278,11 +1274,10 @@ struct SnapCommentsPresentationTests {
         // A thread long enough to sort (`CommentSortPolicy`).
         feed.setCommentSortAvailable(true)
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
-        #expect((feed.navigationItem.rightBarButtonItems?.first?.customView as? UIButton)?
-                    .accessibilityLabel == "Close comments")
         let leading = feed.navigationItem.leftBarButtonItems ?? []
-        #expect(leading.count == 1)
-        #expect(leading.first?.customView is SnapCommentSortButton)
+        #expect(leading.count == 3, "[✕][space][sort]: \(leading.count)")
+        #expect((leading.first?.customView as? UIButton)?.accessibilityLabel == "Close comments")
+        #expect(leading.last?.customView is SnapCommentSortButton)
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == [])
@@ -1309,8 +1304,10 @@ struct SnapCommentsPresentationTests {
         #expect(engaged[0] === resting.first)   // the arrow keeps the edge
         #expect(engaged[1].customView == nil)   // the fixed space
         #expect(engaged[2].customView is SnapCommentSortButton)
-        // …and the trailing run is untouched by the engagement.
-        #expect((feed.navigationItem.rightBarButtonItems ?? []).count == 1)
+        // …and the trailing run carries no ✕ (#1192).
+        #expect(!(feed.navigationItem.rightBarButtonItems ?? []).contains {
+            ($0.customView as? UIButton)?.accessibilityLabel == "Close comments"
+        })
 
         feed.setEngagedChrome(false, hasMedia: true, animated: false)
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting)
@@ -1346,8 +1343,8 @@ struct SnapCommentsPresentationTests {
         #expect(feed.navigationItem.leftBarButtonItems ?? [] == resting, "withdrawn from the engaged bar at once")
     }
 
-    /// ⚠️ THE WHOLE BAR, ENGAGED ON A MEDIA POST: [‹ back] [⇅ sort] ———
-    /// [◎ balance] [✕].
+    /// ⚠️ THE WHOLE BAR, ENGAGED ON A MEDIA POST: [✕] [⇅ sort] ———
+    /// [◎ balance] (#1192: the ✕ is the back arrow, morphed).
     ///
     /// Stated end to end in one place, because the arrangement is the product
     /// decision and it has moved four times: the two groups say different kinds
@@ -1374,18 +1371,18 @@ struct SnapCommentsPresentationTests {
         feed.setCommentSortAvailable(true)
         feed.setEngagedChrome(true, hasMedia: true, animated: false)
 
-        // LEADING, left to right: the arrow then the sort.
+        // LEADING, left to right: the ✕ (the arrow, morphed — #1192) then
+        // the sort.
         let leading = feed.navigationItem.leftBarButtonItems ?? []
-        #expect(leading.count == 3, "the leading group is [back][space][sort]: \(leading.count)")
+        #expect(leading.count == 3, "the leading group is [✕][space][sort]: \(leading.count)")
+        #expect((leading[0].customView as? UIButton)?.accessibilityLabel == "Close comments")
         #expect(leading[1].customView == nil) // the fixed space that keeps them two pills
         #expect(leading[2].customView is SnapCommentSortButton)
 
-        // TRAILING, right to left: the exit at the edge, the balance inboard.
+        // TRAILING: the balance alone — the exit moved to the leading edge.
         let trailing = feed.navigationItem.rightBarButtonItems ?? []
-        #expect(trailing.count == 3, "the trailing run is [✕][space][balance]: \(trailing.count)")
-        #expect((trailing[0].customView as? UIButton)?.accessibilityLabel == "Close comments")
-        #expect(trailing[1].customView == nil)
-        #expect(trailing[2].customView is WalletBadgeButton)
+        #expect(trailing.count == 1, "the trailing run is [balance]: \(trailing.count)")
+        #expect(trailing.first?.customView is WalletBadgeButton)
         // Nothing crossed between the groups.
         #expect(trailing.contains { $0.customView is SnapCommentSortButton } == false)
     }
