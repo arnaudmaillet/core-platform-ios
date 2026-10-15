@@ -110,6 +110,7 @@ final class ProfileBannerView: UIView {
         guard url != currentImageURL || picture.image == nil else { return }
         currentImageURL = url
         picture.image = nil
+        focusTask?.cancel()
 
         isPictureSettled = url == nil
         // Synchronously from the cache when it can (the slot draws a warm hit
@@ -119,7 +120,18 @@ final class ProfileBannerView: UIView {
         // neutral backdrop, the loudest pop on the screen otherwise.
         load.load(url, using: imagePipeline) { [weak self] image, transition in
             guard let self else { return }
-            transition.perform(on: picture) { self.picture.image = image }
+            // A picture taller than the card is cut where its subject is
+            // likely to be (`BannerFocalCrop`): by its ratio now, by its faces
+            // once Vision has looked.
+            let frame = Self.pictureCut
+            let cut = BannerFocalCrop.needsCut(image, targetAspect: frame.aspect)
+            let shown = cut ? BannerFocalCrop.cropped(
+                image, targetAspect: frame.aspect,
+                focusY: BannerFocalCrop.focusY(aspect: image.size.width / image.size.height),
+                anchor: frame.anchor
+            ) : image
+            transition.perform(on: picture) { self.picture.image = shown }
+            if cut { refineFocus(of: image, for: url) }
             bandTone = Self.prominentDarkTone(of: image)
             onImageResolved?(image)
             // A warm hit settles in this pass, with nothing to announce: only
@@ -128,6 +140,40 @@ final class ProfileBannerView: UIView {
         } failed: { [weak self] in
             // A failure settles too: the backdrop is what stays.
             self?.settle()
+        }
+    }
+
+    /// The picture's own frame in a band card, for a cut (`BannerFocalCrop`):
+    /// the card's width by its height plus the parallax reserve above it, and
+    /// where the middle of what the card SHOWS sits in it — the reserve and
+    /// the card's top margin are hidden above.
+    static var pictureCut: (aspect: CGFloat, anchor: CGFloat) {
+        let screen = UIScreen.main.bounds.size
+        let cardMargin: CGFloat = 12
+        let width = screen.width - cardMargin * 2
+        let foot = (screen.height * 0.35).rounded()
+        let height = foot + parallaxReserve
+        let shownTop = parallaxReserve + cardMargin
+        guard height > 0, width > 0 else { return (BannerFocalCrop.bandAspect, 0.5) }
+        return (width / height, (shownTop + height) / 2 / height)
+    }
+
+    /// The cut by the picture's faces, when Vision finds any: dissolved in
+    /// over the ratio's cut, if the two differ enough to see.
+    private var focusTask: Task<Void, Never>?
+
+    private func refineFocus(of image: UIImage, for url: URL?) {
+        focusTask?.cancel()
+        let byRatio = BannerFocalCrop.focusY(aspect: image.size.width / image.size.height)
+        focusTask = Task { @MainActor [weak self] in
+            guard let focus = await BannerFocalCrop.faceFocusY(in: image),
+                  !Task.isCancelled, let self, self.currentImageURL == url,
+                  abs(focus - byRatio) > 0.04 else { return }
+            let frame = Self.pictureCut
+            let cut = BannerFocalCrop.cropped(image, targetAspect: frame.aspect, focusY: focus, anchor: frame.anchor)
+            UIView.transition(with: self.picture, duration: 0.25, options: .transitionCrossDissolve) {
+                self.picture.image = cut
+            }
         }
     }
 
