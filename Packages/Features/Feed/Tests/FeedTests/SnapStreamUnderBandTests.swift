@@ -4,15 +4,14 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// ⚠️ EXPERIMENTAL (`-snap-stream-under-band`, the owner 2026-10-15): the
-/// streaming comments in the band's seat on the caption, the danmaku band
-/// above them — and the engagement corner exactly where it always is.
+/// THE STREAM UNDER THE BAND (the owner, 2026-10-16 — the experiment of
+/// #1244, kept): the streaming comments on the caption, the danmaku band
+/// above them, its trailing end faded short of the rail — and the
+/// engagement corner on the band's SEAT, never on the band.
 @MainActor
 struct SnapStreamUnderBandTests {
-    private static func chrome(streamsUnderBand: Bool) -> SnapChromeView {
-        let chrome = SnapChromeView(
-            frame: CGRect(x: 0, y: 0, width: 390, height: 844), streamsUnderBand: streamsUnderBand
-        )
+    private static func chrome(reactions: Int = 8, cues: Int = 2) -> SnapChromeView {
+        let chrome = SnapChromeView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         chrome.setFixedInsets(UIEdgeInsets(top: 103, left: 0, bottom: 34, right: 0))
         chrome.configure(with: FeedItemDisplayModel(
             id: PostID("post-1"),
@@ -27,53 +26,46 @@ struct SnapStreamUnderBandTests {
             audioText: nil
         ))
         chrome.updateCommentStreams(FeedViewModel.CommentStreams(
-            reactions: (0..<8).map { TickerCommentModel(id: "r\($0)", text: "fire \($0)") },
-            subtitles: (0..<2).map { SubtitleCue(id: "s\($0)", text: "A whole sentence worth reading \($0).") },
-            commentCount: 10
+            reactions: (0..<reactions).map { TickerCommentModel(id: "r\($0)", text: "fire \($0)") },
+            subtitles: (0..<cues).map { SubtitleCue(id: "s\($0)", text: "A whole sentence worth reading \($0).") },
+            commentCount: reactions + cues
         ))
         chrome.layoutIfNeeded()
         return chrome
     }
 
-    @Test func theStreamTakesTheBandsSeatAndTheBandRidesAboveIt() {
-        let stock = Self.chrome(streamsUnderBand: false)
-        let flagged = Self.chrome(streamsUnderBand: true)
-        // The stream sits where the band sits by default…
-        #expect(abs(flagged.debugStreamFrame.maxY - stock.debugBandFrame.maxY) < 0.5)
-        // …and the band stands one md above it, short of the rail.
-        #expect(abs(flagged.debugBandFrame.maxY - (flagged.debugStreamFrame.minY - Spacing.md)) < 0.5)
-        #expect(flagged.debugBandFrame.maxX <= flagged.debugRailFrame.minX - Spacing.md + 0.5)
-        #expect(flagged.debugBandFrame.height == stock.debugBandFrame.height)
+    /// The band stands one md above the stream, short of the rail.
+    @Test func theBandRidesAboveTheStream() {
+        let chrome = Self.chrome()
+        #expect(abs(chrome.debugBandFrame.maxY - (chrome.debugStreamFrame.minY - Spacing.md)) < 0.5)
+        #expect(chrome.debugBandFrame.maxX <= chrome.debugRailFrame.minX - Spacing.md + 0.5)
     }
 
-    /// The like pill, the rail and the sound bubble hang off the band's
-    /// SEAT, not the band: moving the band moves none of them.
+    /// The stream holds its seat whether or not the band renders.
+    @Test func theStreamHoldsItsSeat() {
+        let dense = Self.chrome()
+        let sparse = Self.chrome(reactions: 0)
+        #expect(abs(dense.debugStreamFrame.maxY - sparse.debugStreamFrame.maxY) < 0.5)
+    }
+
+    /// The rail hangs off the band's seat: the band's comings and goings
+    /// never move it.
     @Test func theEngagementCornerDoesNotMove() {
-        let stock = Self.chrome(streamsUnderBand: false)
-        let flagged = Self.chrome(streamsUnderBand: true)
-        #expect(flagged.debugRailFrame == stock.debugRailFrame, "\(flagged.debugRailFrame) vs \(stock.debugRailFrame)")
+        let dense = Self.chrome()
+        let sparse = Self.chrome(reactions: 0)
+        #expect(dense.debugRailFrame == sparse.debugRailFrame)
     }
 
-    /// Flagged, the band's trailing end fades over `trailingFadeLength`
-    /// instead of being cut to a capsule; the stock band keeps its capsule.
-    @Test func theBandsTrailingEndFadesUnderTheFlag() throws {
-        let stock = Self.chrome(streamsUnderBand: false)
-        let flagged = Self.chrome(streamsUnderBand: true)
-        let flaggedEnd = flagged.debugBandTrailingEnd
-        #expect(flaggedEnd.cornerRadius == 0, "the band's end is still cut round")
-        let stops = try #require(flaggedEnd.fadeLocations).map(\.doubleValue)
-        let width = Double(flagged.debugBandFrame.width)
+    /// The band's trailing end fades over `trailingFadeLength` instead of
+    /// being cut to a capsule.
+    @Test func theBandsTrailingEndFades() throws {
+        let chrome = Self.chrome()
+        let end = chrome.debugBandTrailingEnd
+        #expect(end.cornerRadius == 0, "the band's end is still cut round")
+        let stops = try #require(end.fadeLocations).map(\.doubleValue)
+        let width = Double(chrome.debugBandFrame.width)
         #expect(stops.count == 3)
         #expect(abs(stops[1] - (1 - Double(SnapCommentTickerView.trailingFadeLength) / width)) < 0.001)
         #expect(stops[2] == 1)
-        let stockEnd = stock.debugBandTrailingEnd
-        #expect(stockEnd.fadeLocations == nil)
-        #expect(stockEnd.cornerRadius == stock.debugBandFrame.height / 2)
-    }
-
-    @Test func theStockLayoutIsUnchanged() {
-        let stock = Self.chrome(streamsUnderBand: false)
-        #expect(!stock.streamsUnderBand)
-        #expect(!SnapChromeView.streamsUnderBandByDefault, "the experiment is off unless launched with its argument")
     }
 }

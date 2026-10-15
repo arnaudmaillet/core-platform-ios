@@ -92,21 +92,16 @@ struct SnapLikePillLayoutTests {
     }
 
     /// ⚠️ A POST THAT HIDES ITS LIKES HAS NO LIKE PILL (#680): no heart, no
-    /// count, and the band runs to the screen's edge, square-ended, in its
-    /// place.
-    @Test func hiddenLikesTakeThePillAwayAndWidenTheBand() {
+    /// count. The band no longer runs under the pill (it rides the stream,
+    /// short of the rail, 2026-10-16), so it keeps its width either way.
+    @Test func hiddenLikesTakeThePillAway() {
         let shown = Self.chrome(Self.model())
         let hidden = Self.chrome(Self.model(hidden: true))
 
         #expect(!shown.debugBoostButton.isHidden)
         #expect(hidden.debugBoostButton.isHidden, "a post that hides its likes kept its like button")
         #expect(hidden.debugLikeBadgeText == nil)
-
-        #expect(abs(hidden.debugTickerFrame.maxX - Layout.screen.maxX) < 0.5,
-                "the band stops at \(hidden.debugTickerFrame.maxX), not the screen's edge")
-        #expect(shown.debugTickerFrame.maxX < Layout.screen.maxX - SnapActionColumn.trailingInset)
-        #expect(hidden.debugTickerRunsToEdge)
-        #expect(!shown.debugTickerRunsToEdge)
+        #expect(hidden.debugTickerFrame.maxX == shown.debugTickerFrame.maxX)
     }
 
     /// The composer with no stake — the Messages thread — rests its rail
