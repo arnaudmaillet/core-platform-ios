@@ -45,6 +45,11 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private let recordGlass = SoundRecordGlass()
     private var artwork: UIImageView { recordGlass.cover }
     private let playButton = UIButton(configuration: .glass())
+    /// ▶︎ / ❚❚, drawn over the glass disc by an image view of its own: its
+    /// `setSymbolImage(_:contentTransition:)` is UIKit's symbol replace (the
+    /// owner, 2026-10-15). The glass button's configured image swapped with
+    /// no transition, even with `symbolContentTransition` set.
+    private let playGlyph = UIImageView(image: UIImage(systemName: "play.fill"))
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let metaLabel = UILabel()
@@ -89,6 +94,13 @@ final class SoundSheetHeaderView: UICollectionReusableView {
 
         playButton.configuration?.cornerStyle = .capsule
         playButton.configuration?.baseForegroundColor = .white
+        // The glass's own ink (`.label`), as the button drew its image, at
+        // the size it drew it.
+        playGlyph.tintColor = .label
+        playGlyph.contentMode = .center
+        playGlyph.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        playGlyph.isUserInteractionEnabled = false
+        playGlyph.translatesAutoresizingMaskIntoConstraints = false
         // ⚠️ ONE TOGGLE PER TAP: the glyph is drawn, not tapped — the record's
         // tap takes it all. A button that also answered toggled the post
         // twice (paused, then played again) for one tap on the glyph.
@@ -101,7 +113,10 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         // On the RECORD, beside the artwork rather than in it: the artwork
         // turns while the sound plays, the button stays upright.
         record.addSubview(playButton)
+        playButton.addSubview(playGlyph)
         NSLayoutConstraint.activate([
+            playGlyph.centerXAnchor.constraint(equalTo: playButton.centerXAnchor),
+            playGlyph.centerYAnchor.constraint(equalTo: playButton.centerYAnchor),
             playButton.centerXAnchor.constraint(equalTo: record.centerXAnchor),
             playButton.centerYAnchor.constraint(equalTo: record.centerYAnchor),
             playButton.widthAnchor.constraint(equalToConstant: 44),
@@ -191,7 +206,19 @@ final class SoundSheetHeaderView: UICollectionReusableView {
 
     /// The post plays (the record turns, ❚❚) or not (it stops in place, ▶︎).
     func setPlaying(_ playing: Bool) {
-        playButton.configuration?.image = UIImage(systemName: playing ? "pause.fill" : "play.fill")
+        let name = playing ? "pause.fill" : "play.fill"
+        guard name != shownGlyph else { return applyPlayingRest(playing) }
+        shownGlyph = name
+        if let image = UIImage(systemName: name) {
+            playGlyph.setSymbolImage(image, contentTransition: .replace)
+        }
+        applyPlayingRest(playing)
+    }
+
+    /// The glyph shown — so a repeat of the same state replaces nothing.
+    private var shownGlyph = "play.fill"
+
+    private func applyPlayingRest(_ playing: Bool) {
         record.accessibilityLabel = playing ? "Pause post" : "Play post"
         recordGlass.setSpinning(playing)
     }
@@ -206,6 +233,8 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     var debugShowsMutedBadge: Bool { recordGlass.showsMutedBadge }
     /// The glyph says ❚❚ (the post plays) rather than ▶︎.
     var debugShowsPause: Bool { record.accessibilityLabel == "Pause post" }
+    /// The glyph's symbol, as last asked for.
+    var debugShownGlyph: String { shownGlyph }
     var debugCanToggle: Bool { record.isUserInteractionEnabled && !playButton.isHidden }
     func debugTapRecord() { togglePlayback() }
     /// The record's frame, in this view's space.
