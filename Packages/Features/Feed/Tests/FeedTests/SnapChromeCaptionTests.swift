@@ -2,10 +2,10 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The main-feed caption's strict two-line contract with the appended
-/// timestamp: a single-line caption drops the timestamp to its own line, a
-/// two-line caption takes it inline, and a longer caption truncates early so
-/// the timestamp always sits un-clipped at the end of line two.
+/// The main-feed caption's two-line contract with the appended timestamp:
+/// the time always trails the caption inline — on ONE line when both fit
+/// there (2026-10-16), else at the end of line two — and a longer caption
+/// truncates early so the time always sits un-clipped at the end.
 @MainActor
 struct SnapChromeCaptionTests {
     /// A realistic live-cell caption width (390pt cell − two `lg` insets).
@@ -16,13 +16,12 @@ struct SnapChromeCaptionTests {
         SnapChromeView.captionLineCount(string, width: width)
     }
 
-    /// Case A: a short caption fits one line, so the timestamp drops to its
-    /// OWN second line — the composed string is exactly `caption\ntimestamp`,
-    /// two lines total.
-    @Test func singleLineCaptionDropsTheTimestampToItsOwnLine() {
+    /// Case A: a short caption takes its time on the SAME line (the owner,
+    /// 2026-10-16) — one line, so the block above comes down a line.
+    @Test func aShortCaptionTakesItsTimeOnItsLine() {
         let composed = SnapChromeView.composedCaption("Golden hour.", timestamp: timestamp, width: width)
-        #expect(composed.string == "Golden hour.\n7 weeks")
-        #expect(lineCount(composed) == 2)
+        #expect(composed.string == "Golden hour.  7 weeks")
+        #expect(lineCount(composed) == 1)
     }
 
     /// Case B: a caption that naturally wraps to two lines but leaves room
@@ -82,39 +81,26 @@ struct SnapChromeCaptionTests {
         }
     }
 
-    /// The GEOMETRY LOCK: the composed caption block is exactly two body
-    /// lines tall in EVERY case — the smaller timestamp on its own second
-    /// line (Case A) can't collapse the container below the height of a
-    /// two-line (Case B/C) caption. Measured height is identical across all
-    /// three and equals two primary-font line heights.
-    @Test func captionContainerHeightIsIdenticalAcrossCases() {
+    /// The GEOMETRY LOCK, per line: every line is one body line tall, so a
+    /// one-line caption is exactly one body line and a two-line one exactly
+    /// two — the smaller footnote time never shrinks the line it ends.
+    @Test func captionContainerIsWholeBodyLines() {
         let bodyLineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
-        let cases = [
-            "Golden hour.", // A — caption one line, timestamp drops below
-            "Rebuilt the whole deploy pipeline over a slow rainy weekend.", // B — inline
-            "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to.", // C — truncated
+        let cases: [(String, Int)] = [
+            ("Golden hour.", 1), // A — one line, time inline
+            ("Rebuilt the whole deploy pipeline over a slow rainy weekend.", 2), // B — inline on line two
+            ("Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to.", 2), // C — truncated
         ]
-        let heights = cases.map { caption -> CGFloat in
+        for (caption, lines) in cases {
             let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
-            return composed.boundingRect(
+            let height = composed.boundingRect(
                 with: CGSize(width: width, height: .greatestFiniteMagnitude),
                 options: [.usesLineFragmentOrigin],
                 context: nil
             ).height
+            #expect(height >= CGFloat(lines) * bodyLineHeight - 0.5, "\(caption)")
+            #expect(height < (CGFloat(lines) + 0.5) * bodyLineHeight, "\(caption)")
         }
-        // Every case is two body lines tall — neither collapsed toward one
-        // (the Case A regression) nor grown to a third line (within half a
-        // line of exactly two, after boundingRect's constant trailing
-        // descent).
-        for height in heights {
-            #expect(height >= 2 * bodyLineHeight - 0.5)
-            #expect(height < 2.5 * bodyLineHeight)
-        }
-        // …and FLAWLESSLY IDENTICAL to each other — the geometry lock's whole
-        // point (every case ends on the footnote timestamp, so even the
-        // trailing artifact matches).
-        #expect(abs(heights[0] - heights[1]) < 0.5)
-        #expect(abs(heights[1] - heights[2]) < 0.5)
     }
 
     /// No timestamp (or an unmeasured zero width) → the bare caption, so the
