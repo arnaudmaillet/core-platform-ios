@@ -54,6 +54,23 @@ struct SnapStreamUnderBandTests {
         #expect(flagged.debugRailFrame == stock.debugRailFrame, "\(flagged.debugRailFrame) vs \(stock.debugRailFrame)")
     }
 
+    /// Flagged, the band's trailing end fades over `trailingFadeLength`
+    /// instead of being cut to a capsule; the stock band keeps its capsule.
+    @Test func theBandsTrailingEndFadesUnderTheFlag() throws {
+        let stock = Self.chrome(streamsUnderBand: false)
+        let flagged = Self.chrome(streamsUnderBand: true)
+        let flaggedEnd = flagged.debugBandTrailingEnd
+        #expect(flaggedEnd.cornerRadius == 0, "the band's end is still cut round")
+        let stops = try #require(flaggedEnd.fadeLocations).map(\.doubleValue)
+        let width = Double(flagged.debugBandFrame.width)
+        #expect(stops.count == 3)
+        #expect(abs(stops[1] - (1 - Double(SnapCommentTickerView.trailingFadeLength) / width)) < 0.001)
+        #expect(stops[2] == 1)
+        let stockEnd = stock.debugBandTrailingEnd
+        #expect(stockEnd.fadeLocations == nil)
+        #expect(stockEnd.cornerRadius == stock.debugBandFrame.height / 2)
+    }
+
     @Test func theStockLayoutIsUnchanged() {
         let stock = Self.chrome(streamsUnderBand: false)
         #expect(!stock.streamsUnderBand)

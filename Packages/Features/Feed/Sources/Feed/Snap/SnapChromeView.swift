@@ -521,6 +521,8 @@ final class SnapChromeView: UIView {
             inBandSeat.isActive = true
             let over = commentTicker.bottomAnchor.constraint(equalTo: subtitleView.topAnchor, constant: -Spacing.md)
             tickerOverStream = over
+            // No glass to nest in beside the rail: the band's end dissolves.
+            commentTicker.fadesTrailingEdge = true
             NSLayoutConstraint.activate([
                 over,
                 commentTicker.trailingAnchor.constraint(equalTo: shortcutRail.leadingAnchor, constant: -Spacing.md),
@@ -1031,6 +1033,9 @@ final class SnapChromeView: UIView {
     #if DEBUG
     /// The band's and the stream's frames in this chrome's space.
     var debugBandFrame: CGRect { commentTicker.frame }
+    var debugBandTrailingEnd: (cornerRadius: CGFloat, fadeLocations: [NSNumber]?) {
+        commentTicker.debugTrailingEnd
+    }
     var debugStreamFrame: CGRect { subtitleView.frame }
     var debugRailFrame: CGRect { shortcutRail.frame }
     #endif
