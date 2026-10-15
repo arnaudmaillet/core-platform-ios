@@ -9,7 +9,7 @@ import UIKit
 ///   └─ glass (UIVisualEffectView, UIGlassEffect, capsule)
 ///        contentView
 ///        ├─ cover (the record — turns, `setRecordSpinning`)
-///        └─ badge (a small glass of its own, INSIDE the rim: muted)
+///        └─ mutedGlyph (🔇, centred on the record, no plate: muted)
 /// ```
 ///
 /// Before, the cover and the muted badge were plain subviews of a glass
@@ -30,8 +30,11 @@ final class SoundRecordGlass: UIView {
     /// The record: the cover's picture.
     let cover = UIImageView()
     private let glass = UIVisualEffectView(effect: nil)
-    private let badge = UIVisualEffectView(effect: nil)
-    private let badgeGlyph = UIImageView()
+    /// ⚠️ MUTED IS SAID IN THE MIDDLE (the owner, 2026-10-16): a large
+    /// speaker-slash centred on the record, white with a soft shadow and no
+    /// plate — no longer a small dark glass badge on the bottom-trailing
+    /// diagonal. Its size follows the record's.
+    private let mutedGlyph = UIImageView()
 
     /// The glass's thickness around the record, at least.
     static let rim: CGFloat = 3
@@ -42,16 +45,8 @@ final class SoundRecordGlass: UIView {
     var coverSide: CGFloat? = AvatarImageView.bubbleDiameter {
         didSet { setNeedsLayout() }
     }
-    static let badgeSide: CGFloat = 16
-    /// The badge's side here: 16 on a bubble, larger on the sound sheet's
-    /// 96 pt record (#1148).
-    var badgeSide: CGFloat = SoundRecordGlass.badgeSide {
-        didSet { setNeedsLayout() }
-    }
-    /// The badge glyph's point size.
-    var badgeGlyphSize: CGFloat = 8 {
-        didSet { applyBadgeGlyph() }
-    }
+    /// The muted glyph's point size against the record's side.
+    static let mutedGlyphScale: CGFloat = 0.5
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -64,39 +59,37 @@ final class SoundRecordGlass: UIView {
         cover.clipsToBounds = true
         glass.contentView.addSubview(cover)
 
-        badge.cornerConfiguration = .capsule()
-        badge.isHidden = true
-        applyBadgeGlyph()
-        badgeGlyph.tintColor = .white
-        badgeGlyph.contentMode = .center
-        badge.contentView.addSubview(badgeGlyph)
-        glass.contentView.addSubview(badge)
+        mutedGlyph.isHidden = true
+        mutedGlyph.tintColor = .white
+        mutedGlyph.contentMode = .center
+        // Legible over any cover, light or dark, with no plate behind it.
+        mutedGlyph.layer.shadowColor = UIColor.black.cgColor
+        mutedGlyph.layer.shadowOpacity = 0.45
+        mutedGlyph.layer.shadowRadius = 3
+        mutedGlyph.layer.shadowOffset = .zero
+        glass.contentView.addSubview(mutedGlyph)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    private func applyBadgeGlyph() {
-        badgeGlyph.image = UIImage(
-            systemName: "speaker.slash.fill",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: badgeGlyphSize, weight: .bold)
-        )
+    /// The glyph's point size on a record `side` wide.
+    static func mutedGlyphPointSize(forRecordSide side: CGFloat) -> CGFloat {
+        (side * mutedGlyphScale).rounded()
     }
+
+    private var mutedGlyphPointSize: CGFloat = 0
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
         guard window != nil, glass.effect == nil else { return }
         glass.effect = UIGlassEffect(style: .regular)
-        let tinted = UIGlassEffect(style: .regular)
-        // Dark glass, so the white glyph reads over any cover, light or dark.
-        tinted.tintColor = UIColor.black.withAlphaComponent(0.55)
-        badge.effect = tinted
     }
 
-    /// The muted badge.
+    /// The muted glyph.
     var showsMutedBadge: Bool {
-        get { !badge.isHidden }
-        set { badge.isHidden = !newValue }
+        get { !mutedGlyph.isHidden }
+        set { mutedGlyph.isHidden = !newValue }
     }
 
     override func layoutSubviews() {
@@ -106,18 +99,21 @@ final class SoundRecordGlass: UIView {
         let side = min(coverSide ?? rimmed.width, rimmed.width, rimmed.height)
         cover.frame = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
         cover.layer.cornerRadius = cover.bounds.width / 2
-        badge.frame = Self.badgeFrame(in: bounds, side: badgeSide)
-        badgeGlyph.frame = badge.bounds
+        mutedGlyph.frame = cover.frame
+        let pointSize = Self.mutedGlyphPointSize(forRecordSide: side)
+        if pointSize != mutedGlyphPointSize, pointSize > 0 {
+            mutedGlyphPointSize = pointSize
+            mutedGlyph.image = UIImage(
+                systemName: "speaker.slash.fill",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: pointSize, weight: .bold)
+            )
+        }
     }
 
-    /// The badge's frame: on the circle's bottom-trailing diagonal, its edge
-    /// one rim inside the glass's — inside the bubble, never across it.
-    static func badgeFrame(in bounds: CGRect, side: CGFloat = badgeSide) -> CGRect {
-        let radius = min(bounds.width, bounds.height) / 2
-        let reach = max(0, radius - rim - side / 2) / 2.squareRoot()
-        let center = CGPoint(x: bounds.midX + reach, y: bounds.midY + reach)
-        return CGRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
-    }
+    #if DEBUG
+    /// Where the muted glyph is drawn, and its point size.
+    var debugMutedGlyph: (frame: CGRect, pointSize: CGFloat) { (mutedGlyph.frame, mutedGlyphPointSize) }
+    #endif
 
     /// The press: the glass and the record grow together, and settle back.
     func setPressed(_ pressed: Bool) {

@@ -747,6 +747,22 @@ struct SoundSheetTests {
         #expect(!header.debugShowsMutedBadge, "unmuting left the badge")
     }
 
+    /// Muted, the button in the middle says 🔇 in place of ❚❚ or ▶︎ (the
+    /// owner, 2026-10-16), and gives it back when the sound returns.
+    @Test func muteTakesTheMiddleGlyph() throws {
+        let controller = sheet(tiles: 3)
+        controller.setPostPlayback(.init(playing: true, muted: false, available: true))
+        try laidOut(controller)
+        let header = try #require(controller.debugHeader)
+        #expect(header.debugShownGlyph == "pause.fill")
+        controller.setPostPlayback(.init(playing: true, muted: true, available: true))
+        #expect(header.debugShownGlyph == "speaker.slash.fill")
+        controller.setPostPlayback(.init(playing: false, muted: true, available: true))
+        #expect(header.debugShownGlyph == "speaker.slash.fill")
+        controller.setPostPlayback(.init(playing: false, muted: false, available: true))
+        #expect(header.debugShownGlyph == "play.fill")
+    }
+
     /// ▶︎ ⇄ ❚❚ is one glyph view swapping its symbol (a symbol replace, the
     /// owner 2026-10-15), and the same state twice swaps nothing.
     @Test func theRecordsGlyphFollowsThePlayback() throws {

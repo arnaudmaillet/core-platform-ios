@@ -61,12 +61,9 @@ final class SoundSheetHeaderView: UICollectionReusableView {
         // ROUND: a sound is a record, not a picture — and a circle reads as
         // "this plays" next to the square tiles of the posts below.
         artwork.accessibilityIgnoresInvertColors = true
-        // The badge scaled to the 96 pt record — and no larger: at 22 it
-        // clears the 44 pt play button in the middle (centres 34 apart, radii
-        // 22 + 11).
+        // The record's own muted glyph stays down here: the button in the
+        // middle says muted itself, in place of ❚❚ / ▶︎ (`applyGlyph`).
         recordGlass.coverSide = nil
-        recordGlass.badgeSide = 22
-        recordGlass.badgeGlyphSize = 10
         // The record's TAP is the sheet's (`SoundSheetViewController
         // .installRecordTap`, #1162): a recognizer here never fired under the
         // sheet's bar. This view only says where the record is.
@@ -208,13 +205,24 @@ final class SoundSheetHeaderView: UICollectionReusableView {
 
     /// The post plays (the record turns, ❚❚) or not (it stops in place, ▶︎).
     func setPlaying(_ playing: Bool) {
-        let name = playing ? "pause.fill" : "play.fill"
-        guard name != shownGlyph else { return applyPlayingRest(playing) }
+        isPlaying = playing
+        applyGlyph()
+        applyPlayingRest(playing)
+    }
+
+    private var isPlaying = false
+    private var isMuted = false
+
+    /// ⚠️ MUTED WINS THE MIDDLE (the owner, 2026-10-16): the button says 🔇
+    /// in place of ❚❚ / ▶︎ while the sound is off — one glyph in the middle
+    /// of the record, never a second one beside it.
+    private func applyGlyph() {
+        let name = isMuted ? "speaker.slash.fill" : (isPlaying ? "pause.fill" : "play.fill")
+        guard name != shownGlyph else { return }
         shownGlyph = name
         if let image = UIImage(systemName: name, withConfiguration: Self.glyphConfiguration) {
             swapGlyph(to: image, animated: window != nil)
         }
-        applyPlayingRest(playing)
     }
 
     /// ⚠️ NOT THE SYSTEM'S SYMBOL REPLACE (the owner, 2026-10-16): inside
@@ -271,12 +279,15 @@ final class SoundSheetHeaderView: UICollectionReusableView {
 
     /// The feed's sound is off: the badge, which does not turn.
     func setMuted(_ muted: Bool) {
-        recordGlass.showsMutedBadge = muted
+        isMuted = muted
+        applyGlyph()
     }
 
     #if DEBUG
     var debugIsSpinning: Bool { recordGlass.isSpinning }
-    var debugShowsMutedBadge: Bool { recordGlass.showsMutedBadge }
+    /// The button in the middle says muted (🔇), and the record draws no
+    /// second muted glyph of its own.
+    var debugShowsMutedBadge: Bool { shownGlyph == "speaker.slash.fill" && !recordGlass.showsMutedBadge }
     /// The glyph says ❚❚ (the post plays) rather than ▶︎.
     var debugShowsPause: Bool { record.accessibilityLabel == "Pause post" }
     /// The glyph's symbol, as last asked for.

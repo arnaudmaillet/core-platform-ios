@@ -33,27 +33,21 @@ struct SoundRecordGlassTests {
         #expect(!record.isUserInteractionEnabled, "the host button keeps the touches")
     }
 
-    /// Inside the rim, never across it: every corner of the badge's square
-    /// lies within the circle less the rim.
-    @Test(arguments: [36, 44, 48, 56] as [CGFloat])
-    func theBadgeSitsInsideTheRim(side: CGFloat) {
-        let bounds = CGRect(x: 0, y: 0, width: side, height: side)
-        let badge = SoundRecordGlass.badgeFrame(in: bounds)
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        // The badge is a disc: its farthest point from the centre.
-        let farthest = hypot(badge.midX - center.x, badge.midY - center.y) + badge.width / 2
-        #expect(farthest <= side / 2 - SoundRecordGlass.rim + 0.001)
-        #expect(badge.midX > center.x && badge.midY > center.y, "bottom-trailing")
-    }
-
-    @Test func theBadgeIsGlassToo() {
+    /// ⚠️ MUTED IS SAID IN THE MIDDLE (the owner, 2026-10-16): a large
+    /// speaker-slash centred on the record, half its side, with no plate —
+    /// the only glass is the record's own.
+    @Test func theMutedGlyphIsCentredLargeAndBare() {
         let record = SoundRecordGlass()
-        let window = hosted(record)
+        record.coverSide = nil
+        let window = hosted(record, side: 96)
         defer { window.isHidden = true }
         record.showsMutedBadge = true
-        let glasses = effectViews(in: record)
-        #expect(glasses.count == 2)
-        #expect(glasses.allSatisfy { $0.effect is UIGlassEffect })
+        record.layoutIfNeeded()
+        let glyph = record.debugMutedGlyph
+        #expect(glyph.frame.midX == record.cover.frame.midX && glyph.frame.midY == record.cover.frame.midY)
+        #expect(glyph.pointSize == SoundRecordGlass.mutedGlyphPointSize(forRecordSide: record.cover.bounds.width))
+        #expect(glyph.pointSize >= record.cover.bounds.width * 0.45, "the muted glyph is not large")
+        #expect(effectViews(in: record).count == 1, "the muted glyph sits on a plate of its own")
     }
 
     @Test func thePressMovesTheGlassAndTheRecordTogether() {
