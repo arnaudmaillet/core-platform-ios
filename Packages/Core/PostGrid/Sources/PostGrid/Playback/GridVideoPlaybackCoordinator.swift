@@ -149,7 +149,7 @@ public final class GridVideoPlaybackCoordinator {
     /// exactly that at launch, because every tab coordinator is started up front
     /// and `NativePopGestureEnabler` calls `loadViewIfNeeded()` on all five nav
     /// controllers, so the profile root's `viewDidLoad` runs on a tab nobody
-    /// selected. `ProfileGalleryGridView` then forces a layout off-window and
+    /// selected. The profile's gallery (then its own grid) forced a layout off-window and
     /// reconciles, and the only release is a `viewWillDisappear` that never
     /// fires for a tab never entered. Measured on develop: launching straight
     /// onto Messages — no grid, no map ever shown — rested at four players, all

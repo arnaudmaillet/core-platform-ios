@@ -99,7 +99,7 @@ extension ProfileTab {
     /// be empty because of the source filter rather than because the profile
     /// has nothing — "no media in reposts" — and that is more useful than a
     /// generic sentence. The page prefers the model's message when it has one
-    /// and falls back to this; see `ProfileGalleryGridView.render`.
+    /// and falls back to this; see `ProfileGalleryPagerView.pageState`.
     var emptyState: (symbol: String, title: String, subtitle: String) {
         switch self {
         case .format(.activity):

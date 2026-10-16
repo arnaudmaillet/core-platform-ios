@@ -1,5 +1,4 @@
 import CoreGraphics
-import PostGrid
 
 /// Where a profile's scroll comes to rest while the header is still on
 /// screen: a few positions the finger's release is drawn to, rather than
@@ -30,14 +29,4 @@ enum ProfileScrollDetents {
         if firstPost > 0 { detents.append(firstPost) }
         return detents
     }
-
-    /// Where a release aimed at `target` should stop instead — the shared
-    /// rule (`ScrollDetents`, PostGrid), which every hosted page applies.
-    static func snapped(
-        target: CGFloat, detents: [CGFloat], from: CGFloat? = nil, catching: [CGFloat] = []
-    ) -> CGFloat? {
-        ScrollDetents.snapped(target: target, detents: detents, from: from, catching: catching)
-    }
-
-    static var beyondSlack: CGFloat { ScrollDetents.beyondSlack }
 }

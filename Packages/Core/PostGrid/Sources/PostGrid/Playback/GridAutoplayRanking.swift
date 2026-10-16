@@ -7,9 +7,9 @@ import UIKit
 /// many players the surface may hold, and whether a scroll is too fast to
 /// start any.
 ///
-/// Three surfaces feed `GridVideoPlaybackCoordinator`: the For You grid
-/// (`ForYouGridAutoplayDriver`), the profile gallery
-/// (`ProfileGalleryGridView`) and the For You rails' Following row
+/// The surfaces feeding `GridVideoPlaybackCoordinator`: the For You grid
+/// (`ForYouGridAutoplayDriver` — which the profile's pages are too, #1273)
+/// and the For You rails' Following row
 /// (`ForYouRailsView`). They used to carry three copies of these rules; what
 /// genuinely differs between them is passed in, never decided here:
 ///

@@ -4,6 +4,7 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
+@testable import Feed
 @testable import Profile
 
 /// **A pull-to-refresh lands for what it brought, and nothing more.**
@@ -212,11 +213,11 @@ struct ProfileRefreshLandingTests {
         var recounted = post
         recounted.reactionCount = 7
         recounted.commentCount = 3
-        #expect(ProfileGalleryGridView.differOnlyInCounts(post, recounted))
+        #expect(ForYouGridPage.differOnlyInCounts(post, recounted))
         let recaptioned = GalleryPost(
             id: PostID("p"), kind: .photo, isRepost: false, thumbnailURL: nil, caption: "b", publishedAtMS: 1
         )
-        #expect(!ProfileGalleryGridView.differOnlyInCounts(post, recaptioned))
+        #expect(!ForYouGridPage.differOnlyInCounts(post, recaptioned))
     }
 
     /// A new follower count re-applies the header once — and its height,

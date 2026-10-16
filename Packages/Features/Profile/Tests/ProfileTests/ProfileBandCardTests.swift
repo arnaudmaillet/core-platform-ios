@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import PostGrid
 import Testing
 import UIKit
 @testable import Profile
@@ -77,10 +78,10 @@ struct ProfileBandCardTests {
     /// that started past it is left to the others.
     @Test func aReleaseCrossingTheNotchStopsOnIt() {
         let detents: [CGFloat] = [0, 128, 411]
-        #expect(ProfileScrollDetents.snapped(target: 326, detents: detents, from: 80, catching: [128]) == 128)
-        #expect(ProfileScrollDetents.snapped(target: 20, detents: detents, from: 300, catching: [128]) == 128)
-        #expect(ProfileScrollDetents.snapped(target: 326, detents: detents, from: 170, catching: [128]) == 411)
-        #expect(ProfileScrollDetents.snapped(target: 326, detents: detents) == 411)
+        #expect(ScrollDetents.snapped(target: 326, detents: detents, from: 80, catching: [128]) == 128)
+        #expect(ScrollDetents.snapped(target: 20, detents: detents, from: 300, catching: [128]) == 128)
+        #expect(ScrollDetents.snapped(target: 326, detents: detents, from: 170, catching: [128]) == 411)
+        #expect(ScrollDetents.snapped(target: 326, detents: detents) == 411)
     }
 
     /// The ramp's tone: the picture's prominent dark shade, its hue kept,

@@ -61,10 +61,8 @@ struct ProfileLiveCountTests {
     }
 
     /// The media mosaic: every post a bare tile.
-    private func mosaic(staking: PostCardStaking) -> ProfileGalleryGridView {
-        let page = ProfileGalleryGridView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid, tab: .format(.media)
-        )
+    private func mosaic(staking: PostCardStaking) -> ForYouGridPage {
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
         page.staking = staking
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
@@ -75,7 +73,7 @@ struct ProfileLiveCountTests {
         return page
     }
 
-    private func tile(_ id: PostID, on page: ProfileGalleryGridView) throws -> PostGridTileCell {
+    private func tile(_ id: PostID, on page: ForYouGridPage) throws -> PostGridTileCell {
         let path = try #require(page.debugIndexPath(for: id))
         page.collectionView.scrollToItem(at: path, at: .top, animated: false)
         page.collectionView.layoutIfNeeded()

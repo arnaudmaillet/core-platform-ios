@@ -37,7 +37,7 @@ final class ProfileGalleryPagerView: UIView {
     private let allTabs: [ProfileTab]
 
     var onItemTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
-    /// A card's comment chip — see `ProfileGalleryGridView.onItemCommentsTapped`.
+    /// A card's comment chip — see `PostGridPage.onPostTapped`.
     var onItemCommentsTapped: ((GalleryPost, _ stream: [GalleryPost]) -> Void)?
     /// Handed to every page — one screen, one undo window.
     var staking: PostCardStaking? {
@@ -45,7 +45,7 @@ final class ProfileGalleryPagerView: UIView {
     }
 
     /// Every page's rows ask their "..." again — see
-    /// `ProfileGalleryGridView.refreshAuthorMenus`.
+    /// `PostGridPage.refreshAuthorMenus`.
     func refreshAuthorMenus() {
         allPages.forEach { $0.refreshAuthorMenus() }
     }
@@ -66,7 +66,7 @@ final class ProfileGalleryPagerView: UIView {
     /// from the first layout because it does not depend on geometry at all.
     ///
     /// Exact here rather than searched: a gallery page IS a
-    /// `ProfileGalleryGridView` and owns its collection view.
+    /// `PostGridPage` and owns its scroll view.
     ///
     /// ⚠️ PUBLISHED AGAIN WHEN WIRED (#1191). The first layout could publish
     /// before the host set this, and the one-shot guard then never named the
@@ -103,7 +103,7 @@ final class ProfileGalleryPagerView: UIView {
     var onPullReleased: ((CGFloat) -> Void)?
     /// A row's author was tapped, on whichever page is showing.
     var onAuthorTapped: ((GalleryPost) -> Void)?
-    /// What a row's "..." offers — see `ProfileGalleryGridView.authorMenuActions`.
+    /// What a row's "..." offers — see `PostGridPage.postMenuActions`.
     var authorMenuActions: ((PostGridAuthorMenuContext) -> [PostCardMenuAction])?
 
     /// The pan that pages; exposed so the owner can subordinate it to the
