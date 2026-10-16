@@ -852,7 +852,11 @@ final class SnapChromeView: UIView {
         let captionString: NSAttributedString = marked
         guard let timestamp, !timestamp.isEmpty, width > 0 else { return captionString }
 
-        let timestampString = NSAttributedString(string: timestamp, attributes: captionAttributes(secondary: true))
+        // ⚠️ ONE PIECE: "20 weeks" never splits across the two lines — the
+        // inline time once ended line one with "20" and began line two with
+        // "weeks" (seen on a device, 2026-10-16). Its spaces don't break.
+        let unbroken = timestamp.replacingOccurrences(of: " ", with: "\u{00A0}")
+        let timestampString = NSAttributedString(string: unbroken, attributes: captionAttributes(secondary: true))
         let gap = NSAttributedString(string: "  ", attributes: captionAttributes(secondary: false))
 
         // Case A: the caption and its time inline, on ONE line when they fit

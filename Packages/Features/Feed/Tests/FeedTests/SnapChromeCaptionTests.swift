@@ -11,6 +11,8 @@ struct SnapChromeCaptionTests {
     /// A realistic live-cell caption width (390pt cell − two `lg` insets).
     private let width: CGFloat = 358
     private let timestamp = "7 weeks"
+    /// The time as the caption draws it: one piece (a no-break space).
+    private let shownTime = "7\u{00A0}weeks"
 
     private func lineCount(_ string: NSAttributedString) -> Int {
         SnapChromeView.captionLineCount(string, width: width)
@@ -20,8 +22,18 @@ struct SnapChromeCaptionTests {
     /// 2026-10-16) — one line, so the block above comes down a line.
     @Test func aShortCaptionTakesItsTimeOnItsLine() {
         let composed = SnapChromeView.composedCaption("Golden hour.", timestamp: timestamp, width: width)
-        #expect(composed.string == "Golden hour.  7 weeks")
+        #expect(composed.string == "Golden hour.  7\u{00A0}weeks")
         #expect(lineCount(composed) == 1)
+    }
+
+    /// The time is one piece: whatever the caption's length, "7 weeks" is
+    /// never split across the lines (its space does not break).
+    @Test func theTimeNeverSplitsAcrossLines() {
+        let caption = "Golden hour at the pier. #goldenhour"
+        for width: CGFloat in stride(from: 200, through: 360, by: 4) {
+            let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
+            #expect(composed.string.hasSuffix("7\u{00A0}weeks"), "width \(width)")
+        }
     }
 
     /// Case B: a caption that naturally wraps to two lines but leaves room
@@ -33,7 +45,7 @@ struct SnapChromeCaptionTests {
         // The full caption is present (nothing truncated) and the timestamp
         // trails it on the same block, within two lines.
         #expect(composed.string.contains(caption))
-        #expect(composed.string.hasSuffix(timestamp))
+        #expect(composed.string.hasSuffix(shownTime))
         #expect(!composed.string.contains("\n"))
         #expect(!composed.string.contains("…"))
         #expect(lineCount(composed) <= 2)
@@ -48,7 +60,7 @@ struct SnapChromeCaptionTests {
     @Test func longCaptionTruncatesLeavingRoomForTheTimestamp() {
         let caption = "Weekend build log: rebuilt the pipeline end to end, found two race conditions that only reproduce on cold caches, and learned more about backpressure than I ever wanted to."
         let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
-        #expect(composed.string.hasSuffix(timestamp))
+        #expect(composed.string.hasSuffix(shownTime))
         #expect(composed.string.contains("…"))
         #expect(!composed.string.contains("\n"))
         #expect(lineCount(composed) <= 2)
@@ -76,7 +88,7 @@ struct SnapChromeCaptionTests {
         ]
         for caption in captions {
             let composed = SnapChromeView.composedCaption(caption, timestamp: timestamp, width: width)
-            #expect(composed.string.hasSuffix(timestamp))
+            #expect(composed.string.hasSuffix(shownTime))
             #expect(lineCount(composed) <= 2)
         }
     }
