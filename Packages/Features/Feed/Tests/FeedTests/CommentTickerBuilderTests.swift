@@ -29,6 +29,21 @@ struct CommentTickerBuilderTests {
         #expect(dense.count == CommentTickerBuilder.minTickerCount)
     }
 
+    /// The author's initials ride into the model too (#1308): the bubble's
+    /// disc has something to say when there is no picture.
+    @Test func carriesTheAuthorsInitialsIntoTheModel() {
+        let entries = (0..<CommentTickerBuilder.minTickerCount).map { index in
+            CommentEntry(
+                id: "c\(index)", authorID: ProfileID("p\(index)"), authorName: "Ava Moreau",
+                authorHandle: "ava", body: "Nice one \(index)",
+                createdAt: Date(timeIntervalSince1970: 1000)
+            )
+        }
+        let queue = builder.build(entries, postID: PostID("post-1"))
+        #expect(!queue.isEmpty)
+        #expect(queue.allSatisfy { $0.monogram == "AM" })
+    }
+
     /// The author's avatar rides from the comment entry into the ticker
     /// model, so the bubble can draw it leading the text.
     @Test func carriesTheAuthorAvatarIntoTheModel() {

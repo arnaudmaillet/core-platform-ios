@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Foundation
 
 /// One bubble of the snap feed's comment ticker: a short comment reduced to
@@ -6,14 +7,18 @@ import Foundation
 public struct TickerCommentModel: Equatable, Sendable, Identifiable {
     public let id: String
     public let text: String
-    /// The comment author's avatar, shown leading the bubble. Optional — a
-    /// missing/unhydrated author renders the bubble's placeholder circle.
+    /// The comment author's avatar, shown leading the bubble over their
+    /// initials. Optional — an author with no picture (or one not loaded yet,
+    /// or failed) shows the initials alone (#1308).
     public let avatarURL: URL?
+    /// The author's initials: the bubble's disc is never an empty grey plate.
+    public let monogram: String
 
-    public init(id: String, text: String, avatarURL: URL? = nil) {
+    public init(id: String, text: String, avatarURL: URL? = nil, monogram: String = "?") {
         self.id = id
         self.text = text
         self.avatarURL = avatarURL
+        self.monogram = monogram
     }
 }
 
@@ -53,7 +58,10 @@ public struct CommentTickerBuilder: Sendable {
                   !body.contains(where: \.isNewline),
                   Self.isReactionShaped(body),
                   seenBodies.insert(body.lowercased()).inserted else { continue }
-            qualifying.append(TickerCommentModel(id: entry.id, text: body, avatarURL: entry.authorAvatarURL))
+            qualifying.append(TickerCommentModel(
+                id: entry.id, text: body, avatarURL: entry.authorAvatarURL,
+                monogram: MonogramAvatarView.monogram(name: entry.authorName, handle: entry.authorHandle)
+            ))
         }
         guard qualifying.count >= Self.minTickerCount else { return [] }
 
