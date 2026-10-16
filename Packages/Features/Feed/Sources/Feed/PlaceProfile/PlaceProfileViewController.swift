@@ -2393,8 +2393,8 @@ extension PlaceProfileViewController {
             return nil
         }
         // ⚠️ A RE-RENDER, NOT A SWAP: the list is For You's (`.discover`),
-        // whose stretches are planned, and `adoptPost` refuses to move a post
-        // behind the planner's back. The page is under the feed and has never
+        // whose stretches are planned, and a post is never moved behind the
+        // planner's back. The page is under the feed and has never
         // been seen, so it is re-planned with the post first — the one landing
         // allowed to move the list.
         if let settled, settled != anchor,

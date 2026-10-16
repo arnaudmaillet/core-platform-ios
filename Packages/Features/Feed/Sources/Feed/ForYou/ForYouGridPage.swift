@@ -600,20 +600,6 @@ final class ForYouGridPage: UIView {
     }
     private let style: Style
 
-    /// ⚠️ WHETHER A CLOSE MAY MOVE THIS PAGE'S POSTS TO MEET IT.
-    ///
-    /// A mosaic may: the swap trades two bricks in a field of bricks and the
-    /// eye does not track it. A LIST may not — the post that was under the card
-    /// is replaced by another, and a viewer reading a ranked feed sees the
-    /// ranking change under a gesture they made. The product rule is that a
-    /// close lands back on the post the OPENING left from, and a list keeps its
-    /// order.
-    ///
-    /// Discover is a list, chunks included: a tile swapped for the post the
-    /// viewer paged to would put a card's post in a tile's place (or a text
-    /// post in a picture's), and the chunks' posts were chosen to fit their
-    /// slots. A close from a tile lands back on that tile.
-    var landsByAdoption: Bool { style == .grid }
     /// Internal (not private) only for the +QA hooks.
     let collectionView: UICollectionView
 
@@ -1937,93 +1923,6 @@ final class ForYouGridPage: UIView {
         return Hero(frame: cell.convert(rect, to: space), cover: appearance.cover, style: appearance.style)
     }
 
-    /// Whether a hero could land on `postID` once it is IN the departure slot.
-    ///
-    /// ⚠️ ASKED OF THE MODEL, AND THAT IS THE WHOLE POINT.
-    ///
-    /// The obvious spelling — `heroAppearance(for:) != nil` — reads a REALIZED
-    /// CELL, and the post being dismissed is by definition the one the viewer
-    /// paged to, which is exactly the post whose row is furthest from the
-    /// screen. Nine pages down there is no cell, so the question answered "it
-    /// cannot fly", the adoption was declined, and the flight went home to the
-    /// tile it left from: the viewer closed Priya's photograph and watched it
-    /// land on Tom's dog. Measured that way, then fixed here.
-    ///
-    /// What can actually fly is a property of the post and the shape this page
-    /// draws it in: a tile is a rect whatever the post is, and a timeline row
-    /// only has one where it has media — a text row's card is the reveal's
-    /// business, not a flight's.
-    /// Takes the POST rather than its id, because the caller may be holding one
-    /// this page does not have yet — the adoption can insert it.
-    func canLandHero(on post: GalleryPost) -> Bool {
-        drawsAsTile(post.id) || post.kind != .text
-    }
-
-    /// The next post in the RENDERED order after `postID` that a close can
-    /// honestly land on: one with a cover, that `canLandHero` accepts.
-    ///
-    /// ⚠️ "NEXT" IS NEXT IN `posts`, and only this page can answer it. The
-    /// snap feed a tap opens is seeded as a SUFFIX of this page's ordered ids
-    /// — `ForYouViewController.openFeed` hands it `posts[index...]` — so the
-    /// post after the anchor here is literally the one the viewer would have
-    /// reached with one more swipe. The view model's corpus is neither
-    /// ordered nor filtered the same way (`arrange` permutes it into slots,
-    /// `partitioned` groups the arrivals, Discover's planner pulls media into
-    /// chunks), so the same question asked there answers about a different
-    /// list.
-    ///
-    /// Wraps to the HEAD of the page only when nothing after the anchor
-    /// qualifies — the last post on a page still has to land somewhere, and
-    /// the alternative is nil, which is a close with no arrival.
-    ///
-    /// Two preferences decide between candidates, and the order between them
-    /// is a judgement:
-    ///
-    /// - OFF-SCREEN first. The landing swaps this post into the departure slot
-    ///   (`adoptForClose`), so a post the viewer is looking at right now
-    ///   vanishes from where it lives and reappears in the arrival cell,
-    ///   mid-landing, in front of them.
-    /// - A DECODED cover second. `isLandingPlaybackReady` holds the card until
-    ///   the arrival tile has a face, so a candidate the pipeline already holds
-    ///   lands immediately and one it does not costs the wait.
-    ///
-    /// Off-screen wins the conflict because the two failures are not the same
-    /// size: an undecoded cover is a slower close, which the readiness gate is
-    /// built to cover and the adoption's prefetch shortens, while a tile
-    /// changing under the viewer's eye is a wrong frame.
-    func nextLandableMedia(after postID: PostID) -> GalleryPost? {
-        guard let anchor = posts.firstIndex(where: { $0.id == postID }) else { return nil }
-        return bestLandableMedia(in: posts[(anchor + 1)...])
-            ?? bestLandableMedia(in: posts[..<anchor])
-    }
-
-    /// The best candidate in one run, or nil if the run holds none.
-    ///
-    /// Scanned rather than sorted, and a tie keeps the EARLIER post: order is
-    /// the whole meaning of "next", so two equally good candidates must resolve
-    /// to the nearer one.
-    private func bestLandableMedia(in run: ArraySlice<GalleryPost>) -> GalleryPost? {
-        var best: (rank: Int, post: GalleryPost)?
-        for post in run
-        where post.kind != .text && post.thumbnailURL != nil && canLandHero(on: post) {
-            let rank = (isPostVisible(post.id) ? 2 : 0) + (hasDecodedCover(post) ? 0 : 1)
-            // Off screen and already decoded: nothing further along can beat it.
-            if rank == 0 { return post }
-            if rank < (best?.rank ?? Int.max) { best = (rank, post) }
-        }
-        return best?.post
-    }
-
-    /// Whether the pipeline is already holding this post's cover.
-    ///
-    /// The CACHE, which is the only question this page can ask without
-    /// suspending — the same synchronous lookup `hasCover` makes before letting
-    /// a tile play against a blank face.
-    private func hasDecodedCover(_ post: GalleryPost) -> Bool {
-        guard let url = post.thumbnailURL else { return false }
-        return imagePipeline.cachedImage(for: url) != nil
-    }
-
     /// What the flight card should *look* like, without needing a coordinate
     /// space — the card is built before anyone knows the container, and asking
     /// for a frame there would mean inventing one.
@@ -2178,26 +2077,6 @@ final class ForYouGridPage: UIView {
         windowClips.abandon(postID) { pauseReturnPlayback(for: postID) }
     }
 
-    /// A free-standing tile drawn from `post`, sized and rounded like the cell
-    /// currently occupying `slotOf`'s place — what a close lands on when the
-    /// arrival shows a DIFFERENT post from the one that departed.
-    ///
-    /// The occupant decides the geometry rather than `post` itself, and it has
-    /// to: the landing swaps `post` into that slot, so the rect the window
-    /// closes onto is the SLOT's, whatever was in it a moment ago. Reading the
-    /// size off `post`'s own cell would measure wherever it happens to live
-    /// now, which is the tile the swap is about to empty.
-    ///
-    /// The stand-in loads its own cover, which is the whole reason it exists —
-    /// a `PostGridFlightCard` flies the cover it was handed, and for a post
-    /// that never departed there is none.
-    ///
-    /// Nil when nothing is realized at the slot: there is no rect to size to,
-    /// and a stand-in built at a guessed size lands at the wrong one.
-    func makeTileStandIn(for post: GalleryPost, slotOf occupantID: PostID) -> UIView? {
-        makeTileStandIn(for: post, slotOf: occupantID, sizingUnrealizedFromLayout: false)
-    }
-
     /// `sizingUnrealizedFromLayout` is for a tile landing in its OWN slot, where
     /// the layout's rect is the one the close measures too; a swap into
     /// another post's slot keeps the rule above and refuses a guessed size.
@@ -2328,36 +2207,6 @@ final class ForYouGridPage: UIView {
 
     func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
         (cell(for: postID) as? PostGridListRowCell)?.revealCut
-    }
-
-    /// The swap a CLOSE performs: the landed post takes the departure slot, and
-    /// the concealment goes with it.
-    ///
-    /// ⚠️ ONE METHOD BECAUSE IT IS ONE RULE, and it was two call sites getting
-    /// it differently right. What the viewer must never see is the card they
-    /// are returning to sitting visible under the transition standing in for
-    /// it, while the card they left is the hidden one. That is not a detail of
-    /// either driver — it is what "the feed is up to date" means during the
-    /// drag, and it is on screen for the whole gesture, so no sweep afterwards
-    /// can answer it.
-    ///
-    /// `standingIn` is what differs: a card-shaped close CARRIES the row, so
-    /// that row must stand aside for it. A flight carries only the media and
-    /// conceals its landing on its own channel — but it still needs the window
-    /// released, because the screen it is closing may have been opened as one.
-    @discardableResult
-    func adoptForClose(
-        _ postID: PostID,
-        intoSlotOf occupantID: PostID,
-        orInsert model: GalleryPost? = nil,
-        standingIn: Bool
-    ) -> Bool {
-        guard adoptPost(postID, intoSlotOf: occupantID, orInsert: model) else { return false }
-        // Released first: the two are one handover, and the order is what stops
-        // a frame with both rows hidden.
-        setRevealConcealed(false, for: occupantID)
-        if standingIn { setRevealConcealed(true, for: postID) }
-        return true
     }
 
     /// Which posts the viewer currently cannot see, whatever is hiding them.
@@ -2548,182 +2397,6 @@ final class ForYouGridPage: UIView {
             print("[list-jump] thaw from offset=\(offset.y) pinnedTop=\(pinnedTop) → \(debugInsetState)")
         }
         #endif
-    }
-
-    /// Puts the post the viewer ended on into the slot they LEFT from, swapping
-    /// it with whatever was there. Reports whether anything moved.
-    ///
-    /// A dismissal has to land somewhere, and there are two candidates: the tile
-    /// the active post already occupies — which means scrolling the grid under
-    /// the viewer to reach it — or the tile they tapped, which is still exactly
-    /// where they left it. This is the second. The slot becomes a window onto
-    /// whatever the feed settled on, and the card flies home to the frame it
-    /// launched from.
-    ///
-    /// **A swap, not an overwrite.** Every lookup on this page resolves a post
-    /// id to a cell through `firstIndex`. Writing the active post into the
-    /// departure slot while it still sat in its own would put one id in two
-    /// places, and `firstIndex` would answer with whichever came first — so the
-    /// flight rect, the hero hide and the playback adoption could each end up
-    /// addressing a different tile. Swapping keeps ids unique, which is what
-    /// lets the rest of the machinery go on addressing cells by post with no
-    /// idea this happened.
-    ///
-    /// **Geometry cannot shift — in the MOSAIC.** The chaotic layout maps
-    /// *index* to frame, so exchanging the contents of two indices moves
-    /// nothing. What does change is the shape each of the two posts is cropped
-    /// to: `PostGridSliceArrangement` paired them with slots chosen for their
-    /// own aspects, and a swap trades those pairings.
-    ///
-    /// ⚠️ IN A LIST IT SHIFTS, AND THAT IS ALLOWED. This was gated to `.grid`
-    /// on the reasoning above, which left the list — where a viewer scrolls a
-    /// post open, pages to another and closes it — landing on the card they
-    /// LEFT rather than the one they ended on. Rows self-size, so the adopted
-    /// post's height is its own and everything below it moves.
-    ///
-    /// What matters is that nothing the return depends on moves: rows ABOVE the
-    /// slot are untouched, so the slot's origin is exactly where it was, and
-    /// the landing rect is read after this returns. What shifts is off the
-    /// bottom of a screen the flight is covering — and it has to shift, because
-    /// the alternative is a card of the wrong height standing in for the post.
-    @discardableResult
-    func adoptPost(
-        _ postID: PostID, intoSlotOf occupantID: PostID, orInsert model: GalleryPost? = nil
-    ) -> Bool {
-        // ⚠️ NEVER ON DISCOVER. Its stretches are planned — which posts are
-        // cards, which are tiles, in which chunk — and a swap would put a card's
-        // post into a tile's slot (a text post into a picture's) behind the
-        // planner's back, where `segments` and `posts` would then disagree about
-        // what is where. Nothing asks: `landsByAdoption` is false there.
-        guard style != .discover, !showsSkeleton,
-              let slot = posts.firstIndex(where: { $0.id == occupantID })
-        else { return false }
-        // ⚠️ MOVE IF IT IS HERE, INSERT IF IT IS NOT — never a second copy.
-        //
-        // The list this page holds is a page of a paginated feed, and the post
-        // being dismissed came from a stream seeded off it, so the two can
-        // disagree: a refresh that lands while a post is open re-derives the
-        // corpus, and the post the viewer is closing may no longer be in it.
-        // Declining there is what leaves the viewer landing on the card they
-        // left — the same wrong landing as an unrealized row, from a different
-        // cause. Inserting the model the caller carries puts it where it
-        // belongs instead.
-        //
-        // Either way the id ends up in exactly ONE index. Every lookup here
-        // resolves an id through `firstIndex`, so a duplicate does not render
-        // twice, it renders once and makes the OTHER copy unaddressable: the
-        // flight rect, the hero hide and the playback adoption would each be
-        // free to pick a different tile.
-        guard let current = posts.firstIndex(where: { $0.id == postID }) else {
-            guard let model, model.id == postID else { return false }
-            return insertPost(model, at: slot)
-        }
-        guard slot != current else { return false }
-        // ⚠️ A SWAP CAN RE-FORM THE SECTIONS, and the update has to know.
-        //
-        // `split` is not a stored number: it is the length of the leading RUN
-        // of arrivals. Move an old post into that run and the run stops there,
-        // so both sections' counts change — or a section appears or goes, which
-        // is why the comparison is the whole `sectionShape` — while `reloadItems` promises UIKit
-        // they did not. It crashes: "the number of items in section 0 after the
-        // update (1) must be equal to the number before (6)". Invisible while
-        // the adoption was gated to the mosaic, which has one section.
-        //
-        // Refusing the swap was tried and is the wrong trade: the arrivals sit
-        // at the top, so paging a few posts down crosses the boundary almost
-        // immediately, and declining there means the viewer lands on the card
-        // they left — the exact thing the adoption exists to prevent. So the
-        // swap stands and the UPDATE changes shape below.
-        let shapeBefore = sectionShape
-        // The pixels each cell is showing RIGHT NOW, carried across the reload.
-        //
-        // `configure` clears the image and re-asks the cache, so a cell whose
-        // cover the cache has since evicted comes back empty — a blank square
-        // where a tile used to be, for as long as the refetch takes. Both cells
-        // are on screen during a dismissal, so both would show it.
-        let carried = [slot, current].reduce(into: [Int: UIImage]()) { covers, index in
-            let path = indexPath(for: index)
-            if let cover = (collectionView.cellForItem(at: path) as? any GridPlaybackCell)?.renderedCover {
-                covers[index] = cover
-            }
-        }
-        posts.swapAt(slot, current)
-        // Reloaded rather than reconfigured: `reconfigureItems` reuses the cell
-        // without `prepareForReuse`, so a tile would keep the previous post's
-        // video surface and play one post's motion under another's cover.
-        UIView.performWithoutAnimation {
-            if sectionShape == shapeBefore {
-                collectionView.reloadItems(at: [
-                    indexPath(for: slot),
-                    indexPath(for: current)
-                ])
-            } else {
-                // ⚠️ THE WHOLE TABLE, because the sections themselves moved.
-                //
-                // A targeted update carries a promise about the counts, and
-                // this swap has just broken it. `reloadData` makes no such
-                // promise — it is the honest verb for "the shape changed".
-                //
-                // What it costs is one header's worth of shift for the rows
-                // below the boundary, and that is affordable exactly here: the
-                // grid is covered by the post being dismissed, and the landing
-                // rect is read AFTER the layout pass below, so the flight aims
-                // at where the slot actually ended up rather than where it was.
-                collectionView.reloadData()
-            }
-            // Force the pass NOW. `reloadItems` only marks the items dirty; the
-            // cells are rebuilt on the next layout, and the caller reads the
-            // landing rect from a realized cell immediately after this returns.
-            // Without it `cellForItem(at:)` answers nil, the source reports
-            // itself off-screen, and the flight collapses to the middle of the
-            // screen instead of flying to the tile — measured exactly that way.
-            collectionView.layoutIfNeeded()
-            // Re-apply after the rebuild: `applyCover` is a no-op on a cell that
-            // already found its image, so a cache hit still wins.
-            for (index, cover) in carried {
-                let moved = index == slot ? current : slot
-                (collectionView.cellForItem(at: indexPath(for: moved))
-                    as? any GridPlaybackCell)?.applyCover(cover)
-            }
-            // Both swapped cells are on screen for the whole return, and both
-            // must be drawn before it starts. The displaced post's slot is the
-            // one that gets forgotten: nothing is flying to it, so no landing
-            // step ever revisits it, and it would carry whatever state the
-            // rebuild left until something else happened to touch it.
-            for index in [slot, current] {
-                guard let cell = collectionView.cellForItem(
-                    at: indexPath(for: index)
-                ) else { continue }
-                cell.isHidden = false
-                cell.alpha = 1
-                cell.layoutIfNeeded()
-            }
-            // ⚠️ NO `CATransaction.flush()` HERE, however tempting.
-            //
-            // It was here to commit the rebuilt cells to the render server in
-            // this turn rather than the next, because everything downstream —
-            // the hero rect, the flight card's cover, the landing gate — reads
-            // them immediately. `layoutIfNeeded` above already delivers that:
-            // the cells exist and are laid out, which is what those readers
-            // actually need.
-            //
-            // What the flush additionally did was flush UIKIT'S OWN
-            // TRANSACTION, and this method runs inside one on the back-button
-            // path: the adoption is asked for from `animationControllerFor`,
-            // which UIKit calls while committing the pop. Flushing there
-            // aborted the pop — the animator was returned and then never
-            // started, no `animateTransition`, no `didShow`, no completion. On
-            // screen: the closed post's navigation bar still up over the grid,
-            // and the row the close had concealed hidden for good, because the
-            // completion that puts it back never ran.
-            //
-            // Measured by removing exactly this line: the same close then
-            // logged `reveal animate` → `conceal=false` → `ended completed=true`.
-        }
-        // The landing tile is about to be flown onto; give its cover a head
-        // start in case the cache does not already hold it.
-        warmLandingCover(of: posts[slot])
-        return true
     }
 
     /// Puts a post the list no longer holds INTO it, at the departure slot.
@@ -2941,8 +2614,8 @@ final class ForYouGridPage: UIView {
         // these since the day a lookup cleared the wrong cell, and this channel
         // never got the same treatment.
         //
-        // The post→cell mapping is not stable across a close: it ADOPTS, which
-        // moves posts between slots, so by the time the concealment is lifted
+        // The post→cell mapping is not stable across a close (a refresh can
+        // re-render the page under it), so by the time the concealment is lifted
         // `cell(for:)` can resolve the id to a different instance, or to none at
         // all. A live capture of a reported session shows the precondition
         // happening five times in one minute — `row=MISSING`, once of them on a

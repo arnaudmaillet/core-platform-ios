@@ -18,17 +18,12 @@ import UIKit
 /// point, and every defect so far has been one cell of this table that nobody
 /// had opened.
 ///
-/// The rule the whole table serves: **the viewer lands on the post they were
-/// looking at, in the slot they left from, and that post appears exactly once
-/// in the feed.**
-///
-/// Two shipped failures this covers, both invisible to the suites that existed:
-///
-/// * a landing decided by asking for a REALIZED CELL — so paging deep enough
-///   that the row was recycled made every media dismissal land on the departure
-///   post instead ("le dernier dismiss n'est pas bon");
-/// * a landing post the page no longer held, which was declined outright rather
-///   than put back into the list.
+/// The rule the whole table serves (the owner, 2026-10-16, #1269/#1283):
+/// **a close always comes home to the tile that was tapped**, whatever the
+/// viewer paged to, crossfading the page's picture into the tile's own clip —
+/// and nothing in the grid moves to meet it. The close used to ADOPT the post
+/// the viewer ended on into the tapped slot on a mosaic; that is gone, and so
+/// are its tests.
 @MainActor
 struct DismissalReturnMatrixTests {
     private struct SilentFetcher: ImageFetching {
@@ -68,309 +63,86 @@ struct DismissalReturnMatrixTests {
         return page
     }
 
-    /// ⚠️ STAGING IS NOT ONCE-ONLY, and the second one used to undo the first.
-    ///
-    /// A cancelled grab keeps its source. `departureID` names the post that was
-    /// TAPPED and never moves — the right answer for "where is the landing" and
-    /// the wrong one for "what do I swap with", because after one adoption the
-    /// tapped post is no longer in the departure slot. The second staging
-    /// therefore adopted into the row the tapped post had been MOVED to and
-    /// inverted the swap: a grab the viewer abandoned left the grid permanently
-    /// re-ordered, and the next one put the card down where the anchor was not.
-    @Test func stagingTwiceLeavesTheGridWhereTheFirstStagingPutIt() {
-        let page = page(style: .grid, count: 8)
-        let tapped = page.posts[1].id
-        let landed = page.posts[5].id
-
-        let source = ForYouGridZoomSource(
-            page: page, tappedID: tapped, activePostID: { landed },
-            landedModel: { id in page.post(for: id) }, depthView: nil
-        )
-        source.zoomSourceWillStageDismissal()
-        let afterFirst = page.posts.map { $0.id }
-        #expect(afterFirst[1] == landed, "precondition: the landed post took the slot")
-
-        // The grab was abandoned; the viewer grabs again without paging.
-        source.zoomSourceWillStageDismissal()
-
-        #expect(page.posts.map { $0.id } == afterFirst,
-                "the second staging re-ordered a grid the first had already settled")
-    }
-
-    /// And a viewer who pages FURTHER after an abandoned grab adopts into the
-    /// slot as it actually is, not into the row the tapped post was moved to.
-    @Test func stagingAfterPagingFurtherAdoptsIntoTheRealSlot() {
-        let page = page(style: .grid, count: 8)
-        let tapped = page.posts[1].id
-        var landed = page.posts[5].id
-
-        let source = ForYouGridZoomSource(
-            page: page, tappedID: tapped, activePostID: { landed },
-            landedModel: { id in page.post(for: id) }, depthView: nil
-        )
-        source.zoomSourceWillStageDismissal()
-        landed = page.posts[6].id
-        source.zoomSourceWillStageDismissal()
-
-        #expect(page.posts[1].id == landed,
-                "the departure slot holds the wrong post")
-    }
-
     /// Stages a dismissal exactly as the flight does: build the source the tap
-    /// builds, tell it the feed settled on `landed`, and let it re-point.
+    /// builds, tell it the feed settled on `landed`, and let it stage.
     @discardableResult
     private func stageDismissal(
-        on page: ForYouGridPage,
-        tapped: PostID,
-        landed: PostID?,
-        corpus: [GalleryPost] = []
+        on page: ForYouGridPage, tapped: PostID, landed: PostID?,
+        activeMediaPage: (() -> Int?)? = nil
     ) -> ForYouGridZoomSource {
         let source = ForYouGridZoomSource(
-            page: page,
-            tappedID: tapped,
-            activePostID: { landed },
-            landedModel: { id in corpus.first { $0.id == id } },
-            depthView: nil
+            page: page, tappedID: tapped, activePostID: { landed },
+            activeMediaPage: activeMediaPage, depthView: nil
         )
         source.zoomSourceWillStageDismissal()
         return source
     }
 
-    private func index(of id: PostID, in page: ForYouGridPage) -> Int? {
-        page.posts.firstIndex { $0.id == id }
+    /// Where a close anchored to `id` lands: its media, its text row, or its
+    /// row — the answers `zoomHeroFrame` tries in turn.
+    private func landingRect(of id: PostID, in page: ForYouGridPage) -> CGRect? {
+        page.hero(for: id, in: page)?.frame ?? page.rowFrame(for: id, in: page)
     }
 
-    /// Closes the post the way the APP would, by asking the same question the
-    /// app asks: a post with something to fly goes home on the flight, and one
-    /// without goes home as a card — which on this page is a direct adoption,
-    /// because the card driver owns the animation and the page only owns the
-    /// slot.
-    ///
-    /// Written as one helper because the permutation below is a rule about the
-    /// FEED, not about a driver: which one carries the post is an implementation
-    /// detail the viewer cannot see, and a test that only exercised the flight
-    /// would leave every text landing unproven.
-    private func close(on page: ForYouGridPage, tapped: PostID, landed: PostID) {
-        guard let model = page.post(for: landed) else { return }
-        if page.canLandHero(on: model) {
-            stageDismissal(on: page, tapped: tapped, landed: landed)
-        } else if page.landsByAdoption {
-            // The card-shaped close, and only on a mosaic — the app gates it the
-            // same way. A list lands back on the post that opened it and moves
-            // nothing, so there is no call for this helper to make.
-            page.adoptPost(landed, intoSlotOf: tapped, orInsert: model)
+    // MARK: - Home to the tapped tile, always
+
+    /// ⚠️ THE MATRIX: every shape × what the post being closed IS × how far the
+    /// viewer paged. The grid holds still, and the close lands on the tile
+    /// that was tapped — never on the post the viewer ended on.
+    @Test(arguments: [ForYouGridPage.Style.discover, .grid, .list], [0, 1, 2])
+    func aCloseAlwaysComesHomeToTheTappedTile(style: ForYouGridPage.Style, landingKind: Int) {
+        for distance in [0, 3, 24] {
+            let page = page(style: style)
+            let before = page.posts.map(\.id)
+            let tapped = before[1]
+            let landed = before[min(before.count - 1, 1 + distance + landingKind)]
+
+            let source = stageDismissal(on: page, tapped: tapped, landed: landed)
+
+            #expect(page.posts.map(\.id) == before,
+                    "a \(style) close from \(distance) posts on moved the grid to meet it")
+            let home = landingRect(of: tapped, in: page)
+            #expect(home != nil, "precondition: the tapped tile is on screen")
+            #expect(source.zoomHeroFrame(in: page) == home,
+                    "a \(style) close from \(distance) posts on did not land on the tapped tile")
         }
     }
 
-    /// The invariant every single case owes, asserted everywhere rather than
-    /// once: an id in two slots does not render twice, it makes one of the two
-    /// unaddressable — `firstIndex` answers with whichever comes first, so the
-    /// flight rect, the hero hide and the playback handoff are each free to
-    /// pick a different cell.
-    private func expectNoDuplicates(_ page: ForYouGridPage, _ comment: Comment) {
-        let ids = page.posts.map(\.id)
-        #expect(Set(ids).count == ids.count, comment)
-    }
-
-    // MARK: - The tile grid: everything flies
-
-    /// ⚠️ A TILE IS A RECT WHATEVER THE POST IS, text included — the grid draws
-    /// a text post as a coloured tile, and a coloured tile can fly.
-    @Test(arguments: [0, 1, 2])
-    func aGridAdoptsEveryKindOfPost(kindOffset: Int) {
-        let page = page(style: .grid)
-        let tapped = page.posts[3].id
-        let landed = page.posts[12 + kindOffset].id
-        let kind = page.posts[12 + kindOffset].kind
-
-        stageDismissal(on: page, tapped: tapped, landed: landed)
-
-        #expect(index(of: landed, in: page) == 3, "a \(kind) tile did not take the departure slot")
-        expectNoDuplicates(page, "adopting a \(kind) tile duplicated an id")
-        #expect(page.posts.count == 30)
-    }
-
-
-    // MARK: - The list, which never moves
-
-    /// ⚠️ A LIST NEVER PERMUTES, AND THE CLOSE LANDS WHERE IT LEFT.
-    ///
-    /// Whatever the viewer paged to, the window goes back to the post that
-    /// opened it — the row is still exactly where they left it, still concealed
-    /// by the opening, so the landing costs no scrolling and the ranking the
-    /// viewer was reading is the ranking they get back.
-    ///
-    /// Adoption would answer the geometry just as well and is what a mosaic
-    /// still does; on a list it replaces the post under the card with another
-    /// one, which is the thing this rule exists to forbid.
-    @Test(arguments: [0, 1, 2])
-    func aListNeverPermutesAndLandsWhereItLeft(landingKind: Int) {
-        let page = page(style: .list)
-        let before = page.posts.map { $0.id }
-        let tapped = before[3]
-        let landed = before[12 + landingKind]   // photo, video, text
-
-        close(on: page, tapped: tapped, landed: landed)
-
-        #expect(page.posts.map { $0.id } == before,
-                "a list moved to meet its close")
-        #expect(index(of: tapped, in: page) == 3,
-                "the post that opened the close left its slot")
-    }
-
-    // MARK: - Adoption, which is the MOSAIC's alone
-    //
-    // ⚠️ THESE USED TO RUN ON A LIST, and the product rule changed under them.
-    //
-    // A close now lands back on the post that OPENED it and a list keeps its
-    // order: the post under the card being replaced by another is the ranking
-    // changing under a gesture the viewer made, and a scroll is not a re-order
-    // in the code but IS one to the eye. On a mosaic the swap trades two bricks
-    // in a field of bricks and nobody tracks it, so adoption survives there —
-    // and everything below is still exactly true of it.
-    //
-    // The list's own rule is pinned by `aListNeverPermutesAndLandsWhereItLeft`.
-
-    // MARK: - The timeline: media flies, text does not
-
-    /// A tile's hero is its MEDIA, and adoption brings the landed one to the slot.
-    @Test(arguments: [0, 1])
-    func aMosaicAdoptsAMediaTile(kindOffset: Int) {
-        let page = page(style: .grid)
-        let tapped = page.posts[3].id
-        let landed = page.posts[12 + kindOffset].id
-
-        stageDismissal(on: page, tapped: tapped, landed: landed)
-
-        #expect(index(of: landed, in: page) == 3)
-        expectNoDuplicates(page, "adopting a media row duplicated an id")
-    }
-
-    /// ⚠️ AND A TEXT ROW IS NOT THIS DRIVER'S TO LAND.
-    ///
-    /// It has no media, so there is no object that exists at both ends for a
-    /// hero to carry — the card-shaped close takes that post, and it does its
-    /// own adoption. This driver declining is what leaves the slot alone for it.
-    @Test func aTimelineDeclinesATextRow() {
-        let page = page(style: .list)
-        let tapped = page.posts[3].id
-        let landed = page.posts[14].id
-        #expect(page.posts[14].kind == .text)
-
-        stageDismissal(on: page, tapped: tapped, landed: landed)
-
-        #expect(index(of: landed, in: page) == 14, "a text row must be left to the card close")
-        #expect(index(of: tapped, in: page) == 3)
-        expectNoDuplicates(page, "a declined adoption still moved something")
-    }
-
-    // MARK: - Distance: the defect that shipped
-
-    /// ⚠️ HOW FAR THE VIEWER PAGED CANNOT DECIDE WHERE THEY LAND.
-    ///
-    /// This is the reported one. The landing used to be gated on the landed
-    /// post having a REALIZED CELL, and the post being dismissed is precisely
-    /// the one the viewer paged away to: the further they went, the more
-    /// certain its row had been recycled, and the answer flipped from "adopt"
-    /// to "stay" with no rule behind it but the scroll position. Nine pages
-    /// down it declined every time and the photograph landed on the tapped
-    /// post's card.
-    ///
-    /// A row at index 25 of a 852pt-tall timeline is far outside anything
-    /// realized, which is the whole point of choosing it.
-    @Test(arguments: [1, 4, 12, 25])
-    func theLandingIsTheSameHoweverFarTheViewerPaged(distance: Int) {
-        let page = page(style: .grid)
-        let tapped = page.posts[0].id
-        // Always a media row, so distance is the only thing varying.
-        let landingIndex = distance % 3 == 2 ? distance - 1 : distance
-        let landed = page.posts[landingIndex].id
-
-        stageDismissal(on: page, tapped: tapped, landed: landed)
-
-        #expect(index(of: landed, in: page) == 0,
-                "a landing \(landingIndex) rows down was refused for being off screen")
-        expectNoDuplicates(page, "adopting from distance \(landingIndex) duplicated an id")
-    }
-
-    // MARK: - Membership: move, insert, or nothing
-
-    /// The ordinary case, stated as an invariant rather than as a swap: after a
-    /// dismissal the landed post is in the departure slot ONCE.
-    @Test func aPostAlreadyInTheListIsMovedRatherThanCopied() {
-        let page = page(style: .grid)
-        let countBefore = page.posts.count
-        let tapped = page.posts[2].id
-        let landed = page.posts[9].id
-
-        stageDismissal(on: page, tapped: tapped, landed: landed)
-
-        #expect(index(of: landed, in: page) == 2)
-        #expect(page.posts.count == countBefore, "a move must not grow the feed")
-        expectNoDuplicates(page, "the landed post was copied instead of moved")
-    }
-
-    /// ⚠️ AND A POST THE LIST NO LONGER HOLDS IS PUT BACK INTO IT.
-    ///
-    /// The stream a post opens into is seeded off this list, but the two can
-    /// drift: a refresh that lands while a post is open re-derives the corpus.
-    /// Declining there is the same wrong landing as the distance case above,
-    /// from a different cause — so the model the feed still holds is inserted
-    /// at the departure slot.
-    @Test func aPostDroppedFromTheListIsInsertedAtTheSlot() {
-        let page = page(style: .grid)
-        let full = corpus(40)
-        let missing = full[35]
-        let tapped = page.posts[4].id
-        let countBefore = page.posts.count
-
-        stageDismissal(on: page, tapped: tapped, landed: missing.id, corpus: full)
-
-        #expect(index(of: missing.id, in: page) == 4, "the dismissed post never came back")
-        #expect(page.posts.count == countBefore + 1)
-        #expect(index(of: tapped, in: page) == 5, "the departure post should have moved down one")
-        expectNoDuplicates(page, "inserting the landed post duplicated an id")
-    }
-
-    /// With no corpus to consult there is nothing honest to insert, and the
-    /// flight goes home to the tile it left from rather than to a rect invented
-    /// for a post nothing can render.
-    @Test func aPostNobodyHoldsLeavesTheListAlone() {
-        let page = page(style: .grid)
-        let tapped = page.posts[4].id
-
-        stageDismissal(on: page, tapped: tapped, landed: PostID("ghost"))
-
-        #expect(page.posts.count == 30)
-        #expect(index(of: tapped, in: page) == 4)
-        expectNoDuplicates(page, "a refused landing still moved something")
-    }
-
-    /// The viewer never paged: the post they close is the one they opened.
-    /// Nothing moves, and nothing is duplicated by "moving" a post onto itself.
-    @Test(arguments: [ForYouGridPage.Style.grid, .list])
-    func closingTheTappedPostMovesNothing(style: ForYouGridPage.Style) {
-        let page = page(style: style)
+    /// ⚠️ STAGING IS NOT ONCE-ONLY: a cancelled grab keeps its source, and the
+    /// second staging must leave the grid exactly as the first.
+    @Test func stagingTwiceLeavesTheGridUntouched() {
+        let page = page(style: .grid, count: 8)
         let before = page.posts.map(\.id)
-        let tapped = page.posts[6].id
-
-        stageDismissal(on: page, tapped: tapped, landed: tapped)
-
+        var landed = before[5]
+        let source = ForYouGridZoomSource(
+            page: page, tappedID: before[1], activePostID: { landed }, depthView: nil
+        )
+        source.zoomSourceWillStageDismissal()
+        landed = before[6]
+        source.zoomSourceWillStageDismissal()
         #expect(page.posts.map(\.id) == before)
-        expectNoDuplicates(page, "adopting a post into its own slot duplicated it")
+        #expect(source.zoomHeroFrame(in: page) == landingRect(of: before[1], in: page))
+    }
+
+    /// A post the page does not hold (dropped by a refresh, or never there)
+    /// changes nothing: the close goes home.
+    @Test func aPostNobodyHoldsLeavesTheGridAlone() {
+        let page = page(style: .grid)
+        let before = page.posts.map(\.id)
+        let source = stageDismissal(on: page, tapped: before[4], landed: PostID("ghost"))
+        #expect(page.posts.map(\.id) == before)
+        #expect(source.zoomHeroFrame(in: page) == landingRect(of: before[4], in: page))
     }
 
     /// A feed that has not answered yet is asked this too — a pop can beat the
-    /// first page in — and there is no slot to land in.
+    /// first page in — and nothing breaks.
     @Test func anEmptyFeedRefusesQuietly() {
         let page = ForYouGridPage(
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list
         )
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
         page.layoutIfNeeded()
-
         stageDismissal(on: page, tapped: PostID("p0"), landed: PostID("p1"))
-
         #expect(page.posts.isEmpty)
     }
 
@@ -394,7 +166,7 @@ struct DismissalReturnMatrixTests {
 
     /// A whole round trip, the way the app performs one: the push hides the
     /// tapped row's media so the card flies alone, the close re-points at
-    /// whatever the viewer ended on, and then either the flight lands (and puts
+    /// the tapped tile, and then either the flight lands (and puts
     /// its own hide back) or another driver finishes the close and the screen's
     /// own return sweep does.
     private func roundTrip(
@@ -404,8 +176,7 @@ struct DismissalReturnMatrixTests {
         flightLands: Bool
     ) {
         let source = ForYouGridZoomSource(
-            page: page, tappedID: tapped, activePostID: { landed },
-            landedModel: { id in page.post(for: id) }, depthView: nil
+            page: page, tappedID: tapped, activePostID: { landed }, depthView: nil
         )
         source.setZoomSourceHidden(true)
         source.zoomSourceWillStageDismissal()
@@ -464,37 +235,38 @@ struct DismissalReturnMatrixTests {
                 flightLands: trip.isMultiple(of: 2)
             )
             expectNothingConcealed(page, "a row was left hidden by trip \(trip)")
-            expectNoDuplicates(page, "trip \(trip) duplicated an id")
         }
         #expect(page.posts.count == 30)
     }
 
-    /// ⚠️ A WINDOW CAN CLOSE AS A FLIGHT, and the row it opened from is
-    /// CONCEALED for the whole visit.
-    ///
-    /// The two openings are not symmetric. A media post opens with a flight,
-    /// which hides the row's MEDIA; a text post opens as a window, and the
-    /// reveal takes the whole ROW away — "the row goes the moment the window
-    /// takes its place". Page from that text post onto a photograph and the
-    /// close is the flight's, landing in the slot the window left behind: a
-    /// slot the reveal is still holding concealed.
-    ///
-    /// Reported as the transition window "returning to the middle of the
-    /// screen", which is exactly what a flight does when its source reports
-    /// nothing to land on — `ZoomTransitionGeometry.centeredFallback`.
-    @Test func aWindowThatEndsOnAPhotographHasSomewhereToLand() {
+    /// ⚠️ A WINDOW CAN CLOSE AS A FLIGHT: a text tile opened as a window, the
+    /// viewer paged onto a photograph, and the flight lands on the TEXT tile it
+    /// left from — a tile is a rect for every kind, so it never collapses to
+    /// the middle of the screen.
+    @Test func aWindowThatEndsOnAPhotographLandsOnItsTextTile() {
         let page = page(style: .grid)
         let text = page.posts[2].id
         #expect(page.posts[2].kind == .text)
-        let media = page.posts[12].id
-        // What the window's opening does to the row it came from.
         page.setRevealConcealed(true, for: text)
 
-        stageDismissal(on: page, tapped: text, landed: media)
+        let source = stageDismissal(on: page, tapped: text, landed: page.posts[12].id)
 
-        #expect(index(of: media, in: page) == 2, "the landing post never reached the slot")
-        #expect(page.hero(for: media, in: page) != nil, "the flight had no rect and collapsed")
-        #expect(page.isPostVisible(media), "the landing row is concealed under the card")
+        let home = landingRect(of: text, in: page)
+        #expect(home != nil)
+        #expect(source.zoomHeroFrame(in: page) == home, "the flight did not land on its text tile")
+    }
+
+    /// And the row the window departed from comes back when the close is over.
+    @Test func theWindowsOwnRowComesBackAfterAFlightCloses() {
+        let page = page(style: .list)
+        let text = page.posts[2].id
+        page.setRevealConcealed(true, for: text)
+
+        stageDismissal(on: page, tapped: text, landed: page.posts[12].id)
+        page.clearHeroConcealment()
+        page.clearRevealConcealment()
+
+        expectNothingConcealed(page, "the window's row stayed hidden after a flight close")
     }
 
     /// ⚠️ A GRID'S LANDING IS CONCEALED TOO, and for a long time it was not.
@@ -527,21 +299,6 @@ struct DismissalReturnMatrixTests {
         }
     }
 
-    /// And the row the window departed from comes back when the flight lands —
-    /// it is the other end of the same swap, and nothing else revisits it.
-    @Test func theWindowsOwnRowComesBackAfterAFlightCloses() {
-        let page = page(style: .list)
-        let text = page.posts[2].id
-        let media = page.posts[12].id
-        page.setRevealConcealed(true, for: text)
-
-        stageDismissal(on: page, tapped: text, landed: media)
-        page.clearHeroConcealment()
-        page.clearRevealConcealment()
-
-        expectNothingConcealed(page, "the window's row stayed hidden after a flight close")
-    }
-
     /// ⚠️ NO CLOSE COLLAPSES INTO THE MIDDLE OF THE SCREEN WHILE ITS POST HAS A
     /// ROW.
     ///
@@ -552,10 +309,8 @@ struct DismissalReturnMatrixTests {
     /// blank card into the centre of the screen. Reported as "the transition
     /// window returns to the middle".
     ///
-    /// The anchor lands on the other kind by ordinary use: it is re-pointed at
-    /// whatever the viewer paged to, and when that post cannot be adopted the
-    /// anchor stays the DEPARTURE post — which for a window is a text post, and
-    /// for a flight is a media one.
+    /// The anchor is the DEPARTURE post whatever the viewer paged to — which for
+    /// a window is a text post, and for a flight is a media one.
     @Test(arguments: [0, 1, 2])
     func aCloseAlwaysHasARectWhateverKindItsAnchorTurnedOutToBe(kindOffset: Int) {
         let page = page(style: .list)
@@ -581,12 +336,10 @@ struct DismissalReturnMatrixTests {
         #expect(page.posts[2].kind == .text)
         #expect(page.hero(for: text, in: page) == nil, "a text row has no hero — the premise")
 
-        // The case that produces it: a window opened from this text post, the
-        // viewer paged to a post the grid cannot land on, so the anchor stayed
-        // here.
+        // A window opened from this text post: the anchor stays here whatever
+        // the viewer paged to.
         let source = ForYouGridZoomSource(
-            page: page, tappedID: text, activePostID: { PostID("gone") },
-            landedModel: { _ in nil }, depthView: nil
+            page: page, tappedID: text, activePostID: { PostID("gone") }, depthView: nil
         )
         source.zoomSourceWillStageDismissal()
 
@@ -595,8 +348,6 @@ struct DismissalReturnMatrixTests {
         #expect(row != nil)
         #expect(frame == row, "the close collapsed to the centre instead of onto its card")
     }
-
-    // MARK: - Which card is hidden WHILE the close is being dragged
 
     /// The posts whose row is currently standing aside for a transition —
     /// concealed on either channel.
@@ -608,137 +359,39 @@ struct DismissalReturnMatrixTests {
         page.concealedPosts()
     }
 
-    /// ⚠️ THE HIDDEN CARD IS THE ONE THE TRANSITION IS STANDING IN FOR — at
-    /// every moment of the gesture, not merely once it ends.
-    ///
-    /// A window hides the row it opened from, which is what stops the same post
-    /// being on screen twice while it is dragged. Page to another post and the
-    /// swap puts a DIFFERENT post in that slot — and the flag still named the
-    /// old one, so the card the viewer was returning to sat visible under the
-    /// window they were holding, while the card they had left was hidden
-    /// somewhere further down. The report is exactly that, and it is visible
-    /// for the whole drag: no end-of-close sweep can answer it.
-    ///
-    /// Both directions asserted, because "B is hidden" alone would pass while A
-    /// was hidden too.
-    /// ⚠️ TALL ON PURPOSE. `concealedPosts` can only report rows the collection
-    /// view has REALIZED, so on a phone-sized page a post three rows down is
-    /// invisible to it either way and every assertion about that post passes
-    /// vacuously — which is exactly what the first version of these tests did,
-    /// including under falsification. A page tall enough to realize its whole
-    /// corpus is what makes "who is hidden" answerable at all.
-    private func tallPage(
-        _ kinds: [GalleryPost.Kind], style: ForYouGridPage.Style = .list
-    ) -> ForYouGridPage {
-        let page = ForYouGridPage(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style
-        )
-        page.frame = CGRect(x: 0, y: 0, width: 393, height: 6000)
-        page.render(.content(kinds.enumerated().map { index, kind in
-            GalleryPost(
-                id: PostID("p\(index)"),
-                kind: kind,
-                isRepost: false,
-                thumbnailURL: kind == .text ? nil : URL(string: "https://example.test/\(index).jpg"),
-                aspectRatio: 1,
-                caption: "caption \(index)",
-                publishedAtMS: 0
-            )
-        }))
-        page.layoutIfNeeded()
-        return page
-    }
+    // MARK: - What the landing tile is showing when the card arrives
 
-    @Test func theHiddenCardFollowsTheSwap() {
-        let page = tallPage([.text, .photo, .text])
-        let a = page.posts[0].id      // text, opened as a window
-        let b = page.posts[2].id      // text, paged to
-        page.setRevealConcealed(true, for: a)
-        #expect(concealedPosts(in: page) == [a], "the premise: the window hid its own row")
-
-        page.adoptForClose(b, intoSlotOf: a, orInsert: page.post(for: b), standingIn: true)
-
-        #expect(concealedPosts(in: page).contains(b), "the card being returned to was visible")
-        #expect(concealedPosts(in: page).contains(a) == false, "the card left behind stayed hidden")
-        #expect(concealedPosts(in: page) == [b], "exactly one card stands aside for the close")
-    }
-
-    /// A FLIGHT's close does not take the row aside — it carries the media and
-    /// conceals its landing on the other channel — but it still releases what a
-    /// window was holding. Same handover, the other half of it.
-    @Test func aFlightsCloseReleasesTheWindowWithoutTakingTheRow() {
-        let page = tallPage([.text, .photo, .photo])
-        let a = page.posts[0].id
-        let b = page.posts[2].id
-        page.setRevealConcealed(true, for: a)
-
-        page.adoptForClose(b, intoSlotOf: a, orInsert: page.post(for: b), standingIn: false)
-
-        #expect(concealedPosts(in: page).isEmpty,
-                "a flight's close should leave the row it lands on visible until it conceals it")
-    }
-
-    /// The same rule through the seam the app actually calls, rather than by
-    /// hand: staging a close releases what the window was holding.
-    @Test func stagingACloseMovesTheConcealment() {
-        let page = tallPage([.text, .video, .photo], style: .grid)
-        let a = page.posts[0].id
-        let b = page.posts[2].id      // a photograph — the close is a flight
-        page.setRevealConcealed(true, for: a)
-        #expect(concealedPosts(in: page) == [a])
-
-        let source = ForYouGridZoomSource(
-            page: page, tappedID: a, activePostID: { b },
-            landedModel: { id in page.post(for: id) }, depthView: nil
-        )
-        source.zoomSourceWillStageDismissal()
-
-        #expect(concealedPosts(in: page).contains(a) == false,
-                "the window's row stayed hidden after the swap moved past it")
-    }
-
-    // MARK: - What the landing row is showing when the card arrives
-
-    /// ⚠️ THE ROW IS PUT ON THE PAGE THE CARD IS CARRYING.
-    ///
-    /// A close from page four of a collection flies page four, and the row it
-    /// lands on keeps whatever page it was left on — the first, for a row the
-    /// viewer never touched. The photograph therefore changed under the card at
-    /// the exact moment the card was removed. The opening has had this in both
-    /// directions since `openMediaPage`; the close only ever had it in one.
-    @Test func theLandingRowIsPutOnThePageTheCardIsCarrying() {
+    /// ⚠️ A SAME-POST CLOSE PUTS THE TILE ON THE PAGE THE CARD IS CARRYING: a
+    /// close from page four of a collection flies page four, and the tile it
+    /// lands on would otherwise keep the page it was left on.
+    @Test func aSamePostCloseTurnsTheTileToThePageTheCardIsCarrying() {
         let page = page(style: .grid)
         let tapped = page.posts[0].id
-        let landed = page.posts[12].id
         var asked = 0
-
-        let source = ForYouGridZoomSource(
-            page: page, tappedID: tapped, activePostID: { landed },
-            landedModel: { id in page.post(for: id) },
-            activeMediaPage: { asked += 1; return 3 },
-            depthView: nil
-        )
-        source.zoomSourceWillStageDismissal()
-
+        stageDismissal(on: page, tapped: tapped, landed: tapped, activeMediaPage: { asked += 1; return 3 })
         #expect(asked == 1, "the close never asked which page it was flying")
-        #expect(index(of: landed, in: page) == 0)
     }
 
-    /// Nil means "not a collection", and a row with no pages must be left alone
-    /// rather than sent to page zero — the same distinction `openMediaPage`
-    /// draws in the other direction.
+    /// A close from ANOTHER post leaves the tile on its own page: the page on
+    /// screen belongs to the other post, and the tile crossfades into its own
+    /// clip.
+    @Test func aCloseFromAnotherPostLeavesTheTilesPageAlone() {
+        let page = page(style: .grid)
+        var asked = 0
+        stageDismissal(
+            on: page, tapped: page.posts[0].id, landed: page.posts[12].id,
+            activeMediaPage: { asked += 1; return 3 }
+        )
+        #expect(asked == 0, "another post's page was applied to the tapped tile")
+    }
+
+    /// Nil means "not a collection", and a row with no pages is left alone
+    /// rather than sent to page zero.
     @Test func aRowWithNoPagesIsNotSentToPageZero() {
         let page = page(style: .list)
-
-        let source = ForYouGridZoomSource(
-            page: page, tappedID: page.posts[0].id, activePostID: { page.posts[12].id },
-            landedModel: { id in page.post(for: id) },
-            activeMediaPage: { nil },
-            depthView: nil
-        )
-        source.zoomSourceWillStageDismissal()
-
-        #expect(index(of: page.posts[0].id, in: page) == 0)
+        let before = page.posts.map(\.id)
+        stageDismissal(on: page, tapped: before[0], landed: before[0], activeMediaPage: { nil })
+        #expect(page.posts.map(\.id) == before)
     }
 
     /// ⚠️ THE CARD STAYS AND THE MEDIA GOES, on a timeline.
@@ -757,115 +410,5 @@ struct DismissalReturnMatrixTests {
 
         #expect(list.landingConcealsMedia)
         #expect(grid.landingConcealsMedia == false)
-    }
-
-    // MARK: - The order the viewer gets back
-
-    /// ⚠️ THE FEED IS PERMUTED, NOT REBUILT: A, B, C read from A to C comes back
-    /// C, B, A.
-    ///
-    /// Stated as the product rule it is. The post the viewer ended on takes the
-    /// slot they left from — that is the whole point of the adoption — and the
-    /// post that was there goes where the other one came from. Everything
-    /// between them is untouched, which is what makes the grid hold still under
-    /// a card that is landing on it.
-    @Test(arguments: [ForYouGridPage.Style.grid])
-    func readingFromTheFirstPostToTheLastReversesTheEnds(style: ForYouGridPage.Style) {
-        let page = page(style: style, count: 3)
-        let (a, b, c) = (page.posts[0].id, page.posts[1].id, page.posts[2].id)
-
-        close(on: page, tapped: a, landed: c)
-
-        #expect(page.posts.map(\.id) == [c, b, a])
-    }
-
-    /// The same rule with the ends further apart: only the two ends move.
-    /// The same rule with the ends further apart, for every combination of what
-    /// the two ends ARE: only the two ends move, whichever driver carries the
-    /// post home.
-    @Test(arguments: [0, 1, 2], [0, 1, 2])
-    func onlyTheTwoEndsOfTheReadingMove(departureKind: Int, landingKind: Int) {
-        let page = page(style: .grid)
-        let before = page.posts.map(\.id)
-        let from = 3 + departureKind      // 3,4,5 → photo, video, text
-        let to = 12 + landingKind         // 12,13,14 → photo, video, text
-
-        close(on: page, tapped: before[from], landed: before[to])
-
-        var expected = before
-        expected.swapAt(from, to)
-        let story = "a \(page.post(for: before[from])!.kind) → "
-            + "\(page.post(for: before[to])!.kind) reading did not permute its ends"
-        #expect(page.posts.map(\.id) == expected, Comment(rawValue: story))
-    }
-
-    // MARK: - What the adoption owes its caller
-
-    /// ⚠️ THE LANDING RECT IS READABLE THE INSTANT THE ADOPTION RETURNS.
-    ///
-    /// Every caller reads it immediately — the flight rect, the card's cover,
-    /// the reveal's geometry — so a slot whose cell is not realized yet answers
-    /// nil and the close collapses to the middle of the screen.
-    ///
-    /// This is the property a `CATransaction.flush()` used to be here for, and
-    /// it is pinned rather than the flush because the flush also flushed
-    /// UIKIT'S transaction: on a back-button close the adoption runs inside the
-    /// pop's commit, and flushing there aborted the pop outright. The layout
-    /// pass is what actually delivers this, and it is safe anywhere.
-    @Test(arguments: [ForYouGridPage.Style.grid])
-    func theLandingIsMeasurableAsSoonAsTheAdoptionReturns(style: ForYouGridPage.Style) {
-        let page = page(style: style)
-        let tapped = page.posts[2].id
-        let landed = page.posts[12].id
-
-        stageDismissal(on: page, tapped: tapped, landed: landed)
-
-        #expect(page.hero(for: landed, in: page) != nil,
-                "the close had no rect to fly to at the moment it asked")
-        #expect(page.isPostVisible(landed))
-    }
-
-    /// And the same for a post that had to be INSERTED: it is not enough to be
-    /// in the array, it has to be on screen and measurable.
-    @Test func anInsertedPostIsMeasurableToo() {
-        let page = page(style: .grid)
-        let full = corpus(40)
-        let missing = full[33]
-        let tapped = page.posts[1].id
-
-        stageDismissal(on: page, tapped: tapped, landed: missing.id, corpus: full)
-
-        #expect(page.hero(for: missing.id, in: page) != nil)
-    }
-
-    // MARK: - What can fly at all
-
-    /// The question both the hero grab and the adoption ask, pinned on its own
-    /// so the two can never drift: it is about the POST and the SHAPE, and
-    /// about nothing else — no cell, no scroll position, no visibility.
-    @Test func whatCanFlyIsAPropertyOfThePostAndTheShape() {
-        let grid = page(style: .grid)
-        let list = page(style: .list)
-        let photo = GalleryPost(
-            id: PostID("photo"), kind: .photo, isRepost: false,
-            thumbnailURL: URL(string: "https://example.test/a.jpg"),
-            aspectRatio: 1, caption: "", publishedAtMS: 0
-        )
-        let video = GalleryPost(
-            id: PostID("video"), kind: .video, isRepost: false,
-            thumbnailURL: URL(string: "https://example.test/a.jpg"),
-            aspectRatio: 1, caption: "", publishedAtMS: 0
-        )
-        let text = GalleryPost(
-            id: PostID("text"), kind: .text, isRepost: false, thumbnailURL: nil,
-            aspectRatio: 1, caption: "", publishedAtMS: 0
-        )
-
-        for post in [photo, video, text] {
-            #expect(grid.canLandHero(on: post), "a tile is a rect for every kind")
-        }
-        #expect(list.canLandHero(on: photo))
-        #expect(list.canLandHero(on: video))
-        #expect(list.canLandHero(on: text) == false, "a text row has no media to fly")
     }
 }

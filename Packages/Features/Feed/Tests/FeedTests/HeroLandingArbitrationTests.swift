@@ -72,8 +72,7 @@ struct HeroLandingArbitrationTests {
         on page: ForYouGridPage, tapped: PostID, landed: PostID
     ) -> ForYouGridZoomSource {
         ForYouGridZoomSource(
-            page: page, tappedID: tapped, activePostID: { landed },
-            landedModel: { id in page.post(for: id) }, depthView: nil
+            page: page, tappedID: tapped, activePostID: { landed }, depthView: nil
         )
     }
 

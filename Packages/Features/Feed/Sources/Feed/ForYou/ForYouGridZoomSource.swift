@@ -10,19 +10,17 @@ import UIKit
 /// machinery needs a rect, a card and a way to hide the original, and knows
 /// nothing about what produced them.
 ///
-/// **Where it differs from the pin.** A pin is a fixed thing on a map: the
-/// flight leaves from it and returns to it. A grid tile is a doorway into a
-/// *paging* feed, so the post the viewer dismisses on is often not the one they
-/// tapped. This source therefore re-points at the active post before a
-/// dismissal stages (`zoomSourceWillStageDismissal`) and lands the card on
-/// *that* post's tile, scrolling it into view if the viewer had moved past it.
-/// The alternative — flying back to the tapped tile regardless — puts the card
-/// down on content the viewer is no longer looking at.
+/// **A close always comes home to the tile that was tapped** (the owner,
+/// 2026-10-16, #1269/#1283): a grid tile is a doorway into a *paging* feed, so
+/// the post the viewer dismisses on is often not the one they tapped — and the
+/// card then lands on the tapped tile, the page's picture crossfading into the
+/// tile's own clip (`landsOnAnotherPost`). Nothing in the grid moves to meet
+/// the close.
 @MainActor
 final class ForYouGridZoomSource: ZoomTransitionSource {
     private weak var page: ForYouGridPage?
-    /// The post the flight is currently anchored to. Starts at the tapped
-    /// post and re-points to whatever the feed settled on.
+    /// The post the flight is anchored to: the tapped one, whatever the feed
+    /// settled on (#1283).
     private var anchorID: PostID
     /// The tile the viewer left from, kept for the whole push/pop pair.
     ///
@@ -31,23 +29,9 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// when they tapped it, and the active post is brought TO that slot rather
     /// than the grid being taken to the active post.
     private let departureID: PostID
-    /// ⚠️ WHO IS IN THE DEPARTURE SLOT RIGHT NOW, which after any adoption is
-    /// no longer `departureID`.
-    ///
-    /// `departureID` names the post that was TAPPED and never changes, which is
-    /// the right answer for "where is the landing" and the wrong one for "what
-    /// do I swap with". A cancelled grab keeps this source, so a staging can
-    /// run more than once: addressed by post, the second one adopted into the
-    /// row the tapped post had been moved to and inverted the first swap.
-    private var slotOccupantID: PostID
     /// The post the destination is showing right now, injected so this type
     /// never has to know what a feed is.
     private let activePostID: () -> PostID?
-    /// The feed's own copy of a post, for the case where the page being landed
-    /// in no longer holds it. Optional: a caller with no corpus to consult
-    /// simply cannot land on a post the page has dropped, which is where this
-    /// stood before.
-    private let landedModel: ((PostID) -> GalleryPost?)?
     /// Which page of the landed post's collection the destination is showing,
     /// so the row can be put on it before the card arrives. Nil for a caller
     /// with no collections to speak of.
@@ -106,7 +90,6 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         page: ForYouGridPage,
         tappedID: PostID,
         activePostID: @escaping () -> PostID?,
-        landedModel: ((PostID) -> GalleryPost?)? = nil,
         activeMediaPage: (() -> Int?)? = nil,
         depthView: UIView?,
         settledCover: (() -> UIImage?)? = nil,
@@ -115,9 +98,7 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         self.page = page
         anchorID = tappedID
         departureID = tappedID
-        slotOccupantID = tappedID
         self.activePostID = activePostID
-        self.landedModel = landedModel
         self.activeMediaPage = activeMediaPage
         self.depthView = depthView
         self.settledCover = settledCover
@@ -146,11 +127,8 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         }
         // ⚠️ THE ROW ITSELF, BEFORE THE MIDDLE OF THE SCREEN.
         //
-        // A close ends up anchored to a post with no hero more often than the
-        // opening ever could: the anchor is re-pointed at whatever the viewer
-        // paged to, and if that post cannot be landed on the anchor stays the
-        // DEPARTURE post — which, for a text post opened as a window, has no
-        // media either. Both specific rects then answer nil and the card
+        // A close is anchored to the DEPARTURE post whatever the viewer paged
+        // to — which, for a text post opened as a window, has no media. Both specific rects then answer nil and the card
         // collapsed into the centre of the screen, flying a blank placeholder.
         // Reported exactly that way: "the transition window returns to the
         // middle of the screen".
@@ -189,13 +167,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
     /// a flight whose landing was a row made of words, and watched the card
     /// dissolve away over an empty grey rectangle.
     ///
-    /// A mosaic always accepts: it ADOPTS whatever it lands on, so its landing
-    /// is the settled post itself, and the departure gate has already asked
-    /// about that post's kind. Only a list, which keeps its order and therefore
-    /// lands somewhere else, can be asked to receive something it cannot draw.
+    /// The landing is always the tapped tile (#1283), so this asks whether
+    /// THAT tile can receive a hero: a tile always can; a list's text row
+    /// cannot.
     var zoomLandingAcceptsHero: Bool {
         guard let page else { return true }
-        if page.landsByAdoption { return true }
         let accepts = page.heroAppearance(for: anchorID) != nil
         #if DEBUG
         // Said out loud because a refusal here hands the drag to the OTHER
@@ -238,11 +214,8 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // picture with itself, which `ExternalHeroZoomSource` records as a
         // defect rather than a no-op.
         //
-        // Compared against the RESOLVED `anchorID` rather than `departureID`:
-        // a mosaic re-points the anchor to the settled post at staging, and
-        // after that re-pointing the two ends already agree and there is again
-        // nothing to blend. On a list the anchor stays put, which is exactly
-        // the case that needs this.
+        // The anchor is the tapped tile (#1283): a close from any other post
+        // is exactly the case that needs this.
         if isStagingDismissal, let settled = activePostID(), settled != anchorID {
             landsOnAnotherPost = true
             card.setDeparturePicture(settledCover?())
@@ -445,68 +418,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // pop animates the safe area, and an unpinned grid keeps drifting under
         // the flight. See `ForYouGridPage.beginHeroFreeze`.
         page?.beginHeroFreeze()
-        // ⚠️ ONLY A POST THIS FLIGHT CAN LAND ON.
-        //
-        // The adoption is what makes a dismissal return to the card the viewer
-        // ENDED on, and until now it could not reach a list at all, so the
-        // question never arose. It does now: page from a photograph to a
-        // TEXT-only post and the landed row has no media to fly to —
-        // `heroAppearance` answers nil for one on purpose, and the note there
-        // records why (a card impersonating a page of comments is the disease
-        // the reveal exists to avoid). Adopting it anyway would leave the
-        // flight with no rect and collapse it to the middle of the screen.
-        //
-        // So a text landing is declined and the flight goes home to the tile it
-        // left from — the wrong post, and the honest answer this driver can
-        // give. What that case actually wants is the REVEAL, chosen at the
-        // grab rather than at the tap, which is a change to which driver is
-        // installed rather than to where it lands.
-        // ⚠️ THE MODEL DECIDES, NOT A REALIZED CELL — see `canLandHero(on:)`.
-        //
-        // This asked `heroAppearance`, which reads the cell, and the post being
-        // dismissed is the one the viewer paged to: the further they went, the
-        // more certain the row was outside the realized window and the answer
-        // was "cannot fly" for a photograph that plainly could. Nine pages down
-        // it declined every time, and the flight landed on the departure tile —
-        // the viewer closed one post and watched another land.
-        let landed = activePostID()
-        // Resolved from the page when it has it, and from the feed's whole
-        // corpus when it does not — the adoption inserts in that case.
-        let model = landed.flatMap { page?.post(for: $0) ?? landedModel?($0) }
-        // ⚠️ ADDRESSED BY SLOT, NOT BY POST — and the difference only shows on
-        // the SECOND staging.
-        //
-        // A cancelled grab keeps this source, so staging is not once-only.
-        // `departureID` names the post that was tapped, and after one adoption
-        // that post is no longer in the departure slot: the second staging
-        // therefore asked to adopt into the row the tapped post had been MOVED
-        // to, which inverted the first swap. The grid was left permanently
-        // re-ordered by a grab the viewer abandoned, and the card then landed
-        // on a tile that was no longer where the anchor said.
-        // ⚠️ AND ONLY A MOSAIC MAY MOVE ITS POSTS TO MEET THIS CARD — see
-        // `ForYouGridPage.landsByAdoption`. A list keeps its order and the card
-        // goes back to the slot the opening left from, which is the `else`
-        // branch below and is exactly where the tapped row still is.
-        if page?.landsByAdoption == true,
-           let landed, let model, page?.canLandHero(on: model) == true,
-           landed == slotOccupantID
-               || page?.adoptForClose(
-                   landed, intoSlotOf: slotOccupantID, orInsert: model,
-                   // A flight carries the MEDIA, not the row: it conceals its
-                   // own landing below, on the hero channel.
-                   standingIn: false
-               ) == true {
-            // The active post now occupies the departure slot, so anchoring to
-            // it lands on that tile without moving anything.
-            slotOccupantID = landed
-            anchorID = landed
-        } else {
-            // Nothing moved: either the viewer never left the tile, or the feed
-            // settled on a post this grid no longer holds. Both land on what
-            // the departure slot ACTUALLY holds — which after an earlier
-            // adoption is not the post that was tapped.
-            anchorID = slotOccupantID
-        }
+        // ⚠️ HOME TO THE TAPPED TILE, ALWAYS (#1283). The anchor is the
+        // departure slot whatever the viewer paged to: nothing in the grid
+        // moves to meet the close, and a close from another post crossfades
+        // into the tile's own clip (`makeZoomFlightCard`).
+        anchorID = departureID
         // ⚠️ AND ONTO THE PAGE THE VIEWER IS ACTUALLY LOOKING AT.
         //
         // The card a close flies carries ONE page of a collection — the one on
@@ -518,8 +434,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // `openMediaPage`; the close only ever had it in one.
         //
         // Nil means "not a collection", which is why the row is left alone
-        // rather than sent to page zero.
-        if let landed = activeMediaPage?() { page?.setMediaPage(landed, for: anchorID) }
+        // rather than sent to page zero. Only a close from the SAME post: the
+        // page on screen is another post's otherwise, and the tile keeps its own.
+        if activePostID() == anchorID, let landed = activeMediaPage?() {
+            page?.setMediaPage(landed, for: anchorID)
+        }
         // The scope was opened for the TAPPED post; the landing is on this one.
         // Without this the reconcile that fires when the tile is unhidden stops
         // the surface it has just been handed.

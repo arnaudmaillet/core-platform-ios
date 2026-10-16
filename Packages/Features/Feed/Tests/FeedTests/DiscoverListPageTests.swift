@@ -258,10 +258,6 @@ struct DiscoverListPageTests {
         let mediaCard = try #require(cards.first { $0.kind != .text })
         let tile = try #require(tiles.first)
 
-        // A text card has no media to land on; a tile is a rect whatever it is.
-        #expect(page.canLandHero(on: textCard) == false)
-        #expect(page.canLandHero(on: mediaCard))
-        #expect(page.canLandHero(on: tile))
         // A landing on a card conceals its preview; on a tile it conceals
         // nothing — a hole in a chunk is a hole in the mosaic.
         #expect(page.landingConcealsMedia(for: mediaCard.id))
@@ -270,9 +266,6 @@ struct DiscoverListPageTests {
         #expect(page.heroAppearance(for: tile.id)?.style == .tile)
         #expect(page.heroAppearance(for: mediaCard.id)?.style == .listMedia)
         #expect(page.heroAppearance(for: textCard.id) == nil)
-        // And the list never re-orders to meet a close.
-        #expect(page.landsByAdoption == false)
-        #expect(page.adoptPost(tile.id, intoSlotOf: mediaCard.id) == false)
     }
 
     // MARK: - Paired vertical media (experimental)
@@ -368,7 +361,6 @@ struct DiscoverListPageTests {
         let fullCard = try #require(page.posts.first { !page.drawsAsTile($0.id) && $0.kind != .text })
         #expect(page.drawsAsPairedCard(paired.id))
         #expect(page.drawsAsTile(paired.id), "plays, hides and lands like a tile")
-        #expect(page.canLandHero(on: paired))
         #expect(page.landingConcealsMedia(for: paired.id) == false)
         #expect(page.heroAppearance(for: paired.id)?.style == .listMedia)
         let hero = try #require(page.hero(for: paired.id, in: page))
