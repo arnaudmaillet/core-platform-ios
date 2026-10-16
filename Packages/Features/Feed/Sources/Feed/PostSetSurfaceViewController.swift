@@ -181,7 +181,20 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         guard let rails else { return }
         rails.visibleBand = { [weak self] in self?.visibleBand() }
         rails.onHeightChange = { [weak self] in self?.updateLeadHeight() }
-        rails.onCardTapped = { [weak self] index in self?.openCard(at: index) }
+        // A card's flight is the SHELF's (#1271). Pushed: the page pins from
+        // the tap and hands the inset back in `viewDidAppear` (#924).
+        rails.shelf.heroContext = .init(page: page, host: view, thawsOnLanding: false, seedWindow: Self.seedWindow)
+        rails.shelf.shouldOpen = { [weak self] in
+            guard let self, openPost != nil else { return false }
+            return navigationController.map { FeedFeatureBuilder.canOpen(from: self, on: $0) } ?? true
+        }
+        rails.shelf.onOpen = { [weak self] open in
+            guard let self, let openPost else { return }
+            #if DEBUG
+            PushedListJumpTrace.mark("search card open", page: page, host: view)
+            #endif
+            page.openHoldingStill(from: stackScreen) { openPost(self, open.origin, open.stream.map(\.id)) }
+        }
         rails.onFollowingHeaderTapped = { [weak self] in self?.onLeadRowTitleTapped?() }
         rails.onListHeaderTapped = { [weak self] in self?.pushGallery() }
         page.onViewAllTapped = { [weak self] in self?.pushGallery() }
@@ -236,8 +249,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// Taps lead-row card `index` through the row's own tap handler. False
     /// while that card is not loaded yet.
     func debugOpenLeadCard(at index: Int) -> Bool {
-        guard let rails, rails.cards.indices.contains(index), let tap = rails.onCardTapped else { return false }
-        tap(index)
+        guard let rails, rails.cards.indices.contains(index) else { return false }
+        rails.shelf.openCard(at: index)
         return true
     }
     /// Whether the grid's inset is pinned rather than tracking the safe area.
@@ -278,25 +291,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// measured with `-list-jump-trace` on the hashtag page's Recent row, a
     /// picture card's grab and a words card's swipe alike.
     /// `thawsOnLanding: false` leaves the thaw to this screen's appearance.
-    private func openCard(at index: Int) {
-        guard let rails, let openPost else { return }
-        let cards = rails.cards
-        guard cards.indices.contains(index),
-              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
-        else { return }
-        let tapped = cards[index]
-        let stream = Array(cards[index...].prefix(Self.seedWindow))
-        // The card's player is the flight's from here; the list stops.
-        rails.beginPlaybackHandoff(of: tapped.id)
-        page.setAutoplayActive(false)
-        let origin = ForYouRowOrigins.card(
-            tapped, stream: stream, rails: rails, page: page, host: view, thawsOnLanding: false
-        )
-        #if DEBUG
-        PushedListJumpTrace.mark("search card open", page: page, host: view)
-        #endif
-        page.openHoldingStill(from: stackScreen) { openPost(self, origin, stream.map(\.id)) }
-    }
+    private func openCard(at index: Int) { rails?.shelf.openCard(at: index) }
 
     /// "View all": For You's media gallery over this page's media posts, fed
     /// the next pages as they land (#629).

@@ -815,7 +815,17 @@ final class PlaceProfileViewController: UIViewController {
     private func wireRails() {
         rails.visibleBand = { [weak self] in self?.visibleBand() }
         rails.onHeightChange = { [weak self] in self?.updateLeadHeight() }
-        rails.onCardTapped = { [weak self] index in self?.openCard(at: index) }
+        // A card's flight is the SHELF's (#1271).
+        rails.shelf.heroContext = .init(page: activityPage, host: view, seedWindow: Self.seedWindow)
+        rails.shelf.shouldOpen = { [weak self] in
+            guard let self else { return false }
+            return navigationController.map { FeedFeatureBuilder.canOpen(from: self, on: $0) } ?? true
+        }
+        rails.shelf.onOpen = { [weak self] open in
+            guard let self else { return }
+            departure = open.origin.textReveal.map(Departure.card)
+            openPost(self, open.origin, open.stream.map(\.id))
+        }
         rails.onFollowingHeaderTapped = { [weak self] in self?.pushPopularList() }
         rails.onListHeaderTapped = { [weak self] in self?.pushGallery() }
         activityPage.onViewAllTapped = { [weak self] in self?.pushGallery() }
@@ -888,22 +898,7 @@ final class PlaceProfileViewController: UIViewController {
     /// A Popular card opens the way For You's Following cards do
     /// (`ForYouViewController.openCard`, `ForYouRowOrigins.card`), and its
     /// close comes home through the window the origin describes.
-    private func openCard(at index: Int) {
-        let cards = rails.cards
-        guard cards.indices.contains(index),
-              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
-        else { return }
-        let tapped = cards[index]
-        let stream = Array(cards[index...].prefix(Self.seedWindow))
-        // The card's player is the flight's from here; the list stops.
-        rails.beginPlaybackHandoff(of: tapped.id)
-        activityPage.setAutoplayActive(false)
-        let origin = ForYouRowOrigins.card(
-            tapped, stream: stream, rails: rails, page: activityPage, host: view
-        )
-        departure = origin.textReveal.map(Departure.card)
-        openPost(self, origin, stream.map(\.id))
-    }
+    private func openCard(at index: Int) { rails.shelf.openCard(at: index) }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)

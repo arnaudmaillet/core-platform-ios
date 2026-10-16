@@ -325,7 +325,16 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         rails.visibleBand = { [weak self] in self?.visibleBand() }
         rails.onHeightChange = { [weak self] in self?.updateLeadHeight() }
         rails.onStoryTapped = { [weak self] story in self?.openStory(story) }
-        rails.onCardTapped = { [weak self] index in self?.openCard(at: index) }
+        // A card's flight is the SHELF's (#1271): it builds the origin, this
+        // screen presents it.
+        rails.shelf.heroContext = .init(
+            page: page, host: view, seedWindow: Self.seedWindow, closeStaged: rowCloseStaged
+        )
+        rails.shelf.shouldOpen = { [weak self] in
+            guard let self else { return false }
+            return canOpenFromRow && openPostHero != nil
+        }
+        rails.shelf.onOpen = { [weak self] open in self?.presentCard(open) }
         rails.onFriendsHeaderTapped = { [weak self] in self?.pushList(.friends) }
         rails.onFollowingHeaderTapped = { [weak self] in self?.pushList(.following) }
         // "For you ›" and a chunk's "View all" are one way in to one screen.
@@ -2175,20 +2184,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// corner), wearing the card's caption as furniture that fades as it grows.
     /// A text card opens as a window instead, the pushed lists' way, and every
     /// card carries that window for its close (`ForYouRowOrigins`).
-    func openCard(at index: Int) {
-        let cards = rails.cards
-        guard canOpenFromRow, let openPostHero, cards.indices.contains(index) else { return }
-        let tapped = cards[index]
-        let stream = Array(cards[index...].prefix(Self.seedWindow))
-        // The card's player is the flight's from here; the list stops.
-        rails.beginPlaybackHandoff(of: tapped.id)
-        page.setAutoplayActive(false)
-        let origin = ForYouRowOrigins.card(
-            tapped, stream: stream, rails: rails, page: page, host: view,
-            closeStaged: rowCloseStaged
-        )
-        flyingCard = tapped.id
-        openPostHero(self, origin, stream.map(\.id))
+    func openCard(at index: Int) { rails.shelf.openCard(at: index) }
+
+    /// The shelf opened a card: fly it.
+    private func presentCard(_ open: PostShelfSection.Open) {
+        guard let openPostHero else { return }
+        flyingCard = open.post.id
+        openPostHero(self, open.origin, open.stream.map(\.id))
     }
 
     /// What a row's close does once it has staged — nothing, but say where the
