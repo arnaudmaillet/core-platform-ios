@@ -375,7 +375,8 @@ struct DiscoverListPageTests {
         let slot = try #require(page.rowFrame(for: paired.id, in: page))
         #expect(hero.frame == slot, "the flight leaves from the whole card")
         #expect(page.tileCornerRadius(for: paired.id) == ForYouFollowingCardCell.cornerRadius)
-        #expect(!page.drawsAsTile(fullCard.id))
+        #expect(page.restingOverlay(for: paired.id) is ForYouCardCaptionOverlay)
+        #expect(page.restingOverlay(for: fullCard.id) == nil, "a list card has no overlay to wear")
         let standIn = try #require(page.makeDismissStandIn(for: paired.id))
         #expect(!(standIn is PostGridTileStandInView) && !(standIn is RevealDismissCardView),
                 "landed as \(type(of: standIn))")

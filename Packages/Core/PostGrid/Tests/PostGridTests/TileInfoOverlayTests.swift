@@ -232,17 +232,31 @@ struct TileInfoOverlayTests {
         #expect(try #require(cell.debugInfoOverlay?.likeReadout).debugIsStaked)
     }
 
-    // MARK: - Copies: the close's stand-in
+    // MARK: - Copies: the flight's furniture and the close's stand-in
 
-    /// A copy that rides a window (a close's stand-in): at any size it keeps
-    /// the words wrapped at its reference width and pinned to the foot,
-    /// scaled — never re-wrapped.
-    @Test func aCopyIsPosedNotRelaidOut() throws {
-        let copy = PostCardCaptionOverlay(
-            post: Self.post(), placement: .onMedia, captionLines: 2, referenceSize: Self.large
-        )
-        copy.frame = CGRect(origin: .zero, size: Self.large)
-        copy.layoutIfNeeded()
+    /// The flight's copy is the tile's own words at the tile's size — the
+    /// same frames — and nil where the tile wears none.
+    @Test func theFlightsCopyIsTheTilesOwnWords() throws {
+        let cell = tile(Self.large)
+        let own = try #require(cell.debugInfoOverlay)
+        let copy = try #require(PostGridTileCell.makeInfoOverlay(
+            for: Self.post(), restingSize: Self.large, imagePipeline: Self.pipeline
+        ))
+        #expect(copy.debugCaptionFrame == own.debugCaptionFrame)
+        #expect(copy.debugAuthorFrame == own.debugAuthorFrame)
+        #expect(copy.debugLikeFrame == own.debugLikeFrame)
+        #expect(copy.debugCaptionLineLimit == own.debugCaptionLineLimit)
+        #expect(PostGridTileCell.makeInfoOverlay(
+            for: Self.post(), restingSize: Self.small, imagePipeline: Self.pipeline
+        ) == nil)
+    }
+
+    /// The copy rides a window: at any size it keeps the words wrapped at the
+    /// tile's width and pinned to the foot, scaled — never re-wrapped.
+    @Test func theFlightsCopyIsPosedNotRelaidOut() throws {
+        let copy = try #require(PostGridTileCell.makeInfoOverlay(
+            for: Self.post(), restingSize: Self.large, imagePipeline: Self.pipeline
+        ))
         let wrap = copy.debugCaptionWrapWidth
         let page = CGSize(width: 402, height: 874)
         copy.frame = CGRect(origin: .zero, size: page)

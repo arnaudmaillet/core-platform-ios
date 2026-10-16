@@ -413,6 +413,7 @@ struct ForYouFollowingRowsTests {
         let reveal = try #require(origin.textReveal)
 
         #expect(!origin.hasHero)
+        #expect(origin.restingOverlay == nil, "a text card never flies, so it wears no copy")
         #expect(reveal.alignsPageToSource, "the page grows out of the card, caption on caption")
         #expect(reveal.captionTop == cell.revealCaptionTop)
         #expect(reveal.captionTop > 0, "under the band")

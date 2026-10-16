@@ -238,6 +238,16 @@ enum ForYouRowOrigins {
             // card's OWN clip, parked at the tap (#923) — never the page's.
             returnLiveMedia: { [weak rails] in rails?.returnCardSurface(for: id) },
             pauseReturnLiveMedia: { [weak rails] in rails?.pauseReturnPlayback(for: id) },
+            // Wrapped at the card's own size, and only ever posed after — see
+            // `ForYouCardCaptionOverlay`. A media card's: a text card never
+            // flies.
+            restingOverlay: hasMedia ? { [weak rails] in
+                let size = rails.flatMap { $0.cardFrame(for: id, in: $0)?.size } ?? tappedSize
+                return ForYouFollowingCardCell.makeOverlay(
+                    for: rails?.livePost(tapped) ?? tapped, restingSize: size, imagePipeline: rails?.imagePipeline,
+                    viewerStake: rails?.cardStake(for: tapped) ?? 0
+                )
+            } : nil,
             willStageDismissal: { [weak rails, weak page] in
                 stageClose(page: page, then: closeStaged) { rails?.bringCardIntoView(id) }
             }

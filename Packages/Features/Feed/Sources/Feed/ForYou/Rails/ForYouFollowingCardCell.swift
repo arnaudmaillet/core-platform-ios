@@ -138,6 +138,29 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
     var debugLikeReadout: PostLikeReadoutView? { overlay?.likeReadout }
     #endif
 
+    /// The flight carries a copy of the overlay as its resting furniture —
+    /// see `ForYouCardCaptionOverlay`.
+    ///
+    /// ⚠️ BUILT AT THE CARD'S SIZE AND LAID OUT NOW, outside any animation.
+    /// The flight resizes it every frame from here on; a copy that met its
+    /// first layout pass inside the flight's block grew out of the window's
+    /// top-left corner. `restingSize` nil (the card is not in its row) keeps
+    /// the overlay laying out at whatever size it is given, as before.
+    ///
+    /// `viewerStake`: what the card's heart is drawn with — red when there
+    /// is any, as on the card (`ForYouCardCaptionOverlay`).
+    static func makeOverlay(
+        for post: GalleryPost, restingSize: CGSize?, imagePipeline: ImagePipeline? = nil,
+        viewerStake: Int = 0
+    ) -> ForYouCardCaptionOverlay {
+        let overlay = ForYouCardCaptionOverlay(
+            post: post, placement: .onMedia, referenceSize: restingSize,
+            imagePipeline: imagePipeline, viewerStake: viewerStake
+        )
+        UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
+        return overlay
+    }
+
     /// The card as it rests, drawn fresh at `size` — what a close lands on.
     ///
     /// ⚠️ A MEDIA CARD CLOSES AS A WINDOW TOO. It opens with a flight, but the

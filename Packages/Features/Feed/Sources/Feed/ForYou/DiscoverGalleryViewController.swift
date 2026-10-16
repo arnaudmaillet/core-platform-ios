@@ -265,6 +265,12 @@ final class DiscoverGalleryViewController: UIViewController {
             pauseReturnLiveMedia: { [weak page] in page?.pauseReturnPlayback(for: tapped.id) },
             adoptReturnLiveMedia: { [weak page] view in page?.landReturnPlayback(view, for: tapped.id) },
             returnLandingIsReady: { [weak page] in page?.isReturnLandingReady(for: tapped.id) ?? true },
+            // A large tile's words (`PostTileInfo`), worn by the card
+            // at the tile's end and faded as it grows — the Following row's
+            // arrangement. Nil for a tile that wears none.
+            restingOverlay: { [weak page] in page?.restingOverlay(for: tapped.id) },
+            // A tile's heart flies red once the viewer has staked.
+            viewerStake: { [weak page] in page?.viewerStake(on: tapped.id) ?? 0 },
             // Pinned since the tap; the close measures a mosaic holding still.
             willStageDismissal: { [weak page] in page?.pinForPushedClose() },
             // On past the window into the mosaic's next posts, then

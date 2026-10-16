@@ -1384,6 +1384,30 @@ extension ProfileGalleryGridView: UICollectionViewDataSource, UICollectionViewDe
         )
     }
 
+    /// A Discover tile's words — a chunk tile's or a pair's author, likes and
+    /// first lines — for the flight to wear as the tile's resting furniture
+    /// (`SnapFeedHeroOrigin.restingOverlay`), or nil for a post this page draws
+    /// without any. The same overlay at the same size the tile draws
+    /// (`PostGridTileCell.makeInfoOverlay`), For You's
+    /// `ForYouGridPage.restingOverlay(for:)`.
+    ///
+    /// ⚠️ WITHOUT IT A CLOSE LANDS BARE (#910). The card flew the picture
+    /// alone, so the tile it was taken away over showed its words only once
+    /// the tile itself was back — filmed on a Discover pair as the author,
+    /// likes and caption appearing half a second after the landing. Worn by
+    /// the card, they fade in as it shrinks and are whole on the landed frame.
+    func restingOverlay(for postID: PostID) -> UIView? {
+        guard tileShowsInfo(postID), let post = livePost(postID),
+              let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID),
+              size.width > 0, size.height > 0
+        else { return nil }
+        return PostGridTileCell.makeInfoOverlay(
+            for: post, restingSize: size, imagePipeline: imagePipeline,
+            // The heart as the tile draws it (`tileCell` binds the readout).
+            viewerStake: staking?.viewerStake(on: postID) ?? 0
+        )
+    }
+
     /// Whether the row for `post` draws a "...", asked of the same provider the
     /// row itself asks.
     ///

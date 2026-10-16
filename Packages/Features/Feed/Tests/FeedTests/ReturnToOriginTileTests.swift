@@ -124,7 +124,7 @@ struct ReturnToOriginTileTests {
         // The still rises over the page's clip: the card is not left flying
         // the other post into the tile.
         card.setZoomContentBlend(1)
-        let pane = card.subviews[card.subviews.count - 1]
+        let pane = card.subviews[card.subviews.count - 2]
         #expect(!pane.isHidden)
         #expect(abs(pane.alpha - 1) < 0.0001)
     }
@@ -258,7 +258,7 @@ struct ReturnToOriginTileTests {
         return card
     }
 
-    private func pane(of card: PostGridFlightCard) -> UIView { card.subviews[card.subviews.count - 1] }
+    private func pane(of card: PostGridFlightCard) -> UIView { card.subviews[card.subviews.count - 2] }
 
     /// Posed directly — an interactive pose — the curve follows the progress.
     @Test func aPosedFlightTracksTheCurve() {

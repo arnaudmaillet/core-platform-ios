@@ -427,6 +427,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             pauseReturnLiveMedia: { [weak page] in page?.pauseReturnPlayback(for: tapped.id) },
             adoptReturnLiveMedia: { [weak page] view in page?.landReturnPlayback(view, for: tapped.id) },
             returnLandingIsReady: { [weak page] in page?.isReturnLandingReady(for: tapped.id) ?? true },
+            // A paired card's or a large tile's words, worn by the card at the
+            // tile's end (#910) — the gallery's and the profile's arrangement.
+            restingOverlay: { [weak page] in page?.restingOverlay(for: tapped.id) },
+            // A tile's heart flies red once the viewer has staked.
+            viewerStake: { [weak page] in page?.viewerStake(on: tapped.id) ?? 0 },
             // Pinned since the tap; asked again in case a refused push handed
             // the inset back (`openHoldingStill`).
             willStageDismissal: { [weak page] in page?.pinForPushedClose() },
