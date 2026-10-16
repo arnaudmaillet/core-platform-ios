@@ -50,6 +50,23 @@ struct SoundRecordGlassTests {
         #expect(effectViews(in: record).count == 1, "the muted glyph sits on a plate of its own")
     }
 
+    /// On a window the muted glyph bounces in and out (the owner,
+    /// 2026-10-16), and the cover darkens behind it while it shows.
+    @Test func theMutedGlyphComesAndGoesAnimatedOverADimmedCover() {
+        let record = SoundRecordGlass()
+        let window = hosted(record, side: 96)
+        defer { window.isHidden = true }
+        #expect(!record.debugCoverDimmed)
+        record.showsMutedBadge = true
+        #expect(record.showsMutedBadge)
+        #expect(record.debugCoverDimmed, "the cover did not darken behind 🔇")
+        #expect(record.debugMutedGlyphAnimating, "the glyph appeared without its bounce")
+        record.showsMutedBadge = false
+        #expect(!record.showsMutedBadge)
+        #expect(!record.debugCoverDimmed)
+        #expect(record.debugMutedGlyphAnimating, "the glyph left without its bounce out")
+    }
+
     @Test func thePressMovesTheGlassAndTheRecordTogether() {
         let bubble = SnapSoundBubbleButton()
         let window = hosted(bubble)
