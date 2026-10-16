@@ -39,7 +39,9 @@ extension ForYouGridPage: PostGridPage {
     /// Activating a vended page also ends a round trip's handoff — the
     /// host's way back from a post it opened (the profile's rule, #951): the
     /// landing has run by then, and an unlanded return player is released.
-    func setAutoplayActive(_ active: Bool) {
+    ///
+    /// ⚠️ NEVER `setAutoplayActive(_:)` (#1292) — see the requirement.
+    func setPageActive(_ active: Bool) {
         if active, playback?.isHandingOff == true { endPlaybackHandoff() }
         setAutoplayActive(active, keeping: nil)
     }

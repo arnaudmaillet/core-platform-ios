@@ -222,7 +222,7 @@ final class ProfileGalleryPagerView: UIView {
         NSLayoutConstraint.deactivate(chainConstraints)
         chainConstraints = []
         for page in allPages where !pages.contains(where: { $0 === page }) {
-            page.setAutoplayActive(false)
+            page.setPageActive(false)
             page.removeFromSuperview()
         }
         let content = scrollView.contentLayoutGuide
@@ -343,7 +343,7 @@ final class ProfileGalleryPagerView: UIView {
     /// coordinator that refuses to start anything.
     private func syncAutoplay() {
         for (index, page) in pages.enumerated() {
-            page.setAutoplayActive(isSurfaceActive && index == activeIndex)
+            page.setPageActive(isSurfaceActive && index == activeIndex)
         }
     }
 

@@ -104,7 +104,15 @@ public protocol PostGridPage: UIView {
 
     // MARK: Playback, opening and closing
 
-    func setAutoplayActive(_ active: Bool)
+    /// Whether the page is the viewer's: it autoplays while it is. Activating
+    /// it also ends a round trip's handoff the host's landing is done with —
+    /// the profile's way back from a post it opened (#951).
+    ///
+    /// ⚠️ ITS OWN NAME, NOT `setAutoplayActive(_:)` (#1292). Named that, the
+    /// witness won every one-argument call inside Feed too, and For You's
+    /// `viewWillAppear` — run at a grab's BEGIN — ended the flight's handoff
+    /// mid-air: the page lost its video and the tile its return clip.
+    func setPageActive(_ active: Bool)
     /// Brings the post last opened clear of the chrome, once the page is out
     /// of sight.
     func applyPendingReveal()
