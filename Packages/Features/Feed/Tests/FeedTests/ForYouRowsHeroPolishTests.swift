@@ -107,9 +107,9 @@ struct ForYouRowsHeroPolishTests {
     }
 
     /// A COPY draws the face the card already has: the picture straight from
-    /// the pipeline's memory, so the flight's resting overlay takes off with
-    /// the card's face, not its initials.
-    @Test func aCopyDrawsTheFaceFromMemory() async {
+    /// the pipeline's memory, so a close's stand-in lands with the card's
+    /// face, not its initials.
+    @Test func aCopyDrawsTheFaceFromMemory() throws {
         let pipeline = ImagePipeline(fetcher: SilentFetcher())
         let face = URL(string: "https://example.com/bo.jpg")!
         let picture = UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
@@ -119,9 +119,16 @@ struct ForYouRowsHeroPolishTests {
         pipeline.store(picture, for: face)
         var post = Self.post("f", kind: .photo)
         post.authorAvatarURL = face
-        let copy = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: Self.card, imagePipeline: pipeline)
+        func overlay(of standIn: UIView) throws -> ForYouCardCaptionOverlay {
+            try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
+        }
+        let copy = try overlay(of: ForYouFollowingCardCell.makeStandIn(
+            for: post, cover: nil, size: Self.card, imagePipeline: pipeline
+        ))
         #expect(copy.debugShowsAvatarPicture)
-        let bare = ForYouFollowingCardCell.makeOverlay(for: Self.post("g", kind: .photo), restingSize: Self.card)
+        let bare = try overlay(of: ForYouFollowingCardCell.makeStandIn(
+            for: Self.post("g", kind: .photo), cover: nil, size: Self.card
+        ))
         #expect(!bare.debugShowsAvatarPicture, "no picture named: the initials alone")
         #expect(!bare.debugAvatarFrame.isNull)
     }
@@ -152,36 +159,6 @@ struct ForYouRowsHeroPolishTests {
         #expect(overlay.subviews.contains { !($0.layer.animationKeys() ?? []).isEmpty },
                 "a later pose did not ride the window's block — the probe proves nothing")
         overlay.removeFromSuperview()
-    }
-
-    /// The flight's copy, on a close: laid out at the page end outside the
-    /// flight, then posed INSIDE the block that shrinks the card — so its words
-    /// travel with the window rather than jumping to their landing.
-    @Test func theFlightCardPosesItsCaptionInsideTheFlightsBlock() throws {
-        let window = UIWindow(frame: CGRect(origin: .zero, size: Self.page))
-        window.isHidden = false
-        let post = Self.post("v", kind: .video)
-        let card = PostGridFlightCard(post: post, cover: nil, style: .listMedia)
-        card.installRestingOverlay(ForYouFollowingCardCell.makeOverlay(for: post, restingSize: Self.card))
-        window.addSubview(card)
-        UIView.performWithoutAnimation {
-            card.frame = CGRect(origin: .zero, size: Self.page)
-            card.setZoomContentBlend(0)
-            card.layoutIfNeeded()
-        }
-        let overlay = try #require(card.zoomRestingChrome?.subviews.first as? ForYouCardCaptionOverlay)
-        let scale = Self.page.width / Self.card.width
-        #expect(abs(overlay.debugAuthorFrame.maxY - (Self.page.height - 10 * scale)) < 0.5,
-                "the page end is not anchored at the foot")
-
-        UIView.animate(withDuration: 1) {
-            card.frame = CGRect(x: 20, y: 300, width: Self.card.width, height: Self.card.height)
-            card.setZoomContentBlend(1)
-        }
-        #expect(overlay.subviews.contains { !($0.layer.animationKeys() ?? []).isEmpty },
-                "the caption jumped to its landing outside the flight")
-        #expect(abs(overlay.debugAuthorFrame.maxY - (Self.card.height - 10)) < 0.5)
-        card.removeFromSuperview()
     }
 
     /// A media card's window stand-in, built for a close: its words are laid
@@ -385,7 +362,7 @@ struct ForYouRowsHeroPolishTests {
     /// The card's stack, by position — see `PostGridFlightCardBlendTests`.
     private static func departureCover(of card: PostGridFlightCard) -> UIView { card.subviews[1] }
     private static func landingPane(of card: PostGridFlightCard) -> UIView {
-        card.subviews[card.subviews.count - 2]
+        card.subviews[card.subviews.count - 1]
     }
 
     private static func picture(_ color: UIColor) -> UIImage {

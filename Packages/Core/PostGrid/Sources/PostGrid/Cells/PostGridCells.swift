@@ -2886,25 +2886,6 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// The size `infoVariant` was decided at — nil until the next decision.
     private var infoDecidedSize: CGSize?
 
-    /// The words a tile of `restingSize` wears, built and laid out at that
-    /// size — what a flight carries as the tile's resting furniture
-    /// (`PostGridFlightCard.installRestingOverlay`), so the card takes off
-    /// wearing exactly what the tile wore and the flight fades it. Nil when a
-    /// tile of that size wears none.
-    public static func makeInfoOverlay(
-        for post: GalleryPost, restingSize: CGSize, imagePipeline: ImagePipeline?, viewerStake: Int = 0
-    ) -> PostCardCaptionOverlay? {
-        let variant = PostTileInfo.variant(for: restingSize)
-        guard variant != .none else { return nil }
-        let overlay = makeInfoOverlay(
-            for: post, variant: variant, referenceSize: restingSize,
-            imagePipeline: imagePipeline, viewerStake: viewerStake
-        )
-        overlay.frame = CGRect(origin: .zero, size: restingSize)
-        UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
-        return overlay
-    }
-
     /// The one recipe, for the tile and every copy of it.
     ///
     /// The heart is ALWAYS there (a tile always shows its likes), a readout

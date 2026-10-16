@@ -351,11 +351,6 @@ final class ProfileGalleryPagerView: UIView {
         return pages[activeIndex].tileRevealShape(for: postID)
     }
 
-    func restingOverlay(for postID: PostID) -> UIView? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].restingOverlay(for: postID)
-    }
-
     // The return player's questions (#951), asked of the ACTIVE page — the
     // page the post was opened from, which a covered screen cannot change.
 

@@ -1810,12 +1810,6 @@ final class SoundSheetViewController: UIViewController {
                 screenAutoplay()?.playback.isReturnLandingReady(
                     for: id, cell: cell(), hasThumbnail: hasThumbnail
                 ) ?? true
-            },
-            // The tile's marks, worn at the source end and faded as the card
-            // grows, so a close does not pop them on at the landing.
-            restingOverlay: {
-                guard let size = cell()?.bounds.size ?? tappedSize else { return nil }
-                return SoundSheetTileCell.makeBadgeOverlay(for: tile, size: size)
             }
         )
     }

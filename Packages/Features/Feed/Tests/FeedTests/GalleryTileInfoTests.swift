@@ -86,8 +86,7 @@ struct GalleryTileInfoTests {
     }
 
     /// A grid that does not ask — a place's, a post set's — keeps bare
-    /// tiles: no words, every tile its corner count, no flight or close
-    /// carrying any.
+    /// tiles: no words, every tile its corner count, no close carrying any.
     @Test func aGridThatDoesNotAskKeepsBareTiles() throws {
         let page = page(style: .grid, showsInfo: false)
         let tiles = tiles(on: page)
@@ -95,7 +94,6 @@ struct GalleryTileInfoTests {
         for (post, cell) in tiles {
             #expect(cell.debugInfoOverlay == nil)
             #expect(cell.debugShowsCornerLikes)
-            #expect(page.restingOverlay(for: post.id) == nil)
             let standIn = try #require(page.makeDismissStandIn(for: post.id) as? PostGridTileStandInView)
             #expect((standIn.subviews.first as? PostGridTileCell)?.debugInfoOverlay == nil)
         }
@@ -122,44 +120,17 @@ struct GalleryTileInfoTests {
         }
     }
 
-    /// The list's cards and the paired cards are not tiles: they keep their
-    /// own furniture.
-    @Test func pairedCardsAndCardsAreUntouched() throws {
-        let page = page(style: .discover, showsInfo: true)
-        let paired = try #require(page.segments.first(where: \.isPairs)?.posts.first)
-        let overlay = try #require(page.restingOverlay(for: paired.id) as? ForYouCardCaptionOverlay)
-        #expect(overlay.debugCaptionLineLimit == ForYouCardCaptionOverlay.mediaCaptionLines)
-        #expect(overlay.debugUsesLayerShadows, "the Following card's own overlay, as it was")
-        let card = try #require(page.segments.first(where: { $0.chunk == nil && !$0.isPairs })?.posts.first)
-        #expect(page.restingOverlay(for: card.id) == nil)
-    }
-
     // MARK: - The hero
 
-    /// The flight's resting furniture is the tile's own words, at the tile's
-    /// size and in the same places; a tile too small for words flies none and
-    /// keeps its corner count.
-    @Test func theFlightCarriesTheTilesOwnWords() throws {
-        let page = page(style: .grid, showsInfo: true)
-        let tiles = tiles(on: page)
-        let worded = try #require(tiles.first { $0.cell.infoVariant != .none })
-        let own = try #require(worded.cell.debugInfoOverlay)
-        let copy = try #require(page.restingOverlay(for: worded.post.id) as? PostCardCaptionOverlay)
-        #expect(copy.debugCaptionFrame == own.debugCaptionFrame)
-        #expect(copy.debugAuthorFrame == own.debugAuthorFrame)
-        #expect(copy.debugLikeFrame == own.debugLikeFrame)
-        #expect(copy.debugCaptionLineLimit == own.debugCaptionLineLimit)
-
-        if let bare = tiles.first(where: { $0.cell.infoVariant == .none }) {
-            #expect(page.restingOverlay(for: bare.post.id) == nil)
-        }
+    /// Whether `card` draws any of the source's words, anywhere in it.
+    private static func wearsWords(_ card: UIView) -> Bool {
+        card.subviews.contains { $0 is PostCardCaptionOverlay || wearsWords($0) }
     }
 
-    /// For You's own flight (`ForYouGridZoomSource`): the card wears the
-    /// words in its RESTING CHROME — the channel the flight fades as the card
-    /// grows into the page and back — and drops its corner count, so it flies
-    /// one heart, the author line's, as the tile wears it.
-    @Test func forYousFlightCardWearsTheWordsInItsFadingChrome() throws {
+    /// ⚠️ THE FLIGHT CARRIES NO WORDS (the owner, 2026-10-16): For You's own
+    /// flight (`ForYouGridZoomSource`) takes off from a worded tile with the
+    /// picture alone — no caption, no author, no heart, no fading chrome.
+    @Test func forYousFlightCardCarriesNoWords() throws {
         let page = page(style: .discover, showsInfo: true)
         let worded = try #require(tiles(on: page).first { $0.cell.infoVariant != .none },
                                   "precondition: a chunk tile large enough for words")
@@ -167,37 +138,13 @@ struct GalleryTileInfoTests {
             page: page, tappedID: worded.post.id, activePostID: { worded.post.id }, depthView: nil
         )
         let card = try #require(source.makeZoomFlightCard() as? PostGridFlightCard)
-        let chrome = try #require(card.zoomRestingChrome)
-        #expect(chrome.subviews.contains { $0 is PostCardCaptionOverlay }, "the words are not in the fading chrome")
-        #expect(card.debugShowsCornerCount == false, "two hearts in the flight")
-
-        // A tile with no words flies as it always did: its count, no overlay.
-        if let bare = tiles(on: page).first(where: { $0.cell.infoVariant == .none }) {
-            let plain = ForYouGridZoomSource(
-                page: page, tappedID: bare.post.id, activePostID: { bare.post.id }, depthView: nil
-            )
-            let plainCard = try #require(plain.makeZoomFlightCard() as? PostGridFlightCard)
-            #expect(plainCard.debugShowsCornerCount)
-            #expect(plainCard.zoomRestingChrome?.subviews.contains { $0 is PostCardCaptionOverlay } == false)
-        }
-    }
-
-    /// An overlay with no heart of its own leaves the card's count alone.
-    @Test func onlyAnOverlayWithAHeartReplacesTheCount() {
-        let post = corpus(1)[0]
-        let card = PostGridFlightCard(post: post, cover: nil, style: .tile)
-        #expect(card.debugShowsCornerCount)
-        card.installRestingOverlay(PostCardCaptionOverlay(post: post, placement: .onMedia))
-        #expect(card.debugShowsCornerCount)
-        let withHeart = PostGridFlightCard(post: post, cover: nil, style: .tile)
-        withHeart.installRestingOverlay(PostCardCaptionOverlay(post: post, placement: .onMedia, viewerStake: 0))
-        #expect(withHeart.debugShowsCornerCount == false)
+        #expect(card.zoomRestingChrome == nil)
+        #expect(!Self.wearsWords(card))
     }
 
     /// The pushed gallery's flight (the shared `presentSnapFeedHero`): the
-    /// origin hands the tile's words to the card as its resting overlay, and
-    /// the card built from it wears them in the fading chrome.
-    @Test func theGallerysFlightCarriesTheWords() throws {
+    /// same, through `ExternalHeroZoomSource`.
+    @Test func theGallerysFlightCarriesNoWords() throws {
         var opened: SnapFeedHeroOrigin?
         let gallery = DiscoverGalleryViewController(
             imagePipeline: pipeline(), videoPlayback: nil,
@@ -218,12 +165,9 @@ struct GalleryTileInfoTests {
         let tapped = try #require(index, "no gallery tile on screen is large enough")
         #expect(gallery.debugOpenTile(at: tapped))
         let origin = try #require(opened)
-        let overlay = try #require(origin.restingOverlay?() as? PostCardCaptionOverlay)
-        #expect(overlay.likeReadout != nil, "the tile's heart rides with its words")
-
         let card = try #require(ExternalHeroZoomSource(origin: origin).makeZoomFlightCard() as? PostGridFlightCard)
-        #expect(card.zoomRestingChrome?.subviews.contains { $0 is PostCardCaptionOverlay } == true)
-        #expect(card.debugShowsCornerCount == false)
+        #expect(card.zoomRestingChrome == nil)
+        #expect(!Self.wearsWords(card))
     }
 
     /// The close's stand-in — what a window lands as when the feed paged

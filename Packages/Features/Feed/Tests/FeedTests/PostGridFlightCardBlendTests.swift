@@ -80,11 +80,11 @@ struct PostGridFlightCardBlendTests {
     /// to arrive at all. The three covers are private, so they are addressed by
     /// their position between the ones that are not — which pins the order as a
     /// side effect.
-    @Test func theCardStacksItsFiveLayersInTheContractedOrder() {
+    @Test func theCardStacksItsFourLayersInTheContractedOrder() {
         let card = makeCard()
-        #expect(card.subviews.count == 5)
+        #expect(card.subviews.count == 4)
         #expect(card.subviews[2] === card.videoRenderView)
-        #expect(card.subviews.last === card.zoomRestingChrome)
+        #expect(card.zoomRestingChrome == nil, "the card flies no furniture")
     }
 
     /// ⚠️ THE POSITION THE WHOLE FIX IS, restated against a DONATED surface
@@ -103,12 +103,12 @@ struct PostGridFlightCardBlendTests {
 
     private func tileCover(of card: PostGridFlightCard) -> UIView { card.subviews[0] }
     private func departureCover(of card: PostGridFlightCard) -> UIView { card.subviews[1] }
-    /// Above the live surface, below the chrome — see the layer-order test.
+    /// Above the live surface, on top — see the layer-order test.
     ///
     /// This is the PANE, which is what the blend moves. Its own subviews are the
     /// landing's still and, when one could be joined, the landing's live surface.
     private func landingCover(of card: PostGridFlightCard) -> UIView {
-        card.subviews[card.subviews.count - 2]
+        card.subviews[card.subviews.count - 1]
     }
 
     // MARK: - The un-blended card
@@ -119,7 +119,6 @@ struct PostGridFlightCardBlendTests {
     /// could only soften it. It hands in nil and keeps today's animation.
     @Test func aCardWithNoDeparturePictureIsUntouchedByTheBlend() throws {
         let card = makeCard()
-        let chrome = try #require(card.zoomRestingChrome)
         let floor = card.backgroundColor
         for t in [CGFloat(0), 0.5, 1] {
             card.setBlend(t)
@@ -127,7 +126,6 @@ struct PostGridFlightCardBlendTests {
             #expect(isAlpha(departureCover(of: card), 1))
             #expect(isAlpha(landingCover(of: card), 0))
             #expect(isAlpha(card.videoRenderView, 1))
-            #expect(isAlpha(chrome, 1))
             #expect(tileCover(of: card).isHidden == false)
             #expect(card.backgroundColor == floor)
         }
@@ -387,56 +385,6 @@ struct PostGridFlightCardBlendTests {
         #expect(landing.bounds.size == laidOut, "the video layer was resized")
         #expect(landing.transform != .identity, "the surface was not posed at all")
         #expect(landing.center == CGPoint(x: 30, y: 100))
-    }
-
-    // MARK: - Furniture belongs to neither operand
-
-    /// ⚠️ THE TILE'S COUNTERS ARE TEXT, and text is what the fade law is about.
-    /// They are also the tile's own furniture, with no page-side half to
-    /// cross-fade against, so they belong to neither operand and keep the owner
-    /// they already have: `zoomRestingChrome`, which the flight poses on a
-    /// deliberately different clock — `poseInterpolated` excludes the chrome
-    /// alphas and swaps them inside the release spring instead.
-    @Test func theBlendNeverMovesTheCountersOrTheBadge() throws {
-        let card = makeCard(.tile, kind: .video)
-        let chrome = try #require(card.zoomRestingChrome)
-        card.setDeparturePicture(picture())
-
-        chrome.alpha = 0.5
-        for step in 0...4 {
-            card.setBlend(CGFloat(step) / 4)
-            #expect(isAlpha(chrome, 0.5), "the blend dragged the tile's counters onto its clock")
-            for furniture in chrome.subviews {
-                #expect(isAlpha(furniture, 1))
-            }
-        }
-    }
-
-    /// And the reverse: the flight's chrome channel does not disturb a blend that
-    /// is already set. The two write disjoint properties, so whichever runs second
-    /// leaves the other's exactly where it was.
-    @Test func theTwoChannelsDoNotOverwriteEachOther() throws {
-        let card = makeCard()
-        let chrome = try #require(card.zoomRestingChrome)
-        card.setDeparturePicture(picture())
-        card.setBlend(0.25)
-        chrome.alpha = 0
-
-        #expect(isAlpha(landingCover(of: card), 0.25))
-        card.setBlend(0.75)
-        #expect(isAlpha(landingCover(of: card), 0.75))
-        #expect(isAlpha(chrome, 0))
-    }
-
-    /// A timeline row carries no furniture on its card at all — its caption,
-    /// author line and metrics are drawn by the row BELOW the media. That is what
-    /// leaves `.listMedia` with two pictures and nothing else, and it is why the
-    /// blend is legal on this style too.
-    @Test func aListMediaCardHasNoTextFurnitureToFade() throws {
-        let card = makeCard(.listMedia, kind: .video)
-        let chrome = try #require(card.zoomRestingChrome)
-        let drawn = chrome.subviews.filter { !$0.isHidden }
-        #expect(drawn.isEmpty)
     }
 }
 

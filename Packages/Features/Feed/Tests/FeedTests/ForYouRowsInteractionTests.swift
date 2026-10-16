@@ -245,9 +245,7 @@ struct ForYouRowsInteractionTests {
 
     /// A card's caption is an `EmoteLabel`, so its emotes animate.
     @Test func aCardsCaptionAnimatesItsEmotes() {
-        let overlay = ForYouFollowingCardCell.makeOverlay(
-            for: post("c", by: "bo"), restingSize: CGSize(width: 150, height: 200)
-        )
+        let overlay = ForYouCardCaptionOverlay(post: post("c", by: "bo"), placement: .onMedia)
         #expect(overlay.subviews.contains { $0 is EmoteLabel })
     }
 }

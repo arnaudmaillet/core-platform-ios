@@ -133,8 +133,8 @@ final class SoundSheetTileCell: UICollectionViewCell {
         ])
     }
 
-    /// The marks' column — one arrangement for the tile and the overlay a
-    /// flight card wears (`makeBadgeOverlay`), so the two cannot drift.
+    /// The marks' column — one arrangement for the tile and its twin
+    /// (`makeStandIn`), so the two cannot drift.
     private static func badgeStack(_ badges: [UIView]) -> UIStackView {
         let stack = UIStackView(arrangedSubviews: badges)
         stack.axis = .vertical
@@ -144,20 +144,13 @@ final class SoundSheetTileCell: UICollectionViewCell {
         return stack
     }
 
-    private static func makeBadgeStack(original: Bool) -> UIStackView {
-        let originalBadge = TileBadge(text: "Original", symbol: "music.note")
-        originalBadge.isHidden = !original
-        return badgeStack([originalBadge])
-    }
-
     /// The marks on the foot, bottom-leading — the same few points off both
     /// edges they used to keep in the top corner.
     ///
-    /// ⚠️ PINNED TO THE FOOT, SO THEY RIDE IT. Every copy that grows with a
-    /// window — the twin (`makeStandIn`), the flight card's overlay
-    /// (`makeBadgeOverlay`) — is laid out INSIDE the pose that sizes it
-    /// (`RevealStage.apply`, `PostGridFlightCard.poseRestingChrome`), so the
-    /// marks follow the window's bottom edge on the flight's own curve. Pinned
+    /// ⚠️ PINNED TO THE FOOT, SO THEY RIDE IT. The twin that grows with a
+    /// window (`makeStandIn`) is laid out INSIDE the pose that sizes it
+    /// (`RevealStage.apply`), so the marks follow the window's bottom edge on
+    /// the flight's own curve. Pinned
     /// to the top they could not have drifted even laid out late; pinned here,
     /// a pass deferred to the end of the turn would snap them to where they
     /// land while the window was still travelling.
@@ -301,36 +294,6 @@ final class SoundSheetTileCell: UICollectionViewCell {
         UIView.performWithoutAnimation { card.layoutIfNeeded() }
         twin.footFrozen = true
         return card
-    }
-
-    /// The tile's marks alone, for a FLIGHT card to wear over its picture and
-    /// fade as it grows (`SnapFeedHeroOrigin.restingOverlay`) — so a close
-    /// does not land a bare picture and pop "Original" on in the
-    /// frame the card is taken away. Nil for a tile that wears none.
-    ///
-    /// Only the marks: the COUNT is the card's own (`PostGridFlightCard`
-    /// draws a `.tile` source's likes itself, at the tile's insets). Laid out
-    /// at `size`, then re-laid out only inside the card's pose
-    /// (`poseRestingChrome`): the marks are pinned to the foot, bottom-leading
-    /// as on the tile, and ride it — they never re-wrap.
-    static func makeBadgeOverlay(
-        for tile: SoundSheetViewController.Tile, size: CGSize
-    ) -> UIView? {
-        guard tile.isOriginal else { return nil }
-        let overlay = UIView(frame: CGRect(origin: .zero, size: size))
-        overlay.isUserInteractionEnabled = false
-        let badges = makeBadgeStack(original: tile.isOriginal)
-        // The count the card draws, measured only: the marks stand where the
-        // tile's do (`footLift`), decided at the tile's size.
-        let likes = PostMetricLabel(
-            symbol: PointsSymbol.glyph, font: PostGridFlightCard.metaFont, color: .white, shadowed: true
-        )
-        likes.set(tile.likeCount)
-        let lift = footLift(width: size.width, badges: badges, likes: likes)
-        overlay.addSubview(badges)
-        pinBadges(badges, in: overlay, lift: lift)
-        UIView.performWithoutAnimation { overlay.layoutIfNeeded() }
-        return overlay
     }
 
     /// The tile's fill composed over the sheet it rests on — an opaque colour

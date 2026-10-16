@@ -402,7 +402,7 @@ struct SoundSheetTests {
     /// the marks step up onto the count's line rather than run under it —
     /// and the flight card's overlay, which draws only the marks, stands them
     /// exactly there, at every size the card grows through.
-    @Test func aNarrowTileLiftsItsMarksAndTheFlightCardAgrees() throws {
+    @Test func aNarrowTileLiftsItsMarks() throws {
         let size = CGSize(width: 104, height: 139)
         let tile = Sheet.Tile(
             postID: PostID("r"), thumbnailURL: URL(string: "https://example.com/r.jpg"), caption: nil, isOriginal: true, likeCount: 12_345
@@ -413,16 +413,6 @@ struct SoundSheetTests {
         #expect(cell.debugFootLift > 0)
         #expect(!original.intersects(likes), "the mark ran under the count: \(original) / \(likes)")
         #expect(original.maxY <= likes.minY)
-
-        let overlay = try #require(SoundSheetTileCell.makeBadgeOverlay(for: tile, size: size))
-        let flown = try #require(Self.mark("Original", in: overlay))
-        #expect(abs(flown.minX - original.minX) < 0.5 && abs(flown.maxY - original.maxY) < 0.5)
-        // Grown with the card, the marks ride its foot at the SAME lift — a
-        // re-decided lift would drop them onto the foot mid-flight.
-        overlay.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        overlay.layoutIfNeeded()
-        let grown = try #require(Self.mark("Original", in: overlay))
-        #expect(abs((874 - grown.maxY) - (size.height - original.maxY)) < 0.5)
     }
 
     // MARK: - Hero

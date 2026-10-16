@@ -15,10 +15,10 @@ import UIKit
 /// post's long-press preview: the Following row's text cards are the list's
 /// own card (`PostGridListRowCell`).
 ///
-/// Its own view, not a few labels inside the cell, because a flight needs a
-/// COPY of it: the card that flies out of the row wears this as its resting
-/// furniture and the flight fades it as the card grows into the page, the way
-/// a mosaic brick's counters leave (`SnapFeedHeroOrigin.restingOverlay`).
+/// Its own view, not a few labels inside the cell, because a transition
+/// window needs a COPY of it: the stand-in a card-shaped close lands on draws
+/// the card, words included. (A zoom FLIGHT carries none — the owner,
+/// 2026-10-16: `PostGridFlightCard` flies the picture alone.)
 ///
 /// ## ⚠️ Laid out ONCE, at the card's size — then posed, never re-laid out
 ///

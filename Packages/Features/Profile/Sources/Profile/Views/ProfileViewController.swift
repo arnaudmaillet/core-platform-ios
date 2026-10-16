@@ -3199,14 +3199,6 @@ extension ProfileViewController {
             returnLandingIsReady: { [weak galleryPager] in
                 galleryPager?.isReturnLandingReady(for: anchorID) ?? true
             },
-            // The tile's words, worn by the card as For You's tiles' are
-            // (#910): the card takes off wearing what the tile wore and lands
-            // wearing what the tile will, rather than landing as the bare
-            // picture with the words following once the tile is back. Built
-            // at each ask, so a close reads the slot the tile has then.
-            restingOverlay: { [weak galleryPager] in
-                galleryPager?.restingOverlay(for: anchorID)
-            },
             // On past the tiles loaded at the tap into the gallery's next
             // pages, under the tab and source the viewer opened it from (#638).
             continuation: { [weak self] after in

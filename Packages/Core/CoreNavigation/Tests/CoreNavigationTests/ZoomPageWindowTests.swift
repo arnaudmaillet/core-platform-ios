@@ -129,37 +129,6 @@ struct ZoomPageWindowTests {
         #expect(card.appliedCornerRadii.last == 0)
     }
 
-    /// ⚠️ A FRAMED FLIGHT'S FURNITURE IS SEEN ONLY NEAR THE TILE (the owner,
-    /// 2026-10-16): inside the flight's block it fades out over the first
-    /// `framedRestingChromeSpan` of an opening — a keyframe animation, not
-    /// the flight's own curve — and posed outside any block it is simply set.
-    @Test func aFramedFlightsFurnitureLeavesWithinTheFirstThird() throws {
-        let card = WindowProbeCard()
-        let window = UIWindow(frame: page)
-        window.isHidden = false
-        defer { window.isHidden = true }
-        let flight = try Self.framed(card: card, page: page, tile: tile, aspect: aspect)
-        window.addSubview(flight.card)
-        flight.poseAtSource()
-        #expect(card.restingChromeView.alpha == 1)
-        UIView.animate(withDuration: 1) { flight.poseAsPage(cornerRadius: 55) }
-        #expect(card.restingChromeView.alpha == 0, "the model lands at zero")
-        let layer = card.restingChromeView.layer
-        let fade = layer.animationKeys()?.lazy
-            .compactMap { layer.animation(forKey: $0) as? CAKeyframeAnimation }
-            .first
-        let keyframes = try #require(fade, "the fade rode the flight's own curve")
-        let times = try #require(keyframes.keyTimes).map(\.doubleValue)
-        let values = try #require(keyframes.values as? [NSNumber]).map(\.doubleValue)
-        // Zero by the first third, held there after.
-        let gone = try #require(zip(times, values).first { $0.1 == 0 })
-        #expect(gone.0 <= ZoomFlight.framedRestingChromeSpan + 0.001)
-
-        // Outside any animation: set.
-        flight.poseAtSource()
-        #expect(card.restingChromeView.alpha == 1)
-    }
-
     /// ⚠️ THE CARD IS TOLD IT IS IN A WINDOW (the owner, 2026-10-16): its
     /// ground is the window's black now, not the source, so a card that went
     /// transparent under a hot surface must keep its cover. A filling flight

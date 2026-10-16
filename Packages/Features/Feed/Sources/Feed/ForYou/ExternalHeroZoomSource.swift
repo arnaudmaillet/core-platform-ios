@@ -170,8 +170,7 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
             style: origin.style == .tile ? .tile : .listMedia,
             cornerRadius: origin.cornerRadius,
             cornerCurve: origin.cornerCurve,
-            drawsPost: !drawsFace,
-            viewerStake: origin.viewerStake()
+            drawsPost: !drawsFace
         )
         flyingCard = card
         // On the OPENING the far end is the page's picture only when the
@@ -207,9 +206,6 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
                     return surface
                 }
             }
-        }
-        if let overlay = origin.restingOverlay?() {
-            card.installRestingOverlay(overlay)
         }
         // ⚠️ PRESENT ONLY. A dismissal must fly the PAGE's playhead, not the
         // row's — the two are seconds apart once the page has been playing, and

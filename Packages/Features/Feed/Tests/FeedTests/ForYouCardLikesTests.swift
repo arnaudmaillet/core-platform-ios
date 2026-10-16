@@ -132,9 +132,7 @@ struct ForYouCardLikesTests {
         #expect(wallet.boostTotal(forTarget: paired.id.rawValue) == 0)
     }
 
-    /// Staked, the heart is red — on the card and on the copies a flight and
-    /// a close wear, so nothing changes colour in the landing frame. The
-    /// count stays the post's.
+    /// Staked, the heart is red. The count stays the post's.
     @Test func aStakedPairedCardsHeartIsRedOnTheCardAndItsCopies() throws {
         let paired = try #require(page(wallet: Self.wallet()).segments.first(where: \.isPairs)?.posts.first)
         let wallet = Self.wallet()
@@ -145,8 +143,6 @@ struct ForYouCardLikesTests {
         #expect(like.debugIsStaked)
         #expect(like.debugCountText == "1.2K", "a stake never adds to the count")
 
-        let overlay = try #require(page.restingOverlay(for: paired.id) as? ForYouCardCaptionOverlay)
-        #expect(overlay.likeReadout?.debugIsStaked == true)
         #expect(page.viewerStake(on: paired.id) == 1)
     }
 
@@ -282,9 +278,8 @@ struct ForYouCardLikesTests {
         #expect(rails.cardStake(for: rails.cards[0]) == WalletStore.Policy.defaultStakeAmount)
     }
 
-    /// The copies a flight and a close wear carry the card's heart, in the
-    /// card's colour.
-    @Test func aFollowingCardsCopiesWearTheHeart() throws {
+    /// The copy a close wears carries the card's heart.
+    @Test func aFollowingCardsStandInWearsTheHeart() throws {
         let post = GalleryPost(
             id: PostID("picture"), kind: .photo, isRepost: false,
             thumbnailURL: URL(string: "https://example.com/picture.jpg"),
@@ -292,11 +287,6 @@ struct ForYouCardLikesTests {
             authorID: ProfileID("cy"), authorName: "Cy", authorHandle: "cy", reactionCount: 7
         )
         let size = CGSize(width: 150, height: 200)
-        let overlay = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: size, viewerStake: 2)
-        #expect(overlay.likeReadout?.debugIsStaked == true)
-        #expect(overlay.likeReadout?.debugCountText == "7")
-        #expect(!overlay.debugLikeFrame.isNull)
-
         let standIn = ForYouFollowingCardCell.makeStandIn(for: post, cover: nil, size: size)
         let standInOverlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
         #expect(standInOverlay.likeReadout?.debugIsStaked == false)

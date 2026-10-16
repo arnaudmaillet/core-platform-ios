@@ -214,21 +214,17 @@ struct ForYouRowsCloseTests {
     // MARK: - 3. No play glyph in any transition window
 
     /// ⚠️ THE CARD IS THE TILE'S TWIN, and the tile draws no play glyph — so
-    /// neither does the card, at either end of a flight, for any post. The
-    /// brick's one count (reach, trailing foot) is all its furniture.
+    /// neither does the card, at either end of a flight, for any post — nor
+    /// any other furniture (the owner, 2026-10-16: the picture alone).
     @Test(arguments: [GalleryPost.Kind.video, .photo])
     func aFlightCardDrawsNoPlayGlyph(kind: GalleryPost.Kind) throws {
         for style in [PostGridFlightCard.Style.tile, .listMedia] {
             let card = PostGridFlightCard(post: Self.post("p", kind: kind), cover: nil, style: style)
             card.frame = CGRect(x: 0, y: 0, width: 130, height: 130)
             card.layoutIfNeeded()
-            let chrome = try #require(card.zoomRestingChrome)
 
             #expect(!Self.drawsPlayGlyph(card), "\(style) \(kind) flies a play glyph")
-            #expect(chrome.subviews.count == (style == .tile ? 1 : 0))
-            if style == .tile, let count = chrome.subviews.first {
-                #expect(abs(count.frame.maxX - (130 - 8)) < 0.5, "the count sits where the tile's does")
-            }
+            #expect(card.zoomRestingChrome == nil)
         }
     }
 

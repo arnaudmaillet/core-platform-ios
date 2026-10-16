@@ -322,7 +322,7 @@ final class ForYouGridPage: UIView {
     /// every question this answers (it autoplays like a brick, it hides whole
     /// for a flight, a landing leaves no hole in it, a close lands as its
     /// twin) has the tile's answer. What differs is its shape and furniture:
-    /// `tileCornerRadius(for:)`, `heroAppearance`, `restingOverlay(for:)`,
+    /// `tileCornerRadius(for:)`, `heroAppearance`,
     /// `makeTileStandIn`.
     func drawsAsTile(_ postID: PostID) -> Bool {
         switch style {
@@ -358,32 +358,6 @@ final class ForYouGridPage: UIView {
     /// onto it lands at, so the curve never steps in the last frame.
     func tileCornerRadius(for postID: PostID) -> CGFloat {
         drawsAsPairedCard(postID) ? ForYouFollowingCardCell.cornerRadius : tileCornerRadius
-    }
-
-    /// A paired card's words, for the flight to wear as resting furniture
-    /// that fades as the card grows into the page — the Following row's own
-    /// arrangement (`ForYouRowOrigins.card`). Wrapped at the card's size, and
-    /// only posed after (`ForYouCardCaptionOverlay`). Nil for anything else.
-    ///
-    /// And a LARGE TILE's words, when the page's tiles wear them
-    /// (`showsTileInfo`): the same overlay at the same size the tile drew
-    /// (`PostGridTileCell.makeInfoOverlay`), so the card takes off wearing
-    /// what the tile wore and lands wearing what the tile will — and nil for a
-    /// tile too small to wear any, which flies its corner count as before.
-    func restingOverlay(for postID: PostID) -> UIView? {
-        if tileWearsInfo(postID), let post = post(for: postID),
-           let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID) {
-            return PostGridTileCell.makeInfoOverlay(
-                for: post, restingSize: size, imagePipeline: imagePipeline,
-                viewerStake: viewerStake(on: postID)
-            )
-        }
-        guard drawsAsPairedCard(postID), let post = post(for: postID) else { return nil }
-        let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID)
-        return ForYouFollowingCardCell.makeOverlay(
-            for: post, restingSize: size, imagePipeline: imagePipeline,
-            viewerStake: viewerStake(on: postID)
-        )
     }
 
     /// Adopts a planned list: the stretches, their starts, the flat order and
