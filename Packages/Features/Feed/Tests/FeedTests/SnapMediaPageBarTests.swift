@@ -393,6 +393,93 @@ struct SnapMediaPageBarTests {
         #expect(try #require(view.debugSegmentAlpha(2)) < 0.5)   // the track, not the fill
     }
 
+    // MARK: - A fill that appears (#1305)
+
+    /// Keeps each test's window alive while it looks: off a window the fill
+    /// never animates, by design.
+    private final class WindowHost { var window: UIWindow? }
+    private let host = WindowHost()
+
+    private func clipBarOnScreen(playhead: Double?, width: CGFloat = 370) -> SnapMediaPageBarView {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 100))
+        host.window = window
+        let view = SnapMediaPageBarView(frame: CGRect(
+            x: 0, y: 0, width: width, height: SnapMediaPageBarView.thickness
+        ))
+        window.addSubview(view)
+        view.configure(count: 1, current: 0, clipPages: [0])
+        view.setPlayhead(playhead)
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// The played part GROWS IN when it appears — it used to be drawn at its
+    /// whole width in one frame (the owner, 2026-10-17) — and lands on the
+    /// live playhead.
+    @Test func aFillThatAppearsGrowsIn() throws {
+        let view = clipBarOnScreen(playhead: nil)
+        #expect(view.debugFillFrame(0) == nil)
+
+        view.setPlayhead(0.5)
+        #expect(view.debugFillIsGrowing(0), "the fill popped in")
+        let bar = try #require(view.debugSegmentFrame(0))
+        #expect(abs(try #require(view.debugFillFrame(0)).width - bar.width * 0.5) < 1,
+                "the growth does not end on the playhead")
+        // The track itself still never animates on its own.
+        #expect(view.debugSegmentIsAnimating(0) == false)
+    }
+
+    /// ⚠️ EVEN INSIDE A TRANSITION. The fill first appears while the post is
+    /// opening, under `performWithoutAnimation`; a UIKit animation there was
+    /// applied at once and the fill popped in on the simulator anyway.
+    @Test func aFillThatAppearsDuringATransitionStillGrows() {
+        let view = clipBarOnScreen(playhead: nil)
+        UIView.performWithoutAnimation { view.setPlayhead(0.7) }
+        #expect(view.debugFillIsGrowing(0), "the transition swallowed the growth")
+    }
+
+    /// ⚠️ NOT WHILE NOBODY CAN SEE IT. The fill first appears with the chrome
+    /// at alpha 0 under the opening flight; grown then, it had finished
+    /// before the chrome faded in, and the viewer saw the pop anyway. It
+    /// waits, and grows on the first beat the strip shows.
+    @Test func aFillThatAppearsUnseenGrowsOnceItShows() throws {
+        let view = clipBarOnScreen(playhead: nil)
+        let chrome = UIView(frame: view.frame)
+        view.superview?.addSubview(chrome)
+        chrome.addSubview(view)
+        chrome.alpha = 0
+
+        view.setPlayhead(0.5)
+        #expect(view.debugFillIsGrowing(0) == false, "the fill grew where nobody could see it")
+
+        chrome.alpha = 1
+        view.setPlayhead(0.51)
+        #expect(view.debugFillIsGrowing(0), "the fill never grew once it showed")
+        let bar = try #require(view.debugSegmentFrame(0))
+        #expect(abs(try #require(view.debugFillFrame(0)).width - bar.width * 0.51) < 1)
+    }
+
+    /// The feed's next ticks move the end of the growth; they do not restart
+    /// it, and a fill already drawn does not grow again.
+    @Test func aFillAlreadyDrawnFollowsThePlayheadWithoutGrowing() throws {
+        let view = clipBarOnScreen(playhead: 0.4)
+        view.layer.removeAllAnimationsDeep()
+        view.setPlayhead(0.45)
+        #expect(view.debugFillIsGrowing(0) == false, "a drawn fill grew again")
+        let bar = try #require(view.debugSegmentFrame(0))
+        #expect(abs(try #require(view.debugFillFrame(0)).width - bar.width * 0.45) < 1)
+    }
+
+    /// Under a finger the fill is the thumb's, 1:1: it never eases in.
+    @Test func aScrubNeverGrowsTheFill() throws {
+        let view = clipBarOnScreen(playhead: 0.3)
+        view.layer.removeAllAnimationsDeep()
+        view.debugScrub(.began, atX: 100)
+        view.debugScrub(.changed, atX: 185)
+        #expect(view.debugFillFrame(0) != nil)
+        #expect(view.debugFillIsGrowing(0) == false, "the fill eased behind the finger")
+    }
+
     /// ⚠️ NIL IS AN ANSWER. A clip whose length is not known yet draws NO bar
     /// rather than an empty one: a bar at zero says "at the beginning", which
     /// is a different claim from "not yet known" and the one a viewer acts on.
@@ -1184,5 +1271,13 @@ struct SnapMediaPageBarTests {
         let drop = without.debugCaptionFrame.maxY - withStrip.debugCaptionFrame.maxY
         #expect(abs(drop - (SnapMediaPageBarView.thickness + SnapChromeView.pageBarToolbarGap)) < 0.5)
         #expect(without.debugBoostButton.frame == withStrip.debugBoostButton.frame)
+    }
+}
+
+private extension CALayer {
+    /// Ends every animation in the tree, as if it had run out.
+    func removeAllAnimationsDeep() {
+        removeAllAnimations()
+        sublayers?.forEach { $0.removeAllAnimationsDeep() }
     }
 }

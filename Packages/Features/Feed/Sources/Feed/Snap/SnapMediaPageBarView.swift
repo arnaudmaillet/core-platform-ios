@@ -591,22 +591,89 @@ final class SnapMediaPageBarView: UIView {
         let isBar = clipPages.contains(index) && clipness > 0 && watched
         guard isBar, let playhead = drawnPlayhead else {
             fills[index]?.isHidden = true
+            growthPending = false
             return
         }
         let fill = fills[index] ?? {
             let view = UIView()
             view.backgroundColor = .white
             view.isUserInteractionEnabled = false
+            view.isHidden = true
             segments[index].addSubview(view)
             fills[index] = view
             return view
         }()
+        let appearing = fill.isHidden
         fill.isHidden = false
         fill.alpha = clipness * proximity(toPage: index)
         let played = max(min(CGFloat(playhead), 1), 0) * width
-        fill.frame = CGRect(x: 0, y: 0, width: played, height: bounds.height)
+        let target = CGRect(x: 0, y: 0, width: played, height: bounds.height)
         fill.layer.cornerRadius = min(bounds.height, played) / 2
+        // ⚠️ A FILL THAT APPEARS GROWS IN; IT DOES NOT POP IN. Landing on a
+        // clip, or its length becoming known, used to draw the played part at
+        // its whole width in one frame (the owner, 2026-10-17, #1305). It now
+        // grows from the bar's leading end. Not under a finger: a scrub is
+        // 1:1, and an ease behind the thumb is the stutter `heldPlayhead`
+        // exists to remove.
+        fill.frame = target
+        if appearing { growthPending = played > 0.5 }
+        // ⚠️ THE GROWTH WAITS UNTIL IT CAN BE SEEN. The fill first appears
+        // while the post is still opening, with the whole chrome at alpha 0
+        // under the flight (measured: `SnapChromeView` a=0.0): grown then, it
+        // had finished before anyone could see it, and the chrome faded in
+        // on a fill already at full length — the pop, unchanged. So it is
+        // held, and starts on the first beat the strip is actually showing.
+        guard growthPending, !isVeiled else { return }
+        growthPending = false
+        guard !isDraggingPlayhead else { return }
+        // ⚠️ CORE ANIMATION, NOT `UIView.animate`. This runs from the feed and
+        // from layout passes the post's opening wraps in
+        // `performWithoutAnimation` (measured: `areAnimationsEnabled` false
+        // when the fill first appears); a UIKit block there is applied at
+        // once. An explicit layer animation is not subject to that switch.
+        //
+        // ⚠️ AND ADDITIVE. The feed assigns the frame 30 times a second while
+        // this runs; an additive animation is an OFFSET from the model value
+        // decaying to zero, so each new frame moves the end the ease is
+        // converging on instead of cutting it short. The growth lands on the
+        // live playhead, not on where it was when it began.
+        let grow = CABasicAnimation(keyPath: "bounds.size.width")
+        grow.fromValue = -played
+        grow.toValue = 0
+        let slide = CABasicAnimation(keyPath: "position.x")
+        slide.fromValue = -played / 2
+        slide.toValue = 0
+        let growth = CAAnimationGroup()
+        growth.animations = [grow, slide]
+        growth.duration = Self.fillGrowDuration
+        growth.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        grow.isAdditive = true
+        slide.isAdditive = true
+        fill.layer.add(growth, forKey: Self.fillGrowthKey)
     }
+
+    private static let fillGrowthKey = "fill.growth"
+
+    /// A fill appeared and has not grown yet — see `layoutFill`.
+    private var growthPending = false
+
+    /// Whether the strip is out of sight: off a window, or under an ancestor
+    /// that is hidden or fully transparent (the chrome during a flight).
+    private var isVeiled: Bool {
+        guard window != nil else { return true }
+        // Up to the window, not including it: the views are what a flight
+        // veils, and a window's own visibility is not this strip's concern.
+        var view: UIView? = self
+        while let current = view, !(current is UIWindow) {
+            if current.isHidden || current.alpha < 0.02 { return true }
+            view = current.superview
+        }
+        return false
+    }
+
+    /// How long a fill that appears takes to grow to the playhead — short
+    /// enough to read as the bar arriving, not as the clip catching up.
+    static let fillGrowDuration: TimeInterval = 0.45
 
     /// 1 on the page itself, 0 a page away, linear between — the tent above.
     private func proximity(toPage index: Int) -> CGFloat {
@@ -957,6 +1024,12 @@ final class SnapMediaPageBarView: UIView {
 
     /// The played part of a clip's bar, as a rectangle in the strip's own
     /// coordinates — nil when the page draws no bar.
+    /// Whether a clip's fill is growing in (#1305).
+    func debugFillIsGrowing(_ index: Int) -> Bool {
+        guard let fill = fills[index] else { return false }
+        return (fill.layer.animationKeys() ?? []).isEmpty == false
+    }
+
     func debugFillFrame(_ index: Int) -> CGRect? {
         guard let fill = fills[index], !fill.isHidden, fill.alpha > 0.01 else { return nil }
         return fill.convert(fill.bounds, to: self)
