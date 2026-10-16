@@ -110,6 +110,9 @@ final class PostGridFlightCard: UIView {
     /// adopt — the case that earns the transparent floor, and the only case
     /// `applyContentFloor` has to weigh the blend against.
     private var fliesHotLiveMedia = false
+    /// Whether a framed flight put this card in a page window — see
+    /// `zoomCardDidEnterPageWindow` and `applyContentFloor`.
+    private var isInPageWindow = false
     /// The card's own surface, used when it has to mirror. Replaced by a
     /// donated one whenever the source can hand over the layer it is already
     /// rendering — see `adoptZoomLiveMediaView`.
@@ -711,8 +714,15 @@ final class PostGridFlightCard: UIView {
     /// cover, so the lagging pass shows the picture already in flight instead of
     /// a foreign one — and the blend positively requires an opaque floor, since
     /// fading the page operand off a transparent card lands on a hole.
+    ///
+    /// ⚠️ AND A FRAMED FLIGHT (the owner, 2026-10-16, on a device: the card's
+    /// words "jump" at take-off). Inside a page window the card is not over
+    /// the source but over the window's black ground: transparent, the
+    /// lagging pass drew a black card with the tile's words floating on it for
+    /// a frame or two before the picture came back. The cover is the tile's
+    /// own picture, the nearest thing to the frame the surface is late with.
     private func applyContentFloor() {
-        let isOpaque = departureCoverView.image != nil || !fliesHotLiveMedia
+        let isOpaque = departureCoverView.image != nil || !fliesHotLiveMedia || isInPageWindow
         imageView.isHidden = !isOpaque
         backgroundColor = isOpaque ? restingBackground : .clear
     }
@@ -856,6 +866,11 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     /// The adopted surface had a frame when it was taken and has drawn
     /// nothing since: the cover is the content again, under the empty surface.
+    func zoomCardDidEnterPageWindow() {
+        isInPageWindow = true
+        applyContentFloor()
+    }
+
     func zoomLiveMediaDidStall() {
         guard fliesHotLiveMedia else { return }
         fliesHotLiveMedia = false

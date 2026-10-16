@@ -293,6 +293,13 @@ public protocol ZoomFlightCard: UIView {
     /// otherwise the flight carries an empty window over a page whose own
     /// surface it has just taken. Defaults to nothing.
     func zoomLiveMediaDidStall()
+
+    /// The flight has put this card inside a page WINDOW (`ZoomPageWindowCard`,
+    /// a framed flight), whose ground is black. A card that made itself
+    /// transparent beneath a surface that had a frame — so the lagging first
+    /// composite would show the source through it — would show that black
+    /// instead, so it must keep its cover. Defaults to nothing.
+    func zoomCardDidEnterPageWindow()
 }
 
 public extension ZoomFlightCard {
@@ -316,4 +323,5 @@ public extension ZoomFlightCard {
     func prepareZoomStillMediaForFlight(destinationSize: CGSize) {}
     func applyZoomRestingShadow(to layer: CALayer) {}
     func zoomLiveMediaDidStall() {}
+    func zoomCardDidEnterPageWindow() {}
 }
