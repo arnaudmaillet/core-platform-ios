@@ -1739,15 +1739,14 @@ final class ForYouGridPage: UIView {
               let index = posts.firstIndex(where: { $0.id == postID }),
               let url = row?.currentPageVideoURL ?? posts[index].videoURL
         else { return nil }
-        let made = playback.makeAttachedSurface(for: postID, url: url)
         // Nothing to join. Ask for the player rather than reporting its
         // absence: this call is repeated every frame of the flight (see
         // `ZoomLiveMediaRetry`), so a start kicked here is picked up by the
         // next ask — which is the difference between a hero that shows video
         // 100ms in and one that shows a poster all the way home.
-        if made == nil, let row {
-            playback.demandFlightPlayback(of: postID, url: url, in: row)
-        }
+        // The shared rule (`tileFlightSurface`, #1269); a row is demanded, a
+        // tile keeps today's answer.
+        let made = playback.tileFlightSurface(for: postID, url: url, cell: row)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-live-log") {
             print(String(format: "[zoom-live] %.3f producer GRID liveFlightSurface -> %@",
@@ -1837,12 +1836,17 @@ final class ForYouGridPage: UIView {
         // moving picture at all. That is worse than having no gate: the hold is
         // released by the very thing it exists to hold across.
         let pageVideoURL = (cell as? PostGridListRowCell)?.currentPageVideoURL ?? post.videoURL
-        if expectingVideo, let playback, pageVideoURL != nil,
-           autoplays(post) || cell?.loadedVideoRenderView != nil {
-            return playback.isSurfaceRendering(for: postID)
+        guard let playback else {
+            guard let cell, post.thumbnailURL != nil else { return true }
+            return cell.renderedCover != nil
         }
-        guard let cell, post.thumbnailURL != nil else { return true }
-        return cell.renderedCover != nil
+        // The shared rule (`isTileLandingReady`, #1269).
+        return playback.isTileLandingReady(
+            for: postID,
+            expectsVideo: expectingVideo && pageVideoURL != nil
+                && (autoplays(post) || cell?.loadedVideoRenderView != nil),
+            cell: cell, hasThumbnail: post.thumbnailURL != nil
+        )
     }
 
 
@@ -1883,18 +1887,8 @@ final class ForYouGridPage: UIView {
         // never hidden) and leave the preview — and the surface inside it — at
         // alpha 0, so the video would land invisible.
         Self.applyHeroConcealment(false, to: cell as? UICollectionViewCell)
-        if VideoRenderFlags.usesSampleBufferLayer {
-            // The card's surface is one of several showing this playback, not
-            // the playback itself. The tile gets its OWN surface — primed with
-            // the current frame on attach — and takes the pool loan; the card's
-            // is released once it leaves the window. Nothing is re-parented,
-            // which is the ~65ms drop `holdCard` was covering.
-            return playback.adoptAttachedSurface(
-                for: postID, url: url, cell: cell, drawnBy: view
-            )
-        }
-        playback.adoptLiveSurface(view, for: postID, url: url, cell: cell)
-        return true
+        // The shared rule (`adoptTileLanding`, #1269).
+        return playback.adoptTileLanding(view, for: postID, url: url, cell: cell)
     }
 
     /// The destination never adopted the parked player — a cancelled flight, or

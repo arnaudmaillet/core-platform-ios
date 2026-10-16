@@ -441,6 +441,24 @@ struct SoundSheetTests {
         )
     }
 
+    /// ⚠️ THE ONE TILE CONTRACT (#1280, epic #1269): a video tile's card takes
+    /// off on the tile's own surface, and a close onto the same post hands it
+    /// back, the card waiting for the tile to draw.
+    @Test func aVideoTilesFlightCarriesTheWholeTileContract() throws {
+        let controller = sheet(tiles: 3)
+        try laidOut(controller)
+        let post = Self.galleryPost("p1", kind: .video)
+        let tile = SoundSheetViewController.Tile(
+            postID: post.id, thumbnailURL: post.thumbnailURL, caption: nil,
+            videoURL: URL(string: "mock://video/p1")
+        )
+        let origin = controller.heroOrigin(for: tile, post: post, stream: [post], source: .sheet(.recent))
+        #expect(origin.donateLiveMedia != nil, "the card takes off as a still")
+        #expect(origin.adoptLandingLiveMedia != nil, "a same-post close restarts the clip")
+        #expect(origin.landingMediaIsReady != nil)
+        #expect(origin.returnLiveMedia != nil && origin.adoptReturnLiveMedia != nil)
+    }
+
     /// ⚠️ The regression: the flight card rounded as a For You brick (16pt)
     /// and landed on a 12pt tile, so the corners jumped in the frame the card
     /// was taken away — the flash at the end of every close. The card lands

@@ -193,6 +193,16 @@ struct SoundSheetAutoplayTests {
     /// The players still bound a while later — a start's task landing after
     /// its stop is the leak this watches for, and it lands only once the
     /// source resolves.
+    /// The pool's bound players once a staggered release (one hop per
+    /// player) has had time to run — waiting for at most `limit`.
+    private func settledBound(_ pool: VideoPlaybackController, toAtMost limit: Int) async -> Int {
+        for _ in 0..<200 {
+            if pool.activePlayerCount <= limit { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return pool.activePlayerCount
+    }
+
     private func boundAfterAWhile(_ pool: VideoPlaybackController) async -> Int {
         for _ in 0..<100 {
             try? await Task.sleep(for: .milliseconds(5))
@@ -235,8 +245,10 @@ struct SoundSheetAutoplayTests {
 
     /// A feed opened from a tile covers the sheet for the trip, and its host
     /// is presented over full screen — no appearance callback reaches the
-    /// sheet — so the open itself gives the tiles' players back.
-    @Test func aFeedOpenedFromATileStopsTheTiles() async throws {
+    /// sheet — so the open itself gives the OTHER tiles' players back, one
+    /// hop at a time. The tapped tile's is the flight's (#1280, epic #1269):
+    /// the card takes off on it, as For You's tiles do.
+    @Test func aFeedOpenedFromATileStopsTheOtherTiles() async throws {
         let pool = makePool()
         let controller = sheet(count: 18, pool: pool)
         controller.openFeedHero = { _, _, _ in }
@@ -254,10 +266,10 @@ struct SoundSheetAutoplayTests {
 
         let order = controller.sections.first { $0.kind == .recent }?.ids ?? []
         controller.debugSelect(try #require(order.first), in: .recent, order: order)
-        #expect(pool.activePlayerCount == 0, "the tiles kept playing under the feed")
+        #expect(await settledBound(pool, toAtMost: 1) <= 1, "the other tiles kept playing under the feed")
         // Covered, a reconcile (a cover landing, a layout) starts nothing.
         controller.reconcileAutoplay()
-        #expect(await boundAfterAWhile(pool) == 0, "a tile started under the feed")
+        #expect(await boundAfterAWhile(pool) <= 1, "a tile started under the feed")
     }
 
     /// A pushed section plays its own tiles by the same rules, and gives them

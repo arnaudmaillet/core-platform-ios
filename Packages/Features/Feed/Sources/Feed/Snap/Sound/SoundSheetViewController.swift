@@ -1759,6 +1759,7 @@ final class SoundSheetViewController: UIViewController {
             fromGallery ? gallery?.autoplay : self?.autoplay
         }
         let hasThumbnail = tile.thumbnailURL != nil
+        let videoURL = tile.videoURL
         return SnapFeedHeroOrigin(
             post: flown,
             stream: stream,
@@ -1772,6 +1773,14 @@ final class SoundSheetViewController: UIViewController {
                 return frame(presenter.view) != nil
             },
             setConcealed: { concealed in cell()?.setConcealed(concealed) },
+            // ⚠️ THE ONE TILE CONTRACT (#1280, epic #1269): the card takes off
+            // PLAYING on the tile's own surface, and a close onto the same
+            // post hands it back — the playhead continues, the card waiting
+            // for the tile to draw.
+            donateLiveMedia: {
+                guard let videoURL else { return nil }
+                return screenAutoplay()?.playback.tileFlightSurface(for: id, url: videoURL, cell: cell())
+            },
             // ⚠️ EVERY TILE, and For You's Following cards are why
             // (`ForYouRowOrigins`): a TEXT post opens as a window out of its
             // tile and closes back onto it — it used to open with the plain
@@ -1797,6 +1806,17 @@ final class SoundSheetViewController: UIViewController {
             // flash at the end of every close. A 12pt SQUIRCLE, like the tile.
             cornerRadius: SoundSheetTileCell.cornerRadius,
             cornerCurve: .continuous,
+            adoptLandingLiveMedia: { view in
+                guard let view = view as? VideoRenderView, let videoURL, let tileCell = cell() else { return }
+                // In a drawing hierarchy first, or the surface lands invisible.
+                tileCell.setConcealed(false)
+                screenAutoplay()?.playback.adoptTileLanding(view, for: id, url: videoURL, cell: tileCell)
+            },
+            landingMediaIsReady: {
+                screenAutoplay()?.playback.isTileLandingReady(
+                    for: id, expectsVideo: videoURL != nil, cell: cell(), hasThumbnail: hasThumbnail
+                ) ?? true
+            },
             // A close from another post comes home with the tile's OWN clip,
             // parked at the tap (#951) — never the page's. The source reveals
             // the tile before it lands it.
