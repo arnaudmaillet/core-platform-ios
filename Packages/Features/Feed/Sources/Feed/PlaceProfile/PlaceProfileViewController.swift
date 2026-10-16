@@ -746,6 +746,8 @@ final class PlaceProfileViewController: UIViewController {
         self.lead = GridLeadStack(sections: [shelf])
         super.init(nibName: nil, bundle: nil)
         shelf.title = "Popular"
+        // Its title over skeleton cards until the place's posts land (#1296).
+        shelf.isLoading = true
         lead.listTitle = "Recent"
         // The list and the row draw the same cards For You does, and their
         // like chips stake the same way.
@@ -2630,6 +2632,8 @@ extension PlaceProfileViewController {
     /// Whether the page leads with the Popular row and titles its list
     /// Recent.
     var debugSectionTitles: (row: String, list: String) { (shelf.title, lead.listTitle) }
+    /// The Popular shelf (#1296), for tests.
+    var debugShelf: PostShelfSection { shelf }
     /// Taps Popular card `index` through the row's own handler.
     func debugOpenPopularCard(at index: Int) -> Bool {
         guard shelf.cards.indices.contains(index) else { return false }
