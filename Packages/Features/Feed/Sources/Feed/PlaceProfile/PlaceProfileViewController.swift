@@ -1670,7 +1670,7 @@ final class PlaceProfileViewController: UIViewController {
         activityPage.render(recent.isEmpty
             ? .empty(.init(title: "Nothing has happened here yet"))
             : .content(recent))
-        shelf.render(Self.popular(self.corpus, limit: Self.popularRowCount))
+        shelf.apply(.init(title: "Popular", posts: Self.popular(self.corpus, limit: Self.popularRowCount)))
         updateLeadHeight()
         // ⚠️ THE WHOLE CORPUS. These are the PLACE's numbers, and a check-in
         // with no photograph is still something that happened here. As many

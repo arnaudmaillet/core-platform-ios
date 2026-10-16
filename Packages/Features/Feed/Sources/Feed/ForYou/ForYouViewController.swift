@@ -236,7 +236,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
         shelf.staking = staking
-        shelf.title = "Following"
         shelf.titleAccessibilityHint = "Shows posts from people you follow"
         // "For you" names the list under the rows and pushes Discover's whole
         // mosaic — the screen a chunk's "View all" pushes.
@@ -483,8 +482,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// The Friends row and the shelf, from the view model's rows.
     private func renderLead(_ rows: ForYouViewModel.Rails) {
         friendsRow.render(rows.friends, newCount: rows.friendsBadge)
-        shelf.setCount(new: rows.followingBadge)
-        if shelf.render(rows.following) {
+        if shelf.apply(.init(title: "Following", newCount: rows.followingBadge, posts: rows.following)) {
             #if DEBUG
             // Which `-foryou-open-card` index opens which row's card.
             let cards = shelf.cards

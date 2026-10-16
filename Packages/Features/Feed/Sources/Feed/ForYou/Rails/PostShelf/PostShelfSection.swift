@@ -99,6 +99,40 @@ final class PostShelfSection: UIView {
     /// The rows' counts as last applied — what a change is measured from.
     private var drawnCounts: (media: Int, text: Int) = (0, 0)
 
+    // MARK: - The model
+
+    /// What a host says the shelf is (#1271): its title and count, its posts,
+    /// and how much of them each row draws. Applied in one go (`apply`); the
+    /// actions (the title's tap, a card's open) are wired once beside it.
+    struct Model: Equatable {
+        var title: String
+        /// What is new in the shelf, after the title; zero for none.
+        var newCount = 0
+        var posts: [GalleryPost]
+        var mediaLimit: Int?
+        var textLimit: Int?
+        var showsViewAll = false
+    }
+
+    /// Shows `model`. Answers whether the posts changed.
+    @discardableResult
+    func apply(_ model: Model) -> Bool {
+        if title != model.title { title = model.title }
+        if newCount != model.newCount { setCount(new: model.newCount) }
+        mediaLimit = model.mediaLimit
+        textLimit = model.textLimit
+        showsViewAll = model.showsViewAll
+        return render(model.posts)
+    }
+
+    /// The model the shelf shows now.
+    var model: Model {
+        Model(
+            title: title, newCount: newCount, posts: cards,
+            mediaLimit: mediaLimit, textLimit: textLimit, showsViewAll: showsViewAll
+        )
+    }
+
     // MARK: - The host's
 
     /// The section's title — the host's word for what it shows.

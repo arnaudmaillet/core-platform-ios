@@ -33,6 +33,23 @@ struct PostShelfSectionTests {
         #expect(tapped == 1, "the title's own tap path did not reach the host")
     }
 
+    /// The host describes the shelf with ONE model — title, count, posts,
+    /// limits, "View all" — and the shelf draws it (#1271).
+    @Test func aModelDescribesTheWholeShelf() {
+        let shelf = Self.shelf()
+        let posts = [Self.post("m0", kind: .photo), Self.post("m1", kind: .video), Self.post("t0", kind: .text)]
+        let model = PostShelfSection.Model(
+            title: "Recent", newCount: 2, posts: posts, mediaLimit: 1, textLimit: nil, showsViewAll: true
+        )
+        #expect(shelf.apply(model))
+        #expect(shelf.model == model)
+        #expect(shelf.header.content.title == "Recent")
+        #expect(shelf.debugCountText == "2")
+        #expect(shelf.debugRowIDs.media == [posts[0].id], "the media limit was not applied")
+        #expect(shelf.debugRowIDs.text == [posts[2].id])
+        #expect(!shelf.apply(model), "the same posts again reported a change")
+    }
+
     /// Nothing to show, nothing drawn: no heading over nothing.
     @Test func anEmptyShelfIsZeroTall() {
         let shelf = Self.shelf()
