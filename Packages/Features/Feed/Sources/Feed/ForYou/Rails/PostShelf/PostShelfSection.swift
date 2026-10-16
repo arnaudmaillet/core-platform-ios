@@ -660,6 +660,26 @@ final class PostShelfSection: UIView {
     func setCardConcealed(_ concealed: Bool, for id: PostID) {
         if concealed { concealedCard = id } else if concealedCard == id { concealedCard = nil }
         cardCell(for: id)?.isHidden = concealed
+        // A committed window close is landing: the card takes the clip its
+        // window was playing (#1294).
+        if !concealed, let clip = windowClips.takeForLanding(id), let playback,
+           let cell = mediaCardCell(for: id) {
+            playback.landReturnPlayback(clip, for: id, cell: cell)
+        }
+    }
+
+    /// The parked clips a card window is playing, until it lands (#1294).
+    let windowClips = WindowReturnClips()
+
+    /// `standIn` playing card `id`'s parked clip, when there is one (#1294).
+    func dressWithReturnClip(_ standIn: UIView?, for id: PostID) -> UIView? {
+        windowClips.dress(standIn, for: id) { returnCardSurface(for: id) }
+    }
+
+    /// A card window's close is over: one that sprang back pauses the clip.
+    func windowCloseDidEnd(_ committed: Bool, for id: PostID) {
+        guard !committed else { return }
+        windowClips.abandon(id) { pauseReturnPlayback(for: id) }
     }
 
     /// Puts the card a flight hid back.

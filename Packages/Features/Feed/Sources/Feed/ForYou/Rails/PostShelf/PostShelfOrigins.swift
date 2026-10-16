@@ -131,7 +131,10 @@ enum PostShelfOrigins {
             },
             captionEnd: nil,
             depthView: { [weak page] in page },
-            makeDismissStandIn: { [weak shelf] _ in shelf.flatMap(standIn) },
+            // Playing the card's parked clip when it has one (#1294).
+            makeDismissStandIn: { [weak shelf] _ in
+                shelf.flatMap { $0.dressWithReturnClip(standIn($0), for: id) }
+            },
             makePresentStandIn: { [weak shelf] in shelf.flatMap(standIn) },
             alignsPageToSource: false,
             pageFit: .covering,
@@ -144,7 +147,10 @@ enum PostShelfOrigins {
                 ForYouRowOrigins.stageClose(page: page, then: closeStaged) { shelf?.bringCardIntoView(id) }
             },
             // See `card`'s `thawsOnLanding`.
-            dismissalDidEnd: { [weak page] _ in if thawsOnLanding { page?.endHeroFreeze() } }
+            dismissalDidEnd: { [weak page, weak shelf] committed in
+                shelf?.windowCloseDidEnd(committed, for: id)
+                if thawsOnLanding { page?.endHeroFreeze() }
+            }
         )
     }
 
