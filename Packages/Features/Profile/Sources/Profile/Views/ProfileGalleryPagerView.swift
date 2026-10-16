@@ -1,5 +1,6 @@
 import CoreModels
 import CoreStorage
+import FeedInterface
 import DesignSystem
 import MediaCore
 import MediaPlayback
@@ -103,7 +104,7 @@ final class ProfileGalleryPagerView: UIView {
     /// A row's author was tapped, on whichever page is showing.
     var onAuthorTapped: ((GalleryPost) -> Void)?
     /// What a row's "..." offers — see `ProfileGalleryGridView.authorMenuActions`.
-    var authorMenuActions: ((ProfileGalleryGridView.AuthorMenuContext) -> [PostCardMenuAction])?
+    var authorMenuActions: ((PostGridAuthorMenuContext) -> [PostCardMenuAction])?
 
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
@@ -123,8 +124,8 @@ final class ProfileGalleryPagerView: UIView {
     private var isScrubbing = false
     /// The pages on show, in `pageOrder`. Every page is built up front
     /// (`allPages`) and configured alike; only these are laid out and paged.
-    private var pages: [ProfileGalleryGridView]
-    private let allPages: [ProfileGalleryGridView]
+    private var pages: [any PostGridPage]
+    private let allPages: [any PostGridPage]
     /// The horizontal chain the shown pages hang from — rebuilt when a tab
     /// comes or goes.
     private var chainConstraints: [NSLayoutConstraint] = []
@@ -135,24 +136,28 @@ final class ProfileGalleryPagerView: UIView {
     /// callbacks and ANDed with per-page activity below.
     private var isSurfaceActive = false
 
+    /// - Parameter makePage: For You's own grid page, in a style (#1273,
+    ///   epic #1269): every page of the profile is For You's, its tiles For
+    ///   You's tiles.
     init(
-        imagePipeline: ImagePipeline,
         tabs: [ProfileTab] = ProfileTab.publicTabs,
-        videoPlayback: VideoPlaybackController? = nil,
-        bookmarks: PostBookmarkStore? = nil
+        makePage: (PostGridPageStyle) -> any PostGridPage
     ) {
         pageOrder = tabs
         allTabs = tabs
         let built = tabs.map { tab in
-            ProfileGalleryGridView(
-                imagePipeline: imagePipeline,
-                // Posts is For You's list (#631). Saved and Liked are whatever
-                // the viewer kept: a plain timeline.
-                style: Self.style(for: tab),
-                tab: tab,
-                videoPlayback: videoPlayback,
-                bookmarks: bookmarks
-            )
+            let page = makePage(Self.style(for: tab))
+            // Post info by size on every tile (`PostTileInfo`'s three
+            // levels) — the one tile contract.
+            page.showsTileInfo = true
+            // The header draws the pull's indicator (`HeroPullToRefreshView`).
+            page.handPullToHost()
+            // Hosted from birth, as the profile's pages always were: the
+            // header floats over them and their insets are this screen's
+            // (`contentInsetAdjustmentBehavior = .never`), the minimum travel
+            // counted before the header has measured.
+            page.setHostedInsets(top: 0, bottom: 0)
+            return page
         }
         allPages = built
         pages = built
@@ -173,20 +178,23 @@ final class ProfileGalleryPagerView: UIView {
         scrollView.contentInsetAdjustmentBehavior = .never
         scrollView.pin(to: self)
 
-        for page in allPages {
-            page.onItemTapped = { [weak self] post, stream in self?.onItemTapped?(post, stream) }
-            page.onItemCommentsTapped = { [weak self] post, stream in
+        for (tab, page) in zip(allTabs, allPages) {
+            page.onPostTapped = { [weak self] post, stream, comments in
                 guard let self else { return }
-                if let onItemCommentsTapped { onItemCommentsTapped(post, stream) } else { onItemTapped?(post, stream) }
+                if comments, let onItemCommentsTapped {
+                    onItemCommentsTapped(post, stream)
+                } else {
+                    onItemTapped?(post, stream)
+                }
             }
             page.onVerticalScroll = { [weak self] offset in
                 guard let self, page === pages[activeIndex] else { return }
                 onVerticalScroll?(offset)
             }
-            page.onPullToRefresh = { [weak self] in self?.onPullToRefresh?() }
+            page.onRefresh = { [weak self] in self?.onPullToRefresh?() }
             // Every page that pages: the format pages and, on someone else's
             // profile, Reposts and Tagged (#696). Saved and Liked do not.
-            if page.tab.pages {
+            if tab.pages {
                 page.onNearEnd = { [weak self] in
                     guard let self, page === pages[activeIndex] else { return }
                     onNearEnd?()
@@ -194,7 +202,7 @@ final class ProfileGalleryPagerView: UIView {
             }
             page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
             page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
-            page.authorMenuActions = { [weak self] context in
+            page.postMenuActions = { [weak self] context in
                 self?.authorMenuActions?(context) ?? []
             }
             page.onPullReleased = { [weak self] distance in
@@ -259,7 +267,7 @@ final class ProfileGalleryPagerView: UIView {
     }
 
     /// The shape a tab's page takes.
-    static func style(for tab: ProfileTab) -> ProfileGalleryGridView.Style {
+    static func style(for tab: ProfileTab) -> PostGridPageStyle {
         switch tab {
         case .format(.activity), .reposts, .tagged: .discover
         case .format(.media): .grid
@@ -272,15 +280,50 @@ final class ProfileGalleryPagerView: UIView {
             // Whether more pages are coming decides the Discover list's tail
             // chunk, so it is told before the posts.
             allPages[index].setCorpusComplete(snapshot.isComplete(for: tab))
-            allPages[index].render(snapshot.state(for: tab))
+            allPages[index].show(Self.pageState(snapshot.state(for: tab), for: tab))
         }
     }
 
+    /// A profile page's state, as the page draws it: the tab's own words
+    /// for an empty page, the lock for a private profile, the failure.
+    static func pageState(_ state: ProfileViewModel.GalleryPageState, for tab: ProfileTab) -> PostGridPageState {
+        switch state {
+        case .loading:
+            return .loading
+        case .content(let posts):
+            return .content(posts)
+        case .empty(let message):
+            let copy = tab.emptyState
+            return .status(PostGridPageStatus(
+                symbolName: copy.symbol, title: copy.title,
+                subtitle: message.isEmpty ? copy.subtitle : message
+            ))
+        case .restricted(let title, let message):
+            return .status(PostGridPageStatus(symbolName: "lock", title: title, subtitle: message))
+        case .failed(let message):
+            // A failure is NOT an empty state: the glyph and the headline read
+            // as "this did not work", not as "there is nothing here".
+            return .status(PostGridPageStatus(
+                symbolName: "exclamationmark.triangle", title: "Couldn't Load", subtitle: message
+            ))
+        }
+    }
+
+    /// The page being read — what a post opened from the profile flies out
+    /// of and lands back on.
+    var activePage: (any PostGridPage)? {
+        pages.indices.contains(activeIndex) ? pages[activeIndex] : nil
+    }
+
     #if DEBUG
+    /// The active page's revealed tile, in window space, once settled.
+    func debugRevealedTileInWindow() -> CGRect? {
+        (activePage as? any PostGridPageDebugging)?.debugRevealedTileInWindow()
+    }
+
     /// Taps a tile on whichever page is active.
     func debugSelectItem(at index: Int) -> Bool {
-        guard pages.indices.contains(activeIndex) else { return false }
-        return pages[activeIndex].debugSelectItem(at: index)
+        (activePage as? any PostGridPageDebugging)?.debugSelectItem(at: index) ?? false
     }
     #endif
 
@@ -305,114 +348,26 @@ final class ProfileGalleryPagerView: UIView {
     }
 
     /// The chrome that stays over the pages when the header has scrolled away.
+    ///
+    /// The chrome that STAYS — the docked selector and the status bar — not
+    /// the header's reserved height, which scrolls away with the content.
     func setStickyTopOcclusion(_ height: CGFloat) {
-        allPages.forEach { $0.setStickyTopOcclusion(height) }
+        stickyTopOcclusion = height
+        applyOcclusion()
     }
 
-    #if DEBUG
-    /// The active page's revealed tile, in window space, once settled.
-    func debugRevealedTileInWindow() -> CGRect? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].debugRevealedTileInWindow()
-    }
-    #endif
+    private var stickyTopOcclusion: CGFloat = 0
+    private var hostedTopInset: CGFloat = 0
+    private var hostedBottomInset: CGFloat = 0
 
-    /// The active page's hero facts for a post — geometry, cover, shape.
-    func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].heroGeometry(for: postID)
+    private func applyOcclusion() {
+        let occlusion = UIEdgeInsets(top: stickyTopOcclusion, left: 0, bottom: hostedBottomInset, right: 0)
+        allPages.forEach { $0.setChromeOcclusion(occlusion) }
     }
 
-    /// The text reveal's questions, asked of the ACTIVE page — the same rule
-    /// `heroGeometry` follows, and for the same reason: a rect read from one
-    /// page and a cut read from another would describe two different lists.
-    func textRowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].textRowFrame(for: postID, in: space)
-    }
-
-    func textRowCaptionEnd(for postID: PostID) -> CGFloat? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].textRowCaptionEnd(for: postID)
-    }
-
-    func textRowCaptionTop(for postID: PostID) -> CGFloat {
-        guard pages.indices.contains(activeIndex) else { return 0 }
-        return pages[activeIndex].textRowCaptionTop(for: postID)
-    }
-
-    func makeDismissStandIn(for postID: PostID) -> UIView? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].makeDismissStandIn(for: postID)
-    }
-
-    func tileRevealShape(for postID: PostID) -> ProfileTileRevealShape? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].tileRevealShape(for: postID)
-    }
-
-    func restingOverlay(for postID: PostID) -> UIView? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].restingOverlay(for: postID)
-    }
-
-    // The return player's questions (#951), asked of the ACTIVE page — the
-    // page the post was opened from, which a covered screen cannot change.
-
-    func beginReturnHandoff(of postID: PostID) {
-        guard pages.indices.contains(activeIndex) else { return }
-        pages[activeIndex].beginReturnHandoff(of: postID)
-    }
-
-    func endReturnHandoff() {
-        guard pages.indices.contains(activeIndex) else { return }
-        pages[activeIndex].endReturnHandoff()
-    }
-
-    func returnFlightSurface(for postID: PostID) -> VideoRenderView? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].returnFlightSurface(for: postID)
-    }
-
-    func pauseReturnPlayback(for postID: PostID) {
-        guard pages.indices.contains(activeIndex) else { return }
-        pages[activeIndex].pauseReturnPlayback(for: postID)
-    }
-
-    @discardableResult
-    func landReturnPlayback(_ view: UIView, for postID: PostID) -> Bool {
-        guard pages.indices.contains(activeIndex) else { return false }
-        return pages[activeIndex].landReturnPlayback(view, for: postID)
-    }
-
-    func isReturnLandingReady(for postID: PostID) -> Bool {
-        guard pages.indices.contains(activeIndex) else { return true }
-        return pages[activeIndex].isReturnLandingReady(for: postID)
-    }
-
-    /// The any-kind floor under `textRowFrame` — see the grid's own note.
-    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].rowFrame(for: postID, in: space)
-    }
-
-    func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model? {
-        guard pages.indices.contains(activeIndex) else { return nil }
-        return pages[activeIndex].textRowAuthorBand(for: postID)
-    }
-
-
-    func setHeroConcealed(
-        _ concealed: Bool,
-        for postID: PostID,
-        carrying carry: PostGridListRowCell.HeroCarry = .media
-    ) {
-        guard pages.indices.contains(activeIndex) else { return }
-        pages[activeIndex].setHeroConcealed(concealed, for: postID, carrying: carry)
-    }
-
-    var heroCoordinateSpace: UICoordinateSpace? {
-        pages.indices.contains(activeIndex) ? pages[activeIndex].heroCoordinateSpace : nil
+    private func applyHostedInsets() {
+        allPages.forEach { $0.setHostedInsets(top: hostedTopInset, bottom: hostedBottomInset) }
+        applyOcclusion()
     }
 
     /// Settles a tapped tile clear of the chrome while the post covers this
@@ -421,20 +376,23 @@ final class ProfileGalleryPagerView: UIView {
         pages.forEach { $0.applyPendingReveal() }
     }
 
-    func endRefreshing() {
-        pages.forEach { $0.endRefreshing() }
-    }
+    /// The pull's indicator is the header's; nothing to end on the pages.
+    func endRefreshing() {}
 
     /// How far the pages' content starts below their own top — the height of
     /// the header floating over them.
     func setContentTopInset(_ inset: CGFloat) {
-        allPages.forEach { $0.setContentTopInset(inset) }
+        guard hostedTopInset != inset else { return }
+        hostedTopInset = inset
+        applyHostedInsets()
     }
 
     /// Clearance below the last row — the tab bar, the tray, the transparent
     /// bar's glass capsules.
     func setContentBottomInset(_ inset: CGFloat) {
-        allPages.forEach { $0.setContentBottomInset(inset) }
+        guard hostedBottomInset != inset else { return }
+        hostedBottomInset = inset
+        applyHostedInsets()
     }
 
     /// How far every page must be able to travel — the header's distance.
@@ -458,9 +416,9 @@ final class ProfileGalleryPagerView: UIView {
     /// A page whose content is too short to reach the offset takes as much of it
     /// as it can, which is the same clamp UIKit would apply, done deliberately
     /// rather than discovered on arrival.
-    func setVerticalOffset(_ offset: CGFloat, excluding excluded: ProfileGalleryGridView? = nil) {
+    func setVerticalOffset(_ offset: CGFloat, excluding excluded: (any PostGridPage)? = nil) {
         for page in pages where page !== excluded {
-            page.setVerticalOffset(offset)
+            page.setVerticalOffset(offset, animated: false)
         }
     }
 
@@ -493,11 +451,11 @@ final class ProfileGalleryPagerView: UIView {
         guard pages.indices.contains(activeIndex) else { return false }
         let page = pages[activeIndex]
         let before = page.verticalOffset
-        page.setVerticalOffset(offset)
+        page.setVerticalOffset(offset, animated: false)
         let after = page.verticalOffset
         if abs(after - offset) < 1 { return true }
         let clampedAtEnd = after < offset && abs(after - before) < 1
-        return clampedAtEnd && !page.showsSkeleton && after > 0
+        return clampedAtEnd && (page as? any PostGridPageDebugging)?.debugShowsSkeleton != true && after > 0
     }
     #endif
 
@@ -546,7 +504,7 @@ final class ProfileGalleryPagerView: UIView {
     /// the header are the same number. A tab therefore remembers its place for
     /// exactly as long as the viewer stays below the line, which is the whole
     /// time the memory is worth anything.
-    private func alignedOffset(for page: ProfileGalleryGridView) -> CGFloat {
+    private func alignedOffset(for page: any PostGridPage) -> CGFloat {
         let current = verticalOffset
         guard dockLine > 0, current >= dockLine else { return current }
         return max(page.verticalOffset, contentFloor)
@@ -586,7 +544,7 @@ final class ProfileGalleryPagerView: UIView {
         // The destination takes its position BEFORE it travels, so the page
         // sliding in is already where it belongs rather than arriving somewhere
         // else and correcting.
-        pages[index].setVerticalOffset(alignedOffset(for: pages[index]))
+        pages[index].setVerticalOffset(alignedOffset(for: pages[index]), animated: false)
         activeIndex = index
         publishActiveScrollView()
         scrollView.setContentOffset(CGPoint(x: CGFloat(index) * bounds.width, y: 0), animated: animated)
@@ -610,7 +568,7 @@ final class ProfileGalleryPagerView: UIView {
     /// named. Never from `onProgress`: mid-swipe neither page is the answer.
     private func publishActiveScrollView() {
         guard pages.indices.contains(activeIndex) else { return }
-        let scroller = pages[activeIndex].collectionView
+        let scroller = pages[activeIndex].scrollView
         guard scroller !== publishedScroller else { return }
         publishedScroller = scroller
         onActiveScrollViewChanged?(scroller)
@@ -646,14 +604,16 @@ extension ProfileGalleryPagerView {
     var debugVerticalOffsets: [CGFloat] { pages.map(\.verticalOffset) }
     /// Every page's full reloads, items updated in place (reconfigured, or
     /// only their counters rewritten), and empty-state fitting passes, summed.
-    var debugReloadCount: Int { pages.map(\.debugReloadCount).reduce(0, +) }
-    var debugReconfiguredItems: Int {
-        pages.map { $0.debugReconfiguredItems + $0.debugRecountedItems }.reduce(0, +)
+    private var debugPages: [any PostGridPageDebugging] {
+        pages.compactMap { $0 as? any PostGridPageDebugging }
     }
-    var debugRecountedItems: Int { pages.map(\.debugRecountedItems).reduce(0, +) }
-    var debugEmptyStateMeasureCount: Int { pages.map(\.debugEmptyStateMeasureCount).reduce(0, +) }
+    var debugReloadCount: Int { debugPages.map(\.debugReloadCount).reduce(0, +) }
+    var debugReconfiguredItems: Int {
+        debugPages.map { $0.debugReconfiguredItems + $0.debugRecountedItems }.reduce(0, +)
+    }
+    var debugRecountedItems: Int { debugPages.map(\.debugRecountedItems).reduce(0, +) }
     /// Whether any page is showing its bones.
-    var debugShowsSkeleton: Bool { pages.contains(where: \.showsSkeleton) }
+    var debugShowsSkeleton: Bool { debugPages.contains(where: \.debugShowsSkeleton) }
     /// Where a given page would be put for the screen's current position —
     /// the split between the screen's share of the offset and the tab's, which
     /// is otherwise only observable by switching tabs and looking.
@@ -664,12 +624,12 @@ extension ProfileGalleryPagerView {
     /// Leaves one page somewhere without moving the others, which is what a
     /// viewer does by scrolling a tab and then switching away from it.
     func debugSetOffset(_ offset: CGFloat, forPage index: Int) {
-        pages[index].setVerticalOffset(offset)
+        pages[index].setVerticalOffset(offset, animated: false)
     }
     /// Parks the active page in its pulled-down region, so the banner's
     /// stretch-over-overscroll can be screenshotted without touch injection.
     func debugOverscroll(by distance: CGFloat) {
-        pages[activeIndex].setVerticalOffset(-distance)
+        pages[activeIndex].setVerticalOffset(-distance, animated: false)
     }
 }
 #endif
@@ -718,7 +678,7 @@ extension ProfileGalleryPagerView {
         let changedPage = index != activeIndex
         // The index is true before the travel starts, so nothing can re-align to
         // the page being left.
-        pages[index].setVerticalOffset(alignedOffset(for: pages[index]))
+        pages[index].setVerticalOffset(alignedOffset(for: pages[index]), animated: false)
         activeIndex = index
         publishActiveScrollView()
         let target = landing * bounds.width
@@ -748,7 +708,7 @@ extension ProfileGalleryPagerView: UIScrollViewDelegate {
         // once the header is docked.
         let active = pages[activeIndex]
         for page in pages where page !== active {
-            page.setVerticalOffset(alignedOffset(for: page))
+            page.setVerticalOffset(alignedOffset(for: page), animated: false)
         }
     }
 

@@ -37,6 +37,7 @@ struct ProfileBellAndMapMenuTests {
         let screen = ProfileViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: own ? {} : nil,
             trayPlacement: .aboveBottomSafeArea
         )

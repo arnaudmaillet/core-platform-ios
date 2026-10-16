@@ -10,7 +10,15 @@ import PostGrid
 import ShareSheet
 import UIKit
 
+/// Builds For You's grid page in a style — `savesPosts` offers the save
+/// control (#1273).
+typealias ProfileGridPageFactory = (_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage
+
 final class ProfileViewController: UIViewController, HeaderAccessoryHosting, ProfileRouteAnswering {
+    /// For You's grid page (#1273, epic #1269): the profile's pages and its
+    /// media gallery are For You's, so every tile behaves as For You's does.
+    private let makeGridPage: ProfileGridPageFactory
+
     /// Internal (not private) only for the +QA hooks.
     let viewModel: ProfileViewModel
     /// Non-nil only for the signed-in viewer's own profile (the Profile tab);
@@ -299,6 +307,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         viewModel: ProfileViewModel,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
+        makeGridPage: @escaping ProfileGridPageFactory,
         shareTargeting: (any ProfileShareTargeting)? = nil,
         onLogout: (() -> Void)?,
         makeEditViewController: ((UserProfile?, @escaping () -> Void) -> UIViewController)? = nil,
@@ -311,6 +320,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         trayPlacement: ProfileTrayPlacement = .navigationToolbar
     ) {
         self.trayPlacement = trayPlacement
+        self.makeGridPage = makeGridPage
         self.identityStubIsSelf = identityStub?.isSelf == true
         self.viewModel = viewModel
         self.onLogout = onLogout
@@ -331,10 +341,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // up only with something in it.
         let shown = allTabs.filter { $0 == .format(.activity) }
         self.tabs = shown
-        galleryPager = ProfileGalleryPagerView(
-            imagePipeline: imagePipeline, tabs: allTabs, videoPlayback: videoPlayback,
-            bookmarks: viewModel.bookmarks
-        )
+        let savesPosts = viewModel.bookmarks != nil
+        galleryPager = ProfileGalleryPagerView(tabs: allTabs) { style in makeGridPage(style, savesPosts) }
         galleryPager.setVisibleTabs(shown)
         selectorBar = PagedTabBar(titles: shown.map(\.title), style: .navigationTitle)
         super.init(nibName: nil, bundle: nil)
@@ -1411,7 +1419,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     func debugMapFavoriteMenuActions() -> [UIAction] { mapFavoriteMenuActions() }
     /// A gallery card's "..." rows, for `-post-menu-audit` (+QA).
     func debugGalleryMenuActions(
-        for context: ProfileGalleryGridView.AuthorMenuContext
+        for context: PostGridAuthorMenuContext
     ) -> [PostCardMenuAction] {
         galleryMenuActions(for: context)
     }
@@ -1547,7 +1555,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// Report only — or, on the viewer's own post, Edit and Delete
     /// (`ProfileMenuBuilder.galleryMenuActions`).
     private func galleryMenuActions(
-        for context: ProfileGalleryGridView.AuthorMenuContext
+        for context: PostGridAuthorMenuContext
     ) -> [PostCardMenuAction] {
         ProfileMenuBuilder.galleryMenuActions(
             isViewerPost: viewModel.isViewerPost(by: context.authorID),
@@ -1562,7 +1570,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// the same picker, anchored on the row's own "..." rather than on the
     /// header's.
     private func presentPostReportReasons(
-        for context: ProfileGalleryGridView.AuthorMenuContext
+        for context: PostGridAuthorMenuContext
     ) {
         ReportReasonSheet.present(
             from: self, subject: "this post", sourceView: context.anchor
@@ -2881,7 +2889,6 @@ extension ProfileViewController {
     var debugGalleryReconfiguredItems: Int { galleryPager.debugReconfiguredItems }
     var debugGalleryRecountedItems: Int { galleryPager.debugRecountedItems }
     var debugGalleryShowsSkeleton: Bool { galleryPager.debugShowsSkeleton }
-    var debugEmptyStateMeasureCount: Int { galleryPager.debugEmptyStateMeasureCount }
     var debugIsRefreshing: Bool { pullIndicator.debugIsRefreshing }
     /// The content inset the pages were handed — the header's height.
     var debugHeaderHeight: CGFloat { headerHeight }
@@ -2949,10 +2956,10 @@ extension ProfileViewController {
 
     func pushMediaGallery() {
         guard navigationController?.transitionCoordinator == nil else { return }
+        let savesPosts = viewModel.bookmarks != nil
         let gallery = ProfileMediaGalleryViewController(
-            imagePipeline: imagePipeline, videoPlayback: videoPlayback, handle: currentHandle,
-            title: mediaGalleryTitle
-        )
+            handle: currentHandle, title: mediaGalleryTitle
+        ) { [makeGridPage] style in makeGridPage(style, savesPosts) }
         gallery.loadViewIfNeeded()
         gallery.render(lastGallerySnapshot?.media ?? .loading)
         gallery.onOpen = { [weak self, weak gallery] post, stream, showingComments in
@@ -2983,11 +2990,10 @@ extension ProfileViewController {
     /// feed's continuation.
     func openGalleryPost(
         _ post: GalleryPost, stream: [GalleryPost], showingComments: Bool,
-        from surface: (any ProfileHeroSurface)? = nil,
+        from surface: (any PostGridPage)? = nil,
         presenter: UIViewController? = nil,
         format: GalleryFilter.Format = .activity
     ) {
-        let galleryPager: any ProfileHeroSurface = surface ?? self.galleryPager
         let presenter = presenter ?? self
         // One opening at a time: a second tap while the first push is in the
         // air pushed a second feed over it.
@@ -3014,201 +3020,24 @@ extension ProfileViewController {
             viewModel.galleryItemTapped(post.id, stream: window.map(\.id))
             return
         }
-        // Asked ONCE, at tap time, where the answer is unambiguous: the
-        // viewer just touched this cell, so it is realized by definition
-        // and a nil geometry can only mean "no media", never "scrolled
-        // away". The closures below re-ask the transient question for as
-        // long as the flight needs it.
-        let geometry = galleryPager.heroGeometry(for: post.id)
-        // Whether the post is a TILE here (a Discover chunk's or pair's, every
-        // media mosaic brick) — read at tap with the geometry. A card-shaped
-        // close onto a tile lands as the tile (#888), not as a row: see
-        // `textReveal` below.
-        let tileShape = galleryPager.tileRevealShape(for: post.id)
-        // ⚠️ THE CLOSE LANDS ON THE POST THAT OPENED IT, whatever the
-        // viewer paged to — the product rule for a ranked list, and the
-        // same one the place page's own note states at length.
-        //
-        // Re-pointing at the settled post was tried here and taken out
-        // again: it needs the arrival's row brought on screen, and a scroll
-        // is not a re-order in the code and IS one to the eye — the post
-        // that was under the card is replaced by another. What travels
-        // instead is the PAGE, into the row it left from.
-        let anchorID = post.id
-        // The tapped tile's clip is parked, paused at its playhead, for a
-        // close that pages on and comes home to it (#951). The scope ends
-        // when this screen is the viewer's again (`setAutoplayActive(true)`).
-        galleryPager.beginReturnHandoff(of: post.id)
-        // With their live counts (#896): the flight's card draws the number
-        // the tile it leaves draws.
-        let liveWindow = window.map { staking?.liveCopy(of: $0) ?? $0 }
-        let origin = SnapFeedHeroOrigin(
-            post: staking?.liveCopy(of: post) ?? post,
-            stream: liveWindow,
-            hasHero: geometry != nil,
-            cover: geometry?.cover,
-            style: geometry?.isTile == true ? .tile : .listMedia,
-            frame: { [weak galleryPager] container in
-                // Re-measured, not captured: the grid scrolls itself clear
-                // of the chrome while the post is open, so the rect the
-                // dismissal flies home to is not the one it left from.
-                //
-                // The coordinate space is re-resolved with it. It is the
-                // ACTIVE page's collection view, and the geometry above is
-                // already read from whichever page is active — capturing one
-                // and re-asking the other could describe two different pages.
-                guard let galleryPager,
-                      let space = galleryPager.heroSpace,
-                      let current = galleryPager.heroGeometry(for: post.id)
-                else { return nil }
-                return space.convert(current.rect, to: container)
-            },
-            isOnScreen: { [weak galleryPager] in
-                galleryPager?.heroGeometry(for: post.id) != nil
-            },
-            setConcealed: { [weak galleryPager] concealed in
-                galleryPager?.setHeroConcealed(concealed, for: post.id, carrying: .media)
-            },
-            opensComments: showingComments,
-            depthView: { [weak galleryPager] in galleryPager },
-            // A text-only post has no media to fly, and until now that
-            // meant a plain push here while For You opened the same post
-            // as a window. One post, one screen, two transitions depending
-            // on where the viewer tapped it. This is the description that
-            // ends that; everything it does not mention — the rounding,
-            // the fill, the veil, the cut — is the installer's, so the two
-            // surfaces cannot drift apart.
-            //
-            // Offered for EVERY post, not only text ones. `hasHero`
-            // decides which presentation OPENS the post — and a media post
-            // opened by a flight still CLOSES through this description when
-            // the viewer has paged onto a text post: the feed lands that
-            // close as a window on this row (`RowCardCloseLanding`), the
-            // same close For You's Following list runs. Before it did, that
-            // page had no drag and a chevron that cut.
-            textReveal: TextRevealOrigin(
-                rowFrame: { [weak galleryPager] space in
-                    // The text row's rect, or ANY row's — see
-                    // `ProfileGalleryGridView.rowFrame`. A close whose
-                    // anchor turned out to carry media used to land on a
-                    // 96pt square in the middle of the screen.
-                    galleryPager?.textRowFrame(for: anchorID, in: space)
-                        ?? galleryPager?.rowFrame(for: anchorID, in: space)
-                },
-                // Read ONCE, at tap, for the reason the geometry above is:
-                // the viewer just touched this cell, so it is realized by
-                // definition. `applyPendingReveal` may scroll it clear of
-                // the header while the post is up, and a row that scrolled
-                // out cannot answer.
-                captionEnd: galleryPager.textRowCaptionEnd(for: post.id),
-                depthView: { [weak galleryPager] in galleryPager },
-                captionTop: galleryPager.textRowCaptionTop(for: post.id),
-                // Borrowed by the destination for the flight, so the window
-                // shows the header the card does instead of a blank strip
-                // the card's own header then appears into at the landing.
-                //
-                // ⚠️ NOT FOR A TILE, which has no header to match (#888): the
-                // band answers for any post, and borrowed over a window
-                // closing onto a tile it drew a post card's header into the
-                // flight that the tile then dropped.
-                authorBand: tileShape == nil ? galleryPager.textRowAuthorBand(for: post.id) : nil,
-                // What the CLOSE carries home. Built from the post rather
-                // than read off the page, so a viewer who scrolled the
-                // comments still lands on the card they came from.
-                //
-                // Both of these were For You's alone until now, which is
-                // why the two screens' reveals did not feel the same: this
-                // one flew the live page home and gained its header in a
-                // single frame.
-                makeDismissStandIn: { [weak galleryPager] _ in
-                    galleryPager?.makeDismissStandIn(for: anchorID)
-                },
-                // ⚠️ A TILE'S WINDOW IS THE TILE'S SHAPE (#888), For You's
-                // `ForYouGridPage.tileWindow`: its corner and its fill rather
-                // than the card's, and no caption to align the page to. The
-                // row's defaults landed a Discover tile's close as a white,
-                // card-cornered window holding a whole post card — the old
-                // default card, in the tile's slot, for the length of the
-                // landing. The stand-in above is the tile's twin for the same
-                // reason.
-                alignsPageToSource: tileShape == nil,
-                // ⚠️ THE PAGE TRAVELS — this list never got the transition
-                // every other surface now runs. Under `.clipped` it handed
-                // the destination over DURING the drag, with the TAPPED
-                // post's veil cut and borrowed band drawn over whatever the
-                // viewer had paged to. A carrying fit refuses both and
-                // moves the whole hand-over to the release.
-                pageFit: .covering,
-                cornerRadius: tileShape?.cornerRadius,
-                fill: tileShape?.fill ?? PostGridListRowCell.cardFillColor,
-                // The gallery's own concealment, which the media hero
-                // beside this already drives — one mechanism, two kinds of
-                // flight.
-                //
-                // ⚠️ AND THIS ONE CARRIES THE CARD. A window takes the whole
-                // row, so the whole row is what must go; the hero beside it
-                // takes only the picture and says so by omission. Today this
-                // anchor is never re-pointed, so the landing is always the
-                // text post that opened it and both answers agree — stated
-                // anyway, because the day the anchor moves is the day a
-                // window lands on a photograph and leaves its caption
-                // showing underneath, which is what For You was filmed
-                // doing.
-                setConcealed: { [weak galleryPager] concealed in
-                    galleryPager?.setHeroConcealed(
-                        concealed, for: anchorID, carrying: .card
-                    )
-                },
-                // No inset to pin, unlike For You's grid: these pages run
-                // `contentInsetAdjustmentBehavior = .never` for their whole
-                // life because the header floats over them, so the value
-                // the landing is measured against cannot drift under the
-                // transition. And the row has already settled — the pager
-                // applies its pending reveal on `viewDidDisappear`, which
-                // is before any of this is asked.
-                dismissalDidEnd: { [weak self] committed in
-                    // ⚠️ NOTHING IS BROUGHT IN HERE any more. The metric
-                    // line used to be faded up once the card was alone, on
-                    // the reasoning that the page never had one — which is
-                    // true of the PUSH and irrelevant here: a dismissal's
-                    // window carries a whole row, metric line included, so
-                    // the fade blinked something already on screen.
-                    guard committed else { return }
-                    DispatchQueue.main.async {
-                        #if DEBUG
-                        // Where the row ACTUALLY is once everything has
-                        // settled, against the rect the close was aimed at.
-                        if ProcessInfo.processInfo.arguments.contains("-text-reveal-log"),
-                           let self,
-                           let rect = galleryPager.textRowFrame(
-                               for: post.id, in: self.view
-                           ) {
-                            print("[text-reveal] rowAfterPop \(NSCoder.string(for: rect))")
-                        }
-                        #endif
-                    }
-                }
+        guard let page = surface ?? galleryPager.activePage else { return }
+        // ⚠️ THE ONE TILE CONTRACT (#1273, epic #1269): For You's page
+        // describes its tile — a take-off playing, the playhead continued on
+        // a same-post close (this used to restart the clip), the tile's own
+        // parked clip after paging on, the words faded in on a close, the
+        // tile's or the card's window when there is no picture to fly.
+        let origin = page.heroOrigin(
+            opening: post, stream: window, in: presenter.view,
+            textReveal: page.closeWindow(
+                for: post, alignsPageToSource: true,
+                willStageDismissal: {},
+                dismissalDidEnd: { _ in }
             ),
-            // A close from another post comes home with the tile's OWN clip,
-            // parked at the tap (#951) — never the page's.
-            returnLiveMedia: { [weak galleryPager] in galleryPager?.returnFlightSurface(for: anchorID) },
-            pauseReturnLiveMedia: { [weak galleryPager] in galleryPager?.pauseReturnPlayback(for: anchorID) },
-            adoptReturnLiveMedia: { [weak galleryPager] view in
-                galleryPager?.landReturnPlayback(view, for: anchorID)
-            },
-            returnLandingIsReady: { [weak galleryPager] in
-                galleryPager?.isReturnLandingReady(for: anchorID) ?? true
-            },
-            // The tile's words, worn by the card as For You's tiles' are
-            // (#910): the card takes off wearing what the tile wore and lands
-            // wearing what the tile will, rather than landing as the bare
-            // picture with the words following once the tile is back. Built
-            // at each ask, so a close reads the slot the tile has then.
-            restingOverlay: { [weak galleryPager] in
-                galleryPager?.restingOverlay(for: anchorID)
-            },
-            // On past the tiles loaded at the tap into the gallery's next
-            // pages, under the tab and source the viewer opened it from (#638).
+            opensComments: showingComments,
+            willStageDismissal: {},
+            // The header floats over pages whose insets never move while a
+            // post covers them (`contentInsetAdjustmentBehavior = .never`).
+            pinsBeforeClose: false,
             continuation: { [weak self] after in
                 await self?.viewModel.galleryPostIDs(after: after, in: format)
             }
@@ -3220,7 +3049,7 @@ extension ProfileViewController {
         // The push is synchronous, so the stack already says which happened.
         if let navigation = presenter.navigationController,
            navigation.topViewController === presenter, presenter.presentedViewController == nil {
-            galleryPager.endReturnHandoff()
+            page.endPlaybackHandoff()
         }
     }
 }

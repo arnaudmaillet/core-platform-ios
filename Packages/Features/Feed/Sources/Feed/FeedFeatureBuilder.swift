@@ -596,11 +596,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage {
-        ForYouGridPage(
-            imagePipeline: imagePipeline, style: ForYouGridPage.Style(style),
-            // The app's one pool, the same instance For You's tabs borrow from.
-            videoPlayback: videoPlayback,
-            bookmarks: savesPosts ? .shared : nil
+        // The app's one pool, the same instance For You's tabs borrow from.
+        PostGridPages.make(
+            style: style, imagePipeline: imagePipeline, videoPlayback: videoPlayback, savesPosts: savesPosts
         )
     }
 

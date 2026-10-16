@@ -1395,6 +1395,9 @@ final class ForYouGridPage: UIView {
     func applyPendingReveal() {
         guard let id = pendingRevealPostID else { return }
         pendingRevealPostID = nil
+        #if DEBUG
+        debugLastRevealedPostID = id
+        #endif
         guard let index = posts.firstIndex(where: { $0.id == id }) else { return }
         // ⚠️ THE INSET IS THE COVER ONLY WHERE THE INSET IS CHROME.
         //
@@ -2121,7 +2124,9 @@ final class ForYouGridPage: UIView {
     /// picture. The tile's own twin (`PostGridTileStandInView`) is what the
     /// window lands as now, the rows' #314 arrangement for a brick.
     func makeDismissStandIn(for postID: PostID) -> UIView? {
-        guard let post = posts.first(where: { $0.id == postID }) else { return nil }
+        // With its live count (#896): the stand-in draws the number the tile
+        // it hands over to draws, a like made in the feed it opened included.
+        guard let post = post(for: postID) else { return nil }
         if drawsAsTile(postID) { return makeTileStandIn(for: post) }
         // The realized row's width when there is one, the list's own otherwise:
         // a row scrolled out still has to produce a card, and the width is a
@@ -3183,6 +3188,22 @@ final class ForYouGridPage: UIView {
     /// reconfigure — see `applyCountsOnly`.
     private(set) var debugRecountedItems = 0
     private(set) var debugReconfiguredItems = 0
+    /// Whole-list reloads — what a counts-only change or an append must not be.
+    private(set) var debugReloadCount = 0
+    /// The post the last `applyPendingReveal` brought clear of the chrome.
+    private(set) var debugLastRevealedPostID: PostID?
+
+    /// That post's tile, in window space — a host's QA hook measures it
+    /// against its own chrome (the profile's `-profile-verify-reveal`).
+    func debugRevealedTileInWindow() -> CGRect? {
+        guard let id = debugLastRevealedPostID,
+              let index = posts.firstIndex(where: { $0.id == id }),
+              let window,
+              let attributes = collectionView.layoutAttributesForItem(at: indexPath(for: index))
+        else { return nil }
+        return collectionView.convert(attributes.frame, to: window)
+    }
+    var debugShowsSkeleton: Bool { showsSkeleton }
     /// The status block's frame while it shows, nil otherwise.
     var debugStatusFrame: CGRect? { emptyState.isHidden ? nil : emptyState.frame }
     /// The travel a hosted page offers now — see `offeredTravel`.
@@ -3230,6 +3251,9 @@ final class ForYouGridPage: UIView {
     /// The whole-table path every style ends on when a delivery is not an
     /// append.
     private func reloadAll(dissolving: Bool) {
+        #if DEBUG
+        debugReloadCount += 1
+        #endif
         // The covers are the lookahead's (#970): it plans once the reload has
         // laid out the new items (`render`'s `setNeedsPlan`), the visible ones
         // and the screen ahead decoded — the first load included, the moment

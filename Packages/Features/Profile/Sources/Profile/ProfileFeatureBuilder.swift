@@ -204,6 +204,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             ),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
+            makeGridPage: gridPageFactory,
             shareTargeting: shareTargeting,
             onLogout: onLogout,
             makeEditViewController: { [imagePipeline] profile, onSaved in
@@ -467,6 +468,15 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// For You's grid page, built by the composition root (#1273): the pages
     /// the profile's posts are drawn on. `savesPosts` offers the save control.
     public var makePostGridPage: ((_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage)?
+
+    /// `makePostGridPage`, which the composition root always wires: the
+    /// profile has no grid of its own any more.
+    private var gridPageFactory: ProfileGridPageFactory {
+        guard let makePostGridPage else {
+            preconditionFailure("ProfileFeatureBuilder.makePostGridPage is not wired (AppContainer)")
+        }
+        return makePostGridPage
+    }
     /// The wallet the gallery cards' like chips stake from — the app's one
     /// instance. Nil leaves the chips counters.
     public var wallet: WalletStore?
@@ -562,6 +572,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             ),
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
+            makeGridPage: gridPageFactory,
             shareTargeting: shareTargeting,
             onLogout: nil,
             makeRelationshipsViewController: makeRelationshipsFactory(),

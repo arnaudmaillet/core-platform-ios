@@ -7,6 +7,7 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
+@testable import Feed
 @testable import Profile
 
 /// A profile's bare tiles and its gallery's flight draw the post's LIVE count
@@ -100,13 +101,22 @@ struct ProfileLiveCountTests {
     @Test func theGalleryFlightAndItsStandInCarryTheLiveCount() throws {
         let entities = EntityStore()
         let staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
-        let page = mosaic(staking: staking)
-        _ = try tile(PostID("p0"), on: page)
+        // The profile's pages are For You's (#1273): the open is measured on
+        // the page the profile now draws its media on.
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
+        page.staking = staking
+        page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        page.setCorpusComplete(true)
+        page.render(.content((0..<12).map(post)))
+        page.layoutIfNeeded()
+        page.collectionView.layoutIfNeeded()
+        _ = try #require(page.debugCell(for: PostID("p0")) as? PostGridTileCell)
         entities.addLikes(1, to: PostID("p0"))
 
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
         screen.staking = staking

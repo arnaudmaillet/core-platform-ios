@@ -104,6 +104,7 @@ struct ProfilePushFirstFrameTests {
                 cache: cache
             ),
             imagePipeline: ImagePipeline(fetcher: PictureFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil,
             identityStub: stub
         )
@@ -188,6 +189,7 @@ struct ProfilePushFirstFrameTests {
         let first = ProfileViewController(
             viewModel: ProfileViewModel(repository: repository, source: .profile(id), cache: cache),
             imagePipeline: pipeline,
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
         first.loadViewIfNeeded()
@@ -204,6 +206,7 @@ struct ProfilePushFirstFrameTests {
                 repository: repository, source: .profile(ProfileID("prof-kenji")), cache: cache
             ),
             imagePipeline: pipeline,
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
         second.loadViewIfNeeded()
@@ -256,6 +259,7 @@ struct ProfilePushFirstFrameTests {
         let screen = ProfileViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: PictureFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
         screen.loadViewIfNeeded()
