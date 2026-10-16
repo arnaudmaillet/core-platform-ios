@@ -2072,12 +2072,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
             )
             barIdentityPill.avatar.setPicture(profile.avatarURL, pipeline: imagePipeline)
-            // The face's relation ring (#1298): no badge here, but the same
-            // grey for following and pink for friends as every other pill.
-            barIdentityPill.setRing(
-                state == .following ? (viewModel.isMutualFollow ? .friends : .following) : .none,
-                animated: barIdentityPill.window != nil
-            )
             // Never narrower than its face's wrapper.
             let budget = barIdentityWidthBudget(withFollow: follow != nil)
             if barIdentityPill.setWidthBudget(max(PersonPill.wrapperHeight, floor(budget))) {

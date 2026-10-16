@@ -95,11 +95,12 @@ struct PersonPillTests {
                 "the ring moved the pill's width")
     }
 
-    /// A pill with no badge (the profile's) is told its relation.
-    @Test func aBadgeLessPillWearsTheRingItIsGiven() {
+    /// ⚠️ THE RING GOES WITH THE BADGE (the owner, 2026-10-16): a pill with
+    /// no badge (the profile's) never wears one, whatever it is told.
+    @Test func aBadgeLessPillWearsNoRing() {
         let pill = PersonPill(carriesBadge: false)
         pill.setRing(.friends, animated: false)
-        #expect(pill.ringRelation == .friends)
-        #expect(pill.drawnRingColor.cgColor == PersonPillBadgeInks.accent.cgColor)
+        #expect(pill.ringRelation == .none)
+        #expect(pill.drawnRingColor.cgColor.alpha == 0)
     }
 }

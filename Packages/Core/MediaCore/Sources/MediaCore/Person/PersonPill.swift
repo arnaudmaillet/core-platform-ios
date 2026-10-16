@@ -341,12 +341,13 @@ public final class PersonPill: UIView {
     public private(set) var ringRelation: Badge = .none
 
     /// Rings the face for `relation`: grey while the viewer follows, pink
-    /// once they are friends, none otherwise. A pill with a badge follows
-    /// its badge (`setBadge`); one without (the profile's) is told.
+    /// once they are friends, none otherwise — it follows the badge
+    /// (`setBadge`). ⚠️ ONLY WITH A BADGE (the owner, 2026-10-16): a pill
+    /// that carries none (the profile's) never wears the ring.
     /// Re-coloured in place, never resized: the ring sits in the face's
     /// breathing room, outside anything the pill's width is made of.
     public func setRing(_ relation: Badge, animated: Bool) {
-        guard relation != ringRelation else { return }
+        guard statusBadge != nil, relation != ringRelation else { return }
         ringRelation = relation
         let ink = PersonPillRing.ink(for: relation).cgColor
         if animated, window != nil {
