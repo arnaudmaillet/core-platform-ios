@@ -1970,64 +1970,25 @@ final class PlaceProfileViewController: UIViewController {
         guard posts.indices.contains(index) else { return }
         let tapped = posts[index]
         let stream = Array(posts[index...].prefix(Self.seedWindow))
-        let hero = grid.hero(for: tapped.id, in: view)
-        let appearance = grid.heroAppearance(for: tapped.id)
-        // The page's own card style, translated into the one the seam speaks
-        // — `ExternalHeroZoomSource` makes the same trip in the other
-        // direction. Two enums with the same cases on purpose: one is this
-        // feature's, the other crosses the interface.
-        let flightStyle: SnapFeedHeroStyle = appearance?.style == .listMedia ? .listMedia : .tile
-        // The tapped tile's player is the flight's from here, and its own
-        // clip is parked for a close that pages on and comes home (#951).
-        // Closed by `viewDidAppear`'s `endPlaybackHandoff`.
-        grid.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         // On past the window into the place's next pages (#643); nil when
         // the pins are the whole place.
         var continuation: SnapFeedContinuation?
         if loadMore != nil {
             continuation = { [weak self] after in await self?.feedContinuation.postIDs(after: after) }
         }
-        let origin = SnapFeedHeroOrigin(
-            post: tapped,
-            stream: stream,
-            hasHero: hero != nil,
-            cover: appearance?.cover,
-            // ⚠️ ASKED, not assumed. A card's cover is a wide row, not a
-            // square tile, and the literal `.tile` this used to pass was only
-            // ever right because every page here was a grid. The page that
-            // drew the thing knows what shape it drew.
-            style: flightStyle,
-            frame: { [weak grid] space in grid?.hero(for: tapped.id, in: space)?.frame },
-            isOnScreen: { [weak grid] in grid?.isPostVisible(tapped.id) ?? false },
-            setConcealed: { [weak grid] concealed in
-                grid?.setHeroHidden(concealed, for: tapped.id)
-            },
-            // ⚠️ THE CARD TAKES OFF PLAYING, rather than wearing the post's
-            // poster until the page has landed.
-            //
-            // A row on these lists is already playing under the finger that
-            // taps it, and the flight used to carry the still: the clip became
-            // a photograph for the length of the opening and only resumed after
-            // the landing. Filmed on Activity. The card joins the row's own
-            // playback as an extra surface — the row keeps rendering behind it,
-            // so there is nothing to park and nothing to hand back if the
-            // flight is abandoned.
-            donateLiveMedia: { [weak grid] in grid?.liveFlightSurface(for: tapped.id) },
-            // A TEXT post's page IS its thread, so it arrives there by being
-            // tapped at all — see `SnapFeedHeroOrigin.opensComments`.
-            opensComments: showingComments && tapped.kind != .text,
-            depthView: { [weak grid] in grid },
-            // A row with no media has nothing to fly, and `hasHero` above is
-            // already false for it — which used to mean the platform's plain
-            // slide, on the one surface in the app where a text post did not
-            // get the window every other list gives it. This is that window.
+        // ⚠️ THE ONE TILE CONTRACT (#1270, epic #1269): the page describes its
+        // tile — take-off playing, the playhead continued on a same-post
+        // close, the tile's own parked clip after paging on, the words faded
+        // in on a close. Closed by `viewDidAppear`'s `endPlaybackHandoff`.
+        let origin = grid.heroOrigin(
+            opening: tapped, stream: stream, in: view,
+            // A row with no media has nothing to fly; this is the window every
+            // other list gives a text post.
             textReveal: textRowReveal(for: tapped, in: grid),
-            // A close from another post comes home with the tile's OWN clip,
-            // parked at the tap (#951) — never the page's.
-            returnLiveMedia: { [weak grid] in grid?.returnFlightSurface(for: tapped.id) },
-            pauseReturnLiveMedia: { [weak grid] in grid?.pauseReturnPlayback(for: tapped.id) },
-            adoptReturnLiveMedia: { [weak grid] view in grid?.landReturnPlayback(view, for: tapped.id) },
-            returnLandingIsReady: { [weak grid] in grid?.isReturnLandingReady(for: tapped.id) ?? true },
+            // A TEXT post's page IS its thread — see `opensComments`.
+            opensComments: showingComments && tapped.kind != .text,
+            // This page manages its own freeze (`clearLandingConcealment`).
+            pinsBeforeClose: false,
             continuation: continuation
         )
         continuationGrid = grid

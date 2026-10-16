@@ -24,8 +24,10 @@ extension ForYouGridPage {
     ///     closes through once the feed has paged onto words — the host's
     ///     (`tileWindow`, a list's row reveal), or nil.
     ///   - opensComments: the post opens on its thread.
-    ///   - willStageDismissal: what the host adds before a close is measured;
-    ///     the page is pinned (`pinForPushedClose`) first either way.
+    ///   - willStageDismissal: what the host adds before a close is measured.
+    ///   - pinsBeforeClose: the page is pinned (`pinForPushedClose`) before
+    ///     that — for a host whose push holds it still (`openHoldingStill`).
+    ///     False for a host that manages its own freeze (the place page).
     ///   - continuation: on past the window into the host's next posts.
     func heroOrigin(
         opening tapped: GalleryPost,
@@ -34,6 +36,7 @@ extension ForYouGridPage {
         textReveal: TextRevealOrigin?,
         opensComments: Bool = false,
         willStageDismissal: @escaping () -> Void = {},
+        pinsBeforeClose: Bool = true,
         continuation: SnapFeedContinuation?
     ) -> SnapFeedHeroOrigin {
         let id = tapped.id
@@ -79,7 +82,7 @@ extension ForYouGridPage {
             // Pinned since the tap; pinned again in case a refused push or a
             // cancelled window close handed the inset back meanwhile.
             willStageDismissal: { [weak self] in
-                self?.pinForPushedClose()
+                if pinsBeforeClose { self?.pinForPushedClose() }
                 willStageDismissal()
             },
             // The carousel's page the row is on, and the row following the
