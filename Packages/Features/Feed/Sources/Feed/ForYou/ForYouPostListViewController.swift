@@ -77,6 +77,9 @@ final class ForYouPostListViewController: UIViewController {
     enum Kind: String {
         case following
         case friends
+        /// A place's posts by popularity (the place page's Popular title):
+        /// one run, titled "Popular".
+        case popular
     }
 
     let kind: Kind
@@ -144,6 +147,7 @@ final class ForYouPostListViewController: UIViewController {
         // Both lists title every section, a lone "Recent" included — see the
         // type's note.
         page.titlesEverySection = true
+        if kind == .popular { page.earlierSectionTitle = "Popular" }
         // UIKit takes the bar down with the push and brings it back with the
         // pop; a post opened from here finds no dock to give back
         // (`showsAppTabBar(for:)` reads this flag).

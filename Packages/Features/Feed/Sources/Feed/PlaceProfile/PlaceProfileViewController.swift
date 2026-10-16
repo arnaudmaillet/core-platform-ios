@@ -25,13 +25,12 @@ import UIKit
 ///   LIKES — likes, not views, since no surface shows views any more (product
 ///   call, 2026-09-30). No avatar, no bio, no edit/share — a place is not an
 ///   account;
-/// - two tabs under the metrics — **Discover** (the popularity grid) and
-///   **Activity** (every post as CARDS, most popular first) — Activity on the
-///   left, Discover on the right (`tabOrder`) — a `PagedTabBar`
-///   over a `HorizontalPagerView`, the same pairing the profile's
-///   relationship screen ships. Deliberately For You's own vocabulary and
-///   shapes: its Discover is a media grid and its Following is a card list,
-///   which is exactly this pair for one place.
+/// - ONE page under the metrics, For You's own layout (the owner,
+///   2026-10-16 — the Activity/Discover pair and its strip are gone): a
+///   **Popular** row of cards (For You's Following row — the place's most
+///   liked posts), then **Recent** (For You's list — cards with mosaic
+///   stretches and their "View all", ordered by a light For You rule rather
+///   than strictly by date: `recent`). Each title pushes its screen.
 /// Under the identity, the profile's tray: Pin (follow the place) and its QR
 /// code; the balance keeps the top-right slot.
 ///
@@ -42,15 +41,23 @@ import UIKit
 /// the card close's, and this type only has to host its column and say where
 /// that close lands (`CardCloseLanding`).
 final class PlaceProfileViewController: UIViewController {
-    /// The Discover tab's grid of covers.
-    private let page: ForYouGridPage
-    /// The Activity tab: the SAME component For You's "Following" is — a
-    /// `ForYouGridPage` in `.list` style — over the same corpus in popularity
-    /// order, and the landing of every dismissal from the map. Not a bespoke
-    /// list: a place's activity is posts,
-    /// and a viewer who reads them as cards on For You must read them as the
-    /// same cards here.
+    /// The page: For You's own list (`.discover` — cards and mosaic
+    /// stretches) over the place's posts in the `recent` order, led by
+    /// `rails`, and the landing of every dismissal from the map. Not a
+    /// bespoke list: a place's activity is posts, and a viewer who reads them
+    /// as For You's cards must read them as the same cards here.
     private let activityPage: ForYouGridPage
+    /// The list's leading header: For You's own rows view, with only its card
+    /// row — "Popular" here — and the list's title, "Recent", under it (the
+    /// hashtag page's arrangement, `PostSetSurfaceViewController`).
+    private let rails: ForYouRailsView
+    /// How many of the place's most liked posts the Popular row carries.
+    static let popularRowCount = 10
+    /// Pushes the Popular row's whole list, and "Recent"/"View all"'s media
+    /// gallery — made by the builder, which holds what their headers need.
+    /// Nil: the titles open nothing (a test's page).
+    var makePostList: (() -> ForYouPostListViewController)?
+    var makeGallery: (() -> DiscoverGalleryViewController)?
 
     /// The banner's viewport. The PICTURE inside it is cut taller than it is,
     /// so it can lag behind the scroll without ever showing an edge — see
@@ -73,63 +80,12 @@ final class PlaceProfileViewController: UIViewController {
     /// "Reactions"; the views went (2026-09-30).
     private var likesTotal: Int64 = 0
 
-    /// The page's two tabs, by what they ARE rather than where they sit.
-    enum Tab: Equatable {
-        case activity, discover
 
-        var title: String {
-            switch self {
-            case .activity: "Activity"
-            case .discover: "Discover"
-            }
-        }
-    }
-
-    /// Strip order == pager order == `hostedPages` order: Activity on the
-    /// LEFT, Discover on the right (product call, 2026-09-28 — the same swap
-    /// For You's Following/Discover got).
-    ///
-    /// ⚠️ EVERY POSITION IS ASKED OF THIS ARRAY (`index(of:)`), never written
-    /// as a literal. The staging of a landing, the header's alignment, the
-    /// autoplay gate and the tab strip all speak in indices; the order used to
-    /// live in five `0`s and `1`s, and a swap that missed one would land a
-    /// close on the right tab's INDEX with the wrong tab's page.
-    static let tabOrder: [Tab] = [.activity, .discover]
-
-    /// Where `tab` sits in the strip and the pager.
-    static func index(of tab: Tab) -> Int {
-        tabOrder.firstIndex(of: tab) ?? 0
-    }
-
-    /// The tab titles, one source for both selector copies.
-    private static let tabTitles = tabOrder.map(\.title)
-    /// ⚠️ **ONE STRIP NOW, AND THE HAND-OVER IS GONE WITH THE SECOND.** There
-    /// were two — an inline copy in the header's slot and a docked copy in the
-    /// navigation bar's leading group — crossfading at a threshold as the
-    /// header scrolled away, because a re-parented view cannot be in two places
-    /// during a transition. The strip lives at the foot of the screen now and
-    /// never leaves it, so there is nothing to hand over: no slot, no dock
-    /// line, no speed limit, no mirroring latch.
-    private let tabBar = PagedTabBar(titles: tabTitles, style: .navigationTitle)
-    /// The strip's home: a `UITabAccessory` at the foot of the screen.
-    ///
-    /// ⚠️ AN ACCESSORY AND NOT A TOOLBAR, EVEN THOUGH THIS SCREEN IS PUSHED.
-    /// It is pushed with the app's tab bar STILL ON SCREEN — it never sets
-    /// `hidesBottomBarWhenPushed` and re-asserts the bar itself — so the band
-    /// above that bar is the accessory's. The toolbar of this stack belongs to
-    /// the snap feed, whose exit leg reads the incoming screen's
-    /// `toolbarItems`: giving this page any would flip that from "hide the bar"
-    /// to "hand it over".
-    private var selectorAccessory: SelectorAccessory?
-    private var pager: HorizontalPagerView!
-    /// The grab's hold on the pager — see `setContentScrollEnabled`.
-    private var pagerLock = ScrollLock()
-
-    /// The floating header: banner + metrics + tab bar in one host that
-    /// RIDES THE ACTIVE PAGE'S OFFSET (the profile page's mechanics, adopted
-    /// wholesale). The pages fill the screen and scroll themselves; this
-    /// host sits above them, moved by its top constraint, and stops moving
-    /// when the tab bar reaches the navigation bar — the sticky dock.
+    /// The floating header: banner, identity and tray in one host that RIDES
+    /// THE PAGE'S OFFSET (the profile page's mechanics, adopted wholesale).
+    /// The page fills the screen and scrolls itself; this host sits above
+    /// it, moved by its top constraint, and stops once it has gone under the
+    /// navigation bar — the dock.
     private let headerHost = UIView()
     private var headerTopConstraint: NSLayoutConstraint?
     /// The place's display title ("Paris • City Cluster") — worn as the HERO
@@ -151,17 +107,11 @@ final class PlaceProfileViewController: UIViewController {
     /// cluster this is. The SPLITTER stays: `placeName` still arrives as the
     /// gallery's "Paris • City Cluster", so stripping the kind is the only way
     /// to draw the name alone (`heroTitleComponents`).
-    /// The two pages under their hosted-header contract, pager order.
+    /// The page under its hosted-header contract — one now, the header's
+    /// coordinator kept page-agnostic.
     private var hostedPages: [any PlaceProfileHostedPage] = []
-    /// Which page the header is riding. Adopted at tab-tap time (the
-    /// destination takes the offset BEFORE it travels) and confirmed on
-    /// swipe settle.
-    ///
-    /// Starts on the FIRST tab, which is Activity: every arrival from the map
-    /// lands there anyway (`stageActivityLanding`), so the page's resting tab
-    /// and its landing tab are one tab — a close that fell back to the plain
-    /// slide shows the same tab the window would have.
-    private var activeIndex = 0
+    /// The page the header rides: the only one.
+    private let activeIndex = 0
 
     private let postIDs: [PostID]
     private let imagePipeline: ImagePipeline
@@ -278,13 +228,21 @@ final class PlaceProfileViewController: UIViewController {
     /// installed as the stack's delegate whenever this page is top.
     private var markerCloseDriver: InteractiveSlideDismissal?
 
-    /// The tile a flight left THIS page from, and which tab it sat on — nil
-    /// whenever the open post did not come from here (the map's Case B, where
-    /// the viewer arrived from a marker and has never seen this grid).
+    /// Where a flight left THIS page from — nil whenever the open post did
+    /// not come from here (the map's Case B, where the viewer arrived from a
+    /// marker and has never seen this page).
     ///
-    /// It is the whole of what distinguishes the two card-shaped closes: one
-    /// has somewhere the viewer actually was, the other does not.
-    private var tileDeparture: (id: PostID, isActivity: Bool)?
+    /// It is the whole of what distinguishes the card-shaped closes: one has
+    /// somewhere the viewer actually was, the other does not.
+    private var departure: Departure?
+
+    private enum Departure {
+        /// A post of the Recent list — a card or a mosaic tile.
+        case list(PostID)
+        /// A card of the Popular row, closed through the window its origin
+        /// described (`ForYouRowOrigins.card`).
+        case card(TextRevealOrigin)
+    }
 
 
     /// The page's own hero return to the map — created once, then installed
@@ -299,8 +257,6 @@ final class PlaceProfileViewController: UIViewController {
         // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
         // and a committed close install from `viewWillAppear` and find nothing
         // to do here.
-        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                   alongside: transitionCoordinator)
         assertAppTabBar()
         // ⚠️ THE ONE INSTANT THE BAR IS BOTH PRESENT AND LAID OUT on this
         // screen: `assertAppTabBar` has just restored its state (UIKit commits
@@ -325,12 +281,13 @@ final class PlaceProfileViewController: UIViewController {
         // post) ends with the round trip, as the other grid hosts end it in
         // their own `viewDidAppear`. This page never did, so the last post
         // opened from it stayed pinned first in the ranking for good.
-        page.endPlaybackHandoff()
         activityPage.endPlaybackHandoff()
+        rails.endPlaybackHandoff()
+        rails.clearConcealments()
         // The flight that left here is over, whichever way it ended. A stale
         // departure would answer for the NEXT close — including the map's Case
         // B, whose whole point is that it has no departure on this page.
-        tileDeparture = nil
+        departure = nil
         installMapReturnIfTop()
         syncAutoplay()
         #if DEBUG
@@ -459,12 +416,8 @@ final class PlaceProfileViewController: UIViewController {
     /// `-maps-place-pop-demo`: pops this page ~1.5s after it becomes top —
     /// the sim can't tap the back button, and the non-interactive pop is
     /// exactly the leg that proves the hero return animator is installed.
-    /// `-maps-place-tab <activity|discover|index>` selects a tab (a NAME
-    /// survives a reorder of the strip; an index is its position, left to
-    /// right) and `-maps-place-scroll <pt>`
-    /// drives the active page's offset — the two gestures this screen is
-    /// read by, neither of which the simulator can inject. The scroll runs
-    /// last and later, so a run can ask for "the Activity tab, docked".
+    /// `-maps-place-scroll <pt>` drives the page's offset — the gesture this
+    /// screen is read by, which the simulator cannot inject.
     private func scheduleDebugDrivesIfRequested() {
         guard !didScheduleDebugDrives else { return }
         didScheduleDebugDrives = true
@@ -488,13 +441,6 @@ final class PlaceProfileViewController: UIViewController {
                     print("PLACE-INK-AUDIT style=\(style) tones=\(debugHeroInkTones) \(rows) "
                         + String(format: "blur-bake=%.1fms", debugBlurBakeMilliseconds))
                 }
-            }
-        }
-        if let position = arguments.firstIndex(of: "-maps-place-tab"),
-           position + 1 < arguments.count,
-           let index = Self.debugTabIndex(arguments[position + 1]) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                self?.tabBar.debugSimulateTap(at: index)
             }
         }
         // ⚠️ WAITS FOR THE PAGE'S POSTS, not for 2s. The line below used to
@@ -576,9 +522,8 @@ final class PlaceProfileViewController: UIViewController {
                     guard let self else { return }
                     let began = CACurrentMediaTime()
                     let rendersBefore = renders
-                    debugReleasePull(on: Self.tabOrder[activeIndex])
-                    print("[place] pull released on \(Self.tabOrder[activeIndex].title)"
-                        + " refreshing=\(debugIsRefreshing)")
+                    debugReleasePull()
+                    print("[place] pull released refreshing=\(debugIsRefreshing)")
                     QAWait.until("-place-pull-refresh spinner", timeout: 10, { [weak self] in
                         self?.debugIsRefreshing == false
                     }) { [weak self] in
@@ -792,16 +737,18 @@ final class PlaceProfileViewController: UIViewController {
         self.loadPosts = loadPosts
         self.openPost = openPost
         self.anchorID = postIDs.first ?? PostID("")
-        self.page = ForYouGridPage(
-            imagePipeline: imagePipeline, style: .grid, videoPlayback: videoPlayback
-        )
         self.activityPage = ForYouGridPage(
-            imagePipeline: imagePipeline, style: .list, videoPlayback: videoPlayback
+            imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback
         )
+        self.rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         super.init(nibName: nil, bundle: nil)
-        // The Activity list draws the same cards For You does, and its like
-        // chips stake the same way.
-        activityPage.staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
+        rails.followingTitle = "Popular"
+        rails.listTitle = "Recent"
+        // The list and the row draw the same cards For You does, and their
+        // like chips stake the same way.
+        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
+        activityPage.staking = staking
+        rails.staking = staking
     }
 
     @available(*, unavailable)
@@ -818,25 +765,21 @@ final class PlaceProfileViewController: UIViewController {
         // The page the cards lie on, a step below them — see `Surface`.
         view.backgroundColor = Surface.page
         configureHeader()
-        configureTabs()
-        page.render(.loading)
+        configureScroll()
         activityPage.render(.loading)
-        // Either page's "Try Again" reloads the whole place: one hydration
-        // feeds both (`render`). The pull is the indicator's — `configureTabs`.
-        page.onRefresh = { [weak self] in self?.refresh() }
+        // "Try Again" reloads the whole place. The pull is the indicator's —
+        // `configureScroll`.
         activityPage.onRefresh = { [weak self] in self?.refresh() }
-        // Near either list's end: the place's next page (#643).
+        // Near the list's end: the place's next page (#643).
         if loadMore != nil {
-            page.onNearEnd = { [weak self] in self?.loadMorePosts() }
             activityPage.onNearEnd = { [weak self] in self?.loadMorePosts() }
         }
-        page.handPullToHost()
         activityPage.handPullToHost()
         installPullIndicator()
-        page.onItemTapped = { [weak self] index in self?.openTile(at: index, in: self?.page) }
         activityPage.onItemTapped = { [weak self] index in
             self?.openTile(at: index, in: self?.activityPage)
         }
+        wireRails()
         // The comment chip opens the post, not the thread — deliberately, for
         // now. Landing ON the comments needs the pushed feed itself
         // (`openComments(for:revealingFrom:)`), and this screen never holds
@@ -855,9 +798,6 @@ final class PlaceProfileViewController: UIViewController {
         activityPage.onItemCommentsTapped = { [weak self] index in
             self?.openTile(at: index, in: self?.activityPage, showingComments: true)
         }
-        page.onItemCommentsTapped = { [weak self] index in
-            self?.openTile(at: index, in: self?.page, showingComments: true)
-        }
         // The card band's own "..." stays dark here: the reporting and
         // social-graph seams are not threaded into this screen, and a menu
         // whose rows cannot act is worse than no control. An empty answer is
@@ -866,34 +806,104 @@ final class PlaceProfileViewController: UIViewController {
         configureNavigationItems()
     }
 
+    // MARK: - Popular and Recent
+
+    /// For You's coupling of its rows and its list
+    /// (`ForYouViewController.viewDidLoad`, the hashtag page's `wireDiscover`):
+    /// the titles' pushes, the cards' flights, and ONE player budget the two
+    /// share — the list leaves the players the row has claimed.
+    private func wireRails() {
+        rails.visibleBand = { [weak self] in self?.visibleBand() }
+        rails.onHeightChange = { [weak self] in self?.updateLeadHeight() }
+        rails.onCardTapped = { [weak self] index in self?.openCard(at: index) }
+        rails.onFollowingHeaderTapped = { [weak self] in self?.pushPopularList() }
+        rails.onListHeaderTapped = { [weak self] in self?.pushGallery() }
+        activityPage.onViewAllTapped = { [weak self] in self?.pushGallery() }
+        activityPage.onAutoplayReconcile = { [weak self] allowingStarts in
+            self?.rails.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: false)
+        }
+        activityPage.playerReserve = { [weak self] in self?.rails.claimedPlayers ?? 0 }
+        rails.onPlayerClaimChange = { [weak self] in self?.activityPage.updateAutoplay() }
+    }
+
+    /// Sizes the list's leading header to the rows it holds.
+    private func updateLeadHeight() {
+        let width = activityPage.bounds.width
+        guard width > 0 else { return }
+        activityPage.setLead(rails, height: rails.preferredHeight(forWidth: width))
+    }
+
+    /// The part of the screen the viewer can see, in the rows' space — what a
+    /// row's card must be half inside to play.
+    private func visibleBand() -> CGRect? {
+        guard rails.window != nil, view.window != nil else { return nil }
+        let band = view.bounds.inset(by: UIEdgeInsets(
+            top: view.safeAreaInsets.top, left: 0, bottom: barCover, right: 0
+        ))
+        return rails.convert(band, from: view)
+    }
+
+    /// The Popular row's posts, in its order.
+    private var popularPosts: [GalleryPost] { rails.cards }
+
+    /// "Popular": the place's posts by popularity, as For You's pushed
+    /// Following list draws a run of posts.
+    private func pushPopularList() {
+        guard let makePostList, let navigationController,
+              navigationController.transitionCoordinator == nil,
+              FeedFeatureBuilder.canOpen(from: self, on: navigationController)
+        else { return }
+        let list = makePostList()
+        list.render(.content(Self.popular(self.corpus, limit: nil)), newPosts: [])
+        navigationController.pushViewController(list, animated: true)
+    }
+
+    /// "Recent" and every "View all": For You's media gallery over the
+    /// place's media, in the list's order.
+    private func pushGallery() {
+        guard let makeGallery, let navigationController,
+              navigationController.transitionCoordinator == nil,
+              FeedFeatureBuilder.canOpen(from: self, on: navigationController)
+        else { return }
+        let gallery = makeGallery()
+        gallery.render(.content(GalleryFilter.Format.media.filtering(activityPage.posts)))
+        navigationController.pushViewController(gallery, animated: true)
+    }
+
+    /// A Popular card opens the way For You's Following cards do
+    /// (`ForYouViewController.openCard`, `ForYouRowOrigins.card`), and its
+    /// close comes home through the window the origin describes.
+    private func openCard(at index: Int) {
+        let cards = rails.cards
+        guard cards.indices.contains(index),
+              navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
+        else { return }
+        let tapped = cards[index]
+        let stream = Array(cards[index...].prefix(Self.seedWindow))
+        // The card's player is the flight's from here; the list stops.
+        rails.beginPlaybackHandoff(of: tapped.id)
+        activityPage.setAutoplayActive(false)
+        let origin = ForYouRowOrigins.card(
+            tapped, stream: stream, rails: rails, page: activityPage, host: view
+        )
+        departure = origin.textReveal.map(Departure.card)
+        openPost(self, origin, stream.map(\.id))
+    }
+
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
-        // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
-        // +36ms, `viewDidAppear` at +947ms — nine hundred milliseconds of empty
-        // band under a screen already fully on display. The call below is
-        // idempotent with the one in `viewDidAppear`, which stays as the
-        // backstop for the paths the policy declines (a scrub that has not
-        // committed, a flight that owns the chrome).
-        installBottomChromeWhenAppearing(hasActiveFlight: false,
-                                         handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
-            guard let self else { return }
-            selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
-                                       alongside: transitionCoordinator)
-        }
+        // No accessory any more (one page, no strip): the tab bar is the
+        // app's, asserted from `viewDidAppear` (`assertAppTabBar`).
 
         syncAutoplay()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        // ⚠️ ABOVE ANY OTHER GUARD. The accessory belongs to the tab bar
-        // controller, not to this screen: a band left up floats over the feed
-        // pushed on top of this page and over whichever tab comes next.
-        selectorAccessory?.remove(from: tabBarController, alongside: transitionCoordinator)
         // Off screen, this page holds no claim on the shared player pool —
         // the feed pushed above it is about to want every loan.
         for hosted in hostedPages { (hosted as? ForYouGridPage)?.setAutoplayActive(false) }
+        rails.setAutoplayActive(false)
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -981,6 +991,7 @@ final class PlaceProfileViewController: UIViewController {
         for (index, hosted) in hostedPages.enumerated() {
             (hosted as? ForYouGridPage)?.setAutoplayActive(index == activeIndex)
         }
+        rails.setAutoplayActive(true)
     }
 
     // MARK: - Layout (floating header over full-screen pages)
@@ -990,15 +1001,8 @@ final class PlaceProfileViewController: UIViewController {
         // over them (added second, so it draws above the content sliding
         // under it) and is moved by its top constraint from whichever page
         // is being read.
-        let pages: [ForYouGridPage] = Self.tabOrder.map { tab in
-            switch tab {
-            case .activity: activityPage
-            case .discover: page
-            }
-        }
-        hostedPages = pages
-        pager = HorizontalPagerView(pages: pages)
-        pager.pin(to: view)
+        hostedPages = [activityPage]
+        activityPage.pin(to: view)
 
         headerHost.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(headerHost)
@@ -1014,7 +1018,7 @@ final class PlaceProfileViewController: UIViewController {
         // clear; only their cards cover it. It still rests on the header's
         // top and travels with it (`bannerRestingTop`), so the fade, the ink
         // and the stretch are read in its space as before.
-        view.insertSubview(bannerBox, belowSubview: pager)
+        view.insertSubview(bannerBox, belowSubview: activityPage)
 
         // Both fill the box; the picture slides INSIDE its view for the
         // parallax (`applyBannerParallax`), under a blur and a ramp that stay
@@ -1113,13 +1117,6 @@ final class PlaceProfileViewController: UIViewController {
         ])
     }
 
-    /// The inline selector's seat: the bar's own height plus the gap that
-    /// separates it from the first row of content.
-    private static let selectorSlotHeight = PagedTabBar.Style.navigationTitle.height + 16
-    /// The air the slot keeps BELOW the selector, now that the bar itself sits
-    /// on the banner's last 44pt. Derived, so the two cannot drift apart.
-    private static let selectorSlotFooter =
-        selectorSlotHeight - PagedTabBar.Style.navigationTitle.height
     /// The air between the tray and the first post: the profile's own under
     /// its tray (`ProfileHeaderView`'s column foot, `Spacing.xl`), so the two
     /// pages' content starts alike (user, 5 October 2026).
@@ -1204,9 +1201,8 @@ final class PlaceProfileViewController: UIViewController {
     private static let dockZoomScale: CGFloat = 0.88
 
 
-    private func configureTabs() {
-        // The header rides the ACTIVE page's offset — every page reports,
-        // the coordinator listens to one.
+    private func configureScroll() {
+        // The header rides the page's offset.
         for (index, hosted) in hostedPages.enumerated() {
             hosted.onVerticalScroll = { [weak self] offset in
                 guard let self, index == activeIndex else { return }
@@ -1223,68 +1219,9 @@ final class PlaceProfileViewController: UIViewController {
                 refresh()
             }
         }
-        // Tap → the destination takes its aligned position BEFORE it
-        // travels, and the header adopts it immediately — so the page
-        // sliding in is already where it belongs.
-        // BOTH copies answer a tap — whichever the finger reached — and both
-        // are told the outcome, so the invisible one is already correct when
-        // it fades in rather than catching up afterwards.
-        for bar in [tabBar] {
-            bar.addAction(UIAction { [weak self, weak bar] _ in
-                guard let self, let bar else { return }
-                let destination = bar.selectedIndex
-                mirrorSelection(to: destination)
-                guard destination != activeIndex, hostedPages.indices.contains(destination)
-                else { return }
-                hostedPages[destination].setVerticalOffset(alignedOffset(for: destination))
-                activeIndex = destination
-                syncAutoplay()
-                pager.setActivePage(destination, animated: true)
-                applyHeaderOffset(hostedPages[destination].verticalOffset)
-            }, for: .valueChanged)
-        }
-        // Drag on the pill → pages. The neighbour alignment below rides it for
-        // free, since a scrub moves the offset and `onProgress` answers.
-        tabBar.onScrub = { [weak self] progress in self?.pager.scrub(to: progress) }
-        tabBar.onScrubEnd = { [weak self] velocity in
-            self?.pager.settleAfterScrub(velocityInPages: velocity)
-        }
-        // Swipe → lens, every frame — and the neighbours are settled every
-        // frame too: mid-swipe both pages are on screen, and a neighbour
-        // arriving at a stale offset is a header jump the viewer watches.
-        pager.onProgress = { [weak self] progress in
-            guard let self else { return }
-            tabBar.setProgress(progress)
-            for (index, hosted) in hostedPages.enumerated() where index != activeIndex {
-                hosted.setVerticalOffset(alignedOffset(for: index))
-            }
-        }
-        // The band's minimize rides whichever page is in front. The pager is
-        // what knows, and it is what says so — see `onActiveScrollViewChanged`.
-        pager.onActiveScrollViewChanged = { [weak self] scroller in
-            self?.setContentScrollView(scroller, for: .bottom)
-        }
-        pager.onSettled = { [weak self] index in
-            guard let self, hostedPages.indices.contains(index) else { return }
-            activeIndex = index
-            mirrorSelection(to: index)
-            syncAutoplay()
-            // Re-read where the landed page ACTUALLY is — a short page takes
-            // as much of the shared offset as it has content for, and a
-            // header riding a stale number stays hidden over a page sitting
-            // at its top.
-            applyHeaderOffset(hostedPages[index].verticalOffset)
-        }
-    }
-
-    /// Puts the strip on a selection the pager reached by itself.
-    ///
-    /// ⚠️ THE RE-ENTRANCY LATCH IS GONE WITH THE SECOND COPY. It existed
-    /// because `select` fires `.valueChanged`, whose action mirrored back into
-    /// the other bar; with one strip the guard below is the whole of it.
-    private func mirrorSelection(to index: Int) {
-        guard tabBar.selectedIndex != index else { return }
-        tabBar.select(index)
+        // ⚠️ NO TAB BAR COLLAPSE — For You's product call (2026-09-29): the
+        // bar minimized on scroll riding the tab strip's accessory, and with
+        // no tabs on the screen there is nothing for it to make room for.
     }
 
     // MARK: - The scroll coordinator (the profile page's arithmetic)
@@ -1453,13 +1390,10 @@ final class PlaceProfileViewController: UIViewController {
         // took its align-to-the-top branch and moved nothing. Which is exactly
         // the report: a card left cut off by the tab bar with no scroll at all.
         //
-        // The docked band is the navigation bar plus the selector that lands in
-        // it. That is what still covers the list after the header has gone.
-        let docked = view.safeAreaInsets.top + Self.selectorSlotHeight
-        return UIEdgeInsets(
-            top: max(view.safeAreaInsets.top, docked),
-            left: 0, bottom: bottom, right: 0
-        )
+        // The docked band is the navigation bar alone now — no selector lands
+        // in it any more. That is what still covers the list once the header
+        // has gone.
+        return UIEdgeInsets(top: view.safeAreaInsets.top, left: 0, bottom: bottom, right: 0)
     }
 
     /// Hands both tabs what actually covers them.
@@ -1484,10 +1418,13 @@ final class PlaceProfileViewController: UIViewController {
         ).height
     }
 
-    /// How far the header travels before the tab bar reaches the navigation
-    /// bar — the moment it docks and stops climbing.
+    /// How far the header travels before it is all under the navigation bar
+    /// — the moment it docks and stops climbing.
     private var headerTravel: CGFloat {
-        max(0, headerHeight - Self.selectorSlotHeight - view.safeAreaInsets.top)
+        // ⚠️ THE WHOLE HEADER, the tray included: it used to stop a tab
+        // strip's height short — the strip's seat under the bar — which, with
+        // the strip gone, left the Pin and the QR code floating over the posts.
+        max(0, headerHeight - view.safeAreaInsets.top)
     }
 
     /// The offset that puts a page's FIRST ROW directly under the navigation
@@ -1519,6 +1456,10 @@ final class PlaceProfileViewController: UIViewController {
         applyLandingOcclusion()
         applyHeaderOffset(hostedPages.indices.contains(activeIndex)
             ? hostedPages[activeIndex].verticalOffset : 0)
+        // The rows' height depends on the WIDTH (a card is a fraction of it).
+        updateLeadHeight()
+        // The foot chrome may have moved at rest (the tab bar collapsing).
+        chromeDidMove()
     }
 
     /// Moves the header from the active page's offset, and fades the
@@ -1538,6 +1479,9 @@ final class PlaceProfileViewController: UIViewController {
         // from under its own caption.
         bannerBox.alpha = alpha
         identityView.alpha = alpha
+        // The tray goes with them: under the bar it is no control anyone can
+        // reach, only a capsule drawn over the posts.
+        actionRow.alpha = alpha
     }
 
     /// The identity fade's ramp: opaque until the last stretch of travel,
@@ -1613,7 +1557,6 @@ final class PlaceProfileViewController: UIViewController {
         // A page with nothing to keep (it failed) shows that it is trying
         // again.
         if renderedMembers == nil {
-            page.render(.loading)
             activityPage.render(.loading)
         }
         load()
@@ -1639,7 +1582,6 @@ final class PlaceProfileViewController: UIViewController {
                 // The members were already open in the feed above, so a failed
                 // hydration here is almost certainly transient — say so
                 // plainly rather than rendering a dead end.
-                page.render(.failed(message: "Couldn't load this place's posts."))
                 activityPage.render(.failed(message: "Couldn't load this place's posts."))
             }
         }
@@ -1693,40 +1635,35 @@ final class PlaceProfileViewController: UIViewController {
         renderBanner(for: Self.bannerPost(in: Self.gallery(members)))
     }
 
-    /// The pins, ranked, then the place's later pages in the server's order
-    /// (#643), fanned out to both tabs and the counters.
+    /// The pins, then the place's later pages in the server's order (#643),
+    /// fanned out to the Popular row, the Recent list and the counters.
     ///
-    /// ⚠️ THE TWO TABS NO LONGER SHOW THE SAME POSTS, only the same place.
-    /// Discover is a GRID of covers and drops what has none; Activity is a
-    /// column of cards and keeps everything. One hydration still fans out to
-    /// both, so they can only disagree about what this line says they
-    /// disagree about.
+    /// ⚠️ A LATER PAGE IS APPENDED, NOT RE-ORDERED IN: the pins take the
+    /// `recent` order and the pages follow in the server's, so a page landing
+    /// never moves a card or a tile already on screen.
     private func renderCorpus(reset: Bool) {
         let members = renderedMembers ?? []
-        if reset {
-            page.invalidateIncrementalUpdates()
-            activityPage.invalidateIncrementalUpdates()
+        if reset { activityPage.invalidateIncrementalUpdates() }
+        // The last stretch of tiles is planned whole only once the place has
+        // no page left (`MosaicChunkPlanner`).
+        activityPage.setCorpusComplete(!hasMorePosts)
+        var recent = Self.recent(members) + extraPosts
+        // The post a close from the map put first stays first: a later page
+        // landing as the page appears must not take it back.
+        if let landedHead {
+            recent = [landedHead] + recent.filter { $0.id != landedHead.id }
         }
-        if loadMore != nil {
-            // The last stretch of tiles is planned whole only once the place
-            // has no page left.
-            page.setCorpusComplete(!hasMorePosts)
-            activityPage.setCorpusComplete(!hasMorePosts)
-        }
-        let gallery = Self.gallery(members) + extraPosts.filter { $0.kind != .text }
-        page.render(gallery.isEmpty
-            ? .empty(.init(title: "No photos or videos here yet"))
-            : .content(gallery))
-        let activity = Self.activity(members) + extraPosts
-        activityPage.render(activity.isEmpty
+        activityPage.render(recent.isEmpty
             ? .empty(.init(title: "Nothing has happened here yet"))
-            : .content(activity))
-        // ⚠️ THE WHOLE CORPUS, not the gallery's. These are the PLACE's
-        // numbers, and a check-in with no photograph is still something that
-        // happened here — dropping it from a total because a grid cannot draw
-        // it would make the place look quieter than it is. As many as are
-        // loaded: the pins, and the pages read so far.
-        let corpus = members + extraPosts
+            : .content(recent))
+        var row = ForYouViewModel.Rails()
+        row.following = Self.popular(self.corpus, limit: Self.popularRowCount)
+        rails.render(row)
+        updateLeadHeight()
+        // ⚠️ THE WHOLE CORPUS. These are the PLACE's numbers, and a check-in
+        // with no photograph is still something that happened here. As many
+        // as are loaded: the pins, and the pages read so far.
+        let corpus = self.corpus
         likesTotal = Self.aggregatedLikes(of: corpus)
         identityView.setCounters([
             .init(value: CountFormatter.compactString(for: likesTotal), caption: "Likes"),
@@ -1745,13 +1682,11 @@ final class PlaceProfileViewController: UIViewController {
         case .start: token = nil
         case .token(let next): token = next
         }
-        page.setPaging(true)
         activityPage.setPaging(true)
         moreLoad = Task { [weak self] in
             let answer = try? await loadMore(token)
             guard let self, !Task.isCancelled else { return }
             moreLoad = nil
-            page.setPaging(false)
             activityPage.setPaging(false)
             // Whatever the answer, a feed waiting on the next page hears it.
             defer { feedContinuation.answered() }
@@ -1841,28 +1776,43 @@ final class PlaceProfileViewController: UIViewController {
         ranked.first
     }
 
-    /// The Activity tab's corpus: every member, MOST POPULAR first (product
-    /// call, 2026-09-28) — `ranked`, the same rule Discover leads with, so
-    /// the two tabs agree about what the place is known for and differ only in
-    /// what a grid can draw.
-    ///
-    /// Popularity is REACTIONS (likes), then recency, then id — `ranked`'s
-    /// words, not a new formula. It is the number every other popularity
-    /// surface already reads: For You's Trending, this page's banner and first
-    /// tile, and the map marker's face ("its most-liked member"). Comments were
-    /// not folded in: nothing else ranks by them, and a second
-    /// definition here would let this list and the marker above it disagree
-    /// about which post is the place's loudest.
-    ///
-    /// It used to be chronological (newest first). A close from the map still
-    /// moves the post the viewer was on to the head of this list
-    /// (`activityCardRevealOrigin`); that pin wins over the ranking for the
-    /// landing it serves.
-    ///
-    /// Every KIND travels: a place's activity is its posts, so the cards show
-    /// words, stills and video exactly as For You's own card tab does.
-    static func activity(_ posts: [GalleryPost]) -> [GalleryPost] {
-        ranked(posts)
+    /// The post a close from the map put at the head of Recent
+    /// (`activityCardRevealOrigin`), kept there by every later render.
+    private var landedHead: GalleryPost?
+
+    /// Everything loaded: the pins, then the pages read so far.
+    private var corpus: [GalleryPost] { (renderedMembers ?? []) + extraPosts }
+
+    /// The Popular row: the place's most liked posts — `ranked`, the rule
+    /// the banner and the map's pin already lead with — every kind, the first
+    /// `limit` (all of them for the pushed list).
+    static func popular(_ posts: [GalleryPost], limit: Int?) -> [GalleryPost] {
+        let ordered = ranked(posts)
+        return limit.map { Array(ordered.prefix($0)) } ?? ordered
+    }
+
+    /// How much a day of age weighs against engagement in `recent`.
+    static let recentDayWeight = 0.5
+
+    /// The Recent list: a light For You rule rather than a strict date order
+    /// (the owner, 2026-10-16 — a For You in disguise, not called one).
+    /// Engagement (likes, comments counted twice) on a log scale, less half a
+    /// point per day older than the place's newest post: a post a few days
+    /// old with far more engagement climbs over yesterday's quiet one, a week
+    /// old needs a great deal. Ties go to the newer, then the id, so the
+    /// order is stable.
+    static func recent(_ posts: [GalleryPost]) -> [GalleryPost] {
+        guard let newest = posts.map(\.publishedAtMS).max() else { return [] }
+        func score(_ post: GalleryPost) -> Double {
+            let ageDays = Double(newest - post.publishedAtMS) / 86_400_000
+            let engagement = log1p(Double(post.reactionCount ?? 0) + 2 * Double(post.commentCount ?? 0))
+            return engagement - ageDays * recentDayWeight
+        }
+        return posts.map { ($0, score($0)) }.sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+            if lhs.0.publishedAtMS != rhs.0.publishedAtMS { return lhs.0.publishedAtMS > rhs.0.publishedAtMS }
+            return lhs.0.id.rawValue < rhs.0.id.rawValue
+        }.map(\.0)
     }
 
     /// The place's likes: every member's, summed — client-side, since
@@ -1873,14 +1823,11 @@ final class PlaceProfileViewController: UIViewController {
         posts.reduce(0) { $0 + ($1.reactionCount ?? 0) }
     }
 
-    /// What the Discover grid currently shows, in its rendered order — for
-    /// the tests that pin the popularity ranking without reaching into the
-    /// page.
-    var renderedPosts: [GalleryPost] { page.posts }
-    /// The Activity cards as rendered, same purpose.
+    /// The Recent list as rendered — for the tests that pin its order
+    /// without reaching into the page.
     var renderedActivity: [GalleryPost] { activityPage.posts }
-    /// The tab strip's titles, pinned by tests against silent drift. Read off
-    var tabTitles: [String] { tabBar.currentTitles }
+    /// The Popular row as rendered, same purpose.
+    var renderedPopular: [GalleryPost] { rails.cards }
 
     // MARK: - The navigation bar
 
@@ -1890,18 +1837,6 @@ final class PlaceProfileViewController: UIViewController {
         configureFollowButton()
         configureWalletBadge()
         applyTrailingItems()
-        // ⚠️ THE ORDERING RULE WENT WITH THE CAP. The leading-selector install
-        // measured the bar's whole budget to size its capsule, so the trailing
-        // group had to be in place first. An accessory has no budget to
-        // measure against and no group to be swept into.
-        selectorAccessory = SelectorAccessory(strip: tabBar)
-        // ⚠️ THE ACCESSORY GIVES NO OTHER SIGNAL. `UITabAccessory` has one
-        // property and no delegate; a screen that has to know the foot chrome
-        // moved — because its landing occlusion is measured against it — hears
-        // it from the host's own layout pass.
-        selectorAccessory?.hostView.onLayoutChanged = { [weak self] in
-            self?.chromeDidMove()
-        }
     }
 
     /// ⚠️ INDEX 0 IS THE RIGHTMOST. The pin keeps the corner it has always
@@ -2086,7 +2021,7 @@ final class PlaceProfileViewController: UIViewController {
         // map's Case B — see `cardCloseGeometry`. Cleared when this page is the
         // screen again (`viewDidAppear`), so a stale departure can never answer
         // for a later flight that came from somewhere else.
-        tileDeparture = (id: tapped.id, isActivity: grid === activityPage)
+        departure = .list(tapped.id)
         openPost(self, origin, stream.map(\.id))
     }
 
@@ -2155,6 +2090,25 @@ final class PlaceProfileViewController: UIViewController {
               grid.rowFrame(for: post.id, in: grid) != nil
         else { return nil }
         let anchor = post.id
+        // A TILE of the list's mosaic (or a paired card) opens through its
+        // own window — its shape and ground, nothing to align.
+        if grid.drawsAsTile(anchor) {
+            return grid.tileWindow(
+                for: post,
+                willStageDismissal: { [weak self] in
+                    guard let self else { return }
+                    view.layoutIfNeeded()
+                    activityPage.beginHeroFreeze()
+                    activityPage.revealPost(anchor, clearing: landingOcclusion)
+                    view.layoutIfNeeded()
+                },
+                dismissalDidEnd: { [weak self] committed in
+                    guard let self else { return }
+                    activityPage.endHeroFreeze()
+                    if !committed { activityPage.clearRevealConcealment() }
+                }
+            )
+        }
         return TextRevealOrigin(
             rowFrame: { [weak self] space in
                 guard let self else { return nil }
@@ -2162,7 +2116,7 @@ final class PlaceProfileViewController: UIViewController {
                     ?? activityPage.rowFrame(for: anchor, in: space)
             },
             captionEnd: nil,
-            depthView: { [weak self] in self?.pager },
+            depthView: { [weak self] in self?.activityPage },
             makeDismissStandIn: { [weak self] _ in
                 // The settled post is deliberately ignored: this window closes
                 // onto the row it opened from, whatever the viewer paged to.
@@ -2237,8 +2191,15 @@ extension PlaceProfileViewController: CardCloseLanding {
         // A flight that left THIS page has a tile to go back to. Answered
         // first, because it is the case with somewhere the viewer actually was
         // — everything below is for the flight that arrived from a marker.
-        if let tileDeparture {
-            return tileCardCloseGeometry(dismissing: feed, departure: tileDeparture)
+        switch departure {
+        case .list(let id):
+            return tileCardCloseGeometry(dismissing: feed, departing: id)
+        case .card(let origin):
+            // Home to the Popular card it left, through the window its
+            // origin described.
+            return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
+        case nil:
+            break
         }
         guard let landed = activePostID?() else { return nil }
         // Measured in the bounds the pop will run in: this page is off-stack
@@ -2247,7 +2208,7 @@ extension PlaceProfileViewController: CardCloseLanding {
         let bounds = feed.navigationController?.view.bounds ?? feed.view.bounds
         guard let origin = activityCardRevealOrigin(sizedTo: bounds, settled: landed)
         else { return nil }
-        debugLogLanding("landing \(landed.rawValue) on the FIRST Activity row")
+        debugLogLanding("landing \(landed.rawValue) at the head of Recent")
         return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
     }
 
@@ -2263,6 +2224,7 @@ extension PlaceProfileViewController: CardCloseLanding {
             grid.clearHeroConcealment()
             grid.endHeroFreeze()
         }
+        rails.clearConcealments()
     }
 
     /// The close for a flight this page itself opened: home to the very tile
@@ -2291,92 +2253,61 @@ extension PlaceProfileViewController: CardCloseLanding {
     /// `setRevealConcealed`, which now switches on the cell like the hero
     /// channel beside it always has.)
     private func tileCardCloseGeometry(
-        dismissing feed: UIViewController, departure: (id: PostID, isActivity: Bool)
+        dismissing feed: UIViewController, departing anchor: PostID
     ) -> RevealGeometry? {
-        let grid = departure.isActivity ? activityPage : page
+        let grid = activityPage
         grid.clearHeroConcealment()
-        if departure.isActivity {
-            stageActivityLanding(for: departure.id, sizedTo: nil)
-        } else {
-            stageDiscoverLanding(revealing: departure.id, sizedTo: nil)
-        }
-        guard let post = grid.post(for: departure.id),
-              grid.rowFrame(for: departure.id, in: grid) != nil
+        stageActivityLanding(for: anchor, sizedTo: nil)
+        guard let post = grid.post(for: anchor),
+              grid.rowFrame(for: anchor, in: grid) != nil
         else {
-            debugLogLanding("no realized departure for \(departure.id.rawValue)")
+            debugLogLanding("no realized departure for \(anchor.rawValue)")
             return nil
         }
-        debugLogLanding("landing on its own departure \(departure.id.rawValue)"
-            + " tab=\(departure.isActivity ? "activity" : "discover")")
-        let anchor = departure.id
-        let onList = departure.isActivity
-        let origin = TextRevealOrigin(
-            rowFrame: { [weak self] space in
-                guard let self else { return nil }
-                let grid = onList ? activityPage : page
-                return grid.rowFrame(for: anchor, in: space)
-            },
-            // No cut on either tab: a tile has no caption to cut against, and
-            // an Activity row's caption belongs to the DEPARTURE post while the
-            // page being closed may be showing a different one.
-            captionEnd: nil,
-            depthView: { [weak self] in self?.pager },
-            makeDismissStandIn: { [weak self] _ in
-                guard let self else { return nil }
-                // The settled post is deliberately ignored — this window closes
-                // onto what the viewer opened.
-                return onList
-                    ? activityPage.makeDismissStandIn(for: anchor)
-                    : page.makeTileStandIn(for: post, slotOf: anchor)
-            },
-            // ⚠️ FALSE on both tabs, for the two reasons this file already
-            // gives: a full page aligned to a small tile slides most of the
-            // screen's width, and a caption measured on one post cannot align
-            // a page showing another.
-            alignsPageToSource: false,
-            // ⚠️ THE PAGE FILLS THE WINDOW — see `RevealPageFit.covering`.
-            //
-            // Held still it stayed at full size while the window shrank around
-            // it: a keyhole panning over a photograph, filmed on this screen.
-            // It fitted INSIDE the window for a while instead, which stopped
-            // the truncation and started the other half of it — on the release
-            // spring, where the window's aspect leaves the page's, the media
-            // sat letterboxed with the card's ground above and below it.
-            // Filmed too.
-            //
-            // The invariant every report has agreed on is the simple one: the
-            // media fills the transition window, always. That is covering, and
-            // it is what the marker has used all along.
-            pageFit: .covering,
-            // A ROW takes the card's own rounding (nil lets the installer use
-            // it); a tile takes the grid's, asked rather than restated.
-            cornerRadius: onList ? nil : page.tileCornerRadius,
-            // `nil` now means "this source has no ground" — see
-            // `TextRevealOrigin.fill`. A list row HAS one; it is the card's.
-            fill: onList ? PostGridListRowCell.cardFillColor
-                : PostGridTileCell.fillColor(for: post),
-            setConcealed: { [weak self] concealed in
-                guard let self else { return }
-                (onList ? activityPage : page).setRevealConcealed(concealed, for: anchor)
-            },
-            willStageDismissal: { [weak self] _ in
-                guard let self else { return }
-                // And again, for the same reason: the pass that SETS an offset
-                // does not realize the cells at it.
-                (onList ? activityPage : page).clearHeroConcealment()
-                if onList {
-                    stageActivityLanding(for: anchor, sizedTo: nil)
-                } else {
-                    stageDiscoverLanding(revealing: anchor, sizedTo: nil)
-                }
-            },
-            dismissalDidEnd: { [weak self] committed in
-                guard let self else { return }
-                let grid = onList ? activityPage : page
-                grid.endHeroFreeze()
-                if !committed { grid.clearRevealConcealment() }
-            }
-        )
+        debugLogLanding("landing on its own departure \(anchor.rawValue)")
+        let staged: () -> Void = { [weak self] in
+            guard let self else { return }
+            // And again, for the same reason: the pass that SETS an offset
+            // does not realize the cells at it.
+            activityPage.clearHeroConcealment()
+            stageActivityLanding(for: anchor, sizedTo: nil)
+        }
+        let ended: (Bool) -> Void = { [weak self] committed in
+            guard let self else { return }
+            activityPage.endHeroFreeze()
+            if !committed { activityPage.clearRevealConcealment() }
+        }
+        // A mosaic TILE (or a paired card) closes as its own window — its
+        // shape, its ground, its corner.
+        let origin: TextRevealOrigin
+        if grid.drawsAsTile(anchor),
+           let window = grid.tileWindow(for: post, willStageDismissal: staged, dismissalDidEnd: ended) {
+            origin = window
+        } else {
+            origin = TextRevealOrigin(
+                rowFrame: { [weak self] space in self?.activityPage.rowFrame(for: anchor, in: space) },
+                // No cut: a row's caption belongs to the DEPARTURE post while
+                // the page being closed may be showing a different one.
+                captionEnd: nil,
+                depthView: { [weak self] in self?.activityPage },
+                makeDismissStandIn: { [weak self] _ in
+                    // The settled post is deliberately ignored — this window
+                    // closes onto what the viewer opened.
+                    self?.activityPage.makeDismissStandIn(for: anchor)
+                },
+                // ⚠️ FALSE: a caption measured on one post cannot align a
+                // page showing another.
+                alignsPageToSource: false,
+                // The media fills the window, always — `RevealPageFit.covering`.
+                pageFit: .covering,
+                fill: PostGridListRowCell.cardFillColor,
+                setConcealed: { [weak self] concealed in
+                    self?.activityPage.setRevealConcealed(concealed, for: anchor)
+                },
+                willStageDismissal: { _ in staged() },
+                dismissalDidEnd: ended
+            )
+        }
         return TextRevealInstaller.geometry(feed: feed, origin: origin, pipeline: imagePipeline)
     }
 }
@@ -2486,10 +2417,17 @@ extension PlaceProfileViewController {
             debugLogLanding("no post for \(anchor.rawValue)")
             return nil
         }
+        // ⚠️ A RE-RENDER, NOT A SWAP: the list is For You's (`.discover`),
+        // whose stretches are planned, and `adoptPost` refuses to move a post
+        // behind the planner's back. The page is under the feed and has never
+        // been seen, so it is re-planned with the post first — the one landing
+        // allowed to move the list.
         if let settled, settled != anchor,
-           activityPage.adoptPost(
-               settled, intoSlotOf: anchor, orInsert: activityPage.post(for: settled)
-           ) {
+           let model = activityPage.post(for: settled) ?? corpus.first(where: { $0.id == settled }) {
+            let reordered = [model] + activityPage.posts.filter { $0.id != settled }
+            landedHead = model
+            activityPage.invalidateIncrementalUpdates()
+            activityPage.render(.content(reordered))
             anchor = settled
         }
         anchorID = anchor
@@ -2502,6 +2440,19 @@ extension PlaceProfileViewController {
         }
         debugLogLanding("staged \(anchor.rawValue)"
             + " row=\(activityPage.rowFrame(for: anchor, in: activityPage).map(\.debugDescription) ?? "nil")")
+        // The head of Recent may be a mosaic TILE (or a paired card): it
+        // takes its own window, in its own shape and ground.
+        if activityPage.drawsAsTile(anchor), let post = activityPage.post(for: anchor) {
+            return activityPage.tileWindow(
+                for: post,
+                willStageDismissal: { [weak self] in self?.stageActivityLanding(for: anchor, sizedTo: nil) },
+                dismissalDidEnd: { [weak self] committed in
+                    guard let self else { return }
+                    activityPage.endHeroFreeze()
+                    if !committed { activityPage.clearRevealConcealment() }
+                }
+            )
+        }
         return TextRevealOrigin(
             rowFrame: { [weak self] space in
                 guard let self else { return nil }
@@ -2512,7 +2463,7 @@ extension PlaceProfileViewController {
                     ?? activityPage.rowFrame(for: anchor, in: space)
             },
             captionEnd: activityPage.textRowCaptionEnd(for: anchor),
-            depthView: { [weak self] in self?.pager },
+            depthView: { [weak self] in self?.activityPage },
             captionTop: activityPage.textRowCaptionTop(for: anchor),
             authorBand: activityPage.textRowAuthorBand(for: anchor),
             makeDismissStandIn: { [weak self] _ in
@@ -2579,16 +2530,6 @@ extension PlaceProfileViewController {
         if let bounds, view.bounds.size != bounds.size {
             view.frame = bounds
         }
-        // ⚠️ A PASS BEFORE THE PAGER IS TOUCHED. `setActivePage` moves a
-        // scroll view by PAGE WIDTH, and a pager that has never been laid out
-        // has none — so the offset it computes is zero and any page but the
-        // first is never brought on, whatever it was asked for. Measured (when
-        // Activity was the SECOND tab): the landing row stayed unrealized on
-        // the first ask and only appeared on the second, one run loop later,
-        // which sent every close to the fallback slide. Kept for whichever tab
-        // sits second.
-        view.layoutIfNeeded()
-        adoptTab(.activity)
         // ⚠️ LAY OUT BEFORE REVEALING, and this ordering is the whole of it.
         // `revealPost` asks the collection view for the landing row's layout
         // attributes; on a page that has only just been given a size those
@@ -2604,32 +2545,6 @@ extension PlaceProfileViewController {
         view.layoutIfNeeded()
     }
 
-    /// Puts this page on its Discover tab with `anchor`'s tile on screen.
-    /// Same shape and same two layout traps as `stageActivityLanding`.
-    private func stageDiscoverLanding(revealing anchor: PostID, sizedTo bounds: CGRect?) {
-        loadViewIfNeeded()
-        if let bounds, view.bounds.size != bounds.size { view.frame = bounds }
-        view.layoutIfNeeded()
-        adoptTab(.discover)
-        page.beginHeroFreeze()
-        page.revealPost(anchor, clearing: landingOcclusion)
-        view.layoutIfNeeded()
-    }
-
-    /// Puts the header, the strip and the pager on `tab` with no animation —
-    /// the landing's half of a tab tap, through the same alignment rule, so the
-    /// header does not move for the switch.
-    private func adoptTab(_ tab: Tab) {
-        let index = Self.index(of: tab)
-        if activeIndex != index {
-            hostedPages[index].setVerticalOffset(alignedOffset(for: index))
-            activeIndex = index
-            applyHeaderOffset(hostedPages[index].verticalOffset)
-            syncAutoplay()
-        }
-        mirrorSelection(to: index)
-        pager.setActivePage(index, animated: false)
-    }
 
     /// A landing post the grid does not hold (hydration raced the grab, or
     /// the feed paged past the members somehow) still needs a card to fly —
@@ -2730,46 +2645,36 @@ extension PlaceProfileViewController {
     /// scrolled to an arbitrary row, which looks like a scroll position rather
     /// than like a bug.
     var debugLandingAnchor: PostID { anchorID }
-    /// The title of the tab the page is on, so a test can say "Activity"
-    /// without knowing where the strip puts it.
-    var debugActiveTabTitle: String { Self.tabOrder[activeIndex].title }
-    /// The tab the strip's pill is on, which must agree with the page.
-    var debugSelectedTabTitle: String { Self.tabOrder[tabBar.selectedIndex].title }
-    /// Selects `tab` the way a settled landing does, for a test that needs the
-    /// page to start somewhere else.
-    func debugSelectTab(_ tab: Tab) {
-        loadViewIfNeeded()
-        adoptTab(tab)
-    }
-    /// Taps Discover's tile `index` through the page's selection path, the
-    /// one a finger reaches. False while it is not loaded yet.
-    func debugOpenDiscoverTile(at index: Int) -> Bool {
-        page.debugSelectItem(at: index)
-    }
-    /// `-maps-place-tab`'s argument: a tab's name, or its position.
-    static func debugTabIndex(_ argument: String) -> Int? {
-        switch argument.lowercased() {
-        case "activity": index(of: .activity)
-        case "discover": index(of: .discover)
-        default: Int(argument).flatMap { tabOrder.indices.contains($0) ? $0 : nil }
-        }
-    }
     var debugLikes: Int64 { likesTotal }
     /// How many hydrations reached the page — a refresh that brought the same
     /// members must leave it where it was.
     var debugRenderCount: Int { renders }
-    /// Releases a pull on the page for `tab`, as a finger letting go does.
-    /// Selects `tab` first: only the page in front answers a pull.
-    func debugReleasePull(on tab: Tab, by distance: CGFloat = HeroPullToRefreshView.threshold + 40) {
-        debugSelectTab(tab)
-        (hostedPages[Self.index(of: tab)] as? ForYouGridPage)?.debugReleasePull(by: distance)
+    /// Releases a pull on the page, as a finger letting go does.
+    func debugReleasePull(by distance: CGFloat = HeroPullToRefreshView.threshold + 40) {
+        loadViewIfNeeded()
+        activityPage.debugReleasePull(by: distance)
     }
+    /// Whether the page leads with the Popular row and titles its list
+    /// Recent.
+    var debugSectionTitles: (row: String, list: String) { (rails.followingTitle, rails.listTitle) }
+    /// Taps Popular card `index` through the row's own handler.
+    func debugOpenPopularCard(at index: Int) -> Bool {
+        guard rails.cards.indices.contains(index) else { return false }
+        openCard(at: index)
+        return true
+    }
+    /// Taps Recent item `index` through the page's selection path, the one
+    /// a finger reaches. False while it is not loaded yet.
+    func debugOpenTile(at index: Int) -> Bool {
+        activityPage.debugSelectItem(at: index)
+    }
+    /// Taps a section title, as a finger does.
+    func debugTapPopularTitle() { pushPopularList() }
+    func debugTapRecentTitle() { pushGallery() }
     /// Whether the pull's spinner is still turning.
     var debugIsRefreshing: Bool { pullIndicator.debugIsRefreshing }
     /// Whether any page still carries a stock `UIRefreshControl`.
-    var debugPagesCarryRefreshControl: Bool {
-        page.debugHasRefreshControl || activityPage.debugHasRefreshControl
-    }
+    var debugPagesCarryRefreshControl: Bool { activityPage.debugHasRefreshControl }
     var debugIsLoading: Bool { isLoading }
     var debugHeroName: String? { identityView.titleLabel.name }
     /// How far the identity's foot clears the banner's edge — the invariant the
@@ -2893,11 +2798,6 @@ extension PlaceProfileViewController: ZoomTransitionDestination {
     /// multi-selection in progress), and a grab ending must hand back the
     /// state it found — the feed's `ScrollLock` rule.
     func setContentScrollEnabled(_ enabled: Bool) {
-        guard let pager else { return }
-        if enabled {
-            pagerLock.thaw(pager.pagingScrollView)
-        } else {
-            pagerLock.freeze(pager.pagingScrollView)
-        }
+        // One page, no horizontal pager left to hold still.
     }
 }

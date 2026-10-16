@@ -259,16 +259,16 @@ struct PlaceProfileTests {
     }
 
     /// And the hydration path renders THROUGH that order: whatever order the
-    /// members arrive in, the Gallery grid's content is popularity-first.
-    @Test func hydrationRendersInRankedOrder() async {
+    /// members arrive in, the Popular row is popularity-first.
+    @Test func hydrationRendersThePopularRowInRankedOrder() async {
         let profile = makeProfile(posts: [
             post("post-1", reactions: 5),
             post("post-2", reactions: 70),
             post("post-3", reactions: 20),
         ])
         profile.beginLoading()
-        for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["post-2", "post-3", "post-1"])
+        for _ in 0..<50 where profile.renderedPopular.isEmpty { await Task.yield() }
+        #expect(profile.renderedPopular.map(\.id.rawValue) == ["post-2", "post-3", "post-1"])
     }
 
     // MARK: - Banner and metrics
@@ -310,25 +310,38 @@ struct PlaceProfileTests {
         #expect(likes == 140)
     }
 
-    // MARK: - Activity
+    // MARK: - Popular and Recent (the owner, 2026-10-16)
 
-    /// The Activity tab is MOST POPULAR first — reactions, then recency, then
-    /// id: the page's one ranking, not a second formula — and it carries EVERY
-    /// kind: a place's activity is its posts, so words, stills and video all
-    /// travel.
-    @Test func activityIsMostPopularFirstAndKeepsEveryKind() {
-        let ordered = PlaceProfileViewController.activity([
+    /// The Popular row is the place's most liked posts, every kind, the
+    /// first `limit` — `ranked`, the banner's and the pin's own rule.
+    @Test func popularIsTheMostLikedEveryKind() {
+        let posts = [
             post("post-1", kind: .photo, reactions: 40, publishedAtMS: 3_000),
             post("post-2", kind: .text, reactions: 900, publishedAtMS: 1_000),
             post("post-3", kind: .video, reactions: 120, publishedAtMS: 2_000),
-            // A tie on reactions: the newer one leads.
             post("post-4", kind: .photo, reactions: 40, publishedAtMS: 4_000),
+        ]
+        let row = PlaceProfileViewController.popular(posts, limit: 3)
+        #expect(row.map(\.id.rawValue) == ["post-2", "post-3", "post-4"])
+        #expect(PlaceProfileViewController.popular(posts, limit: nil) == PlaceProfileViewController.ranked(posts))
+    }
+
+    /// Recent is a light For You rule, not a strict date order: a little
+    /// older with far more engagement climbs over a quiet newer post; much
+    /// older does not; equal engagement goes to the newer.
+    @Test func recentWeighsEngagementAgainstAge() {
+        let day: Int64 = 86_400_000
+        let now: Int64 = 100 * day
+        let ordered = PlaceProfileViewController.recent([
+            post("quiet-today", reactions: 0, publishedAtMS: now),
+            post("loud-yesterday", reactions: 200, publishedAtMS: now - day),
+            post("loud-last-month", reactions: 200, publishedAtMS: now - 30 * day),
+            post("quiet-two-days", reactions: 0, publishedAtMS: now - 2 * day),
         ])
-        #expect(ordered.map(\.id.rawValue) == ["post-2", "post-3", "post-4", "post-1"])
-        #expect(Set(ordered.map(\.kind)) == [.photo, .text, .video],
-                "no kind is filtered out — the cards show what For You's own card tab does")
-        #expect(ordered == PlaceProfileViewController.ranked(ordered),
-                "the same ranking Discover leads with, so the two tabs cannot disagree")
+        #expect(ordered.map(\.id.rawValue) == ["loud-yesterday", "quiet-today", "quiet-two-days", "loud-last-month"])
+        // Not the strict date order, and not the popularity one either.
+        #expect(ordered != PlaceProfileViewController.ranked(ordered))
+        #expect(PlaceProfileViewController.recent([]) == [])
     }
 
     /// Which posts open through a WINDOW rather than the platform's slide.
@@ -351,15 +364,10 @@ struct PlaceProfileTests {
             for: post("post-4", kind: .text), onListTab: false))
     }
 
-    /// The whole fan-out through one hydration: both tabs populated from one
-    /// corpus under one ranking — popularity — and differing only in what a
-    /// grid can draw.
-    ///
-    /// ⚠️ THEY NO LONGER SHOW THE SAME POSTS. Discover is a GRID of covers and
-    /// drops what has none; Activity is a column of cards and keeps every kind.
-    /// The place's own numbers still come from the whole corpus — see
-    /// `theMetricsCountTheWholePlaceNotJustItsGallery`.
-    @Test func oneHydrationFansOutToBothTabs() async {
+    /// The whole fan-out through one hydration: the Popular row and the
+    /// Recent list from one corpus, every kind in both, under their own
+    /// orders — and the page titled as For You is, with its own words.
+    @Test func oneHydrationFeedsPopularAndRecent() async {
         let profile = makeProfile(posts: [
             post("post-1", kind: .photo, reactions: 50, publishedAtMS: 1_000),
             post("post-2", kind: .video, reactions: 90, publishedAtMS: 2_000),
@@ -367,13 +375,13 @@ struct PlaceProfileTests {
             post("post-3", kind: .text, reactions: 900, publishedAtMS: 500),
         ])
         profile.beginLoading()
-        for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["post-2", "post-1"],
-                "a text post has no cover and cannot be a tile")
-        #expect(profile.renderedActivity.map(\.id.rawValue) == ["post-3", "post-2", "post-1"],
-                "the cards keep every kind — its words are not lost, only moved")
-        #expect(profile.tabTitles == ["Activity", "Discover"],
-                "Activity on the left, Discover on the right")
+        for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
+        #expect(profile.renderedPopular.map(\.id.rawValue) == ["post-3", "post-2", "post-1"],
+                "the row keeps every kind")
+        #expect(Set(profile.renderedActivity.map(\.id.rawValue)) == ["post-1", "post-2", "post-3"])
+        #expect(profile.renderedActivity == PlaceProfileViewController.recent(profile.renderedActivity))
+        #expect(profile.debugSectionTitles.row == "Popular")
+        #expect(profile.debugSectionTitles.list == "Recent")
     }
 
     /// ⚠️ A DISMISSAL FROM THE MAP LANDS ON ACTIVITY, WITH THE POST THE VIEWER
@@ -395,15 +403,13 @@ struct PlaceProfileTests {
         profile.beginLoading()
         for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
         #expect(profile.renderedActivity.first?.id == PostID("post-2"),
-                "precondition: the ranking put post-2 first")
+                "precondition: the order put post-2 first")
 
         // The viewer paged on to the least popular post before closing.
         profile.activePostID = { PostID("post-3") }
         let feed = UIViewController()
         feed.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         _ = profile.cardCloseGeometry(dismissing: feed)
-        #expect(profile.debugActiveTabTitle == "Activity",
-                "the landing chose a tab by the post's kind again")
         #expect(profile.debugLandingAnchor == PostID("post-3"))
         #expect(profile.renderedActivity.first?.id == PostID("post-3"),
                 "the post the viewer was on is not at the head of the list")
@@ -414,41 +420,6 @@ struct PlaceProfileTests {
         #expect(profile.renderedActivity.first?.id == PostID("post-3"))
     }
 
-    /// ⚠️ EVERY POSITION IS ASKED OF THE ORDER, and the landing proves it: with
-    /// Activity moved to the LEFT, a staging that still spoke in the old `1`
-    /// would put the strip on Discover's slot while revealing an Activity row.
-    /// Driven from Discover so the landing has a tab to move off.
-    @Test func theActivityLandingFollowsTheTabOrder() async {
-        let profile = makeProfile(posts: [
-            post("post-1", kind: .photo, reactions: 50),
-            post("post-2", kind: .photo, reactions: 90),
-        ])
-        laidOut(profile)
-        profile.beginLoading()
-        for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
-        #expect(PlaceProfileViewController.tabOrder == [.activity, .discover])
-        #expect(profile.debugActiveTabTitle == "Activity", "the page rests on its first tab")
-
-        profile.debugSelectTab(.discover)
-        #expect(profile.debugActiveTabTitle == "Discover")
-
-        profile.activePostID = { PostID("post-1") }
-        let feed = UIViewController()
-        feed.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        _ = profile.cardCloseGeometry(dismissing: feed)
-        #expect(profile.debugActiveTabTitle == "Activity")
-        #expect(profile.debugSelectedTabTitle == "Activity",
-                "the strip's pill sits on another tab than the page the close landed on")
-    }
-
-    /// `-maps-place-tab` takes a NAME, which survives a reorder, or a position.
-    @Test func thePlaceTabArgumentTakesANameOrAPosition() {
-        #expect(PlaceProfileViewController.debugTabIndex("activity") == 0)
-        #expect(PlaceProfileViewController.debugTabIndex("Discover") == 1)
-        #expect(PlaceProfileViewController.debugTabIndex("1") == 1)
-        #expect(PlaceProfileViewController.debugTabIndex("2") == nil)
-        #expect(PlaceProfileViewController.debugTabIndex("shorts") == nil)
-    }
 
     /// The gallery's rule, on its own: the ranking minus what a grid cannot
     /// draw, in that order.
@@ -471,8 +442,7 @@ struct PlaceProfileTests {
             post("post-2", kind: .text, reactions: 7, publishedAtMS: 2_000),
         ])
         profile.beginLoading()
-        for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
-        #expect(profile.renderedPosts.count == 1, "precondition: the text post left the grid")
+        for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
         #expect(profile.debugLikes == 57)
         // Both posts count, the text one too.
         #expect(profile.debugIdentity.statViews.map(\.valueLabel.text) == ["57", "2"])
@@ -629,7 +599,7 @@ struct PlaceProfileTests {
         window.rootViewController = profile
         window.makeKeyAndVisible()
         profile.beginLoading()
-        for _ in 0..<50 where profile.renderedPosts.isEmpty { await Task.yield() }
+        for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
         window.layoutIfNeeded()
 
         #expect(profile.debugHeaderConstant == 0, "at rest the header sits at its origin")
@@ -747,8 +717,8 @@ struct PlaceProfileTests {
     /// release through the control started a spinner that never stopped. The
     /// identical answer is the case a render-driven stop would miss (it
     /// publishes nothing), and the failure the case an error path would.
-    @Test(arguments: RefreshOutcome.allCases, [PlaceProfileViewController.Tab.activity, .discover])
-    func aPullAlwaysEndsItsSpinner(outcome: RefreshOutcome, tab: PlaceProfileViewController.Tab) async {
+    @Test(arguments: RefreshOutcome.allCases)
+    func aPullAlwaysEndsItsSpinner(outcome: RefreshOutcome) async {
         let first = [post("p1", reactions: 10), post("p2", reactions: 5)]
         let refreshed: Result<[GalleryPost], Answers.Failure> = switch outcome {
         case .sameMembers: .success(first)
@@ -758,7 +728,7 @@ struct PlaceProfileTests {
         let answers = Answers([.success(first), refreshed])
         let profile = await hydrated(answers)
 
-        profile.debugReleasePull(on: tab)
+        profile.debugReleasePull()
         #expect(profile.debugIsRefreshing, "the release did not start the spinner")
         await settle(until: { !profile.debugIsRefreshing })
 
@@ -774,7 +744,7 @@ struct PlaceProfileTests {
         let profile = await hydrated(answers)
         #expect(!profile.debugPagesCarryRefreshControl)
 
-        profile.debugReleasePull(on: .activity, by: HeroPullToRefreshView.threshold - 20)
+        profile.debugReleasePull(by: HeroPullToRefreshView.threshold - 20)
         await settle(until: { answers.calls > 1 })
 
         #expect(answers.calls == 1, "a pull short of the threshold refreshed")
@@ -787,7 +757,7 @@ struct PlaceProfileTests {
         let profile = await hydrated(answers)
         #expect(profile.debugRenderCount == 1)
 
-        profile.debugReleasePull(on: .activity)
+        profile.debugReleasePull()
         await settle(until: { !profile.debugIsRefreshing })
 
         #expect(profile.debugRenderCount == 1, "an identical answer re-rendered the page")
@@ -803,11 +773,11 @@ struct PlaceProfileTests {
         ])
         let profile = await hydrated(answers)
 
-        profile.debugReleasePull(on: .discover)
+        profile.debugReleasePull()
         await settle(until: { !profile.debugIsRefreshing })
 
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["p2", "p1"])
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["p2", "p1"])
+        #expect(profile.renderedPopular.map(\.id.rawValue) == ["p2", "p1"])
         #expect(profile.debugLikes == 100)
     }
 
@@ -816,7 +786,7 @@ struct PlaceProfileTests {
         let answers = Answers([.success([post("p1", reactions: 10)]), .failure(Answers.Failure())])
         let profile = await hydrated(answers)
 
-        profile.debugReleasePull(on: .activity)
+        profile.debugReleasePull()
         await settle(until: { !profile.debugIsRefreshing })
 
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1"])
@@ -831,7 +801,7 @@ struct PlaceProfileTests {
         profile.beginLoading()
         await settle(until: { answers.calls == 1 })
 
-        profile.debugReleasePull(on: .activity)
+        profile.debugReleasePull()
         #expect(profile.debugIsRefreshing)
         answers.held = false
         await settle(until: { !profile.debugIsRefreshing })
@@ -850,7 +820,7 @@ struct PlaceProfileTests {
         await settle(until: { answers.calls == 1 && !profile.debugIsLoading })
         #expect(profile.renderedActivity.isEmpty)
 
-        profile.debugReleasePull(on: .activity)
+        profile.debugReleasePull()
         await settle(until: { !profile.renderedActivity.isEmpty && !profile.debugIsRefreshing })
 
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1"])
