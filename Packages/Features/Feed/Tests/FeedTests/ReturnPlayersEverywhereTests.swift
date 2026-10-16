@@ -140,6 +140,97 @@ struct ReturnPlayersEverywhereTests {
         #expect(!page.isReturnLandingReady(for: tapped), "the hold settled on the still")
     }
 
+    // MARK: - The card window (#1294)
+
+    /// ⚠️ A CLOSE THROUGH THE CARD WINDOW PLAYS THE TILE HOME (#1294). Paged
+    /// onto a text post, the close has no picture to fly and goes through the
+    /// window, whose stand-in used to be a still while the tile's clip sat
+    /// parked for this very close. The stand-in now plays it, and the landing
+    /// (the reveal showing the row again, a committed close only) hands it to
+    /// the tile.
+    @Test func theCardWindowPlaysTheTilesParkedClipAndTheTileTakesIt() async throws {
+        let pool = Self.makePool()
+        let (page, tapped, window) = try await playingPage(.grid, pool: pool)
+        defer { window.isHidden = true }
+        page.beginPlaybackHandoff(of: tapped, parkingReturn: true)
+        await Self.settle { pool.returnPlaybackCount == 1 }
+
+        let standIn = try #require(page.makeWindowStandIn(for: tapped))
+        let clip = try #require(Self.firstVideoSurface(in: standIn), "the window carried a still")
+        #expect(page.windowClips.debugHasClip(for: tapped))
+
+        page.setRevealConcealed(true, for: tapped)
+        page.setRevealConcealed(false, for: tapped)
+        #expect(!page.windowClips.debugHasClip(for: tapped), "the landing kept the clip")
+        // The clip stays over the tile until the tile draws it — no frame
+        // where the stand-in has gone and the tile has not drawn yet.
+        #expect(page.windowClips.debugIsHolding(tapped), "the landing let the clip go before the tile drew")
+        await Self.settle { !page.windowClips.debugIsHolding(tapped) }
+        #expect(!page.windowClips.debugIsHolding(tapped), "the hold never ended")
+        #expect(pool.returnPlaybackCount == 0, "the landing did not claim the parked player")
+        let tile = try #require((page.debugCell(for: tapped) as? any GridPlaybackCell)?.loadedVideoRenderView)
+        #expect(pool.hasPlayer(in: tile), "the tile did not take the window's clip")
+        _ = clip
+    }
+
+    /// A window close that springs back pauses the clip it was playing and
+    /// lands nothing: the post stays open, and the clip waits for the next
+    /// close.
+    @Test func aCardWindowThatSpringsBackPausesTheClip() async throws {
+        let pool = Self.makePool()
+        let (page, tapped, window) = try await playingPage(.grid, pool: pool)
+        defer { window.isHidden = true }
+        page.beginPlaybackHandoff(of: tapped, parkingReturn: true)
+        await Self.settle { pool.returnPlaybackCount == 1 }
+
+        _ = try #require(page.makeWindowStandIn(for: tapped))
+        page.windowCloseDidEnd(false, for: tapped)
+        #expect(!page.windowClips.debugHasClip(for: tapped))
+        #expect(pool.returnPlaybackCount == 1, "the spring-back released the parked clip")
+    }
+
+    /// A shelf's media card does the same through its own window
+    /// (`PostShelfOrigins.cardReveal`).
+    @Test func aShelfCardsWindowPlaysItsParkedClip() async throws {
+        let pool = Self.makePool()
+        let posts = Self.videos(4, prefix: "s")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let shelf = PostShelfSection(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: pool)
+        shelf.frame = CGRect(x: 0, y: 100, width: 402, height: 400)
+        window.addSubview(shelf)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        shelf.render(posts)
+        shelf.visibleBand = { [weak shelf] in shelf?.bounds }
+        shelf.layoutIfNeeded()
+        for index in posts.indices { shelf.debugCardCell(at: index)?.applyCover(Self.picture()) }
+        await Self.whenAutoplayIsAllowed()
+        shelf.setAutoplayActive(true)
+        await Self.settle {
+            shelf.updateAutoplay()
+            return shelf.debugCardCell(at: 0)?.loadedVideoRenderView.map { pool.hasPlayer(in: $0) } == true
+        }
+        let id = posts[0].id
+        shelf.beginPlaybackHandoff(of: id)
+        await Self.settle { pool.returnPlaybackCount == 1 }
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .discover)
+        let reveal = PostShelfOrigins.cardReveal(for: posts[0], cover: Self.picture(), shelf: shelf, page: page)
+        let standIn = try #require(reveal.makeDismissStandIn(nil))
+        #expect(Self.firstVideoSurface(in: standIn) != nil, "the card's window carried a still")
+        reveal.setConcealed(true)
+        reveal.setConcealed(false)
+        #expect(pool.returnPlaybackCount == 0, "the card did not take its window's clip")
+        reveal.dismissalDidEnd(true)
+    }
+
+    private static func firstVideoSurface(in view: UIView) -> VideoRenderView? {
+        if let surface = view as? VideoRenderView { return surface }
+        for sub in view.subviews {
+            if let found = firstVideoSurface(in: sub) { return found }
+        }
+        return nil
+    }
+
     /// Nothing parked (evicted, or never playing): no surface, nothing landed,
     /// and the hold waits on the tile's still alone.
     @Test func aGridPageWithNothingParkedFallsBackToTheStill() async throws {

@@ -916,7 +916,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 // read off the page, so a viewer who scrolled the comments
                 // still lands on the card they came from — see
                 // `RevealDismissCardView`.
-                makeDismissStandIn: { [weak page] _ in page?.makeDismissStandIn(for: anchorID) },
+                // Playing the tile's parked clip when it has one (#1294).
+                makeDismissStandIn: { [weak page] _ in page?.makeWindowStandIn(for: anchorID) },
                 // A tile has no caption for the page's to land on — the
                 // marker's reason (`TextRevealOrigin.alignsPageToSource`).
                 alignsPageToSource: !landsOnTile,
@@ -1007,6 +1008,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 },
                 dismissalDidEnd: { [weak self, weak page] committed in
                     page?.endHeroFreeze()
+                    page?.windowCloseDidEnd(committed, for: anchorID)
                     // ⚠️ NOTHING IS BROUGHT IN HERE any more.
                     //
                     // The card's metric line used to be faded up once the card

@@ -110,6 +110,12 @@ public final class PostGridTileStandInView: UIView, RevealStandInShaping {
         layer.cornerCurve = .continuous
     }
 
+    /// Plays `view` — the tile's own parked clip — over the stand-in's cover
+    /// and under its words, for a window that carries the tile home (#1294).
+    public func installLiveMedia(_ view: UIView) {
+        tile.installStandInLiveMedia(view)
+    }
+
     /// The window's rounding, driven by the flight.
     ///
     /// Both layers, now that the tile fills this view: the tile clips its own

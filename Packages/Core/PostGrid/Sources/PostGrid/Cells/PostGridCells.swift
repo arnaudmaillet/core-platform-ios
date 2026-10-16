@@ -2666,6 +2666,14 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// (#781), a parked frame outranking a late thumbnail — and the surface's
     /// plumbing shared with every other hero source. Readable inside the
     /// package so a test can ask what is in flight.
+    /// A stand-in's moving picture (#1294): over the cover, under the words —
+    /// a twin's, never a loan, so it bypasses `media`.
+    func installStandInLiveMedia(_ view: UIView) {
+        view.frame = contentView.bounds
+        view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        contentView.insertSubview(view, aboveSubview: imageView)
+    }
+
     private(set) lazy var media: MediaSurface = {
         let media = MediaSurface(cover: imageView, in: contentView, coverSize: .full)
         media.debugLabel = "tile"

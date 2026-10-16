@@ -713,6 +713,8 @@ final class ForYouGridPage: UIView {
     /// Two flights, two kinds of concealment, two slots. They are OR-ed at the
     /// one place that applies them, so neither can clear the other.
     private var revealConcealedPostID: PostID?
+    /// The parked clips a card window is playing, until it lands (#1294).
+    let windowClips = WindowReturnClips()
     /// The autoplay decisions this page measures for — the during-scroll
     /// throttle's state and the last cover range fetched among them. See
     /// `ForYouGridAutoplayDriver`.
@@ -2155,6 +2157,27 @@ final class ForYouGridPage: UIView {
         )
     }
 
+    /// The window's stand-in for `postID`, wearing the tile's parked clip
+    /// when there is one (#1294): a close from a text page plays the tile
+    /// home rather than carrying a still of it.
+    func makeWindowStandIn(for postID: PostID) -> UIView? {
+        dressWithReturnClip(makeDismissStandIn(for: postID), for: postID)
+    }
+
+    /// `standIn` playing `postID`'s parked clip — a tile's or a paired card's;
+    /// a row's card has no picture to play it in.
+    func dressWithReturnClip(_ standIn: UIView?, for postID: PostID) -> UIView? {
+        guard drawsAsTile(postID) || drawsAsPairedCard(postID) else { return standIn }
+        return windowClips.dress(standIn, for: postID) { returnFlightSurface(for: postID) }
+    }
+
+    /// A card window's close is over: one that sprang back pauses the clip
+    /// its stand-in was playing, for the next close (#1294).
+    func windowCloseDidEnd(_ committed: Bool, for postID: PostID) {
+        guard !committed else { return }
+        windowClips.abandon(postID) { pauseReturnPlayback(for: postID) }
+    }
+
     /// A free-standing tile drawn from `post`, sized and rounded like the cell
     /// currently occupying `slotOf`'s place — what a close lands on when the
     /// arrival shows a DIFFERENT post from the one that departed.
@@ -2252,7 +2275,10 @@ final class ForYouGridPage: UIView {
             rowFrame: { [weak self] space in self?.rowFrame(for: anchor, in: space) },
             captionEnd: nil,
             depthView: { [weak self] in self },
-            makeDismissStandIn: { [weak self] _ in self?.makeTileStandIn(for: post) },
+            // Playing the tile's parked clip when it has one (#1294).
+            makeDismissStandIn: { [weak self] _ in
+                self?.dressWithReturnClip(self?.makeTileStandIn(for: post), for: anchor)
+            },
             makePresentStandIn: { [weak self] in self?.makeTileStandIn(for: post) },
             alignsPageToSource: false,
             pageFit: .covering,
@@ -2262,7 +2288,10 @@ final class ForYouGridPage: UIView {
                 self?.setRevealConcealed(concealed, for: anchor)
             },
             willStageDismissal: { _ in willStageDismissal() },
-            dismissalDidEnd: dismissalDidEnd
+            dismissalDidEnd: { [weak self] committed in
+                self?.windowCloseDidEnd(committed, for: anchor)
+                dismissalDidEnd(committed)
+            }
         )
     }
 
@@ -2930,6 +2959,14 @@ final class ForYouGridPage: UIView {
         } else {
             Self.applyHeroConcealment(false, to: revealConcealedCell)
             revealConcealedCell = nil
+            // A committed window close is landing (the reveal shows the row
+            // again only then): the tile takes the clip its window was
+            // playing (#1294).
+            windowClips.land(
+                postID, over: (cell(for: postID) as? UICollectionViewCell)?.contentView,
+                land: { landReturnPlayback($0, for: postID) },
+                isReady: { [weak self] in self?.isReturnLandingReady(for: postID) ?? true }
+            )
         }
     }
 
