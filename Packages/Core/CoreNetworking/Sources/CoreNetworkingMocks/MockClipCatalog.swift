@@ -50,11 +50,17 @@ public struct MockClipCatalog: Sendable {
         self.clips = clips
     }
 
-    /// The clip for a dataset slot, cycling through the catalog. Nil only when
-    /// the resources are missing, and the dataset then synthesizes as before.
+    /// The clip for a dataset slot: every clip once, in order, then — past
+    /// the catalog's end — round the clips whose sound may be shared, so a
+    /// repeat is spread evenly (each clip again at most once more than any
+    /// other) and a clip whose sound is its post's alone is never a second
+    /// post's (the owner, 2026-10-16). Nil only when the resources are
+    /// missing, and the dataset then synthesizes as before.
     public func clip(forSlot slot: Int) -> Clip? {
         guard !clips.isEmpty else { return nil }
-        return clips[((slot % clips.count) + clips.count) % clips.count]
+        if slot >= 0, slot < clips.count { return clips[slot] }
+        return borrowableClip(forSlot: slot - clips.count)
+            ?? clips[((slot % clips.count) + clips.count) % clips.count]
     }
 
     /// The clips whose sound another post may borrow — every clip but the

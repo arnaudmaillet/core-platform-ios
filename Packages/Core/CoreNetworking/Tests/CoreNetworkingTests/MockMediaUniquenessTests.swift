@@ -30,6 +30,18 @@ struct MockMediaUniquenessTests {
                 "\(uses.count) clip uses over \(clips.clips.count) clips, \(Set(uses).count) distinct")
     }
 
+    /// Past the catalog's end a clip repeats as LITTLE as it can (the
+    /// owner, 2026-10-16): no clip is used more than once more than any
+    /// other that may repeat, and a unique-sound clip is used once only.
+    @Test func repeatsAreSpreadAndSpareUniqueSounds() {
+        var counts: [String: Int] = [:]
+        for id in clipUses { counts[id, default: 0] += 1 }
+        let unique = Set(clips.clips.filter { !$0.lendsItsSound }.map(\.id))
+        for id in unique { #expect(counts[id, default: 0] <= 1, "\(id) is two posts' sound") }
+        let shared = counts.filter { !unique.contains($0.key) }.map(\.value)
+        #expect((shared.max() ?? 0) - (shared.min() ?? 0) <= 1, "repeats bunch on some clips")
+    }
+
     /// A single-photo post's picture is no other single-photo post's.
     @Test func noSinglePhotoRepeats() {
         let singles = dataset.posts.filter { $0.extraMedia.isEmpty }
