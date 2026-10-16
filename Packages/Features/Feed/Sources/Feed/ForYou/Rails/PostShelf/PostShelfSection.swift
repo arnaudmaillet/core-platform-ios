@@ -52,10 +52,17 @@ final class PostShelfSection: UIView {
             + PostShelfRows.height(forWidth: width, media: media, text: text)
     }
 
-    /// The height this shelf needs at `width`.
+    /// The height this shelf needs at `width` — while it loads, its title
+    /// over one row of skeleton cards (#1296).
     func preferredHeight(forWidth width: CGFloat) -> CGFloat {
+        if showsSkeleton { return Self.loadingHeight(forWidth: width) }
         let counts = rowCounts
         return Self.height(forWidth: width, media: counts.media, text: counts.text)
+    }
+
+    /// A loading shelf's height: its title and one media row.
+    static func loadingHeight(forWidth width: CGFloat) -> CGFloat {
+        SectionTitleView.Metrics.height + LeadRowMetrics.cardSize(forWidth: width).height
     }
 
     /// Each row's count, as drawn: its posts, under its limit.
@@ -74,13 +81,33 @@ final class PostShelfSection: UIView {
         )
     }
 
+    /// How many cards a row draws by default (the owner, 2026-10-16, #1296).
+    nonisolated static let rowLimit = 10
+
     /// The most cards each row draws; nil for all of them (#1271).
-    var mediaLimit: Int? { didSet { if mediaLimit != oldValue { rowsChanged() } } }
-    var textLimit: Int? { didSet { if textLimit != oldValue { rowsChanged() } } }
-    /// A "View all" card ends the shelf's LAST row (`ShelfViewAllCell`): the
-    /// title's action, where a viewer who scrolled the row to its end
-    /// arrives. Drawn only while the title has an action.
-    var showsViewAll = false { didSet { if showsViewAll != oldValue { rowsChanged() } } }
+    var mediaLimit: Int? = PostShelfSection.rowLimit { didSet { if mediaLimit != oldValue { rowsChanged() } } }
+    var textLimit: Int? = PostShelfSection.rowLimit { didSet { if textLimit != oldValue { rowsChanged() } } }
+    /// A chevron card ends EACH row (`ShelfViewAllCell`, the owner,
+    /// 2026-10-16, #1296): the title's action — the shelf's "View all" —
+    /// where a viewer who scrolled a row to its end arrives. No words: the
+    /// chevron is the label. Drawn only while the title has an action.
+    var showsViewAll = true { didSet { if showsViewAll != oldValue { rowsChanged() } } }
+
+    /// The shelf is waiting for its posts (#1296): its title over a row of
+    /// skeleton cards (`SkeletonBoneView`, the app's loading contract #1085)
+    /// rather than nothing. Posts arriving take its place.
+    var isLoading = false {
+        didSet {
+            guard isLoading != oldValue else { return }
+            let wasShowing = oldValue && cards.isEmpty
+            setNeedsLayout()
+            if wasShowing != showsSkeleton { onHeightChange?() }
+        }
+    }
+
+    /// Whether the skeleton is what the shelf draws: loading, with nothing yet.
+    private var showsSkeleton: Bool { isLoading && cards.isEmpty }
+    private var skeletonCards: [SkeletonBoneView] = []
 
     /// The item a "View all" card stands for in a row's data source.
     static let viewAllID = PostID("post-shelf.view-all")
@@ -109,9 +136,11 @@ final class PostShelfSection: UIView {
         /// What is new in the shelf, after the title; zero for none.
         var newCount = 0
         var posts: [GalleryPost]
-        var mediaLimit: Int?
-        var textLimit: Int?
-        var showsViewAll = false
+        var mediaLimit: Int? = PostShelfSection.rowLimit
+        var textLimit: Int? = PostShelfSection.rowLimit
+        var showsViewAll = true
+        /// Still waiting for the posts: the title over skeleton cards.
+        var isLoading = false
     }
 
     /// Shows `model`. Answers whether the posts changed.
@@ -122,14 +151,16 @@ final class PostShelfSection: UIView {
         mediaLimit = model.mediaLimit
         textLimit = model.textLimit
         showsViewAll = model.showsViewAll
-        return render(model.posts)
+        let changed = render(model.posts)
+        isLoading = model.isLoading
+        return changed
     }
 
     /// The model the shelf shows now.
     var model: Model {
         Model(
             title: title, newCount: newCount, posts: cards,
-            mediaLimit: mediaLimit, textLimit: textLimit, showsViewAll: showsViewAll
+            mediaLimit: mediaLimit, textLimit: textLimit, showsViewAll: showsViewAll, isLoading: isLoading
         )
     }
 
@@ -343,7 +374,6 @@ final class PostShelfSection: UIView {
     private func applyCards() {
         let rows = shownRows
         drawnCounts = (rows.media.count, rows.text.count)
-        let viewAllInText = !rows.text.isEmpty
         func snapshot(_ posts: [GalleryPost], endsOnViewAll: Bool) -> NSDiffableDataSourceSnapshot<Int, PostID> {
             var snapshot = NSDiffableDataSourceSnapshot<Int, PostID>()
             snapshot.appendSections([0])
@@ -353,11 +383,11 @@ final class PostShelfSection: UIView {
         }
         let animated = window != nil
         mediaSource.apply(
-            snapshot(rows.media, endsOnViewAll: drawsViewAll && !viewAllInText), animatingDifferences: animated
+            snapshot(rows.media, endsOnViewAll: drawsViewAll), animatingDifferences: animated
         ) { [weak self] in
             self?.updateAutoplay()
         }
-        textSource.apply(snapshot(rows.text, endsOnViewAll: drawsViewAll && viewAllInText), animatingDifferences: animated)
+        textSource.apply(snapshot(rows.text, endsOnViewAll: drawsViewAll), animatingDifferences: animated)
     }
 
     /// A text card: the list's own card (`PostGridListRowCell`) held to the
@@ -401,11 +431,15 @@ final class PostShelfSection: UIView {
         super.layoutSubviews()
         let width = bounds.width
         let counts = rowCounts
-        header.isHidden = cards.isEmpty
+        layoutSkeleton(width: width)
+        header.isHidden = cards.isEmpty && !showsSkeleton
         // Each row hides itself with nothing in it; the heading stays over
         // whichever row there is.
         mediaView.isHidden = counts.media == 0
         textView.isHidden = counts.text == 0
+        if showsSkeleton {
+            header.frame = CGRect(x: 0, y: 0, width: width, height: SectionTitleView.Metrics.height)
+        }
         guard !cards.isEmpty else { return }
         // The title spans the row edge to edge: it stands its own inset from
         // the surface (`SectionTitleView.Metrics.surfaceInset`).
@@ -422,6 +456,29 @@ final class PostShelfSection: UIView {
             let size = textCardSize(forWidth: width)
             RowGeometry.setItemSize(size, of: textView)
             textView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
+        }
+    }
+
+    /// The skeleton row while loading: as many card-shaped bones as the width
+    /// shows (two whole and one peeking), at the media cards' size and gap —
+    /// the shelf's own shape, so the posts arriving change nothing but the
+    /// pictures.
+    private func layoutSkeleton(width: CGFloat) {
+        guard showsSkeleton, width > 0 else {
+            skeletonCards.forEach { $0.removeFromSuperview() }
+            skeletonCards = []
+            return
+        }
+        let size = LeadRowMetrics.cardSize(forWidth: width)
+        let count = Int(LeadRowMetrics.cardsPerWidth.rounded(.up))
+        while skeletonCards.count < count {
+            let bone = SkeletonBoneView(rounding: .fixed(PostShelfMediaCardCell.cornerRadius))
+            addSubview(bone)
+            skeletonCards.append(bone)
+        }
+        for (index, bone) in skeletonCards.enumerated() {
+            let x = LeadRowMetrics.sideMargin + CGFloat(index) * (size.width + LeadRowMetrics.itemGap)
+            bone.frame = CGRect(x: x, y: SectionTitleView.Metrics.height, width: size.width, height: size.height)
         }
     }
 
@@ -930,6 +987,20 @@ final class PostShelfSection: UIView {
 }
 
 // MARK: - The rows' delegate
+
+extension PostShelfSection: UICollectionViewDelegateFlowLayout {
+    /// Every card at the row's size; the chevron card ending the row narrow
+    /// (`ShelfViewAllCell.width`), as tall as the row.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout collectionViewLayout: UICollectionViewLayout,
+        sizeForItemAt indexPath: IndexPath
+    ) -> CGSize {
+        let size = (collectionViewLayout as? UICollectionViewFlowLayout)?.itemSize ?? .zero
+        guard cardID(in: collectionView, at: indexPath) == Self.viewAllID else { return size }
+        return CGSize(width: ShelfViewAllCell.width, height: size.height)
+    }
+}
 
 extension PostShelfSection: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {

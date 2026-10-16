@@ -61,7 +61,13 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     private var leadIDs: [PostID] = []
     private var leadTask: Task<Void, Never>?
     /// See `PostSetSurface.onLeadRowTitleTapped`.
-    var onLeadRowTitleTapped: (() -> Void)?
+    var onLeadRowTitleTapped: (() -> Void)? {
+        // The shelf's title, and the chevron card ending its rows, act only
+        // while the host gives them something to do (#1296).
+        didSet {
+            shelf?.onTitleTapped = onLeadRowTitleTapped.map { _ in { [weak self] in self?.onLeadRowTitleTapped?() } }
+        }
+    }
     /// The media gallery "View all" pushes — For You's own, made by the
     /// builder, which holds what its header needs.
     var makeGallery: (() -> DiscoverGalleryViewController)?
@@ -200,7 +206,6 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             #endif
             page.openHoldingStill(from: stackScreen) { openPost(self, open.origin, open.stream.map(\.id)) }
         }
-        shelf.onTitleTapped = { [weak self] in self?.onLeadRowTitleTapped?() }
         lead.onListTitleTapped = { [weak self] in self?.pushGallery() }
         lead.listTitleAccessibilityHint = "Shows every post"
         page.onViewAllTapped = { [weak self] in self?.pushGallery() }
@@ -222,6 +227,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         guard case .posts(let ids) = state, !ids.isEmpty else {
             leadIDs = []
             leadTask?.cancel()
+            shelf.isLoading = false
             shelf.render([])
             updateLeadHeight()
             return
@@ -229,12 +235,16 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         guard ids != leadIDs else { return }
         leadIDs = ids
         leadTask?.cancel()
+        // Its title over skeleton cards while the posts hydrate (#1296).
+        shelf.isLoading = true
+        updateLeadHeight()
         leadTask = Task { [weak self] in
             guard let self else { return }
             let posts = await self.hydrate(ids)
             guard !Task.isCancelled, self.leadIDs == ids else { return }
             let byID = Dictionary(posts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             self.shelf?.render(ids.compactMap { byID[$0] })
+            self.shelf?.isLoading = false
             self.updateLeadHeight()
             #if DEBUG
             self.openCardForQAIfRequested()
@@ -245,6 +255,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     #if DEBUG
     /// The lead row's posts as drawn, for tests.
     var debugLeadRowIDs: [PostID] { shelf?.cards.map(\.id) ?? [] }
+    /// The lead's shelf (#1296), for tests.
+    var debugShelf: PostShelfSection? { shelf }
     /// Whether this surface has a lead header at all (`.discover` only).
     var debugHasLeadHeader: Bool { lead != nil }
     /// Taps item `index` through the page's own selection path, the one a

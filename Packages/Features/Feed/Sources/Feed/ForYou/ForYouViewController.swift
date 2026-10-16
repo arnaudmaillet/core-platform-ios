@@ -236,6 +236,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
         shelf.staking = staking
+        // Its title over skeleton cards until the first snapshot (#1296).
+        shelf.apply(.init(title: "Following", posts: [], isLoading: true))
         shelf.titleAccessibilityHint = "Shows posts from people you follow"
         // "For you" names the list under the rows and pushes Discover's whole
         // mosaic — the screen a chunk's "View all" pushes.
@@ -411,7 +413,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             page.setCorpusComplete(!viewModel.hasMorePages)
             page.render(snapshot.discover)
             // The stories' pictures are the Friends row's lookahead (#970).
-            renderLead(snapshot.rails)
+            renderLead(snapshot.rails, loading: snapshot.following == .loading)
             lastSnapshot = snapshot
             discoverGallery?.render(snapshot.media)
             followingList?.render(snapshot.following, newPosts: snapshot.followingNew)
@@ -480,9 +482,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     }
 
     /// The Friends row and the shelf, from the view model's rows.
-    private func renderLead(_ rows: ForYouViewModel.Rails) {
+    private func renderLead(_ rows: ForYouViewModel.Rails, loading: Bool) {
         friendsRow.render(rows.friends, newCount: rows.friendsBadge)
-        if shelf.apply(.init(title: "Following", newCount: rows.followingBadge, posts: rows.following)) {
+        if shelf.apply(.init(
+            title: "Following", newCount: rows.followingBadge, posts: rows.following, isLoading: loading
+        )) {
             #if DEBUG
             // Which `-foryou-open-card` index opens which row's card.
             let cards = shelf.cards
