@@ -3,157 +3,53 @@ import CoreModels
 import DesignSystem
 import UIKit
 
-/// The author identity (avatar + name/meta) hosted as the navigation bar's
-/// *trailing* bar item custom view (right-aligned, mirroring system floating
-/// actions). The bar never hides or transforms it during a hero flight — the
-/// card flies beneath the real, static bar.
+/// The author identity (avatar + name/meta) hosted as a bar item's custom
+/// view: the post page's toolbar, the conversation's bar, the text composer.
+/// The bar never hides or transforms it during a hero flight — the card
+/// flies beneath the real, static bar.
+///
+/// THE DRAWING IS THE APP'S ONE PERSON PILL (`PersonPill`, MediaCore, #1277):
+/// the face, the two lines, the relation badge centred on the face's edge.
+/// What this view adds is the FEED's: who is shown (a post's author, a
+/// conversation's correspondent), the swaps between people (blurred in place,
+/// `BarItemContentTransition`), the scroll's scrub blur, and the bar
+/// remeasures a width change asks for.
 ///
 /// ITS WIDTH IS ITS CONTENT'S (#925): the pill hugs the face and the two
 /// lines, under a cap — the room its bar leaves it (`setWidthBudget`) — and a
 /// new person re-negotiates the item's size through the blur
-/// (`BarItemRemeasure`). It used to be FIXED in the snap feed (asked
-/// 2026-09-30, so the glass did not change size from page to page); the owner
-/// asked for the intrinsic width on 2026-10-11, once the follow glyph had
-/// left the trailing end.
+/// (`BarItemRemeasure`).
 ///
-/// THE RELATION IS A BADGE ON THE AVATAR (#925), not a glyph at the pill's
-/// trailing end: a small mark over the face's bottom-right corner, so a
-/// relation that loads or changes never touches the pill's width, and every
-/// change of it is an SF Symbols replace — never the pill's blur.
+/// THE RELATION IS A BADGE ON THE AVATAR (#925): a relation that loads or
+/// changes never touches the pill's width, and every change of it is an SF
+/// Symbols replace — never the pill's blur.
 final class SnapAuthorIdentityView: UIView {
     /// What the avatar's badge says about the viewer and the person.
-    ///
-    /// Only `.follow` is an ACTION (the "+"). The others are STATE, drawn so
-    /// following someone does not simply make the pill forget it — and so a
-    /// friend (a mutual follow) reads apart from a one-way follow, and a
-    /// request a private account has not answered reads apart from both. A
-    /// state mark takes no tap of its own: it falls through to the pill,
-    /// which opens the person's profile, where unfollowing and withdrawing a
-    /// request live.
-    enum FollowBadge: Equatable, Sendable {
-        /// Nothing drawn: the viewer themself, someone blocked, a relation not
-        /// known yet, or a host that offers no follow at all.
-        case none
-        /// "+": the viewer does not follow them. A tap follows.
-        case follow
-        /// The viewer follows them; they do not follow back.
-        case following
-        /// Both follow each other.
-        case friends
-        /// The viewer asked a private account to follow them, and the request
-        /// is pending (#968).
-        case pending
-
-        /// The symbols the owner chose (#925):
-        /// - `plus` — the action;
-        /// - `checkmark.circle.fill` — the viewer follows them;
-        /// - `person.2.fill` — two people: the app already means "Friends" by
-        ///   it (the map's Friends filter), and it is the one symbol that says
-        ///   the relation goes BOTH ways;
-        /// - `clock.circle.fill` — waiting on the other person (#968). Not
-        ///   `clock.fill`: that symbol is ONE layer, a white disc with its
-        ///   hands cut out, so on the badge it can only be a white disc with
-        ///   black hands. `clock.circle.fill` is the same clock in two layers,
-        ///   like the check: its circle draws black and its hands white — and
-        ///   the two marks a "+" can turn into share one construction.
-        var symbolName: String? {
-            switch self {
-            case .none: nil
-            case .follow: "plus"
-            case .following: "checkmark.circle.fill"
-            case .friends: "person.2.fill"
-            case .pending: "clock.circle.fill"
-            }
-        }
-
-        /// The symbol the badge draws: the relation's glyph inside its own
-        /// disc (#1199), so the disc and the mark move as one.
-        var circledSymbolName: String {
-            switch self {
-            case .none, .follow: "plus.circle.fill"
-            case .following: "checkmark.circle.fill"
-            case .friends: "person.2.circle.fill"
-            case .pending: "clock.circle.fill"
-            }
-        }
-
-        /// Each glyph's size on the badge's disc: the check and the clock are
-        /// discs of their own, as large as it (drawn black, their marks white:
-        /// `AvatarStatusBadge.glyphImage`); the "+" and the two people sit
-        /// inside it.
-        var pointSize: CGFloat {
-            switch self {
-            case .following, .pending: 13
-            case .friends: 7
-            case .none, .follow: 9
-            }
-        }
-
-        var accessibilityLabel: String? {
-            switch self {
-            case .none: nil
-            case .follow: "Follow"
-            case .following: "Following"
-            case .friends: "Friends"
-            case .pending: "Requested"
-            }
-        }
-
-        /// What the pill draws for where the viewer stands — ONE rule for a
-        /// post's author and a conversation's correspondent (#752).
-        init(_ relation: FollowRelation) {
-            self = switch relation {
-            case .notFollowing, .followedBy: .follow
-            case .following: .following
-            case .mutual: .friends
-            // Drawn, not offered: the profile screen withdraws it.
-            case .requested: .pending
-            case .viewer, .blocked: .none
-            }
-        }
-    }
+    typealias FollowBadge = PersonPill.Badge
 
     /// Matches the bar's standard control height.
     private static let height: CGFloat = 40
-    /// The fixed height of the bar's own item wrapper on iOS 26 — the box the
-    /// avatar centers in (see the breathing math at the row constraints).
-    private static let barItemWrapperHeight: CGFloat = 36
     /// Long display names truncate here rather than crowding the back item.
     private static let maxWidth: CGFloat = 220
     /// The unhydrated (cold-tap) floor: the pill opens at a plausible
     /// footprint instead of a nub, so hydration is a small glide, not a pop.
-    /// Only while the redaction bars show: a hydrated pill takes its
-    /// content's width (#925), a short name included.
     private static let minWidth: CGFloat = 150
 
     /// Caps the pill's width — the room its bar leaves it. The pill takes its
     /// intrinsic width, at most this (#925).
     ///
     /// The cap is real — the system overflows the whole item into a `•••`
-    /// menu the moment the run does not fit (measured: the author's view
-    /// chain dead-ended at its item wrapper, never reaching the window), and
-    /// losing the author entirely is worse than any amount of truncation. So
-    /// the pill pays for it in WIDTH: same two lines, same badge, same
-    /// platter — the name simply truncates earlier.
-    ///
-    /// The floor comes off below `minWidth` (`applyWidthFloor`). A cap
-    /// changed on an installed pill asks its bar for a pass.
+    /// menu the moment the run does not fit, and losing the author entirely
+    /// is worse than any amount of truncation. So the pill pays for it in
+    /// WIDTH: the name simply truncates earlier. A cap changed on an
+    /// installed pill asks its bar for a pass.
     func setWidthBudget(_ budget: CGFloat?) {
-        let target = min(Self.maxWidth, budget ?? Self.maxWidth)
-        guard target > 0, maxWidthConstraint?.constant != target else { return }
-        maxWidthConstraint?.constant = target
-        applyWidthFloor()
-        if superview != nil { BarItemRemeasure.run(self, duration: nil) }
-    }
-
-    /// The cold-tap floor holds while the redaction bars show, and never
-    /// under a cap narrower than it, which it would otherwise out-argue.
-    private func applyWidthFloor() {
-        minWidthConstraint?.isActive = isRedacted && widthCap >= Self.minWidth
+        guard pill.setWidthBudget(budget), superview != nil else { return }
+        BarItemRemeasure.run(self, duration: nil)
     }
 
     /// The widest the pill is drawn: the budget, under the pill's own cap.
-    var widthCap: CGFloat { maxWidthConstraint?.constant ?? Self.maxWidth }
+    var widthCap: CGFloat { pill.widthCap }
 
     /// Called when the identity is tapped, with the shown author.
     var onAuthorTapped: ((ProfileID) -> Void)?
@@ -161,35 +57,20 @@ final class SnapAuthorIdentityView: UIView {
     /// state mark (`FollowBadge`): those take no tap of their own.
     var onFollowTapped: ((ProfileID) -> Void)?
 
-    /// The author's INITIALS, always drawn — the app's avatar contract:
-    /// initials first, the picture hydrates in front of them. It used to be a
-    /// grey disc for anyone without a picture, the one place in the app a
-    /// person was faceless.
-    ///
-    /// The app's avatar (#943): the initials, the picture dissolved in over
-    /// them and covering them once landed, a late face for someone else
-    /// landing nowhere. Its load starts INSIDE the content swap (`draw`), so
-    /// a face that arrives late can only land on the new author's content —
-    /// never mid-blur on the old one.
-    private let avatar = AvatarView(diameter: AvatarImageView.bubbleDiameter, size: SnapAuthorIdentityView.faceBucket)
-    private let nameLabel = UILabel()
-    private let metaLabel = UILabel()
-    /// The relation's mark over the avatar's bottom-right corner (#925).
-    private let statusBadge = AvatarStatusBadge()
-    /// Redacted stand-ins shown where the labels will be until the first
-    /// author hydrates (cold tap) — the system placeholder idiom, resolved
-    /// through the same cross-fade that swaps authors.
-    private let namePlaceholder = SnapAuthorIdentityView.makeRedactionBar(width: 96, height: 12)
-    private let metaPlaceholder = SnapAuthorIdentityView.makeRedactionBar(width: 64, height: 9)
-    private let labelsStack = UIStackView()
-    /// Everything the pill draws, edge-pinned: the one view a content change
-    /// fades (`contentTransition`) — a CONTAINER, because a platter flattens a
+    /// Everything the pill draws: the one view a content change fades
+    /// (`contentTransition`) — a CONTAINER, because a platter flattens a
     /// label's own partial alpha to opaque.
-    private let contentView = UIView()
+    ///
+    /// The face is decoded at the avatar bucket (`faceBucket`).
+    private let pill = PersonPill(
+        height: SnapAuthorIdentityView.height, carriesBadge: true,
+        ceiling: SnapAuthorIdentityView.maxWidth, coldWidth: SnapAuthorIdentityView.minWidth,
+        faceSize: SnapAuthorIdentityView.faceBucket
+    )
     /// Blurs one author out and the next in, inside the one bar item
     /// (`BarItemContentTransition`), the glass taking the new width.
     private lazy var contentTransition: BarItemContentTransition = {
-        let transition = BarItemContentTransition(host: self, content: contentView)
+        let transition = BarItemContentTransition(host: self, content: pill)
         transition.remeasure = { [weak self] duration in
             guard let self else { return }
             BarItemRemeasure.run(self, duration: duration)
@@ -217,120 +98,26 @@ final class SnapAuthorIdentityView: UIView {
     /// What is actually on screen, so a repeat call can tell "same page again"
     /// from "same page, better data".
     private var renderedModel: FeedItemDisplayModel?
-    /// The width bounds, held so `setWidthBudget` can retune them.
-    private var maxWidthConstraint: NSLayoutConstraint?
-    private var minWidthConstraint: NSLayoutConstraint?
 
     init() {
         super.init(frame: .zero)
-
-        // Size and circle geometry come from the shared component: the same
-        // diameter as the Maps toolbar's profile avatar, and a radius bound
-        // to the bounds each layout pass — a perfect circle by construction.
-        // Clear: with no picture (yet) the initials behind show through.
-        avatar.picture.backgroundColor = .clear
-
-        // The bars' one identity look (`BarIdentityStyle`, the owner
-        // 2026-10-15): the name at a bar item's title size over the handle.
-        BarIdentityStyle.apply(name: nameLabel, handle: metaLabel)
-        // THE ORDER THE PILL GIVES WAY IN, when the bar is too narrow to
-        // hold everything: the display NAME truncates first, the handle
-        // line only once the name has nothing left to give. A name is the
-        // thing a reader can still recognize half-written ("Rosa Igle…");
-        // a half-written handle is not an identifier at all. Resistance,
-        // not two width rules — Auto Layout squeezes the lower one first
-        // and never has to be told about the second.
-        // (Set by `BarIdentityStyle.apply`.)
-
         // The bar is transparent over arbitrary media; shadows keep the
-        // identity legible without a background.
-        for label in [nameLabel, metaLabel] {
-            label.layer.shadowColor = UIColor.black.cgColor
-            label.layer.shadowOpacity = 0.5
-            label.layer.shadowRadius = 3
-            label.layer.shadowOffset = .zero
-        }
-
-        applyFollowBadge(animated: false)
-        statusBadge.addAction(UIAction { [weak self] _ in
+        // identity legible without a background (`setOverMedia`).
+        pill.setOverMedia(true)
+        pill.setBadge(followBadge, animated: false)
+        pill.onFollowTapped = { [weak self] in
             guard let self, self.followBadge == .follow, let id = self.authorID else { return }
             self.onFollowTapped?(id)
-        }, for: .primaryActionTriggered)
-
-        for view in [nameLabel, namePlaceholder, metaLabel, metaPlaceholder] {
-            labelsStack.addArrangedSubview(view)
         }
-        labelsStack.axis = .vertical
-        labelsStack.alignment = .leading
-        setRedacted(true)
-
-        let row = UIStackView(arrangedSubviews: [avatar, labelsStack])
-        row.axis = .horizontal
-        row.spacing = Spacing.sm
-        // The badge reaches half its width past the face (centred on its
-        // edge, #1277): the name starts clear of it, whatever the relation —
-        // a constant, so a badge arriving never moves the pill's width.
-        row.setCustomSpacing(AvatarStatusBadge.overhang + Spacing.xs, after: avatar)
-        row.alignment = .center
-        // Any width the pill has beyond (or short of) its content — the floor
-        // while it hydrates, the cap — is the labels area's: its content is
-        // leading-aligned, so a stretched frame just gains invisible trailing
-        // space, and it is the one member that gives way.
-        labelsStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        labelsStack.setContentCompressionResistancePriority(UILayoutPriority(749), for: .horizontal)
-        // The avatar's leading inset matches its vertical breathing exactly:
-        // the bar's item wrapper renders 36pt tall and the avatar is
-        // vertically centered, so the same computed gap on the left keeps it
-        // uniform on all three sides whatever the shared diameter is. The
-        // labels end the pill, so the trailing inset is the text's room
-        // against the rounded end. The bar self-sizes custom views through
-        // Auto Layout; the height pin and width cap are the only external
-        // metrics.
-        let avatarBreathing = max(0, (Self.barItemWrapperHeight - AvatarImageView.bubbleDiameter) / 2)
-        contentView.pin(to: self)
-        row.constrain(in: contentView) { parent in
-            row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: avatarBreathing)
-            row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.md)
-            row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
-        // The badge rides the face's bottom-right corner, a little outside
-        // it, over everything else the pill draws — inside the content, so a
-        // new person's blur carries it with the face. Its size is its own:
-        // nothing in the row is measured against it, so no relation ever
-        // moves the pill's width. It takes its own taps (a control descendant
-        // defeats the container's gesture) only while it is the "+";
-        // otherwise touches fall through to the pill's author tap.
-        // Trailing to trailing, not centre to trailing: only an edge-to-edge
-        // offset mirrors under a right-to-left layout.
-        //
-        // ⚠️ CENTRED ON THE DISC'S EDGE, AT ITS MID-HEIGHT (the owner,
-        // 2026-10-16, #1277): the badge's centre sits over the far end of the
-        // face's disc, level with the face — no longer hanging off its
-        // bottom corner.
-        statusBadge.constrain(in: contentView) { _ in
-            statusBadge.trailingAnchor.constraint(
-                equalTo: avatar.trailingAnchor, constant: AvatarStatusBadge.overhang
-            )
-            statusBadge.centerYAnchor.constraint(equalTo: avatar.centerYAnchor)
-        }
-        // 999, not required: the bar wraps items in its own fixed-height
-        // container (36pt on iOS 26) via autoresizing constraints; a required
-        // height fights it and UIKit breaks ours at runtime with a console
-        // warning. Yield to the wrapper — the content row centers regardless.
-        let height = heightAnchor.constraint(equalToConstant: Self.height)
-        height.priority = UILayoutPriority(999)
-        height.isActive = true
-        let maxWidth = widthAnchor.constraint(lessThanOrEqualToConstant: Self.maxWidth)
-        maxWidth.isActive = true
-        maxWidthConstraint = maxWidth
-        // The redacted cold state's floor (`applyWidthFloor`). 999 so it can
-        // never fight the bar's own constraints.
-        let minWidth = widthAnchor.constraint(greaterThanOrEqualToConstant: Self.minWidth)
-        minWidth.priority = UILayoutPriority(999)
-        minWidthConstraint = minWidth
-        applyWidthFloor()
-
+        pill.pin(to: self)
+        // The tap is the HOST's, not the pill's: a swap fades the pill to
+        // nothing at its midpoint, and a faded view takes no touch.
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(authorTapped)))
+    }
+
+    @objc private func authorTapped() {
+        guard let authorID else { return }
+        onAuthorTapped?(authorID)
     }
 
     @available(*, unavailable)
@@ -359,8 +146,8 @@ final class SnapAuthorIdentityView: UIView {
         renderedModel = model
         authorID = model.authorID
         guard !sameFace else {
-            guard metaLabel.text != meta else { return }
-            contentTransition.perform(animated: animated) { self.metaLabel.text = meta }
+            guard pill.handle != meta else { return }
+            contentTransition.perform(animated: animated) { self.pill.setHandle(meta) }
             return
         }
         var faceURL = model.avatarURL
@@ -368,16 +155,14 @@ final class SnapAuthorIdentityView: UIView {
         if ProcessInfo.processInfo.arguments.contains("-pill-no-face") { faceURL = nil }
         #endif
         contentTransition.perform(animated: animated) {
-            self.setRedacted(false)
-            self.nameLabel.text = model.authorName
-            self.metaLabel.text = meta
-            self.avatar.setMonogram(MonogramAvatarView.monogram(
+            self.pill.setName(model.authorName, handle: meta)
+            self.pill.avatar.setMonogram(MonogramAvatarView.monogram(
                 name: model.authorName, handle: Self.handle(fromMeta: model.metaText)
             ))
             // A face already in the pipeline's memory is drawn here, in the
             // same pass as the name — nothing to fade in after the pill
             // appears. Any other lands later, on THIS author's content.
-            self.avatar.setPicture(faceURL, pipeline: pipeline)
+            self.pill.avatar.setPicture(faceURL, pipeline: pipeline)
         }
     }
 
@@ -432,10 +217,10 @@ final class SnapAuthorIdentityView: UIView {
     /// fades the whole pill, as `setAuthor` does.
     func setPerson(id: ProfileID?, name: String, meta: String, avatarURL: URL?, pipeline: ImagePipeline) {
         let faceChanged = id != authorID || avatarURL != personAvatarURL
-        guard faceChanged || name != nameLabel.text || meta != metaLabel.text else { return }
+        guard faceChanged || name != pill.name || meta != pill.handle else { return }
         // Someone else than the person drawn: an id that replaces another
         // id. A first id for the name already drawn is the same person.
-        let personChanged = isRedacted || (authorID != nil && id != authorID)
+        let personChanged = pill.isRedacted || (authorID != nil && id != authorID)
         renderedModel = nil
         authorID = id
         let urlChanged = avatarURL != personAvatarURL
@@ -443,11 +228,9 @@ final class SnapAuthorIdentityView: UIView {
         defer { BarItemRemeasure.run(self, duration: 0.22) }
 
         let draw = {
-            self.setRedacted(false)
-            self.nameLabel.text = name
-            self.metaLabel.text = meta
-            if personChanged { self.avatar.setPicture(nil, pipeline: nil) }
-            self.avatar.setMonogram(MonogramAvatarView.monogram(
+            self.pill.setName(name, handle: meta)
+            if personChanged { self.pill.avatar.setPicture(nil, pipeline: nil) }
+            self.pill.avatar.setMonogram(MonogramAvatarView.monogram(
                 name: name, handle: Self.handle(fromMeta: meta)
             ))
         }
@@ -463,7 +246,7 @@ final class SnapAuthorIdentityView: UIView {
         guard personChanged || urlChanged else { return }
         // The face over the initials (nil: the person's picture is gone, the
         // initials again); the avatar fades it in on the disc alone.
-        avatar.setPicture(avatarURL, pipeline: pipeline)
+        pill.avatar.setPicture(avatarURL, pipeline: pipeline)
     }
 
     /// What the pill's second line says for a post's meta ("@handle · 3m"):
@@ -492,8 +275,7 @@ final class SnapAuthorIdentityView: UIView {
     /// late alike: `animated`, on screen, the badge's symbol changes through
     /// SF Symbols' replace transition, and nothing else moves. The pill is
     /// never blurred or faded for it (it used to be, through the author's own
-    /// swap, #889), and the bar item is never resized — the badge sits over
-    /// the face, outside anything the pill's width is made of.
+    /// swap, #889), and the bar item is never resized.
     ///
     /// A swap of the pill's WHOLE content already under way (a new author
     /// blurring in) takes the badge with it instead: set in the same turn as
@@ -508,7 +290,7 @@ final class SnapAuthorIdentityView: UIView {
         var now = true
         contentTransition.afterSwap { [weak self] in
             guard let self else { return }
-            self.applyFollowBadge(animated: now && animated && self.window != nil)
+            self.pill.setBadge(self.followBadge, animated: now && animated && self.window != nil)
         }
         now = false
     }
@@ -529,212 +311,33 @@ final class SnapAuthorIdentityView: UIView {
     private(set) var followBadge: FollowBadge = .follow
 
     /// The symbol the badge draws now — nil for none. Tests.
-    var drawnBadgeSymbol: String? { statusBadge.drawn.symbolName }
+    var drawnBadgeSymbol: String? { pill.drawnBadgeSymbol }
 
     /// How many badge changes were drawn through the symbol replace. Tests.
-    var badgeReplaceCount: Int { statusBadge.replaceCount }
+    var badgeReplaceCount: Int { pill.badgeReplaceCount }
 
     /// The badge's disc and glyph images as drawn now. Tests (#968).
-    var drawnBadgeImages: (disc: UIImage?, glyph: UIImage?) { statusBadge.drawnImages }
-
-    /// Draws `followBadge` on the avatar. Only the "+" takes touches — a
-    /// state mark lets them through to the pill's own tap (the profile),
-    /// which is the natural reading of tapping someone's "friends" mark and
-    /// keeps unfollowing where it already lives.
-    private func applyFollowBadge(animated: Bool) {
-        statusBadge.show(followBadge, animated: animated)
-    }
-
-    @objc private func authorTapped() {
-        guard let authorID else { return }
-        onAuthorTapped?(authorID)
-    }
+    var drawnBadgeImages: (disc: UIImage?, glyph: UIImage?) { (nil, pill.drawnBadgeImage) }
 
     /// The SHADOW only — the colours are semantic and resolve from the
-    /// bar's theme (`SnapChromeTheme`, applied to the navigation bar).
-    ///
-    /// The shadow is not a theme question: it exists because this pill
-    /// floats over an arbitrary photo with no background of its own, and a
-    /// text page's own ground makes it unnecessary. Keeping it here — while
-    /// the colour comes from the theme — is what stopped the pill from
-    /// having a second, private opinion about light and dark.
-    func setOverMedia(_ overMedia: Bool) {
-        for label in [nameLabel, metaLabel] {
-            label.layer.shadowOpacity = overMedia ? 0.5 : 0
-        }
-    }
-
-    /// Swaps the label area between redacted stand-ins and the real labels.
-    /// The stand-in bars need a gap of their own; label line-heights carry it
-    /// once hydrated.
-    private func setRedacted(_ redacted: Bool) {
-        isRedacted = redacted
-        applyWidthFloor()
-        applyLabelVisibility()
-    }
-
-    private var isRedacted = true
-
-
-    /// The label area's visibility: the real labels once hydrated, the
-    /// redaction bars before.
-    private func applyLabelVisibility() {
-        nameLabel.isHidden = isRedacted
-        namePlaceholder.isHidden = !isRedacted
-        metaLabel.isHidden = isRedacted
-        metaPlaceholder.isHidden = !isRedacted
-        labelsStack.spacing = isRedacted ? 5 : 0
-    }
-
-    private static func makeRedactionBar(width: CGFloat, height: CGFloat) -> UIView {
-        let bar = UIView()
-        bar.backgroundColor = UIColor.white.withAlphaComponent(0.3)
-        bar.layer.cornerRadius = height / 2
-        bar.layer.cornerCurve = .continuous
-        // Below the width cap: a narrow pill shortens the bar rather than
-        // being widened by it. Still above a fitting pass's own level, so a
-        // hugging pill keeps the bar's length.
-        let length = bar.widthAnchor.constraint(equalToConstant: width)
-        length.priority = .defaultHigh
-        length.isActive = true
-        bar.heightAnchor.constraint(equalToConstant: height).isActive = true
-        return bar
-    }
+    /// bar's theme (`SnapChromeTheme`, applied to the navigation bar). A text
+    /// page's own ground makes it unnecessary.
+    func setOverMedia(_ overMedia: Bool) { pill.setOverMedia(overMedia) }
 }
 
-/// The person pill's relation badge (#925): a small disc over the avatar's
-/// bottom-right corner wearing the relation's symbol.
-///
-/// TWO SYMBOL VIEWS, BOTH SF SYMBOLS: the disc (`circle.fill`) and the glyph
-/// on it. A change of relation REPLACES the glyph (SF Symbols' replace
-/// transition); to or from no badge, the disc is replaced too, from or into a
-/// clear one — so appearing and disappearing are that same replace, and the
-/// badge is never faded, scaled or hidden by hand.
-///
-/// ⚠️ FIXED INK, and a disc that is a SYMBOL, not a background. On glass a
-/// semantic ink pair draws vibrant and an inverted badge vanishes in dark mode
-/// (memory `sheet-glass-vibrancy-ink`), and the glass repaints a subview's
-/// `backgroundColor` with its own corner (`glass-paints-background-color`).
-/// So both inks are fixed (`.alwaysOriginal`, or a palette) and the disc is
-/// drawn by an image.
-///
-/// BLACK DISC, WHITE GLYPH, in light and dark mode alike (owner, #968): the
-/// badge is one mark whatever the appearance or the photo behind the bar.
-private final class AvatarStatusBadge: UIButton {
-    /// The disc's side — larger than the 16pt it was (the owner, 2026-10-16,
-    /// #1277).
-    static let diameter: CGFloat = 20
-    /// How far the badge reaches past the face's edge: half its side, its
-    /// centre being ON that edge.
-    static var overhang: CGFloat { diameter / 2 }
-    /// The touch area around the disc: a 20pt disc is still too small a target.
-    private static let touchOutset: CGFloat = 8
-
-    /// The badge — its disc and its mark are ONE circled symbol drawn with a
-    /// palette (#1199): two image views, a disc and a mark each with its own
-    /// replace, arrived and left out of step (the owner, on a device).
-    private let glyph = UIImageView()
-    /// The badge on screen.
-    private(set) var drawn: SnapAuthorIdentityView.FollowBadge = .none
-    /// Changes drawn through the replace transition.
-    private(set) var replaceCount = 0
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        for view in [glyph] {
-            view.isUserInteractionEnabled = false
-            view.contentMode = .center
-            view.constrain(in: self) { parent in
-                view.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-                view.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-            }
-        }
-        // Its size is its own and never the pill's to negotiate.
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: Self.diameter),
-            heightAnchor.constraint(equalToConstant: Self.diameter),
-        ])
-        glyph.image = Self.glyphImage(.none)
-        apply(interactionFor: .none)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        bounds.insetBy(dx: -Self.touchOutset, dy: -Self.touchOutset).contains(point)
-    }
-
-    /// Draws `badge` — through the symbol replace when `animated`, at once
-    /// otherwise.
-    func show(_ badge: SnapAuthorIdentityView.FollowBadge, animated: Bool) {
-        guard badge != drawn else { return }
-        drawn = badge
-        apply(interactionFor: badge)
-        let glyphImage = Self.glyphImage(badge)
-        guard animated else {
-            glyph.image = glyphImage
-            return
-        }
-        replaceCount += 1
-        // ONE replace for the disc and the mark (#1199): they are one symbol.
-        glyph.setSymbolImage(glyphImage, contentTransition: .replace)
-    }
-
-    private func apply(interactionFor badge: SnapAuthorIdentityView.FollowBadge) {
-        isUserInteractionEnabled = badge == .follow
-        isAccessibilityElement = badge != .none
-        accessibilityLabel = badge.accessibilityLabel
-        accessibilityTraits = badge == .follow ? .button : .staticText
-    }
-
-    /// The disc's ink and the glyph's: fixed, never resolved per appearance
-    /// (#968).
-    static let restingDiscInk = UIColor.black
-    static let glyphInk = UIColor.white
-
-    static var accentInk: UIColor { AvatarBadgeInks.accent }
-    static var quietDiscInk: UIColor { AvatarBadgeInks.quietDisc }
-
-    /// The disc's ink for a badge (#1197, the owner 2026-10-15): the "+"
-    /// black; a FOLLOWED check and a pending request grey, their mark pink;
-    /// FRIENDS pink, their mark white; clear for none.
-    static func discInk(for badge: SnapAuthorIdentityView.FollowBadge) -> UIColor {
-        switch badge {
-        case .none: .clear
-        case .follow: restingDiscInk
-        case .following, .pending: quietDiscInk
-        case .friends: accentInk
+extension PersonPill.Badge {
+    /// What the pill draws for where the viewer stands — ONE rule for a
+    /// post's author and a conversation's correspondent (#752).
+    init(_ relation: FollowRelation) {
+        self = switch relation {
+        case .notFollowing, .followedBy: .follow
+        case .following: .following
+        case .mutual: .friends
+        // Drawn, not offered: the profile screen withdraws it.
+        case .requested: .pending
+        case .viewer, .blocked: .none
         }
     }
-
-    /// The glyph's ink for a badge: pink on the grey discs, white elsewhere.
-    static func glyphInk(for badge: SnapAuthorIdentityView.FollowBadge) -> UIColor {
-        switch badge {
-        case .none: .clear
-        case .following, .pending: accentInk
-        case .follow, .friends: glyphInk
-        }
-    }
-
-    /// The badge as one image: the relation's circled symbol — its disc and
-    /// its mark one symbol — in a palette (mark, disc); for none, the same
-    /// symbol in clear ink, so the badge's arrival and departure are replaces
-    /// too.
-    ///
-    /// ⚠️ A palette is fixed ink already (no tint reaches it), and must NOT
-    /// be re-marked `.alwaysOriginal`: that drops the palette and draws the
-    /// whole symbol in the view's tint (measured: the system blue).
-    private static func glyphImage(_ badge: SnapAuthorIdentityView.FollowBadge) -> UIImage {
-        let configuration = UIImage.SymbolConfiguration(pointSize: diameter - 3, weight: .semibold)
-            .applying(UIImage.SymbolConfiguration(paletteColors: [glyphInk(for: badge), discInk(for: badge)]))
-        return UIImage(systemName: badge.circledSymbolName)?
-            .applyingSymbolConfiguration(configuration)
-            ?? UIImage()
-    }
-
-    /// The disc's and the glyph's images as drawn now. Tests.
-    var drawnImages: (disc: UIImage?, glyph: UIImage?) { (nil, glyph.image) }
 }
 
 /// The snap feed's navigation-bar controls, built as *custom views* so their
@@ -796,20 +399,18 @@ enum SnapNavControls {
 #if DEBUG
 extension SnapAuthorIdentityView {
     /// The picture on the disc now; nil while the initials show.
-    var debugFaceImage: UIImage? { avatar.shownPicture }
+    var debugFaceImage: UIImage? { pill.avatar.shownPicture }
     /// The lines the pill shows, top to bottom, and the name's font.
-    var debugShownLines: [String] {
-        [nameLabel, metaLabel].filter { !$0.isHidden }.compactMap(\.text)
-    }
-    var debugNameFont: UIFont { nameLabel.font }
-    var debugHandleFont: UIFont { metaLabel.font }
+    var debugShownLines: [String] { pill.debugShownLines }
+    var debugNameFont: UIFont { pill.debugNameFont }
+    var debugHandleFont: UIFont { pill.debugHandleFont }
 
     /// `-pill-probe`: what the pill's disc actually is at this instant — its
     /// frame in the window, its corner and mask, every transformed ancestor up
     /// to the bar, and any OTHER view in the window drawing the same initials.
     func debugProbe(_ tag: String) {
         guard let window else { print("[pill-probe] \(tag) pill=\(ObjectIdentifier(self)) NO WINDOW"); return }
-        let disc = avatar.monogram
+        let disc = pill.avatar.monogram
         let frame = disc.convert(disc.bounds, to: window)
         let presentation = disc.layer.presentation()
         let maskPath = (disc.layer.mask as? CAShapeLayer)?.path?.boundingBox
@@ -872,12 +473,3 @@ extension SnapAuthorIdentityView {
     }
 }
 #endif
-
-/// The author pill badge's fixed inks (#968, #1197): one value in either
-/// appearance.
-enum AvatarBadgeInks {
-    /// The accent pink.
-    static let accent = Palette.tint.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-    /// A quiet grey disc.
-    static let quietDisc = UIColor.systemGray5.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
-}

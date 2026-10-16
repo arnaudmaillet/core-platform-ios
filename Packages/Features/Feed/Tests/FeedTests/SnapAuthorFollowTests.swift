@@ -340,22 +340,47 @@ struct SnapAuthorFollowTests {
 
     /// A state mark is not an action: it takes no touch, so a tap on it is a
     /// tap on the pill (the profile), and it never follows.
+    ///
+    /// VOICEOVER READS ONE ELEMENT (#1277): the pill says "Name, @handle,
+    /// Following"; the "+" is the pill's "Follow" custom action, not a
+    /// separate tiny target.
     @Test(arguments: [SnapAuthorIdentityView.FollowBadge.following, .friends, .pending])
     func aStateMarkTakesNoTap(_ badge: SnapAuthorIdentityView.FollowBadge) throws {
-        let pill = SnapAuthorIdentityView()
-        pill.setFollowBadge(badge)
-        let glyph = try #require(Self.badgeButton(in: pill))
+        let host = SnapAuthorIdentityView()
+        host.setPerson(id: ProfileID("prof-2"), name: "Ava Moreau", meta: "@ava", avatarURL: nil,
+                       pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()))
+        host.setFollowBadge(badge)
+        let glyph = try #require(Self.badgeButton(in: host))
+        let pill = try #require(Self.personPill(in: host))
 
-        #expect(glyph.isAccessibilityElement)
+        #expect(glyph.isAccessibilityElement == false, "the badge is read with the pill")
         #expect(glyph.isUserInteractionEnabled == false)
-        #expect(glyph.accessibilityLabel == badge.accessibilityLabel)
+        #expect(pill.isAccessibilityElement)
+        #expect(pill.accessibilityLabel == "Ava Moreau, @ava, \(badge.accessibilityLabel ?? "")")
+        #expect(pill.accessibilityCustomActions == nil, "a state mark offers no action")
 
-        pill.setFollowBadge(.follow)
+        var followed: [ProfileID] = []
+        host.onFollowTapped = { followed.append($0) }
+        host.setFollowBadge(.follow)
         #expect(glyph.isUserInteractionEnabled, "the \"+\" is the one badge that acts")
-        pill.setFollowBadge(.none)
-        #expect(pill.drawnBadgeSymbol == nil)
+        #expect(pill.accessibilityLabel == "Ava Moreau, @ava")
+        let action = try #require(pill.accessibilityCustomActions?.first)
+        #expect(action.name == "Follow")
+        _ = action.actionHandler?(action)
+        #expect(followed == [ProfileID("prof-2")], "the custom action did not follow")
+
+        host.setFollowBadge(.none)
+        #expect(host.drawnBadgeSymbol == nil)
         #expect(glyph.isUserInteractionEnabled == false)
-        #expect(glyph.isAccessibilityElement == false)
+        #expect(pill.accessibilityCustomActions == nil)
+    }
+
+    private static func personPill(in view: UIView) -> PersonPill? {
+        for sub in view.subviews {
+            if let pill = sub as? PersonPill { return pill }
+            if let found = personPill(in: sub) { return found }
+        }
+        return nil
     }
 
     private static func badgeButton(in view: UIView) -> UIButton? {
