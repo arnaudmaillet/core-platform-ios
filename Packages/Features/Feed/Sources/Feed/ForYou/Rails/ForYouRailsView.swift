@@ -54,13 +54,10 @@ import CoreNavigation
 /// list is counted in its sections, and a header that scrolls with them
 /// changes none of that arithmetic.
 ///
-/// **Following is two independent rows** under one heading — media cards,
-/// then text cards twice as wide, each its own scroller
-/// (`ForYouFollowingRows`): scrolling one never moves the other. A media card
-/// is a Following card (`ForYouFollowingCardCell`); a text card is the list's
-/// own card (`PostGridListRowCell`), its like a real stake. Every card is
-/// found by its post (`cardRow(for:)`), so the flights, the previews and the
-/// bring-into-view read either row the same way; only the media row plays.
+/// **Following is a shelf of posts** (`PostShelfSection`, #1271): its title,
+/// a row of media cards and a row of text cards. The rails host it under the
+/// Friends row and forward its card API, so hosts and flights read the cards
+/// here as before.
 ///
 /// A row with nothing in it is not drawn at all — no heading over nothing,
 /// the inbox's rule for its sections — and with both empty the header is zero
@@ -146,8 +143,7 @@ final class ForYouRailsView: UIView {
         }
         if following > 0 {
             if friends > 0 { height += Metrics.rowGap }
-            height += SectionTitleView.Metrics.height
-                + ForYouFollowingRows.height(forWidth: width, media: following - textCards, text: textCards)
+            height += PostShelfSection.height(forWidth: width, media: following - textCards, text: textCards)
         }
         // "For you" under whatever rows there are; nothing at all without them.
         guard height > 0 else { return 0 }
@@ -160,25 +156,23 @@ final class ForYouRailsView: UIView {
     /// to.
     func preferredHeight(forWidth width: CGFloat) -> CGFloat {
         Self.height(
-            forWidth: width, friends: stories.count, following: cards.count, textCards: rowCounts.text
+            forWidth: width, friends: stories.count, following: cards.count, textCards: shelf.rowCounts.text
         )
-    }
-
-    /// Each Following row's count.
-    private var rowCounts: (media: Int, text: Int) {
-        let text = cards.filter { ForYouFollowingRows.Row($0) == .text }.count
-        return (cards.count - text, text)
     }
 
     /// A story's avatar was tapped.
     var onStoryTapped: ((ForYouViewModel.FriendStory) -> Void)?
     /// A card was tapped: its index into `cards`.
-    var onCardTapped: ((Int) -> Void)?
+    var onCardTapped: ((Int) -> Void)? {
+        get { shelf.onCardTapped }
+        set { shelf.onCardTapped = newValue }
+    }
     var onFriendsHeaderTapped: (() -> Void)? {
         didSet { friendsHeader.onTap = onFriendsHeaderTapped }
     }
     var onFollowingHeaderTapped: (() -> Void)? {
-        didSet { followingHeader.onTap = onFollowingHeaderTapped }
+        get { shelf.onTitleTapped }
+        set { shelf.onTitleTapped = newValue }
     }
     /// "For you" was tapped: the host pushes Discover's whole mosaic.
     var onListHeaderTapped: (() -> Void)? {
@@ -189,59 +183,48 @@ final class ForYouRailsView: UIView {
     /// none of them.
     var storyMenuElements: ((ForYouViewModel.FriendStory) -> [UIMenuElement])?
     /// The same for a card (View Profile, Unfollow, Report).
-    var cardMenuElements: ((GalleryPost) -> [UIMenuElement])?
-    /// A TEXT card's author band was tapped — the host opens their profile,
-    /// as the list's cards do.
-    var onCardAuthorTapped: ((GalleryPost) -> Void)?
-    /// What a TEXT card's "..." offers (Unfollow, Report) — the list's rows,
-    /// from the same host; `anchor` is what a sheet raised from it points at.
-    /// Nil, or nothing to offer, and the card draws no "...".
-    var cardAuthorMenuActions: ((_ post: GalleryPost, _ anchor: UIView) -> [PostCardMenuAction])?
-    /// A TEXT card's repost was pressed. Nothing publishes a repost yet, so
-    /// nothing sets this — and, as on the list's cards
-    /// (`ForYouGridPage.onRepostRequested`), the control is not drawn until
-    /// something does (#801).
-    var onCardRepostRequested: ((GalleryPost) -> Void)?
-
-    /// What a text card's repost control does: nil, which hides it, while
-    /// nothing handles a repost (#801).
-    func cardRepostHandler(for post: GalleryPost) -> (() -> Void)? {
-        guard onCardRepostRequested != nil else { return nil }
-        return { [weak self] in self?.onCardRepostRequested?(post) }
+    var cardMenuElements: ((GalleryPost) -> [UIMenuElement])? {
+        get { shelf.cardMenuElements }
+        set { shelf.cardMenuElements = newValue }
     }
-    /// The saved pile a text card's save control reads and writes — the one
-    /// the list's cards, the post page and the profile's Saved tab share.
-    private let bookmarks = PostBookmarkStore.shared
+    /// A TEXT card's author band was tapped.
+    var onCardAuthorTapped: ((GalleryPost) -> Void)? {
+        get { shelf.onCardAuthorTapped }
+        set { shelf.onCardAuthorTapped = newValue }
+    }
+    /// What a TEXT card's "..." offers.
+    var cardAuthorMenuActions: ((_ post: GalleryPost, _ anchor: UIView) -> [PostCardMenuAction])? {
+        get { shelf.cardAuthorMenuActions }
+        set { shelf.cardAuthorMenuActions = newValue }
+    }
+    /// A TEXT card's repost was pressed (#801).
+    var onCardRepostRequested: ((GalleryPost) -> Void)? {
+        get { shelf.onCardRepostRequested }
+        set { shelf.onCardRepostRequested = newValue }
+    }
+
+    func cardRepostHandler(for post: GalleryPost) -> (() -> Void)? { shelf.cardRepostHandler(for: post) }
     /// The rows changed which of them are drawn — the host re-sizes its header.
     var onHeightChange: (() -> Void)?
     /// Where a card's like reads the viewer's stake — For You's, shared with
-    /// the list. A media card's heart is a readout; a TEXT card's like is the
-    /// list's own chip, and stakes (`PostCardStaking.bind`).
-    var staking: PostCardStaking?
-
-    /// `post` with its live like count (#896) — for a Following card's
-    /// flight, its stand-ins and its resting overlay, which must draw the
-    /// number the bound card draws, a like made in the feed included.
-    func livePost(_ post: GalleryPost) -> GalleryPost {
-        staking?.liveCopy(of: post) ?? post
+    /// the list.
+    var staking: PostCardStaking? {
+        get { shelf.staking }
+        set { shelf.staking = newValue }
     }
 
-    /// What the viewer has staked on `post` — what a COPY of its card (a
-    /// flight's furniture, a close's stand-in) draws its heart from.
-    func cardStake(for post: GalleryPost) -> Int {
-        staking?.viewerStake(on: post.id) ?? 0
-    }
+    func livePost(_ post: GalleryPost) -> GalleryPost { shelf.livePost(post) }
+    func cardStake(for post: GalleryPost) -> Int { shelf.cardStake(for: post) }
     /// The part of the screen the viewer can see, in THIS view's space, for
     /// autoplay: a card under the navigation bar is not one they are looking
     /// at. Nil (no host yet) plays nothing.
     var visibleBand: (() -> CGRect?)?
-    /// The row's claim on the pool changed on its OWN account — it scrolled, a
-    /// cover landed — so the list under it must re-divide the budget now, not
-    /// at its next scroll tick. See `claimedPlayers`.
+    /// The shelf's claim on the pool changed on its OWN account — so the list
+    /// under it must re-divide the budget now. See `claimedPlayers`.
     var onPlayerClaimChange: (() -> Void)?
 
     private(set) var stories: [ForYouViewModel.FriendStory] = []
-    private(set) var cards: [GalleryPost] = []
+    var cards: [GalleryPost] { shelf.cards }
     /// The friends as the view model last ordered them — what the row shows
     /// once it is free to re-sort (`releaseStoryOrder`).
     private var latestStories: [ForYouViewModel.FriendStory] = []
@@ -250,70 +233,44 @@ final class ForYouRailsView: UIView {
     private var heldStoryOrder: [ProfileID]?
 
     private let friendsHeader = SectionTitleView(content: .init(title: "Friends", isLink: true))
-    private let followingHeader = SectionTitleView(content: .init(title: "Following", isLink: true))
+    /// The posts of the people the viewer follows — a shelf (#1271).
+    let shelf: PostShelfSection
     /// The list's own title, under the rows — and, like the rows', a way in:
     /// Discover's whole mosaic.
     private let listHeader = SectionTitleView(content: .init(title: "For you", isLink: true))
 
     /// What the card row and the list are called. For You's, by default; a
     /// hashtag's page names them "Recent" and "Top" (#629).
-    var followingTitle = "Following" {
-        didSet { followingHeader.content = .init(title: followingTitle, newCount: followingBadge, isLink: true) }
+    var followingTitle: String {
+        get { shelf.title }
+        set { shelf.title = newValue }
     }
     var listTitle = "For you" {
         didSet { listHeader.content = .init(title: listTitle, isLink: true) }
     }
-    private var followingBadge = 0
     private let storiesView: UICollectionView
-    /// Following's media row — the cards that play.
-    private let mediaView: UICollectionView
-    /// Following's text row, scrolling apart from the media row above it.
-    private let textView: UICollectionView
-    /// Also what a card's COPIES read the author's face from — the flight's
-    /// resting overlay, a window's stand-in — so they draw the picture the
-    /// card in the row already has (`ForYouCardCaptionOverlay`).
+    /// Also what a card's COPIES read the author's face from.
     let imagePipeline: ImagePipeline
-    /// The Following row's own playback: EVERY card on screen plays, muted —
-    /// "all the visible video cards", the product call of 2026-09-29 (it used
-    /// to be the lead card alone). A card must be half on screen to count
-    /// (`GridPlaybackVisibility`), and at 2.3 cards per width no more than
-    /// three can be — which is the row's budget.
-    ///
-    /// The pool is shared with the list below (six decoders,
-    /// `VideoPlaybackController.capacity`): the list plays what the row's
-    /// claim leaves it (`ForYouGridPage.playerReserve`, fed `claimedPlayers`).
-    private let playback: GridVideoPlaybackCoordinator?
-    static let concurrentPlayers = 3
-    /// How many players the row holds as of its last reconcile — what the
-    /// list under it subtracts from the pool's budget.
-    private(set) var claimedPlayers = 0
+    static var concurrentPlayers: Int { PostShelfSection.concurrentPlayers }
+    /// How many players the rows hold as of their last reconcile — what the
+    /// list under them subtracts from the pool's budget.
+    var claimedPlayers: Int { shelf.claimedPlayers }
 
-    /// The rows' lookaheads (#970): each row its own list and its own owner,
-    /// along its horizontal axis — a screen width ahead decoded, two and a
-    /// half on disk. A row outside the list's display window plans nothing
-    /// (`refreshLookaheadReach`).
+    /// The Friends row's lookahead (#970), along its horizontal axis — a
+    /// screen width ahead decoded, two and a half on disk. Outside the list's
+    /// display window it plans nothing (`refreshLookaheadReach`).
     ///
-    /// The Friends row's faces carry their story's first pictures too: a tap
-    /// flies the face into its first post, and nothing else on this screen
-    /// shows the friends' posts, so a flight asking the cache at the tap
-    /// found it cold every time (`ForYouRowOrigins.storyPictures` rescues a
-    /// late one mid-air; a picture there from the first frame is the
-    /// transition as designed).
+    /// The faces carry their story's first pictures too: a tap flies the face
+    /// into its first post, and nothing else on this screen shows the
+    /// friends' posts, so a flight asking the cache at the tap found it cold
+    /// every time (`ForYouRowOrigins.storyPictures` rescues a late one
+    /// mid-air; a picture there from the first frame is the transition as
+    /// designed).
     private lazy var storyLookahead: ScrollLookahead = {
         let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "foryou.friends", kind: .rail) { [weak self] path in
             self?.storyImages(at: path) ?? []
         }
         lookahead.attach(to: storiesView)
-        return lookahead
-    }()
-
-    private lazy var cardLookahead: ScrollLookahead = {
-        let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "foryou.following", kind: .rail) { [weak self] path in
-            guard let self, let id = mediaSource.itemIdentifier(for: path),
-                  let post = cards.first(where: { $0.id == id }) else { return [] }
-            return post.lookaheadImages
-        }
-        lookahead.attach(to: mediaView)
         return lookahead
     }()
 
@@ -330,69 +287,30 @@ final class ForYouRailsView: UIView {
         return face + pictures
     }
 
-    private var rowLookaheads: [ScrollLookahead] { [storyLookahead, cardLookahead] }
-
-    /// Whether the rows sit in the list's display window (a screen ahead
-    /// of the viewport, half a screen behind): outside it, a row plans
+    /// Whether the Friends row sits in the list's display window (a screen
+    /// ahead of the viewport, half a screen behind): outside it, it plans
     /// nothing (#970).
     private func refreshLookaheadReach() {
         guard let window else { return }
         let reach = LookaheadWindow.display.rect(around: window.bounds, axis: .vertical, forward: true)
-        let inside = !isHidden && convert(bounds, to: window).intersects(reach)
-        for lookahead in rowLookaheads { lookahead.setInParentWindow(inside) }
+        storyLookahead.setInParentWindow(!isHidden && convert(bounds, to: window).intersects(reach))
     }
 
     private var storySource: UICollectionViewDiffableDataSource<Int, ProfileID>!
-    private var mediaSource: UICollectionViewDiffableDataSource<Int, PostID>!
-    private var textSource: UICollectionViewDiffableDataSource<Int, PostID>!
 
     /// The story whose disc a flight is carrying, hidden until it lands.
     private var concealedStory: ProfileID?
-    /// The card a flight is carrying.
-    private var concealedCard: PostID?
-
-    /// The row under the finger and which way it last moved — what a release
-    /// with no speed left snaps by (`ForYouRowSnap`). Nil between drags.
-    private var drag: (row: UIScrollView, tracker: ForYouRowDragTracker)?
+    private let snapper = RowSnapper()
 
     init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?) {
         self.imagePipeline = imagePipeline
-        playback = videoPlayback.map {
-            GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers)
-        }
-        // Placeholder sizes: every item is sized from the width, which
-        // `layoutSubviews` knows and this does not.
-        storiesView = UICollectionView(frame: .zero, collectionViewLayout: Self.rowLayout(
-            itemSize: ForYouStoryCell.Metrics.size(discSide: 70)
-        ))
-        mediaView = UICollectionView(frame: .zero, collectionViewLayout: Self.rowLayout(
-            itemSize: CGSize(width: 150, height: 200)
-        ))
-        textView = UICollectionView(frame: .zero, collectionViewLayout: Self.rowLayout(
-            itemSize: CGSize(width: 316, height: 150)
-        ))
+        shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+        storiesView = RowGeometry.makeRow(itemSize: ForYouStoryCell.Metrics.size(discSide: 70))
         super.init(frame: .zero)
-        for row in [storiesView, mediaView, textView] {
-            row.backgroundColor = .clear
-            row.showsHorizontalScrollIndicator = false
-            row.alwaysBounceHorizontal = true
-            row.alwaysBounceVertical = false
-            // A row comes to rest on an item's edge (`scrollViewWillEndDragging`);
-            // the quicker deceleration makes that one decided motion rather
-            // than a long glide bent to its stop at the end.
-            row.decelerationRate = .fast
-            // The row sits inside the list's own scroll view, which already
-            // accounts for the bars; its horizontal scroll has none to add.
-            row.contentInsetAdjustmentBehavior = .never
-            // No system band under the header: a row is a scroll view too, and
-            // it would draw one — see `prefersClearTopEdge`.
-            row.prefersClearTopEdge()
-            row.delegate = self
-            addSubview(row)
-        }
+        storiesView.delegate = self
+        addSubview(storiesView)
+        addSubview(shelf)
         storiesView.register(ForYouStoryCell.self, forCellWithReuseIdentifier: ForYouStoryCell.reuseID)
-        mediaView.register(ForYouFollowingCardCell.self, forCellWithReuseIdentifier: ForYouFollowingCardCell.reuseID)
-        textView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
         storySource = UICollectionViewDiffableDataSource(collectionView: storiesView) {
             [weak self] view, indexPath, id in
             let cell = view.dequeueReusableCell(
@@ -403,56 +321,26 @@ final class ForYouRailsView: UIView {
             cell.isDiscConcealed = id == concealedStory
             return cell
         }
-        textSource = UICollectionViewDiffableDataSource(collectionView: textView) {
-            [weak self] view, indexPath, id in
-            let cell = view.dequeueReusableCell(
-                withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
-            ) as! PostGridListRowCell
-            guard let self, let post = cards.first(where: { $0.id == id }) else { return cell }
-            configureTextCard(cell, with: post)
-            return cell
+        shelf.title = "Following"
+        shelf.titleAccessibilityHint = "Shows posts from people you follow"
+        // The shelf reads the band in ITS space; the host hands it in ours.
+        shelf.visibleBand = { [weak self] in
+            guard let self, let band = visibleBand?() else { return nil }
+            return convert(band, to: shelf)
         }
-        mediaSource = UICollectionViewDiffableDataSource(collectionView: mediaView) {
-            [weak self] view, indexPath, id in
-            let cell = view.dequeueReusableCell(
-                withReuseIdentifier: ForYouFollowingCardCell.reuseID, for: indexPath
-            ) as! ForYouFollowingCardCell
-            guard let self, let post = cards.first(where: { $0.id == id }) else { return cell }
-            cell.configure(with: post, imagePipeline: imagePipeline)
-            // The heart closing the author line reads the viewer's stake.
-            staking?.bindReadout(cell, to: post.id)
-            // Autoplay is gated on the cover: its arrival re-opens the gate
-            // for a card that came up faceless while the row sat still.
-            cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
-            cell.isHidden = id == concealedCard
-            return cell
-        }
+        shelf.onPlayerClaimChange = { [weak self] in self?.onPlayerClaimChange?() }
         addSubview(friendsHeader)
-        addSubview(followingHeader)
         addSubview(listHeader)
         friendsHeader.isHidden = true
-        followingHeader.isHidden = true
         listHeader.isHidden = true
         storiesView.isHidden = true
-        mediaView.isHidden = true
-        textView.isHidden = true
+        shelf.isHidden = true
         friendsHeader.accessibilityHint = "Shows your friends' posts"
-        followingHeader.accessibilityHint = "Shows posts from people you follow"
         listHeader.accessibilityHint = "Shows every post in Discover's mosaic"
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    private static func rowLayout(itemSize: CGSize) -> UICollectionViewFlowLayout {
-        let layout = UICollectionViewFlowLayout()
-        layout.scrollDirection = .horizontal
-        layout.itemSize = itemSize
-        layout.minimumLineSpacing = Metrics.itemGap
-        layout.minimumInteritemSpacing = 0
-        layout.sectionInset = UIEdgeInsets(top: 0, left: Metrics.sideMargin, bottom: 0, right: Metrics.sideMargin)
-        return layout
-    }
 
     // MARK: - Content
 
@@ -462,19 +350,14 @@ final class ForYouRailsView: UIView {
         // The friends in the order the viewer was shown, while it is held.
         let ordered = heldStoryOrder.map { Self.holding(rails.friends, in: $0) } ?? rails.friends
         let storiesChanged = ordered != stories
-        let cardsChanged = rails.following != cards
         stories = ordered
-        cards = rails.following
         friendsHeader.content = .init(title: "Friends", newCount: rails.friendsBadge, isLink: true)
-        followingBadge = rails.followingBadge
-        followingHeader.content = .init(title: followingTitle, newCount: rails.followingBadge, isLink: true)
+        shelf.setCount(new: rails.followingBadge)
         if storiesChanged {
             applyStories(animated: window != nil)
             storyLookahead.setNeedsPlan()
         }
-        if cardsChanged {
-            applyCards()
-            cardLookahead.setNeedsPlan()
+        if shelf.render(rails.following) {
             #if DEBUG
             // Which `-foryou-open-card` index opens which row's card.
             let text = cards.indices.filter { ForYouFollowingRows.Row(cards[$0]) == .text }
@@ -546,65 +429,13 @@ final class ForYouRailsView: UIView {
         holdStoryOrderIfShown()
     }
 
+
     override func didMoveToWindow() {
         super.didMoveToWindow()
         holdStoryOrderIfShown()
-        // A stay on screen per row: a new owner each, revoked when it leaves.
-        for lookahead in rowLookaheads { lookahead.setOnScreen(window != nil) }
+        // A stay on screen: a new owner, revoked when it leaves.
+        storyLookahead.setOnScreen(window != nil)
         refreshLookaheadReach()
-    }
-
-    /// Each row its own posts, in the section's order (`ForYouFollowingRows`).
-    private func applyCards() {
-        let rows = ForYouFollowingRows.partition(cards)
-        func snapshot(_ posts: [GalleryPost]) -> NSDiffableDataSourceSnapshot<Int, PostID> {
-            var snapshot = NSDiffableDataSourceSnapshot<Int, PostID>()
-            snapshot.appendSections([0])
-            snapshot.appendItems(posts.map(\.id))
-            return snapshot
-        }
-        let animated = window != nil
-        mediaSource.apply(snapshot(rows.media), animatingDifferences: animated) { [weak self] in
-            self?.updateAutoplay()
-        }
-        textSource.apply(snapshot(rows.text), animatingDifferences: animated)
-    }
-
-    /// A text card: the list's own card (`PostGridListRowCell`) held to the
-    /// row's two lines, wired as the list wires its cards — the like stakes,
-    /// the save writes the shared pile, the band opens the author and its
-    /// "..." offers the host's rows, the comment count opens the post. A tap
-    /// anywhere else is the row's own selection.
-    private func configureTextCard(_ cell: PostGridListRowCell, with post: GalleryPost) {
-        cell.configure(
-            with: post, imagePipeline: imagePipeline, captionLines: ForYouFollowingRows.textLines
-        )
-        // The like chip stakes — see `PostCardStaking`.
-        staking?.bind(cell, to: post.id)
-        // As on the list's cards: no handler, no repost control (#801).
-        cell.onRepostTapped = cardRepostHandler(for: post)
-        cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
-        cell.onBookmarkTapped = { [weak self, weak cell] in
-            guard let self, let cell else { return }
-            MemberGates.perform(.save, from: cell) { [weak self, weak cell] in
-                guard let self else { return }
-                _ = bookmarks.toggle(post.id.rawValue)
-                // The fill says it; the hand feels it (#803).
-                Feedback.toggled()
-                cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
-            }
-        }
-        // Captured by POST, never by index path — the list's rule: the row
-        // can have changed by the time the finger arrives.
-        cell.onCommentsTapped = { [weak self] in self?.open(.card(post.id)) }
-        if post.authorID != nil {
-            cell.onAuthorTapped = { [weak self] in self?.onCardAuthorTapped?(post) }
-            cell.authorMenuActions = { [weak self, weak cell] in
-                guard let self, let cell else { return [] }
-                return cardAuthorMenuActions?(post, cell.authorMenuAnchor) ?? []
-            }
-        }
-        cell.isHidden = post.id == concealedCard
     }
 
     override func layoutSubviews() {
@@ -615,43 +446,25 @@ final class ForYouRailsView: UIView {
         var y: CGFloat = 0
         let hasStories = !stories.isEmpty
         let hasCards = !cards.isEmpty
-        let counts = rowCounts
         friendsHeader.isHidden = !hasStories
         storiesView.isHidden = !hasStories
-        followingHeader.isHidden = !hasCards
-        // Each row hides itself with nothing in it; the heading stays over
-        // whichever row there is.
-        mediaView.isHidden = counts.media == 0
-        textView.isHidden = counts.text == 0
+        shelf.isHidden = !hasCards
         if hasStories {
             friendsHeader.frame = CGRect(
                 x: 0, y: y, width: width, height: SectionTitleView.Metrics.height
             )
             y += SectionTitleView.Metrics.height
             let size = Metrics.storySize(forWidth: width)
-            Self.setItemSize(size, of: storiesView)
+            RowGeometry.setItemSize(size, of: storiesView)
             storiesView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
             y += size.height
         }
         if hasCards {
             if hasStories { y += Metrics.rowGap }
-            followingHeader.frame = CGRect(
-                x: 0, y: y, width: width, height: SectionTitleView.Metrics.height
-            )
-            y += SectionTitleView.Metrics.height
-            if counts.media > 0 {
-                let size = Metrics.cardSize(forWidth: width)
-                Self.setItemSize(size, of: mediaView)
-                mediaView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
-                y += size.height
-                if counts.text > 0 { y += ForYouFollowingRows.rowGap }
-            }
-            if counts.text > 0 {
-                let size = textCardSize(forWidth: width)
-                Self.setItemSize(size, of: textView)
-                textView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
-                y += size.height
-            }
+            let height = shelf.preferredHeight(forWidth: width)
+            shelf.frame = CGRect(x: 0, y: y, width: width, height: height)
+            shelf.layoutIfNeeded()
+            y += height
         }
         listHeader.isHidden = !(hasStories || hasCards)
         if !listHeader.isHidden {
@@ -662,123 +475,28 @@ final class ForYouRailsView: UIView {
         }
     }
 
-    private static func setItemSize(_ size: CGSize, of row: UICollectionView) {
-        guard let layout = row.collectionViewLayout as? UICollectionViewFlowLayout,
-              layout.itemSize != size else { return }
-        layout.itemSize = size
-    }
-
-    /// A text card's size at `width` — measured once per width, since it is
-    /// a real card laid out (`PostGridListRowCell.fixedTextCardHeight`).
-    private func textCardSize(forWidth width: CGFloat) -> CGSize {
-        if let cached = textCardSizeCache, cached.width == width { return cached.size }
-        let size = ForYouFollowingRows.textCardSize(forWidth: width)
-        textCardSizeCache = (width, size)
-        return size
-    }
-
-    private var textCardSizeCache: (width: CGFloat, size: CGSize)?
-
     // MARK: - Autoplay
-
-    private var isAutoplayActive = false
 
     /// The screen is (or is no longer) the viewer's: covered by a post, a
     /// pushed screen, another tab. Nothing plays while it is not.
     func setAutoplayActive(_ active: Bool) {
-        isAutoplayActive = active
         // Covered but alive: the rows drop to the minimum windows (#970).
-        for lookahead in rowLookaheads { lookahead.setHidden(!active) }
-        playback?.setSurfaceVisible(active)
-        if active { updateAutoplay() }
+        storyLookahead.setHidden(!active)
+        shelf.setAutoplayActive(active)
     }
 
-    /// Reconciles the row's players against what is on screen. Cheap and
-    /// idempotent; the host calls it as the LIST scrolls (the row moving in or
-    /// out of the band) and the row calls it as ITSELF scrolls.
-    ///
-    /// - Parameter notifiesClaimChange: false from the list's own reconcile,
-    ///   which reads `claimedPlayers` straight after — telling it to reconcile
-    ///   again from inside that reconcile would re-enter it.
+    /// Reconciles the shelf's players against what is on screen — see
+    /// `PostShelfSection.updateAutoplay`.
     func updateAutoplay(allowingStarts: Bool = true, notifiesClaimChange: Bool = true) {
         // Called as the LIST scrolls too: the rows' reach follows it.
         refreshLookaheadReach()
-        let before = claimedPlayers
-        claimedPlayers = reconcilePlayback(allowingStarts: allowingStarts)
-        if notifiesClaimChange, claimedPlayers != before { onPlayerClaimChange?() }
+        shelf.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: notifiesClaimChange)
     }
 
-    /// The reconcile proper; answers how many players the row now holds.
-    private func reconcilePlayback(allowingStarts: Bool) -> Int {
-        guard let playback else { return 0 }
-        guard isAutoplayActive, !mediaView.isHidden, let band = visibleBand?() else {
-            playback.update(candidates: [], allowingStarts: allowingStarts)
-            return 0
-        }
-        // The band, in the row's CONTENT space: the scroll view's bounds are
-        // its content offset, so a card's frame compares directly.
-        let viewport = mediaView.convert(band, from: self).intersection(mediaView.bounds)
-        let tiles = mediaView.indexPathsForVisibleItems.compactMap {
-            indexPath -> GridAutoplayRanking.Tile? in
-            guard let id = mediaSource.itemIdentifier(for: indexPath),
-                  id != concealedCard,
-                  let post = cards.first(where: { $0.id == id }),
-                  post.hasPlayableVideo, let url = post.videoURL,
-                  let cell = mediaView.cellForItem(at: indexPath) as? ForYouFollowingCardCell,
-                  hasCover(post, in: cell)
-            else { return nil }
-            return .init(id: id, url: url, cell: cell, mediaFrame: cell.frame, isPaused: false)
-        }
-        // Every card half on screen plays (a null band admits none); the
-        // ranking only matters when the budget is short, and then the row is
-        // ranked from its left edge, so the card nearest it keeps its player.
-        let candidates = GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .minXEdge)
-        playback.update(candidates: candidates, allowingStarts: allowingStarts)
-        return GridAutoplayRanking.playersHeld(candidateCount: candidates.count, budget: Self.concurrentPlayers)
-    }
-
-    /// A card may play only once it has a face behind its surface — the
-    /// list's own gate (`ForYouGridPage.hasCover`), for the same black-tile
-    /// reason.
-    private func hasCover(_ post: GalleryPost, in cell: ForYouFollowingCardCell) -> Bool {
-        guard let thumbnail = post.thumbnailURL else { return true }
-        if cell.renderedCover != nil { return true }
-        guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
-        cell.applyCover(cached)
-        return true
-    }
-
-    /// Opens the handoff for a card a flight is about to carry: the row's
-    /// reconcile must neither restart nor stop its player while it is in the
-    /// air.
-    ///
-    /// The card's own clip is parked as well, paused at its playhead, for a
-    /// close that pages on and comes home here (#923, `returnCardSurface`).
-    func beginPlaybackHandoff(of id: PostID) {
-        landingCard = nil
-        playback?.focus(id)
-        updateAutoplay()
-        playback?.beginHandoff(id, parkingReturn: true)
-    }
-
-    /// The card's own clip, resumed from where it was parked at the tap — the
-    /// arriving picture of a close from another post (#923). Nil when nothing
-    /// is parked, and the close lands on the card's still.
-    func returnCardSurface(for id: PostID) -> VideoRenderView? {
-        playback?.makeReturnSurface(for: id)
-    }
-
-    /// A close that resumed the card's return player was abandoned.
-    func pauseReturnPlayback(for id: PostID) {
-        playback?.pauseReturnPlayback(of: id)
-    }
-
-    func endPlaybackHandoff() {
-        landingCard = nil
-        playback?.endHandoff()
-        playback?.focus(nil)
-        updateAutoplay()
-    }
+    func beginPlaybackHandoff(of id: PostID) { shelf.beginPlaybackHandoff(of: id) }
+    func returnCardSurface(for id: PostID) -> VideoRenderView? { shelf.returnCardSurface(for: id) }
+    func pauseReturnPlayback(for id: PostID) { shelf.pauseReturnPlayback(for: id) }
+    func endPlaybackHandoff() { shelf.endPlaybackHandoff() }
 
     // MARK: - As a flight's source
 
@@ -787,41 +505,11 @@ final class ForYouRailsView: UIView {
         return storiesView.cellForItem(at: indexPath) as? ForYouStoryCell
     }
 
-    /// The Following row card `id` is in, and where in it — the media row
-    /// or the text row.
-    private func cardRow(for id: PostID) -> (row: UICollectionView, indexPath: IndexPath)? {
-        if let indexPath = mediaSource.indexPath(for: id) { return (mediaView, indexPath) }
-        if let indexPath = textSource.indexPath(for: id) { return (textView, indexPath) }
-        return nil
-    }
-
-    /// Card `id`'s cell, whichever row it is in.
-    private func cardCell(for id: PostID) -> UICollectionViewCell? {
-        cardRow(for: id).flatMap { $0.row.cellForItem(at: $0.indexPath) }
-    }
-
-    /// The post a Following row shows at `indexPath`.
-    private func cardID(in row: UICollectionView, at indexPath: IndexPath) -> PostID? {
-        if row === mediaView { return mediaSource.itemIdentifier(for: indexPath) }
-        if row === textView { return textSource.itemIdentifier(for: indexPath) }
-        return nil
-    }
-
-    /// A MEDIA card's cell — what plays, and what a flight carries.
-    private func mediaCardCell(for id: PostID) -> ForYouFollowingCardCell? {
-        cardCell(for: id) as? ForYouFollowingCardCell
-    }
-
-    /// A TEXT card's cell — the list's own card.
-    private func textCardCell(for id: PostID) -> PostGridListRowCell? {
-        cardCell(for: id) as? PostGridListRowCell
-    }
-
     /// The friend's face, in `space` — nil while it is not on screen, which a
     /// flight answers with a centred collapse rather than a trip to a rect
     /// nobody can see.
     func storyFrame(for id: ProfileID, in space: UICoordinateSpace) -> CGRect? {
-        guard let cell = storyCell(for: id), isInRow(cell, storiesView) else { return nil }
+        guard let cell = storyCell(for: id), RowGeometry.isInRow(cell, storiesView) else { return nil }
         return cell.discFrame(in: space, restingBelow: storiesView)
     }
 
@@ -845,7 +533,7 @@ final class ForYouRailsView: UIView {
     }
 
     func isStoryOnScreen(_ id: ProfileID) -> Bool {
-        storyCell(for: id).map { isVisible($0, in: storiesView) } ?? false
+        storyCell(for: id).map { RowGeometry.isVisible($0, in: storiesView) } ?? false
     }
 
     func setStoryConcealed(_ concealed: Bool, for id: ProfileID) {
@@ -853,264 +541,46 @@ final class ForYouRailsView: UIView {
         storyCell(for: id)?.isDiscConcealed = concealed
     }
 
-    /// The card's rect in `space`, at rest — see `restingFrame`.
-    func cardFrame(for id: PostID, in space: UICoordinateSpace) -> CGRect? {
-        guard let (row, indexPath) = cardRow(for: id), let cell = row.cellForItem(at: indexPath),
-              isInRow(cell, row) else { return nil }
-        return Self.restingFrame(of: cell, below: row, in: space)
-    }
+    func cardFrame(for id: PostID, in space: UICoordinateSpace) -> CGRect? { shelf.cardFrame(for: id, in: space) }
 
-    /// `view`'s bounds in `space` as they are AT REST: every transform from
-    /// `view` up to (not including) `ancestor` left out, `ancestor` and
-    /// everything above it converted by UIKit as usual.
-    ///
-    /// ⚠️ WHERE A FLIGHT LANDS IS WHERE ITS SOURCE RESTS, not where it is
-    /// drawn this instant. An item that scales under a press — the disc of a
-    /// story, a card's content — reports its SCALED rect through
-    /// `convert(_:to:)`, so a close measured while (or because) the press was
-    /// still easing out flew to a rect a few points inside the item and off
-    /// its centre. Filmed on both rows as "the window doesn't come back to
-    /// the right coordinates". The rows' own scroll offsets are NOT
-    /// transforms — they are the bounds origins subtracted below — so the row
-    /// having scrolled is still honoured; only a transform is ignored.
-    ///
-    /// Assumes the default anchor point, which is `center`'s meaning.
+    /// See `RowGeometry.restingFrame`.
     static func restingFrame(
         of view: UIView, below ancestor: UIView, in space: UICoordinateSpace
     ) -> CGRect {
-        var rect = view.bounds
-        var current = view
-        while current !== ancestor, let parent = current.superview {
-            // From `current`'s bounds space into `parent`'s, as the frame an
-            // identity transform would give it: centred on `center`.
-            let size = current.bounds.size
-            rect = rect.offsetBy(
-                dx: current.center.x - size.width / 2 - current.bounds.minX,
-                dy: current.center.y - size.height / 2 - current.bounds.minY
-            )
-            current = parent
-        }
-        return current.convert(rect, to: space)
+        RowGeometry.restingFrame(of: view, below: ancestor, in: space)
     }
 
-    /// A media card's picture — nil for a text card, which has none.
-    func cardCover(for id: PostID) -> UIImage? {
-        mediaCardCell(for: id)?.renderedCover
-    }
-
-    // MARK: - A text card, for the window it opens through
-
-    /// What the list's text rows hand their window (`ForYouGridPage`'s
-    /// `textRowCaptionEnd` / `textRowCaptionTop` / `textRowAuthorBand`), for a
-    /// text card — read off the realized card, nil (or zero) when it is not.
-    func textCardCaptionEnd(for id: PostID) -> CGFloat? {
-        textCardCell(for: id)?.revealCut
-    }
-
-    func textCardCaptionTop(for id: PostID) -> CGFloat {
-        textCardCell(for: id)?.revealCaptionTop ?? 0
-    }
-
-    func textCardAuthorBand(for id: PostID) -> PostAuthorBandView.Model? {
-        if let model = textCardCell(for: id)?.authorBandModel { return model }
-        return cards.first { $0.id == id }.map { PostAuthorBandView.Model(post: $0) }
-    }
-
-    /// The card a window lands as — the list's own stand-in
-    /// (`RevealDismissCardView`) at this card's size, caption held to the
-    /// row's lines and its closing line drawing what the card draws, so the
-    /// landing swaps it for the card without a word or a control changing.
-    /// Nil while the card has no size to measure.
-    func makeTextCardStandIn(for id: PostID) -> UIView? {
-        guard let post = cards.first(where: { $0.id == id }).map(livePost) else { return nil }
-        let cell = textCardCell(for: id)
-        // The realized card's size, else the row's — every text card in the
-        // row is the same size.
-        let size = cell?.bounds.size
-            ?? textSource.indexPath(for: id).flatMap { textView.layoutAttributesForItem(at: $0)?.size }
-        guard let size, size.width > 0, size.height > 0 else { return nil }
-        return RevealDismissCardView(
-            post: post,
-            width: size.width,
-            imagePipeline: imagePipeline,
-            showsAuthorMenu: showsAuthorMenu(for: post),
-            actions: .init(
-                repost: onCardRepostRequested != nil, bookmark: true, saved: bookmarks.isSaved(id.rawValue),
-                stake: staking?.viewerStake(on: id)
-            ),
-            ageText: cell?.renderedAgeText,
-            height: size.height,
-            captionLines: ForYouFollowingRows.textLines
-        )
-    }
-
-    /// Whether a text card draws a "...", asked of the provider the card asks
-    /// — the stand-in must match it, or the control pops in the last frame.
-    private func showsAuthorMenu(for post: GalleryPost) -> Bool {
-        guard post.authorID != nil, let cardAuthorMenuActions else { return false }
-        return !cardAuthorMenuActions(post, UIView()).isEmpty
-    }
-
-    func isCardOnScreen(_ id: PostID) -> Bool {
-        guard let (row, indexPath) = cardRow(for: id), let cell = row.cellForItem(at: indexPath)
-        else { return false }
-        return isVisible(cell, in: row)
-    }
-
-    func setCardConcealed(_ concealed: Bool, for id: PostID) {
-        if concealed { concealedCard = id } else if concealedCard == id { concealedCard = nil }
-        cardCell(for: id)?.isHidden = concealed
-    }
+    func cardCover(for id: PostID) -> UIImage? { shelf.cardCover(for: id) }
+    func textCardCaptionEnd(for id: PostID) -> CGFloat? { shelf.textCardCaptionEnd(for: id) }
+    func textCardCaptionTop(for id: PostID) -> CGFloat { shelf.textCardCaptionTop(for: id) }
+    func textCardAuthorBand(for id: PostID) -> PostAuthorBandView.Model? { shelf.textCardAuthorBand(for: id) }
+    func makeTextCardStandIn(for id: PostID) -> UIView? { shelf.makeTextCardStandIn(for: id) }
+    func isCardOnScreen(_ id: PostID) -> Bool { shelf.isCardOnScreen(id) }
+    func setCardConcealed(_ concealed: Bool, for id: PostID) { shelf.setCardConcealed(concealed, for: id) }
 
     /// Puts everything a flight hid back — for the moment the screen is the
     /// viewer's again, whoever finished the close.
     func clearConcealments() {
         if let concealedStory { setStoryConcealed(false, for: concealedStory) }
-        if let concealedCard { setCardConcealed(false, for: concealedCard) }
+        shelf.clearConcealments()
     }
 
-    /// A surface already showing the card's playback, for the flight to take
-    /// off playing — the list's own `liveFlightSurface`, for the row.
-    func liveCardSurface(for id: PostID) -> VideoRenderView? {
-        guard let playback, let post = cards.first(where: { $0.id == id }),
-              let url = post.videoURL else { return nil }
-        if let made = playback.makeAttachedSurface(for: id, url: url) { return made }
-        // Nothing to join: ask, rather than report the absence — the flight
-        // asks again every frame, and a start kicked here is what the next ask
-        // finds.
-        if let cell = mediaCardCell(for: id) {
-            playback.demandFlightPlayback(of: id, url: url, in: cell)
-        }
-        return nil
-    }
+    func liveCardSurface(for id: PostID) -> VideoRenderView? { shelf.liveCardSurface(for: id) }
+    func adoptLandingPlayback(_ view: UIView, for id: PostID) { shelf.adoptLandingPlayback(view, for: id) }
+    func isLandingPlaybackReady(for id: PostID) -> Bool { shelf.isLandingPlaybackReady(for: id) }
 
-    /// A close is landing on card `id` with the page's live `view`: the card
-    /// takes that playback onto its OWN surface — the list's own landing
-    /// (`ForYouGridPage.adoptLivePlayback`), for the row.
-    ///
-    /// ⚠️ THE THUMBNAIL FLASH AT THE END OF A CLOSE. Without this the flight
-    /// card was removed over a card still showing what it rested on while the
-    /// feed covered the row — its poster, or a frame from before the open —
-    /// and its player only resumed once the screen had appeared and the row
-    /// reconciled: a beat of thumbnail between the flight's video and the
-    /// card's. Here the card's surface is primed with the page's current
-    /// frame and takes the pool loan before the flight card goes, and
-    /// `isLandingPlaybackReady` holds the flight card over it until it draws.
-    ///
-    /// Unconcealed FIRST: a surface outside a visible hierarchy is skipped by
-    /// the renderer and would never report drawing. The flight card is still
-    /// on top, at the same rect, so revealing the card under it shows nothing.
-    func adoptLandingPlayback(_ view: UIView, for id: PostID) {
-        guard let playback, let post = cards.first(where: { $0.id == id }),
-              let url = post.videoURL, let cell = mediaCardCell(for: id)
-        else { return }
-        setCardConcealed(false, for: id)
-        if VideoRenderFlags.usesSampleBufferLayer {
-            // One playback, several surfaces: the card gets its own, primed on
-            // attach, and the flight card's is released once it leaves the
-            // window. Nothing is re-parented.
-            if playback.adoptAttachedSurface(
-                for: id, url: url, cell: cell, drawnBy: view as? VideoRenderView
-            ) { landingCard = id }
-            return
-        }
-        guard let view = view as? VideoRenderView else { return }
-        playback.adoptLiveSurface(view, for: id, url: url, cell: cell)
-        landingCard = id
-    }
-
-    /// The card a close's live surface was handed to, until the handoff ends
-    /// — the one whose landing waits on its clip rather than on its cover.
-    private var landingCard: PostID?
-
-    /// Whether card `id` is showing what the landing needs it to: its clip
-    /// drawing, for a card that took the flight's playback; its cover,
-    /// otherwise — `ForYouGridPage.isLandingPlaybackReady`'s rule, for the
-    /// row. The flight card's hold has a ceiling, so a card that never gets
-    /// there costs a pause, not a stuck card.
-    ///
-    /// ⚠️ ONLY A CARD THAT ADOPTED waits on its clip. A close that flew no
-    /// video (a photo page, a donation that did not happen) left nothing
-    /// playing here until the row reconciles on appearing, so asking the pool
-    /// would hold every such landing for the hold's whole ceiling.
-    func isLandingPlaybackReady(for id: PostID) -> Bool {
-        guard let post = cards.first(where: { $0.id == id }) else { return true }
-        let cell = mediaCardCell(for: id)
-        if let playback, landingCard == id {
-            return playback.isSurfaceRendering(for: id)
-        }
-        guard let cell, post.thumbnailURL != nil else { return true }
-        return cell.renderedCover != nil
-    }
-
-    /// Scrolls the row so an item is wholly in view — before a close measures
+    /// Scrolls the row so a face is wholly in view — before a close measures
     /// where it lands, since the rows can be scrolled under an open post.
     func bringStoryIntoView(_ id: ProfileID) {
         guard let indexPath = storySource.indexPath(for: id) else { return }
-        bringIntoView(indexPath, in: storiesView)
+        RowGeometry.bringIntoView(indexPath, in: storiesView)
     }
 
-    /// In ITS row — the media row or the text row; the other row stays where
-    /// the viewer left it.
-    func bringCardIntoView(_ id: PostID) {
-        guard let (row, indexPath) = cardRow(for: id) else { return }
-        bringIntoView(indexPath, in: row)
-    }
-
-    /// Flush with the margin on the side the item was cut by — one of the
-    /// rests a swipe would have left it on (`ForYouRowSnap`).
-    private func bringIntoView(_ indexPath: IndexPath, in row: UICollectionView) {
-        row.layoutIfNeeded()
-        guard let frame = row.layoutAttributesForItem(at: indexPath)?.frame else { return }
-        let visible = row.bounds.insetBy(dx: Metrics.sideMargin, dy: 0)
-        guard !(visible.minX <= frame.minX && frame.maxX <= visible.maxX) else { return }
-        row.scrollRectToVisible(frame.insetBy(dx: -Metrics.sideMargin, dy: 0), animated: false)
-        row.layoutIfNeeded()
-    }
-
-    /// On screen: in a window, and within its row's visible bounds.
-    private func isVisible(_ cell: UICollectionViewCell, in row: UICollectionView) -> Bool {
-        cell.window != nil && isInRow(cell, row)
-    }
-
-    /// Within its row's visible bounds — what a RECT is asked, window or not.
-    ///
-    /// ⚠️ NOT `isVisible`. A card-shaped close (`RowCardCloseLanding`) asks
-    /// whether the row exists BEFORE the pop has put this screen back in the
-    /// window — the swipe stages at its begin — and a window check there
-    /// answered "no row", so the close fell to a plain slide
-    /// (`geometry=false`, measured). The rect is re-asked in the transition's
-    /// own space once the screen is back, as every list's is.
-    private func isInRow(_ cell: UICollectionViewCell, _ row: UICollectionView) -> Bool {
-        !row.isHidden && row.bounds.intersects(cell.frame)
-    }
+    func bringCardIntoView(_ id: PostID) { shelf.bringCardIntoView(id) }
 
     // MARK: - Long press
 
-    /// What a context menu is about — carried in its configuration's
-    /// identifier, since the menu outlives the index path it was asked for.
-    enum MenuTarget: Equatable {
-        case story(ProfileID)
-        case card(PostID)
-
-        var identifier: NSString {
-            switch self {
-            case .story(let id): "story:\(id.rawValue)" as NSString
-            case .card(let id): "card:\(id.rawValue)" as NSString
-            }
-        }
-
-        init?(_ identifier: NSCopying) {
-            guard let raw = identifier as? NSString as String? else { return nil }
-            if raw.hasPrefix("story:") {
-                self = .story(ProfileID(String(raw.dropFirst("story:".count))))
-            } else if raw.hasPrefix("card:") {
-                self = .card(PostID(String(raw.dropFirst("card:".count))))
-            } else {
-                return nil
-            }
-        }
-    }
+    typealias MenuTarget = RowMenuTarget
 
     /// Opens what a menu was about, the way a tap on it would — nothing if it
     /// left the row while the menu was up.
@@ -1120,14 +590,7 @@ final class ForYouRailsView: UIView {
             guard let story = stories.first(where: { $0.authorID == id }) else { return }
             onStoryTapped?(story)
         case .card(let id):
-            guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
-            onCardTapped?(index)
-        }
-    }
-
-    private static func openAction(_ handler: @escaping () -> Void) -> UIAction {
-        UIAction(title: "Open", image: UIImage(systemName: "arrow.up.left.and.arrow.down.right")) { _ in
-            handler()
+            shelf.open(id)
         }
     }
 
@@ -1135,35 +598,21 @@ final class ForYouRailsView: UIView {
         let id = story.authorID
         var children: [UIMenuElement] = []
         if !story.posts.isEmpty {
-            children.append(Self.openAction { [weak self] in self?.open(.story(id)) })
+            children.append(RowGeometry.openAction { [weak self] in self?.open(.story(id)) })
         }
         children += storyMenuElements?(story) ?? []
         return UIMenu(children: children)
     }
 
-    private func cardMenu(for post: GalleryPost) -> UIMenu {
-        let id = post.id
-        let open = Self.openAction { [weak self] in self?.open(.card(id)) }
-        return UIMenu(children: [open] + (cardMenuElements?(post) ?? []))
-    }
-
-    /// The view the lift is made of, and its outline.
-    private func targetedPreview(in row: UICollectionView, at indexPath: IndexPath) -> UITargetedPreview? {
-        guard let cell = row.cellForItem(at: indexPath), cell.window != nil else { return nil }
+    /// The FACE the lift is made of (round, without its name).
+    private func targetedPreview(at indexPath: IndexPath) -> UITargetedPreview? {
+        guard let story = storiesView.cellForItem(at: indexPath) as? ForYouStoryCell,
+              story.window != nil else { return nil }
         let parameters = UIPreviewParameters()
         parameters.backgroundColor = .clear
-        if let story = cell as? ForYouStoryCell {
-            let face = story.faceView
-            parameters.visiblePath = ForYouStoryCell.Metrics.faceShape.path(in: face.bounds)
-            return UITargetedPreview(view: face, parameters: parameters)
-        }
-        let card = cell.contentView
-        // Each row's card on its own curve: the list's card for words.
-        let radius = cell is PostGridListRowCell
-            ? PostGridListRowCell.cardCornerRadius
-            : ForYouFollowingCardCell.cornerRadius
-        parameters.visiblePath = UIBezierPath(roundedRect: card.bounds, cornerRadius: radius)
-        return UITargetedPreview(view: card, parameters: parameters)
+        let face = story.faceView
+        parameters.visiblePath = ForYouStoryCell.Metrics.faceShape.path(in: face.bounds)
+        return UITargetedPreview(view: face, parameters: parameters)
     }
 
     #if DEBUG
@@ -1176,26 +625,20 @@ final class ForYouRailsView: UIView {
     /// The same for card `index`.
     func debugCardMenuTitles(at index: Int) -> [String] {
         guard cards.indices.contains(index) else { return [] }
-        return cardMenu(for: cards[index]).children.map(\.title)
+        return shelf.cardMenu(for: cards[index]).children.map(\.title)
     }
 
-    /// The long-press configuration for card `index`, through the row's own
-    /// delegate path.
     func debugCardMenuConfiguration(at index: Int, point: CGPoint = .zero) -> UIContextMenuConfiguration? {
-        guard let (row, indexPath) = debugCardPlace(at: index) else { return nil }
-        return collectionView(row, contextMenuConfigurationForItemsAt: [indexPath], point: point)
+        shelf.debugCardMenuConfiguration(at: index, point: point)
     }
 
-    /// Where card `index` (into `cards`) sits — its row and its index path
-    /// there.
     func debugCardPlace(at index: Int) -> (row: UICollectionView, indexPath: IndexPath)? {
-        guard cards.indices.contains(index) else { return nil }
-        return cardRow(for: cards[index].id)
+        shelf.debugCardPlace(at: index)
     }
 
     /// `media 2` / `text 0` — the row and item card `index` is, for a log.
     func debugCardPlaceName(at index: Int) -> String? {
-        debugCardPlace(at: index).map { "\($0.row === textView ? "text" : "media") \($0.indexPath.item)" }
+        debugCardPlace(at: index).map { "\($0.row === shelf.textView ? "text" : "media") \($0.indexPath.item)" }
     }
 
     /// Card `index`'s frame in its row's content space, from its layout.
@@ -1206,19 +649,19 @@ final class ForYouRailsView: UIView {
     /// MEDIA card `index`'s cell, when the row has realized it.
     func debugCardCell(at index: Int) -> ForYouFollowingCardCell? {
         guard cards.indices.contains(index) else { return nil }
-        return mediaCardCell(for: cards[index].id)
+        return shelf.mediaCardCell(for: cards[index].id)
     }
 
     /// TEXT card `index`'s cell — the list's own card — when realized.
     func debugTextCardCell(at index: Int) -> PostGridListRowCell? {
         guard cards.indices.contains(index) else { return nil }
-        return textCardCell(for: cards[index].id)
+        return shelf.textCardCell(for: cards[index].id)
     }
 
-    /// Following's two rows — for a test scrolling one or converting a point
+    /// The shelf's two rows — for a test scrolling one or converting a point
     /// into it.
-    var debugMediaRow: UICollectionView { mediaView }
-    var debugTextRow: UICollectionView { textView }
+    var debugMediaRow: UICollectionView { shelf.mediaView }
+    var debugTextRow: UICollectionView { shelf.textView }
 
     /// Opens what a committed preview would — the commit's own path, minus
     /// UIKit's animator.
@@ -1231,7 +674,7 @@ final class ForYouRailsView: UIView {
     var debugStoryOrder: [ProfileID] { stories.map(\.authorID) }
     var debugShowsListHeader: Bool { !listHeader.isHidden }
     /// Friends, Following and "For you" — the app's one section title each.
-    var debugHeaders: [SectionTitleView] { [friendsHeader, followingHeader, listHeader] }
+    var debugHeaders: [SectionTitleView] { [friendsHeader, shelf.header, listHeader] }
 
     /// Taps story `index` through the row's own selection path.
     func debugTapStory(at index: Int) -> Bool {
@@ -1241,205 +684,132 @@ final class ForYouRailsView: UIView {
     }
 
     /// Taps card `index` through the row's own selection path.
-    func debugTapCard(at index: Int) -> Bool {
-        guard let (row, indexPath) = debugCardPlace(at: index) else { return false }
-        collectionView(row, didSelectItemAt: indexPath)
-        return true
-    }
+    func debugTapCard(at index: Int) -> Bool { shelf.debugTapCard(at: index) }
 
     /// Whether card `index` has a face to fly — what a scripted open waits on.
     func debugCardIsReady(at index: Int) -> Bool {
         guard cards.indices.contains(index) else { return false }
         let post = cards[index]
         guard post.kind != .text else { return true }
-        return mediaCardCell(for: post.id)?.renderedCover != nil
+        return shelf.mediaCardCell(for: post.id)?.renderedCover != nil
     }
 
     /// The headers' OWN tap path (`SectionTitleView.debugTap`), not the
     /// host's closure: calling the closure is how #312's dead chevron passed.
     func debugTapFriendsHeader() { friendsHeader.debugTap() }
-    func debugTapFollowingHeader() { followingHeader.debugTap() }
+    func debugTapFollowingHeader() { shelf.debugTapTitle() }
     func debugTapListHeader() { listHeader.debugTap() }
     var debugFriendsBadge: String? { friendsHeader.debugCountText }
-    var debugFollowingBadge: String? { followingHeader.debugCountText }
+    var debugFollowingBadge: String? { shelf.debugCountText }
     #endif
 }
 
+/// The Friends row's delegate; a shelf row handed here (a test driving the
+/// rails) goes to the shelf, which is its own rows' delegate.
 extension ForYouRailsView: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: false)
-        if collectionView === storiesView {
-            guard let id = storySource.itemIdentifier(for: indexPath),
-                  let story = stories.first(where: { $0.authorID == id }) else { return }
-            onStoryTapped?(story)
-        } else {
-            guard let id = cardID(in: collectionView, at: indexPath),
-                  let index = cards.firstIndex(where: { $0.id == id }) else { return }
-            onCardTapped?(index)
+        guard collectionView === storiesView else {
+            shelf.collectionView(collectionView, didSelectItemAt: indexPath)
+            return
         }
+        collectionView.deselectItem(at: indexPath, animated: false)
+        guard let id = storySource.itemIdentifier(for: indexPath),
+              let story = stories.first(where: { $0.authorID == id }) else { return }
+        onStoryTapped?(story)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        if let drag, drag.row === scrollView {
-            self.drag?.tracker.track(scrollView.contentOffset.x)
+        guard scrollView === storiesView else {
+            if shelf.owns(scrollView) { shelf.scrollViewDidScroll(scrollView) }
+            return
         }
-        if scrollView === storiesView { storyLookahead.scrollViewDidScroll() }
-        if scrollView === mediaView { cardLookahead.scrollViewDidScroll() }
-        // Only the media row plays; the text row scrolls past nothing to start.
-        guard scrollView === mediaView else { return }
-        // A horizontal row is short: reconciling on every tick costs a diff
-        // of three cards, and a card that comes half into view should start
-        // as it arrives, not when the finger lifts.
-        updateAutoplay()
+        snapper.didScroll(scrollView)
+        storyLookahead.scrollViewDidScroll()
     }
 
     /// A row came to rest: its fling is over, and its display window decodes.
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        if scrollView === storiesView { storyLookahead.scrollViewDidEndScrolling() }
-        if scrollView === mediaView { cardLookahead.scrollViewDidEndScrolling() }
+        guard scrollView === storiesView else {
+            if shelf.owns(scrollView) { shelf.scrollViewDidEndDecelerating(scrollView) }
+            return
+        }
+        storyLookahead.scrollViewDidEndScrolling()
     }
 
     // MARK: - Snapping
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        guard isRow(scrollView) else { return }
-        drag = (scrollView, ForYouRowDragTracker(offset: scrollView.contentOffset.x))
+        guard scrollView === storiesView else {
+            if shelf.owns(scrollView) { shelf.scrollViewWillBeginDragging(scrollView) }
+            return
+        }
+        snapper.willBeginDragging(scrollView)
     }
 
     /// The row comes to rest on an item's edge, the side picked by the
-    /// gesture's direction — see `ForYouRowSnap`.
-    ///
-    /// ⚠️ A RELEASE WITH NO SPEED IS ANIMATED BY HAND. Handed a new target
-    /// with a zero velocity, UIScrollView jumps to it rather than gliding, so
-    /// a slow drag lifted from a standstill would teleport the row. There the
-    /// row is told to stay where it is and is then animated to the snap.
+    /// gesture's direction — see `RowSnapper`.
     func scrollViewWillEndDragging(
         _ scrollView: UIScrollView,
         withVelocity velocity: CGPoint,
         targetContentOffset: UnsafeMutablePointer<CGPoint>
     ) {
-        guard let row = scrollView as? UICollectionView, isRow(row) else { return }
-        let tracker = drag?.row === row ? drag?.tracker : nil
-        drag = nil
-        let target = snapTarget(
-            in: row,
-            projected: targetContentOffset.pointee.x,
-            start: tracker?.start ?? row.contentOffset.x,
-            direction: ForYouRowSnap.direction(velocity: velocity.x, lastMovement: tracker?.lastMovement)
-        )
-        let offsets = Self.offsetRange(of: row)
-        let current = row.contentOffset.x
-        guard abs(velocity.x) < ForYouRowSnap.flickVelocity, offsets.contains(current) else {
-            // Moving — or pulled past an end, where UIKit's own spring back is
-            // the motion wanted: the deceleration is bent onto the snap.
-            targetContentOffset.pointee.x = target
+        guard scrollView === storiesView else {
+            if shelf.owns(scrollView) {
+                shelf.scrollViewWillEndDragging(
+                    scrollView, withVelocity: velocity, targetContentOffset: targetContentOffset
+                )
+            }
             return
         }
-        targetContentOffset.pointee.x = current
-        guard target != current else { return }
-        DispatchQueue.main.async { [weak row] in
-            guard let row, !row.isTracking else { return }
-            row.setContentOffset(CGPoint(x: target, y: row.contentOffset.y), animated: true)
-        }
+        snapper.willEndDragging(
+            storiesView, velocity: velocity, targetContentOffset: targetContentOffset, stepped: false
+        )
     }
 
-    private func isRow(_ scrollView: UIScrollView) -> Bool {
-        scrollView === storiesView || scrollView === mediaView || scrollView === textView
-    }
-
-    /// Where `row` rests after a release — its items' extents, read from its
-    /// layout, handed to `ForYouRowSnap`, each row by its own items.
-    ///
-    /// **The text row moves ONE CARD per gesture** (`steppedTarget`, the card
-    /// carousel's variant): its cards are four fifths of the screen, so a
-    /// fling the projection carried past two or three of them would read as
-    /// the row running away, not as a page turned — the momentum decides how
-    /// fast, `start` (where the drag began) how far. Faces and media cards are
-    /// small enough that a fling going several items is the point, so those
-    /// rows take the projection (`target`), as they always have.
+    /// Where `row` rests after a release — see `RowSnapper.snapTarget`.
     func snapTarget(
         in row: UICollectionView, projected: CGFloat, start: CGFloat, direction: ForYouRowSnap.Direction?
     ) -> CGFloat {
-        let content = CGRect(origin: .zero, size: row.collectionViewLayout.collectionViewContentSize)
-        let items = (row.collectionViewLayout.layoutAttributesForElements(in: content) ?? [])
-            .filter { $0.representedElementCategory == .cell }
-            .map { $0.frame.minX...$0.frame.maxX }
-            .sorted { $0.lowerBound < $1.lowerBound }
-        guard row === textView else {
-            return ForYouRowSnap.target(
-                projected: projected,
-                direction: direction,
-                items: items,
-                viewport: row.bounds.width,
-                margin: Metrics.sideMargin,
-                offsets: Self.offsetRange(of: row)
-            )
+        guard row === storiesView else {
+            return shelf.snapTarget(in: row, projected: projected, start: start, direction: direction)
         }
-        return ForYouRowSnap.steppedTarget(
-            live: row.contentOffset.x,
-            start: start,
-            direction: direction,
-            items: items,
-            viewport: row.bounds.width,
-            margin: Metrics.sideMargin,
-            offsets: Self.offsetRange(of: row)
+        return RowSnapper.snapTarget(
+            in: row, projected: projected, start: start, direction: direction, stepped: false
         )
-    }
-
-    /// Every content offset `row` can rest at.
-    private static func offsetRange(of row: UIScrollView) -> ClosedRange<CGFloat> {
-        let low = -row.adjustedContentInset.left
-        let high = row.contentSize.width + row.adjustedContentInset.right - row.bounds.width
-        return low...max(low, high)
     }
 
     // MARK: - Long press: the native preview
 
-    /// A long press lifts the post — a card's own, or the one a friend's face
-    /// opens first — with the menu under it. Keyed by an identifier that says
-    /// which row and which item, so the commit below finds it again even if
-    /// the row changed while the menu was up.
+    /// A long press on a face lifts the post it opens first, with the menu
+    /// under it. A friend with nothing loaded lifts their face alone.
     func collectionView(
         _ collectionView: UICollectionView,
         contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
         point: CGPoint
     ) -> UIContextMenuConfiguration? {
-        guard let indexPath = indexPaths.first else { return nil }
+        guard collectionView === storiesView else {
+            return shelf.collectionView(collectionView, contextMenuConfigurationForItemsAt: indexPaths, point: point)
+        }
+        guard let indexPath = indexPaths.first,
+              let id = storySource.itemIdentifier(for: indexPath),
+              let story = stories.first(where: { $0.authorID == id }) else { return nil }
         let width = max(0, bounds.width - Metrics.sideMargin * 2)
         let pipeline = imagePipeline
-        if collectionView === storiesView {
-            guard let id = storySource.itemIdentifier(for: indexPath),
-                  let story = stories.first(where: { $0.authorID == id }) else { return nil }
-            let first = story.posts.first
-            return UIContextMenuConfiguration(
-                identifier: MenuTarget.story(id).identifier,
-                // A friend with nothing loaded lifts their face alone.
-                previewProvider: first.map { post in
-                    { ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width) }
-                },
-                actionProvider: { [weak self] _ in self?.storyMenu(for: story) }
-            )
-        }
-        guard let id = cardID(in: collectionView, at: indexPath),
-              let post = cards.first(where: { $0.id == id }) else { return nil }
         return UIContextMenuConfiguration(
-            identifier: MenuTarget.card(id).identifier,
-            previewProvider: {
-                ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width)
+            identifier: MenuTarget.story(id).identifier,
+            previewProvider: story.posts.first.map { post in
+                { ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width) }
             },
-            actionProvider: { [weak self] _ in self?.cardMenu(for: post) }
+            actionProvider: { [weak self] _ in self?.storyMenu(for: story) }
         )
     }
 
-    /// Where the preview lifts from and settles back to: the FACE for a
-    /// friend (round, without its name), the card for a card — not the whole
-    /// cell, whose rectangle would flash its square corners under the lift.
     func collectionView(
         _ collectionView: UICollectionView,
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         highlightPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        targetedPreview(in: collectionView, at: indexPath)
+        targetedPreview(at: indexPath)
     }
 
     func collectionView(
@@ -1447,23 +817,12 @@ extension ForYouRailsView: UICollectionViewDelegate {
         contextMenuConfiguration configuration: UIContextMenuConfiguration,
         dismissalPreviewForItemAt indexPath: IndexPath
     ) -> UITargetedPreview? {
-        targetedPreview(in: collectionView, at: indexPath)
+        targetedPreview(at: indexPath)
     }
 
-    /// Tapping the lifted preview opens the post — the same open as a tap on
-    /// the item, through the same flight.
-    ///
-    /// ⚠️ `.dismiss`, THEN OUR HERO — not UIKit's `.pop`. The row's open is a
-    /// flight OUT OF THE CARD (or the face): it conceals the source, hands the
-    /// card's player to the page, and the close lands back on that same card.
-    /// A `.pop` commit grows the preview into a destination UIKit presents
-    /// itself, and none of that would hold: no source concealed, no player
-    /// handed over, and a close flying home to a card the opening never left.
-    /// So the preview settles back into its card first and the flight takes
-    /// off from there — one extra beat, and the open and the close are the
-    /// same pair of motions whichever way in the viewer used. The open waits
-    /// one turn past the completion so UIKit has put the card back before the
-    /// flight measures and hides it.
+    /// Tapping the lifted preview opens the friend's post — the same open as
+    /// a tap on the face, through the same flight (`.dismiss`, then our hero:
+    /// see `PostShelfSection`'s commit).
     func collectionView(
         _ collectionView: UICollectionView,
         willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
@@ -1474,15 +833,5 @@ extension ForYouRailsView: UICollectionViewDelegate {
         animator.addCompletion { [weak self] in
             DispatchQueue.main.async { self?.open(target) }
         }
-    }
-
-    func collectionView(
-        _ collectionView: UICollectionView,
-        didEndDisplaying cell: UICollectionViewCell,
-        forItemAt indexPath: IndexPath
-    ) {
-        // A card that left gives its player back now — the pool is shared.
-        guard collectionView === mediaView, let card = cell as? ForYouFollowingCardCell else { return }
-        playback?.stop(cell: card)
     }
 }
