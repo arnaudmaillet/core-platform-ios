@@ -71,6 +71,54 @@ struct PostShelfSectionTests {
         #expect(opened == [1, 0])
     }
 
+    // MARK: - Limits and "View all"
+
+    /// Each row draws at most its limit, in the section's order, and the
+    /// shelf is as tall as what it draws.
+    @Test func aRowDrawsAtMostItsLimit() {
+        let shelf = Self.shelf()
+        let media = (0..<6).map { Self.post("m\($0)", kind: .photo) }
+        let text = (0..<4).map { Self.post("t\($0)", kind: .text) }
+        shelf.render(media + text)
+        var changes = 0
+        shelf.onHeightChange = { changes += 1 }
+        shelf.mediaLimit = 3
+        shelf.textLimit = 1
+        #expect(shelf.debugRowIDs.media == media.prefix(3).map(\.id))
+        #expect(shelf.debugRowIDs.text == [text[0].id])
+        #expect(shelf.rowCounts == (3, 1))
+        #expect(changes == 2, "\(changes): a limit that moved a row's count did not re-size the host")
+        shelf.textLimit = 0
+        shelf.layoutIfNeeded()
+        #expect(shelf.textView.isHidden, "a row limited to nothing still drew")
+        #expect(shelf.preferredHeight(forWidth: 402)
+            == SectionTitleView.Metrics.height + ForYouFollowingRows.height(forWidth: 402, media: 3, text: 0))
+    }
+
+    /// "View all" ends the shelf's LAST row, runs the title's action, and is
+    /// drawn only while the title has one.
+    @Test func viewAllEndsTheLastRowAndRunsTheTitlesAction() {
+        let shelf = Self.shelf()
+        shelf.render([Self.post("m", kind: .photo), Self.post("t", kind: .text)])
+        shelf.showsViewAll = true
+        #expect(!shelf.debugTapViewAll(), "drawn with no action behind it")
+        var tapped = 0
+        shelf.onTitleTapped = { tapped += 1 }
+        #expect(shelf.debugTapViewAll())
+        #expect(tapped == 1)
+        let textItems = shelf.textView.numberOfItems(inSection: 0)
+        #expect(textItems == 2, "not at the end of the text row (the last one)")
+        #expect(shelf.mediaView.numberOfItems(inSection: 0) == 1)
+
+        // Media only: the media row is the last one.
+        shelf.render([Self.post("m", kind: .photo)])
+        #expect(shelf.mediaView.numberOfItems(inSection: 0) == 2)
+        var opened: [Int] = []
+        shelf.onCardTapped = { opened.append($0) }
+        #expect(shelf.debugTapViewAll())
+        #expect(tapped == 2 && opened.isEmpty, "View all opened a post")
+    }
+
     // MARK: - The lead stack
 
     /// A lead with nothing shown is zero tall and titles nothing.

@@ -58,11 +58,46 @@ final class PostShelfSection: UIView {
         return Self.height(forWidth: width, media: counts.media, text: counts.text)
     }
 
-    /// Each row's count.
+    /// Each row's count, as drawn: its posts, under its limit.
     var rowCounts: (media: Int, text: Int) {
-        let text = cards.filter { ForYouFollowingRows.Row($0) == .text }.count
-        return (cards.count - text, text)
+        let rows = shownRows
+        return (rows.media.count, rows.text.count)
     }
+
+    /// Each row's posts as drawn: the section's order, each row under its
+    /// limit (`mediaLimit`, `textLimit`).
+    private var shownRows: (media: [GalleryPost], text: [GalleryPost]) {
+        let rows = ForYouFollowingRows.partition(cards)
+        return (
+            mediaLimit.map { Array(rows.media.prefix(max(0, $0))) } ?? rows.media,
+            textLimit.map { Array(rows.text.prefix(max(0, $0))) } ?? rows.text
+        )
+    }
+
+    /// The most cards each row draws; nil for all of them (#1271).
+    var mediaLimit: Int? { didSet { if mediaLimit != oldValue { rowsChanged() } } }
+    var textLimit: Int? { didSet { if textLimit != oldValue { rowsChanged() } } }
+    /// A "View all" card ends the shelf's LAST row (`ShelfViewAllCell`): the
+    /// title's action, where a viewer who scrolled the row to its end
+    /// arrives. Drawn only while the title has an action.
+    var showsViewAll = false { didSet { if showsViewAll != oldValue { rowsChanged() } } }
+
+    /// The item a "View all" card stands for in a row's data source.
+    static let viewAllID = PostID("post-shelf.view-all")
+
+    private var drawsViewAll: Bool { showsViewAll && onTitleTapped != nil }
+
+    /// A limit or the "View all" changed: the rows redraw, and the host
+    /// re-sizes if a row's count moved.
+    private func rowsChanged() {
+        let counts = drawnCounts
+        applyCards()
+        setNeedsLayout()
+        if rowCounts != counts { onHeightChange?() }
+    }
+
+    /// The rows' counts as last applied — what a change is measured from.
+    private var drawnCounts: (media: Int, text: Int) = (0, 0)
 
     // MARK: - The host's
 
@@ -78,7 +113,10 @@ final class PostShelfSection: UIView {
     }
     /// The title was tapped: the host pushes the shelf's whole list.
     var onTitleTapped: (() -> Void)? {
-        didSet { header.onTap = onTitleTapped }
+        didSet {
+            header.onTap = onTitleTapped
+            if (oldValue == nil) != (onTitleTapped == nil), showsViewAll { applyCards() }
+        }
     }
     /// What VoiceOver says the title does.
     var titleAccessibilityHint: String? {
@@ -200,8 +238,14 @@ final class PostShelfSection: UIView {
         }
         mediaView.register(ForYouFollowingCardCell.self, forCellWithReuseIdentifier: ForYouFollowingCardCell.reuseID)
         textView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
+        for row in [mediaView, textView] {
+            row.register(ShelfViewAllCell.self, forCellWithReuseIdentifier: ShelfViewAllCell.reuseID)
+        }
         textSource = UICollectionViewDiffableDataSource(collectionView: textView) {
             [weak self] view, indexPath, id in
+            if id == Self.viewAllID {
+                return view.dequeueReusableCell(withReuseIdentifier: ShelfViewAllCell.reuseID, for: indexPath)
+            }
             let cell = view.dequeueReusableCell(
                 withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
             ) as! PostGridListRowCell
@@ -211,6 +255,9 @@ final class PostShelfSection: UIView {
         }
         mediaSource = UICollectionViewDiffableDataSource(collectionView: mediaView) {
             [weak self] view, indexPath, id in
+            if id == Self.viewAllID {
+                return view.dequeueReusableCell(withReuseIdentifier: ShelfViewAllCell.reuseID, for: indexPath)
+            }
             let cell = view.dequeueReusableCell(
                 withReuseIdentifier: ForYouFollowingCardCell.reuseID, for: indexPath
             ) as! ForYouFollowingCardCell
@@ -243,7 +290,7 @@ final class PostShelfSection: UIView {
     @discardableResult
     func render(_ posts: [GalleryPost]) -> Bool {
         guard posts != cards else { return false }
-        let counts = rowCounts
+        let counts = drawnCounts
         cards = posts
         applyCards()
         cardLookahead.setNeedsPlan()
@@ -257,20 +304,26 @@ final class PostShelfSection: UIView {
     /// The shelf's rows changed how many posts they hold — its host re-sizes.
     var onHeightChange: (() -> Void)?
 
-    /// Each row its own posts, in the section's order.
+    /// Each row its own posts, in the section's order, under its limit; the
+    /// last row ends on "View all" when the shelf offers it.
     private func applyCards() {
-        let rows = ForYouFollowingRows.partition(cards)
-        func snapshot(_ posts: [GalleryPost]) -> NSDiffableDataSourceSnapshot<Int, PostID> {
+        let rows = shownRows
+        drawnCounts = (rows.media.count, rows.text.count)
+        let viewAllInText = !rows.text.isEmpty
+        func snapshot(_ posts: [GalleryPost], endsOnViewAll: Bool) -> NSDiffableDataSourceSnapshot<Int, PostID> {
             var snapshot = NSDiffableDataSourceSnapshot<Int, PostID>()
             snapshot.appendSections([0])
             snapshot.appendItems(posts.map(\.id))
+            if endsOnViewAll, !posts.isEmpty { snapshot.appendItems([Self.viewAllID]) }
             return snapshot
         }
         let animated = window != nil
-        mediaSource.apply(snapshot(rows.media), animatingDifferences: animated) { [weak self] in
+        mediaSource.apply(
+            snapshot(rows.media, endsOnViewAll: drawsViewAll && !viewAllInText), animatingDifferences: animated
+        ) { [weak self] in
             self?.updateAutoplay()
         }
-        textSource.apply(snapshot(rows.text), animatingDifferences: animated)
+        textSource.apply(snapshot(rows.text, endsOnViewAll: drawsViewAll && viewAllInText), animatingDifferences: animated)
     }
 
     /// A text card: the list's own card (`PostGridListRowCell`) held to the
@@ -777,6 +830,24 @@ final class PostShelfSection: UIView {
     /// The title's OWN tap path (`SectionTitleView.debugTap`), not the host's
     /// closure: calling the closure is how #312's dead chevron passed.
     func debugTapTitle() { header.debugTap() }
+
+    /// Taps the "View all" card through its row's selection path; false when
+    /// no row ends on one.
+    func debugTapViewAll() -> Bool {
+        for (row, source) in [(mediaView, mediaSource!), (textView, textSource!)] {
+            if let indexPath = source.indexPath(for: Self.viewAllID) {
+                collectionView(row, didSelectItemAt: indexPath)
+                return true
+            }
+        }
+        return false
+    }
+
+    /// The posts each row holds as drawn, "View all" left out.
+    var debugRowIDs: (media: [PostID], text: [PostID]) {
+        (mediaSource.snapshot().itemIdentifiers.filter { $0 != Self.viewAllID },
+         textSource.snapshot().itemIdentifiers.filter { $0 != Self.viewAllID })
+    }
     var debugCountText: String? { header.debugCountText }
     #endif
 }
@@ -787,6 +858,10 @@ extension PostShelfSection: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         collectionView.deselectItem(at: indexPath, animated: false)
         guard let id = cardID(in: collectionView, at: indexPath) else { return }
+        guard id != Self.viewAllID else {
+            onTitleTapped?()
+            return
+        }
         open(id)
     }
 
