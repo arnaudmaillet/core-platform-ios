@@ -269,6 +269,42 @@ struct ZoomFlight {
         mediaCard.frame = rect
     }
 
+    /// The share of a FRAMED flight over which the source's furniture (a
+    /// card's caption and author, `zoomRestingChrome`) is seen — the first
+    /// part of an opening, the last part of a close.
+    static let framedRestingChromeSpan: Double = 0.3
+
+    /// The source's furniture, faded with the flight — on the flight's own
+    /// curve for a filling flight, within `framedRestingChromeSpan` of the
+    /// tile end for a FRAMED one.
+    ///
+    /// ⚠️ A FRAMED FLIGHT'S PICTURE CHANGES SHAPE UNDER ITS WORDS (the owner,
+    /// 2026-10-16, on a device: "the caption is no longer anchored, it
+    /// jumps"). The furniture is the tile's layout, posed by a uniform scale of
+    /// the picture's WIDTH, while the picture goes from the tile's portrait
+    /// crop to the page's fitted landscape rect: wider much faster than taller.
+    /// Faded over the whole flight, the words grew past the picture they sit
+    /// on, the author line cut off by its foot. Gone within the first third
+    /// (back within the last, on a close), they are only seen while the
+    /// picture is still the tile's shape. Keyframes inside the flight's block,
+    /// so a scrubbed or reversed flight carries the fade with it; a pose made
+    /// outside any animation (a grab's frame) is simply set.
+    private func fadeRestingChrome(to alpha: CGFloat) {
+        guard let resting = mediaCard.zoomRestingChrome else { return }
+        guard isFramed, UIView.inheritedAnimationDuration > 0 else {
+            resting.alpha = alpha
+            return
+        }
+        let span = Self.framedRestingChromeSpan
+        UIView.animateKeyframes(withDuration: 0, delay: 0, options: [.calculationModeLinear]) {
+            UIView.addKeyframe(
+                withRelativeStartTime: alpha == 0 ? 0 : 1 - span, relativeDuration: span
+            ) {
+                resting.alpha = alpha
+            }
+        }
+    }
+
     /// The picture's card's rect in a window of `size` at `fit` — the window's
     /// own bounds for a filling flight.
     private func mediaRect(inWindowOfSize size: CGSize, fit: CGFloat) -> CGRect {
@@ -530,7 +566,7 @@ struct ZoomFlight {
         // the handshake depends on rather than on whatever fraction it was
         // holding.
         mediaCard.setZoomContentBlend(1)
-        mediaCard.zoomRestingChrome?.alpha = 1
+        fadeRestingChrome(to: 1)
         shadow.frame = CGRect(origin: landing.origin, size: shadow.frame.size)
         shadow.alpha = 1
         let center = CGPoint(x: landing.width / 2, y: landing.height / 2)
@@ -563,7 +599,7 @@ struct ZoomFlight {
         // handed as its departure operand. A card with no second picture reads
         // this as the no-op it is.
         mediaCard.setZoomContentBlend(0)
-        mediaCard.zoomRestingChrome?.alpha = 0
+        fadeRestingChrome(to: 0)
         shadow.alpha = 0
         let center = CGPoint(x: pageFrame.width / 2, y: pageFrame.height / 2)
         for surface in posedMediaSurfaces {
