@@ -385,3 +385,25 @@ struct SnapCommentTickerViewTests {
         #expect(abs(velocity - -300) < 0.01)
     }
 }
+
+/// A bubble's position from its two witnesses (#1310): the presentation can
+/// lie to the LEFT right after a flight reattaches (it reports the exit the
+/// model rests at), and is the truth to the RIGHT (a frozen layer clock).
+struct TickerVisualCenterTests {
+    /// Traced on the simulator: presentation 0, clock 442 — a live bubble
+    /// read as gone, and the next one laid over it.
+    @Test func aPresentationStuckAtTheExitNeverHidesALiveBubble() {
+        #expect(SnapCommentTickerView.visualCenterX(analytic: 420, presented: -30, flightStart: 460) == 420)
+    }
+
+    /// A transition froze the layer clock: the bubble is where it was drawn.
+    @Test func aFrozenClockKeepsTheDrawnPosition() {
+        #expect(SnapCommentTickerView.visualCenterX(analytic: 200, presented: 260, flightStart: 300) == 260)
+    }
+
+    /// Never past where the flight departed.
+    @Test func neverPastTheFlightsStart() {
+        #expect(SnapCommentTickerView.visualCenterX(analytic: 200, presented: 900, flightStart: 300) == 300)
+        #expect(SnapCommentTickerView.visualCenterX(analytic: 200, presented: nil, flightStart: 300) == 200)
+    }
+}

@@ -629,8 +629,11 @@ final class SnapCommentTickerView: UIView {
         // layer reports the frozen truth, so measuring the actual gap makes
         // overlap impossible by construction and simply defers the spawn
         // until the clock runs again.
-        if let last = laneBubbles[lane].last {
-            let lastRight = currentVisualCenterX(of: last, lane: lane) + last.width / 2
+        // ⚠️ THE RIGHTMOST BUBBLE, NOT THE LAST ONE. After a scrub the
+        // array's last is not always the one nearest the entry edge
+        // (traced: last 317, rightmost 349), and a spawn measured against
+        // the wrong one was laid over the real one.
+        if let lastRight = laneBubbles[lane].map({ currentVisualCenterX(of: $0, lane: lane) + $0.width / 2 }).max() {
             let deferral = Self.entryDeferral(
                 lastRightEdge: lastRight, bandWidth: bandWidth, speed: Self.laneSpeeds[lane]
             )
@@ -864,12 +867,14 @@ final class SnapCommentTickerView: UIView {
                 }
             }
             laneBubbles[lane] = kept
+            // Read BEFORE the flights reattach: `animateToExit` parks each
+            // model at the exit, and an edge read after it is always ~0.
+            let rightEdge = laneBubbles[lane].map { $0.view.layer.position.x + $0.width / 2 }.max()
             for bubble in laneBubbles[lane] {
                 animateToExit(bubble, lane: lane)
             }
             let speed = Self.laneSpeeds[lane]
-            if let last = laneBubbles[lane].last {
-                let rightEdge = last.view.layer.position.x + last.width / 2
+            if let rightEdge {
                 armSpawn(lane: lane, after: TimeInterval(max(0, (rightEdge + Self.interItemGap - bandWidth) / speed)))
             } else {
                 armSpawn(lane: lane, after: 0)
@@ -1047,17 +1052,33 @@ final class SnapCommentTickerView: UIView {
     /// design.
     private func currentVisualCenterX(of bubble: Bubble, lane: Int) -> CGFloat {
         let layer = bubble.view.layer
-        if let presented = layer.presentation() {
-            return presented.position.x
-        }
-        if layer.animation(forKey: "flight") != nil {
-            return max(
-                -bubble.width / 2,
-                bubble.flightStartX - Self.laneSpeeds[lane]
-                    * CGFloat(clock() - bubble.flightStartTime)
-            )
-        }
-        return layer.position.x
+        guard layer.animation(forKey: "flight") != nil else { return layer.position.x }
+        let analytic = max(
+            -bubble.width / 2,
+            bubble.flightStartX - Self.laneSpeeds[lane] * CGFloat(clock() - bubble.flightStartTime)
+        )
+        return Self.visualCenterX(
+            analytic: analytic, presented: layer.presentation()?.position.x, flightStart: bubble.flightStartX
+        )
+    }
+
+    /// Where an in-flight bubble is, from its two witnesses (#1310).
+    ///
+    /// ⚠️ THE PRESENTATION CAN LIE TO THE LEFT. Right after a flight is
+    /// (re)attached — the hand-back after a scrub — `presentation()` still
+    /// reports the model value, which rests at the EXIT by design: traced at
+    /// 0 for a bubble the clock put at 442. Trusted, the entry edge read as
+    /// clear and the next bubble was laid on top of a live one — the
+    /// danmaku's lines piling up after a few scrubs (owner, 2026-10-17).
+    ///
+    /// It is still the truth when it is to the RIGHT: a percent-driven
+    /// transition freezes the layer clock while the wall clock runs on, and
+    /// the bubble really is where the render server left it. So the rightmost
+    /// of the two, never past where the flight departed: an error can only
+    /// delay a spawn, never overlap one.
+    static func visualCenterX(analytic: CGFloat, presented: CGFloat?, flightStart: CGFloat) -> CGFloat {
+        guard let presented else { return analytic }
+        return min(max(analytic, presented), flightStart)
     }
 
     // MARK: - Queue & pool plumbing
