@@ -101,18 +101,18 @@ struct PlaceProfileTests {
         #expect(profile.debugMetricsFrame.maxY <= profile.debugIdentityFrame.maxY + 0.5)
     }
 
-    /// On the profile's grid: the flag on the column's leading edge, as an
-    /// avatar is; the name and the counters beside it, to the column's end.
+    /// On the profile's column, as the HEADLINE (#1304): the flag at the
+    /// column's leading edge with the likes beside it, the name UNDER that
+    /// line, from the same leading edge.
     @Test func theIdentityIsLaidOnTheProfilesColumn() {
         let profile = makeProfile()
         laidOut(profile)
         let identity = profile.debugIdentityFrame
         #expect(abs(identity.minX - HeroBannerMetrics.identityInset) < 0.5)
         #expect(abs(identity.maxX - (402 - HeroBannerMetrics.identityInset)) < 0.5)
-        let flagRight = identity.minX + PlaceIdentityView.flagSide
-        #expect(profile.debugNameFrame.minX > flagRight, "the name runs under the flag")
-        #expect(abs(profile.debugMetricsFrame.minX - profile.debugNameFrame.minX) < 0.5)
-        #expect(abs(profile.debugMetricsFrame.maxX - (402 - HeroBannerMetrics.identityInset)) < 0.5)
+        #expect(abs(profile.debugNameFrame.minX - identity.minX) < 0.5, "the name is not under the flag")
+        #expect(profile.debugNameFrame.minY > profile.debugMetricsFrame.minY, "the name is not under the likes' line")
+        #expect(profile.debugMetricsFrame.minX > identity.minX, "the likes are not beside the flag")
     }
 
     /// "#3" rides the flag in its bubble when the place has a rank…
@@ -145,7 +145,7 @@ struct PlaceProfileTests {
         #expect(identity.flagView.image === flag)
         #expect(identity.titleLabel.name == "Paris")
         #expect(identity.titleLabel.subtitle == "France")
-        #expect(identity.statViews.map(\.captionLabel.text) == ["Likes", "Posts"])
+        #expect(identity.statViews.map(\.captionLabel.text) == ["Likes"])
 
         let bare = makeProfile()
         laidOut(bare)
@@ -444,59 +444,52 @@ struct PlaceProfileTests {
         profile.beginLoading()
         for _ in 0..<50 where profile.renderedActivity.isEmpty { await Task.yield() }
         #expect(profile.debugLikes == 57)
-        // Both posts count, the text one too.
-        #expect(profile.debugIdentity.statViews.map(\.valueLabel.text) == ["57", "2"])
+        // Both posts' likes count, the text one's too.
+        #expect(profile.debugIdentity.statViews.map(\.valueLabel.text) == ["57"])
     }
 
     // MARK: - The follow toggle
 
-    /// The tray's Pin capsule mirrors the injected state and flips it —
-    /// "Pin", prominent, the outline pin → toggle → "Pinned", quiet, the
-    /// filled pin → toggle → "Pin" — always reading the caller's answer
-    /// rather than caching its own.
-    @Test func thePinButtonTogglesTheInjectedState() throws {
+    /// The bar's STAR mirrors the injected state and flips it (#1304: the
+    /// tray's Pin capsule became the bar's star) — outline → toggle → filled
+    /// in the save star's gold → toggle → outline — always reading the
+    /// caller's answer rather than caching its own.
+    /// The place page's identity is the HEADLINE (#1304): its likes alone,
+    /// large, beside the flag; no posts' count.
+    @Test func theIdentityIsTheHeadlineWithItsLikesAlone() {
+        let profile = makeProfile()
+        laidOut(profile)
+        #expect(profile.debugIdentity.layout == .headline)
+        #expect(profile.debugIdentity.statViews.count == 1)
+        #expect(profile.debugIdentity.statViews.first?.captionLabel.text == "Likes")
+    }
+
+    @Test func theStarTogglesTheInjectedState() throws {
         var followed = false
         let profile = makeProfile(following: ClusterGalleryFollowing(
             isFollowing: { followed },
             toggle: { followed.toggle(); return followed }
         ))
         laidOut(profile)
-        let pin = try #require(profile.debugTrayButtons.first)
-        #expect(pin.configuration?.title == "Pin")
-        #expect(pin.configuration?.image == UIImage(systemName: "pin"))
-        #expect(pin.configuration?.baseBackgroundColor != HeroTray.fill, "the invitation is the prominent capsule")
-        #expect(pin.accessibilityLabel == "Follow this place")
+        let star = try #require(profile.debugStarItem)
+        let tap = { (star.target as? NSObject)?.perform(star.action) }
+        #expect(star.image == SaveStar.image(saved: false))
+        #expect(star.accessibilityLabel == "Follow this place")
 
-        pin.sendActions(for: .primaryActionTriggered)
+        _ = tap()
         #expect(followed, "the toggle reached the caller's store")
-        #expect(pin.configuration?.title == "Pinned")
-        #expect(pin.configuration?.image == UIImage(systemName: "pin.fill"))
-        #expect(pin.configuration?.baseBackgroundColor == HeroTray.fill)
-        #expect(pin.accessibilityLabel == "Unfollow this place")
+        #expect(star.image == SaveStar.image(saved: true))
+        #expect(star.accessibilityLabel == "Unfollow this place")
 
-        pin.sendActions(for: .primaryActionTriggered)
+        _ = tap()
         #expect(!followed)
-        #expect(pin.configuration?.title == "Pin")
+        #expect(star.image == SaveStar.image(saved: false))
     }
 
-    /// The pin left the bar's corner for the tray (5 October 2026): the bar
-    /// keeps the balance alone, in its own bubble.
-    @Test func theBarKeepsTheBalanceAndNoPin() throws {
-        let profile = makeProfile(
-            following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }),
-            wallet: WalletStore(defaults: Self.makeWalletDefaults())
-        )
-        profile.loadViewIfNeeded()
-        let items = try #require(profile.navigationItem.rightBarButtonItems)
-        #expect(items.count == 1)
-        #expect(items[0].customView is WalletBadgeButton)
-        #expect(items.allSatisfy { !$0.sharesBackground })
-    }
-
-    /// The tray under the identity, as the profile's: the Pin capsule
-    /// leading, the QR code's bubble beside it — each only with its seam,
-    /// and no tray at all with neither.
-    @Test func theTrayHoldsPinThenTheQRCodeEachWithItsSeam() throws {
+    /// ⚠️ THE TRAY IS GONE (#1304): its two controls are bar items, left of
+    /// the balance — rightmost first: balance, QR code, star — each in its
+    /// own bubble, each only with its seam.
+    @Test func theBarHoldsTheBalanceThenTheQRCodeThenTheStar() throws {
         let profile = PlaceProfileViewController(
             postIDs: [], placeName: "Paris • City Cluster",
             identity: PlaceIdentity(
@@ -507,36 +500,31 @@ struct PlaceProfileTests {
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
             videoPlayback: nil,
             following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }),
+            wallet: WalletStore(defaults: Self.makeWalletDefaults()),
             loadPosts: { [] }, openPost: { _, _, _ in }
         )
         laidOut(profile)
-        let buttons = profile.debugTrayButtons
-        try #require(buttons.count == 2)
-        #expect(buttons[0].configuration?.title == "Pin")
-        #expect(buttons[1].configuration?.title == nil, "the QR code is an icon alone")
-        #expect(buttons[1].configuration?.image == UIImage(systemName: "qrcode"))
-        let tray = profile.debugTrayFrame
-        #expect(abs(tray.height - HeroTray.bubbleSize) < 0.5)
-        #expect(tray.minY > profile.debugIdentityFrame.maxY, "the tray is not under the identity")
-        #expect(abs(tray.minX - HeroBannerMetrics.identityInset) < 0.5, "not on the profile's column")
-        // Leading: the bubble right after the capsule, not at the row's end.
-        let qr = buttons[1].convert(buttons[1].bounds, to: profile.view)
-        #expect(qr.maxX < 402 / 2, "the QR code drifted to the trailing edge")
-        #expect(abs(qr.width - HeroTray.bubbleSize) < 0.5)
+        let items = profile.debugTrailingItems
+        try #require(items.count == 3)
+        #expect(items[0].customView is WalletBadgeButton, "the balance left the corner")
+        #expect(items[1] === profile.debugQRItem)
+        #expect(items[1].image == UIImage(systemName: "qrcode"))
+        #expect(items[2] === profile.debugStarItem)
+        #expect(items.allSatisfy { !$0.sharesBackground })
 
-        // The bubble opens the PROFILE'S share sheet, shared: the place's
-        // name, country and flag on its card, its link in the code, and no
-        // row of people (the page has no source of them).
+        // The QR code opens the PROFILE'S share sheet, shared, with no row
+        // of people (the page has no source of them).
         let sheet = try #require(profile.debugMakeShareSheet())
         sheet.loadViewIfNeeded()
         #expect(!sheet.debugShowsTargetsRow, "a people row with nobody in it")
 
-        let pinOnly = makeProfile(following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }))
-        laidOut(pinOnly)
-        #expect(pinOnly.debugTrayButtons.count == 1, "a QR code with no link")
+        let starOnly = makeProfile(following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }))
+        laidOut(starOnly)
+        #expect(starOnly.debugQRItem == nil, "a QR code with no link")
+        #expect(starOnly.debugStarItem != nil)
         let bare = makeProfile(following: nil)
         laidOut(bare)
-        #expect(bare.debugTrayButtons.isEmpty)
+        #expect(bare.debugStarItem == nil && bare.debugQRItem == nil)
         // No tray: the first post stands its gap under the identity itself.
         #expect(abs(bare.debugIdentityClearance - Spacing.xl) < 0.5)
     }

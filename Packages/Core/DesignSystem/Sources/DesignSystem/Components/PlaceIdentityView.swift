@@ -28,7 +28,25 @@ import UIKit
 ///
 /// Page ink by default; a place page standing it on a picture gives each
 /// half the picture's ink (`setTitleInk`, `setCountersInk`).
+///
+/// **The place page's own arrangement is the HEADLINE** (`Layout.headline`,
+/// the owner, 2026-10-16, #1304): one line — the flag as tall as the first
+/// counter's figure, the figure large beside it, its word after it — and the
+/// title under that line; the rank much bigger, across the flag's rim.
+///
+/// ```
+///  ⬤ 29.4K Likes
+///  #3
+///  Paris  France
+/// ```
 public final class PlaceIdentityView: UIView {
+    /// How the identity is arranged.
+    public enum Layout: Sendable {
+        /// The profile's: the big flag beside the title over the counters.
+        case profile
+        /// The place page's: flag and figure on one line, the title under it.
+        case headline
+    }
     /// A counter: its figure ("38K") and the word for what it counts.
     public struct Counter: Equatable, Sendable {
         public let value: String
@@ -55,7 +73,7 @@ public final class PlaceIdentityView: UIView {
     /// The round flag — or, for a place with none, a neutral disc.
     public let flagView = PlaceFlagView()
     /// "#19" over the flag's rim; hidden without a rank.
-    public let rankBubble = PlaceRankBubble()
+    public let rankBubble: PlaceRankBubble
     /// The name and its subtitle.
     public let titleLabel: PlaceTitleLabel
     /// The counters' row: `counterParts` equal parts.
@@ -64,9 +82,16 @@ public final class PlaceIdentityView: UIView {
     public private(set) var statViews: [PlaceStatView] = []
     /// The title over the counters.
     public let column = UIStackView()
+    /// The arrangement this identity was built in.
+    public let layout: Layout
 
-    public init(flag: UIImage?, name: String, subtitle: String?, counters: [Counter], rank: String?) {
+    public init(
+        flag: UIImage?, name: String, subtitle: String?, counters: [Counter], rank: String?,
+        layout: Layout = .profile
+    ) {
         titleLabel = PlaceTitleLabel(name: name, subtitle: subtitle ?? "")
+        self.layout = layout
+        rankBubble = PlaceRankBubble(large: layout == .headline)
         super.init(frame: .zero)
 
         flagView.contentMode = .scaleAspectFit
@@ -79,6 +104,10 @@ public final class PlaceIdentityView: UIView {
         setFlag(flag)
         rankBubble.accessibilityIdentifier = "place.identity.rank"
         setRank(rank)
+        if layout == .headline {
+            buildHeadline(counters: counters)
+            return
+        }
         let flagBox = UIView()
         for view in [flagView, rankBubble] {
             view.translatesAutoresizingMaskIntoConstraints = false
@@ -155,6 +184,82 @@ public final class PlaceIdentityView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    /// The headline: `[flag] 29.4K Likes` on one line, the flag as tall as
+    /// the figure's line, the title under it; the big rank centred on the
+    /// flag's bottom-trailing rim, the figure kept clear of it.
+    private func buildHeadline(counters: [Counter]) {
+        statViews = counters.prefix(1).map {
+            PlaceStatView(value: $0.value, caption: $0.caption, style: .headline)
+        }
+        // ⚠️ A PLAIN VIEW, NOT A STACK. A stack's spacing is a required
+        // equality, and the figure must also clear the rank: a wide rank
+        // ("#126") made the two disagree and Auto Layout crushed the bubble
+        // to a sliver. Here the figure sits `md` after the flag by
+        // preference and moves right for the rank when it has to.
+        let line = UIView()
+        for view in [flagView] + statViews {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            line.addSubview(view)
+        }
+        column.addArrangedSubview(line)
+        column.addArrangedSubview(titleLabel)
+        column.axis = .vertical
+        // Both rows span the width: the line is a plain view whose figure
+        // only bounds its trailing edge, and the title is composed for the
+        // width it is given.
+        column.alignment = .fill
+        column.spacing = Spacing.sm
+        column.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(column)
+        rankBubble.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(rankBubble)
+        var constraints = [
+            column.topAnchor.constraint(equalTo: topAnchor),
+            column.leadingAnchor.constraint(equalTo: leadingAnchor),
+            column.trailingAnchor.constraint(equalTo: trailingAnchor),
+            column.bottomAnchor.constraint(equalTo: bottomAnchor),
+            // ⚠️ THE TITLE IS GIVEN THE WHOLE WIDTH. Left to its own size in a
+            // leading column it was cut for whatever width it had first
+            // ("Pa…"): the label composes its text for the width it is laid
+            // at, and nothing asked it to be wider.
+            titleLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
+            flagView.widthAnchor.constraint(equalTo: flagView.heightAnchor),
+            // The rank across the flag's bottom-trailing rim, as a badge.
+            rankBubble.centerXAnchor.constraint(equalTo: flagView.trailingAnchor, constant: -4),
+            // Seated on the flag's foot rather than hanging below it: an
+            // overhang into the gap above the name squashed the bubble.
+            rankBubble.bottomAnchor.constraint(equalTo: flagView.bottomAnchor),
+            // The title stands clear of the rank's overhang.
+            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: rankBubble.bottomAnchor, constant: Spacing.xs),
+        ]
+        constraints += [
+            flagView.leadingAnchor.constraint(equalTo: line.leadingAnchor),
+            flagView.topAnchor.constraint(equalTo: line.topAnchor),
+            flagView.bottomAnchor.constraint(equalTo: line.bottomAnchor),
+        ]
+        if let stat = statViews.first {
+            let beside = stat.leadingAnchor.constraint(equalTo: flagView.trailingAnchor, constant: Spacing.md)
+            beside.priority = .defaultLow
+            constraints += [
+                // ONE LINE: the flag is the figure's line tall.
+                flagView.heightAnchor.constraint(equalTo: stat.valueLabel.heightAnchor),
+                stat.centerYAnchor.constraint(equalTo: flagView.centerYAnchor),
+                stat.topAnchor.constraint(greaterThanOrEqualTo: line.topAnchor),
+                stat.trailingAnchor.constraint(lessThanOrEqualTo: line.trailingAnchor),
+                stat.leadingAnchor.constraint(greaterThanOrEqualTo: flagView.trailingAnchor, constant: Spacing.md),
+                // The figure stands clear of the rank, however wide it is.
+                stat.leadingAnchor.constraint(greaterThanOrEqualTo: rankBubble.trailingAnchor, constant: Spacing.xs),
+                beside,
+            ]
+        } else {
+            constraints += [
+                flagView.heightAnchor.constraint(equalToConstant: 40),
+                flagView.trailingAnchor.constraint(lessThanOrEqualTo: line.trailingAnchor),
+            ]
+        }
+        NSLayoutConstraint.activate(constraints)
+    }
 
     /// The round flag; nil draws a neutral disc.
     public func setFlag(_ image: UIImage?) {
@@ -330,16 +435,31 @@ public final class PlaceTitleLabel: UILabel {
 /// over the word that says what it counts, centred on each other, the column
 /// as wide as the wider of the two.
 public final class PlaceStatView: UIView {
+    /// The profile's column, or the headline's large figure with its word
+    /// after it on the same baseline (#1304).
+    enum Style { case column, headline }
+
     public let valueLabel = UILabel()
     public let captionLabel = UILabel()
 
-    init(value: String, caption: String) {
+    init(value: String, caption: String, style: Style = .column) {
         super.init(frame: .zero)
-        // The profile's type, capped (#482).
-        valueLabel.font = .scaledSystemFont(ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24)
+        switch style {
+        case .column:
+            // The profile's type, capped (#482).
+            valueLabel.font = .scaledSystemFont(ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24)
+            captionLabel.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 16)
+        case .headline:
+            // Large: the place's number, the page's headline (#1304).
+            valueLabel.font = .scaledSystemFont(ofSize: 34, weight: .bold, relativeTo: .largeTitle, maximumPointSize: 44)
+            captionLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20)
+            // The figure keeps its own line height: the flag follows it, never
+            // the other way round (a stretched label centres its glyphs and
+            // leaves the word beside it floating above them).
+            valueLabel.setContentHuggingPriority(.required, for: .vertical)
+        }
         valueLabel.adjustsFontForContentSizeCategory = true
         valueLabel.textAlignment = .center
-        captionLabel.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 16)
         captionLabel.adjustsFontForContentSizeCategory = true
         captionLabel.textAlignment = .center
         captionLabel.text = caption
@@ -348,8 +468,8 @@ public final class PlaceStatView: UIView {
             label.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
         let stack = UIStackView(arrangedSubviews: [valueLabel, captionLabel])
-        stack.axis = .vertical
-        stack.alignment = .center
+        stack.axis = style == .column ? .vertical : .horizontal
+        stack.alignment = style == .column ? .center : .firstBaseline
         stack.spacing = Spacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
@@ -406,26 +526,30 @@ public final class PlaceRankBubble: UIView {
         }
     }
 
-    init() {
+    init(large: Bool = false) {
         super.init(frame: .zero)
         backgroundColor = UIColor(white: 0.1, alpha: 1)
         layer.borderColor = UIColor.systemBackground.cgColor
         layer.borderWidth = 2
         layer.cornerCurve = .continuous
-        label.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 13, weight: .heavy, relativeTo: .caption1, maximumPointSize: 19
-        )
+        // The headline's is much bigger (the owner, 2026-10-16, #1304).
+        label.font = large
+            ? .scaledMonospacedDigitSystemFont(ofSize: 20, weight: .heavy, relativeTo: .title3, maximumPointSize: 28)
+            : .scaledMonospacedDigitSystemFont(ofSize: 13, weight: .heavy, relativeTo: .caption1, maximumPointSize: 19)
         label.adjustsFontForContentSizeCategory = true
         label.textColor = .white
         label.textAlignment = .center
         label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // Nor in height: the headline's name below once pulled the bubble
+        // down onto its glyphs.
+        label.setContentCompressionResistancePriority(.required, for: .vertical)
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         NSLayoutConstraint.activate([
             label.topAnchor.constraint(equalTo: topAnchor, constant: 3),
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -3),
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 7),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: large ? 10 : 7),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: large ? -10 : -7),
             widthAnchor.constraint(greaterThanOrEqualTo: heightAnchor),
         ])
         isAccessibilityElement = true

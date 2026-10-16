@@ -139,7 +139,6 @@ struct PlacePostsTests {
         #expect(await settle { profile.renderedActivity.count == 5 })
         // The most liked post of the pages still comes AFTER the pins.
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["pin-b", "pin-a", "x1", "x2", "x3"])
-        #expect(profile.debugIdentity.statViews.map(\.valueLabel.text).last == "5", "two pins and three new posts")
 
         profile.loadMorePosts()
         try? await Task.sleep(for: .milliseconds(50))

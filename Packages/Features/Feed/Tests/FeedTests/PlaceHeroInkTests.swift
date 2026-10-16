@@ -86,7 +86,7 @@ struct PlaceHeroInkTests {
         let profile = place(picture, style: style)
         #expect(profile.debugHasBannerPicture)
         let measured = try #require(profile.debugHeroInkContrast())
-        #expect(measured.count == 5)
+        #expect(measured.count == 3)
         for (label, contrast) in measured {
             #expect(contrast.min >= 4.5, "\(label) \(contrast) \(profile.debugHeroInkTones)")
         }
@@ -134,7 +134,6 @@ struct PlaceHeroInkTests {
             let profile = place(picture, style: style)
             #expect(profile.debugHeroInkTones.name == pageSide, "\(picture)")
             #expect(profile.debugHeroInkTones.likes == pageSide, "\(picture)")
-            #expect(profile.debugHeroInkTones.posts == pageSide, "\(picture)")
             #expect(profile.debugHeroNameInk == pageSide.primary, "\(picture)")
         }
     }
@@ -145,7 +144,7 @@ struct PlaceHeroInkTests {
     @Test func theBlurIsNilUnderTheName() throws {
         let profile = place(.stripes, style: .light)
         let measured = try #require(profile.debugHeroInkContrast())
-        let name = try #require(measured.first { $0.0 == "Paris" })
+        let name = try #require(measured.first { $0.0.hasPrefix("Paris") }, "\(measured.map(\.0))")
         #expect(name.1.median - name.1.min > 1, "name \(name.1)")
     }
 

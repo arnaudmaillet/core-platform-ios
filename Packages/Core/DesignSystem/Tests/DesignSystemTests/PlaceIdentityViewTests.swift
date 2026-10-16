@@ -202,4 +202,87 @@ struct PlaceIdentityViewTests {
         #expect(page.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor == .label)
         #expect(identity.titleLabel.layer.shadowOpacity == 0)
     }
+
+    // MARK: - The headline (the place page, #1304)
+
+    private func headline(rank: String? = "#3") -> PlaceIdentityView {
+        let view = PlaceIdentityView(
+            flag: nil, name: "Paris", subtitle: "France",
+            counters: [.init(value: "29.4K", caption: "Likes")], rank: rank, layout: .headline
+        )
+        view.frame = CGRect(x: 0, y: 0, width: 370, height: 300)
+        view.frame.size = view.systemLayoutSizeFitting(
+            CGSize(width: 370, height: 0),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        )
+        view.layoutIfNeeded()
+        return view
+    }
+
+    /// ⚠️ ONE LINE: the flag is the large figure's line tall and stands
+    /// before it; the title is under that line.
+    @Test func theHeadlineIsTheFlagAndTheFigureOnOneLineWithTheNameUnder() throws {
+        let view = headline()
+        let likes = try #require(view.statViews.first)
+        #expect(view.statViews.count == 1)
+        let flag = view.flagView.convert(view.flagView.bounds, to: view)
+        let figure = likes.valueLabel.convert(likes.valueLabel.bounds, to: view)
+        let title = view.titleLabel.convert(view.titleLabel.bounds, to: view)
+        #expect(abs(flag.height - figure.height) < 0.5, "the flag is not the figure's line tall")
+        #expect(abs(flag.midY - figure.midY) < 1, "the flag and the figure are not on one line")
+        #expect(flag.maxX < figure.minX, "the figure is not right of the flag")
+        #expect(likes.valueLabel.font.pointSize >= 34, "the figure is not large")
+        #expect(title.minY >= flag.maxY, "the name is not under the line")
+        // The name has the whole width: in a leading column it was once cut
+        // for the width it first got, "Pa…".
+        #expect(abs(title.width - view.bounds.width) < 0.5, "the name is not given the width")
+        #expect(view.titleLabel.text == "Paris  France", "the name is cut")
+    }
+
+    /// The rank is MUCH bigger than the profile's, across the flag's rim, and
+    /// the figure stands clear of it.
+    @Test func theHeadlinesRankIsMuchBigger() throws {
+        let view = headline()
+        let profile = PlaceIdentityView(
+            flag: nil, name: "Paris", subtitle: "France",
+            counters: [.init(value: "29.4K", caption: "Likes")], rank: "#3"
+        )
+        #expect(view.rankBubble.label.font.pointSize >= profile.rankBubble.label.font.pointSize * 1.5)
+        let rank = view.rankBubble.convert(view.rankBubble.bounds, to: view)
+        let flag = view.flagView.convert(view.flagView.bounds, to: view)
+        let figure = try #require(view.statViews.first).convert(view.statViews[0].bounds, to: view)
+        #expect(rank.intersects(flag), "the rank is not on the flag")
+        #expect(rank.maxX <= figure.minX, "the rank covers the figure")
+    }
+
+    /// A wide rank keeps its whole text: the figure moves right for it. A
+    /// stack's fixed spacing once crushed "#126" to a sliver on the device.
+    @Test func aWideRankIsNeverCrushed() throws {
+        let view = headline(rank: "#126")
+        let bubble = view.rankBubble
+        #expect(bubble.label.bounds.width >= bubble.label.intrinsicContentSize.width - 0.5, "the rank is cut")
+        #expect(bubble.label.bounds.height >= bubble.label.intrinsicContentSize.height - 0.5, "the rank is squashed")
+        let rank = bubble.convert(bubble.bounds, to: view)
+        let figure = try #require(view.statViews.first).convert(view.statViews[0].bounds, to: view)
+        #expect(rank.maxX <= figure.minX, "the rank covers the figure")
+    }
+
+    /// The word sits on the figure's baseline, not above it.
+    @Test func theWordSharesTheFiguresBaseline() throws {
+        let view = headline()
+        let likes = try #require(view.statViews.first)
+        let value = likes.valueLabel, caption = likes.captionLabel
+        let valueBaseline = value.convert(CGPoint(x: 0, y: value.firstBaselineAnchorY), to: view).y
+        let captionBaseline = caption.convert(CGPoint(x: 0, y: caption.firstBaselineAnchorY), to: view).y
+        #expect(abs(valueBaseline - captionBaseline) < 1, "the word floats off the figure's baseline")
+        #expect(abs(value.bounds.height - value.intrinsicContentSize.height) < 0.5, "the figure's line is stretched")
+    }
+}
+
+private extension UILabel {
+    /// The first baseline in the label's own space, for a centred single line.
+    var firstBaselineAnchorY: CGFloat {
+        let line = font.lineHeight
+        return (bounds.height - line) / 2 + font.ascender
+    }
 }

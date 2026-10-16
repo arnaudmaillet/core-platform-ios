@@ -156,16 +156,16 @@ final class PlaceProfileViewController: UIViewController {
     /// The header's follow-this-place toggle, when the caller's subject has a
     /// followable identity (`ClusterGalleryFollowing`); nil hides the button.
     private let following: ClusterGalleryFollowing?
-    /// The trailing item: the balance, when there is a wallet. The pin left
-    /// the bar for the tray (user, 5 October 2026).
+    /// The trailing items, rightmost first: the balance, when there is a
+    /// wallet, then the QR code and the star (the owner, 2026-10-16, #1304:
+    /// the tray under the identity is gone, its two controls are here).
     private var walletItem: UIBarButtonItem?
-    /// The tray under the identity row — the profile's (`HeroTray`): the
-    /// Pin capsule, then the QR code's bubble, each from its seam.
-    private let actionRow = UIStackView()
-    /// Follows the place — pins it, as the map's "pinned" filter reads it.
-    private let pinButton = UIButton(configuration: HeroTray.capsule(prominent: true))
-    /// The place's share link as a QR code — the profile's bubble.
-    private let qrCodeButton = UIButton(configuration: HeroTray.bubble(systemImage: "qrcode"))
+    /// Follows the place — pins it, as the map's "pinned" filter reads it:
+    /// the outline star, filled (`SaveStar`) once followed. Nil without a
+    /// follow seam.
+    private var starItem: UIBarButtonItem?
+    /// The place's share link as a QR code. Nil without a share link.
+    private var qrItem: UIBarButtonItem?
     /// What the QR code carries; nil, no bubble.
     private let shareURL: URL?
     /// The viewer's spendable balance, in the same face it wears on the map,
@@ -727,9 +727,12 @@ final class PlaceProfileViewController: UIViewController {
             flag: identity?.flag,
             name: Self.heroTitleComponents(of: placeName).name,
             subtitle: identity?.subtitle,
-            // Dashes until the place's posts arrive (`render`).
-            counters: [.init(value: "—", caption: "Likes"), .init(value: "—", caption: "Posts")],
-            rank: rank?.positionText
+            // A dash until the place's posts arrive (`render`). Its likes
+            // alone: the posts' count is gone (#1304).
+            counters: [.init(value: "—", caption: "Likes")],
+            rank: rank?.positionText,
+            // One line: the flag beside the big figure, the name under it.
+            layout: .headline
         )
         self.imagePipeline = imagePipeline
         self.following = following
@@ -1073,7 +1076,6 @@ final class PlaceProfileViewController: UIViewController {
         applyHeroLegibility()
         identityView.translatesAutoresizingMaskIntoConstraints = false
         headerHost.addSubview(identityView)
-        configureActionRow()
 
         // ⚠️ Stretchy banner, the profile's own mechanism: the host is moved
         // by its TOP CONSTRAINT rather than a transform precisely so this
@@ -1116,19 +1118,10 @@ final class PlaceProfileViewController: UIViewController {
             // identity, over the picture's lower part. The foot keeps the old
             // selector slot's clearance, derived from the bar, not typed (see
             // `debugIdentityClearance`).
-            // The tray under the identity, on the profile's column — and
-            // its foot, not the identity's, ends the header.
-            actionRow.topAnchor.constraint(
-                equalTo: identityView.bottomAnchor, constant: actionRow.isHidden ? 0 : Self.trayGap
-            ),
-            actionRow.leadingAnchor.constraint(
-                equalTo: headerHost.leadingAnchor, constant: HeroBannerMetrics.identityInset
-            ),
-            actionRow.trailingAnchor.constraint(
-                equalTo: headerHost.trailingAnchor, constant: -HeroBannerMetrics.identityInset
-            ),
+            // The identity's foot ends the header: its controls are in the
+            // bar now (#1304).
             headerHost.bottomAnchor.constraint(
-                equalTo: actionRow.bottomAnchor, constant: Self.identityClearance
+                equalTo: identityView.bottomAnchor, constant: Self.identityClearance
             ),
         ])
     }
@@ -1141,38 +1134,6 @@ final class PlaceProfileViewController: UIViewController {
     /// capsule stood on the banner's foot. The strip lives at the foot of the
     /// screen now, and the band was air with nothing in it.
     private static let identityClearance = Spacing.xl
-    /// The air above the tray: the profile's (`trayGap`).
-    private static let trayGap: CGFloat = Spacing.md
-
-    /// The tray, as the profile composes its own: a capsule leading, a bubble
-    /// beside it, the rest of the row empty. Each control only with its seam
-    /// — no follow closure, no Pin; no share link, no QR code — and no tray
-    /// at all with neither (its height and its gap go with it).
-    private func configureActionRow() {
-        actionRow.axis = .horizontal
-        actionRow.alignment = .fill
-        actionRow.spacing = Spacing.sm
-        actionRow.translatesAutoresizingMaskIntoConstraints = false
-        headerHost.addSubview(actionRow)
-        if following != nil { actionRow.addArrangedSubview(pinButton) }
-        if shareURL != nil {
-            qrCodeButton.accessibilityLabel = "QR code"
-            qrCodeButton.addAction(UIAction { [weak self] _ in self?.presentQRCode() }, for: .primaryActionTriggered)
-            qrCodeButton.widthAnchor.constraint(equalToConstant: HeroTray.bubbleSize).isActive = true
-            actionRow.addArrangedSubview(qrCodeButton)
-        }
-        // The rest of the row: the controls keep their own widths, leading.
-        let spacer = UIView()
-        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        actionRow.addArrangedSubview(spacer)
-        let empty = actionRow.arrangedSubviews.count == 1
-        actionRow.isHidden = empty
-        actionRow.heightAnchor.constraint(equalToConstant: empty ? 0 : HeroTray.bubbleSize).isActive = true
-        for button in [pinButton, qrCodeButton] {
-            button.setContentHuggingPriority(.required, for: .horizontal)
-            PressFeedback.attach(to: button, sound: nil)
-        }
-    }
 
     /// The place's share sheet — the PROFILE'S OWN (`ShareSheet`, shared):
     /// its QR card with the place's flag punched in, its name and country,
@@ -1187,7 +1148,7 @@ final class PlaceProfileViewController: UIViewController {
             let activity = UIActivityViewController(
                 activityItems: [ShareItemSource(card: card, icon: image), image], applicationActivities: nil
             )
-            activity.popoverPresentationController?.sourceView = self.qrCodeButton
+            activity.popoverPresentationController?.sourceItem = self.qrItem
             self.present(activity, animated: true)
         }
         present(sheet, animated: true)
@@ -1249,7 +1210,7 @@ final class PlaceProfileViewController: UIViewController {
     /// under the other measured 2.3:1 in either ink). The rank's bubble wears
     /// its own fixed ink.
     private var nameTone = HeroInk.defaultTone
-    private var counterTones: [HeroInk.Tone] = [HeroInk.defaultTone, HeroInk.defaultTone]
+    private var counterTones: [HeroInk.Tone] = [HeroInk.defaultTone]
     private var heroInkReadFor: [CGRect] = []
     #if DEBUG
     /// How many times the ground under the type was read.
@@ -1495,9 +1456,6 @@ final class PlaceProfileViewController: UIViewController {
         // from under its own caption.
         bannerBox.alpha = alpha
         identityView.alpha = alpha
-        // The tray goes with them: under the bar it is no control anyone can
-        // reach, only a capsule drawn over the posts.
-        actionRow.alpha = alpha
     }
 
     /// The identity fade's ramp: opaque until the last stretch of travel,
@@ -1681,7 +1639,6 @@ final class PlaceProfileViewController: UIViewController {
         likesTotal = Self.aggregatedLikes(of: corpus)
         identityView.setCounters([
             .init(value: CountFormatter.compactString(for: likesTotal), caption: "Likes"),
-            .init(value: "\(corpus.count)", caption: corpus.count == 1 ? "Post" : "Posts"),
         ])
     }
 
@@ -1846,23 +1803,23 @@ final class PlaceProfileViewController: UIViewController {
     // MARK: - The navigation bar
 
     /// The bar, left to right: back chevron · selector (docked only) ·
-    /// dynamic space · points balance · Follow.
+    /// dynamic space · star · QR code · points balance (#1304).
     private func configureNavigationItems() {
         configureFollowButton()
+        configureQRItem()
         configureWalletBadge()
         applyTrailingItems()
     }
 
-    /// ⚠️ INDEX 0 IS THE RIGHTMOST. The pin keeps the corner it has always
-    /// had and the balance sits inboard of it — the same order the map puts
-    /// its coin inboard of the bell.
+    /// ⚠️ INDEX 0 IS THE RIGHTMOST: the balance keeps the corner, the QR code
+    /// and the star stand inboard of it (#1304).
     ///
     /// ⚠️ EACH IN ITS OWN BUBBLE. `sharesBackground = false` is UIKit's
     /// opt-out from the one glass pill a trailing group otherwise draws
     /// around everything in it. Left sharing, a balance and a pin read as
     /// one segmented control with a divider nobody drew.
     private func applyTrailingItems() {
-        let items = [walletItem].compactMap { $0 }
+        let items = [walletItem, qrItem, starItem].compactMap { $0 }
         for item in items { item.sharesBackground = false }
         navigationItem.rightBarButtonItems = items
     }
@@ -1925,35 +1882,43 @@ final class PlaceProfileViewController: UIViewController {
         )
     }
 
-    /// The tray's Pin capsule: following a place pins it (the map's
-    /// "pinned" filter reads the same store). It left the navigation bar's
-    /// corner for the tray (user, 5 October 2026), the profile's Follow
-    /// capsule's place — so it carries its word again, which the bar could
-    /// not afford.
+    /// The bar's star: following a place pins it (the map's "pinned" filter
+    /// reads the same store). It was the tray's Pin capsule until the tray
+    /// went (the owner, 2026-10-16, #1304), and its pin is a star now.
     private func configureFollowButton() {
         guard following != nil else { return }
-        pinButton.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            MemberGates.perform(.followPlace, from: self) { [weak self] in
-                guard let self, let following = self.following else { return }
-                self.renderFollowState(following.toggle())
-            }
-        }, for: .primaryActionTriggered)
+        let item = UIBarButtonItem(image: nil, style: .plain, target: self, action: #selector(starTapped))
+        item.sharesBackground = false
+        starItem = item
         renderFollowState(following?.isFollowing() ?? false)
     }
 
-    /// One place decides both states' looks, so they can't drift — the
-    /// profile's Follow/Following pair: the PROMINENT capsule invites ("Pin",
-    /// the outline pin), the quiet one rests ("Pinned", the filled pin).
+    @objc private func starTapped() {
+        MemberGates.perform(.followPlace, from: self) { [weak self] in
+            guard let self, let following = self.following else { return }
+            self.renderFollowState(following.toggle())
+        }
+    }
+
+    /// The place's QR code in the bar, beside the star.
+    private func configureQRItem() {
+        guard shareURL != nil else { return }
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "qrcode"), style: .plain, target: self, action: #selector(qrTapped)
+        )
+        item.accessibilityLabel = "QR code"
+        item.sharesBackground = false
+        qrItem = item
+    }
+
+    @objc private func qrTapped() { presentQRCode() }
+
+    /// The star's two states: outline while the viewer does not follow the
+    /// place, filled in the save star's gold once they do (`SaveStar`).
     private func renderFollowState(_ isFollowing: Bool) {
         followState = isFollowing
-        var configuration = HeroTray.capsule(prominent: !isFollowing)
-        configuration.title = isFollowing ? "Pinned" : "Pin"
-        configuration.image = UIImage(systemName: isFollowing ? "pin.fill" : "pin")
-        configuration.imagePadding = Spacing.xs
-        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(textStyle: .footnote)
-        pinButton.configuration = configuration
-        pinButton.accessibilityLabel = isFollowing ? "Unfollow this place" : "Follow this place"
+        starItem?.image = SaveStar.image(saved: isFollowing)
+        starItem?.accessibilityLabel = isFollowing ? "Unfollow this place" : "Follow this place"
     }
 
     // MARK: - Opening a tile
@@ -2549,16 +2514,15 @@ extension PlaceProfileViewController {
         identityView.titleLabel.attributedText?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor
     }
     /// The ink the title and each counter wear on the picture.
-    var debugHeroInkTones: (name: HeroInk.Tone, likes: HeroInk.Tone, posts: HeroInk.Tone) {
-        (nameTone, counterTones[0], counterTones[1])
+    var debugHeroInkTones: (name: HeroInk.Tone, likes: HeroInk.Tone) {
+        (nameTone, counterTones[0])
     }
     /// The identity row, for a test that reads it.
     var debugIdentity: PlaceIdentityView { identityView }
-    /// The tray's controls as laid out, leading first.
-    var debugTrayButtons: [UIButton] {
-        actionRow.arrangedSubviews.compactMap { $0 as? UIButton }
-    }
-    var debugTrayFrame: CGRect { actionRow.convert(actionRow.bounds, to: view) }
+    /// The bar's trailing items, rightmost first (#1304).
+    var debugTrailingItems: [UIBarButtonItem] { navigationItem.rightBarButtonItems ?? [] }
+    var debugStarItem: UIBarButtonItem? { starItem }
+    var debugQRItem: UIBarButtonItem? { qrItem }
     /// The share sheet the QR bubble opens.
     func debugMakeShareSheet() -> ShareSheetViewController? { makeShareSheet() }
     /// The banner's fade, in the view's space.
@@ -2609,7 +2573,10 @@ extension PlaceProfileViewController {
     var debugNameFrame: CGRect { identityView.titleLabel.convert(identityView.titleLabel.bounds, to: view) }
     /// The whole identity row — flag, title, counters — in the view's space.
     var debugIdentityFrame: CGRect { identityView.convert(identityView.bounds, to: view) }
-    var debugMetricsFrame: CGRect { identityView.countersRow.convert(identityView.countersRow.bounds, to: view) }
+    var debugMetricsFrame: CGRect {
+        guard let likes = identityView.statViews.first else { return .null }
+        return likes.convert(likes.bounds, to: view)
+    }
     /// The rank's bubble as drawn — nil when it is not.
     var debugRank: String? { identityView.rankBubble.isHidden ? nil : identityView.rankBubble.text }
     /// The band's two numbers as rendered — the place's own totals, which are
@@ -2662,8 +2629,8 @@ extension PlaceProfileViewController {
     /// but its stated reason is history: the selector is at the foot of the
     /// screen. Re-decide it rather than inheriting it.
     var debugIdentityClearance: CGFloat {
-        // From the tray's foot, the header's last content.
-        headerHost.bounds.height - actionRow.frame.maxY
+        // From the identity's foot, the header's last content (#1304).
+        headerHost.bounds.height - identityView.frame.maxY
     }
     /// Drives the active page to a travel offset through the same path a
     /// finger's scroll reports through.
