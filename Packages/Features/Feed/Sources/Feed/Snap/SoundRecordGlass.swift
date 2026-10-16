@@ -35,6 +35,9 @@ final class SoundRecordGlass: UIView {
     /// plate — no longer a small dark glass badge on the bottom-trailing
     /// diagonal. Its size follows the record's.
     private let mutedGlyph = UIImageView()
+    /// The cover darkened behind the muted glyph — the record "off".
+    private let coverDim = UIView()
+    static let coverDimAlpha: CGFloat = 0.35
 
     /// The glass's thickness around the record, at least.
     static let rim: CGFloat = 3
@@ -58,6 +61,12 @@ final class SoundRecordGlass: UIView {
         cover.contentMode = .scaleAspectFill
         cover.clipsToBounds = true
         glass.contentView.addSubview(cover)
+
+        coverDim.backgroundColor = .black
+        coverDim.alpha = 0
+        coverDim.isUserInteractionEnabled = false
+        coverDim.clipsToBounds = true
+        glass.contentView.addSubview(coverDim)
 
         mutedGlyph.isHidden = true
         mutedGlyph.tintColor = .white
@@ -86,11 +95,77 @@ final class SoundRecordGlass: UIView {
         glass.effect = UIGlassEffect(style: .regular)
     }
 
-    /// The muted glyph.
+    /// The muted glyph, and the cover dimmed behind it. On a window it
+    /// comes in with a bounce and a fade and leaves with a bounce out and a
+    /// fade (the owner, 2026-10-16); off one it just is.
     var showsMutedBadge: Bool {
-        get { !mutedGlyph.isHidden }
-        set { mutedGlyph.isHidden = !newValue }
+        get { isShowingMuted }
+        set { setMuted(newValue, animated: window != nil) }
     }
+
+    private var isShowingMuted = false
+
+    func setMuted(_ muted: Bool, animated: Bool) {
+        guard muted != isShowingMuted else { return }
+        isShowingMuted = muted
+        setCoverDimmed(muted, animated: animated)
+        mutedGlyph.layer.removeAllAnimations()
+        guard animated else {
+            mutedGlyph.isHidden = !muted
+            mutedGlyph.alpha = 1
+            mutedGlyph.transform = .identity
+            return
+        }
+        let small = CGAffineTransform(scaleX: Self.mutedOutScale, y: Self.mutedOutScale)
+        if muted {
+            UIView.performWithoutAnimation {
+                mutedGlyph.isHidden = false
+                mutedGlyph.alpha = 0
+                mutedGlyph.transform = small
+            }
+            UIView.animate(
+                withDuration: 0.45, delay: 0, usingSpringWithDamping: 0.55, initialSpringVelocity: 0,
+                options: [.allowUserInteraction]
+            ) {
+                self.mutedGlyph.alpha = 1
+                self.mutedGlyph.transform = .identity
+            }
+        } else {
+            UIView.animateKeyframes(
+                withDuration: 0.26, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]
+            ) {
+                UIView.addKeyframe(withRelativeStartTime: 0, relativeDuration: 0.3) {
+                    self.mutedGlyph.transform = CGAffineTransform(scaleX: 1.12, y: 1.12)
+                }
+                UIView.addKeyframe(withRelativeStartTime: 0.3, relativeDuration: 0.7) {
+                    self.mutedGlyph.transform = small
+                    self.mutedGlyph.alpha = 0
+                }
+            } completion: { _ in
+                guard !self.isShowingMuted else { return }
+                self.mutedGlyph.isHidden = true
+                self.mutedGlyph.alpha = 1
+                self.mutedGlyph.transform = .identity
+            }
+        }
+    }
+
+    /// The cover darkened, fading in or out — the muted glyph's ground, and
+    /// on the sound sheet the ground of its middle button's 🔇.
+    func setCoverDimmed(_ dimmed: Bool, animated: Bool) {
+        let alpha: CGFloat = dimmed ? 1 : 0
+        guard coverDim.alpha != alpha else { return }
+        guard animated else {
+            coverDim.alpha = alpha
+            return
+        }
+        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.coverDim.alpha = alpha
+        }
+    }
+
+    /// How small the muted glyph is when it comes and goes.
+    static let mutedOutScale: CGFloat = 0.4
 
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -99,7 +174,12 @@ final class SoundRecordGlass: UIView {
         let side = min(coverSide ?? rimmed.width, rimmed.width, rimmed.height)
         cover.frame = CGRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side)
         cover.layer.cornerRadius = cover.bounds.width / 2
-        mutedGlyph.frame = cover.frame
+        // By bounds and centre: the glyph's bounce transforms it.
+        mutedGlyph.bounds = CGRect(origin: .zero, size: cover.frame.size)
+        mutedGlyph.center = CGPoint(x: cover.frame.midX, y: cover.frame.midY)
+        coverDim.frame = cover.frame
+        coverDim.layer.cornerRadius = cover.frame.width / 2
+        coverDim.backgroundColor = UIColor.black.withAlphaComponent(Self.coverDimAlpha)
         let pointSize = Self.mutedGlyphPointSize(forRecordSide: side)
         if pointSize != mutedGlyphPointSize, pointSize > 0 {
             mutedGlyphPointSize = pointSize
@@ -113,6 +193,9 @@ final class SoundRecordGlass: UIView {
     #if DEBUG
     /// Where the muted glyph is drawn, and its point size.
     var debugMutedGlyph: (frame: CGRect, pointSize: CGFloat) { (mutedGlyph.frame, mutedGlyphPointSize) }
+    /// Whether the cover is dimmed now, and the glyph's running animations.
+    var debugCoverDimmed: Bool { coverDim.alpha > 0 }
+    var debugMutedGlyphAnimating: Bool { !(mutedGlyph.layer.animationKeys() ?? []).isEmpty }
     #endif
 
     /// The press: the glass and the record grow together, and settle back.

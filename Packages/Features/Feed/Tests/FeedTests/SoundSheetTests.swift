@@ -741,7 +741,8 @@ struct SoundSheetTests {
 
         controller.setPostPlayback(.init(playing: false, muted: true, available: true))
         #expect(!header.debugIsSpinning && !header.debugShowsPause)
-        #expect(header.debugShowsMutedBadge, "pausing took the badge away")
+        // Paused, the middle offers ▶︎ even muted (2026-10-16).
+        #expect(!header.debugShowsMutedBadge, "a paused post kept 🔇 over ▶︎")
 
         controller.setPostPlayback(.init(playing: false, muted: false, available: true))
         #expect(!header.debugShowsMutedBadge, "unmuting left the badge")
@@ -757,10 +758,26 @@ struct SoundSheetTests {
         #expect(header.debugShownGlyph == "pause.fill")
         controller.setPostPlayback(.init(playing: true, muted: true, available: true))
         #expect(header.debugShownGlyph == "speaker.slash.fill")
+        #expect(header.debugCoverDimmed, "the cover is not dimmed behind 🔇")
+        // Paused: ▶︎, muted or not — 🔇 shows only while the post plays.
         controller.setPostPlayback(.init(playing: false, muted: true, available: true))
-        #expect(header.debugShownGlyph == "speaker.slash.fill")
+        #expect(header.debugShownGlyph == "play.fill")
+        #expect(!header.debugCoverDimmed)
         controller.setPostPlayback(.init(playing: false, muted: false, available: true))
         #expect(header.debugShownGlyph == "play.fill")
+    }
+
+    /// A long press on the record mutes or unmutes the post, as the post's
+    /// own sound bubble does (the owner, 2026-10-16).
+    @Test func aHoldOnTheRecordTogglesTheMute() throws {
+        let controller = sheet(tiles: 3)
+        try laidOut(controller)
+        var mutes = 0, plays = 0
+        controller.onToggleMute = { mutes += 1 }
+        controller.onTogglePlayback = { plays += 1 }
+        controller.debugHoldRecord()
+        #expect(mutes == 1)
+        #expect(plays == 0, "the hold also played or paused")
     }
 
     /// ▶︎ ⇄ ❚❚ is one glyph view swapping its symbol (a symbol replace, the

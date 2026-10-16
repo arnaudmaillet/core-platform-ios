@@ -4749,6 +4749,8 @@ final class SnapFeedViewController: UIViewController {
         let playing = isOnScreen && ((activeSnapCell?.isClipAdvancing ?? false) || songPlayer.isPlaying)
         sheet.setPostPlayback(postPlayback(of: model, playing: playing))
         sheet.onTogglePlayback = { [weak self] in self?.togglePagePlayback() }
+        // The record's hold mutes or unmutes, as the post's bubble does.
+        sheet.onToggleMute = { [weak self] in self?.toggleSound() }
         soundSheet = sheet
         sheet.onCoverChanged = { [weak self] covering in
             covered?.setCoveredBySheet(covering)

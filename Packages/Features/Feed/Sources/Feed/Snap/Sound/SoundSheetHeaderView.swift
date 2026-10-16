@@ -213,11 +213,16 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     private var isPlaying = false
     private var isMuted = false
 
-    /// ⚠️ MUTED WINS THE MIDDLE (the owner, 2026-10-16): the button says 🔇
-    /// in place of ❚❚ / ▶︎ while the sound is off — one glyph in the middle
-    /// of the record, never a second one beside it.
+    /// ⚠️ MUTED TAKES THE MIDDLE WHILE IT PLAYS (the owner, 2026-10-16): the
+    /// button says 🔇 in place of ❚❚ while the sound is off, and ▶︎ whenever
+    /// the post is paused — one glyph in the middle of the record, never a
+    /// second one beside it.
     private func applyGlyph() {
-        let name = isMuted ? "speaker.slash.fill" : (isPlaying ? "pause.fill" : "play.fill")
+        // Muted shows only while the post plays (the owner, 2026-10-16): a
+        // paused post offers ▶︎, muted or not.
+        let name = isPlaying ? (isMuted ? "speaker.slash.fill" : "pause.fill") : "play.fill"
+        // The cover dims behind 🔇, as the post's bubble does behind its own.
+        recordGlass.setCoverDimmed(name == "speaker.slash.fill", animated: window != nil)
         guard name != shownGlyph else { return }
         shownGlyph = name
         if let image = UIImage(systemName: name, withConfiguration: Self.glyphConfiguration) {
@@ -288,6 +293,7 @@ final class SoundSheetHeaderView: UICollectionReusableView {
     /// The button in the middle says muted (🔇), and the record draws no
     /// second muted glyph of its own.
     var debugShowsMutedBadge: Bool { shownGlyph == "speaker.slash.fill" && !recordGlass.showsMutedBadge }
+    var debugCoverDimmed: Bool { recordGlass.debugCoverDimmed }
     /// The glyph says ❚❚ (the post plays) rather than ▶︎.
     var debugShowsPause: Bool { record.accessibilityLabel == "Pause post" }
     /// The glyph's symbol, as last asked for.
