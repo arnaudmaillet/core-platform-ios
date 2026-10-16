@@ -216,28 +216,11 @@ final class DiscoverGalleryViewController: UIViewController {
         else { return }
         let tapped = posts[index]
         let stream = Array(posts[index...].prefix(Self.seedWindow))
-        let hero = page.hero(for: tapped.id, in: view)
-        let appearance = page.heroAppearance(for: tapped.id)
-        // The tapped tile's player is the flight's from here: the grid's own
-        // reconcile must neither restart nor stop it while it is in the air.
-        page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         #if DEBUG
         PushedListJumpTrace.mark("gallery open", page: page, host: view)
         #endif
-        let origin = SnapFeedHeroOrigin(
-            post: tapped,
-            stream: stream,
-            hasHero: hero != nil,
-            cover: appearance?.cover,
-            style: .tile,
-            frame: { [weak page] space in page?.hero(for: tapped.id, in: space)?.frame },
-            isOnScreen: { [weak page] in page?.isPostVisible(tapped.id) ?? false },
-            setConcealed: { [weak page] concealed in
-                page?.setHeroHidden(concealed, for: tapped.id)
-            },
-            // The card takes off PLAYING, joining the tile's own surface.
-            donateLiveMedia: { [weak page] in page?.liveFlightSurface(for: tapped.id) },
-            depthView: { [weak page] in page },
+        let origin = page.heroOrigin(
+            opening: tapped, stream: stream, in: view,
             // ⚠️ THE CLOSE FROM A TEXT PAGE. The feed is a pager: page from
             // the tile's picture onto a post with only words, and there is no
             // picture left to fly — both grabs refuse the `.card` page and the
@@ -259,20 +242,6 @@ final class DiscoverGalleryViewController: UIViewController {
                     if !committed { page?.clearRevealConcealment() }
                 }
             ),
-            // A close from another post comes home with the tile's OWN clip,
-            // parked at the tap (#951) — never the page's.
-            returnLiveMedia: { [weak page] in page?.returnFlightSurface(for: tapped.id) },
-            pauseReturnLiveMedia: { [weak page] in page?.pauseReturnPlayback(for: tapped.id) },
-            adoptReturnLiveMedia: { [weak page] view in page?.landReturnPlayback(view, for: tapped.id) },
-            returnLandingIsReady: { [weak page] in page?.isReturnLandingReady(for: tapped.id) ?? true },
-            // A large tile's words (`PostTileInfo`), worn by the card
-            // at the tile's end and faded as it grows — the Following row's
-            // arrangement. Nil for a tile that wears none.
-            restingOverlay: { [weak page] in page?.restingOverlay(for: tapped.id) },
-            // A tile's heart flies red once the viewer has staked.
-            viewerStake: { [weak page] in page?.viewerStake(on: tapped.id) ?? 0 },
-            // Pinned since the tap; the close measures a mosaic holding still.
-            willStageDismissal: { [weak page] in page?.pinForPushedClose() },
             // On past the window into the mosaic's next posts, then
             // Discover's next page (#638).
             continuation: { [weak self] after in await self?.postIDs(after: after) }

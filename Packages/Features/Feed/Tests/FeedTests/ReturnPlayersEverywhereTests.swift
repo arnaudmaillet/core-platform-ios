@@ -241,18 +241,25 @@ struct ReturnPlayersEverywhereTests {
             window.layoutIfNeeded()
             return place.debugOpenTile(at: 0) && opened != nil
         }
-        try Self.expectReturnWired(opened)
+        // The place page moves onto `ForYouGridPage.heroOrigin` once its
+        // redesign (#1262) has landed — until then its same-post close is
+        // the old one.
+        try Self.expectReturnWired(opened, continuesPlayhead: false)
     }
 
-    private static func expectReturnWired(_ origin: SnapFeedHeroOrigin?) throws {
+    private static func expectReturnWired(
+        _ origin: SnapFeedHeroOrigin?, continuesPlayhead: Bool = true
+    ) throws {
         let origin = try #require(origin, "the tap never reached the shared flight")
         #expect(origin.returnLiveMedia != nil)
         #expect(origin.pauseReturnLiveMedia != nil)
         #expect(origin.adoptReturnLiveMedia != nil)
         #expect(origin.returnLandingIsReady != nil)
-        // Same-post closes are untouched: none of these adopted the page's
-        // playback before, and they still do not.
-        #expect(origin.adoptLandingLiveMedia == nil)
+        // ⚠️ AND A SAME-POST CLOSE CONTINUES THE PLAYHEAD (#1270, epic
+        // #1269): the tile takes the surface the card flew, as For You's own
+        // tiles do — these used to restart the clip.
+        #expect((origin.adoptLandingLiveMedia != nil) == continuesPlayhead)
+        #expect((origin.landingMediaIsReady != nil) == continuesPlayhead)
     }
 
     // MARK: - The landing choice through the shared flight

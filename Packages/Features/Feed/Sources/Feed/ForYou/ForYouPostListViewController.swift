@@ -272,44 +272,14 @@ final class ForYouPostListViewController: UIViewController {
         else { return }
         let tapped = posts[index]
         let stream = Array(posts[index...].prefix(Self.seedWindow))
-        let hero = page.hero(for: tapped.id, in: view)
-        let appearance = page.heroAppearance(for: tapped.id)
-        // The tapped row's player is the flight's from here.
-        page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         #if DEBUG
         PushedListJumpTrace.mark("\(kind.rawValue) open", page: page, host: view)
         #endif
-        let origin = SnapFeedHeroOrigin(
-            post: tapped,
-            stream: stream,
-            hasHero: hero != nil,
-            cover: appearance?.cover,
-            style: appearance?.style == .tile ? .tile : .listMedia,
-            frame: { [weak page] space in page?.hero(for: tapped.id, in: space)?.frame },
-            isOnScreen: { [weak page] in page?.isPostVisible(tapped.id) ?? false },
-            setConcealed: { [weak page] concealed in
-                page?.setHeroHidden(concealed, for: tapped.id)
-            },
-            // The card takes off PLAYING, joining the row's own surface.
-            donateLiveMedia: { [weak page] in page?.liveFlightSurface(for: tapped.id) },
+        let origin = page.heroOrigin(
+            opening: tapped, stream: stream, in: view,
+            textReveal: textRowReveal(for: tapped),
             // A TEXT post's page IS its thread — see `opensComments`.
             opensComments: showingComments && tapped.kind != .text,
-            depthView: { [weak page] in page },
-            textReveal: textRowReveal(for: tapped),
-            // A close from another post comes home with the tile's OWN clip,
-            // parked at the tap (#951) — never the page's.
-            returnLiveMedia: { [weak page] in page?.returnFlightSurface(for: tapped.id) },
-            pauseReturnLiveMedia: { [weak page] in page?.pauseReturnPlayback(for: tapped.id) },
-            adoptReturnLiveMedia: { [weak page] view in page?.landReturnPlayback(view, for: tapped.id) },
-            returnLandingIsReady: { [weak page] in page?.isReturnLandingReady(for: tapped.id) ?? true },
-            // Already pinned since the tap; pinned again in case a cancelled
-            // window close handed it back meanwhile.
-            willStageDismissal: { [weak page] in page?.pinForPushedClose() },
-            // The carousel's page the row is on — the TAPPED item, which on a
-            // card's strip is often not the first — and the row following the
-            // post's carousel back, so the close lands on the page left open.
-            mediaPage: page.currentMediaPage(atIndex: index),
-            followMediaPage: { [weak page] id, mediaPage in page?.setMediaPage(mediaPage, for: id) },
             // On past the window into the list's next posts, then the
             // timeline's next page (#638).
             continuation: { [weak self] after in await self?.postIDs(after: after) }
