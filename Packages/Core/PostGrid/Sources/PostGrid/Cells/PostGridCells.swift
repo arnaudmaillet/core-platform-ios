@@ -1476,7 +1476,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// list sizes to its content (the default).
     ///
     /// For You's Following section lays its text cards in a row of one height
-    /// (`ForYouFollowingRows`), so a card there can neither grow by a "Show
+    /// (`PostShelfRows`), so a card there can neither grow by a "Show
     /// more" nor shrink with a short caption: the caption is held to this
     /// many lines and the LABEL cuts the rest with an ellipsis — no
     /// affordance, the whole card opens the post — and the closing line

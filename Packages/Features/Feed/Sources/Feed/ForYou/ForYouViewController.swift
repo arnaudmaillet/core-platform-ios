@@ -488,7 +488,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             #if DEBUG
             // Which `-foryou-open-card` index opens which row's card.
             let cards = shelf.cards
-            let text = cards.indices.filter { ForYouFollowingRows.Row(cards[$0]) == .text }
+            let text = cards.indices.filter { PostShelfRows.Row(cards[$0]) == .text }
             let media = cards.indices.filter { !text.contains($0) }
             print("[qa] following rows: media=\(media) text=\(text)")
             #endif

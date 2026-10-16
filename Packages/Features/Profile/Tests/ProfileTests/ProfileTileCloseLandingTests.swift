@@ -137,7 +137,7 @@ struct ProfileTileCloseLandingTests {
         #expect(standIn.bounds.size == slot.size, "the twin is not the slot's size")
         #expect(reveal.authorBand == nil, "a post card's header is borrowed into a tile's flight")
         #expect(reveal.alignsPageToSource == false, "the page is aligned to a caption a tile does not have")
-        #expect(reveal.cornerRadius == ForYouFollowingCardCell.cornerRadius, "not the pair's own corner")
+        #expect(reveal.cornerRadius == PostShelfMediaCardCell.cornerRadius, "not the pair's own corner")
     }
 
     /// A chunk's tile, the same rule at the mosaic's corner.
@@ -206,7 +206,7 @@ struct ProfileTileCloseLandingTests {
         let pair = try #require(page.segments.first { $0.isPairs }?.posts.first)
         try realize(pair.id, on: page)
         let slot = try #require(page.rowFrame(for: pair.id, in: page))
-        #expect(page.debugCell(for: pair.id) is ForYouFollowingCardCell, "the pair is not drawn as For You's card")
+        #expect(page.debugCell(for: pair.id) is PostShelfMediaCardCell, "the pair is not drawn as For You's card")
 
         let origin = try self.origin(opening: pair, from: page)
 

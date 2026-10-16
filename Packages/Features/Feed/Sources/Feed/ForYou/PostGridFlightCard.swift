@@ -304,7 +304,7 @@ final class PostGridFlightCard: UIView {
     /// source, gone by the page.
     ///
     /// ⚠️ The overlay arrives LAID OUT, at the source's size
-    /// (`ForYouFollowingCardCell.makeOverlay`), and is only ever posed from
+    /// (`PostShelfMediaCardCell.makeOverlay`), and is only ever posed from
     /// here — see `poseRestingChrome`. The card is usually still 0x0 when this
     /// runs, so nothing is laid out now: a pass at zero would be the pose the
     /// flight's first frame animates FROM.

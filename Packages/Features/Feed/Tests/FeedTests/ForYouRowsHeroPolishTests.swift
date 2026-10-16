@@ -119,9 +119,9 @@ struct ForYouRowsHeroPolishTests {
         pipeline.store(picture, for: face)
         var post = Self.post("f", kind: .photo)
         post.authorAvatarURL = face
-        let copy = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: Self.card, imagePipeline: pipeline)
+        let copy = PostShelfMediaCardCell.makeOverlay(for: post, restingSize: Self.card, imagePipeline: pipeline)
         #expect(copy.debugShowsAvatarPicture)
-        let bare = ForYouFollowingCardCell.makeOverlay(for: Self.post("g", kind: .photo), restingSize: Self.card)
+        let bare = PostShelfMediaCardCell.makeOverlay(for: Self.post("g", kind: .photo), restingSize: Self.card)
         #expect(!bare.debugShowsAvatarPicture, "no picture named: the initials alone")
         #expect(!bare.debugAvatarFrame.isNull)
     }
@@ -162,7 +162,7 @@ struct ForYouRowsHeroPolishTests {
         window.isHidden = false
         let post = Self.post("v", kind: .video)
         let card = PostGridFlightCard(post: post, cover: nil, style: .listMedia)
-        card.installRestingOverlay(ForYouFollowingCardCell.makeOverlay(for: post, restingSize: Self.card))
+        card.installRestingOverlay(PostShelfMediaCardCell.makeOverlay(for: post, restingSize: Self.card))
         window.addSubview(card)
         UIView.performWithoutAnimation {
             card.frame = CGRect(origin: .zero, size: Self.page)
@@ -189,7 +189,7 @@ struct ForYouRowsHeroPolishTests {
     /// card's stand-in is the list's, `RevealDismissCardView`, since the
     /// Following row's text cards became the list's card.)
     @Test func aStandInArrivesLaidOut() throws {
-        let standIn = ForYouFollowingCardCell.makeStandIn(
+        let standIn = PostShelfMediaCardCell.makeStandIn(
             for: Self.post("p", kind: .photo), cover: nil, size: Self.card
         )
         let overlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)

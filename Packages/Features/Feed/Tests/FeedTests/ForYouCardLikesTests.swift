@@ -100,7 +100,7 @@ struct ForYouCardLikesTests {
     @Test func aPairedCardShowsTheHeartOnItsAuthorLine() throws {
         let page = page(wallet: Self.wallet())
         let paired = try #require(page.segments.first(where: \.isPairs)?.posts.first)
-        let cell = try #require(page.debugCell(for: paired.id) as? ForYouFollowingCardCell)
+        let cell = try #require(page.debugCell(for: paired.id) as? PostShelfMediaCardCell)
         cell.layoutIfNeeded()
         let like = try #require(cell.debugLikeReadout)
 
@@ -140,7 +140,7 @@ struct ForYouCardLikesTests {
         let wallet = Self.wallet()
         stake(on: paired.id, in: wallet)
         let page = page(wallet: wallet)
-        let cell = try #require(page.debugCell(for: paired.id) as? ForYouFollowingCardCell)
+        let cell = try #require(page.debugCell(for: paired.id) as? PostShelfMediaCardCell)
         let like = try #require(cell.debugLikeReadout)
         #expect(like.debugIsStaked)
         #expect(like.debugCountText == "1.2K", "a stake never adds to the count")
@@ -292,12 +292,12 @@ struct ForYouCardLikesTests {
             authorID: ProfileID("cy"), authorName: "Cy", authorHandle: "cy", reactionCount: 7
         )
         let size = CGSize(width: 150, height: 200)
-        let overlay = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: size, viewerStake: 2)
+        let overlay = PostShelfMediaCardCell.makeOverlay(for: post, restingSize: size, viewerStake: 2)
         #expect(overlay.likeReadout?.debugIsStaked == true)
         #expect(overlay.likeReadout?.debugCountText == "7")
         #expect(!overlay.debugLikeFrame.isNull)
 
-        let standIn = ForYouFollowingCardCell.makeStandIn(for: post, cover: nil, size: size)
+        let standIn = PostShelfMediaCardCell.makeStandIn(for: post, cover: nil, size: size)
         let standInOverlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
         #expect(standInOverlay.likeReadout?.debugIsStaked == false)
         #expect(standInOverlay.likeReadout?.debugCountText == "7")

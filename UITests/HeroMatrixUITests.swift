@@ -31,7 +31,7 @@ final class HeroMatrixUITests: XCTestCase {
     /// Following card (#1154). The list's first cell is the Friends rail's
     /// first face now, which opens a profile, not a post — no flight home.
     private func firstTile(in app: XCUIApplication) -> XCUIElement {
-        app.cells.matching(identifier: "foryou.following-card").firstMatch
+        app.cells.matching(identifier: "post-shelf.media-card").firstMatch
     }
 
     @discardableResult

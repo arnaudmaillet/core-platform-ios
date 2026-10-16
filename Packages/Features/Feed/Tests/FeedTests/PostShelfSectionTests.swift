@@ -54,7 +54,7 @@ struct PostShelfSectionTests {
         let media = kind == .text ? 0 : 2
         let text = kind == .text ? 2 : 0
         #expect(shelf.preferredHeight(forWidth: 402)
-            == SectionTitleView.Metrics.height + ForYouFollowingRows.height(forWidth: 402, media: media, text: text))
+            == SectionTitleView.Metrics.height + PostShelfRows.height(forWidth: 402, media: media, text: text))
     }
 
     /// A tap on a card opens it by its index into the shelf's posts,
@@ -92,7 +92,7 @@ struct PostShelfSectionTests {
         shelf.layoutIfNeeded()
         #expect(shelf.textView.isHidden, "a row limited to nothing still drew")
         #expect(shelf.preferredHeight(forWidth: 402)
-            == SectionTitleView.Metrics.height + ForYouFollowingRows.height(forWidth: 402, media: 3, text: 0))
+            == SectionTitleView.Metrics.height + PostShelfRows.height(forWidth: 402, media: 3, text: 0))
     }
 
     /// "View all" ends the shelf's LAST row, runs the title's action, and is

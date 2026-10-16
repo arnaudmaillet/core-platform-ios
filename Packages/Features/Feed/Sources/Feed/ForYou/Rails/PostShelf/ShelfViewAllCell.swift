@@ -17,7 +17,7 @@ final class ShelfViewAllCell: UICollectionViewCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .tertiarySystemFill
-        contentView.layer.cornerRadius = ForYouFollowingCardCell.cornerRadius
+        contentView.layer.cornerRadius = PostShelfMediaCardCell.cornerRadius
         contentView.layer.cornerCurve = .continuous
         contentView.clipsToBounds = true
 

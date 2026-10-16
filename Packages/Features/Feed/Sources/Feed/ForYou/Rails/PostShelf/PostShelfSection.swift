@@ -28,9 +28,9 @@ import UIKit
 /// rest — the cards, their autoplay, their lookahead, their previews and the
 /// hooks a flight out of a card reads.
 ///
-/// **Two independent rows** under one heading (`ForYouFollowingRows`):
+/// **Two independent rows** under one heading (`PostShelfRows`):
 /// scrolling one never moves the other. A media card is
-/// `ForYouFollowingCardCell`; a text card is the list's own card
+/// `PostShelfMediaCardCell`; a text card is the list's own card
 /// (`PostGridListRowCell`), its like a real stake. Every card is found by its
 /// post (`cardRow(for:)`), so the flights, the previews and the
 /// bring-into-view read either row the same way; only the media row plays.
@@ -49,7 +49,7 @@ final class PostShelfSection: UIView {
     static func height(forWidth width: CGFloat, media: Int, text: Int) -> CGFloat {
         guard media + text > 0 else { return 0 }
         return SectionTitleView.Metrics.height
-            + ForYouFollowingRows.height(forWidth: width, media: media, text: text)
+            + PostShelfRows.height(forWidth: width, media: media, text: text)
     }
 
     /// The height this shelf needs at `width`.
@@ -67,7 +67,7 @@ final class PostShelfSection: UIView {
     /// Each row's posts as drawn: the section's order, each row under its
     /// limit (`mediaLimit`, `textLimit`).
     private var shownRows: (media: [GalleryPost], text: [GalleryPost]) {
-        let rows = ForYouFollowingRows.partition(cards)
+        let rows = PostShelfRows.partition(cards)
         return (
             mediaLimit.map { Array(rows.media.prefix(max(0, $0))) } ?? rows.media,
             textLimit.map { Array(rows.text.prefix(max(0, $0))) } ?? rows.text
@@ -207,7 +207,7 @@ final class PostShelfSection: UIView {
     /// and a half on disk. Outside the list's display window it plans nothing
     /// (`refreshLookaheadReach`).
     private lazy var cardLookahead: ScrollLookahead = {
-        let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "foryou.following", kind: .rail) { [weak self] path in
+        let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "post-shelf.media", kind: .rail) { [weak self] path in
             guard let self, let id = mediaSource.itemIdentifier(for: path),
                   let post = cards.first(where: { $0.id == id }) else { return [] }
             return post.lookaheadImages
@@ -236,7 +236,7 @@ final class PostShelfSection: UIView {
             row.delegate = self
             addSubview(row)
         }
-        mediaView.register(ForYouFollowingCardCell.self, forCellWithReuseIdentifier: ForYouFollowingCardCell.reuseID)
+        mediaView.register(PostShelfMediaCardCell.self, forCellWithReuseIdentifier: PostShelfMediaCardCell.reuseID)
         textView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
         for row in [mediaView, textView] {
             row.register(ShelfViewAllCell.self, forCellWithReuseIdentifier: ShelfViewAllCell.reuseID)
@@ -259,8 +259,8 @@ final class PostShelfSection: UIView {
                 return view.dequeueReusableCell(withReuseIdentifier: ShelfViewAllCell.reuseID, for: indexPath)
             }
             let cell = view.dequeueReusableCell(
-                withReuseIdentifier: ForYouFollowingCardCell.reuseID, for: indexPath
-            ) as! ForYouFollowingCardCell
+                withReuseIdentifier: PostShelfMediaCardCell.reuseID, for: indexPath
+            ) as! PostShelfMediaCardCell
             guard let self, let post = cards.first(where: { $0.id == id }) else { return cell }
             cell.configure(with: post, imagePipeline: imagePipeline)
             // The heart closing the author line reads the viewer's stake.
@@ -285,7 +285,7 @@ final class PostShelfSection: UIView {
 
     // MARK: - Content
 
-    /// Shows `posts`, each in its row (`ForYouFollowingRows`). Answers
+    /// Shows `posts`, each in its row (`PostShelfRows`). Answers
     /// whether anything changed.
     @discardableResult
     func render(_ posts: [GalleryPost]) -> Bool {
@@ -333,7 +333,7 @@ final class PostShelfSection: UIView {
     /// anywhere else is the row's own selection.
     private func configureTextCard(_ cell: PostGridListRowCell, with post: GalleryPost) {
         cell.configure(
-            with: post, imagePipeline: imagePipeline, captionLines: ForYouFollowingRows.textLines
+            with: post, imagePipeline: imagePipeline, captionLines: PostShelfRows.textLines
         )
         // The like chip stakes — see `PostCardStaking`.
         staking?.bind(cell, to: post.id)
@@ -382,7 +382,7 @@ final class PostShelfSection: UIView {
             RowGeometry.setItemSize(size, of: mediaView)
             mediaView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
             y += size.height
-            if counts.text > 0 { y += ForYouFollowingRows.rowGap }
+            if counts.text > 0 { y += PostShelfRows.rowGap }
         }
         if counts.text > 0 {
             let size = textCardSize(forWidth: width)
@@ -395,7 +395,7 @@ final class PostShelfSection: UIView {
     /// a real card laid out (`PostGridListRowCell.fixedTextCardHeight`).
     private func textCardSize(forWidth width: CGFloat) -> CGSize {
         if let cached = textCardSizeCache, cached.width == width { return cached.size }
-        let size = ForYouFollowingRows.textCardSize(forWidth: width)
+        let size = PostShelfRows.textCardSize(forWidth: width)
         textCardSizeCache = (width, size)
         return size
     }
@@ -464,7 +464,7 @@ final class PostShelfSection: UIView {
                   id != concealedCard,
                   let post = cards.first(where: { $0.id == id }),
                   post.hasPlayableVideo, let url = post.videoURL,
-                  let cell = mediaView.cellForItem(at: indexPath) as? ForYouFollowingCardCell,
+                  let cell = mediaView.cellForItem(at: indexPath) as? PostShelfMediaCardCell,
                   hasCover(post, in: cell)
             else { return nil }
             return .init(id: id, url: url, cell: cell, mediaFrame: cell.frame, isPaused: false)
@@ -480,7 +480,7 @@ final class PostShelfSection: UIView {
     /// A card may play only once it has a face behind its surface — the
     /// list's own gate (`ForYouGridPage.hasCover`), for the same black-tile
     /// reason.
-    private func hasCover(_ post: GalleryPost, in cell: ForYouFollowingCardCell) -> Bool {
+    private func hasCover(_ post: GalleryPost, in cell: PostShelfMediaCardCell) -> Bool {
         guard let thumbnail = post.thumbnailURL else { return true }
         if cell.renderedCover != nil { return true }
         guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
@@ -543,8 +543,8 @@ final class PostShelfSection: UIView {
     }
 
     /// A MEDIA card's cell — what plays, and what a flight carries.
-    func mediaCardCell(for id: PostID) -> ForYouFollowingCardCell? {
-        cardCell(for: id) as? ForYouFollowingCardCell
+    func mediaCardCell(for id: PostID) -> PostShelfMediaCardCell? {
+        cardCell(for: id) as? PostShelfMediaCardCell
     }
 
     /// A TEXT card's cell — the list's own card.
@@ -606,7 +606,7 @@ final class PostShelfSection: UIView {
             ),
             ageText: cell?.renderedAgeText,
             height: size.height,
-            captionLines: ForYouFollowingRows.textLines
+            captionLines: PostShelfRows.textLines
         )
     }
 
@@ -795,7 +795,7 @@ final class PostShelfSection: UIView {
         let card = cell.contentView
         let radius = cell is PostGridListRowCell
             ? PostGridListRowCell.cardCornerRadius
-            : ForYouFollowingCardCell.cornerRadius
+            : PostShelfMediaCardCell.cornerRadius
         parameters.visiblePath = UIBezierPath(roundedRect: card.bounds, cornerRadius: radius)
         return UITargetedPreview(view: card, parameters: parameters)
     }
@@ -831,7 +831,7 @@ final class PostShelfSection: UIView {
     }
 
     /// MEDIA card `index`'s cell, when the row has realized it.
-    func debugCardCell(at index: Int) -> ForYouFollowingCardCell? {
+    func debugCardCell(at index: Int) -> PostShelfMediaCardCell? {
         guard cards.indices.contains(index) else { return nil }
         return mediaCardCell(for: cards[index].id)
     }
@@ -1018,7 +1018,7 @@ extension PostShelfSection: UICollectionViewDelegate {
         forItemAt indexPath: IndexPath
     ) {
         // A card that left gives its player back now — the pool is shared.
-        guard collectionView === mediaView, let card = cell as? ForYouFollowingCardCell else { return }
+        guard collectionView === mediaView, let card = cell as? PostShelfMediaCardCell else { return }
         playback?.stop(cell: card)
     }
 }

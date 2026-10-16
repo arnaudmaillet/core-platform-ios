@@ -14,9 +14,9 @@ import UIKit
 /// card — two media cards wide, two lines of caption, its repost, save,
 /// comments and staking like — in another, under one heading.
 @MainActor
-struct ForYouFollowingRowsTests {
+struct PostShelfRowsTests {
     private typealias Metrics = LeadRowMetrics
-    private typealias Rows = ForYouFollowingRows
+    private typealias Rows = PostShelfRows
 
     // MARK: - Two scroll views
 
@@ -35,7 +35,7 @@ struct ForYouFollowingRowsTests {
         }
         #expect(fixture.mediaRow.numberOfItems(inSection: 0) == Self.mixed.filter { $0.kind != .text }.count)
         #expect(fixture.textRow.numberOfItems(inSection: 0) == Self.mixed.filter { $0.kind == .text }.count)
-        #expect(fixture.mediaRow.visibleCells.allSatisfy { $0 is ForYouFollowingCardCell })
+        #expect(fixture.mediaRow.visibleCells.allSatisfy { $0 is PostShelfMediaCardCell })
         #expect(fixture.textRow.visibleCells.allSatisfy { $0 is PostGridListRowCell })
     }
 

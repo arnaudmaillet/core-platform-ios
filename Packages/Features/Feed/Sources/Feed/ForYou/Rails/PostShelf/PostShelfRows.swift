@@ -4,14 +4,15 @@ import DesignSystem
 import PostGrid
 import UIKit
 
-/// The Following section as TWO INDEPENDENT ROWS under one heading —
+/// A shelf of posts (`PostShelfSection`) as TWO INDEPENDENT ROWS under one
+/// heading —
 /// pictures on top, words below, each its own horizontal scroller (the user's
 /// call of 3 October 2026, replacing #375's two lanes in one scroller).
 ///
 /// ```
-///     Following 5 ›
+///     Title 5 ›
 ///   ┌──────┐ ┌──────┐ ┌───       the media row: MEDIA posts only, the
-///   │ ▶    │ │ ▶    │ │ ▶        Following cards (`ForYouFollowingCardCell`)
+///   │ ▶    │ │ ▶    │ │ ▶        media cards (`PostShelfMediaCardCell`)
 ///   │ Ana  │ │ Bo   │ │          — scrolls on its own
 ///   └──────┘ └──────┘ └───
 ///   ┌───────────────┐ ┌────     the text row: TEXT posts only, each the
@@ -33,7 +34,7 @@ import UIKit
 /// ellipsis and no "Show more" (`PostGridListRowCell.fixedCaptionLines`), and
 /// its height is what that card needs for two lines at its width
 /// (`textCardHeight(forWidth:)`). It opens and closes as the list's text
-/// cards do (`ForYouRowOrigins.textCardReveal`).
+/// cards do (`PostShelfOrigins.textCardReveal`).
 ///
 /// **A text card is still two media cards and their gap wide** — kept,
 /// although nothing aligns it to the columns now, because it is the one width
@@ -48,12 +49,12 @@ import UIKit
 ///
 /// **A row with nothing in it is not drawn**: no media posts, and the text
 /// row sits right under the heading; no text posts, and the section is the
-/// media row alone. The heading ("Following", its New count and link) stays
+/// media row alone. The heading (the host's title, its count and link) stays
 /// over whichever rows there are.
-enum ForYouFollowingRows {
+enum PostShelfRows {
     /// A row, by the kind of post it holds.
     enum Row: CaseIterable {
-        /// Photos and videos — the Following cards.
+        /// Photos and videos — the media cards.
         case media
         /// Words alone: the list's card, two lines at most.
         case text

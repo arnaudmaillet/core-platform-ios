@@ -367,7 +367,7 @@ final class ForYouGridPage: UIView {
     }
 
     /// Whether `postID` is drawn as a half-width card of a pair — a Following
-    /// card (`ForYouFollowingCardCell`), here and on the stand-in a close
+    /// card (`PostShelfMediaCardCell`), here and on the stand-in a close
     /// lands as.
     func drawsAsPairedCard(_ postID: PostID) -> Bool {
         pairedPostIDs.contains(postID)
@@ -377,7 +377,7 @@ final class ForYouGridPage: UIView {
     /// paired card, the page's tile rounding otherwise. What a window closing
     /// onto it lands at, so the curve never steps in the last frame.
     func tileCornerRadius(for postID: PostID) -> CGFloat {
-        drawsAsPairedCard(postID) ? ForYouFollowingCardCell.cornerRadius : tileCornerRadius
+        drawsAsPairedCard(postID) ? PostShelfMediaCardCell.cornerRadius : tileCornerRadius
     }
 
     /// A paired card's words, for the flight to wear as resting furniture
@@ -400,7 +400,7 @@ final class ForYouGridPage: UIView {
         }
         guard drawsAsPairedCard(postID), let post = post(for: postID) else { return nil }
         let size = cell(for: postID)?.bounds.size ?? slotSize(of: postID)
-        return ForYouFollowingCardCell.makeOverlay(
+        return PostShelfMediaCardCell.makeOverlay(
             for: post, restingSize: size, imagePipeline: imagePipeline,
             viewerStake: viewerStake(on: postID)
         )
@@ -789,7 +789,7 @@ final class ForYouGridPage: UIView {
         collectionView.register(PostGridTileCell.self, forCellWithReuseIdentifier: PostGridTileCell.reuseID)
         collectionView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
         collectionView.register(
-            ForYouFollowingCardCell.self, forCellWithReuseIdentifier: ForYouFollowingCardCell.reuseID
+            PostShelfMediaCardCell.self, forCellWithReuseIdentifier: PostShelfMediaCardCell.reuseID
         )
         collectionView.register(
             PostGridSkeletonTileCell.self, forCellWithReuseIdentifier: PostGridSkeletonTileCell.reuseID
@@ -1927,7 +1927,7 @@ final class ForYouGridPage: UIView {
         // hero — see `heroAppearance`.
         case let tile as PostGridTileCell: tile.bounds
         // A paired (Following) card is its picture, edge to edge, too.
-        case let card as ForYouFollowingCardCell: card.bounds
+        case let card as PostShelfMediaCardCell: card.bounds
         case let row as PostGridListRowCell: row.mediaHeroRect ?? .zero
         default: .zero
         }
@@ -2031,7 +2031,7 @@ final class ForYouGridPage: UIView {
             (cover: tile.renderedCover, style: .tile)
         // A paired card flies as the Following row's cards do: a list
         // media flight, on the card's own corner (`ForYouRowOrigins.card`).
-        case let card as ForYouFollowingCardCell:
+        case let card as PostShelfMediaCardCell:
             (cover: card.renderedCover, style: .listMedia)
         case let row as PostGridListRowCell:
             // A TEXT row answers nil, and that is the whole of its transition
@@ -2189,9 +2189,9 @@ final class ForYouGridPage: UIView {
         // rests — the picture the cell is showing and the words over it — the
         // Following row's own stand-in (`ForYouRowOrigins.cardReveal`).
         if drawsAsPairedCard(occupantID) {
-            let cover = (cell(for: occupantID) as? ForYouFollowingCardCell)?.renderedCover
+            let cover = (cell(for: occupantID) as? PostShelfMediaCardCell)?.renderedCover
                 ?? post.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) }
-            return ForYouFollowingCardCell.makeStandIn(
+            return PostShelfMediaCardCell.makeStandIn(
                 for: post, cover: cover, size: size, imagePipeline: imagePipeline,
                 // The heart, as the card in the slot will draw it.
                 viewerStake: viewerStake(on: post.id)
@@ -3399,8 +3399,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // picture, the author and two lines over its foot. Played and
             // concealed like a tile (`drawsAsTile`).
             let cell = collectionView.dequeueReusableCell(
-                withReuseIdentifier: ForYouFollowingCardCell.reuseID, for: indexPath
-            ) as! ForYouFollowingCardCell
+                withReuseIdentifier: PostShelfMediaCardCell.reuseID, for: indexPath
+            ) as! PostShelfMediaCardCell
             cell.configure(with: post, imagePipeline: imagePipeline)
             // The heart closing the author line reads the viewer's stake.
             staking?.bindReadout(cell, to: post.id)

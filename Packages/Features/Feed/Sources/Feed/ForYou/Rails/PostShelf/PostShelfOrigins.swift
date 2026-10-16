@@ -83,7 +83,7 @@ enum PostShelfOrigins {
             // flies.
             restingOverlay: hasMedia ? { [weak shelf] in
                 let size = shelf.flatMap { $0.cardFrame(for: id, in: $0)?.size } ?? tappedSize
-                return ForYouFollowingCardCell.makeOverlay(
+                return PostShelfMediaCardCell.makeOverlay(
                     for: shelf?.livePost(tapped) ?? tapped, restingSize: size, imagePipeline: shelf?.imagePipeline,
                     viewerStake: shelf?.cardStake(for: tapped) ?? 0
                 )
@@ -117,7 +117,7 @@ enum PostShelfOrigins {
             let picture = shelf.cardCover(for: id) ?? cover
             // Drawn as it rests: the live count, a like made in the feed
             // included (#896).
-            return ForYouFollowingCardCell.makeStandIn(
+            return PostShelfMediaCardCell.makeStandIn(
                 for: shelf.livePost(post), cover: picture, size: size, imagePipeline: shelf.imagePipeline,
                 viewerStake: shelf.cardStake(for: post)
             )
@@ -135,7 +135,7 @@ enum PostShelfOrigins {
             makePresentStandIn: { [weak shelf] in shelf.flatMap(standIn) },
             alignsPageToSource: false,
             pageFit: .covering,
-            cornerRadius: ForYouFollowingCardCell.cornerRadius,
+            cornerRadius: PostShelfMediaCardCell.cornerRadius,
             // The card's own ground: the brick's floor — what the cell itself
             // is painted.
             fill: PostGridTileCell.fillColor(for: post),

@@ -7,7 +7,7 @@ import UIKit
 /// The foot of a compact card: who posted, and the first lines of what they
 /// said — over a scrim on a picture, straight on the card for words.
 ///
-/// Born as the Following card's overlay (`ForYouFollowingCardCell`, which
+/// Born as the Following card's overlay (`PostShelfMediaCardCell`, which
 /// still calls it `ForYouCardCaptionOverlay`), and shared since 2026-10-03 with
 /// the mosaic's LARGE tiles (`PostGridTileCell.showsInfo`) — one arrangement,
 /// so a tile and a Following card read as the same furniture at different
