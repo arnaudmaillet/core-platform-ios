@@ -27,7 +27,8 @@ import UIKit
 /// viewer follows who are not friends, as cards) whose header pushes the
 /// whole list, and the viewer's friends have a row of their own, as stories,
 /// whose header pushes theirs. The rows are the list's leading header
-/// (`ForYouRailsView`, hosted by `ForYouGridPage.setLead`), so they scroll
+/// (`FriendsStoriesRow` and `PostShelfSection` in a `GridLeadStack`, hosted by
+/// `ForYouGridPage.setLead`), so they scroll
 /// with it and none of the list's index arithmetic moves.
 ///
 /// **Three ways into the snap feed, two flights.** A list post flies with this
@@ -61,10 +62,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     ///
     /// Internal (not private) only for the +QA hooks.
     let page: ForYouGridPage
-    /// The Friends and Following rows, leading the list.
+    /// The Friends row and the shelf of the people the viewer follows,
+    /// leading the list (#1271): `lead` stacks them over "For you".
     ///
     /// Internal (not private) only for the +QA hooks.
-    let rails: ForYouRailsView
+    let friendsRow: FriendsStoriesRow
+    let shelf: PostShelfSection
+    let lead: GridLeadStack
     /// The cards' stakes — see `PostCardStaking`.
     private let staking: PostCardStaking?
     private let makeSnapFeed: ([PostID]) -> UIViewController
@@ -223,13 +227,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.reporting = reporting
         self.socialGraph = socialGraph
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
-        rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+        friendsRow = FriendsStoriesRow(imagePipeline: imagePipeline)
+        shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+        lead = GridLeadStack(sections: [friendsRow, shelf])
         // The cards' counts are the posts' live ones (#896): a like in the
         // vertical feed is on the tile it opened from.
         staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
         super.init(nibName: nil, bundle: nil)
         page.staking = staking
-        rails.staking = staking
+        shelf.staking = staking
+        shelf.titleAccessibilityHint = "Shows posts from people you follow"
+        // "For you" names the list under the rows and pushes Discover's whole
+        // mosaic — the screen a chunk's "View all" pushes.
+        lead.listTitle = "For you"
+        lead.listTitleAccessibilityHint = "Shows every post in Discover's mosaic"
         // The chunks' large tiles wear their author and caption start
         // (`PostTileInfo`) — the Discover gallery's too.
         page.showsTileInfo = true
@@ -321,30 +332,30 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         contextItem.menu = makeContextMenu()
 
         page.pin(to: view)
-        // The rows lead the list, as its header — see `ForYouRailsView`.
-        rails.visibleBand = { [weak self] in self?.visibleBand() }
-        rails.onHeightChange = { [weak self] in self?.updateLeadHeight() }
-        rails.onStoryTapped = { [weak self] story in self?.openStory(story) }
+        // The rows lead the list, as its header — see `GridLeadStack`.
+        shelf.visibleBand = { [weak self] in self?.visibleBand() }
+        lead.onHeightChange = { [weak self] in self?.updateLeadHeight() }
+        friendsRow.onStoryTapped = { [weak self] story in self?.openStory(story) }
         // A card's flight is the SHELF's (#1271): it builds the origin, this
         // screen presents it.
-        rails.shelf.heroContext = .init(
+        shelf.heroContext = .init(
             page: page, host: view, seedWindow: Self.seedWindow, closeStaged: rowCloseStaged
         )
-        rails.shelf.shouldOpen = { [weak self] in
+        shelf.shouldOpen = { [weak self] in
             guard let self else { return false }
             return canOpenFromRow && openPostHero != nil
         }
-        rails.shelf.onOpen = { [weak self] open in self?.presentCard(open) }
-        rails.onFriendsHeaderTapped = { [weak self] in self?.pushList(.friends) }
-        rails.onFollowingHeaderTapped = { [weak self] in self?.pushList(.following) }
+        shelf.onOpen = { [weak self] open in self?.presentCard(open) }
+        friendsRow.onTitleTapped = { [weak self] in self?.pushList(.friends) }
+        shelf.onTitleTapped = { [weak self] in self?.pushList(.following) }
         // "For you ›" and a chunk's "View all" are one way in to one screen.
-        rails.onListHeaderTapped = { [weak self] in self?.pushDiscoverGallery() }
-        rails.storyMenuElements = { [weak self] story in self?.storyMenuElements(for: story) ?? [] }
-        rails.cardMenuElements = { [weak self] post in self?.cardMenuElements(for: post) ?? [] }
+        lead.onListTitleTapped = { [weak self] in self?.pushDiscoverGallery() }
+        friendsRow.storyMenuElements = { [weak self] story in self?.storyMenuElements(for: story) ?? [] }
+        shelf.cardMenuElements = { [weak self] post in self?.cardMenuElements(for: post) ?? [] }
         // A text card is the list's card: its band opens the author and its
         // "..." offers the list's rows.
-        rails.onCardAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
-        rails.cardAuthorMenuActions = { [weak self] post, anchor in
+        shelf.onCardAuthorTapped = { [weak self] post in self?.openAuthor(of: post) }
+        shelf.cardAuthorMenuActions = { [weak self] post, anchor in
             guard let self, let authorID = post.authorID else { return [] }
             return authorMenuActions(
                 for: ForYouGridPage.AuthorMenuContext(post: post, authorID: authorID, anchor: anchor)
@@ -355,12 +366,15 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // band. The rows are reconciled FIRST and the list plays what the
         // pool has left after them (`ForYouGridPage.playerReserve`).
         page.onAutoplayReconcile = { [weak self] allowingStarts in
-            self?.rails.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: false)
+            // The list scrolled: the Friends row's reach follows it, and the
+            // shelf reconciles its players.
+            self?.friendsRow.listDidScroll()
+            self?.shelf.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: false)
         }
-        page.playerReserve = { [weak self] in self?.rails.claimedPlayers ?? 0 }
-        rails.onPlayerClaimChange = { [weak self] in self?.page.updateAutoplay() }
+        page.playerReserve = { [weak self] in self?.shelf.claimedPlayers ?? 0 }
+        shelf.onPlayerClaimChange = { [weak self] in self?.page.updateAutoplay() }
         // Leaving the APP frees the Friends row to re-sort — see
-        // `ForYouRailsView.releaseStoryOrder`. (Leaving for another tab is
+        // `FriendsStoriesRow.releaseStoryOrder`. (Leaving for another tab is
         // `viewDidDisappear`'s.)
         NotificationCenter.default.addObserver(
             self, selector: #selector(appDidEnterBackground),
@@ -397,7 +411,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             page.setCorpusComplete(!viewModel.hasMorePages)
             page.render(snapshot.discover)
             // The stories' pictures are the Friends row's lookahead (#970).
-            rails.render(snapshot.rails)
+            renderLead(snapshot.rails)
             lastSnapshot = snapshot
             discoverGallery?.render(snapshot.media)
             followingList?.render(snapshot.following, newPosts: snapshot.followingNew)
@@ -465,22 +479,42 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         updateLeadHeight()
     }
 
+    /// The Friends row and the shelf, from the view model's rows.
+    private func renderLead(_ rows: ForYouViewModel.Rails) {
+        friendsRow.render(rows.friends, newCount: rows.friendsBadge)
+        if shelf.apply(.init(title: "Following", newCount: rows.followingBadge, posts: rows.following)) {
+            #if DEBUG
+            // Which `-foryou-open-card` index opens which row's card.
+            let cards = shelf.cards
+            let text = cards.indices.filter { PostShelfRows.Row(cards[$0]) == .text }
+            let media = cards.indices.filter { !text.contains($0) }
+            print("[qa] following rows: media=\(media) text=\(text)")
+            #endif
+        }
+    }
+
+    /// The rows' screen is (or is no longer) the viewer's.
+    private func setLeadActive(_ active: Bool) {
+        friendsRow.setActive(active)
+        shelf.setAutoplayActive(active)
+    }
+
     /// Sizes the list's leading header to the rows it holds.
     private func updateLeadHeight() {
         let width = page.bounds.width
         guard width > 0 else { return }
-        page.setLead(rails, height: rails.preferredHeight(forWidth: width))
+        page.setLead(lead, height: lead.preferredHeight(forWidth: width))
     }
 
-    /// The part of the screen the viewer can see, in the rows' space: under
+    /// The part of the screen the viewer can see, in the shelf's space: under
     /// the navigation bar and above the tab bar. What a row's card must be
     /// half inside to play — the list's own rule, measured the list's way.
     private func visibleBand() -> CGRect? {
-        guard rails.window != nil, view.window != nil else { return nil }
+        guard shelf.window != nil, view.window != nil else { return nil }
         let band = view.bounds.inset(by: UIEdgeInsets(
             top: view.safeAreaInsets.top, left: 0, bottom: floatingBarCover, right: 0
         ))
-        return rails.convert(band, from: view)
+        return shelf.convert(band, from: view)
     }
 
     /// An author tap, from the list or a pushed list: the app's one profile
@@ -1036,7 +1070,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         guard let authorID = post.authorID else { return [] }
         var elements: [UIMenuElement] = [profileAction { [weak self] in self?.openAuthor(of: post) }]
         let rows = authorMenuActions(
-            for: ForYouGridPage.AuthorMenuContext(post: post, authorID: authorID, anchor: rails)
+            for: ForYouGridPage.AuthorMenuContext(post: post, authorID: authorID, anchor: shelf)
         )
         if let menu = PostCardMenu.menu(for: rows) {
             elements.append(UIMenu(options: .displayInline, children: menu.children))
@@ -1224,7 +1258,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // to it (#923, `ForYouGridZoomSource`).
         page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         // The rows are covered too, and their one player is not the flight's.
-        rails.setAutoplayActive(false)
+        setLeadActive(false)
         let feed = snapFeed(for: Array(ids))
         // ⚠️ NO `onWillCloseFeed` FOR THE DOCK any more. It put the bar's
         // state back at alpha 0 before the chevron's pop, to be shown at the
@@ -1930,12 +1964,13 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // so it cannot race a landing. The rows' face and card included.
         page.clearRevealConcealment()
         page.clearHeroConcealment()
-        rails.clearConcealments()
+        friendsRow.clearConcealments()
+        shelf.clearConcealments()
         // `viewWillAppear` is too early to be the only reconcile: no cell is
         // realized yet. This is the first moment both are true — surface
         // active, cells realized — so the reconcile here cannot be raced.
         page.setAutoplayActive(true)
-        rails.setAutoplayActive(true)
+        setLeadActive(true)
         // A row's flight is over: its card is one among others again.
         //
         // ⚠️ AFTER THE ROW IS ACTIVE, NEVER BEFORE. Closing the handoff
@@ -1946,12 +1981,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // a beat after the landing instead of at it. Active first, the handoff
         // still shields that card while the others start; closed second, the
         // card is simply chosen again and keeps the player it holds.
-        rails.endPlaybackHandoff()
+        shelf.endPlaybackHandoff()
         // ⚠️ THE RING CLEARS HERE, after the close has landed — not at the
         // tap: a close must fly home to the face as it was when it left.
         // Marking the posts seen puts the friend among the ones with nothing
         // unseen in the view model's order, but the row does NOT move them
-        // while the viewer is still here (`ForYouRailsView.heldStoryOrder`);
+        // while the viewer is still here (`FriendsStoriesRow.heldStoryOrder`);
         // only the ring goes. The re-sort waits until they leave the screen
         // (`viewDidDisappear`) or the app (`appDidEnterBackground`).
         if let viewed = viewedStoryPosts {
@@ -1988,12 +2023,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // before they are back. A push — a friend's posts, a list — is not
         // leaving: the row keeps the order they tapped from.
         if navigationController?.topViewController === self {
-            rails.releaseStoryOrder()
+            friendsRow.releaseStoryOrder()
         }
     }
 
     @objc private func appDidEnterBackground() {
-        rails.releaseStoryOrder()
+        friendsRow.releaseStoryOrder()
     }
 
     /// Suspends the list's and the rows' media when something covers them.
@@ -2006,7 +2041,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// push from a tab switch: on a push it is already the pushed screen.
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        rails.setAutoplayActive(false)
+        setLeadActive(false)
         if !(navigationController?.topViewController is any ZoomTransitionDestination) {
             page.setAutoplayActive(false)
         }
@@ -2022,8 +2057,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // A row's flight is closing: the close measures where it lands as it
         // begins, and the row may have been scrolled under the open post — so
         // the face or card it flew from is brought back into view first.
-        if let story = flyingStory { rails.bringStoryIntoView(story) }
-        if let card = flyingCard { rails.bringCardIntoView(card) }
+        if let story = flyingStory { friendsRow.bringStoryIntoView(story) }
+        if let card = flyingCard { shelf.bringCardIntoView(card) }
         // Coming back from the feed: this screen owns the bottom again.
         guard navigationController?.topViewController === self else { return }
         // WHEN is `TabBarRevealPolicy`'s, HOW is UIKit's. A tab switch back or
@@ -2159,7 +2194,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     func openStory(_ story: ForYouViewModel.FriendStory) {
         guard canOpenFromRow, let openPostHero, let first = story.posts.first,
               let origin = ForYouRowOrigins.story(
-                  story, rails: rails, page: page, host: view,
+                  story, friends: friendsRow, page: page, host: view,
                   pagePicture: first.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) },
                   pictures: .init(pipeline: imagePipeline, peek: { [weak self] in self?.cachedPicture($0) }),
                   closeStaged: rowCloseStaged
@@ -2169,7 +2204,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         openedStoryPosts = story.posts.map(\.id)
         // Everything under the feed stops: it is about to be covered.
         page.setAutoplayActive(false)
-        rails.setAutoplayActive(false)
+        setLeadActive(false)
         openPostHero(self, origin, story.posts.map(\.id))
     }
 
@@ -2184,7 +2219,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// corner), wearing the card's caption as furniture that fades as it grows.
     /// A text card opens as a window instead, the pushed lists' way, and every
     /// card carries that window for its close (`ForYouRowOrigins`).
-    func openCard(at index: Int) { rails.shelf.openCard(at: index) }
+    func openCard(at index: Int) { shelf.openCard(at: index) }
 
     /// The shelf opened a card: fly it.
     private func presentCard(_ open: PostShelfSection.Open) {
@@ -2214,10 +2249,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         let rect: CGRect?
         let what: String
         if let flyingStory {
-            rect = rails.storyFrame(for: flyingStory, in: window)
+            rect = friendsRow.storyFrame(for: flyingStory, in: window)
             what = "story=\(flyingStory.rawValue)"
         } else if let flyingCard {
-            rect = rails.cardFrame(for: flyingCard, in: window)
+            rect = shelf.cardFrame(for: flyingCard, in: window)
             what = "card=\(flyingCard.rawValue)"
         } else {
             return

@@ -345,14 +345,14 @@ struct DiscoverListPageTests {
             }
             #expect(abs(left.minY - right.minY) < 0.5, "a pair is one row: \(left) | \(right)")
         }
-        #expect(view.cellForItem(at: IndexPath(item: 0, section: section)) is ForYouFollowingCardCell)
+        #expect(view.cellForItem(at: IndexPath(item: 0, section: section)) is PostShelfMediaCardCell)
         let full = try #require(page.segments.firstIndex { !$0.isPairs && $0.chunk == nil })
         #expect(view.cellForItem(at: IndexPath(item: 0, section: full)) is PostGridListRowCell)
     }
 
     /// The paired card IS the Following card at half width: the same 3:4.
     @Test func thePairedCardIsTheFollowingCardsShape() {
-        #expect(DiscoverListLayout.pairCardHeightRatio == ForYouRailsView.Metrics.cardAspect)
+        #expect(DiscoverListLayout.pairCardHeightRatio == LeadRowMetrics.cardAspect)
     }
 
     /// The hero asks a paired card what it asks a tile — the card is its
@@ -374,14 +374,14 @@ struct DiscoverListPageTests {
         let hero = try #require(page.hero(for: paired.id, in: page))
         let slot = try #require(page.rowFrame(for: paired.id, in: page))
         #expect(hero.frame == slot, "the flight leaves from the whole card")
-        #expect(page.tileCornerRadius(for: paired.id) == ForYouFollowingCardCell.cornerRadius)
+        #expect(page.tileCornerRadius(for: paired.id) == PostShelfMediaCardCell.cornerRadius)
         #expect(page.restingOverlay(for: paired.id) is ForYouCardCaptionOverlay)
         #expect(page.restingOverlay(for: fullCard.id) == nil, "a list card has no overlay to wear")
         let standIn = try #require(page.makeDismissStandIn(for: paired.id))
         #expect(!(standIn is PostGridTileStandInView) && !(standIn is RevealDismissCardView),
                 "landed as \(type(of: standIn))")
         #expect(abs(standIn.bounds.width - slot.width) < 0.5 && abs(standIn.bounds.height - slot.height) < 0.5)
-        #expect(standIn.layer.cornerRadius == ForYouFollowingCardCell.cornerRadius)
+        #expect(standIn.layer.cornerRadius == PostShelfMediaCardCell.cornerRadius)
     }
 
     /// Landings stay inserts with blocks in the list.

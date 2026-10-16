@@ -30,7 +30,7 @@ import CoreGraphics
 /// **"Nothing on the hidden side" is geometry, not this function's doing.**
 /// An item flush with one margin leaves its neighbour `gap - margin` points
 /// off that edge, so a strip keeps its gap at least its margin
-/// (`ForYouRailsView.Metrics.itemGap`; a carousel inside its box has a margin
+/// (`LeadRowMetrics.itemGap`; a carousel inside its box has a margin
 /// of zero, so any gap does).
 ///
 /// Pure, so it is tested without a scroll view. Lived in Feed as

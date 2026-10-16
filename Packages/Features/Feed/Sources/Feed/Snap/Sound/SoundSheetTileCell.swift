@@ -251,7 +251,7 @@ final class SoundSheetTileCell: UICollectionViewCell {
     /// The tile as it rests, drawn fresh — what a WINDOW out of it starts as
     /// and what a close lands as, whatever the viewer ended on
     /// (`SnapFeedHeroOrigin.textReveal`). For You's Following card's twin
-    /// (`ForYouFollowingCardCell.makeStandIn`), for this sheet's tile.
+    /// (`PostShelfMediaCardCell.makeStandIn`), for this sheet's tile.
     ///
     /// Two arrangements, because the window grows from the tile to the whole
     /// screen and the two kinds of tile stand that differently:
@@ -297,7 +297,7 @@ final class SoundSheetTileCell: UICollectionViewCell {
         // Laid out HERE, at the tile's size and outside any animation — the
         // reveal lays a stand-in out inside its own block, and a first pass
         // there grows the badges and words out of the window's top-left
-        // corner (`ForYouFollowingCardCell.addAnchoredOverlay`).
+        // corner (`PostShelfMediaCardCell.addAnchoredOverlay`).
         UIView.performWithoutAnimation { card.layoutIfNeeded() }
         twin.footFrozen = true
         return card

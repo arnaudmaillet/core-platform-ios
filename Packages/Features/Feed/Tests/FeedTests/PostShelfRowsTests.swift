@@ -14,9 +14,9 @@ import UIKit
 /// card — two media cards wide, two lines of caption, its repost, save,
 /// comments and staking like — in another, under one heading.
 @MainActor
-struct ForYouFollowingRowsTests {
-    private typealias Metrics = ForYouRailsView.Metrics
-    private typealias Rows = ForYouFollowingRows
+struct PostShelfRowsTests {
+    private typealias Metrics = LeadRowMetrics
+    private typealias Rows = PostShelfRows
 
     // MARK: - Two scroll views
 
@@ -24,9 +24,8 @@ struct ForYouFollowingRowsTests {
     /// each Following row its own collection view holding only its kind.
     @Test func followingIsTwoScrollViews() throws {
         let fixture = Fixture(cards: Self.mixed)
-        // The Friends row is the rails' own; the two Following rows are the
-        // shelf's (`PostShelfSection`, #1271).
-        let rows = (fixture.rails.subviews + fixture.rails.shelf.subviews).compactMap { $0 as? UICollectionView }
+        // The Friends row's own, and the shelf's two (`PostShelfSection`, #1271).
+        let rows = (fixture.lead.friends.subviews + fixture.lead.shelf.subviews).compactMap { $0 as? UICollectionView }
         #expect(rows.count == 3, "Friends, Following media, Following text")
         #expect(fixture.mediaRow !== fixture.textRow)
         #expect(!fixture.mediaRow.isHidden && !fixture.textRow.isHidden)
@@ -36,7 +35,7 @@ struct ForYouFollowingRowsTests {
         }
         #expect(fixture.mediaRow.numberOfItems(inSection: 0) == Self.mixed.filter { $0.kind != .text }.count)
         #expect(fixture.textRow.numberOfItems(inSection: 0) == Self.mixed.filter { $0.kind == .text }.count)
-        #expect(fixture.mediaRow.visibleCells.allSatisfy { $0 is ForYouFollowingCardCell })
+        #expect(fixture.mediaRow.visibleCells.allSatisfy { $0 is PostShelfMediaCardCell })
         #expect(fixture.textRow.visibleCells.allSatisfy { $0 is PostGridListRowCell })
     }
 
@@ -50,21 +49,21 @@ struct ForYouFollowingRowsTests {
         #expect(Rows.partition(cards).media.map(\.id) == media)
         #expect(Rows.partition(cards).text.map(\.id) == text)
         for (index, post) in cards.enumerated() {
-            let place = try #require(fixture.rails.debugCardPlace(at: index))
+            let place = try #require(fixture.lead.shelf.debugCardPlace(at: index))
             let isText = post.kind == .text
             #expect(place.row === (isText ? fixture.textRow : fixture.mediaRow))
             #expect(place.indexPath.item == (isText ? text : media).firstIndex(of: post.id))
         }
-        #expect(ForYouRailsView.height(
+        #expect(ForYouLeadFixture.height(
             forWidth: 402, friends: 0, following: cards.count, textCards: text.count
-        ) == fixture.rails.preferredHeight(forWidth: 402))
+        ) == fixture.lead.stack.preferredHeight(forWidth: 402))
 
         var opened: [Int] = []
-        fixture.rails.onCardTapped = { opened.append($0) }
+        fixture.lead.shelf.onCardTapped = { opened.append($0) }
         let firstText = try #require(cards.firstIndex { $0.kind == .text })
         let firstMedia = try #require(cards.firstIndex { $0.kind != .text })
-        #expect(fixture.rails.debugTapCard(at: firstText))
-        #expect(fixture.rails.debugTapCard(at: firstMedia))
+        #expect(fixture.lead.shelf.debugTapCard(at: firstText))
+        #expect(fixture.lead.shelf.debugTapCard(at: firstMedia))
         #expect(opened == [firstText, firstMedia], "each row opens its own post")
     }
 
@@ -88,19 +87,19 @@ struct ForYouFollowingRowsTests {
         let media = cards.indices.filter { cards[$0].kind != .text }
         let words = cards.indices.filter { cards[$0].kind == .text }
         for (column, index) in media.enumerated() {
-            let frame = try #require(fixture.rails.debugCardLayoutFrame(at: index))
+            let frame = try #require(fixture.lead.shelf.debugCardLayoutFrame(at: index))
             #expect(frame.size == card)
             #expect(frame.minX == margin + CGFloat(column) * (card.width + gap))
         }
         for (position, index) in words.enumerated() {
-            let frame = try #require(fixture.rails.debugCardLayoutFrame(at: index))
+            let frame = try #require(fixture.lead.shelf.debugCardLayoutFrame(at: index))
             #expect(frame.size == text)
             #expect(frame.minX == margin + CGFloat(position) * (text.width + gap))
         }
         // The peek: the text row's second card starts where the media row's
         // third does.
-        let thirdMedia = try #require(fixture.rails.debugCardLayoutFrame(at: media[2]))
-        let secondText = try #require(fixture.rails.debugCardLayoutFrame(at: words[1]))
+        let thirdMedia = try #require(fixture.lead.shelf.debugCardLayoutFrame(at: media[2]))
+        let secondText = try #require(fixture.lead.shelf.debugCardLayoutFrame(at: words[1]))
         #expect(thirdMedia.minX == secondText.minX)
 
         // Stacked: the media row, the gap, the text row.
@@ -124,19 +123,19 @@ struct ForYouFollowingRowsTests {
         let media = fixture.mediaRow, text = fixture.textRow
 
         media.setContentOffset(CGPoint(x: 200, y: 0), animated: false)
-        fixture.rails.scrollViewDidScroll(media)
+        fixture.lead.shelf.scrollViewDidScroll(media)
         #expect(media.contentOffset.x == 200)
         #expect(text.contentOffset.x == 0, "the text row moved with the media row")
 
         text.setContentOffset(CGPoint(x: 150, y: 0), animated: false)
-        fixture.rails.scrollViewDidScroll(text)
+        fixture.lead.shelf.scrollViewDidScroll(text)
         #expect(text.contentOffset.x == 150)
         #expect(media.contentOffset.x == 200, "the media row moved with the text row")
 
         // A release in one row bends only its own deceleration.
-        fixture.rails.scrollViewWillBeginDragging(media)
+        fixture.lead.shelf.scrollViewWillBeginDragging(media)
         var target = CGPoint(x: 260, y: 0)
-        fixture.rails.scrollViewWillEndDragging(media, withVelocity: CGPoint(x: 1.5, y: 0), targetContentOffset: &target)
+        fixture.lead.shelf.scrollViewWillEndDragging(media, withVelocity: CGPoint(x: 1.5, y: 0), targetContentOffset: &target)
         #expect(text.contentOffset.x == 150)
     }
 
@@ -152,8 +151,8 @@ struct ForYouFollowingRowsTests {
         #expect(!fixture.mediaRow.isHidden)
         #expect(fixture.mediaRow.bounds.height == card.height)
         #expect(Rows.height(forWidth: 402, media: cards.count, text: 0) == card.height)
-        #expect(ForYouRailsView.height(forWidth: 402, friends: 0, following: cards.count)
-            == fixture.rails.preferredHeight(forWidth: 402))
+        #expect(ForYouLeadFixture.height(forWidth: 402, friends: 0, following: cards.count)
+            == fixture.lead.stack.preferredHeight(forWidth: 402))
         #expect(!fixture.followingHeader.isHidden, "the heading stays")
         #expect(fixture.mediaRow.frame.minY == fixture.followingHeader.frame.maxY)
     }
@@ -167,8 +166,8 @@ struct ForYouFollowingRowsTests {
         #expect(!fixture.followingHeader.isHidden, "the heading stays")
         #expect(fixture.textRow.frame.minY == fixture.followingHeader.frame.maxY)
         #expect(Rows.height(forWidth: 402, media: 0, text: cards.count) == Rows.textCardHeight(forWidth: 402))
-        #expect(ForYouRailsView.height(forWidth: 402, friends: 0, following: cards.count, textCards: cards.count)
-            == fixture.rails.preferredHeight(forWidth: 402))
+        #expect(ForYouLeadFixture.height(forWidth: 402, friends: 0, following: cards.count, textCards: cards.count)
+            == fixture.lead.stack.preferredHeight(forWidth: 402))
     }
 
     /// Both rows: their heights and the gap between them.
@@ -190,9 +189,9 @@ struct ForYouFollowingRowsTests {
         let long = String(repeating: "A long post that goes on and on. ", count: 12)
         let cards = [Self.post("m0", kind: .photo), Self.post("t0", kind: .text, caption: long)]
         let fixture = Fixture(cards: cards, width: width)
-        let cell = try #require(fixture.rails.debugTextCardCell(at: 1))
+        let cell = try #require(fixture.lead.shelf.debugTextCardCell(at: 1))
         cell.layoutIfNeeded()
-        #expect(fixture.rails.debugCardCell(at: 1) == nil, "no Following card draws words any more")
+        #expect(fixture.lead.shelf.debugCardCell(at: 1) == nil, "no Following card draws words any more")
 
         #expect(cell.fixedCaptionLines == Rows.textLines)
         #expect(Rows.textLines == 2)
@@ -232,8 +231,8 @@ struct ForYouFollowingRowsTests {
             Self.post("t1", kind: .text, caption: "Short.")
         ]
         let fixture = Fixture(cards: cards)
-        let long = try #require(fixture.rails.debugTextCardCell(at: 0))
-        let short = try #require(fixture.rails.debugTextCardCell(at: 1))
+        let long = try #require(fixture.lead.shelf.debugTextCardCell(at: 0))
+        let short = try #require(fixture.lead.shelf.debugTextCardCell(at: 1))
         for cell in [long, short] { cell.layoutIfNeeded() }
         #expect(long.bounds.size == short.bounds.size)
         #expect(long.debugClosingLineFrame == short.debugClosingLineFrame)
@@ -248,22 +247,22 @@ struct ForYouFollowingRowsTests {
         let before = wallet.balance
         let fixture = Fixture(cards: Self.mixed, staking: PostCardStaking(wallet: wallet))
         let index = try #require(Self.mixed.firstIndex { $0.kind == .text })
-        let cell = try #require(fixture.rails.debugTextCardCell(at: index))
+        let cell = try #require(fixture.lead.shelf.debugTextCardCell(at: index))
         let id = Self.mixed[index].id
 
         #expect(cell.debugTapLikesChip(), "the chip is wired")
         #expect(wallet.balance == before - WalletStore.Policy.defaultStakeAmount)
         #expect(wallet.boostTotal(forTarget: id.rawValue) == WalletStore.Policy.defaultStakeAmount)
-        #expect(fixture.rails.cardStake(for: Self.mixed[index]) == WalletStore.Policy.defaultStakeAmount)
+        #expect(fixture.lead.shelf.cardStake(for: Self.mixed[index]) == WalletStore.Policy.defaultStakeAmount)
     }
 
     /// The comment count opens the card's post, as a tap on the card does.
     @Test func aTextCardsCommentsOpenItsPost() throws {
         let fixture = Fixture(cards: Self.mixed)
         var opened: [Int] = []
-        fixture.rails.onCardTapped = { opened.append($0) }
+        fixture.lead.shelf.onCardTapped = { opened.append($0) }
         let index = try #require(Self.mixed.firstIndex { $0.kind == .text })
-        let cell = try #require(fixture.rails.debugTextCardCell(at: index))
+        let cell = try #require(fixture.lead.shelf.debugTextCardCell(at: index))
         #expect(cell.debugTapCommentsChip())
         #expect(opened == [index])
     }
@@ -290,7 +289,7 @@ struct ForYouFollowingRowsTests {
         let fixture = Fixture(cards: Self.mixed)
         let row = fixture.mediaRow
         var target = CGPoint(x: 40, y: 0)
-        fixture.rails.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 1.5, y: 0), targetContentOffset: &target)
+        fixture.lead.shelf.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 1.5, y: 0), targetContentOffset: &target)
         let frames = (0..<row.numberOfItems(inSection: 0)).compactMap {
             row.layoutAttributesForItem(at: IndexPath(item: $0, section: 0))?.frame
         }
@@ -300,7 +299,7 @@ struct ForYouFollowingRowsTests {
         #expect(flushRight.width == Metrics.cardSize(forWidth: 402).width, "a media card, not a pair")
 
         var back = CGPoint(x: target.x - 20, y: 0)
-        fixture.rails.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: -1.5, y: 0), targetContentOffset: &back)
+        fixture.lead.shelf.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: -1.5, y: 0), targetContentOffset: &back)
         #expect(back.x == 0, "back to the start, flush left")
     }
 
@@ -321,45 +320,45 @@ struct ForYouFollowingRowsTests {
 
         // A FLING from the start whose projection would cross three cards.
         var target = CGPoint(x: frames[3].maxX, y: 0)
-        fixture.rails.scrollViewWillBeginDragging(row)
+        fixture.lead.shelf.scrollViewWillBeginDragging(row)
         row.contentOffset.x = 30
-        fixture.rails.scrollViewDidScroll(row)
-        fixture.rails.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 4, y: 0), targetContentOffset: &target)
+        fixture.lead.shelf.scrollViewDidScroll(row)
+        fixture.lead.shelf.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 4, y: 0), targetContentOffset: &target)
         #expect(target.x == frames[1].maxX + margin - width, "one card per gesture: card 1 flush right")
         #expect(frames[2].minX - target.x >= width, "nothing to the right of it")
         #expect(frames[0].maxX - target.x > 0, "card 0 peeks on the left")
 
         // Forward again, from that rest: card 2.
         row.contentOffset.x = target.x
-        fixture.rails.scrollViewWillBeginDragging(row)
+        fixture.lead.shelf.scrollViewWillBeginDragging(row)
         row.contentOffset.x = target.x + 20
-        fixture.rails.scrollViewDidScroll(row)
+        fixture.lead.shelf.scrollViewDidScroll(row)
         var next = CGPoint(x: target.x + 20, y: 0)
-        fixture.rails.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 1, y: 0), targetContentOffset: &next)
+        fixture.lead.shelf.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 1, y: 0), targetContentOffset: &next)
         #expect(next.x == frames[2].maxX + margin - width)
 
         // Back from there: card 1's LEADING edge on the left margin.
         row.contentOffset.x = next.x
-        fixture.rails.scrollViewWillBeginDragging(row)
+        fixture.lead.shelf.scrollViewWillBeginDragging(row)
         row.contentOffset.x = next.x - 20
-        fixture.rails.scrollViewDidScroll(row)
+        fixture.lead.shelf.scrollViewDidScroll(row)
         var back = CGPoint(x: 0, y: 0)
-        fixture.rails.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: -4, y: 0), targetContentOffset: &back)
+        fixture.lead.shelf.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: -4, y: 0), targetContentOffset: &back)
         #expect(back.x == frames[1].minX - margin, "one card back, flush left — not all the way home")
 
         // The ends: the first card flush left, the last flush right.
         row.contentOffset.x = 0
-        #expect(fixture.rails.snapTarget(in: row, projected: 0, start: 0, direction: nil) == 0)
+        #expect(fixture.lead.shelf.snapTarget(in: row, projected: 0, start: 0, direction: nil) == 0)
         #expect(frames[0].minX - margin == 0)
         #expect(frames[4].maxX + margin - width == end, "the last card ends flush right")
         row.contentOffset.x = end - 1
-        let atEnd = fixture.rails.snapTarget(in: row, projected: end, start: end - 1, direction: .forward)
+        let atEnd = fixture.lead.shelf.snapTarget(in: row, projected: end, start: end - 1, direction: .forward)
         #expect(atEnd == end)
 
         // A release with no speed goes by the drag's last movement — still
         // one card, and still a card's edge.
         row.contentOffset.x = 60
-        let slow = fixture.rails.snapTarget(in: row, projected: 60, start: 0, direction: .forward)
+        let slow = fixture.lead.shelf.snapTarget(in: row, projected: 60, start: 0, direction: .forward)
         #expect(slow == frames[1].maxX + margin - width)
         #expect(anchors(of: row).contains(slow))
     }
@@ -374,11 +373,11 @@ struct ForYouFollowingRowsTests {
         let fixture = Fixture(cards: cards)
         let index = try #require(cards.firstIndex { $0.kind == kind })
         let tapped = cards[index]
-        let origin = ForYouRowOrigins.card(
-            tapped, stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let origin = PostShelfOrigins.card(
+            tapped, stream: cards, shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         )
         let cell: UICollectionViewCell = try #require(
-            kind == .text ? fixture.rails.debugTextCardCell(at: index) : fixture.rails.debugCardCell(at: index)
+            kind == .text ? fixture.lead.shelf.debugTextCardCell(at: index) : fixture.lead.shelf.debugCardCell(at: index)
         )
         let frame = try #require(origin.frame(fixture.host.view))
 
@@ -407,10 +406,10 @@ struct ForYouFollowingRowsTests {
         let long = String(repeating: "A long post that goes on and on. ", count: 12)
         let cards = [Self.post("m0", kind: .photo), Self.post("t0", kind: .text, caption: long)]
         let fixture = Fixture(cards: cards)
-        let cell = try #require(fixture.rails.debugTextCardCell(at: 1))
+        let cell = try #require(fixture.lead.shelf.debugTextCardCell(at: 1))
         cell.layoutIfNeeded()
-        let origin = ForYouRowOrigins.card(
-            cards[1], stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let origin = PostShelfOrigins.card(
+            cards[1], stream: cards, shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         )
         let reveal = try #require(origin.textReveal)
 
@@ -456,24 +455,24 @@ struct ForYouFollowingRowsTests {
         other.contentOffset.x = 37
         // The LAST card of its row, from the start: off to the right.
         let index = try #require(cards.lastIndex { ($0.kind == .text) == isText })
-        let origin = ForYouRowOrigins.card(
-            cards[index], stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let origin = PostShelfOrigins.card(
+            cards[index], stream: cards, shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         )
         #expect(origin.frame(fixture.host.view) == nil, "precondition: the card is out of the row")
 
         origin.willStageDismissal()
 
         let landed = try #require(origin.frame(fixture.host.view))
-        let rails = fixture.rails.convert(fixture.rails.bounds, to: fixture.host.view)
-        #expect(rails.minX + Metrics.sideMargin <= landed.minX + 0.5)
-        #expect(landed.maxX <= rails.maxX - Metrics.sideMargin + 0.5, "\(landed) is not wholly in view")
+        let lead = fixture.lead.stack.convert(fixture.lead.stack.bounds, to: fixture.host.view)
+        #expect(lead.minX + Metrics.sideMargin <= landed.minX + 0.5)
+        #expect(landed.maxX <= lead.maxX - Metrics.sideMargin + 0.5, "\(landed) is not wholly in view")
         #expect(anchors(of: row).contains(row.contentOffset.x), "rest \(row.contentOffset.x) is off its row's rests")
         #expect(other.contentOffset.x == 37, "the other row was moved")
 
         // And back to the first card, scrolled away the other way.
         let first = try #require(cards.firstIndex { ($0.kind == .text) == isText })
-        let back = ForYouRowOrigins.card(
-            cards[first], stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let back = PostShelfOrigins.card(
+            cards[first], stream: cards, shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         )
         back.willStageDismissal()
         #expect(row.contentOffset.x == 0, "the first card returns flush left, at the start")
@@ -487,10 +486,10 @@ struct ForYouFollowingRowsTests {
         let cards = Self.mixed
         let fixture = Fixture(cards: cards)
         let index = try #require(cards.firstIndex { $0.kind == kind })
-        let configuration = try #require(fixture.rails.debugCardMenuConfiguration(at: index))
+        let configuration = try #require(fixture.lead.shelf.debugCardMenuConfiguration(at: index))
         var opened: [Int] = []
-        fixture.rails.onCardTapped = { opened.append($0) }
-        fixture.rails.debugCommitPreview(configuration)
+        fixture.lead.shelf.onCardTapped = { opened.append($0) }
+        fixture.lead.shelf.debugCommitPreview(configuration)
         #expect(opened == [index])
     }
 
@@ -532,14 +531,14 @@ struct ForYouFollowingRowsTests {
         let cards = [Self.post("m0", kind: .photo), Self.post("t0", kind: .text, caption: "Words")]
         let bare = Fixture(cards: cards)
         defer { bare.window.isHidden = true }
-        let bareCell = try #require(bare.rails.debugTextCardCell(at: 1))
+        let bareCell = try #require(bare.lead.shelf.debugTextCardCell(at: 1))
         #expect(!bareCell.visibleRowActions.repost)
-        #expect(bare.rails.cardRepostHandler(for: cards[1]) == nil)
+        #expect(bare.lead.shelf.cardRepostHandler(for: cards[1]) == nil)
 
         var reposted: [PostID] = []
         let wired = Fixture(cards: cards, onRepost: { reposted.append($0.id) })
         defer { wired.window.isHidden = true }
-        let wiredCell = try #require(wired.rails.debugTextCardCell(at: 1))
+        let wiredCell = try #require(wired.lead.shelf.debugTextCardCell(at: 1))
         #expect(wiredCell.visibleRowActions.repost, "a handled repost is not drawn")
         wiredCell.onRepostTapped?()
         #expect(reposted == [cards[1].id])
@@ -564,7 +563,7 @@ struct ForYouFollowingRowsTests {
     private final class Fixture {
         let window: UIWindow
         let host = UIViewController()
-        let rails: ForYouRailsView
+        let lead: ForYouLeadFixture
         let page: ForYouGridPage
 
         init(
@@ -573,27 +572,27 @@ struct ForYouFollowingRowsTests {
         ) {
             window = UIWindow(frame: CGRect(x: 0, y: 0, width: width, height: 874))
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
-            rails = ForYouRailsView(imagePipeline: pipeline, videoPlayback: nil)
-            rails.staking = staking
-            rails.onCardRepostRequested = onRepost
+            lead = ForYouLeadFixture(pipeline: pipeline, videoPlayback: nil)
+            lead.shelf.staking = staking
+            lead.shelf.onCardRepostRequested = onRepost
             page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
             var model = ForYouViewModel.Rails()
             model.following = cards
-            rails.render(model)
+            lead.render(model)
             window.rootViewController = host
             window.isHidden = false
             page.frame = host.view.bounds
             host.view.addSubview(page)
-            rails.frame = CGRect(x: 0, y: 120, width: width, height: rails.preferredHeight(forWidth: width))
-            host.view.addSubview(rails)
+            lead.stack.frame = CGRect(x: 0, y: 120, width: width, height: lead.stack.preferredHeight(forWidth: width))
+            host.view.addSubview(lead.stack)
             window.layoutIfNeeded()
-            rails.layoutIfNeeded()
-            for row in rails.subviews.compactMap({ $0 as? UICollectionView }) { row.layoutIfNeeded() }
+            lead.stack.layoutIfNeeded()
+            for row in lead.stack.subviews.compactMap({ $0 as? UICollectionView }) { row.layoutIfNeeded() }
         }
 
-        var mediaRow: UICollectionView { rails.debugMediaRow }
-        var textRow: UICollectionView { rails.debugTextRow }
+        var mediaRow: UICollectionView { lead.shelf.mediaView }
+        var textRow: UICollectionView { lead.shelf.textView }
         /// "Following" — the second of the rows' headings.
-        var followingHeader: SectionTitleView { rails.debugHeaders[1] }
+        var followingHeader: SectionTitleView { [lead.friends.header, lead.shelf.header, lead.stack.debugListTitleView][1] }
     }
 }

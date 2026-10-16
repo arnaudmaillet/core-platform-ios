@@ -59,7 +59,7 @@ public struct ShopMedia {
 /// where to buy them.
 public final class ShopStorefrontViewController: UIViewController {
     enum Metrics {
-        /// The rows' side margin and gap — For You's (`ForYouRailsView`): a
+        /// The rows' side margin and gap — For You's (`LeadRowMetrics`): a
         /// gap no less than the margin, so a snap can put an item fully away.
         static let margin: CGFloat = 16
         static let gap: CGFloat = 16
@@ -74,7 +74,7 @@ public final class ShopStorefrontViewController: UIViewController {
         static let playsWhenVisible: CGFloat = 0.6
         /// The row's closing "See all" tile: a chevron's width.
         static let seeAllWidth: CGFloat = 44
-        /// Players at once, For You's row budget (`ForYouRailsView.concurrentPlayers`).
+        /// Players at once, For You's row budget (`PostShelfSection.concurrentPlayers`).
         static let concurrentPlayers = 3
         /// The packs are PORTRAIT cards in a row (owner, 2026-10-13): two and
         /// a bit per screen, the third peeking to say the row goes on.

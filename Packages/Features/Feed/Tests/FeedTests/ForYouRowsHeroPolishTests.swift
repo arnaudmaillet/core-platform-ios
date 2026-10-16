@@ -119,9 +119,9 @@ struct ForYouRowsHeroPolishTests {
         pipeline.store(picture, for: face)
         var post = Self.post("f", kind: .photo)
         post.authorAvatarURL = face
-        let copy = ForYouFollowingCardCell.makeOverlay(for: post, restingSize: Self.card, imagePipeline: pipeline)
+        let copy = PostShelfMediaCardCell.makeOverlay(for: post, restingSize: Self.card, imagePipeline: pipeline)
         #expect(copy.debugShowsAvatarPicture)
-        let bare = ForYouFollowingCardCell.makeOverlay(for: Self.post("g", kind: .photo), restingSize: Self.card)
+        let bare = PostShelfMediaCardCell.makeOverlay(for: Self.post("g", kind: .photo), restingSize: Self.card)
         #expect(!bare.debugShowsAvatarPicture, "no picture named: the initials alone")
         #expect(!bare.debugAvatarFrame.isNull)
     }
@@ -162,7 +162,7 @@ struct ForYouRowsHeroPolishTests {
         window.isHidden = false
         let post = Self.post("v", kind: .video)
         let card = PostGridFlightCard(post: post, cover: nil, style: .listMedia)
-        card.installRestingOverlay(ForYouFollowingCardCell.makeOverlay(for: post, restingSize: Self.card))
+        card.installRestingOverlay(PostShelfMediaCardCell.makeOverlay(for: post, restingSize: Self.card))
         window.addSubview(card)
         UIView.performWithoutAnimation {
             card.frame = CGRect(origin: .zero, size: Self.page)
@@ -189,7 +189,7 @@ struct ForYouRowsHeroPolishTests {
     /// card's stand-in is the list's, `RevealDismissCardView`, since the
     /// Following row's text cards became the list's card.)
     @Test func aStandInArrivesLaidOut() throws {
-        let standIn = ForYouFollowingCardCell.makeStandIn(
+        let standIn = PostShelfMediaCardCell.makeStandIn(
             for: Self.post("p", kind: .photo), cover: nil, size: Self.card
         )
         let overlay = try #require(standIn.subviews.compactMap { $0 as? ForYouCardCaptionOverlay }.first)
@@ -229,14 +229,14 @@ struct ForYouRowsHeroPolishTests {
     @Test func theRowsCardOriginWiresTheLanding() throws {
         let tapped = Self.post("v", kind: .video)
         let fixture = Fixture(cards: [tapped])
-        let origin = ForYouRowOrigins.card(
-            tapped, stream: [tapped], rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let origin = PostShelfOrigins.card(
+            tapped, stream: [tapped], shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         )
         #expect(origin.adoptLandingLiveMedia != nil)
         let ready = try #require(origin.landingMediaIsReady)
         // No playback in the fixture and no cover loaded: nothing adopted, so
         // the answer is the cover's, not a clip's.
-        #expect(ready() == fixture.rails.isLandingPlaybackReady(for: tapped.id))
+        #expect(ready() == fixture.lead.shelf.isLandingPlaybackReady(for: tapped.id))
     }
 
     // MARK: - 3. A face flies the post's media
@@ -414,25 +414,25 @@ struct ForYouRowsHeroPolishTests {
     private final class Fixture {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let host = UIViewController()
-        let rails: ForYouRailsView
+        let lead: ForYouLeadFixture
         let page: ForYouGridPage
 
         init(cards: [GalleryPost]) {
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
-            rails = ForYouRailsView(imagePipeline: pipeline, videoPlayback: nil)
+            lead = ForYouLeadFixture(pipeline: pipeline, videoPlayback: nil)
             page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
             var model = ForYouViewModel.Rails()
             model.following = cards
-            rails.render(model)
+            lead.render(model)
             window.rootViewController = host
             window.isHidden = false
             page.frame = host.view.bounds
             host.view.addSubview(page)
-            rails.frame = CGRect(x: 0, y: 120, width: 402, height: rails.preferredHeight(forWidth: 402))
-            host.view.addSubview(rails)
+            lead.stack.frame = CGRect(x: 0, y: 120, width: 402, height: lead.stack.preferredHeight(forWidth: 402))
+            host.view.addSubview(lead.stack)
             window.layoutIfNeeded()
-            rails.layoutIfNeeded()
-            for row in rails.subviews.compactMap({ $0 as? UICollectionView }) { row.layoutIfNeeded() }
+            lead.stack.layoutIfNeeded()
+            for row in lead.stack.subviews.compactMap({ $0 as? UICollectionView }) { row.layoutIfNeeded() }
         }
     }
 }

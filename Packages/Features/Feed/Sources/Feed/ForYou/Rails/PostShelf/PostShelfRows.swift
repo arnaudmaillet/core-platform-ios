@@ -4,14 +4,15 @@ import DesignSystem
 import PostGrid
 import UIKit
 
-/// The Following section as TWO INDEPENDENT ROWS under one heading —
+/// A shelf of posts (`PostShelfSection`) as TWO INDEPENDENT ROWS under one
+/// heading —
 /// pictures on top, words below, each its own horizontal scroller (the user's
 /// call of 3 October 2026, replacing #375's two lanes in one scroller).
 ///
 /// ```
-///     Following 5 ›
+///     Title 5 ›
 ///   ┌──────┐ ┌──────┐ ┌───       the media row: MEDIA posts only, the
-///   │ ▶    │ │ ▶    │ │ ▶        Following cards (`ForYouFollowingCardCell`)
+///   │ ▶    │ │ ▶    │ │ ▶        media cards (`PostShelfMediaCardCell`)
 ///   │ Ana  │ │ Bo   │ │          — scrolls on its own
 ///   └──────┘ └──────┘ └───
 ///   ┌───────────────┐ ┌────     the text row: TEXT posts only, each the
@@ -33,7 +34,7 @@ import UIKit
 /// ellipsis and no "Show more" (`PostGridListRowCell.fixedCaptionLines`), and
 /// its height is what that card needs for two lines at its width
 /// (`textCardHeight(forWidth:)`). It opens and closes as the list's text
-/// cards do (`ForYouRowOrigins.textCardReveal`).
+/// cards do (`PostShelfOrigins.textCardReveal`).
 ///
 /// **A text card is still two media cards and their gap wide** — kept,
 /// although nothing aligns it to the columns now, because it is the one width
@@ -44,16 +45,16 @@ import UIKit
 /// Sized on its own (say 1.3 cards per width, 284pt on a 402pt screen) the
 /// text row would peek wider than the media row under it, and its two lines
 /// would hold fewer words, for no gain. Each row comes to rest per card by
-/// `RowEdgeSnap` — see `ForYouRailsView.snapTarget`.
+/// `RowEdgeSnap` — see `RowSnapper.snapTarget`.
 ///
 /// **A row with nothing in it is not drawn**: no media posts, and the text
 /// row sits right under the heading; no text posts, and the section is the
-/// media row alone. The heading ("Following", its New count and link) stays
+/// media row alone. The heading (the host's title, its count and link) stays
 /// over whichever rows there are.
-enum ForYouFollowingRows {
+enum PostShelfRows {
     /// A row, by the kind of post it holds.
     enum Row: CaseIterable {
-        /// Photos and videos — the Following cards.
+        /// Photos and videos — the media cards.
         case media
         /// Words alone: the list's card, two lines at most.
         case text
@@ -75,7 +76,7 @@ enum ForYouFollowingRows {
     /// gap between them — see the note on the type.
     @MainActor
     static func textCardWidth(forWidth width: CGFloat) -> CGFloat {
-        ForYouRailsView.Metrics.cardSize(forWidth: width).width * 2 + ForYouRailsView.Metrics.itemGap
+        LeadRowMetrics.cardSize(forWidth: width).width * 2 + LeadRowMetrics.itemGap
     }
 
     /// A text card's height in a section `width` wide: the list's card at
@@ -98,7 +99,7 @@ enum ForYouFollowingRows {
     @MainActor
     static func height(forWidth width: CGFloat, media: Int, text: Int) -> CGFloat {
         let hasMedia = media > 0, hasText = text > 0
-        return (hasMedia ? ForYouRailsView.Metrics.cardSize(forWidth: width).height : 0)
+        return (hasMedia ? LeadRowMetrics.cardSize(forWidth: width).height : 0)
             + (hasMedia && hasText ? rowGap : 0)
             // Measured only when there is a text card to size.
             + (hasText ? textCardHeight(forWidth: width) : 0)
@@ -107,5 +108,5 @@ enum ForYouFollowingRows {
     /// Between the media row and the text row: the rows' item gap, so the
     /// two read as one section rather than two.
     @MainActor
-    static var rowGap: CGFloat { ForYouRailsView.Metrics.itemGap }
+    static var rowGap: CGFloat { LeadRowMetrics.itemGap }
 }

@@ -33,6 +33,23 @@ struct PostShelfSectionTests {
         #expect(tapped == 1, "the title's own tap path did not reach the host")
     }
 
+    /// The host describes the shelf with ONE model — title, count, posts,
+    /// limits, "View all" — and the shelf draws it (#1271).
+    @Test func aModelDescribesTheWholeShelf() {
+        let shelf = Self.shelf()
+        let posts = [Self.post("m0", kind: .photo), Self.post("m1", kind: .video), Self.post("t0", kind: .text)]
+        let model = PostShelfSection.Model(
+            title: "Recent", newCount: 2, posts: posts, mediaLimit: 1, textLimit: nil, showsViewAll: true
+        )
+        #expect(shelf.apply(model))
+        #expect(shelf.model == model)
+        #expect(shelf.header.content.title == "Recent")
+        #expect(shelf.debugCountText == "2")
+        #expect(shelf.debugRowIDs.media == [posts[0].id], "the media limit was not applied")
+        #expect(shelf.debugRowIDs.text == [posts[2].id])
+        #expect(!shelf.apply(model), "the same posts again reported a change")
+    }
+
     /// Nothing to show, nothing drawn: no heading over nothing.
     @Test func anEmptyShelfIsZeroTall() {
         let shelf = Self.shelf()
@@ -54,7 +71,7 @@ struct PostShelfSectionTests {
         let media = kind == .text ? 0 : 2
         let text = kind == .text ? 2 : 0
         #expect(shelf.preferredHeight(forWidth: 402)
-            == SectionTitleView.Metrics.height + ForYouFollowingRows.height(forWidth: 402, media: media, text: text))
+            == SectionTitleView.Metrics.height + PostShelfRows.height(forWidth: 402, media: media, text: text))
     }
 
     /// A tap on a card opens it by its index into the shelf's posts,
@@ -92,7 +109,7 @@ struct PostShelfSectionTests {
         shelf.layoutIfNeeded()
         #expect(shelf.textView.isHidden, "a row limited to nothing still drew")
         #expect(shelf.preferredHeight(forWidth: 402)
-            == SectionTitleView.Metrics.height + ForYouFollowingRows.height(forWidth: 402, media: 3, text: 0))
+            == SectionTitleView.Metrics.height + PostShelfRows.height(forWidth: 402, media: 3, text: 0))
     }
 
     /// "View all" ends the shelf's LAST row, runs the title's action, and is
@@ -142,8 +159,11 @@ struct PostShelfSectionTests {
             + (0..<text).map { Self.post("t\($0)", kind: .text) }
         shelf.render(posts)
         let lead = GridLeadStack(sections: [shelf])
+        // The rails' old formula with only a card row: the row, the section
+        // gap, the list's title and its own gap.
         #expect(lead.preferredHeight(forWidth: 402)
-            == ForYouRailsView.height(forWidth: 402, friends: 0, following: media + text, textCards: text))
+            == PostShelfSection.height(forWidth: 402, media: media, text: text)
+                + LeadRowMetrics.rowGap + SectionTitleView.Metrics.height + LeadRowMetrics.listGap)
     }
 
     /// The shelf's rows changing size reaches the host through the stack, and

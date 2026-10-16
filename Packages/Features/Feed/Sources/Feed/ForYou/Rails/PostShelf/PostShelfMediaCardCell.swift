@@ -7,14 +7,14 @@ import MediaPlayback
 import PostGrid
 import UIKit
 
-/// The bottom of a Following card — who posted, and the first two lines of
+/// The bottom of a shelf's media card — who posted, and the first two lines of
 /// what they said. The overlay lives in PostGrid since the mosaic's large
 /// tiles wear it too (`PostCardCaptionOverlay`); this is
-/// the name the Following card has always called it by.
+/// the name the card has always called it by.
 typealias ForYouCardCaptionOverlay = PostCardCaptionOverlay
 
-/// One MEDIA card in For You's Following section (its media row,
-/// `ForYouFollowingRows`) and in Discover's pairs: a photo or a video,
+/// One MEDIA card in a shelf of posts (`PostShelfSection`'s media row,
+/// `PostShelfRows`) and in Discover's pairs: a photo or a video,
 /// equal-sized with its neighbours, playing (muted) whenever it is half on
 /// screen, with its author and first two lines over the bottom of it.
 ///
@@ -24,19 +24,19 @@ typealias ForYouCardCaptionOverlay = PostCardCaptionOverlay
 /// first frame, and the surface handed back on reuse. What it adds is the
 /// overlay.
 ///
-/// Media only, since 3 October 2026: a text post in the Following section is the
+/// Media only, since 3 October 2026: a text post on a shelf is the
 /// list's own card (`PostGridListRowCell`) in the text row, and the text
 /// face this card used to draw — its words on the card's fill — is gone, with
 /// its stand-in. Pairs are vertical media by construction.
-final class ForYouFollowingCardCell: UICollectionViewCell {
-    static let reuseID = "ForYouFollowingCardCell"
+final class PostShelfMediaCardCell: UICollectionViewCell {
+    static let reuseID = "PostShelfMediaCardCell"
 
     /// The rounding a card takes: the timeline row's MEDIA corner, so the
     /// flight out of it can be the list's own card style (`.listMedia`) and
     /// land on the same curve it left.
     static var cornerRadius: CGFloat { PostGridListRowCell.mediaCornerRadius }
     /// The card's identifier for UI tests.
-    static let accessibilityIdentifier = "foryou.following-card"
+    static let accessibilityIdentifier = "post-shelf.media-card"
 
     private let imageView = UIImageView()
     /// The cover and the live surface over it (#1088): the cover's arrival on
@@ -231,6 +231,6 @@ final class ForYouFollowingCardCell: UICollectionViewCell {
     func endVideoPreview() { media.endPreview() }
 }
 
-extension ForYouFollowingCardCell: GridPlaybackCell {}
+extension PostShelfMediaCardCell: GridPlaybackCell {}
 
-extension ForYouFollowingCardCell: PostCardLikeReadout {}
+extension PostShelfMediaCardCell: PostCardLikeReadout {}

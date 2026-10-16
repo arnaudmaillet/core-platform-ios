@@ -10,7 +10,7 @@ import UIKit
 /// The surfaces feeding `GridVideoPlaybackCoordinator`: the For You grid
 /// (`ForYouGridAutoplayDriver` — which the profile's pages are too, #1273)
 /// and the For You rails' Following row
-/// (`ForYouRailsView`). They used to carry three copies of these rules; what
+/// (`PostShelfSection`). They used to carry three copies of these rules; what
 /// genuinely differs between them is passed in, never decided here:
 ///
 /// - the REFERENCE a distance is measured from — the vertical centre for a

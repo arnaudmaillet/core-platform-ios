@@ -3,7 +3,7 @@ import Foundation
 /// For You's Discover list draws VERTICAL media — posts taller than 4:5
 /// (`VerticalMediaPairing.isEligible`) — as half-width cards two side by side,
 /// in blocks of two to six, instead of one full-width card each. A paired card
-/// is the Following row's card (`ForYouFollowingCardCell`: the picture, the
+/// is the Following row's card (`PostShelfMediaCardCell`: the picture, the
 /// author and two lines over its foot) at half the list's width, 3:4.
 /// Collections never pair. Where the pairs go is the planner's
 /// (`MosaicChunkPlanner.pairBlock`).

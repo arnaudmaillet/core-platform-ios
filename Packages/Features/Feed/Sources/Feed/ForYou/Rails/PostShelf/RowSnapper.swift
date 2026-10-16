@@ -84,7 +84,7 @@ final class RowSnapper {
             .filter { $0.representedElementCategory == .cell }
             .map { $0.frame.minX...$0.frame.maxX }
             .sorted { $0.lowerBound < $1.lowerBound }
-        let margin = ForYouRailsView.Metrics.sideMargin
+        let margin = LeadRowMetrics.sideMargin
         guard stepped else {
             return ForYouRowSnap.target(
                 projected: projected, direction: direction, items: items,
@@ -115,9 +115,9 @@ enum RowGeometry {
         let layout = UICollectionViewFlowLayout()
         layout.scrollDirection = .horizontal
         layout.itemSize = itemSize
-        layout.minimumLineSpacing = ForYouRailsView.Metrics.itemGap
+        layout.minimumLineSpacing = LeadRowMetrics.itemGap
         layout.minimumInteritemSpacing = 0
-        let margin = ForYouRailsView.Metrics.sideMargin
+        let margin = LeadRowMetrics.sideMargin
         layout.sectionInset = UIEdgeInsets(top: 0, left: margin, bottom: 0, right: margin)
         let row = UICollectionView(frame: .zero, collectionViewLayout: layout)
         row.backgroundColor = .clear
@@ -181,7 +181,7 @@ enum RowGeometry {
     /// on (`ForYouRowSnap`). Before a close measures where it lands, since a
     /// row can be scrolled under an open post.
     static func bringIntoView(_ indexPath: IndexPath, in row: UICollectionView) {
-        let margin = ForYouRailsView.Metrics.sideMargin
+        let margin = LeadRowMetrics.sideMargin
         row.layoutIfNeeded()
         guard let frame = row.layoutAttributesForItem(at: indexPath)?.frame else { return }
         let visible = row.bounds.insetBy(dx: margin, dy: 0)
