@@ -243,12 +243,19 @@ final class PostShelfSection: UIView {
     @discardableResult
     func render(_ posts: [GalleryPost]) -> Bool {
         guard posts != cards else { return false }
+        let counts = rowCounts
         cards = posts
         applyCards()
         cardLookahead.setNeedsPlan()
         setNeedsLayout()
+        // The height is the title and the rows: it moves only with a row's
+        // count.
+        if rowCounts != counts { onHeightChange?() }
         return true
     }
+
+    /// The shelf's rows changed how many posts they hold — its host re-sizes.
+    var onHeightChange: (() -> Void)?
 
     /// Each row its own posts, in the section's order.
     private func applyCards() {

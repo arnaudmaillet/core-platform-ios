@@ -43,14 +43,15 @@ import UIKit
 final class PlaceProfileViewController: UIViewController {
     /// The page: For You's own list (`.discover` — cards and mosaic
     /// stretches) over the place's posts in the `recent` order, led by
-    /// `rails`, and the landing of every dismissal from the map. Not a
+    /// `lead`, and the landing of every dismissal from the map. Not a
     /// bespoke list: a place's activity is posts, and a viewer who reads them
     /// as For You's cards must read them as the same cards here.
     private let activityPage: ForYouGridPage
-    /// The list's leading header: For You's own rows view, with only its card
-    /// row — "Popular" here — and the list's title, "Recent", under it (the
-    /// hashtag page's arrangement, `PostSetSurfaceViewController`).
-    private let rails: ForYouRailsView
+    /// The list's leading header (#1271): a shelf of posts — "Popular" here —
+    /// and the list's title, "Recent", under it (the hashtag page's
+    /// arrangement, `PostSetSurfaceViewController`).
+    private let shelf: PostShelfSection
+    private let lead: GridLeadStack
     /// How many of the place's most liked posts the Popular row carries.
     static let popularRowCount = 10
     /// Pushes the Popular row's whole list, and "Recent"/"View all"'s media
@@ -282,8 +283,8 @@ final class PlaceProfileViewController: UIViewController {
         // their own `viewDidAppear`. This page never did, so the last post
         // opened from it stayed pinned first in the ranking for good.
         activityPage.endPlaybackHandoff()
-        rails.endPlaybackHandoff()
-        rails.clearConcealments()
+        shelf.endPlaybackHandoff()
+        shelf.clearConcealments()
         // The flight that left here is over, whichever way it ended. A stale
         // departure would answer for the NEXT close — including the map's Case
         // B, whose whole point is that it has no departure on this page.
@@ -740,15 +741,17 @@ final class PlaceProfileViewController: UIViewController {
         self.activityPage = ForYouGridPage(
             imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback
         )
-        self.rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+        let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+        self.shelf = shelf
+        self.lead = GridLeadStack(sections: [shelf])
         super.init(nibName: nil, bundle: nil)
-        rails.followingTitle = "Popular"
-        rails.listTitle = "Recent"
+        shelf.title = "Popular"
+        lead.listTitle = "Recent"
         // The list and the row draw the same cards For You does, and their
         // like chips stake the same way.
         let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
         activityPage.staking = staking
-        rails.staking = staking
+        shelf.staking = staking
     }
 
     @available(*, unavailable)
@@ -813,48 +816,49 @@ final class PlaceProfileViewController: UIViewController {
     /// the titles' pushes, the cards' flights, and ONE player budget the two
     /// share — the list leaves the players the row has claimed.
     private func wireRails() {
-        rails.visibleBand = { [weak self] in self?.visibleBand() }
-        rails.onHeightChange = { [weak self] in self?.updateLeadHeight() }
+        shelf.visibleBand = { [weak self] in self?.visibleBand() }
+        lead.onHeightChange = { [weak self] in self?.updateLeadHeight() }
         // A card's flight is the SHELF's (#1271).
-        rails.shelf.heroContext = .init(page: activityPage, host: view, seedWindow: Self.seedWindow)
-        rails.shelf.shouldOpen = { [weak self] in
+        shelf.heroContext = .init(page: activityPage, host: view, seedWindow: Self.seedWindow)
+        shelf.shouldOpen = { [weak self] in
             guard let self else { return false }
             return navigationController.map { FeedFeatureBuilder.canOpen(from: self, on: $0) } ?? true
         }
-        rails.shelf.onOpen = { [weak self] open in
+        shelf.onOpen = { [weak self] open in
             guard let self else { return }
             departure = open.origin.textReveal.map(Departure.card)
             openPost(self, open.origin, open.stream.map(\.id))
         }
-        rails.onFollowingHeaderTapped = { [weak self] in self?.pushPopularList() }
-        rails.onListHeaderTapped = { [weak self] in self?.pushGallery() }
+        shelf.onTitleTapped = { [weak self] in self?.pushPopularList() }
+        lead.onListTitleTapped = { [weak self] in self?.pushGallery() }
+        lead.listTitleAccessibilityHint = "Shows every post"
         activityPage.onViewAllTapped = { [weak self] in self?.pushGallery() }
         activityPage.onAutoplayReconcile = { [weak self] allowingStarts in
-            self?.rails.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: false)
+            self?.shelf.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: false)
         }
-        activityPage.playerReserve = { [weak self] in self?.rails.claimedPlayers ?? 0 }
-        rails.onPlayerClaimChange = { [weak self] in self?.activityPage.updateAutoplay() }
+        activityPage.playerReserve = { [weak self] in self?.shelf.claimedPlayers ?? 0 }
+        shelf.onPlayerClaimChange = { [weak self] in self?.activityPage.updateAutoplay() }
     }
 
     /// Sizes the list's leading header to the rows it holds.
     private func updateLeadHeight() {
         let width = activityPage.bounds.width
         guard width > 0 else { return }
-        activityPage.setLead(rails, height: rails.preferredHeight(forWidth: width))
+        activityPage.setLead(lead, height: lead.preferredHeight(forWidth: width))
     }
 
     /// The part of the screen the viewer can see, in the rows' space — what a
     /// row's card must be half inside to play.
     private func visibleBand() -> CGRect? {
-        guard rails.window != nil, view.window != nil else { return nil }
+        guard shelf.window != nil, view.window != nil else { return nil }
         let band = view.bounds.inset(by: UIEdgeInsets(
             top: view.safeAreaInsets.top, left: 0, bottom: barCover, right: 0
         ))
-        return rails.convert(band, from: view)
+        return shelf.convert(band, from: view)
     }
 
     /// The Popular row's posts, in its order.
-    private var popularPosts: [GalleryPost] { rails.cards }
+    private var popularPosts: [GalleryPost] { shelf.cards }
 
     /// "Popular": the place's posts by popularity, as For You's pushed
     /// Following list draws a run of posts.
@@ -898,7 +902,7 @@ final class PlaceProfileViewController: UIViewController {
     /// A Popular card opens the way For You's Following cards do
     /// (`ForYouViewController.openCard`, `ForYouRowOrigins.card`), and its
     /// close comes home through the window the origin describes.
-    private func openCard(at index: Int) { rails.shelf.openCard(at: index) }
+    private func openCard(at index: Int) { shelf.openCard(at: index) }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
@@ -913,7 +917,7 @@ final class PlaceProfileViewController: UIViewController {
         // Off screen, this page holds no claim on the shared player pool —
         // the feed pushed above it is about to want every loan.
         for hosted in hostedPages { (hosted as? ForYouGridPage)?.setAutoplayActive(false) }
-        rails.setAutoplayActive(false)
+        shelf.setAutoplayActive(false)
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -1001,7 +1005,7 @@ final class PlaceProfileViewController: UIViewController {
         for (index, hosted) in hostedPages.enumerated() {
             (hosted as? ForYouGridPage)?.setAutoplayActive(index == activeIndex)
         }
-        rails.setAutoplayActive(true)
+        shelf.setAutoplayActive(true)
     }
 
     // MARK: - Layout (floating header over full-screen pages)
@@ -1666,9 +1670,7 @@ final class PlaceProfileViewController: UIViewController {
         activityPage.render(recent.isEmpty
             ? .empty(.init(title: "Nothing has happened here yet"))
             : .content(recent))
-        var row = ForYouViewModel.Rails()
-        row.following = Self.popular(self.corpus, limit: Self.popularRowCount)
-        rails.render(row)
+        shelf.render(Self.popular(self.corpus, limit: Self.popularRowCount))
         updateLeadHeight()
         // ⚠️ THE WHOLE CORPUS. These are the PLACE's numbers, and a check-in
         // with no photograph is still something that happened here. As many
@@ -1837,7 +1839,7 @@ final class PlaceProfileViewController: UIViewController {
     /// without reaching into the page.
     var renderedActivity: [GalleryPost] { activityPage.posts }
     /// The Popular row as rendered, same purpose.
-    var renderedPopular: [GalleryPost] { rails.cards }
+    var renderedPopular: [GalleryPost] { shelf.cards }
 
     // MARK: - The navigation bar
 
@@ -2195,7 +2197,7 @@ extension PlaceProfileViewController: CardCloseLanding {
             grid.clearHeroConcealment()
             grid.endHeroFreeze()
         }
-        rails.clearConcealments()
+        shelf.clearConcealments()
     }
 
     /// The close for a flight this page itself opened: home to the very tile
@@ -2627,10 +2629,10 @@ extension PlaceProfileViewController {
     }
     /// Whether the page leads with the Popular row and titles its list
     /// Recent.
-    var debugSectionTitles: (row: String, list: String) { (rails.followingTitle, rails.listTitle) }
+    var debugSectionTitles: (row: String, list: String) { (shelf.title, lead.listTitle) }
     /// Taps Popular card `index` through the row's own handler.
     func debugOpenPopularCard(at index: Int) -> Bool {
-        guard rails.cards.indices.contains(index) else { return false }
+        guard shelf.cards.indices.contains(index) else { return false }
         openCard(at: index)
         return true
     }
