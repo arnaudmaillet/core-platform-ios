@@ -447,34 +447,8 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         let ended: (Bool) -> Void = { [weak page] committed in
             if !committed { page?.clearRevealConcealment() }
         }
-        if page.drawsAsTile(anchor) {
-            return page.tileWindow(
-                for: post, willStageDismissal: staged, dismissalDidEnd: ended
-            )
-        }
-        guard page.rowFrame(for: anchor, in: page) != nil else { return nil }
-        return TextRevealOrigin(
-            // The text row's rect, or any row's: the anchor may be a media
-            // row, which `textRowFrame` refuses on purpose.
-            rowFrame: { [weak page] space in
-                page?.textRowFrame(for: anchor, in: space) ?? page?.rowFrame(for: anchor, in: space)
-            },
-            // Read once, at the tap, while the row is realized by definition.
-            captionEnd: page.textRowCaptionEnd(for: anchor),
-            depthView: { [weak page] in page },
-            captionTop: page.textRowCaptionTop(for: anchor),
-            authorBand: page.textRowAuthorBand(for: anchor),
-            makeDismissStandIn: { [weak page] _ in page?.makeDismissStandIn(for: anchor) },
-            alignsPageToSource: true,
-            // The media fills the window, always — see `RevealPageFit.covering`.
-            pageFit: .covering,
-            // The list's card, its own curve and fill (the initialiser's
-            // defaults are the card's).
-            setConcealed: { [weak page] concealed in
-                page?.setRevealConcealed(concealed, for: anchor)
-            },
-            willStageDismissal: { _ in staged() },
-            dismissalDidEnd: ended
+        return page.closeWindow(
+            for: post, alignsPageToSource: true, willStageDismissal: staged, dismissalDidEnd: ended
         )
     }
 

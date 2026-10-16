@@ -304,24 +304,15 @@ final class ForYouPostListViewController: UIViewController {
     /// window therefore does not align the page to the row's caption; it opens
     /// over a page that holds still, and closes onto the row it opened from.
     private func textRowReveal(for post: GalleryPost) -> TextRevealOrigin? {
-        guard page.rowFrame(for: post.id, in: page) != nil else { return nil }
         let anchor = post.id
-        return TextRevealOrigin(
-            rowFrame: { [weak page] space in
-                page?.textRowFrame(for: anchor, in: space) ?? page?.rowFrame(for: anchor, in: space)
-            },
-            captionEnd: nil,
-            depthView: { [weak page] in page },
-            makeDismissStandIn: { [weak page] _ in page?.makeDismissStandIn(for: anchor) },
+        return page.closeWindow(
+            for: post,
+            // Held still, the card opening over it: the feed is a pager, so
+            // the row and the page are the same post only until the first swipe.
             alignsPageToSource: false,
-            // The media fills the window, always — see `RevealPageFit.covering`.
-            pageFit: .covering,
-            setConcealed: { [weak page] concealed in
-                page?.setRevealConcealed(concealed, for: anchor)
-            },
             // The row may have scrolled under the open post; bring it back, and
             // pin the inset before the landing is measured.
-            willStageDismissal: { [weak self] _ in
+            willStageDismissal: { [weak self] in
                 guard let self else { return }
                 view.layoutIfNeeded()
                 page.beginHeroFreeze()
