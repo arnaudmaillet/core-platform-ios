@@ -142,8 +142,11 @@ struct PostShelfSectionTests {
             + (0..<text).map { Self.post("t\($0)", kind: .text) }
         shelf.render(posts)
         let lead = GridLeadStack(sections: [shelf])
+        // The rails' old formula with only a card row: the row, the section
+        // gap, the list's title and its own gap.
         #expect(lead.preferredHeight(forWidth: 402)
-            == ForYouRailsView.height(forWidth: 402, friends: 0, following: media + text, textCards: text))
+            == PostShelfSection.height(forWidth: 402, media: media, text: text)
+                + LeadRowMetrics.rowGap + SectionTitleView.Metrics.height + LeadRowMetrics.listGap)
     }
 
     /// The shelf's rows changing size reaches the host through the stack, and

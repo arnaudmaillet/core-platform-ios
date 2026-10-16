@@ -378,7 +378,7 @@ final class PostShelfSection: UIView {
         header.frame = CGRect(x: 0, y: 0, width: width, height: SectionTitleView.Metrics.height)
         var y = SectionTitleView.Metrics.height
         if counts.media > 0 {
-            let size = ForYouRailsView.Metrics.cardSize(forWidth: width)
+            let size = LeadRowMetrics.cardSize(forWidth: width)
             RowGeometry.setItemSize(size, of: mediaView)
             mediaView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
             y += size.height
@@ -820,6 +820,49 @@ final class PostShelfSection: UIView {
         return collectionView(row, contextMenuConfigurationForItemsAt: [indexPath], point: point)
     }
 
+    /// `media 2` / `text 0` — the row and item card `index` is, for a log.
+    func debugCardPlaceName(at index: Int) -> String? {
+        debugCardPlace(at: index).map { "\($0.row === textView ? "text" : "media") \($0.indexPath.item)" }
+    }
+
+    /// Card `index`'s frame in its row's content space, from its layout.
+    func debugCardLayoutFrame(at index: Int) -> CGRect? {
+        debugCardPlace(at: index).flatMap { $0.row.layoutAttributesForItem(at: $0.indexPath)?.frame }
+    }
+
+    /// MEDIA card `index`'s cell, when the row has realized it.
+    func debugCardCell(at index: Int) -> ForYouFollowingCardCell? {
+        guard cards.indices.contains(index) else { return nil }
+        return mediaCardCell(for: cards[index].id)
+    }
+
+    /// TEXT card `index`'s cell — the list's own card — when realized.
+    func debugTextCardCell(at index: Int) -> PostGridListRowCell? {
+        guard cards.indices.contains(index) else { return nil }
+        return textCardCell(for: cards[index].id)
+    }
+
+    /// The menu a long press on card `index` would show — its rows' titles.
+    func debugCardMenuTitles(at index: Int) -> [String] {
+        guard cards.indices.contains(index) else { return [] }
+        return cardMenu(for: cards[index]).children.map(\.title)
+    }
+
+    /// Whether card `index` has a face to fly — what a scripted open waits on.
+    func debugCardIsReady(at index: Int) -> Bool {
+        guard cards.indices.contains(index) else { return false }
+        let post = cards[index]
+        guard post.kind != .text else { return true }
+        return mediaCardCell(for: post.id)?.renderedCover != nil
+    }
+
+    /// Opens what a committed preview would — the commit's own path, minus
+    /// UIKit's animator.
+    func debugCommitPreview(_ configuration: UIContextMenuConfiguration) {
+        guard case .card(let id)? = RowMenuTarget(configuration.identifier) else { return }
+        open(id)
+    }
+
     /// Taps card `index` through the row's own selection path.
     func debugTapCard(at index: Int) -> Bool {
         guard let (row, indexPath) = debugCardPlace(at: index) else { return false }
@@ -919,7 +962,7 @@ extension PostShelfSection: UICollectionViewDelegate {
         guard let indexPath = indexPaths.first,
               let id = cardID(in: collectionView, at: indexPath),
               let post = cards.first(where: { $0.id == id }) else { return nil }
-        let width = max(0, bounds.width - ForYouRailsView.Metrics.sideMargin * 2)
+        let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
         let pipeline = imagePipeline
         return UIContextMenuConfiguration(
             identifier: RowMenuTarget.card(id).identifier,

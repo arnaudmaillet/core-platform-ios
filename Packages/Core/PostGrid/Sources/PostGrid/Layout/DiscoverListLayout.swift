@@ -77,7 +77,7 @@ public enum DiscoverListLayout {
     public static let pairGutter: CGFloat = PostGridListLayout.rowSpacing
 
     /// A paired card's height over its width: 3:4, the For You FOLLOWING
-    /// card's own shape (`ForYouRailsView.Metrics.cardAspect`, which a Feed
+    /// card's own shape (`LeadRowMetrics.cardAspect`, which a Feed
     /// test pins to this) — a paired card IS that card, at half the list's
     /// width. Every paired post is taller than 4:5, so the box only ever crops
     /// height, and one fixed box is what makes a pair one row.

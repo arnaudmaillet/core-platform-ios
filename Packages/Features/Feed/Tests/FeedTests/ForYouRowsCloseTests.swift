@@ -35,8 +35,8 @@ struct ForYouRowsCloseTests {
     func everyCardCarriesTheWindowItsCloseNeeds(kind: GalleryPost.Kind) throws {
         let tapped = Self.post("c-\(kind)", kind: kind)
         let fixture = Fixture(cards: [tapped, Self.post("after", kind: .text)])
-        let origin = ForYouRowOrigins.card(
-            tapped, stream: fixture.rails.cards, rails: fixture.rails,
+        let origin = PostShelfOrigins.card(
+            tapped, stream: fixture.lead.shelf.cards, shelf: fixture.lead.shelf,
             page: fixture.page, host: fixture.host.view
         )
 
@@ -55,7 +55,7 @@ struct ForYouRowsCloseTests {
         let story = Self.story("pal", posts: [Self.post("s1", kind: kind), Self.post("s2", kind: .text)])
         let fixture = Fixture(stories: [story])
         let origin = try #require(ForYouRowOrigins.story(
-            story, rails: fixture.rails, page: fixture.page, host: fixture.host.view, pagePicture: nil
+            story, friends: fixture.lead.friends, page: fixture.page, host: fixture.host.view, pagePicture: nil
         ))
 
         #expect(origin.hasHero == (kind != .text))
@@ -70,8 +70,8 @@ struct ForYouRowsCloseTests {
     @Test func aMediaCardsWindowLandsAsThePictureCard() throws {
         let tapped = Self.post("m", kind: .video)
         let fixture = Fixture(cards: [tapped])
-        let reveal = try #require(ForYouRowOrigins.card(
-            tapped, stream: [tapped], rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let reveal = try #require(PostShelfOrigins.card(
+            tapped, stream: [tapped], shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         ).textReveal)
         let row = try #require(reveal.rowFrame(fixture.host.view))
         let standIn = try #require(reveal.makeDismissStandIn(nil))
@@ -89,8 +89,8 @@ struct ForYouRowsCloseTests {
     @Test func bothClosesPinTheListAndHandItBack() throws {
         let tapped = Self.post("m", kind: .photo)
         let fixture = Fixture(cards: [tapped])
-        let origin = ForYouRowOrigins.card(
-            tapped, stream: [tapped], rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let origin = PostShelfOrigins.card(
+            tapped, stream: [tapped], shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         )
         #expect(!fixture.isFrozen, "precondition")
 
@@ -112,8 +112,8 @@ struct ForYouRowsCloseTests {
         let cards = (0..<8).map { Self.post("c\($0)", kind: .photo) }
         let fixture = Fixture(cards: cards)
         let row = try #require(fixture.cardsRow)
-        let origin = ForYouRowOrigins.card(
-            cards[0], stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let origin = PostShelfOrigins.card(
+            cards[0], stream: cards, shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         )
         row.contentOffset.x = row.contentSize.width - row.bounds.width
         fixture.window.layoutIfNeeded()
@@ -122,8 +122,8 @@ struct ForYouRowsCloseTests {
         origin.willStageDismissal()
 
         let landed = try #require(origin.frame(fixture.host.view))
-        let rails = fixture.rails.convert(fixture.rails.bounds, to: fixture.host.view)
-        #expect(rails.minX <= landed.minX && landed.maxX <= rails.maxX, "\(landed) is not wholly in view")
+        let lead = fixture.lead.stack.convert(fixture.lead.stack.bounds, to: fixture.host.view)
+        #expect(lead.minX <= landed.minX && landed.maxX <= lead.maxX, "\(landed) is not wholly in view")
     }
 
     /// ⚠️ THE CARD CLOSE ASKS FOR THE ROW BEFORE THIS SCREEN IS BACK. A swipe
@@ -137,15 +137,15 @@ struct ForYouRowsCloseTests {
         let cards = (0..<8).map { Self.post("c\($0)", kind: $0 == 0 ? .video : .photo) }
         let fixture = Fixture(cards: cards)
         let row = try #require(fixture.cardsRow)
-        let reveal = try #require(ForYouRowOrigins.card(
-            cards[0], stream: cards, rails: fixture.rails, page: fixture.page, host: fixture.host.view
+        let reveal = try #require(PostShelfOrigins.card(
+            cards[0], stream: cards, shelf: fixture.lead.shelf, page: fixture.page, host: fixture.host.view
         ).textReveal)
         row.contentOffset.x = row.contentSize.width - row.bounds.width
         row.layoutIfNeeded()
-        fixture.rails.removeFromSuperview()
-        #expect(fixture.rails.window == nil, "precondition: the screen is covered")
+        fixture.lead.stack.removeFromSuperview()
+        #expect(fixture.lead.stack.window == nil, "precondition: the screen is covered")
 
-        #expect(reveal.rowFrame(fixture.rails) != nil, "the close would find no row")
+        #expect(reveal.rowFrame(fixture.lead.stack) != nil, "the close would find no row")
         #expect(RowCardCloseLanding(origin: reveal, pipeline: nil)
             .cardCloseGeometry(dismissing: UIViewController()) != nil)
     }
@@ -155,13 +155,13 @@ struct ForYouRowsCloseTests {
     @Test func aCardsLandingIgnoresATransformOnIt() throws {
         let tapped = Self.post("m", kind: .photo)
         let fixture = Fixture(cards: [tapped])
-        let resting = try #require(fixture.rails.cardFrame(for: tapped.id, in: fixture.host.view))
+        let resting = try #require(fixture.lead.shelf.cardFrame(for: tapped.id, in: fixture.host.view))
         let cell = try #require(fixture.cardsRow?.visibleCells.first)
 
         cell.transform = CGAffineTransform(scaleX: 0.95, y: 0.95)
         cell.contentView.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
 
-        #expect(fixture.rails.cardFrame(for: tapped.id, in: fixture.host.view) == resting)
+        #expect(fixture.lead.shelf.cardFrame(for: tapped.id, in: fixture.host.view) == resting)
         #expect(cell.convert(cell.bounds, to: fixture.host.view) != resting, "precondition: UIKit's own answer moves")
     }
 
@@ -182,7 +182,7 @@ struct ForYouRowsCloseTests {
         content.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
         disc.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
 
-        let resting = ForYouRailsView.restingFrame(of: disc, below: row, in: root)
+        let resting = RowGeometry.restingFrame(of: disc, below: row, in: root)
 
         // disc (10,10) in content → cell (10,10) → row content (70,20) → root:
         // minus the row's offset, plus its origin.
@@ -279,31 +279,31 @@ struct ForYouRowsCloseTests {
     private final class Fixture {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let host = UIViewController()
-        let rails: ForYouRailsView
+        let lead: ForYouLeadFixture
         let page: ForYouGridPage
 
         init(cards: [GalleryPost] = [], stories: [ForYouViewModel.FriendStory] = []) {
             let pipeline = ImagePipeline(fetcher: SilentFetcher())
-            rails = ForYouRailsView(imagePipeline: pipeline, videoPlayback: nil)
+            lead = ForYouLeadFixture(pipeline: pipeline, videoPlayback: nil)
             page = ForYouGridPage(imagePipeline: pipeline, style: .discover, videoPlayback: nil)
             // Rendered before it has a window, so the rows apply unanimated.
             var model = ForYouViewModel.Rails()
             model.following = cards
             model.friends = stories
-            rails.render(model)
+            lead.render(model)
             window.rootViewController = host
             window.isHidden = false
             page.frame = host.view.bounds
             host.view.addSubview(page)
-            rails.frame = CGRect(x: 0, y: 120, width: 402, height: rails.preferredHeight(forWidth: 402))
-            host.view.addSubview(rails)
+            lead.stack.frame = CGRect(x: 0, y: 120, width: 402, height: lead.stack.preferredHeight(forWidth: 402))
+            host.view.addSubview(lead.stack)
             window.layoutIfNeeded()
-            rails.layoutIfNeeded()
-            for row in rails.subviews.compactMap({ $0 as? UICollectionView }) { row.layoutIfNeeded() }
+            lead.stack.layoutIfNeeded()
+            for row in lead.stack.subviews.compactMap({ $0 as? UICollectionView }) { row.layoutIfNeeded() }
         }
 
         /// Following's media row.
-        var cardsRow: UICollectionView? { rails.debugMediaRow }
+        var cardsRow: UICollectionView? { lead.shelf.mediaView }
 
         var isFrozen: Bool { page.debugInsetState.contains("frozen=Y") }
     }

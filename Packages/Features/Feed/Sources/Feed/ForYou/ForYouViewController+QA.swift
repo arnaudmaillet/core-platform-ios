@@ -330,14 +330,14 @@ extension ForYouViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 QAWait.until("-foryou-open-story \(index)", { [weak self] in
                     guard let self, isAtRest() else { return false }
-                    return rails.stories.indices.contains(index)
+                    return friendsRow.stories.indices.contains(index)
                 }) { [weak self] in
                     guard let self else { return }
-                    let story = rails.stories[index]
+                    let story = friendsRow.stories[index]
                     print("[qa] -foryou-open-story \(index): \(story.handle) unseen=\(story.hasUnseen)"
                         + " posts=\(story.posts.map(\.id.rawValue))")
                     scheduleDemoCloseIfRequested()
-                    _ = rails.debugTapStory(at: index)
+                    _ = friendsRow.debugTapStory(at: index)
                 }
             }
         }
@@ -345,14 +345,14 @@ extension ForYouViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 QAWait.until("-foryou-open-card \(index)", { [weak self] in
                     guard let self, isAtRest() else { return false }
-                    return rails.debugCardIsReady(at: index)
+                    return shelf.debugCardIsReady(at: index)
                 }) { [weak self] in
                     guard let self else { return }
-                    let card = rails.cards[index]
-                    let place = rails.debugCardPlaceName(at: index).map { " row=\($0)" } ?? ""
+                    let card = shelf.cards[index]
+                    let place = shelf.debugCardPlaceName(at: index).map { " row=\($0)" } ?? ""
                     print("[qa] -foryou-open-card \(index): \(card.id.rawValue) kind=\(card.kind)\(place)")
                     scheduleDemoCloseIfRequested()
-                    _ = rails.debugTapCard(at: index)
+                    _ = shelf.debugTapCard(at: index)
                 }
             }
         }
@@ -392,11 +392,11 @@ extension ForYouViewController {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 QAWait.until("-foryou-push-list \(raw)", { [weak self] in
                     guard let self, isAtRest() else { return false }
-                    return kind == .friends ? !rails.stories.isEmpty : !rails.cards.isEmpty
+                    return kind == .friends ? !friendsRow.stories.isEmpty : !shelf.cards.isEmpty
                 }) { [weak self] in
                     guard let self else { return }
                     print("[qa] -foryou-push-list \(raw)")
-                    kind == .friends ? rails.debugTapFriendsHeader() : rails.debugTapFollowingHeader()
+                    kind == .friends ? friendsRow.debugTapTitle() : shelf.debugTapTitle()
                     scheduleListOpenIfRequested(kind)
                 }
             }
@@ -488,7 +488,7 @@ extension ForYouViewController {
     /// tab after a delay — the way to see what is still drawing or playing
     /// once the tab is left — and, with the second number, come back to For
     /// You that long after (the Friends row re-sorts across the round trip,
-    /// `ForYouRailsView.releaseStoryOrder`).
+    /// `FriendsStoriesRow.releaseStoryOrder`).
     func scheduleTabAwayIfNeeded() {
         let arguments = ProcessInfo.processInfo.arguments
         guard !hasScheduledTabAway,
@@ -523,7 +523,9 @@ extension ForYouViewController: DebugItemSelectable {
 
 extension ForYouViewController {
     /// The rows leading the list — their headers' own tap paths.
-    var debugRails: ForYouRailsView { rails }
+    var debugFriendsRow: FriendsStoriesRow { friendsRow }
+    var debugShelf: PostShelfSection { shelf }
+    var debugLead: GridLeadStack { lead }
     /// Whether Discover's chunk tiles wear their words (`PostTileInfo`).
     var debugShowsTileInfo: Bool { page.showsTileInfo }
     /// Presses a chunk's "View all", as its footer does.

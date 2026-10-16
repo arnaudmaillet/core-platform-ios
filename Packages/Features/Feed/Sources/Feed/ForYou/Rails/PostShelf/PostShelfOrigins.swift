@@ -71,7 +71,7 @@ enum PostShelfOrigins {
                 ),
             // A close hands the page's playback to the card before the flight
             // card goes, and waits for it to draw — no thumbnail between the
-            // two (`ForYouRailsView.adoptLandingPlayback`).
+            // two (`PostShelfSection.adoptLandingPlayback`).
             adoptLandingLiveMedia: { [weak shelf] view in shelf?.adoptLandingPlayback(view, for: id) },
             landingMediaIsReady: { [weak shelf] in shelf?.isLandingPlaybackReady(for: id) ?? true },
             // A close from another post comes home to this card with the

@@ -283,7 +283,7 @@ struct ReturnPlayersEverywhereTests {
         await Self.settle {
             // Re-asserted each turn: the view model's own first load renders
             // the (empty) rails after the screen appears.
-            if screen.debugRails.cards != posts { screen.debugRails.render(rows) }
+            if screen.debugShelf.cards != posts { screen.debugShelf.render(posts) }
             window.layoutIfNeeded()
             screen.openCard(at: 0)
             return opened != nil

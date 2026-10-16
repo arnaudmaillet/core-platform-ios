@@ -24,12 +24,14 @@ protocol GridLeadSection: UIView {
 /// A section with nothing to show takes no room; with none shown, the stack
 /// is zero tall and the title is not drawn either — alone at the top of the
 /// screen it would title the only thing there. The gaps are the app's ONE
-/// section gap (`ForYouRailsView.Metrics.rowGap`) between sections and before
+/// section gap (`LeadRowMetrics.rowGap`) between sections and before
 /// the title, and the title's own (`listGap`) before the list.
 ///
-/// Hosted as the list's LEADING HEADER, never as sections of its own — see
-/// `ForYouRailsView` for why. The host owns the stack (the page holds its
-/// lead weakly) and re-sizes the lead on `onHeightChange`.
+/// Hosted as the list's LEADING HEADER (`ForYouGridPage.setLead`), never as
+/// sections of its own: every index path, chunk plan, hero and reveal on the
+/// list is counted in its sections, and a header that scrolls with them
+/// changes none of that arithmetic. The host owns the stack (the page holds
+/// its lead weakly) and re-sizes the lead on `onHeightChange`.
 @MainActor
 final class GridLeadStack: UIView {
     let sections: [any GridLeadSection]
@@ -77,15 +79,15 @@ final class GridLeadStack: UIView {
     static func height(sections: [CGFloat]) -> CGFloat {
         let shown = sections.filter { $0 > 0 }
         guard !shown.isEmpty else { return 0 }
-        let gap = ForYouRailsView.Metrics.rowGap
+        let gap = LeadRowMetrics.rowGap
         return shown.reduce(0, +) + gap * CGFloat(shown.count - 1)
-            + gap + SectionTitleView.Metrics.height + ForYouRailsView.Metrics.listGap
+            + gap + SectionTitleView.Metrics.height + LeadRowMetrics.listGap
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         let width = bounds.width
-        let gap = ForYouRailsView.Metrics.rowGap
+        let gap = LeadRowMetrics.rowGap
         var y: CGFloat = 0
         var anyShown = false
         for section in sections {

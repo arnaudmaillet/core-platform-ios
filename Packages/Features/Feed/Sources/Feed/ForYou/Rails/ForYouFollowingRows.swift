@@ -44,7 +44,7 @@ import UIKit
 /// Sized on its own (say 1.3 cards per width, 284pt on a 402pt screen) the
 /// text row would peek wider than the media row under it, and its two lines
 /// would hold fewer words, for no gain. Each row comes to rest per card by
-/// `RowEdgeSnap` — see `ForYouRailsView.snapTarget`.
+/// `RowEdgeSnap` — see `RowSnapper.snapTarget`.
 ///
 /// **A row with nothing in it is not drawn**: no media posts, and the text
 /// row sits right under the heading; no text posts, and the section is the
@@ -75,7 +75,7 @@ enum ForYouFollowingRows {
     /// gap between them — see the note on the type.
     @MainActor
     static func textCardWidth(forWidth width: CGFloat) -> CGFloat {
-        ForYouRailsView.Metrics.cardSize(forWidth: width).width * 2 + ForYouRailsView.Metrics.itemGap
+        LeadRowMetrics.cardSize(forWidth: width).width * 2 + LeadRowMetrics.itemGap
     }
 
     /// A text card's height in a section `width` wide: the list's card at
@@ -98,7 +98,7 @@ enum ForYouFollowingRows {
     @MainActor
     static func height(forWidth width: CGFloat, media: Int, text: Int) -> CGFloat {
         let hasMedia = media > 0, hasText = text > 0
-        return (hasMedia ? ForYouRailsView.Metrics.cardSize(forWidth: width).height : 0)
+        return (hasMedia ? LeadRowMetrics.cardSize(forWidth: width).height : 0)
             + (hasMedia && hasText ? rowGap : 0)
             // Measured only when there is a text card to size.
             + (hasText ? textCardHeight(forWidth: width) : 0)
@@ -107,5 +107,5 @@ enum ForYouFollowingRows {
     /// Between the media row and the text row: the rows' item gap, so the
     /// two read as one section rather than two.
     @MainActor
-    static var rowGap: CGFloat { ForYouRailsView.Metrics.itemGap }
+    static var rowGap: CGFloat { LeadRowMetrics.itemGap }
 }

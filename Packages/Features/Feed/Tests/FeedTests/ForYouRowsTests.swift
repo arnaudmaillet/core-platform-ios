@@ -301,9 +301,9 @@ struct ForYouRowsTests {
     // MARK: - The rows' view
 
     @Test func aRowWithNothingInItIsNotDrawn() {
-        #expect(ForYouRailsView.height(forWidth: 393, friends: 0, following: 0) == 0)
-        let both = ForYouRailsView.height(forWidth: 393, friends: 3, following: 3)
-        let friendsOnly = ForYouRailsView.height(forWidth: 393, friends: 3, following: 0)
+        #expect(ForYouLeadFixture.height(forWidth: 393, friends: 0, following: 0) == 0)
+        let both = ForYouLeadFixture.height(forWidth: 393, friends: 3, following: 3)
+        let friendsOnly = ForYouLeadFixture.height(forWidth: 393, friends: 3, following: 0)
         #expect(friendsOnly > 0)
         #expect(both > friendsOnly)
     }
@@ -314,22 +314,22 @@ struct ForYouRowsTests {
     @Test func theRowsKeepTheAppsSectionGap() {
         let width: CGFloat = 393
         let bar = SectionTitleView.Metrics.height
-        let story = ForYouRailsView.Metrics.storySize(forWidth: width).height
-        let card = ForYouRailsView.Metrics.cardSize(forWidth: width).height
-        let gap = ForYouRailsView.Metrics.rowGap
+        let story = LeadRowMetrics.storySize(forWidth: width).height
+        let card = LeadRowMetrics.cardSize(forWidth: width).height
+        let gap = LeadRowMetrics.rowGap
         #expect(gap == SectionTitleView.gapAbove())
         let air = (bar - UIFont.systemFont(ofSize: 20, weight: .bold).lineHeight) / 2
         #expect(abs(gap + air - Spacing.section) <= 0.5)
-        #expect(ForYouRailsView.height(forWidth: width, friends: 3, following: 3)
-                == bar + story + gap + bar + card + gap + bar + ForYouRailsView.Metrics.listGap)
+        #expect(ForYouLeadFixture.height(forWidth: width, friends: 3, following: 3)
+                == bar + story + gap + bar + card + gap + bar + LeadRowMetrics.listGap)
     }
 
     /// Two whole cards and a third peeking — the product's "the row goes on".
     @Test func aCardIsAFractionOfTheWidthSoTheThirdPeeks() {
         let width: CGFloat = 393
-        let card = ForYouRailsView.Metrics.cardSize(forWidth: width)
-        let margin = ForYouRailsView.Metrics.sideMargin
-        let spacing = ForYouRailsView.Metrics.itemGap
+        let card = LeadRowMetrics.cardSize(forWidth: width)
+        let margin = LeadRowMetrics.sideMargin
+        let spacing = LeadRowMetrics.itemGap
         let twoCards = margin + card.width * 2 + spacing * 2
         #expect(twoCards < width, "a third card starts on screen")
         #expect(twoCards + card.width > width, "and does not fit")

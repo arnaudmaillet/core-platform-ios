@@ -5,7 +5,8 @@ import PostGrid
 import UIKit
 
 /// How For You's two rows describe themselves to the shared flight
-/// (`presentSnapFeedHero`): a friend's FACE, or a Following CARD.
+/// (`presentSnapFeedHero`): a friend's FACE. A shelf's CARD is
+/// `PostShelfOrigins`'.
 ///
 /// Built here rather than inline in `ForYouViewController` so the one
 /// decision the rows kept getting wrong — what a close has to work with — is
@@ -42,7 +43,7 @@ enum ForYouRowOrigins {
     /// `nil` for a friend with nothing to open.
     static func story(
         _ story: ForYouViewModel.FriendStory,
-        rails: ForYouRailsView,
+        friends: FriendsStoriesRow,
         page: ForYouGridPage,
         host: UIView,
         pagePicture: UIImage?,
@@ -51,18 +52,18 @@ enum ForYouRowOrigins {
     ) -> SnapFeedHeroOrigin? {
         guard let first = story.posts.first else { return nil }
         let author = story.authorID
-        let face = rails.storyFace(for: author)
+        let face = friends.storyFace(for: author)
         let hasMedia = first.kind != .text
         return SnapFeedHeroOrigin(
             post: first,
             stream: story.posts,
-            hasHero: hasMedia && rails.storyFrame(for: author, in: host) != nil,
+            hasHero: hasMedia && friends.storyFrame(for: author, in: host) != nil,
             cover: face,
             style: .listMedia,
-            frame: { [weak rails] space in rails?.storyFrame(for: author, in: space) },
-            isOnScreen: { [weak rails] in rails?.isStoryOnScreen(author) ?? false },
-            setConcealed: { [weak rails, weak page] concealed in
-                rails?.setStoryConcealed(concealed, for: author)
+            frame: { [weak friends] space in friends?.storyFrame(for: author, in: space) },
+            isOnScreen: { [weak friends] in friends?.isStoryOnScreen(author) ?? false },
+            setConcealed: { [weak friends, weak page] concealed in
+                friends?.setStoryConcealed(concealed, for: author)
                 // The flight's close is over once its source is put back.
                 if !concealed { page?.endHeroFreeze() }
             },
@@ -70,11 +71,11 @@ enum ForYouRowOrigins {
             // EVERY story — a text first post opens through it, and a media
             // one closes through it once the viewer pages onto words.
             textReveal: storyReveal(
-                for: author, face: face, rails: rails, page: page, closeStaged: closeStaged
+                for: author, face: face, friends: friends, page: page, closeStaged: closeStaged
             ),
             // The face's own outline — a nearly-round square, not a disc —
             // so the card leaves as the face and lands as it.
-            cornerRadius: rails.storyFaceCornerRadius,
+            cornerRadius: friends.storyFaceCornerRadius,
             cornerCurve: ForYouStoryCell.Metrics.faceShape.cornerCurve,
             // The post's own picture, if the pipeline has it: the far end of
             // the cross-dissolve. Without it the face grows into the page and
@@ -88,8 +89,8 @@ enum ForYouRowOrigins {
             // the face over the media the viewer ended on as it shrinks — the
             // map marker's arrangement.
             pagePictureOf: pictures.map { storyPictures(of: story.posts, from: $0) },
-            willStageDismissal: { [weak rails, weak page] in
-                stageClose(page: page, then: closeStaged) { rails?.bringStoryIntoView(author) }
+            willStageDismissal: { [weak friends, weak page] in
+                stageClose(page: page, then: closeStaged) { friends?.bringStoryIntoView(author) }
             }
         )
     }
@@ -132,11 +133,11 @@ enum ForYouRowOrigins {
     static func storyReveal(
         for author: ProfileID,
         face: UIImage?,
-        rails: ForYouRailsView,
+        friends: FriendsStoriesRow,
         page: ForYouGridPage,
         closeStaged: @escaping () -> Void = {}
     ) -> TextRevealOrigin {
-        let radius = rails.storyFaceCornerRadius
+        let radius = friends.storyFaceCornerRadius
         func standIn() -> UIView? {
             guard let face else { return nil }
             let view = UIImageView(image: face)
@@ -147,10 +148,10 @@ enum ForYouRowOrigins {
             return view
         }
         return TextRevealOrigin(
-            rowFrame: { [weak rails] space in
-                inView(rails?.storyFrame(for: author, in: space)) {
-                    rails?.bringStoryIntoView(author)
-                    return rails?.storyFrame(for: author, in: space)
+            rowFrame: { [weak friends] space in
+                inView(friends?.storyFrame(for: author, in: space)) {
+                    friends?.bringStoryIntoView(author)
+                    return friends?.storyFrame(for: author, in: space)
                 }
             },
             captionEnd: nil,
@@ -162,31 +163,15 @@ enum ForYouRowOrigins {
             cornerRadius: radius,
             cornerCurve: ForYouStoryCell.Metrics.faceShape.cornerCurve,
             fill: nil,
-            setConcealed: { [weak rails] concealed in
-                rails?.setStoryConcealed(concealed, for: author)
+            setConcealed: { [weak friends] concealed in
+                friends?.setStoryConcealed(concealed, for: author)
             },
-            willStageDismissal: { [weak rails, weak page] _ in
-                stageClose(page: page, then: closeStaged) { rails?.bringStoryIntoView(author) }
+            willStageDismissal: { [weak friends, weak page] _ in
+                stageClose(page: page, then: closeStaged) { friends?.bringStoryIntoView(author) }
             },
             // Both ways: a close that sprang back is over too, and the list
             // under a page that is staying has nothing to hold still for.
             dismissalDidEnd: { [weak page] _ in page?.endHeroFreeze() }
-        )
-    }
-
-    /// A shelf's card, from the rails' shelf — see `PostShelfOrigins.card`.
-    static func card(
-        _ tapped: GalleryPost,
-        stream: [GalleryPost],
-        rails: ForYouRailsView,
-        page: ForYouGridPage,
-        host: UIView,
-        thawsOnLanding: Bool = true,
-        closeStaged: @escaping () -> Void = {}
-    ) -> SnapFeedHeroOrigin {
-        PostShelfOrigins.card(
-            tapped, stream: stream, shelf: rails.shelf, page: page, host: host,
-            thawsOnLanding: thawsOnLanding, closeStaged: closeStaged
         )
     }
 

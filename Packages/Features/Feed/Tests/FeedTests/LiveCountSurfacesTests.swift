@@ -87,8 +87,8 @@ struct LiveCountSurfacesTests {
     /// the live count — a like made in the feed it opened included.
     @Test func aFollowingCardsFlightAndStandInsDrawTheLiveCount() {
         let entities = EntityStore()
-        let rails = ForYouRailsView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
-        rails.staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
+        let lead = ForYouLeadFixture(pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
+        lead.shelf.staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
         let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), style: .discover, videoPlayback: nil)
         let card = Self.post("c1", likes: 123)
         entities.mergeCounts([card.id: PostCounts(likes: 123)])
@@ -96,8 +96,8 @@ struct LiveCountSurfacesTests {
         // Liked in the feed.
         entities.addLikes(1, to: card.id)
 
-        #expect(rails.livePost(card).reactionCount == 124)
-        let origin = ForYouRowOrigins.card(card, stream: [card], rails: rails, page: page, host: rails)
+        #expect(lead.shelf.livePost(card).reactionCount == 124)
+        let origin = PostShelfOrigins.card(card, stream: [card], shelf: lead.shelf, page: page, host: lead.stack)
         #expect(origin.post.reactionCount == 124)
         #expect(origin.stream.map(\.reactionCount) == [124])
     }
@@ -105,11 +105,11 @@ struct LiveCountSurfacesTests {
     /// A count the author hides stays hidden on every copy.
     @Test func aHiddenCountStaysHiddenOnTheFlight() {
         let entities = EntityStore()
-        let rails = ForYouRailsView(imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
-        rails.staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
+        let lead = ForYouLeadFixture(pipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()), videoPlayback: nil)
+        lead.shelf.staking = PostCardStaking(wallet: Self.wallet(), entities: entities)
         var card = Self.post("c1", likes: nil)
         card.likeCountsHidden = true
         entities.setLikeCount(99, for: card.id)
-        #expect(rails.livePost(card).reactionCount == nil)
+        #expect(lead.shelf.livePost(card).reactionCount == nil)
     }
 }

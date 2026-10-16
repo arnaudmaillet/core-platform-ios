@@ -36,10 +36,10 @@ struct ForYouRowsInteractionTests {
         )
     }
 
-    private func makeRails() -> ForYouRailsView {
-        let rails = ForYouRailsView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil)
-        rails.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
-        return rails
+    private func makeLead() -> ForYouLeadFixture {
+        let lead = ForYouLeadFixture(pipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil)
+        lead.stack.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
+        return lead
     }
 
     private func railsState(
@@ -56,15 +56,15 @@ struct ForYouRowsInteractionTests {
     /// The headers push through the bar's own recogniser — #312's chevron was
     /// dead on device while its test, calling the host's closure, passed.
     @Test func eachRowHeaderPushesItsList() {
-        let rails = makeRails()
+        let lead = makeLead()
         var pushed: [String] = []
-        rails.onFriendsHeaderTapped = { pushed.append("friends") }
-        rails.onFollowingHeaderTapped = { pushed.append("following") }
-        rails.onListHeaderTapped = { pushed.append("for you") }
-        rails.render(railsState(friends: [story("ana", unseen: true)], following: [post("c", by: "bo")]))
-        rails.debugTapFriendsHeader()
-        rails.debugTapFollowingHeader()
-        rails.debugTapListHeader()
+        lead.friends.onTitleTapped = { pushed.append("friends") }
+        lead.shelf.onTitleTapped = { pushed.append("following") }
+        lead.stack.onListTitleTapped = { pushed.append("for you") }
+        lead.render(railsState(friends: [story("ana", unseen: true)], following: [post("c", by: "bo")]))
+        lead.friends.debugTapTitle()
+        lead.shelf.debugTapTitle()
+        lead.stack.debugListTitleView.debugTap()
         #expect(pushed == ["friends", "following", "for you"])
     }
 
@@ -85,7 +85,7 @@ struct ForYouRowsInteractionTests {
             press(screen)
             return nav.topViewController
         }
-        let byHeading = pushed { $0.debugRails.debugTapListHeader() }
+        let byHeading = pushed { $0.debugLead.debugListTitleView.debugTap() }
         let byViewAll = pushed { $0.debugPressViewAll() }
         #expect(byHeading is DiscoverGalleryViewController)
         #expect(byViewAll is DiscoverGalleryViewController)
@@ -94,17 +94,17 @@ struct ForYouRowsInteractionTests {
 
     /// "For you" under the rows — and nothing at all without rows.
     @Test func forYouTitlesTheListUnderTheRows() {
-        let rails = makeRails()
-        rails.render(railsState(friends: []))
-        rails.layoutIfNeeded()
-        #expect(!rails.debugShowsListHeader)
-        #expect(ForYouRailsView.height(forWidth: 393, friends: 0, following: 0) == 0)
+        let lead = makeLead()
+        lead.render(railsState(friends: []))
+        lead.stack.layoutIfNeeded()
+        #expect(lead.stack.debugListTitleView.isHidden)
+        #expect(ForYouLeadFixture.height(forWidth: 393, friends: 0, following: 0) == 0)
 
-        rails.render(railsState(friends: [story("ana", unseen: false)]))
-        rails.layoutIfNeeded()
-        #expect(rails.debugShowsListHeader)
-        let rowsOnly = SectionTitleView.Metrics.height + ForYouRailsView.Metrics.storySize(forWidth: 393).height
-        #expect(ForYouRailsView.height(forWidth: 393, friends: 1, following: 0)
+        lead.render(railsState(friends: [story("ana", unseen: false)]))
+        lead.stack.layoutIfNeeded()
+        #expect(!lead.stack.debugListTitleView.isHidden)
+        let rowsOnly = SectionTitleView.Metrics.height + LeadRowMetrics.storySize(forWidth: 393).height
+        #expect(ForYouLeadFixture.height(forWidth: 393, friends: 1, following: 0)
                 >= rowsOnly + SectionTitleView.Metrics.height, "room for the title")
     }
 
@@ -115,15 +115,15 @@ struct ForYouRowsInteractionTests {
     /// sheet's titles stand on.
     @Test func theRowTitlesAreTheAppsSectionTitle() {
         let list = UIScrollView(frame: CGRect(x: 0, y: 0, width: 393, height: 800))
-        let rails = makeRails()
-        list.addSubview(rails)
+        let lead = makeLead()
+        list.addSubview(lead.stack)
         var state = railsState(
             friends: [story("ana", unseen: true)], following: [post("p1", by: "bo"), post("p2", by: "cy")]
         )
         state.friendsBadge = 2
-        rails.render(state)
-        rails.layoutIfNeeded()
-        let headers = rails.debugHeaders
+        lead.render(state)
+        lead.stack.layoutIfNeeded()
+        let headers = [lead.friends.header, lead.shelf.header, lead.stack.debugListTitleView]
         for header in headers { header.layoutIfNeeded() }
         #expect(headers.map(\.debugTitleText) == ["Friends", "Following", "For you"])
         #expect(headers.map(\.debugCountText) == ["2", nil, nil])
@@ -148,33 +148,33 @@ struct ForYouRowsInteractionTests {
     /// The menu leads with Open, then the host's rows; the preview's commit
     /// opens exactly what a tap on the card opens.
     @Test func aCardsPreviewCommitsToTheCardsOpen() throws {
-        let rails = makeRails()
+        let lead = makeLead()
         let cards = [post("c0", by: "bo"), post("c1", by: "cy")]
-        rails.render(railsState(friends: [], following: cards))
-        rails.cardMenuElements = { _ in [UIAction(title: "View Profile") { _ in }] }
-        #expect(rails.debugCardMenuTitles(at: 1) == ["Open", "View Profile"])
+        lead.render(railsState(friends: [], following: cards))
+        lead.shelf.cardMenuElements = { _ in [UIAction(title: "View Profile") { _ in }] }
+        #expect(lead.shelf.debugCardMenuTitles(at: 1) == ["Open", "View Profile"])
 
         var opened: [Int] = []
-        rails.onCardTapped = { opened.append($0) }
-        let configuration = try #require(rails.debugCardMenuConfiguration(at: 1))
-        rails.debugCommitPreview(configuration)
+        lead.shelf.onCardTapped = { opened.append($0) }
+        let configuration = try #require(lead.shelf.debugCardMenuConfiguration(at: 1))
+        lead.shelf.debugCommitPreview(configuration)
         #expect(opened == [1])
     }
 
     /// A friend's menu: Open (their posts), then the host's rows.
     @Test func aFriendsMenuOpensTheirPosts() {
-        let rails = makeRails()
-        rails.render(railsState(friends: [story("ana", unseen: true)]))
-        rails.storyMenuElements = { _ in [UIAction(title: "View Profile") { _ in }] }
-        #expect(rails.debugStoryMenuTitles(at: 0) == ["Open", "View Profile"])
+        let lead = makeLead()
+        lead.render(railsState(friends: [story("ana", unseen: true)]))
+        lead.friends.storyMenuElements = { _ in [UIAction(title: "View Profile") { _ in }] }
+        #expect(lead.friends.debugStoryMenuTitles(at: 0) == ["Open", "View Profile"])
     }
 
     @Test func aMenuTargetSurvivesItsIdentifier() {
-        let story = ForYouRailsView.MenuTarget.story(ProfileID("ana"))
-        let card = ForYouRailsView.MenuTarget.card(PostID("post:with:colons"))
-        #expect(ForYouRailsView.MenuTarget(story.identifier) == story)
-        #expect(ForYouRailsView.MenuTarget(card.identifier) == card)
-        #expect(ForYouRailsView.MenuTarget("elsewhere" as NSString) == nil)
+        let story = RowMenuTarget.story(ProfileID("ana"))
+        let card = RowMenuTarget.card(PostID("post:with:colons"))
+        #expect(RowMenuTarget(story.identifier) == story)
+        #expect(RowMenuTarget(card.identifier) == card)
+        #expect(RowMenuTarget("elsewhere" as NSString) == nil)
     }
 
     /// The preview is sized by the post's shape, held between 2:3 and 16:9.
@@ -197,7 +197,7 @@ struct ForYouRowsInteractionTests {
         // The view model re-sorted: Ana's ring cleared, so she went last; Dee
         // arrived (a follow-back) and Cy left (an unfollow).
         let fresh = [story("bo", unseen: true), story("dee", unseen: true), story("ana", unseen: false)]
-        let held = ForYouRailsView.holding(fresh, in: shown)
+        let held = FriendsStoriesRow.holding(fresh, in: shown)
         #expect(held.map(\.authorID.rawValue) == ["ana", "dee", "bo"])
         #expect(held.first?.hasUnseen == false, "the ring is the fresh one")
     }
@@ -205,33 +205,33 @@ struct ForYouRowsInteractionTests {
     /// On screen, a ring clearing moves nobody; once the viewer has left, the
     /// row takes the view model's order again.
     @Test func theRowReordersOnlyOnceTheViewerLeaves() {
-        let rails = makeRails()
+        let lead = makeLead()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
-        window.addSubview(rails)
-        rails.render(railsState(friends: [story("ana", unseen: true), story("bo", unseen: true)]))
-        #expect(rails.debugStoryOrder.map(\.rawValue) == ["ana", "bo"])
+        window.addSubview(lead.stack)
+        lead.render(railsState(friends: [story("ana", unseen: true), story("bo", unseen: true)]))
+        #expect(lead.friends.debugStoryOrder.map(\.rawValue) == ["ana", "bo"])
 
         // Ana's posts were watched: the view model puts her after Bo.
-        rails.render(railsState(friends: [story("bo", unseen: true), story("ana", unseen: false)]))
-        #expect(rails.debugStoryOrder.map(\.rawValue) == ["ana", "bo"], "held while on screen")
-        #expect(rails.stories.first?.hasUnseen == false, "but her ring is gone")
+        lead.render(railsState(friends: [story("bo", unseen: true), story("ana", unseen: false)]))
+        #expect(lead.friends.debugStoryOrder.map(\.rawValue) == ["ana", "bo"], "held while on screen")
+        #expect(lead.friends.stories.first?.hasUnseen == false, "but her ring is gone")
 
-        rails.releaseStoryOrder()
-        #expect(rails.debugStoryOrder.map(\.rawValue) == ["bo", "ana"])
+        lead.friends.releaseStoryOrder()
+        #expect(lead.friends.debugStoryOrder.map(\.rawValue) == ["bo", "ana"])
         // Still in the window (the app went to the background): the re-sorted
         // order is the one held from here.
-        rails.render(railsState(friends: [story("ana", unseen: true), story("bo", unseen: false)]))
-        #expect(rails.debugStoryOrder.map(\.rawValue) == ["bo", "ana"])
-        rails.removeFromSuperview()
+        lead.render(railsState(friends: [story("ana", unseen: true), story("bo", unseen: false)]))
+        #expect(lead.friends.debugStoryOrder.map(\.rawValue) == ["bo", "ana"])
+        lead.stack.removeFromSuperview()
     }
 
     /// Off screen the row follows the view model; nothing has been shown to
     /// hold.
     @Test func anUnshownRowFollowsTheViewModel() {
-        let rails = makeRails()
-        rails.render(railsState(friends: [story("ana", unseen: true), story("bo", unseen: true)]))
-        rails.render(railsState(friends: [story("bo", unseen: true), story("ana", unseen: false)]))
-        #expect(rails.debugStoryOrder.map(\.rawValue) == ["bo", "ana"])
+        let lead = makeLead()
+        lead.render(railsState(friends: [story("ana", unseen: true), story("bo", unseen: true)]))
+        lead.render(railsState(friends: [story("bo", unseen: true), story("ana", unseen: false)]))
+        #expect(lead.friends.debugStoryOrder.map(\.rawValue) == ["bo", "ana"])
     }
 
     // MARK: - Playback and emotes
@@ -239,8 +239,8 @@ struct ForYouRowsInteractionTests {
     /// Every card on screen plays — at 2.3 per width, three at most — and the
     /// row plus the list never ask for more than the pool's six.
     @Test func theRowPlaysEveryVisibleCardWithinThePool() {
-        #expect(ForYouRailsView.concurrentPlayers == 3)
-        #expect(ForYouRailsView.Metrics.cardsPerWidth < 3)
+        #expect(PostShelfSection.concurrentPlayers == 3)
+        #expect(LeadRowMetrics.cardsPerWidth < 3)
     }
 
     /// A card's caption is an `EmoteLabel`, so its emotes animate.

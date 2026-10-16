@@ -23,7 +23,7 @@ final class ForYouStoryCell: UICollectionViewCell {
     static let reuseID = "ForYouStoryCell"
 
     /// ⚠️ NO FIXED FACE SIZE. The row sizes its cells from the screen's width
-    /// (`ForYouRailsView.Metrics.storiesPerWidth`) so a face is always cropped
+    /// (`LeadRowMetrics.storiesPerWidth`) so a face is always cropped
     /// at the right edge; the cell takes the disc as its width and derives the
     /// face from it (`faceDiameter`).
     enum Metrics {
@@ -46,7 +46,7 @@ final class ForYouStoryCell: UICollectionViewCell {
         /// the circular badges every person row wears. One outline for the
         /// face, its ring, the long-press lift and the hand-clipped snapshot; a
         /// flight, which can only wear a corner, takes the matching circular
-        /// radius (`ForYouRailsView.storyFaceCornerRadius`). The map's media
+        /// radius (`FriendsStoriesRow.storyFaceCornerRadius`). The map's media
         /// markers wear the same tile (`AvatarShape.roundedTile`).
         static let faceShape = AvatarShape.roundedTile
 
@@ -122,7 +122,7 @@ final class ForYouStoryCell: UICollectionViewCell {
         // ⚠️ NO PRESS FEEDBACK (2026-09-29). The give-and-dim fired on the
         // touch-down that starts every scroll of the row, and the product call
         // is no feedback at all under a finger: a tap opens, a long press
-        // lifts the native preview (`ForYouRailsView`'s context menu).
+        // lifts the native preview (`FriendsStoriesRow`'s context menu).
     }
 
     @available(*, unavailable)
@@ -209,9 +209,9 @@ final class ForYouStoryCell: UICollectionViewCell {
     /// else) that scales the disc makes UIKit's conversion report the SCALED
     /// rect, and a flight measuring that lands a few points inside and off
     /// centre of the face it is returning to — filmed on a close. Where a
-    /// flight goes is where the face RESTS; see `ForYouRailsView.restingFrame`.
+    /// flight goes is where the face RESTS; see `RowGeometry.restingFrame`.
     func discFrame(in space: UICoordinateSpace, restingBelow row: UIView) -> CGRect {
-        ForYouRailsView.restingFrame(of: monogram, below: row, in: space)
+        RowGeometry.restingFrame(of: monogram, below: row, in: space)
     }
 
     /// The face exactly as drawn: the picture when it has landed, the initials

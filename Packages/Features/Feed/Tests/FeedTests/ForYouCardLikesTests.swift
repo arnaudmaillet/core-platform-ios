@@ -201,10 +201,10 @@ struct ForYouCardLikesTests {
 
     // MARK: - The Following row
 
-    private func rails(wallet: WalletStore) -> ForYouRailsView {
-        let rails = ForYouRailsView(imagePipeline: pipeline(), videoPlayback: nil)
-        rails.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
-        rails.staking = PostCardStaking(wallet: wallet)
+    private func lead(wallet: WalletStore) -> ForYouLeadFixture {
+        let lead = ForYouLeadFixture(pipeline: pipeline(), videoPlayback: nil)
+        lead.stack.frame = CGRect(x: 0, y: 0, width: 393, height: 600)
+        lead.shelf.staking = PostCardStaking(wallet: wallet)
         var state = ForYouViewModel.Rails()
         state.following = [
             GalleryPost(
@@ -219,11 +219,11 @@ struct ForYouCardLikesTests {
                 authorID: ProfileID("cy"), authorName: "Cy", authorHandle: "cy", reactionCount: 9
             )
         ]
-        rails.render(state)
-        rails.layoutIfNeeded()
-        rails.debugMediaRow.layoutIfNeeded()
-        rails.debugTextRow.layoutIfNeeded()
-        return rails
+        lead.render(state)
+        lead.stack.layoutIfNeeded()
+        lead.shelf.mediaView.layoutIfNeeded()
+        lead.shelf.textView.layoutIfNeeded()
+        return lead
     }
 
     /// Every Following MEDIA card closes its author line with the heart and
@@ -232,12 +232,12 @@ struct ForYouCardLikesTests {
     @Test func everyFollowingCardShowsTheHeartOnItsAuthorLine() throws {
         let wallet = Self.wallet()
         stake(on: PostID("picture"), in: wallet)
-        let rails = rails(wallet: wallet)
+        let lead = lead(wallet: wallet)
 
-        #expect(rails.debugCardCell(at: 0) == nil, "the text post is not a Following card")
-        #expect(rails.debugTextCardCell(at: 0) != nil, "the text post is the list's card")
+        #expect(lead.shelf.debugCardCell(at: 0) == nil, "the text post is not a Following card")
+        #expect(lead.shelf.debugTextCardCell(at: 0) != nil, "the text post is the list's card")
 
-        let picture = try #require(rails.debugCardCell(at: 1))
+        let picture = try #require(lead.shelf.debugCardCell(at: 1))
         picture.layoutIfNeeded()
         let pictureLike = try #require(picture.debugLikeReadout)
         #expect(pictureLike.ground == .media)
@@ -247,7 +247,7 @@ struct ForYouCardLikesTests {
         #expect(abs(pictureFrame.maxX - (picture.contentView.bounds.maxX - 10)) < 0.5, "\(pictureFrame)")
         #expect(pictureFrame.midY > picture.contentView.bounds.midY)
         expectTouchFallsThrough(pictureLike, in: picture)
-        #expect(rails.cardStake(for: rails.cards[1]) == 1)
+        #expect(lead.shelf.cardStake(for: lead.shelf.cards[1]) == 1)
     }
 
     /// A tap opens the post; a hold on a media card's heart is the card's own
@@ -255,18 +255,18 @@ struct ForYouCardLikesTests {
     @Test func theHeartOfAFollowingCardIsTheCardsToTapAndHold() throws {
         let wallet = Self.wallet()
         let before = wallet.balance
-        let rails = rails(wallet: wallet)
+        let lead = lead(wallet: wallet)
         var opened: [Int] = []
-        rails.onCardTapped = { opened.append($0) }
+        lead.shelf.onCardTapped = { opened.append($0) }
 
-        #expect(rails.debugTapCard(at: 1))
+        #expect(lead.shelf.debugTapCard(at: 1))
         #expect(opened == [1])
 
-        let picture = try #require(rails.debugCardCell(at: 1))
+        let picture = try #require(lead.shelf.debugCardCell(at: 1))
         picture.layoutIfNeeded()
         let like = try #require(picture.debugLikeReadout)
-        let onHeart = like.convert(CGPoint(x: like.bounds.midX, y: like.bounds.midY), to: rails.debugMediaRow)
-        #expect(rails.debugCardMenuConfiguration(at: 1, point: onHeart) != nil, "the card's preview")
+        let onHeart = like.convert(CGPoint(x: like.bounds.midX, y: like.bounds.midY), to: lead.shelf.mediaView)
+        #expect(lead.shelf.debugCardMenuConfiguration(at: 1, point: onHeart) != nil, "the card's preview")
         #expect(wallet.balance == before)
     }
 
@@ -275,11 +275,11 @@ struct ForYouCardLikesTests {
     @Test func aFollowingTextCardsLikeStakes() throws {
         let wallet = Self.wallet()
         let before = wallet.balance
-        let rails = rails(wallet: wallet)
-        let words = try #require(rails.debugTextCardCell(at: 0))
+        let lead = lead(wallet: wallet)
+        let words = try #require(lead.shelf.debugTextCardCell(at: 0))
         #expect(words.debugTapLikesChip())
         #expect(wallet.balance == before - WalletStore.Policy.defaultStakeAmount)
-        #expect(rails.cardStake(for: rails.cards[0]) == WalletStore.Policy.defaultStakeAmount)
+        #expect(lead.shelf.cardStake(for: lead.shelf.cards[0]) == WalletStore.Policy.defaultStakeAmount)
     }
 
     /// The copies a flight and a close wear carry the card's heart, in the

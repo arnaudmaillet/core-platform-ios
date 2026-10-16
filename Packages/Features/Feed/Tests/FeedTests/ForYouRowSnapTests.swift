@@ -13,7 +13,7 @@ import UIKit
 /// cropped on the other side in both cases.
 @MainActor
 struct ForYouRowSnapTests {
-    typealias Metrics = ForYouRailsView.Metrics
+    typealias Metrics = LeadRowMetrics
 
     /// A row of `count` items `width` wide, laid out the way the rows' flow
     /// layout lays them: the side margin, then items `itemGap` apart.
@@ -232,24 +232,24 @@ struct ForYouRowSnapTests {
     /// through its own delegate: it rests flush right on a card, with the
     /// next card wholly off screen.
     @Test func theFollowingRowSnapsThroughItsDelegate() throws {
-        let rails = ForYouRailsView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil)
-        rails.frame = CGRect(x: 0, y: 0, width: 393, height: 800)
+        let lead = ForYouLeadFixture(pipeline: ImagePipeline(fetcher: SilentFetcher()), videoPlayback: nil)
+        lead.stack.frame = CGRect(x: 0, y: 0, width: 393, height: 800)
         var state = ForYouViewModel.Rails()
         state.following = (0..<8).map { post("c\($0)") }
-        rails.render(state)
-        rails.layoutIfNeeded()
-        let row = rails.debugMediaRow
+        lead.render(state)
+        lead.stack.layoutIfNeeded()
+        let row = lead.shelf.mediaView
         row.layoutIfNeeded()
 
         var target = CGPoint(x: 40, y: 0)
-        rails.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 1.5, y: 0), targetContentOffset: &target)
+        lead.shelf.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: 1.5, y: 0), targetContentOffset: &target)
         let frames = (0..<8).compactMap { row.layoutAttributesForItem(at: IndexPath(item: $0, section: 0))?.frame }
         let flushRight = try #require(frames.first { $0.maxX - target.x == row.bounds.width - Metrics.sideMargin })
         let next = try #require(frames.first { $0.minX > flushRight.maxX })
         #expect(next.minX - target.x >= row.bounds.width, "nothing to the right of the snapped card")
 
         var back = CGPoint(x: target.x - 20, y: 0)
-        rails.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: -1.5, y: 0), targetContentOffset: &back)
+        lead.shelf.scrollViewWillEndDragging(row, withVelocity: CGPoint(x: -1.5, y: 0), targetContentOffset: &back)
         #expect(back.x == 0, "back to the start, flush left")
     }
 }

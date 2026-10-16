@@ -352,7 +352,7 @@ struct DiscoverListPageTests {
 
     /// The paired card IS the Following card at half width: the same 3:4.
     @Test func thePairedCardIsTheFollowingCardsShape() {
-        #expect(DiscoverListLayout.pairCardHeightRatio == ForYouRailsView.Metrics.cardAspect)
+        #expect(DiscoverListLayout.pairCardHeightRatio == LeadRowMetrics.cardAspect)
     }
 
     /// The hero asks a paired card what it asks a tile — the card is its

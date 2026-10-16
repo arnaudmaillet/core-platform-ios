@@ -71,8 +71,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     public static let gap: CGFloat = 6
 
     /// Items per box width on a card: two whole and a third cropped by the
-    /// box's right edge — the Following row's count (`ForYouRailsView
-    /// .Metrics.cardsPerWidth`), so the two strips on For You read as one
+    /// box's right edge — a shelf's media row count (`LeadRowMetrics
+    /// .cardsPerWidth`), so the two strips on For You read as one
     /// family.
     public static let cardPagesPerBox: CGFloat = 2.3
 

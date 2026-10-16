@@ -16,7 +16,7 @@ import UIKit
 ///   │  two lines of …      │   its author and caption over the foot
 ///   └──────────────────────┘
 ///   ┌──────────────────────┐
-///   │ Open                 │   the menu (`ForYouRailsView`)
+///   │ Open                 │   the menu (`PostShelfSection`)
 ///   │ View Profile         │
 ///   └──────────────────────┘
 /// ```
