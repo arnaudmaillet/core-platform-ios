@@ -16,7 +16,9 @@ import UIKit
 /// a close that springs back pauses it for the next one.
 @MainActor
 final class WindowReturnClips {
-    private var surfaces: [PostID: VideoRenderView] = [:]
+    private var surfaces: [PostID: (clip: VideoRenderView, host: ScaledClipHost)] = [:]
+    /// The clip held over a tile that took its playback, until the tile draws.
+    private var holds: [PostID: LandingHold] = [:]
 
     /// `standIn`, wearing `surface()` over its cover and under its words when
     /// there is a clip to wear. Remembered for the landing.
@@ -31,13 +33,27 @@ final class WindowReturnClips {
             host.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             standIn.insertSubview(host, at: min(1, standIn.subviews.count))
         }
-        surfaces[id] = clip
+        surfaces[id] = (clip, host)
         return standIn
     }
 
-    /// The clip a landing on `id` hands its tile, once.
-    func takeForLanding(_ id: PostID) -> VideoRenderView? {
-        surfaces.removeValue(forKey: id)
+    /// Lands `id`'s clip on its tile, once: `land` hands the tile the
+    /// playback, and the clip stays OVER the tile — moved out of the stand-in
+    /// the reveal is about to remove — until `isReady` says the tile draws it
+    /// (the flight's landing hold, for the window). Without it the tile's
+    /// first frame came a frame after the stand-in went: a one-frame cut,
+    /// seen on device. The hold has a ceiling, so a tile that never draws
+    /// costs a pause, not a stuck clip.
+    func land(_ id: PostID, over tile: UIView?, land: (VideoRenderView) -> Void, isReady: @escaping () -> Bool) {
+        guard let (clip, host) = surfaces.removeValue(forKey: id) else { return }
+        land(clip)
+        guard let tile else { return }
+        holds[id]?.end()
+        host.removeFromSuperview()
+        host.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        host.frame = tile.bounds
+        tile.addSubview(host)
+        holds[id] = LandingHold(host: host, isReady: isReady) { [weak self] in self?.holds[id] = nil }
     }
 
     /// The close sprang back: the clip waits, paused, for the next one.
@@ -46,8 +62,43 @@ final class WindowReturnClips {
         pause()
     }
 
+    /// Holds a landed clip over its tile until the tile draws, at most
+    /// `ceiling` seconds.
+    private final class LandingHold {
+        static let ceiling: CFTimeInterval = 0.6
+        private weak var host: UIView?
+        private let isReady: () -> Bool
+        private let done: () -> Void
+        private var link: CADisplayLink?
+        private let started = CACurrentMediaTime()
+
+        init(host: UIView, isReady: @escaping () -> Bool, done: @escaping () -> Void) {
+            self.host = host
+            self.isReady = isReady
+            self.done = done
+            let link = CADisplayLink(target: self, selector: #selector(tick))
+            link.add(to: .main, forMode: .common)
+            self.link = link
+        }
+
+        @objc private func tick() {
+            guard host != nil, !isReady(), CACurrentMediaTime() - started < Self.ceiling else {
+                end()
+                return
+            }
+        }
+
+        func end() {
+            link?.invalidate()
+            link = nil
+            host?.removeFromSuperview()
+            done()
+        }
+    }
+
     #if DEBUG
     func debugHasClip(for id: PostID) -> Bool { surfaces[id] != nil }
+    func debugIsHolding(_ id: PostID) -> Bool { holds[id] != nil }
     #endif
 }
 

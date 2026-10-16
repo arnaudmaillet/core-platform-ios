@@ -2962,7 +2962,11 @@ final class ForYouGridPage: UIView {
             // A committed window close is landing (the reveal shows the row
             // again only then): the tile takes the clip its window was
             // playing (#1294).
-            if let clip = windowClips.takeForLanding(postID) { landReturnPlayback(clip, for: postID) }
+            windowClips.land(
+                postID, over: (cell(for: postID) as? UICollectionViewCell)?.contentView,
+                land: { landReturnPlayback($0, for: postID) },
+                isReady: { [weak self] in self?.isReturnLandingReady(for: postID) ?? true }
+            )
         }
     }
 

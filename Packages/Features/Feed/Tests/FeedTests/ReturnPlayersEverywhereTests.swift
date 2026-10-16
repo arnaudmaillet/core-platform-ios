@@ -162,6 +162,11 @@ struct ReturnPlayersEverywhereTests {
         page.setRevealConcealed(true, for: tapped)
         page.setRevealConcealed(false, for: tapped)
         #expect(!page.windowClips.debugHasClip(for: tapped), "the landing kept the clip")
+        // The clip stays over the tile until the tile draws it — no frame
+        // where the stand-in has gone and the tile has not drawn yet.
+        #expect(page.windowClips.debugIsHolding(tapped), "the landing let the clip go before the tile drew")
+        await Self.settle { !page.windowClips.debugIsHolding(tapped) }
+        #expect(!page.windowClips.debugIsHolding(tapped), "the hold never ended")
         #expect(pool.returnPlaybackCount == 0, "the landing did not claim the parked player")
         let tile = try #require((page.debugCell(for: tapped) as? any GridPlaybackCell)?.loadedVideoRenderView)
         #expect(pool.hasPlayer(in: tile), "the tile did not take the window's clip")

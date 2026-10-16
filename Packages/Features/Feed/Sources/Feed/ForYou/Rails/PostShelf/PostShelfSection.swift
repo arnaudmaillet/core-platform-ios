@@ -662,9 +662,15 @@ final class PostShelfSection: UIView {
         cardCell(for: id)?.isHidden = concealed
         // A committed window close is landing: the card takes the clip its
         // window was playing (#1294).
-        if !concealed, let clip = windowClips.takeForLanding(id), let playback,
-           let cell = mediaCardCell(for: id) {
-            playback.landReturnPlayback(clip, for: id, cell: cell)
+        if !concealed, let playback, let cell = mediaCardCell(for: id) {
+            let hasThumbnail = cards.first { $0.id == id }?.thumbnailURL != nil
+            windowClips.land(
+                id, over: cell.contentView,
+                land: { playback.landReturnPlayback($0, for: id, cell: cell) },
+                isReady: { [weak cell] in
+                    playback.isReturnLandingReady(for: id, cell: cell, hasThumbnail: hasThumbnail)
+                }
+            )
         }
     }
 
