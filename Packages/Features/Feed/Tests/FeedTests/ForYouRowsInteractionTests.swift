@@ -253,7 +253,7 @@ struct ForYouRowsInteractionTests {
 }
 
 /// Pages nothing — the heading's push needs the screen, not its content.
-private final class EmptyForYouProvider: ForYouProviding, @unchecked Sendable {
+final class EmptyForYouProvider: ForYouProviding, @unchecked Sendable {
     func firstPage() async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
     func page(after token: String) async throws -> ForYouPage { ForYouPage(posts: [], nextPageToken: nil) }
 }

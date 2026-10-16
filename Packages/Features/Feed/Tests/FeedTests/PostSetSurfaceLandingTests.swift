@@ -177,6 +177,11 @@ struct PostSetSurfaceLandingTests {
         let stage = Stage(posts: (1...6).map { Stage.post("t\($0)", kind: .text) }, lead: lead)
         let opened = try #require(await open(on: stage, push: true) { $0.debugOpenLeadCard(at: 0) })
         #expect(opened.origin.post.id == lead[0].id)
+        // The shelf built it (#1271): a media card under the tile contract.
+        if kind != .text {
+            #expect(opened.origin.donateLiveMedia != nil && opened.origin.adoptLandingLiveMedia != nil)
+            #expect(opened.origin.restingOverlay != nil && opened.origin.returnLiveMedia != nil)
+        }
         #expect(!opened.rest.isNull && opened.rest.minY > 0, "no card to land on")
         #expect(stage.surface.debugIsGridInsetPinned, "a covered list tracking the safe area")
 

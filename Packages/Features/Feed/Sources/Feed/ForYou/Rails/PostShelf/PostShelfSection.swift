@@ -2,6 +2,7 @@ import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
+import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
@@ -85,7 +86,8 @@ final class PostShelfSection: UIView {
         set { header.accessibilityHint = newValue }
     }
 
-    /// A card was tapped: its index into `cards`.
+    /// A card was tapped, on a shelf with no hero context (`openCard`): its
+    /// index into `cards`.
     var onCardTapped: ((Int) -> Void)?
     /// What a long press on a card offers under the preview, after "Open" —
     /// the host's rows (View Profile, Unfollow, Report).
@@ -651,14 +653,71 @@ final class PostShelfSection: UIView {
         RowGeometry.bringIntoView(indexPath, in: row)
     }
 
-    // MARK: - Opening and the long press
+    // MARK: - Opening
+
+    /// What a shelf's flight needs from its host, set once (#1271): the list
+    /// the shelf leads (it stops playing for the flight and holds still for
+    /// the close), the view the flight measures in, and the host's own
+    /// arrangement for the landing.
+    struct HeroContext {
+        weak var page: ForYouGridPage?
+        weak var host: UIView?
+        /// For You's arrangement: the page is pinned only for the close, and
+        /// handed back as it lands. A PUSHED host passes false — see
+        /// `PostShelfOrigins.card`'s `thawsOnLanding` (#924).
+        var thawsOnLanding = true
+        /// How many posts from the tapped one on the opened feed is seeded
+        /// with.
+        var seedWindow = 40
+        /// Runs once a close has staged — the host's log, say.
+        var closeStaged: () -> Void = {}
+    }
+
+    /// A card being opened: the post, the feed it opens into, and the origin
+    /// the SHELF built for the flight — a host never builds one by hand.
+    struct Open {
+        let post: GalleryPost
+        let stream: [GalleryPost]
+        let origin: SnapFeedHeroOrigin
+    }
+
+    var heroContext: HeroContext?
+    /// Whether a card may open now (a transition under way, say, says no).
+    var shouldOpen: (() -> Bool)?
+    /// A card is opening: the handoff has begun, the list has stopped playing
+    /// — the host presents `open.origin`.
+    var onOpen: ((Open) -> Void)?
+
+    /// Opens card `index` (into `cards`): the shelf's flight, handed to the
+    /// host through `onOpen`. Without a hero context it is reported as a bare
+    /// tap (`onCardTapped`).
+    func openCard(at index: Int) {
+        guard cards.indices.contains(index) else { return }
+        guard let context = heroContext, let page = context.page, let host = context.host, onOpen != nil else {
+            onCardTapped?(index)
+            return
+        }
+        guard shouldOpen?() ?? true else { return }
+        let tapped = cards[index]
+        let stream = Array(cards[index...].prefix(context.seedWindow))
+        // The card's player is the flight's from here; the list stops.
+        beginPlaybackHandoff(of: tapped.id)
+        page.setAutoplayActive(false)
+        let origin = PostShelfOrigins.card(
+            tapped, stream: stream, shelf: self, page: page, host: host,
+            thawsOnLanding: context.thawsOnLanding, closeStaged: context.closeStaged
+        )
+        onOpen?(Open(post: tapped, stream: stream, origin: origin))
+    }
 
     /// Opens card `id` the way a tap would — nothing if it left the shelf
     /// while a menu was up.
     func open(_ id: PostID) {
         guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
-        onCardTapped?(index)
+        openCard(at: index)
     }
+
+    // MARK: - The long press
 
     func cardMenu(for post: GalleryPost) -> UIMenu {
         let id = post.id
