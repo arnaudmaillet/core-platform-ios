@@ -141,8 +141,9 @@ struct SnapAuthorPillItemTests {
     }
 
     /// ⚠️ THE BADGE IS ON THE AVATAR, NOT AT THE TRAILING END (#925): no
-    /// relation moves the pill's width, and the badge sits over the face's
-    /// bottom-right corner, a little outside it.
+    /// relation moves the pill's width. ⚠️ Since #1277 (the owner,
+    /// 2026-10-16) the badge is larger and its CENTRE sits on the far end of
+    /// the face's disc, level with the face's middle.
     @Test func theBadgeRidesTheAvatarAndNeverMovesTheWidth() throws {
         let pill = SnapAuthorIdentityView()
         pill.setAuthor(Self.model(id: "p1", author: "Ada Lovelace", authorID: "prof-1", meta: "@ada · 2h"),
@@ -162,10 +163,12 @@ struct SnapAuthorPillItemTests {
         let avatar = try #require(Self.firstView(of: MonogramAvatarView.self, in: pill))
         let badgeFrame = badge.convert(badge.bounds, to: pill)
         let face = avatar.convert(avatar.bounds, to: pill)
-        #expect(badgeFrame.maxX > face.maxX && badgeFrame.midX < face.maxX,
-                "not on the face's right edge: \(badgeFrame) vs \(face)")
-        #expect(badgeFrame.maxY > face.maxY && badgeFrame.midY < face.maxY,
-                "not on the face's bottom edge: \(badgeFrame) vs \(face)")
+        #expect(abs(badgeFrame.width - 20) < 0.5 && abs(badgeFrame.height - 20) < 0.5,
+                "not the larger badge: \(badgeFrame)")
+        #expect(abs(badgeFrame.midX - face.maxX) < 0.5,
+                "the badge's centre is not on the face's edge: \(badgeFrame) vs \(face)")
+        #expect(abs(badgeFrame.midY - face.midY) < 0.5,
+                "the badge is not level with the face: \(badgeFrame) vs \(face)")
         let labels = Self.shownLabels(in: pill).map { $0.convert($0.bounds, to: pill) }
         #expect(!labels.isEmpty)
         #expect(labels.allSatisfy { $0.maxX <= pill.bounds.maxX + 0.5 }, "a label runs past the pill")
