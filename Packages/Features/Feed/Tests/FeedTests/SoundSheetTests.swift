@@ -457,11 +457,11 @@ struct SoundSheetTests {
         }
         controller.update(sections: content.sections, tiles: tiles)
         try laidOut(controller)
-        let grid = try grid(of: controller)
-        grid.layoutIfNeeded()
+        let collection = try grid(of: controller)
+        collection.layoutIfNeeded()
         func cell(_ id: String) throws -> UICollectionViewCell {
             let path = try #require(try dataSource(of: controller).indexPath(for: .tile(PostID(id), .popular)))
-            return try #require(grid.cellForItem(at: path))
+            return try #require(collection.cellForItem(at: path))
         }
 
         let original = try #require(try cell("p0") as? PostGridTileCell, "a media post kept the sheet's own tile")
