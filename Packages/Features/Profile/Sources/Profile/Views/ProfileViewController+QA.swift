@@ -230,7 +230,7 @@ extension ProfileViewController {
         // it is — an empty row list on your own profile is the rule working,
         // not the wiring missing.
         let rows = debugGalleryMenuActions(
-            for: ProfileGalleryGridView.AuthorMenuContext(
+            for: PostGridAuthorMenuContext(
                 post: post, authorID: authorID, anchor: UIView()
             )
         )

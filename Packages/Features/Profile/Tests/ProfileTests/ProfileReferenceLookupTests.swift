@@ -195,6 +195,7 @@ struct ProfileReferenceLookupTests {
                 source: .lookup(.handle("ada")), lookup: { await lookup($0) }
             ),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
     }

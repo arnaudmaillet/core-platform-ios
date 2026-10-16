@@ -112,6 +112,7 @@ struct ProfileChildChromeTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil,
             trayPlacement: .navigationToolbar
         )
@@ -126,6 +127,7 @@ struct ProfileChildChromeTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil,
             trayPlacement: .aboveBottomSafeArea
         )

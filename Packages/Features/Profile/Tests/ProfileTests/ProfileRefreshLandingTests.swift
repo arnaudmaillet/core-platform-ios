@@ -97,7 +97,7 @@ struct ProfileRefreshLandingTests {
             repository: profiles, gallery: gallery, source: .profile(ProfileID("prof-kenji"))
         )
         let screen = ProfileViewController(
-            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), onLogout: nil
+            viewModel: viewModel, imagePipeline: ImagePipeline(fetcher: SilentFetcher()), makeGridPage: TestGridPages.factory(), onLogout: nil
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))
         window.rootViewController = UINavigationController(rootViewController: screen)
@@ -249,7 +249,6 @@ struct ProfileRefreshLandingTests {
         let gallery = Gallery()
         await hosting(profiles, gallery) { screen, _ in
             let measures = screen.debugHeaderMeasureCount
-            let emptyStateMeasures = screen.debugEmptyStateMeasureCount
             let pull = Array(stride(from: 0.0, through: -160, by: -8))
             let travel = Array(stride(from: -160.0, through: 400, by: 16))
             for offset in pull + travel {
@@ -258,7 +257,6 @@ struct ProfileRefreshLandingTests {
             screen.debugScrollFrame(to: 0)
 
             #expect(screen.debugHeaderMeasureCount == measures, "a scroll measured the header")
-            #expect(screen.debugEmptyStateMeasureCount == emptyStateMeasures, "a scroll measured the empty state")
             #expect(abs(screen.debugHeaderHeight - screen.debugMeasuredHeaderHeight) < 0.5)
         }
     }

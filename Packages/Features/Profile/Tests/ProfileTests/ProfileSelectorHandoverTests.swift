@@ -100,6 +100,7 @@ struct ProfileSelectorHandoverTests {
         let screen = ProfileViewController(
             viewModel: viewModel,
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil,
             trayPlacement: trayPlacement
         )

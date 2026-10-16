@@ -29,7 +29,10 @@ let package = Package(
         .package(path: "../../Core/ShareSheet"),
         // Tests only: the live-count suite drives the app's EntityStore
         // (#896); the target reaches it through PostGrid's card staking.
-        .package(path: "../../Core/EntityStore")
+        .package(path: "../../Core/EntityStore"),
+        // Tests only: the profile's pages are For You's grid (#1273), built
+        // through `PostGridPages.make` — the real page, not a stand-in.
+        .package(path: "../Feed")
     ],
     targets: [
         .target(
@@ -74,6 +77,7 @@ let package = Package(
             name: "ProfileTests",
             dependencies: [
                 "Profile",
+                "Feed",
                 // `ProfileReference` / `ProfileLookup`, for the handle and
                 // share-token lookup suite (#800).
                 "ProfileInterface",

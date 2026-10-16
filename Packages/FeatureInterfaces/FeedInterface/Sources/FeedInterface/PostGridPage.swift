@@ -84,6 +84,8 @@ public protocol PostGridPage: UIView {
     var postMenuActions: ((PostGridAuthorMenuContext) -> [PostCardMenuAction])? { get set }
     /// Pull-to-refresh, and a status's action.
     var onRefresh: (() -> Void)? { get set }
+    /// Re-asks every visible row for its "..." menu — a relation changed.
+    func refreshAuthorMenus()
 
     // MARK: Hosted under a floating header
 
@@ -127,3 +129,18 @@ public protocol PostGridPage: UIView {
     /// The open was refused: the playback handoff `heroOrigin` began ends.
     func endPlaybackHandoff()
 }
+
+#if DEBUG
+/// What a host's QA hooks and tests read of a vended page.
+@MainActor
+public protocol PostGridPageDebugging: PostGridPage {
+    var debugShowsSkeleton: Bool { get }
+    var debugReloadCount: Int { get }
+    var debugRecountedItems: Int { get }
+    var debugReconfiguredItems: Int { get }
+    /// Taps item `index` through the page's own selection path.
+    func debugSelectItem(at index: Int) -> Bool
+    /// The tile `applyPendingReveal` last brought clear, in window space.
+    func debugRevealedTileInWindow() -> CGRect?
+}
+#endif

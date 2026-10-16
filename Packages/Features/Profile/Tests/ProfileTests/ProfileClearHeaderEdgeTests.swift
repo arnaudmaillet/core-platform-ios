@@ -28,7 +28,7 @@ struct ProfileClearHeaderEdgeTests {
     /// ⚠️ THE PAGER TOO: its scroll view spans the header and draws its own
     /// effect, so pages alone leave the system's band in place.
     @Test func theGalleryPagerHidesItsEffectToo() throws {
-        let pager = ProfileGalleryPagerView(imagePipeline: ImagePipeline(fetcher: SilentFetcher()))
+        let pager = ProfileGalleryPagerView(makePage: TestGridPages.pageMaker())
         let paging = try #require(pager.subviews.compactMap { $0 as? UIScrollView }.first)
         #expect(paging.topEdgeEffect.isHidden)
     }

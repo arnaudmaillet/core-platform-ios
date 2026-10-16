@@ -1,4 +1,6 @@
 import FeedInterface
+import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -28,7 +30,17 @@ extension ForYouGridPage: PostGridPage {
 
     var scrollView: UIScrollView { collectionView }
 
+    func refreshAuthorMenus() {
+        for case let row as PostGridListRowCell in collectionView.subviews {
+            row.refreshAuthorMenu()
+        }
+    }
+
+    /// Activating a vended page also ends a round trip's handoff — the
+    /// host's way back from a post it opened (the profile's rule, #951): the
+    /// landing has run by then, and an unlanded return player is released.
     func setAutoplayActive(_ active: Bool) {
+        if active, playback?.isHandingOff == true { endPlaybackHandoff() }
         setAutoplayActive(active, keeping: nil)
     }
 }
@@ -40,5 +52,25 @@ extension ForYouGridPage.Style {
         case .list: self = .list
         case .discover: self = .discover
         }
+    }
+}
+
+#if DEBUG
+extension ForYouGridPage: PostGridPageDebugging {}
+#endif
+
+/// For You's grid page, built outside the feature's own builder — the
+/// composition root's (`FeedFeatureBuilder.makePostGridPage`) and the
+/// profile's tests, which draw the profile on the real page (#1273).
+public enum PostGridPages {
+    @MainActor
+    public static func make(
+        style: PostGridPageStyle, imagePipeline: ImagePipeline,
+        videoPlayback: VideoPlaybackController?, savesPosts: Bool
+    ) -> any PostGridPage {
+        ForYouGridPage(
+            imagePipeline: imagePipeline, style: ForYouGridPage.Style(style),
+            videoPlayback: videoPlayback, bookmarks: savesPosts ? .shared : nil
+        )
     }
 }

@@ -6,6 +6,7 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
+@testable import Feed
 @testable import Profile
 
 /// **A card-shaped close onto a TILE lands as that tile (#888).**
@@ -82,12 +83,10 @@ struct ProfileTileCloseLandingTests {
             + (2..<30).map { post($0, $0 % 3 == 2 ? .text : .photo) }
     }
 
-    private func page(_ style: ProfileGalleryGridView.Style, posts: [GalleryPost]) -> ProfileGalleryGridView {
-        let page = ProfileGalleryGridView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            style: style,
-            tab: .format(style == .grid ? .media : .activity)
-        )
+    /// The page the profile draws on (#1273): For You's.
+    private func page(_ style: ForYouGridPage.Style, posts: [GalleryPost]) -> ForYouGridPage {
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style)
+        page.showsTileInfo = true
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         page.layoutIfNeeded()
         page.setCorpusComplete(true)
@@ -98,18 +97,20 @@ struct ProfileTileCloseLandingTests {
     }
 
     /// Brings `id`'s cell on screen, as the tap that opens it would have.
-    private func realize(_ id: PostID, on page: ProfileGalleryGridView) throws {
-        let path = try #require(page.debugIndexPath(for: id))
+    private func realize(_ id: PostID, on page: ForYouGridPage) throws {
+        let index = try #require(page.posts.firstIndex { $0.id == id })
+        let path = page.indexPath(for: index)
         page.collectionView.scrollToItem(at: path, at: .top, animated: false)
         page.collectionView.layoutIfNeeded()
     }
 
     /// Opens `post` from `page` through the profile's real open, and returns
     /// the origin it hands the feed — the description the close lands by.
-    private func origin(opening post: GalleryPost, from page: ProfileGalleryGridView) throws -> SnapFeedHeroOrigin {
+    private func origin(opening post: GalleryPost, from page: ForYouGridPage) throws -> SnapFeedHeroOrigin {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
         var handed: SnapFeedHeroOrigin?
@@ -119,31 +120,30 @@ struct ProfileTileCloseLandingTests {
     }
 
     /// The bug itself: a pair's photo opened by a flight, closed from a text
-    /// page. The window lands as the pair's TILE — its twin, at the slot's
-    /// size, on the tile's corner and fill, with no author band borrowed and
-    /// no caption to align to.
+    /// page. The window lands as the pair's own card — For You's paired card
+    /// since the profile's pages are For You's (#1273) — at the slot's size,
+    /// on the card's corner, with no author band borrowed and no caption to
+    /// align to.
     @Test func aPairsCloseLandsAsItsTileNotAsAPostCard() throws {
         let page = self.page(.discover, posts: corpus())
-        let pair = try #require(page.debugSegments.first { $0.isPairs }?.posts.first)
+        let pair = try #require(page.segments.first { $0.isPairs }?.posts.first)
         try realize(pair.id, on: page)
         let slot = try #require(page.rowFrame(for: pair.id, in: page))
 
         let reveal = try #require(try origin(opening: pair, from: page).textReveal)
 
         let standIn = try #require(reveal.makeDismissStandIn(nil))
-        #expect(standIn is PostGridTileStandInView, "the close lands as a post card, not as the tile")
-        #expect(!(standIn is RevealDismissCardView))
+        #expect(!(standIn is RevealDismissCardView), "the close lands as a post card, not as the pair")
         #expect(standIn.bounds.size == slot.size, "the twin is not the slot's size")
         #expect(reveal.authorBand == nil, "a post card's header is borrowed into a tile's flight")
         #expect(reveal.alignsPageToSource == false, "the page is aligned to a caption a tile does not have")
-        #expect(reveal.cornerRadius == PostGridListRowCell.mediaCornerRadius, "not the pair's own corner")
-        #expect(reveal.fill == PostGridTileCell.fillColor(for: pair), "not the tile's own fill")
+        #expect(reveal.cornerRadius == ForYouFollowingCardCell.cornerRadius, "not the pair's own corner")
     }
 
     /// A chunk's tile, the same rule at the mosaic's corner.
     @Test func aChunkTilesCloseLandsAsItsTile() throws {
         let page = self.page(.discover, posts: corpus())
-        let tile = try #require(page.debugSegments.first { $0.chunk != nil }?.posts.first)
+        let tile = try #require(page.segments.first { $0.chunk != nil }?.posts.first)
         try realize(tile.id, on: page)
         let slot = try #require(page.rowFrame(for: tile.id, in: page))
 
@@ -175,7 +175,7 @@ struct ProfileTileCloseLandingTests {
     /// its caption, the band borrowed.
     @Test func aTextRowStillLandsAsItsCard() throws {
         let page = self.page(.discover, posts: corpus())
-        let text = try #require(page.debugSegments.first { $0.chunk == nil && !$0.isPairs }?
+        let text = try #require(page.segments.first { $0.chunk == nil && !$0.isPairs }?
             .posts.first { $0.kind == .text })
         try realize(text.id, on: page)
 
@@ -192,9 +192,8 @@ struct ProfileTileCloseLandingTests {
     // MARK: - The words a media close carries home (#910)
 
     /// The cell `id` is drawn in — a tile, for every caller below.
-    private func tileCell(_ id: PostID, on page: ProfileGalleryGridView) throws -> PostGridTileCell {
-        let path = try #require(page.debugIndexPath(for: id))
-        return try #require(page.collectionView.cellForItem(at: path) as? PostGridTileCell)
+    private func tileCell(_ id: PostID, on page: ForYouGridPage) throws -> PostGridTileCell {
+        try #require(page.debugCell(for: id) as? PostGridTileCell)
     }
 
     /// The bug itself: a media close onto a Discover pair landed as the bare
@@ -204,10 +203,10 @@ struct ProfileTileCloseLandingTests {
     /// heart closing the author line as on the tile.
     @Test func aPairsOriginCarriesItsWords() throws {
         let page = self.page(.discover, posts: corpus())
-        let pair = try #require(page.debugSegments.first { $0.isPairs }?.posts.first)
+        let pair = try #require(page.segments.first { $0.isPairs }?.posts.first)
         try realize(pair.id, on: page)
         let slot = try #require(page.rowFrame(for: pair.id, in: page))
-        #expect(try tileCell(pair.id, on: page).debugInfoOverlay != nil, "the pair wears no words to carry")
+        #expect(page.debugCell(for: pair.id) is ForYouFollowingCardCell, "the pair is not drawn as For You's card")
 
         let origin = try self.origin(opening: pair, from: page)
 
@@ -221,7 +220,7 @@ struct ProfileTileCloseLandingTests {
     /// is too small to — whatever the tile under the landing draws.
     @Test func aChunkTilesOriginCarriesWhatTheTileWears() throws {
         let page = self.page(.discover, posts: corpus())
-        let tiles = try #require(page.debugSegments.first { $0.chunk != nil }?.posts)
+        let tiles = try #require(page.segments.first { $0.chunk != nil }?.posts)
         var sawWorded = false
         for tile in tiles {
             try realize(tile.id, on: page)
@@ -233,16 +232,18 @@ struct ProfileTileCloseLandingTests {
         #expect(sawWorded, "no chunk tile large enough to wear words: the test proves nothing")
     }
 
-    /// ⚠️ NOTHING IS ADDED where the tile wears no words: the media gallery's
-    /// bricks fly their corner count as before, and a row has no overlay.
-    @Test func bricksAndRowsCarryNoWords() throws {
+    /// ⚠️ THE MEDIA GALLERY'S BRICKS CARRY WHAT THEY WEAR (post info by size
+    /// on every tile, #1269), and a row has no overlay.
+    @Test func bricksCarryWhatTheyWearAndRowsCarryNoWords() throws {
         let photos = (0..<12).map { post($0, .photo) }
         let grid = page(.grid, posts: photos)
         try realize(photos[3].id, on: grid)
-        #expect(try origin(opening: photos[3], from: grid).restingOverlay?() == nil)
+        let wears = try tileCell(photos[3].id, on: grid).debugInfoOverlay != nil
+        let carried = try origin(opening: photos[3], from: grid).restingOverlay?()
+        #expect((carried is PostCardCaptionOverlay) == wears)
 
         let discover = page(.discover, posts: corpus())
-        let row = try #require(discover.debugSegments.first { $0.chunk == nil && !$0.isPairs }?.posts.first)
+        let row = try #require(discover.segments.first { $0.chunk == nil && !$0.isPairs }?.posts.first)
         try realize(row.id, on: discover)
         #expect(try origin(opening: row, from: discover).restingOverlay?() == nil)
     }

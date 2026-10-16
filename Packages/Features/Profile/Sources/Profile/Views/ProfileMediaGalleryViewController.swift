@@ -1,44 +1,10 @@
 import CoreModels
 import DesignSystem
+import FeedInterface
 import MediaCore
 import MediaPlayback
 import PostGrid
 import UIKit
-
-/// What a post opened from the profile flies out of and lands back on: the
-/// questions `ProfileViewController.openGalleryPost` asks while the feed is up.
-///
-/// Two surfaces answer them: the profile's pager (its active page) and the
-/// media gallery Posts' "View all" pushes (#631). One description of a post's
-/// place, whichever list it was tapped in.
-@MainActor
-protocol ProfileHeroSurface: UIView {
-    func heroGeometry(for postID: PostID) -> (rect: CGRect, cover: UIImage?, isTile: Bool)?
-    /// The space `heroGeometry`'s rect is in.
-    var heroSpace: UICoordinateSpace? { get }
-    func setHeroConcealed(_ concealed: Bool, for postID: PostID, carrying carry: PostGridListRowCell.HeroCarry)
-    func textRowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect?
-    func rowFrame(for postID: PostID, in space: UICoordinateSpace) -> CGRect?
-    func textRowCaptionEnd(for postID: PostID) -> CGFloat?
-    func textRowCaptionTop(for postID: PostID) -> CGFloat
-    func textRowAuthorBand(for postID: PostID) -> PostAuthorBandView.Model?
-    func makeDismissStandIn(for postID: PostID) -> UIView?
-    /// The tile a card-shaped close lands on, or nil for a row (#888).
-    func tileRevealShape(for postID: PostID) -> ProfileTileRevealShape?
-    /// The words a tile wears over its picture, for a flight to wear as the
-    /// tile's resting furniture, or nil for a post that wears none (#910).
-    func restingOverlay(for postID: PostID) -> UIView?
-    /// A post opens from this surface: its tile's clip is parked for a close
-    /// from another post (#951) — see `ProfileGalleryGridView`.
-    func beginReturnHandoff(of postID: PostID)
-    /// The open was refused: the scope `beginReturnHandoff` opened closes now.
-    func endReturnHandoff()
-    func returnFlightSurface(for postID: PostID) -> VideoRenderView?
-    func pauseReturnPlayback(for postID: PostID)
-    @discardableResult
-    func landReturnPlayback(_ view: UIView, for postID: PostID) -> Bool
-    func isReturnLandingReady(for postID: PostID) -> Bool
-}
 
 /// How a TILE meets the window closing onto it: its corner and its fill. The
 /// rest of a window's description is a row's — see
@@ -46,14 +12,6 @@ protocol ProfileHeroSurface: UIView {
 struct ProfileTileRevealShape: Equatable {
     let cornerRadius: CGFloat
     let fill: UIColor
-}
-
-extension ProfileGalleryPagerView: ProfileHeroSurface {
-    var heroSpace: UICoordinateSpace? { heroCoordinateSpace }
-}
-
-extension ProfileGalleryGridView: ProfileHeroSurface {
-    var heroSpace: UICoordinateSpace? { heroCoordinateSpace }
 }
 
 /// The profile's photos and videos as the media mosaic — what "View all"
@@ -65,7 +23,7 @@ extension ProfileGalleryGridView: ProfileHeroSurface {
 /// its media into it as pages land, and opens its posts through the same
 /// flight the Posts list uses, measured against this mosaic.
 final class ProfileMediaGalleryViewController: UIViewController {
-    let grid: ProfileGalleryGridView
+    let grid: any PostGridPage
     /// A tile was tapped — or a card's comment chip, `showingComments`. The
     /// profile opens it, flying from this screen's mosaic.
     var onOpen: ((GalleryPost, _ stream: [GalleryPost], _ showingComments: Bool) -> Void)?
@@ -77,15 +35,17 @@ final class ProfileMediaGalleryViewController: UIViewController {
     private let handle: String?
     private let galleryTitle: String
 
+    /// - Parameter makePage: For You's own grid page (#1273) — the mosaic's
+    ///   tiles are For You's tiles.
     init(
-        imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?, handle: String?,
-        title: String = ProfileTab.format(.media).title
+        handle: String?, title: String = ProfileTab.format(.media).title,
+        makePage: (PostGridPageStyle) -> any PostGridPage
     ) {
         self.handle = handle
         self.galleryTitle = title
-        grid = ProfileGalleryGridView(
-            imagePipeline: imagePipeline, style: .grid, tab: .format(.media), videoPlayback: videoPlayback
-        )
+        grid = makePage(.grid)
+        // Post info by size (`PostTileInfo`'s three levels), as every tile.
+        grid.showsTileInfo = true
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -100,13 +60,12 @@ final class ProfileMediaGalleryViewController: UIViewController {
         grid.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(grid)
         grid.pin(to: view)
-        grid.onItemTapped = { [weak self] post, stream in self?.onOpen?(post, stream, false) }
-        grid.onItemCommentsTapped = { [weak self] post, stream in self?.onOpen?(post, stream, true) }
+        grid.onPostTapped = { [weak self] post, stream, comments in self?.onOpen?(post, stream, comments) }
         grid.onNearEnd = { [weak self] in self?.onNearEnd?() }
     }
 
     func render(_ state: ProfileViewModel.GalleryPageState) {
-        grid.render(state)
+        grid.show(ProfileGalleryPagerView.pageState(state, for: .format(.media)))
     }
 
     override func viewDidLayoutSubviews() {
@@ -116,9 +75,8 @@ final class ProfileMediaGalleryViewController: UIViewController {
         // here: the navigation bar above, the home indicator (or tab bar)
         // below, and the bar as what content passes under.
         let safe = view.safeAreaInsets
-        grid.setContentTopInset(safe.top)
-        grid.setContentBottomInset(safe.bottom)
-        grid.setStickyTopOcclusion(safe.top)
+        grid.setHostedInsets(top: safe.top, bottom: safe.bottom)
+        grid.setChromeOcclusion(UIEdgeInsets(top: safe.top, left: 0, bottom: safe.bottom, right: 0))
     }
 
     override func viewDidAppear(_ animated: Bool) {

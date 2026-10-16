@@ -29,6 +29,7 @@ struct ProfileHeaderAccessoryTests {
         ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: {},
             trayPlacement: .aboveBottomSafeArea
         )
@@ -114,6 +115,7 @@ struct ProfileHeaderAccessoryTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: {},
             switcherFactory: ProfileSwitcherMenuFactory(
                 switching: StubSwitching(), imagePipeline: ImagePipeline(fetcher: SilentFetcher())
@@ -138,6 +140,7 @@ struct ProfileHeaderAccessoryTests {
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: StubAccessoryProfiles()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
         screen.loadViewIfNeeded()

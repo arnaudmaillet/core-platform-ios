@@ -6,6 +6,7 @@ import MediaPlayback
 import PostGrid
 import Testing
 import UIKit
+@testable import Feed
 @testable import Profile
 
 /// #951 on the profile's gallery: the tap parks the tile's clip, a close from
@@ -163,58 +164,66 @@ struct ProfileReturnPlaybackTests {
         #expect(page.isReturnLandingReady(for: tapped.id))
     }
 
+    /// The page the profile draws its media on (#1273): For You's, with the
+    /// app's pool.
+    private func forYouGallery(pool: VideoPlaybackController? = nil) -> (ForYouGridPage, [GalleryPost]) {
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid, videoPlayback: pool)
+        page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        page.setCorpusComplete(true)
+        let posts = videos()
+        page.render(.content(posts))
+        page.layoutIfNeeded()
+        page.collectionView.layoutIfNeeded()
+        return (page, posts)
+    }
+
     /// ⚠️ A REFUSED OPEN pushes nothing, and the screen never disappears to end
     /// the scope it opened: the grid would sit silent. The open closes it at
     /// once; a real push keeps it for the trip.
-    @Test func aRefusedOpenClosesTheScopeAndAPushKeepsIt() async throws {
+    @Test func aRefusedOpenClosesTheScopeAndAPushKeepsIt() throws {
         let pool = VideoPlaybackController(source: FixedVideoSource(
             url: FileManager.default.temporaryDirectory.appendingPathComponent("profile-return.mp4")
         ))
-        let (page, tapped, _, window) = try await playingGallery(pool: pool)
-        defer { window.isHidden = true }
+        let (page, posts) = forYouGallery(pool: pool)
+        let tapped = try #require(posts.first)
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
         let navigation = UINavigationController(rootViewController: screen)
 
         screen.feedHero = { _, _, _ in }
         screen.openGalleryPost(tapped, stream: [tapped], showingComments: false, from: page)
-        #expect(!page.debugIsHandingOff, "a refused open left the grid's scope open")
+        #expect(page.playback?.isHandingOff == false, "a refused open left the grid's scope open")
 
         screen.feedHero = { _, _, _ in navigation.pushViewController(UIViewController(), animated: false) }
         screen.openGalleryPost(tapped, stream: [tapped], showingComments: false, from: page)
-        #expect(page.debugIsHandingOff, "a real open lost its scope")
+        #expect(page.playback?.isHandingOff == true, "a real open lost its scope")
     }
 
-    /// The profile's open hands the shared flight the return path — and only
-    /// that: same-post closes adopt nothing, as before.
-    @Test func theProfilesOpenWiresTheReturn() throws {
-        let page = ProfileGalleryGridView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid, tab: .format(.media)
-        )
-        page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
-        page.layoutIfNeeded()
-        page.setCorpusComplete(true)
-        let posts = videos()
-        page.render(.content(posts))
-        page.layoutIfNeeded()
-        page.collectionView.layoutIfNeeded()
-
+    /// ⚠️ The profile's open hands the shared flight the WHOLE tile contract
+    /// (#1273, epic #1269): the return path, and the landing's playhead — a
+    /// same-post close used to restart the tile's clip.
+    @Test func theProfilesOpenWiresTheReturnAndThePlayhead() throws {
+        let (page, posts) = forYouGallery()
         let screen = ProfileViewController(
             viewModel: ProfileViewModel(repository: NoProfiles(), gallery: NoGallery(), source: .currentUser),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
+            makeGridPage: TestGridPages.factory(),
             onLogout: nil
         )
         var handed: SnapFeedHeroOrigin?
         screen.feedHero = { _, _, origin in handed = origin }
         screen.openGalleryPost(posts[0], stream: posts, showingComments: false, from: page)
         let origin = try #require(handed, "the open never reached the hero seam")
+        #expect(origin.donateLiveMedia != nil, "the tile takes off as a still")
         #expect(origin.returnLiveMedia != nil)
         #expect(origin.pauseReturnLiveMedia != nil)
         #expect(origin.adoptReturnLiveMedia != nil)
         #expect(origin.returnLandingIsReady != nil)
-        #expect(origin.adoptLandingLiveMedia == nil)
+        #expect(origin.adoptLandingLiveMedia != nil, "a same-post close restarts the clip")
+        #expect(origin.landingMediaIsReady != nil)
     }
 }

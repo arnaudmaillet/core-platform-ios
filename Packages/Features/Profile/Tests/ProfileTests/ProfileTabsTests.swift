@@ -99,9 +99,7 @@ struct ProfileTabsTests {
     // MARK: - The pager follows the tab list
 
     private func pager(_ tabs: [ProfileTab]) -> ProfileGalleryPagerView {
-        let pager = ProfileGalleryPagerView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), tabs: tabs
-        )
+        let pager = ProfileGalleryPagerView(tabs: tabs, makePage: TestGridPages.pageMaker())
         pager.frame = CGRect(x: 0, y: 0, width: 400, height: 600)
         pager.layoutIfNeeded()
         return pager
