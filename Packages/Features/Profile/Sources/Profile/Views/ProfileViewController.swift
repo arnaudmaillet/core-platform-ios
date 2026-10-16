@@ -206,9 +206,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         item.tintColor = Palette.prominentGlassTint
         return item
     }()
-    /// The profile's identity, once followed — the post's author pill.
-    private lazy var barIdentityPill: ProfileBarIdentityPill = {
-        let pill = ProfileBarIdentityPill()
+    /// The profile's identity, once followed — the app's one person pill
+    /// (#1277), with no badge: the relation is the Follow item beside it.
+    /// A tap brings the profile's page back to its top, where the tray is.
+    private lazy var barIdentityPill: PersonPill = {
+        let pill = PersonPill(carriesBadge: false)
+        pill.accessibilityHint = "Scrolls back to the top of the profile."
         pill.onTap = { [weak self] in self?.galleryPager.scrollActivePageToProfileTop() }
         return pill
     }()
@@ -1408,7 +1411,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         navigationItem.rightBarButtonItems?.first { $0 === barFollowItem || $0 === barIdentityItem }
     }
     var debugBarFollowItem: UIBarButtonItem { barFollowItem }
-    var debugBarIdentityPill: ProfileBarIdentityPill { barIdentityPill }
+    var debugBarIdentityPill: PersonPill { barIdentityPill }
     /// The bell, if the bar shows it.
     var debugMuteBellItem: UIBarButtonItem? {
         navigationItem.rightBarButtonItems?.first { $0 === muteBellItem }
@@ -2064,12 +2067,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         switch state {
         case .follow, .following, .requested:
             guard let profile = viewModel.profile else { return (nil, follow) }
-            barIdentityPill.configure(
-                name: profile.displayName, handle: profile.handle,
-                monogram: MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle),
-                avatarURL: profile.avatarURL, pipeline: imagePipeline
+            barIdentityPill.setName(profile.displayName, handle: "@\(profile.handle)")
+            barIdentityPill.avatar.setMonogram(
+                MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
             )
-            barIdentityPill.setWidthBudget(barIdentityWidthBudget(withFollow: follow != nil))
+            barIdentityPill.avatar.setPicture(profile.avatarURL, pipeline: imagePipeline)
+            // Never narrower than its face's wrapper.
+            let budget = barIdentityWidthBudget(withFollow: follow != nil)
+            if barIdentityPill.setWidthBudget(max(PersonPill.wrapperHeight, floor(budget))) {
+                barIdentityPill.setNeedsLayout()
+            }
             return (barIdentityItem, follow)
         default:
             return (nil, nil)

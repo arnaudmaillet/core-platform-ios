@@ -1,4 +1,5 @@
 import DesignSystem
+import MediaCore
 import Testing
 import UIKit
 @testable import Feed
@@ -43,8 +44,8 @@ struct SnapAuthorBadgeInkTests {
 
         let (discInk, markInk): (UIColor, UIColor) = switch badge {
         case .follow: (.black, .white)
-        case .following, .pending: (AvatarBadgeInks.quietDisc, AvatarBadgeInks.accent)
-        case .friends: (AvatarBadgeInks.accent, .white)
+        case .following, .pending: (PersonPillBadgeInks.quietDisc, PersonPillBadgeInks.accent)
+        case .friends: (PersonPillBadgeInks.accent, .white)
         case .none: (.clear, .clear)
         }
         let mode = style == .dark ? "dark" : "light"
