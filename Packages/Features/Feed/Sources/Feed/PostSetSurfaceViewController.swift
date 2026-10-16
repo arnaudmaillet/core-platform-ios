@@ -397,44 +397,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         guard posts.indices.contains(index), let openPost,
               navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
         else { return }
-        // With their live counts (#896, `ForYouGridPage.post(for:)`): the
-        // flight's card draws the number the tile it leaves draws.
-        let tapped = page.post(for: posts[index].id) ?? posts[index]
-        let stream = posts[index...].prefix(Self.seedWindow).map { page.post(for: $0.id) ?? $0 }
-        let hero = page.hero(for: tapped.id, in: view)
-        let appearance = page.heroAppearance(for: tapped.id)
-
-        page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
-
-        let origin = SnapFeedHeroOrigin(
-            post: tapped,
-            stream: stream,
-            hasHero: hero != nil,
-            cover: appearance?.cover,
-            style: appearance?.style == .listMedia ? .listMedia : .tile,
-            frame: { [weak page] space in page?.hero(for: tapped.id, in: space)?.frame },
-            isOnScreen: { [weak page] in page?.isPostVisible(tapped.id) ?? false },
-            setConcealed: { [weak page] concealed in
-                page?.setHeroHidden(concealed, for: tapped.id)
-            },
-            donateLiveMedia: { [weak page] in page?.liveFlightSurface(for: tapped.id) },
-            opensComments: false,
-            depthView: { [weak page] in page },
+        let tapped = posts[index]
+        let stream = Array(posts[index...].prefix(Self.seedWindow))
+        let origin = page.heroOrigin(
+            opening: tapped, stream: stream, in: view,
             textReveal: textReveal(for: tapped),
-            // A close from another post comes home with the tile's OWN clip,
-            // parked at the tap (#951) — never the page's.
-            returnLiveMedia: { [weak page] in page?.returnFlightSurface(for: tapped.id) },
-            pauseReturnLiveMedia: { [weak page] in page?.pauseReturnPlayback(for: tapped.id) },
-            adoptReturnLiveMedia: { [weak page] view in page?.landReturnPlayback(view, for: tapped.id) },
-            returnLandingIsReady: { [weak page] in page?.isReturnLandingReady(for: tapped.id) ?? true },
-            // A paired card's or a large tile's words, worn by the card at the
-            // tile's end (#910) — the gallery's and the profile's arrangement.
-            restingOverlay: { [weak page] in page?.restingOverlay(for: tapped.id) },
-            // A tile's heart flies red once the viewer has staked.
-            viewerStake: { [weak page] in page?.viewerStake(on: tapped.id) ?? 0 },
-            // Pinned since the tap; asked again in case a refused push handed
-            // the inset back (`openHoldingStill`).
-            willStageDismissal: { [weak page] in page?.pinForPushedClose() },
             // On past the window into what this surface holds, then into the
             // caller's next page (#638).
             continuation: { [weak self] after in await self?.postIDs(after: after) }
