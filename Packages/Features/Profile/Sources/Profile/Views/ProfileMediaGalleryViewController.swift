@@ -73,12 +73,12 @@ final class ProfileMediaGalleryViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        grid.setAutoplayActive(true)
+        grid.setPageActive(true)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        grid.setAutoplayActive(false)
+        grid.setPageActive(false)
     }
 
     /// The post has covered this screen: the tapped tile is brought clear of
