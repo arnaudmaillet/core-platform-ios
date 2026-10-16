@@ -657,7 +657,7 @@ final class SnapCommentTickerView: UIView {
         _ item: TickerCommentModel, atIndex itemIndex: Int, lane: Int, leftEdge: CGFloat, width: CGFloat
     ) -> Bubble {
         let view = dequeueBubble()
-        view.configure(text: item.text, avatarURL: item.avatarURL, pipeline: imagePipeline)
+        view.configure(text: item.text, avatarURL: item.avatarURL, monogram: item.monogram, pipeline: imagePipeline)
         view.alpha = Self.bubbleOpacity
         view.frame = CGRect(
             x: leftEdge,
@@ -1136,7 +1136,7 @@ private final class DisplayLinkProxy: NSObject {
 /// pass per frame per bubble over the video). The whole bubble is ONE view
 /// whose layer the conveyor animates on `position.x`; the avatar and text
 /// ride it as a unit.
-private final class TickerBubbleView: UIView {
+final class TickerBubbleView: UIView {
     /// Sized to fit within the lane (the band height is derived from the
     /// caption line + text insets, so a compact circle sits centered without
     /// growing the band).
@@ -1145,16 +1145,21 @@ private final class TickerBubbleView: UIView {
     static let textInsets = UIEdgeInsets(top: 3, left: 0, bottom: 3, right: 0)
     static let font = UIFont.scaledFont(forTextStyle: .caption1, weight: .semibold)
 
-    private let avatarView = AvatarImageView()
+    /// THE app's avatar (#1308): the author's initials as a permanent floor,
+    /// the picture dissolved over them when it lands. The bubble used to load
+    /// the picture by hand into a bare image view over a grey disc, so an
+    /// author with no picture — or one late or failed — was an empty disc.
+    let avatarView = AvatarView(diameter: TickerBubbleView.avatarDiameter, size: .avatar)
     /// Emotes ride the band: the players are subviews of the label, so they
     /// travel with the bubble's own flight and cost nothing per frame.
     private let label = EmoteLabel()
-    private var avatarTask: Task<Void, Never>?
 
     init() {
         super.init(frame: .zero)
         isUserInteractionEnabled = false
-        avatarView.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        // The band is always over the media, in white: the disc wears the
+        // dark appearance's plate and ink whatever the app's.
+        avatarView.overrideUserInterfaceStyle = .dark
         addSubview(avatarView)
         label.font = Self.font
         label.textColor = .white
@@ -1173,25 +1178,18 @@ private final class TickerBubbleView: UIView {
         label.frame = CGRect(x: textX, y: 0, width: max(0, bounds.width - textX), height: bounds.height)
     }
 
-    /// Sets the text and starts the avatar load (cancelling any prior). A
-    /// missing url/pipeline leaves the placeholder circle showing.
-    func configure(text: String, avatarURL: URL?, pipeline: ImagePipeline?) {
+    /// Sets the text, the author's initials, and their picture over them —
+    /// a missing url or pipeline leaves the initials, never an empty disc.
+    func configure(text: String, avatarURL: URL?, monogram: String, pipeline: ImagePipeline?) {
         label.text = text
-        avatarTask?.cancel()
-        avatarView.image = nil
-        guard let avatarURL, let pipeline else { return }
-        avatarTask = Task { [weak self] in
-            guard let image = try? await pipeline.image(for: avatarURL, size: .avatar) else { return }
-            guard !Task.isCancelled, let self else { return }
-            self.avatarView.image = image
-        }
+        avatarView.setMonogram(monogram)
+        avatarView.setPicture(avatarURL, pipeline: pipeline)
     }
 
-    /// Pool hygiene: cancel the in-flight avatar load and clear content.
+    /// Pool hygiene: back to the initials alone (the load cancelled), and no
+    /// text — a recycled bubble never shows the previous author.
     func prepareForReuse() {
-        avatarTask?.cancel()
-        avatarTask = nil
-        avatarView.image = nil
+        avatarView.reset()
         label.text = nil
     }
 }
