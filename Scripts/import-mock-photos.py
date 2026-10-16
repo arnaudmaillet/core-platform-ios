@@ -3,8 +3,16 @@
 
     Scripts/import-mock-photos.py ~/Downloads/photos
 
-One GALLERY per subfolder that holds `.jpg` files (subfolders with none — the
-video-only ones — and `.DS_Store` are ignored). Galleries are numbered
+One GALLERY per subfolder that holds `.jpg` or `.heic` files (subfolders with
+none — the video-only ones — and `.DS_Store` are ignored). A photo that is a
+byte-for-byte copy of one already taken (a gallery downloaded with a page
+twice) is skipped. An EXIF rotation (3, 6, 8) is applied to the pixels before
+the metadata goes.
+
+A subfolder named `singles` is NOT a gallery: its photos belong to no shoot,
+and each becomes one single-photo post's picture. It is written as the
+manifest entry `"id": "singles"` with photos `single-NN`, and gallery numbers
+skip it. Galleries are numbered
 `gallery-1…` in sorted folder-name order and their photos in NATURAL order
 (`-2` before `-10`), so ids are stable across runs over the same sources.
 
@@ -22,6 +30,7 @@ axis that matters, and quality 82 is where the artefacts stop showing on a
 photograph at that size. The folder is rewritten from scratch on every run.
 """
 
+import hashlib
 import json
 import re
 import subprocess
@@ -80,9 +89,14 @@ def main():
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     source = Path(sys.argv[1]).expanduser()
-    folders = sorted(d for d in source.iterdir() if d.is_dir() and any(d.glob("*.jpg")))
+    def pictures(folder: Path):
+        return sorted((p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".heic")),
+                      key=natural_key)
+
+    folders = sorted(d for d in source.iterdir() if d.is_dir() and pictures(d))
     if not folders:
-        sys.exit(f"no subfolder of {source} holds .jpg files")
+        sys.exit(f"no subfolder of {source} holds .jpg or .heic files")
+    seen = set()
 
     OUT.mkdir(parents=True, exist_ok=True)
     for stale in OUT.iterdir():
@@ -90,20 +104,33 @@ def main():
 
     manifest = []
     with tempfile.TemporaryDirectory() as scratch:
-        for number, folder in enumerate(folders, start=1):
-            gallery_id = f"gallery-{number}"
+        number = 0
+        for folder in folders:
+            is_singles = folder.name.lower() == "singles"
+            if not is_singles:
+                number += 1
+            gallery_id = "singles" if is_singles else f"gallery-{number}"
             photos = []
-            for index, photo in enumerate(sorted(folder.glob("*.jpg"), key=natural_key), start=1):
+            index = 0
+            for photo in pictures(folder):
+                digest = hashlib.sha256(photo.read_bytes()).hexdigest()
+                if digest in seen:
+                    print(f"skip (duplicate): {folder.name}/{photo.name}")
+                    continue
+                seen.add(digest)
+                index += 1
                 original = sips_properties(photo)
                 # Stripping EXIF drops the orientation tag, so a rotated source
-                # would come out on its side. None of these carry one; refuse
-                # rather than guess if a later import does.
-                if original["orientation"] not in (None, 1):
+                # would come out on its side: the rotation goes into the
+                # pixels first. A mirrored orientation is refused, not guessed.
+                rotation = {None: 0, 1: 0, 3: 180, 6: 90, 8: 270}.get(original["orientation"])
+                if rotation is None:
                     sys.exit(f"{photo}: EXIF orientation {original['orientation']} is not handled")
-                photo_id = f"{gallery_id}-{index:02d}"
+                photo_id = f"single-{index:02d}" if is_singles else f"{gallery_id}-{index:02d}"
                 encoded = Path(scratch) / f"{photo_id}.jpg"
                 resize = ["-Z", str(LONG_SIDE)] if max(original["width"], original["height"]) > LONG_SIDE else []
-                subprocess.run(["sips", *resize, "-s", "format", "jpeg", "-s", "formatOptions", str(QUALITY),
+                rotate = ["-r", str(rotation)] if rotation else []
+                subprocess.run(["sips", *rotate, *resize, "-s", "format", "jpeg", "-s", "formatOptions", str(QUALITY),
                                 str(photo), "--out", str(encoded)], check=True, capture_output=True)
                 (OUT / encoded.name).write_bytes(strip_metadata(encoded.read_bytes()))
                 size = sips_properties(OUT / encoded.name)

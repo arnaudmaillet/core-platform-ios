@@ -37,6 +37,11 @@ public struct MockPhotoCatalog: Sendable {
     public static let shared = MockPhotoCatalog(bundle: .module)
 
     public let galleries: [Gallery]
+    /// Photographs that belong to no gallery — the `singles` folder of an
+    /// import — each one a single-photo post's picture.
+    public let singles: [Photo]
+    /// The id of the manifest entry holding `singles`.
+    public static let singlesID = "singles"
     /// Every photo of every gallery, in gallery order.
     public let photos: [Photo]
     private let directory: URL?
@@ -49,11 +54,27 @@ public struct MockPhotoCatalog: Sendable {
               let galleries = try? JSONDecoder().decode([Gallery].self, from: data)
         else {
             self.galleries = []
+            self.singles = []
             self.photos = []
             return
         }
-        self.galleries = galleries.filter { !$0.photos.isEmpty }
-        self.photos = self.galleries.flatMap(\.photos)
+        self.galleries = galleries.filter { !$0.photos.isEmpty && $0.id != Self.singlesID }
+        self.singles = galleries.first { $0.id == Self.singlesID }?.photos ?? []
+        self.photos = self.galleries.flatMap(\.photos) + singles
+    }
+
+    /// The picture of a SINGLE-photo post, `ordinal` counting those posts
+    /// across the whole mock world (the owner, 2026-10-16: no two posts on
+    /// one picture, and a gallery is a carousel, not a pool).
+    ///
+    /// The singles first, each once. Past them — the last resort the owner
+    /// allowed — gallery pages other than the heads, gallery by gallery so a
+    /// shoot is spent in one run rather than scattered. Cycles only when the
+    /// whole catalog is spent.
+    public func singlePhoto(forOrdinal ordinal: Int) -> Photo? {
+        let pool = singles + galleries.flatMap { $0.photos.dropFirst() }
+        guard !pool.isEmpty else { return nil }
+        return pool[Self.wrap(ordinal, pool.count)]
     }
 
     /// The photo for a dataset slot, cycling through EVERY photo of every

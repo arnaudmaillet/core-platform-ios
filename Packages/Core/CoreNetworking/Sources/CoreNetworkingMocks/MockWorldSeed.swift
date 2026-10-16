@@ -491,6 +491,16 @@ public enum MockWorldSeed {
     static func records(authors: [MockSocialDataset.Author], olderThanMS: Int64) -> [MockSocialDataset.PostRecord] {
         guard !authors.isEmpty else { return [] }
         let shapes: [(Int, Int)] = [(1080, 1350), (1600, 900), (1080, 1080)]
+        // Each kind's run of ordinals, in placement order (see
+        // `MockSocialDataset.Ordinals`): the world draws after everyone else.
+        var videoOrdinal: [Int: Int] = [:], photoOrdinal: [Int: Int] = [:]
+        for (index, placement) in placements.enumerated() {
+            switch placement.post.kind {
+            case .video: videoOrdinal[index] = videoOrdinal.count
+            case .photo: photoOrdinal[index] = photoOrdinal.count
+            case .text: break
+            }
+        }
         return placements.enumerated().map { index, placement in
             let shape = shapes[index % shapes.count]
             // Slots past the ones the corpus, the viewer and the arrivals
@@ -499,10 +509,12 @@ public enum MockWorldSeed {
             let media: (url: String, width: Int, height: Int)? = switch placement.post.kind {
             case .video:
                 MockSocialDataset.syntheticVideo(
-                    slot: 60 + index, fallback: "mock://video/world-\(index)", shape: shape
+                    slot: MockSocialDataset.Ordinals.worldClips + (videoOrdinal[index] ?? 0),
+                    fallback: "mock://video/world-\(index)", shape: shape
                 )
             case .photo:
-                MockSocialDataset.photo(slot: 60 + index, fallback: "world-\(index)", shape: shape)
+                MockSocialDataset.photo(slot: MockSocialDataset.worldSingleBase + (photoOrdinal[index] ?? 0),
+                                        fallback: "world-\(index)", shape: shape)
             case .text:
                 nil
             }

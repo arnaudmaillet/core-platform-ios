@@ -250,12 +250,13 @@ extension MockPostSoundProvider {
             ceiling += entry.share
             guard roll < ceiling else { continue }
             switch entry.sound {
-            case .clip(let slot): return clips.clip(forSlot: slot)?.id
+            case .clip(let slot): return clips.borrowableClip(forSlot: slot)?.id
             case .song(let slot): return songs.song(forSlot: slot)?.id
             }
         }
+        // Never a clip whose sound is its own post's alone (`soundIsUnique`).
         return index % 3 == 0
-            ? clips.clip(forSlot: index / 3)?.id
+            ? clips.borrowableClip(forSlot: index / 3)?.id
             : songs.song(forSlot: index)?.id
     }
 
