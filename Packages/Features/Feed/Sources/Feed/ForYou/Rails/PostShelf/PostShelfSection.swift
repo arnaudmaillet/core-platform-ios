@@ -1,0 +1,840 @@
+import CoreModels
+import CoreNavigation
+import CoreStorage
+import DesignSystem
+import MediaCore
+import MediaPlayback
+import PostGrid
+import UIKit
+
+/// A SHELF OF POSTS (#1271): a titled section, a row of media cards and a row
+/// of text cards, each row its own horizontal scroller.
+///
+/// ```
+///     Title 5 ›
+///   ┌──────┐ ┌──────┐ ┌───       media cards, the third peeking; every
+///   │ ▶    │ │ ▶    │ │ ▶        card on screen plays, and each wears its
+///   │ Ana  │ │ Bo   │ │          first lines over its foot
+///   └──────┘ └──────┘ └───
+///   ┌───────────────┐ ┌────      text posts below them, as the list's own
+///   │ ◉ Cy · two l… │ │ ◉ D      cards, two lines — a row of their own
+///   └───────────────┘ └────
+/// ```
+///
+/// The title, its count and its chevron are the host's (`title`,
+/// `setCount`): For You calls it its follows' section, the place page its
+/// popular posts, a search its recent ones. The section draws and drives the
+/// rest — the cards, their autoplay, their lookahead, their previews and the
+/// hooks a flight out of a card reads.
+///
+/// **Two independent rows** under one heading (`ForYouFollowingRows`):
+/// scrolling one never moves the other. A media card is
+/// `ForYouFollowingCardCell`; a text card is the list's own card
+/// (`PostGridListRowCell`), its like a real stake. Every card is found by its
+/// post (`cardRow(for:)`), so the flights, the previews and the
+/// bring-into-view read either row the same way; only the media row plays.
+///
+/// A row with nothing in it is not drawn, and with no posts at all the
+/// section is zero tall — no heading over nothing.
+///
+/// **A tap opens, a long press previews, and nothing gives under a finger**
+/// (the product call of 2026-09-29): a tap is the row's own selection, which
+/// a scroll never makes; a long press lifts UIKit's native preview, and
+/// tapping the preview opens the post the way a tap would.
+@MainActor
+final class PostShelfSection: UIView {
+    /// The height a shelf of `media` media posts and `text` text posts needs
+    /// at `width`: its title and its rows, zero with nothing to show.
+    static func height(forWidth width: CGFloat, media: Int, text: Int) -> CGFloat {
+        guard media + text > 0 else { return 0 }
+        return SectionTitleView.Metrics.height
+            + ForYouFollowingRows.height(forWidth: width, media: media, text: text)
+    }
+
+    /// The height this shelf needs at `width`.
+    func preferredHeight(forWidth width: CGFloat) -> CGFloat {
+        let counts = rowCounts
+        return Self.height(forWidth: width, media: counts.media, text: counts.text)
+    }
+
+    /// Each row's count.
+    var rowCounts: (media: Int, text: Int) {
+        let text = cards.filter { ForYouFollowingRows.Row($0) == .text }.count
+        return (cards.count - text, text)
+    }
+
+    // MARK: - The host's
+
+    /// The section's title — the host's word for what it shows.
+    var title = "" {
+        didSet { applyHeader() }
+    }
+    /// The title's count: what is new in the shelf, or nothing.
+    private(set) var newCount = 0
+    func setCount(new count: Int) {
+        newCount = count
+        applyHeader()
+    }
+    /// The title was tapped: the host pushes the shelf's whole list.
+    var onTitleTapped: (() -> Void)? {
+        didSet { header.onTap = onTitleTapped }
+    }
+    /// What VoiceOver says the title does.
+    var titleAccessibilityHint: String? {
+        get { header.accessibilityHint }
+        set { header.accessibilityHint = newValue }
+    }
+
+    /// A card was tapped: its index into `cards`.
+    var onCardTapped: ((Int) -> Void)?
+    /// What a long press on a card offers under the preview, after "Open" —
+    /// the host's rows (View Profile, Unfollow, Report).
+    var cardMenuElements: ((GalleryPost) -> [UIMenuElement])?
+    /// A TEXT card's author band was tapped — the host opens their profile,
+    /// as the list's cards do.
+    var onCardAuthorTapped: ((GalleryPost) -> Void)?
+    /// What a TEXT card's "..." offers (Unfollow, Report) — the list's rows,
+    /// from the same host; `anchor` is what a sheet raised from it points at.
+    /// Nil, or nothing to offer, and the card draws no "...".
+    var cardAuthorMenuActions: ((_ post: GalleryPost, _ anchor: UIView) -> [PostCardMenuAction])?
+    /// A TEXT card's repost was pressed. Nothing publishes a repost yet, so
+    /// nothing sets this — and, as on the list's cards, the control is not
+    /// drawn until something does (#801).
+    var onCardRepostRequested: ((GalleryPost) -> Void)?
+    /// Where a card's like reads the viewer's stake. A media card's heart is
+    /// a readout; a TEXT card's like is the list's own chip, and stakes
+    /// (`PostCardStaking.bind`).
+    var staking: PostCardStaking?
+    /// The part of the screen the viewer can see, in THIS view's space, for
+    /// autoplay: a card under the navigation bar is not one they are looking
+    /// at. Nil (no host yet) plays nothing.
+    var visibleBand: (() -> CGRect?)?
+    /// The shelf's claim on the pool changed on its OWN account — it
+    /// scrolled, a cover landed — so the list under it must re-divide the
+    /// budget now. See `claimedPlayers`.
+    var onPlayerClaimChange: (() -> Void)?
+
+    /// What a text card's repost control does: nil, which hides it, while
+    /// nothing handles a repost (#801).
+    func cardRepostHandler(for post: GalleryPost) -> (() -> Void)? {
+        guard onCardRepostRequested != nil else { return nil }
+        return { [weak self] in self?.onCardRepostRequested?(post) }
+    }
+
+    /// `post` with its live like count (#896) — for a card's flight, its
+    /// stand-ins and its resting overlay, which must draw the number the
+    /// bound card draws, a like made in the feed included.
+    func livePost(_ post: GalleryPost) -> GalleryPost {
+        staking?.liveCopy(of: post) ?? post
+    }
+
+    /// What the viewer has staked on `post` — what a COPY of its card (a
+    /// flight's furniture, a close's stand-in) draws its heart from.
+    func cardStake(for post: GalleryPost) -> Int {
+        staking?.viewerStake(on: post.id) ?? 0
+    }
+
+    // MARK: - State
+
+    private(set) var cards: [GalleryPost] = []
+
+    /// The saved pile a text card's save control reads and writes — the one
+    /// the list's cards, the post page and the profile's Saved tab share.
+    private let bookmarks = PostBookmarkStore.shared
+    let header = SectionTitleView(content: .init(title: "", isLink: true))
+    /// The media row — the cards that play.
+    let mediaView: UICollectionView
+    /// The text row, scrolling apart from the media row above it.
+    let textView: UICollectionView
+    /// Also what a card's COPIES read the author's face from — the flight's
+    /// resting overlay, a window's stand-in.
+    let imagePipeline: ImagePipeline
+    /// The media row's own playback: EVERY card on screen plays, muted —
+    /// "all the visible video cards", the product call of 2026-09-29. A card
+    /// must be half on screen to count (`GridPlaybackVisibility`), and at 2.3
+    /// cards per width no more than three can be — which is the row's budget.
+    ///
+    /// The pool is shared with the list below (six decoders,
+    /// `VideoPlaybackController.capacity`): the list plays what the shelf's
+    /// claim leaves it (`ForYouGridPage.playerReserve`, fed `claimedPlayers`).
+    private let playback: GridVideoPlaybackCoordinator?
+    static let concurrentPlayers = 3
+    /// How many players the shelf holds as of its last reconcile — what the
+    /// list under it subtracts from the pool's budget.
+    private(set) var claimedPlayers = 0
+
+    /// The media row's lookahead (#970): a screen width ahead decoded, two
+    /// and a half on disk. Outside the list's display window it plans nothing
+    /// (`refreshLookaheadReach`).
+    private lazy var cardLookahead: ScrollLookahead = {
+        let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "foryou.following", kind: .rail) { [weak self] path in
+            guard let self, let id = mediaSource.itemIdentifier(for: path),
+                  let post = cards.first(where: { $0.id == id }) else { return [] }
+            return post.lookaheadImages
+        }
+        lookahead.attach(to: mediaView)
+        return lookahead
+    }()
+
+    private var mediaSource: UICollectionViewDiffableDataSource<Int, PostID>!
+    private var textSource: UICollectionViewDiffableDataSource<Int, PostID>!
+
+    /// The card a flight is carrying, hidden until it lands.
+    private var concealedCard: PostID?
+    private let snapper = RowSnapper()
+
+    init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?) {
+        self.imagePipeline = imagePipeline
+        playback = videoPlayback.map {
+            GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers)
+        }
+        mediaView = RowGeometry.makeRow(itemSize: CGSize(width: 150, height: 200))
+        textView = RowGeometry.makeRow(itemSize: CGSize(width: 316, height: 150))
+        super.init(frame: .zero)
+        addSubview(header)
+        for row in [mediaView, textView] {
+            row.delegate = self
+            addSubview(row)
+        }
+        mediaView.register(ForYouFollowingCardCell.self, forCellWithReuseIdentifier: ForYouFollowingCardCell.reuseID)
+        textView.register(PostGridListRowCell.self, forCellWithReuseIdentifier: PostGridListRowCell.reuseID)
+        textSource = UICollectionViewDiffableDataSource(collectionView: textView) {
+            [weak self] view, indexPath, id in
+            let cell = view.dequeueReusableCell(
+                withReuseIdentifier: PostGridListRowCell.reuseID, for: indexPath
+            ) as! PostGridListRowCell
+            guard let self, let post = cards.first(where: { $0.id == id }) else { return cell }
+            configureTextCard(cell, with: post)
+            return cell
+        }
+        mediaSource = UICollectionViewDiffableDataSource(collectionView: mediaView) {
+            [weak self] view, indexPath, id in
+            let cell = view.dequeueReusableCell(
+                withReuseIdentifier: ForYouFollowingCardCell.reuseID, for: indexPath
+            ) as! ForYouFollowingCardCell
+            guard let self, let post = cards.first(where: { $0.id == id }) else { return cell }
+            cell.configure(with: post, imagePipeline: imagePipeline)
+            // The heart closing the author line reads the viewer's stake.
+            staking?.bindReadout(cell, to: post.id)
+            // Autoplay is gated on the cover: its arrival re-opens the gate
+            // for a card that came up faceless while the row sat still.
+            cell.onCoverLoaded = { [weak self] in self?.updateAutoplay() }
+            cell.isHidden = id == concealedCard
+            return cell
+        }
+        header.isHidden = true
+        mediaView.isHidden = true
+        textView.isHidden = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func applyHeader() {
+        header.content = .init(title: title, newCount: newCount, isLink: true)
+    }
+
+    // MARK: - Content
+
+    /// Shows `posts`, each in its row (`ForYouFollowingRows`). Answers
+    /// whether anything changed.
+    @discardableResult
+    func render(_ posts: [GalleryPost]) -> Bool {
+        guard posts != cards else { return false }
+        cards = posts
+        applyCards()
+        cardLookahead.setNeedsPlan()
+        setNeedsLayout()
+        return true
+    }
+
+    /// Each row its own posts, in the section's order.
+    private func applyCards() {
+        let rows = ForYouFollowingRows.partition(cards)
+        func snapshot(_ posts: [GalleryPost]) -> NSDiffableDataSourceSnapshot<Int, PostID> {
+            var snapshot = NSDiffableDataSourceSnapshot<Int, PostID>()
+            snapshot.appendSections([0])
+            snapshot.appendItems(posts.map(\.id))
+            return snapshot
+        }
+        let animated = window != nil
+        mediaSource.apply(snapshot(rows.media), animatingDifferences: animated) { [weak self] in
+            self?.updateAutoplay()
+        }
+        textSource.apply(snapshot(rows.text), animatingDifferences: animated)
+    }
+
+    /// A text card: the list's own card (`PostGridListRowCell`) held to the
+    /// row's two lines, wired as the list wires its cards — the like stakes,
+    /// the save writes the shared pile, the band opens the author and its
+    /// "..." offers the host's rows, the comment count opens the post. A tap
+    /// anywhere else is the row's own selection.
+    private func configureTextCard(_ cell: PostGridListRowCell, with post: GalleryPost) {
+        cell.configure(
+            with: post, imagePipeline: imagePipeline, captionLines: ForYouFollowingRows.textLines
+        )
+        // The like chip stakes — see `PostCardStaking`.
+        staking?.bind(cell, to: post.id)
+        // As on the list's cards: no handler, no repost control (#801).
+        cell.onRepostTapped = cardRepostHandler(for: post)
+        cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+        cell.onBookmarkTapped = { [weak self, weak cell] in
+            guard let self, let cell else { return }
+            MemberGates.perform(.save, from: cell) { [weak self, weak cell] in
+                guard let self else { return }
+                _ = bookmarks.toggle(post.id.rawValue)
+                // The fill says it; the hand feels it (#803).
+                Feedback.toggled()
+                cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+            }
+        }
+        // Captured by POST, never by index path — the list's rule: the row
+        // can have changed by the time the finger arrives.
+        cell.onCommentsTapped = { [weak self] in self?.open(post.id) }
+        if post.authorID != nil {
+            cell.onAuthorTapped = { [weak self] in self?.onCardAuthorTapped?(post) }
+            cell.authorMenuActions = { [weak self, weak cell] in
+                guard let self, let cell else { return [] }
+                return cardAuthorMenuActions?(post, cell.authorMenuAnchor) ?? []
+            }
+        }
+        cell.isHidden = post.id == concealedCard
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let width = bounds.width
+        let counts = rowCounts
+        header.isHidden = cards.isEmpty
+        // Each row hides itself with nothing in it; the heading stays over
+        // whichever row there is.
+        mediaView.isHidden = counts.media == 0
+        textView.isHidden = counts.text == 0
+        guard !cards.isEmpty else { return }
+        // The title spans the row edge to edge: it stands its own inset from
+        // the surface (`SectionTitleView.Metrics.surfaceInset`).
+        header.frame = CGRect(x: 0, y: 0, width: width, height: SectionTitleView.Metrics.height)
+        var y = SectionTitleView.Metrics.height
+        if counts.media > 0 {
+            let size = ForYouRailsView.Metrics.cardSize(forWidth: width)
+            RowGeometry.setItemSize(size, of: mediaView)
+            mediaView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
+            y += size.height
+            if counts.text > 0 { y += ForYouFollowingRows.rowGap }
+        }
+        if counts.text > 0 {
+            let size = textCardSize(forWidth: width)
+            RowGeometry.setItemSize(size, of: textView)
+            textView.frame = CGRect(x: 0, y: y, width: width, height: size.height)
+        }
+    }
+
+    /// A text card's size at `width` — measured once per width, since it is
+    /// a real card laid out (`PostGridListRowCell.fixedTextCardHeight`).
+    private func textCardSize(forWidth width: CGFloat) -> CGSize {
+        if let cached = textCardSizeCache, cached.width == width { return cached.size }
+        let size = ForYouFollowingRows.textCardSize(forWidth: width)
+        textCardSizeCache = (width, size)
+        return size
+    }
+
+    private var textCardSizeCache: (width: CGFloat, size: CGSize)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // A stay on screen: a new owner, revoked when it leaves.
+        cardLookahead.setOnScreen(window != nil)
+        refreshLookaheadReach()
+    }
+
+    /// Whether the shelf sits in the list's display window (a screen ahead of
+    /// the viewport, half a screen behind): outside it, the row plans nothing
+    /// (#970).
+    private func refreshLookaheadReach() {
+        guard let window else { return }
+        let reach = LookaheadWindow.display.rect(around: window.bounds, axis: .vertical, forward: true)
+        let shown = !isHidden && !(superview?.isHidden ?? false)
+        cardLookahead.setInParentWindow(shown && convert(bounds, to: window).intersects(reach))
+    }
+
+    // MARK: - Autoplay
+
+    private var isAutoplayActive = false
+
+    /// The screen is (or is no longer) the viewer's: covered by a post, a
+    /// pushed screen, another tab. Nothing plays while it is not.
+    func setAutoplayActive(_ active: Bool) {
+        isAutoplayActive = active
+        // Covered but alive: the row drops to the minimum windows (#970).
+        cardLookahead.setHidden(!active)
+        playback?.setSurfaceVisible(active)
+        if active { updateAutoplay() }
+    }
+
+    /// Reconciles the row's players against what is on screen. Cheap and
+    /// idempotent; the host calls it as the LIST scrolls (the shelf moving in
+    /// or out of the band) and the shelf calls it as ITS ROW scrolls.
+    ///
+    /// - Parameter notifiesClaimChange: false from the list's own reconcile,
+    ///   which reads `claimedPlayers` straight after — telling it to reconcile
+    ///   again from inside that reconcile would re-enter it.
+    func updateAutoplay(allowingStarts: Bool = true, notifiesClaimChange: Bool = true) {
+        // Called as the LIST scrolls too: the row's reach follows it.
+        refreshLookaheadReach()
+        let before = claimedPlayers
+        claimedPlayers = reconcilePlayback(allowingStarts: allowingStarts)
+        if notifiesClaimChange, claimedPlayers != before { onPlayerClaimChange?() }
+    }
+
+    /// The reconcile proper; answers how many players the shelf now holds.
+    private func reconcilePlayback(allowingStarts: Bool) -> Int {
+        guard let playback else { return 0 }
+        guard isAutoplayActive, !mediaView.isHidden, let band = visibleBand?() else {
+            playback.update(candidates: [], allowingStarts: allowingStarts)
+            return 0
+        }
+        // The band, in the row's CONTENT space: the scroll view's bounds are
+        // its content offset, so a card's frame compares directly.
+        let viewport = mediaView.convert(band, from: self).intersection(mediaView.bounds)
+        let tiles = mediaView.indexPathsForVisibleItems.compactMap {
+            indexPath -> GridAutoplayRanking.Tile? in
+            guard let id = mediaSource.itemIdentifier(for: indexPath),
+                  id != concealedCard,
+                  let post = cards.first(where: { $0.id == id }),
+                  post.hasPlayableVideo, let url = post.videoURL,
+                  let cell = mediaView.cellForItem(at: indexPath) as? ForYouFollowingCardCell,
+                  hasCover(post, in: cell)
+            else { return nil }
+            return .init(id: id, url: url, cell: cell, mediaFrame: cell.frame, isPaused: false)
+        }
+        // Every card half on screen plays (a null band admits none); the
+        // ranking only matters when the budget is short, and then the row is
+        // ranked from its left edge, so the card nearest it keeps its player.
+        let candidates = GridAutoplayRanking.candidates(from: tiles, in: viewport, reference: .minXEdge)
+        playback.update(candidates: candidates, allowingStarts: allowingStarts)
+        return GridAutoplayRanking.playersHeld(candidateCount: candidates.count, budget: Self.concurrentPlayers)
+    }
+
+    /// A card may play only once it has a face behind its surface — the
+    /// list's own gate (`ForYouGridPage.hasCover`), for the same black-tile
+    /// reason.
+    private func hasCover(_ post: GalleryPost, in cell: ForYouFollowingCardCell) -> Bool {
+        guard let thumbnail = post.thumbnailURL else { return true }
+        if cell.renderedCover != nil { return true }
+        guard let cached = imagePipeline.cachedImage(for: thumbnail) else { return false }
+        cell.applyCover(cached)
+        return true
+    }
+
+    /// Opens the handoff for a card a flight is about to carry: the row's
+    /// reconcile must neither restart nor stop its player while it is in the
+    /// air.
+    ///
+    /// The card's own clip is parked as well, paused at its playhead, for a
+    /// close that pages on and comes home here (#923, `returnCardSurface`).
+    func beginPlaybackHandoff(of id: PostID) {
+        landingCard = nil
+        playback?.focus(id)
+        updateAutoplay()
+        playback?.beginHandoff(id, parkingReturn: true)
+    }
+
+    /// The card's own clip, resumed from where it was parked at the tap — the
+    /// arriving picture of a close from another post (#923). Nil when nothing
+    /// is parked, and the close lands on the card's still.
+    func returnCardSurface(for id: PostID) -> VideoRenderView? {
+        playback?.makeReturnSurface(for: id)
+    }
+
+    /// A close that resumed the card's return player was abandoned.
+    func pauseReturnPlayback(for id: PostID) {
+        playback?.pauseReturnPlayback(of: id)
+    }
+
+    func endPlaybackHandoff() {
+        landingCard = nil
+        playback?.endHandoff()
+        playback?.focus(nil)
+        updateAutoplay()
+    }
+
+    // MARK: - As a flight's source
+
+    /// The row card `id` is in, and where in it — the media row or the text
+    /// row.
+    func cardRow(for id: PostID) -> (row: UICollectionView, indexPath: IndexPath)? {
+        if let indexPath = mediaSource.indexPath(for: id) { return (mediaView, indexPath) }
+        if let indexPath = textSource.indexPath(for: id) { return (textView, indexPath) }
+        return nil
+    }
+
+    /// Card `id`'s cell, whichever row it is in.
+    private func cardCell(for id: PostID) -> UICollectionViewCell? {
+        cardRow(for: id).flatMap { $0.row.cellForItem(at: $0.indexPath) }
+    }
+
+    /// The post a row shows at `indexPath`.
+    private func cardID(in row: UICollectionView, at indexPath: IndexPath) -> PostID? {
+        if row === mediaView { return mediaSource.itemIdentifier(for: indexPath) }
+        if row === textView { return textSource.itemIdentifier(for: indexPath) }
+        return nil
+    }
+
+    /// A MEDIA card's cell — what plays, and what a flight carries.
+    func mediaCardCell(for id: PostID) -> ForYouFollowingCardCell? {
+        cardCell(for: id) as? ForYouFollowingCardCell
+    }
+
+    /// A TEXT card's cell — the list's own card.
+    func textCardCell(for id: PostID) -> PostGridListRowCell? {
+        cardCell(for: id) as? PostGridListRowCell
+    }
+
+    /// The card's rect in `space`, at rest — see `RowGeometry.restingFrame`.
+    func cardFrame(for id: PostID, in space: UICoordinateSpace) -> CGRect? {
+        guard let (row, indexPath) = cardRow(for: id), let cell = row.cellForItem(at: indexPath),
+              RowGeometry.isInRow(cell, row) else { return nil }
+        return RowGeometry.restingFrame(of: cell, below: row, in: space)
+    }
+
+    /// A media card's picture — nil for a text card, which has none.
+    func cardCover(for id: PostID) -> UIImage? {
+        mediaCardCell(for: id)?.renderedCover
+    }
+
+    // MARK: - A text card, for the window it opens through
+
+    /// What the list's text rows hand their window (`ForYouGridPage`'s
+    /// `textRowCaptionEnd` / `textRowCaptionTop` / `textRowAuthorBand`), for a
+    /// text card — read off the realized card, nil (or zero) when it is not.
+    func textCardCaptionEnd(for id: PostID) -> CGFloat? {
+        textCardCell(for: id)?.revealCut
+    }
+
+    func textCardCaptionTop(for id: PostID) -> CGFloat {
+        textCardCell(for: id)?.revealCaptionTop ?? 0
+    }
+
+    func textCardAuthorBand(for id: PostID) -> PostAuthorBandView.Model? {
+        if let model = textCardCell(for: id)?.authorBandModel { return model }
+        return cards.first { $0.id == id }.map { PostAuthorBandView.Model(post: $0) }
+    }
+
+    /// The card a window lands as — the list's own stand-in
+    /// (`RevealDismissCardView`) at this card's size, caption held to the
+    /// row's lines and its closing line drawing what the card draws, so the
+    /// landing swaps it for the card without a word or a control changing.
+    /// Nil while the card has no size to measure.
+    func makeTextCardStandIn(for id: PostID) -> UIView? {
+        guard let post = cards.first(where: { $0.id == id }).map(livePost) else { return nil }
+        let cell = textCardCell(for: id)
+        // The realized card's size, else the row's — every text card in the
+        // row is the same size.
+        let size = cell?.bounds.size
+            ?? textSource.indexPath(for: id).flatMap { textView.layoutAttributesForItem(at: $0)?.size }
+        guard let size, size.width > 0, size.height > 0 else { return nil }
+        return RevealDismissCardView(
+            post: post,
+            width: size.width,
+            imagePipeline: imagePipeline,
+            showsAuthorMenu: showsAuthorMenu(for: post),
+            actions: .init(
+                repost: onCardRepostRequested != nil, bookmark: true, saved: bookmarks.isSaved(id.rawValue),
+                stake: staking?.viewerStake(on: id)
+            ),
+            ageText: cell?.renderedAgeText,
+            height: size.height,
+            captionLines: ForYouFollowingRows.textLines
+        )
+    }
+
+    /// Whether a text card draws a "...", asked of the provider the card asks
+    /// — the stand-in must match it, or the control pops in the last frame.
+    private func showsAuthorMenu(for post: GalleryPost) -> Bool {
+        guard post.authorID != nil, let cardAuthorMenuActions else { return false }
+        return !cardAuthorMenuActions(post, UIView()).isEmpty
+    }
+
+    func isCardOnScreen(_ id: PostID) -> Bool {
+        guard let (row, indexPath) = cardRow(for: id), let cell = row.cellForItem(at: indexPath)
+        else { return false }
+        return RowGeometry.isVisible(cell, in: row)
+    }
+
+    func setCardConcealed(_ concealed: Bool, for id: PostID) {
+        if concealed { concealedCard = id } else if concealedCard == id { concealedCard = nil }
+        cardCell(for: id)?.isHidden = concealed
+    }
+
+    /// Puts the card a flight hid back.
+    func clearConcealments() {
+        if let concealedCard { setCardConcealed(false, for: concealedCard) }
+    }
+
+    /// A surface already showing the card's playback, for the flight to take
+    /// off playing — the list's own `liveFlightSurface`, for the row.
+    func liveCardSurface(for id: PostID) -> VideoRenderView? {
+        guard let playback, let post = cards.first(where: { $0.id == id }),
+              let url = post.videoURL else { return nil }
+        if let made = playback.makeAttachedSurface(for: id, url: url) { return made }
+        // Nothing to join: ask, rather than report the absence — the flight
+        // asks again every frame, and a start kicked here is what the next ask
+        // finds.
+        if let cell = mediaCardCell(for: id) {
+            playback.demandFlightPlayback(of: id, url: url, in: cell)
+        }
+        return nil
+    }
+
+    /// A close is landing on card `id` with the page's live `view`: the card
+    /// takes that playback onto its OWN surface — the list's own landing
+    /// (`ForYouGridPage.adoptLivePlayback`), for the row.
+    ///
+    /// ⚠️ THE THUMBNAIL FLASH AT THE END OF A CLOSE. Without this the flight
+    /// card was removed over a card still showing what it rested on while the
+    /// feed covered the row — its poster, or a frame from before the open —
+    /// and its player only resumed once the screen had appeared and the row
+    /// reconciled. Here the card's surface is primed with the page's current
+    /// frame and takes the pool loan before the flight card goes, and
+    /// `isLandingPlaybackReady` holds the flight card over it until it draws.
+    ///
+    /// Unconcealed FIRST: a surface outside a visible hierarchy is skipped by
+    /// the renderer and would never report drawing. The flight card is still
+    /// on top, at the same rect, so revealing the card under it shows nothing.
+    func adoptLandingPlayback(_ view: UIView, for id: PostID) {
+        guard let playback, let post = cards.first(where: { $0.id == id }),
+              let url = post.videoURL, let cell = mediaCardCell(for: id)
+        else { return }
+        setCardConcealed(false, for: id)
+        if VideoRenderFlags.usesSampleBufferLayer {
+            // One playback, several surfaces: the card gets its own, primed on
+            // attach, and the flight card's is released once it leaves the
+            // window. Nothing is re-parented.
+            if playback.adoptAttachedSurface(
+                for: id, url: url, cell: cell, drawnBy: view as? VideoRenderView
+            ) { landingCard = id }
+            return
+        }
+        guard let view = view as? VideoRenderView else { return }
+        playback.adoptLiveSurface(view, for: id, url: url, cell: cell)
+        landingCard = id
+    }
+
+    /// The card a close's live surface was handed to, until the handoff ends
+    /// — the one whose landing waits on its clip rather than on its cover.
+    private var landingCard: PostID?
+
+    /// Whether card `id` is showing what the landing needs it to: its clip
+    /// drawing, for a card that took the flight's playback; its cover,
+    /// otherwise — `ForYouGridPage.isLandingPlaybackReady`'s rule, for the
+    /// row. The flight card's hold has a ceiling, so a card that never gets
+    /// there costs a pause, not a stuck card.
+    ///
+    /// ⚠️ ONLY A CARD THAT ADOPTED waits on its clip. A close that flew no
+    /// video left nothing playing here until the row reconciles on appearing,
+    /// so asking the pool would hold every such landing for the hold's whole
+    /// ceiling.
+    func isLandingPlaybackReady(for id: PostID) -> Bool {
+        guard let post = cards.first(where: { $0.id == id }) else { return true }
+        let cell = mediaCardCell(for: id)
+        if let playback, landingCard == id {
+            return playback.isSurfaceRendering(for: id)
+        }
+        guard let cell, post.thumbnailURL != nil else { return true }
+        return cell.renderedCover != nil
+    }
+
+    /// In ITS row — the media row or the text row; the other row stays where
+    /// the viewer left it.
+    func bringCardIntoView(_ id: PostID) {
+        guard let (row, indexPath) = cardRow(for: id) else { return }
+        RowGeometry.bringIntoView(indexPath, in: row)
+    }
+
+    // MARK: - Opening and the long press
+
+    /// Opens card `id` the way a tap would — nothing if it left the shelf
+    /// while a menu was up.
+    func open(_ id: PostID) {
+        guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        onCardTapped?(index)
+    }
+
+    func cardMenu(for post: GalleryPost) -> UIMenu {
+        let id = post.id
+        let open = RowGeometry.openAction { [weak self] in self?.open(id) }
+        return UIMenu(children: [open] + (cardMenuElements?(post) ?? []))
+    }
+
+    /// The card the lift is made of, on its own curve: the list's card for
+    /// words — not the whole cell, whose rectangle would flash its square
+    /// corners under the lift.
+    private func targetedPreview(in row: UICollectionView, at indexPath: IndexPath) -> UITargetedPreview? {
+        guard let cell = row.cellForItem(at: indexPath), cell.window != nil else { return nil }
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        let card = cell.contentView
+        let radius = cell is PostGridListRowCell
+            ? PostGridListRowCell.cardCornerRadius
+            : ForYouFollowingCardCell.cornerRadius
+        parameters.visiblePath = UIBezierPath(roundedRect: card.bounds, cornerRadius: radius)
+        return UITargetedPreview(view: card, parameters: parameters)
+    }
+
+    /// Whether `scrollView` is one of the shelf's rows.
+    func owns(_ scrollView: UIScrollView) -> Bool {
+        scrollView === mediaView || scrollView === textView
+    }
+
+    #if DEBUG
+    /// Where card `index` (into `cards`) sits — its row and its index path
+    /// there.
+    func debugCardPlace(at index: Int) -> (row: UICollectionView, indexPath: IndexPath)? {
+        guard cards.indices.contains(index) else { return nil }
+        return cardRow(for: cards[index].id)
+    }
+
+    /// The long-press configuration for card `index`, through the row's own
+    /// delegate path.
+    func debugCardMenuConfiguration(at index: Int, point: CGPoint = .zero) -> UIContextMenuConfiguration? {
+        guard let (row, indexPath) = debugCardPlace(at: index) else { return nil }
+        return collectionView(row, contextMenuConfigurationForItemsAt: [indexPath], point: point)
+    }
+
+    /// Taps card `index` through the row's own selection path.
+    func debugTapCard(at index: Int) -> Bool {
+        guard let (row, indexPath) = debugCardPlace(at: index) else { return false }
+        collectionView(row, didSelectItemAt: indexPath)
+        return true
+    }
+
+    /// The title's OWN tap path (`SectionTitleView.debugTap`), not the host's
+    /// closure: calling the closure is how #312's dead chevron passed.
+    func debugTapTitle() { header.debugTap() }
+    var debugCountText: String? { header.debugCountText }
+    #endif
+}
+
+// MARK: - The rows' delegate
+
+extension PostShelfSection: UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: false)
+        guard let id = cardID(in: collectionView, at: indexPath) else { return }
+        open(id)
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        snapper.didScroll(scrollView)
+        guard scrollView === mediaView else { return }
+        cardLookahead.scrollViewDidScroll()
+        // Only the media row plays; the text row scrolls past nothing to
+        // start. A horizontal row is short: reconciling on every tick costs a
+        // diff of three cards, and a card that comes half into view should
+        // start as it arrives, not when the finger lifts.
+        updateAutoplay()
+    }
+
+    /// A row came to rest: its fling is over, and its display window decodes.
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        if scrollView === mediaView { cardLookahead.scrollViewDidEndScrolling() }
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        guard owns(scrollView) else { return }
+        snapper.willBeginDragging(scrollView)
+    }
+
+    /// The row comes to rest on an item's edge — the text row ONE card per
+    /// gesture (`RowSnapper`).
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView,
+        withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        guard let row = scrollView as? UICollectionView, owns(row) else { return }
+        snapper.willEndDragging(
+            row, velocity: velocity, targetContentOffset: targetContentOffset, stepped: row === textView
+        )
+    }
+
+    /// Where `row` rests after a release.
+    func snapTarget(
+        in row: UICollectionView, projected: CGFloat, start: CGFloat, direction: ForYouRowSnap.Direction?
+    ) -> CGFloat {
+        RowSnapper.snapTarget(
+            in: row, projected: projected, start: start, direction: direction, stepped: row === textView
+        )
+    }
+
+    /// A long press lifts the card's post with the menu under it, keyed by an
+    /// identifier that says which card, so the commit below finds it again
+    /// even if the row changed while the menu was up.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let indexPath = indexPaths.first,
+              let id = cardID(in: collectionView, at: indexPath),
+              let post = cards.first(where: { $0.id == id }) else { return nil }
+        let width = max(0, bounds.width - ForYouRailsView.Metrics.sideMargin * 2)
+        let pipeline = imagePipeline
+        return UIContextMenuConfiguration(
+            identifier: RowMenuTarget.card(id).identifier,
+            previewProvider: {
+                ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width)
+            },
+            actionProvider: { [weak self] _ in self?.cardMenu(for: post) }
+        )
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        targetedPreview(in: collectionView, at: indexPath)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        targetedPreview(in: collectionView, at: indexPath)
+    }
+
+    /// Tapping the lifted preview opens the post — the same open as a tap on
+    /// the card, through the same flight.
+    ///
+    /// ⚠️ `.dismiss`, THEN OUR HERO — not UIKit's `.pop`. The open is a flight
+    /// OUT OF THE CARD: it conceals the source, hands the card's player to
+    /// the page, and the close lands back on that same card. A `.pop` commit
+    /// grows the preview into a destination UIKit presents itself, and none
+    /// of that would hold. So the preview settles back into its card first
+    /// and the flight takes off from there; the open waits one turn past the
+    /// completion so UIKit has put the card back before the flight measures
+    /// and hides it.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+        animator: UIContextMenuInteractionCommitAnimating
+    ) {
+        guard case .card(let id)? = RowMenuTarget(configuration.identifier) else { return }
+        animator.preferredCommitStyle = .dismiss
+        animator.addCompletion { [weak self] in
+            DispatchQueue.main.async { self?.open(id) }
+        }
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        didEndDisplaying cell: UICollectionViewCell,
+        forItemAt indexPath: IndexPath
+    ) {
+        // A card that left gives its player back now — the pool is shared.
+        guard collectionView === mediaView, let card = cell as? ForYouFollowingCardCell else { return }
+        playback?.stop(cell: card)
+    }
+}

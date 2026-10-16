@@ -24,7 +24,9 @@ struct ForYouFollowingRowsTests {
     /// each Following row its own collection view holding only its kind.
     @Test func followingIsTwoScrollViews() throws {
         let fixture = Fixture(cards: Self.mixed)
-        let rows = fixture.rails.subviews.compactMap { $0 as? UICollectionView }
+        // The Friends row is the rails' own; the two Following rows are the
+        // shelf's (`PostShelfSection`, #1271).
+        let rows = (fixture.rails.subviews + fixture.rails.shelf.subviews).compactMap { $0 as? UICollectionView }
         #expect(rows.count == 3, "Friends, Following media, Following text")
         #expect(fixture.mediaRow !== fixture.textRow)
         #expect(!fixture.mediaRow.isHidden && !fixture.textRow.isHidden)
