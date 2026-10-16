@@ -155,10 +155,13 @@ struct GalleryTileInfoTests {
         }
     }
 
-    /// For You's own flight (`ForYouGridZoomSource`): the card wears the
-    /// words in its RESTING CHROME — the channel the flight fades as the card
-    /// grows into the page and back — and drops its corner count, so it flies
-    /// one heart, the author line's, as the tile wears it.
+    /// For You's own flight (`ForYouGridZoomSource`): on a CLOSE the card
+    /// wears the words in its RESTING CHROME — the channel the flight fades in
+    /// as the card shrinks home — and drops its corner count, so it flies one
+    /// heart, the author line's, as the tile wears it.
+    ///
+    /// ⚠️ AN OPENING WEARS NOTHING (the owner, 2026-10-16): the picture
+    /// alone, no words, no count.
     @Test func forYousFlightCardWearsTheWordsInItsFadingChrome() throws {
         let page = page(style: .discover, showsInfo: true)
         let worded = try #require(tiles(on: page).first { $0.cell.infoVariant != .none },
@@ -166,6 +169,9 @@ struct GalleryTileInfoTests {
         let source = ForYouGridZoomSource(
             page: page, tappedID: worded.post.id, activePostID: { worded.post.id }, depthView: nil
         )
+        let opening = try #require(source.makeZoomFlightCard() as? PostGridFlightCard)
+        #expect(opening.zoomRestingChrome == nil, "an opening flew the tile's furniture")
+        source.zoomSourceWillStageDismissal()
         let card = try #require(source.makeZoomFlightCard() as? PostGridFlightCard)
         let chrome = try #require(card.zoomRestingChrome)
         #expect(chrome.subviews.contains { $0 is PostCardCaptionOverlay }, "the words are not in the fading chrome")
@@ -176,6 +182,7 @@ struct GalleryTileInfoTests {
             let plain = ForYouGridZoomSource(
                 page: page, tappedID: bare.post.id, activePostID: { bare.post.id }, depthView: nil
             )
+            plain.zoomSourceWillStageDismissal()
             let plainCard = try #require(plain.makeZoomFlightCard() as? PostGridFlightCard)
             #expect(plainCard.debugShowsCornerCount)
             #expect(plainCard.zoomRestingChrome?.subviews.contains { $0 is PostCardCaptionOverlay } == false)
@@ -196,7 +203,8 @@ struct GalleryTileInfoTests {
 
     /// The pushed gallery's flight (the shared `presentSnapFeedHero`): the
     /// origin hands the tile's words to the card as its resting overlay, and
-    /// the card built from it wears them in the fading chrome.
+    /// the card built for the CLOSE wears them in the fading chrome; the card
+    /// built for the opening wears nothing.
     @Test func theGallerysFlightCarriesTheWords() throws {
         var opened: SnapFeedHeroOrigin?
         let gallery = DiscoverGalleryViewController(
@@ -221,7 +229,11 @@ struct GalleryTileInfoTests {
         let overlay = try #require(origin.restingOverlay?() as? PostCardCaptionOverlay)
         #expect(overlay.likeReadout != nil, "the tile's heart rides with its words")
 
-        let card = try #require(ExternalHeroZoomSource(origin: origin).makeZoomFlightCard() as? PostGridFlightCard)
+        let source = ExternalHeroZoomSource(origin: origin)
+        let opening = try #require(source.makeZoomFlightCard() as? PostGridFlightCard)
+        #expect(opening.zoomRestingChrome == nil, "an opening flew the tile's words")
+        source.zoomSourceWillStageDismissal()
+        let card = try #require(source.makeZoomFlightCard() as? PostGridFlightCard)
         #expect(card.zoomRestingChrome?.subviews.contains { $0 is PostCardCaptionOverlay } == true)
         #expect(card.debugShowsCornerCount == false)
     }

@@ -129,6 +129,20 @@ struct ZoomPageWindowTests {
         #expect(card.appliedCornerRadii.last == 0)
     }
 
+    /// ⚠️ THE CARD IS TOLD IT IS IN A WINDOW (the owner, 2026-10-16): its
+    /// ground is the window's black now, not the source, so a card that went
+    /// transparent under a hot surface must keep its cover. A filling flight
+    /// says nothing.
+    @Test func aFramedFlightTellsItsCardItIsInAWindow() throws {
+        let framedCard = WindowProbeCard()
+        _ = try Self.framed(card: framedCard, page: page, tile: tile, aspect: aspect)
+        #expect(framedCard.enteredPageWindow)
+
+        let fillingCard = WindowProbeCard()
+        _ = Self.build(card: fillingCard, framing: nil, page: page, tile: tile)
+        #expect(!fillingCard.enteredPageWindow)
+    }
+
     /// A held page window is still the page: the picture stays fitted, scaled
     /// with the window.
     @Test func aFloatingWindowKeepsItsPictureFitted() throws {
@@ -257,6 +271,8 @@ private final class WindowProbeCard: UIView, ZoomFlightCard {
     var ownSurface: UIView?
     var nativeSize: CGSize?
     private(set) var appliedCornerRadii: [CGFloat] = []
+    private(set) var enteredPageWindow = false
+    func zoomCardDidEnterPageWindow() { enteredPageWindow = true }
 
     var zoomRestingCornerRadius: CGFloat { 10 }
     var zoomRestingChrome: UIView? { restingChromeView }

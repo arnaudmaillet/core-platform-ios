@@ -110,6 +110,9 @@ final class PostGridFlightCard: UIView {
     /// adopt — the case that earns the transparent floor, and the only case
     /// `applyContentFloor` has to weigh the blend against.
     private var fliesHotLiveMedia = false
+    /// Whether a framed flight put this card in a page window — see
+    /// `zoomCardDidEnterPageWindow` and `applyContentFloor`.
+    private var isInPageWindow = false
     /// The card's own surface, used when it has to mirror. Replaced by a
     /// donated one whenever the source can hand over the layer it is already
     /// rendering — see `adoptZoomLiveMediaView`.
@@ -132,6 +135,9 @@ final class PostGridFlightCard: UIView {
     /// rather than re-gated: the card is the tile's twin, and a twin draws
     /// nothing its original does not.
     private let restingChromeView = UIView()
+    /// Whether the card wears the source's furniture at all — see
+    /// `leaveFurnitureBehind`.
+    private var wearsFurniture = true
     /// The count's font — internal because the sound sheet's tile draws the
     /// count this card lands on, and must draw it in the same type.
     static let metaFont = UIFont.scaledFont(forTextStyle: .caption2, weight: .semibold)
@@ -317,6 +323,17 @@ final class PostGridFlightCard: UIView {
         if bounds.width > 0, bounds.height > 0 {
             UIView.performWithoutAnimation { poseRestingChrome() }
         }
+    }
+
+    /// ⚠️ AN OPENING FLIES THE PICTURE ALONE (the owner, 2026-10-16): no
+    /// count, no caption. Faded out as the card grew, the words read as
+    /// unanchored — in a framed flight the picture changes shape under them —
+    /// however the fade was timed (filmed twice on a device). They go with
+    /// the source when it is concealed. A CLOSE still wears them and fades
+    /// them in as it shrinks, so the landing never pops them on.
+    func leaveFurnitureBehind() {
+        wearsFurniture = false
+        restingChromeView.isHidden = true
     }
 
     /// The overlay `installRestingOverlay` laid in, posed with the chrome.
@@ -711,8 +728,15 @@ final class PostGridFlightCard: UIView {
     /// cover, so the lagging pass shows the picture already in flight instead of
     /// a foreign one — and the blend positively requires an opaque floor, since
     /// fading the page operand off a transparent card lands on a hole.
+    ///
+    /// ⚠️ AND A FRAMED FLIGHT (the owner, 2026-10-16, on a device: the card's
+    /// words "jump" at take-off). Inside a page window the card is not over
+    /// the source but over the window's black ground: transparent, the
+    /// lagging pass drew a black card with the tile's words floating on it for
+    /// a frame or two before the picture came back. The cover is the tile's
+    /// own picture, the nearest thing to the frame the surface is late with.
     private func applyContentFloor() {
-        let isOpaque = departureCoverView.image != nil || !fliesHotLiveMedia
+        let isOpaque = departureCoverView.image != nil || !fliesHotLiveMedia || isInPageWindow
         imageView.isHidden = !isOpaque
         backgroundColor = isOpaque ? restingBackground : .clear
     }
@@ -730,7 +754,7 @@ extension PostGridFlightCard: ZoomFlightCard {
     var zoomRestingCornerRadius: CGFloat { restingCornerRadius ?? style.cornerRadius }
 
 
-    var zoomRestingChrome: UIView? { restingChromeView }
+    var zoomRestingChrome: UIView? { wearsFurniture ? restingChromeView : nil }
 
     /// The live surface, but ONLY while this card still contains it.
     ///
@@ -856,6 +880,11 @@ extension PostGridFlightCard: ZoomFlightCard {
 
     /// The adopted surface had a frame when it was taken and has drawn
     /// nothing since: the cover is the content again, under the empty surface.
+    func zoomCardDidEnterPageWindow() {
+        isInPageWindow = true
+        applyContentFloor()
+    }
+
     func zoomLiveMediaDidStall() {
         guard fliesHotLiveMedia else { return }
         fliesHotLiveMedia = false

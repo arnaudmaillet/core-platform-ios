@@ -74,6 +74,8 @@ final class ZoomPageWindowCard: UIView, ZoomFlightCard {
         media.isUserInteractionEnabled = false
         media.frame = bounds
         addSubview(media)
+        // Its ground is black now, not the source: see the requirement.
+        media.zoomCardDidEnterPageWindow()
     }
 
     @available(*, unavailable)

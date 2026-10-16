@@ -223,7 +223,11 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         // A paired (Following) card wears its words as the flight's resting
         // furniture, faded as it grows — the Following row's arrangement
         // (`ForYouRowOrigins.card`). Nil for every other cell.
-        if let overlay = page?.restingOverlay(for: anchorID) {
+        // On a CLOSE only — an opening flies the picture alone
+        // (`PostGridFlightCard.leaveFurnitureBehind`).
+        if !isStagingDismissal {
+            card.leaveFurnitureBehind()
+        } else if let overlay = page?.restingOverlay(for: anchorID) {
             card.installRestingOverlay(overlay)
         }
         // ⚠️ AND THE PICTURE THE VIEWER IS LEAVING, dissolved into it — the

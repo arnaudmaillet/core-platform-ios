@@ -208,7 +208,11 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
                 }
             }
         }
-        if let overlay = origin.restingOverlay?() {
+        // The source's words fade in on a CLOSE only — an opening flies the
+        // picture alone (`PostGridFlightCard.leaveFurnitureBehind`).
+        if !isStagingDismissal {
+            card.leaveFurnitureBehind()
+        } else if let overlay = origin.restingOverlay?() {
             card.installRestingOverlay(overlay)
         }
         // ⚠️ PRESENT ONLY. A dismissal must fly the PAGE's playhead, not the
