@@ -22,13 +22,14 @@ final class WindowReturnClips {
     /// there is a clip to wear. Remembered for the landing.
     func dress(_ standIn: UIView?, for id: PostID, surface: () -> VideoRenderView?) -> UIView? {
         guard let standIn, let clip = surface() else { return standIn }
+        let host = ScaledClipHost(clip: clip, restingSize: standIn.bounds.size)
         if let tile = standIn as? PostGridTileStandInView {
-            tile.installLiveMedia(clip)
+            tile.installLiveMedia(host)
         } else {
             // A media card's twin: its picture first, its words over it.
-            clip.frame = standIn.bounds
-            clip.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            standIn.insertSubview(clip, at: min(1, standIn.subviews.count))
+            host.frame = standIn.bounds
+            host.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            standIn.insertSubview(host, at: min(1, standIn.subviews.count))
         }
         surfaces[id] = clip
         return standIn
@@ -48,4 +49,50 @@ final class WindowReturnClips {
     #if DEBUG
     func debugHasClip(for id: PostID) -> Bool { surfaces[id] != nil }
     #endif
+}
+
+/// Holds a clip at ONE size and fits it to its own bounds by TRANSFORM — the
+/// flight's way (`ZoomFlight` poses its live surface the same), for the same
+/// reason (#1294).
+///
+/// ⚠️ A VIDEO SURFACE MUST NOT BE RESIZED INSIDE AN ANIMATION. The window
+/// shrinks its stand-in in an animation block; a clip resized with it re-lays
+/// its sample-buffer content out with AVFoundation's OWN ~0.3 s animation
+/// (see `VideoRenderView.settleGeometry`), so the picture slid behind the
+/// window it was in — filmed on device as the clip "animating out of step,
+/// badly attached to the window". A transform is animated with the window and
+/// leaves the layer's bounds alone.
+///
+/// Aspect-fill against the resting size the clip is laid out at, centred:
+/// the stand-in's picture is cropped the same way.
+final class ScaledClipHost: UIView {
+    private let clip: UIView
+    private let restingSize: CGSize
+
+    init(clip: UIView, restingSize: CGSize) {
+        self.clip = clip
+        self.restingSize = CGSize(width: max(1, restingSize.width), height: max(1, restingSize.height))
+        super.init(frame: CGRect(origin: .zero, size: self.restingSize))
+        clipsToBounds = true
+        isUserInteractionEnabled = false
+        clip.transform = .identity
+        clip.autoresizingMask = []
+        clip.bounds = CGRect(origin: .zero, size: self.restingSize)
+        addSubview(clip)
+        layoutClip()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layoutClip()
+    }
+
+    private func layoutClip() {
+        let scale = max(bounds.width / restingSize.width, bounds.height / restingSize.height)
+        clip.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        clip.transform = CGAffineTransform(scaleX: scale, y: scale)
+    }
 }
