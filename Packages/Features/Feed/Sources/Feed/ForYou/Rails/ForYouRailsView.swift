@@ -482,6 +482,7 @@ final class ForYouRailsView: UIView {
     func setAutoplayActive(_ active: Bool) {
         // Covered but alive: the rows drop to the minimum windows (#970).
         storyLookahead.setHidden(!active)
+        if active { refreshLookaheadReach() }
         shelf.setAutoplayActive(active)
     }
 
