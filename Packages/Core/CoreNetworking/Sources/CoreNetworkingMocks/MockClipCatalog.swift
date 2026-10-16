@@ -25,6 +25,11 @@ public struct MockClipCatalog: Sendable {
         /// Nil for the author's own "original sound".
         public let soundTitle: String?
         public let soundArtist: String?
+        /// The clip's sound belongs to its own post alone (the owner,
+        /// 2026-10-16: `--unique=` in the import): never lent to another post.
+        public let soundIsUnique: Bool?
+
+        public var lendsItsSound: Bool { soundIsUnique != true }
     }
 
     public static let shared = MockClipCatalog(bundle: .module)
@@ -50,6 +55,17 @@ public struct MockClipCatalog: Sendable {
     public func clip(forSlot slot: Int) -> Clip? {
         guard !clips.isEmpty else { return nil }
         return clips[((slot % clips.count) + clips.count) % clips.count]
+    }
+
+    /// The clips whose sound another post may borrow — every clip but the
+    /// ones whose sound is their post's alone.
+    public var borrowableClips: [Clip] { clips.filter(\.lendsItsSound) }
+
+    /// The borrowable clip for a slot, cycling through the borrowable ones.
+    public func borrowableClip(forSlot slot: Int) -> Clip? {
+        let pool = borrowableClips
+        guard !pool.isEmpty else { return nil }
+        return pool[((slot % pool.count) + pool.count) % pool.count]
     }
 
     /// The dataset's media tuple for a slot: the clip's URL and its encoded size.

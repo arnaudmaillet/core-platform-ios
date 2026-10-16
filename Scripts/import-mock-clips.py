@@ -2,7 +2,16 @@
 """Imports a folder of downloaded clips + sounds as the mock BFF's video corpus.
 
     Scripts/import-mock-clips.py ~/Downloads/medias_video_with_audio [more.mp4 more.mp3 ...]
+    Scripts/import-mock-clips.py ~/Downloads/medias_video_with_audio --unique="~/Downloads/medias_video_with_audio 2"
     Scripts/import-mock-clips.py --rebake-sheets
+
+`--unique=PATH` (repeatable) imports PATH like any source and marks its clips
+`soundIsUnique`: their sound belongs to their own post alone — the dataset
+never lends it to another post.
+
+Ids are STABLE: a clip already in `clips.json` keeps its id (matched by its
+source name), and new sources are numbered after the highest id — adding
+clips never renumbers the ones already committed.
 
 `--rebake-sheets` re-bakes every committed clip's preview sheet and nothing
 else — no sources needed, nothing re-encoded.
@@ -177,6 +186,9 @@ def main():
         bake_sheets([clip["id"] for clip in clips])
         return
     sources = [Path(arg).expanduser() for arg in sys.argv[1:] if not arg.startswith("--")]
+    unique_sources = [Path(arg.split("=", 1)[1]).expanduser() for arg in sys.argv[1:]
+                      if arg.startswith("--unique=")]
+    sources += unique_sources
     if not BAKER.exists():
         subprocess.run(["swift", "build", "--package-path", str(ROOT / "Tools/IconBaker"),
                         "-c", "release"], check=True)
@@ -189,9 +201,21 @@ def main():
         for stale in OUT.iterdir():
             stale.unlink()
 
+    # Stable ids: a source already imported keeps its id; a new one is
+    # numbered after the highest.
+    previous = {} if fresh or not (OUT / "clips.json").exists() else {
+        entry["source"]: entry["id"] for entry in json.loads((OUT / "clips.json").read_text())
+    }
+    next_number = max((int(i.split("-")[1]) for i in previous.values()), default=0) + 1
+    unique_stems = {p.stem for src in unique_sources for p in (src.glob("*.mp4") if src.is_dir() else [src])}
+
     manifest = []
-    for number, (video, sound) in enumerate(pair(sources), start=1):
-        clip_id = f"clip-{number:02d}"
+    for video, sound in pair(sources):
+        source_name = re.sub(r"^(tiktokio\.world_|reelsvideo\.io_)", "", video.stem)
+        clip_id = previous.get(source_name)
+        if clip_id is None:
+            clip_id = f"clip-{next_number:02d}"
+            next_number += 1
         outputs = [OUT / f"{clip_id}.mp4", OUT / f"{clip_id}-sound.m4a", OUT / f"{clip_id}.jpg"]
         encode = not all(p.exists() for p in outputs)
         # The source's own size, unless its short side is over 720 — then 720,
@@ -223,11 +247,13 @@ def main():
             "soundDuration": round(sound_length, 2),
             "soundTitle": title,
             "soundArtist": artist,
-            "source": re.sub(r"^(tiktokio\.world_|reelsvideo\.io_)", "", video.stem),
+            "source": source_name,
+            **({"soundIsUnique": True} if video.stem in unique_stems else {}),
         })
         print(f"{clip_id}  {encoded['width']}x{encoded['height']}  "
               f"{encoded['duration']:.1f}s  {title or 'original sound'}")
 
+    manifest.sort(key=lambda e: int(e["id"].split("-")[1]))
     (OUT / "clips.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     bake_sheets([entry["id"] for entry in manifest])
     total = sum(p.stat().st_size for p in OUT.iterdir())

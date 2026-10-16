@@ -161,8 +161,84 @@ public struct MockSocialDataset: Sendable {
     static func photo(
         slot: Int, fallback: String, shape: (Int, Int)
     ) -> (url: String, width: Int, height: Int) {
-        MockPhotoCatalog.shared.photo(forSlot: slot)?.media
+        MockPhotoCatalog.shared.singlePhoto(forOrdinal: slot)?.media
             ?? Self.unbundledPhoto(fallback, shape: shape)
+    }
+
+    // MARK: - One media, one post
+
+    /// ⚠️ ONE MEDIA, ONE POST (the owner, 2026-10-16): no two posts of the
+    /// mock world on the same clip or the same picture while the catalogs
+    /// last. Every source draws from its OWN run of ordinals, back to back
+    /// in this order, so the runs never overlap:
+    ///
+    /// - clips: the main corpus's 40 videos (`index / 3`), the viewer's 3,
+    ///   the arrivals' 2 heads, the collections' 5 clip pages, then the
+    ///   world's videos in placement order (`worldClipBase`);
+    /// - single photos: the main corpus's single-photo posts (its carousels
+    ///   skipped), the viewer's 3, arrival 0, the world's photos in
+    ///   placement order, then the chat's one picture (`MockPhotoCatalog
+    ///   .singlePhoto(forOrdinal:)`);
+    /// - galleries: each one WHOLE, as one carousel post — the three test
+    ///   collections of the arrivals, then one main-corpus photo post in
+    ///   three per remaining gallery (`mainCarouselGallery`).
+    ///
+    /// Only past a catalog's end do media repeat — the world's tail, until
+    /// more media are imported.
+    enum Ordinals {
+        static let viewerClips = 40
+        static let arrivalClips = 43
+        static let bigGalleryClips = 45
+        static let overCapacityClips = 47
+        static let worldClips = 50
+        /// The main corpus's photo posts (120 posts, one in three).
+        static let mainPhotoPosts = 40
+    }
+
+    /// The galleries the arrivals' test collections are made of (the
+    /// over-capacity one, the large one, the small one).
+    static let collectionGalleries: Set<Int> = [2, 3, 4]
+
+    /// The galleries left for whole-gallery carousels in the main corpus.
+    static var carouselGalleries: [Int] {
+        MockPhotoCatalog.shared.galleries.indices.filter { !collectionGalleries.contains($0) }
+    }
+
+    /// The gallery the main corpus's photo post `photoOrdinal` (0..<40) is a
+    /// carousel of — one post in three, while galleries remain; nil for a
+    /// single-photo post.
+    static func mainCarouselGallery(photoOrdinal: Int) -> Int? {
+        guard photoOrdinal % 3 == 0 else { return nil }
+        let galleries = carouselGalleries
+        return photoOrdinal / 3 < galleries.count ? galleries[photoOrdinal / 3] : nil
+    }
+
+    /// How many main-corpus carousels precede photo post `photoOrdinal`.
+    private static func carouselsBefore(photoOrdinal: Int) -> Int {
+        min((photoOrdinal + 2) / 3, carouselGalleries.count)
+    }
+
+    /// The single-photo ordinal of the main corpus's photo post
+    /// `photoOrdinal` — its carousels take no single.
+    static func mainSingleOrdinal(photoOrdinal: Int) -> Int {
+        photoOrdinal - carouselsBefore(photoOrdinal: photoOrdinal)
+    }
+
+    /// Where the viewer's single photos start: right after the main corpus's.
+    static var viewerSingleBase: Int { mainSingleOrdinal(photoOrdinal: Ordinals.mainPhotoPosts) }
+    static var arrivalSingleBase: Int { viewerSingleBase + 3 }
+    static var worldSingleBase: Int { arrivalSingleBase + 1 }
+
+    /// A whole gallery as one carousel: its head and every page after it.
+    static func carousel(
+        gallery: Int, fallback: String, shape: (Int, Int)
+    ) -> (head: (url: String, width: Int, height: Int), pages: [(url: String, width: Int, height: Int)]) {
+        let count = MockPhotoCatalog.shared.gallery(forSlot: gallery)?.photos.count ?? 1
+        let head = galleryPhoto(gallery: gallery, page: 0, fallback: fallback, shape: shape)
+        let pages = (1..<max(1, count)).map {
+            galleryPhoto(gallery: gallery, page: $0, fallback: "\(fallback)-\($0)", shape: shape)
+        }
+        return (head, pages)
     }
 
     /// Page `page` of a collection whose photos all come from the gallery at
@@ -203,9 +279,10 @@ public struct MockSocialDataset: Sendable {
             case (false, _):
                 nil
             case (true, true):
-                Self.syntheticVideo(slot: 40 + index, fallback: "mock://video/me\(index)", shape: shape)
+                Self.syntheticVideo(slot: Ordinals.viewerClips + index / 3,
+                                    fallback: "mock://video/me\(index)", shape: shape)
             case (true, false):
-                Self.photo(slot: 40 + index, fallback: "me\(index)", shape: shape)
+                Self.photo(slot: Self.viewerSingleBase + index / 3, fallback: "me\(index)", shape: shape)
             }
             return PostRecord(
                 postID: String(format: "post-me-%02d", index),
@@ -368,13 +445,14 @@ public struct MockSocialDataset: Sendable {
             case (false, _):
                 nil
             case (true, true):
-                Self.syntheticVideo(slot: 44 + index, fallback: "mock://video/new-\(index)", shape: shape)
+                Self.syntheticVideo(slot: Ordinals.arrivalClips + index / 2,
+                                    fallback: "mock://video/new-\(index)", shape: shape)
             case (true, false):
                 if let collectionGallery {
                     Self.galleryPhoto(gallery: collectionGallery, page: 0,
                                       fallback: "new-\(index)", shape: shape)
                 } else {
-                    Self.photo(slot: 50 + index, fallback: "new-\(index)", shape: shape)
+                    Self.photo(slot: Self.arrivalSingleBase + index, fallback: "new-\(index)", shape: shape)
                 }
             }
             // ARRIVAL 4 IS A COLLECTION — four photos behind the one the card
@@ -487,7 +565,8 @@ public struct MockSocialDataset: Sendable {
                 // above give: the client pre-layouts from the declared size,
                 // and a number the file does not have shows up as a crop.
                 ? (0..<3).map { position in
-                    Self.syntheticVideo(slot: 46 + position, fallback: "mock://video/cap-\(position)",
+                    Self.syntheticVideo(slot: Ordinals.overCapacityClips + position,
+                                        fallback: "mock://video/cap-\(position)",
                                         shape: (1600, 900))
                 }
                 // ⚠️ EVERY PHOTO PAGE FROM THE POST'S OWN GALLERY. A carousel
@@ -503,7 +582,8 @@ public struct MockSocialDataset: Sendable {
                         // gallery's: two posts sharing a file is its own test
                         // (see `PlaybackScopeTests`) and must not be smuggled in
                         // here by accident.
-                        Self.syntheticVideo(slot: 30 + position, fallback: "mock://video/new-0-\(position)",
+                        Self.syntheticVideo(slot: Ordinals.bigGalleryClips + (position == bigVideoPositions.max() ? 1 : 0),
+                                            fallback: "mock://video/new-0-\(position)",
                                             shape: shape)
                     } else {
                         Self.galleryPhoto(gallery: collectionGallery ?? index, page: position + 1,
@@ -524,7 +604,8 @@ public struct MockSocialDataset: Sendable {
                         // the client's own rule does the rest. A DIFFERENT clip
                         // per page (one slot each): two pages on one asset would
                         // hide the very duplication this exists to catch.
-                        Self.syntheticVideo(slot: 36 + position, fallback: "mock://video/new-4-\(position)",
+                        Self.syntheticVideo(slot: Ordinals.bigGalleryClips + (position == videoPagePositions.max() ? 1 : 0),
+                                            fallback: "mock://video/new-4-\(position)",
                                             shape: shape)
                     } else {
                         Self.galleryPhoto(gallery: collectionGallery ?? index, page: position + 1,
@@ -884,26 +965,37 @@ public struct MockSocialDataset: Sendable {
             // in BOTH catalogs, and each takes its dimensions FROM its file
             // rather than from `mediaShapes`: the declared size has to match
             // the file or pre-layout crops it.
+            // One photo post in three is a WHOLE gallery, as a carousel,
+            // while galleries remain (`mainCarouselGallery`); the others take
+            // their own single picture.
+            let carouselGallery = hasMedia && !isVideo ? Self.mainCarouselGallery(photoOrdinal: index / 3) : nil
+            let carousel = carouselGallery.map {
+                Self.carousel(gallery: $0, fallback: "\(index)", shape: shape)
+            }
             let media: (url: String, width: Int, height: Int)? = switch (hasMedia, isVideo) {
             case (false, _):
                 nil
             case (true, true):
                 Self.syntheticVideo(slot: index / 3, fallback: "mock://video/\(index)", shape: shape)
             case (true, false):
-                Self.photo(slot: index / 3, fallback: "\(index)", shape: shape)
+                carousel?.head
+                    ?? Self.photo(slot: Self.mainSingleOrdinal(photoOrdinal: index / 3),
+                                  fallback: "\(index)", shape: shape)
             }
             // Every fifth post is a repost of the previous same-slot post.
             // Per author that lands on one residue mod 40 → three reposts
             // each, cycling all three kinds (40 ≡ 1 mod 3).
             let isRepost = index % 5 == 4 && index >= 8
-            records.append(PostRecord(
+            var record = PostRecord(
                 postID: String(format: "post-%04d", index),
                 authorProfileID: author.profileID,
                 caption: caption,
                 media: media,
                 publishedAtMS: newestMS - Int64(index) * 180_000, // 3 minutes apart, newest first
                 parentID: isRepost ? String(format: "post-%04d", index - 8) : ""
-            ))
+            )
+            record.extraMedia = carousel?.pages ?? []
+            records.append(record)
         }
         // Five posts that arrived AFTER the viewer last looked, at the head of
         // the timeline. See `justArrivedRecords`.
