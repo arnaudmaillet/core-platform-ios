@@ -71,6 +71,50 @@ struct PostShelfSectionTests {
         #expect(opened == [1, 0])
     }
 
+    // MARK: - The lead stack
+
+    /// A lead with nothing shown is zero tall and titles nothing.
+    @Test func anEmptyLeadIsZeroTallAndUntitled() {
+        let shelf = Self.shelf()
+        let lead = GridLeadStack(sections: [shelf])
+        lead.listTitle = "Recent"
+        lead.frame = CGRect(x: 0, y: 0, width: 402, height: 600)
+        lead.layoutIfNeeded()
+        #expect(lead.preferredHeight(forWidth: 402) == 0)
+        #expect(lead.debugListTitleView.isHidden)
+    }
+
+    /// One shelf over the list's title is as tall as the rails were with only
+    /// their card row (the place page's and the hashtag page's lead before
+    /// #1271), so the list under it starts where it did.
+    @Test(arguments: [(3, 0), (0, 2), (4, 3)])
+    func aShelfLeadKeepsTheRailsHeight(media: Int, text: Int) {
+        let shelf = Self.shelf()
+        let posts = (0..<media).map { Self.post("m\($0)", kind: .photo) }
+            + (0..<text).map { Self.post("t\($0)", kind: .text) }
+        shelf.render(posts)
+        let lead = GridLeadStack(sections: [shelf])
+        #expect(lead.preferredHeight(forWidth: 402)
+            == ForYouRailsView.height(forWidth: 402, friends: 0, following: media + text, textCards: text))
+    }
+
+    /// The shelf's rows changing size reaches the host through the stack, and
+    /// the list's title takes its own tap.
+    @Test func theStackForwardsHeightChangesAndTheTitlesTap() {
+        let shelf = Self.shelf()
+        let lead = GridLeadStack(sections: [shelf])
+        var changes = 0
+        lead.onHeightChange = { changes += 1 }
+        shelf.render([Self.post("m", kind: .photo)])
+        #expect(changes == 1)
+        shelf.render([Self.post("m2", kind: .photo)])
+        #expect(changes == 1, "the same row counts moved the lead")
+        var tapped = 0
+        lead.onListTitleTapped = { tapped += 1 }
+        lead.debugListTitleView.debugTap()
+        #expect(tapped == 1)
+    }
+
     private static func post(_ id: String, kind: GalleryPost.Kind) -> GalleryPost {
         GalleryPost(
             id: PostID(id), kind: kind, isRepost: false,

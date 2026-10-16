@@ -53,7 +53,10 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// `.discover`'s leading header: For You's own rows view, with only its
     /// card row ("Following" there, the caller's title here) and the list's
     /// title under it. Nil for the other styles.
-    private var rails: ForYouRailsView?
+    /// The lead (`.discover` only, #1271): one shelf of posts over the list's
+    /// title.
+    private var shelf: PostShelfSection?
+    private var lead: GridLeadStack?
     /// The lead row's ids, so an identical re-show is not a re-fetch.
     private var leadIDs: [PostID] = []
     private var leadTask: Task<Void, Never>?
@@ -78,7 +81,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     var staking: PostCardStaking? {
         didSet {
             page.staking = staking
-            rails?.staking = staking
+            shelf?.staking = staking
         }
     }
 
@@ -122,7 +125,9 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         self.style = style
         self.hydrate = hydrate
         if style == .discover {
-            rails = ForYouRailsView(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+            let shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
+            self.shelf = shelf
+            lead = GridLeadStack(sections: [shelf])
         }
         super.init(nibName: nil, bundle: nil)
     }
@@ -178,45 +183,46 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// flights, and ONE player budget the two share — the list leaves the
     /// players the row has claimed (`ForYouGridPage.playerReserve`).
     private func wireDiscover() {
-        guard let rails else { return }
-        rails.visibleBand = { [weak self] in self?.visibleBand() }
-        rails.onHeightChange = { [weak self] in self?.updateLeadHeight() }
+        guard let shelf, let lead else { return }
+        shelf.visibleBand = { [weak self] in self?.visibleBand() }
+        lead.onHeightChange = { [weak self] in self?.updateLeadHeight() }
         // A card's flight is the SHELF's (#1271). Pushed: the page pins from
         // the tap and hands the inset back in `viewDidAppear` (#924).
-        rails.shelf.heroContext = .init(page: page, host: view, thawsOnLanding: false, seedWindow: Self.seedWindow)
-        rails.shelf.shouldOpen = { [weak self] in
+        shelf.heroContext = .init(page: page, host: view, thawsOnLanding: false, seedWindow: Self.seedWindow)
+        shelf.shouldOpen = { [weak self] in
             guard let self, openPost != nil else { return false }
             return navigationController.map { FeedFeatureBuilder.canOpen(from: self, on: $0) } ?? true
         }
-        rails.shelf.onOpen = { [weak self] open in
+        shelf.onOpen = { [weak self] open in
             guard let self, let openPost else { return }
             #if DEBUG
             PushedListJumpTrace.mark("search card open", page: page, host: view)
             #endif
             page.openHoldingStill(from: stackScreen) { openPost(self, open.origin, open.stream.map(\.id)) }
         }
-        rails.onFollowingHeaderTapped = { [weak self] in self?.onLeadRowTitleTapped?() }
-        rails.onListHeaderTapped = { [weak self] in self?.pushGallery() }
+        shelf.onTitleTapped = { [weak self] in self?.onLeadRowTitleTapped?() }
+        lead.onListTitleTapped = { [weak self] in self?.pushGallery() }
+        lead.listTitleAccessibilityHint = "Shows every post"
         page.onViewAllTapped = { [weak self] in self?.pushGallery() }
         page.onAutoplayReconcile = { [weak self] allowingStarts in
-            self?.rails?.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: false)
+            self?.shelf?.updateAutoplay(allowingStarts: allowingStarts, notifiesClaimChange: false)
         }
-        page.playerReserve = { [weak self] in self?.rails?.claimedPlayers ?? 0 }
-        rails.onPlayerClaimChange = { [weak self] in self?.page.updateAutoplay() }
+        page.playerReserve = { [weak self] in self?.shelf?.claimedPlayers ?? 0 }
+        shelf.onPlayerClaimChange = { [weak self] in self?.page.updateAutoplay() }
     }
 
     func setSectionTitles(row: String, list: String) {
-        rails?.followingTitle = row
-        rails?.listTitle = list
+        shelf?.title = row
+        lead?.listTitle = list
     }
 
     func showLeadRow(_ state: PostSetSurfaceState) {
         loadViewIfNeeded()
-        guard let rails else { return }
+        guard let shelf else { return }
         guard case .posts(let ids) = state, !ids.isEmpty else {
             leadIDs = []
             leadTask?.cancel()
-            rails.render(ForYouViewModel.Rails())
+            shelf.render([])
             updateLeadHeight()
             return
         }
@@ -228,9 +234,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
             let posts = await self.hydrate(ids)
             guard !Task.isCancelled, self.leadIDs == ids else { return }
             let byID = Dictionary(posts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            var row = ForYouViewModel.Rails()
-            row.following = ids.compactMap { byID[$0] }
-            self.rails?.render(row)
+            self.shelf?.render(ids.compactMap { byID[$0] })
             self.updateLeadHeight()
             #if DEBUG
             self.openCardForQAIfRequested()
@@ -240,17 +244,17 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     #if DEBUG
     /// The lead row's posts as drawn, for tests.
-    var debugLeadRowIDs: [PostID] { rails?.cards.map(\.id) ?? [] }
+    var debugLeadRowIDs: [PostID] { shelf?.cards.map(\.id) ?? [] }
     /// Whether this surface has a lead header at all (`.discover` only).
-    var debugHasLeadHeader: Bool { rails != nil }
+    var debugHasLeadHeader: Bool { lead != nil }
     /// Taps item `index` through the page's own selection path, the one a
     /// finger reaches. False while that item is not loaded yet.
     func debugOpenTile(at index: Int) -> Bool { page.debugSelectItem(at: index) }
     /// Taps lead-row card `index` through the row's own tap handler. False
     /// while that card is not loaded yet.
     func debugOpenLeadCard(at index: Int) -> Bool {
-        guard let rails, rails.cards.indices.contains(index) else { return false }
-        rails.shelf.openCard(at: index)
+        guard let shelf, shelf.cards.indices.contains(index) else { return false }
+        shelf.openCard(at: index)
         return true
     }
     /// Whether the grid's inset is pinned rather than tracking the safe area.
@@ -259,20 +263,20 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
 
     /// Sizes the list's leading header to the rows it holds.
     private func updateLeadHeight() {
-        guard let rails else { return }
+        guard let lead else { return }
         let width = page.bounds.width
         guard width > 0 else { return }
-        page.setLead(rails, height: rails.preferredHeight(forWidth: width))
+        page.setLead(lead, height: lead.preferredHeight(forWidth: width))
     }
 
     /// The part of the screen the viewer can see, in the rows' space — what a
     /// row's card must be half inside to play.
     private func visibleBand() -> CGRect? {
-        guard let rails, rails.window != nil, view.window != nil else { return nil }
+        guard let shelf, shelf.window != nil, view.window != nil else { return nil }
         let band = view.bounds.inset(by: UIEdgeInsets(
             top: view.safeAreaInsets.top, left: 0, bottom: view.safeAreaInsets.bottom, right: 0
         ))
-        return rails.convert(band, from: view)
+        return shelf.convert(band, from: view)
     }
 
     /// A lead-row card opens the way For You's Following cards do
@@ -291,7 +295,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
     /// measured with `-list-jump-trace` on the hashtag page's Recent row, a
     /// picture card's grab and a words card's swipe alike.
     /// `thawsOnLanding: false` leaves the thaw to this screen's appearance.
-    private func openCard(at index: Int) { rails?.shelf.openCard(at: index) }
+    private func openCard(at index: Int) { shelf?.openCard(at: index) }
 
     /// "View all": For You's media gallery over this page's media posts, fed
     /// the next pages as they land (#629).
@@ -513,11 +517,11 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         let label = "-search-open-card \(index)"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
             QAWait.until(label, { [weak self] in
-                guard let self, let rails = self.rails else { return false }
-                return rails.cards.indices.contains(index) && rails.window != nil && self.openPost != nil
+                guard let self, let shelf = self.shelf else { return false }
+                return shelf.cards.indices.contains(index) && shelf.window != nil && self.openPost != nil
             }) { [weak self] in
-                guard let self, let rails = self.rails else { return }
-                print("[qa] \(label): opening \(rails.cards[index].id) of \(rails.cards.count)")
+                guard let self, let shelf = self.shelf else { return }
+                print("[qa] \(label): opening \(shelf.cards[index].id) of \(shelf.cards.count)")
                 self.openCard(at: index)
             }
         }
@@ -568,7 +572,7 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         // flight until it lands, and appearance closes it then.
         if active, navigationController?.transitionCoordinator == nil { closeOpeningRoundTrip() }
         page.setAutoplayActive(active)
-        rails?.setAutoplayActive(active)
+        shelf?.setAutoplayActive(active)
     }
 
     /// ⚠️ THE HANDOFF A TAP OPENED ENDS WHEN THIS SCREEN IS BACK, the sweep
@@ -584,13 +588,13 @@ final class PostSetSurfaceViewController: UIViewController, PostSetSurface {
         page.endPlaybackHandoff()
         // The rows' card too — active first, then the handoff closed, for the
         // reason `ForYouViewController.viewDidAppear` gives.
-        guard let rails else { return }
-        rails.clearConcealments()
+        guard let shelf else { return }
+        shelf.clearConcealments()
         if isPlaybackActive {
             page.setAutoplayActive(true)
-            rails.setAutoplayActive(true)
+            shelf.setAutoplayActive(true)
         }
-        rails.endPlaybackHandoff()
+        shelf.endPlaybackHandoff()
     }
 
     /// ⚠️ REMEMBERED, BECAUSE VISIBILITY ARRIVES BEFORE THE CONTENT DOES.
