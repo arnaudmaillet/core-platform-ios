@@ -4825,7 +4825,10 @@ final class SnapFeedViewController: UIViewController {
             return SoundSheetViewController.Tile(
                 postID: id, thumbnailURL: post?.thumbnailURL, caption: post?.caption,
                 isOriginal: id == dealt.original, isLoaded: post != nil,
-                likeCount: post?.likes, videoURL: post?.video
+                likeCount: post?.likes, videoURL: post?.video,
+                // The post as the repository has it — author included — for
+                // the standard tile's words (#1280).
+                post: galleryPost?(id)
             )
         }
         return (dealt.sections, tiles)

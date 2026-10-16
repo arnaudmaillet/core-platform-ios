@@ -101,8 +101,18 @@ final class SoundSheetGalleryViewController: UIViewController {
             cell.configure(tile, pipeline: pipeline)
             cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
         }
-        dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, id in
-            view.dequeueConfiguredReusableCell(using: registration, for: path, item: id)
+        // A loaded media post is the standard tile, as in the sheet (#1280).
+        let mediaRegistration = UICollectionView.CellRegistration<PostGridTileCell, PostID> { [weak self] cell, _, id in
+            guard let tile = self?.tile(id), let post = tile.post else { return }
+            SoundSheetViewController.configureStandardTile(cell, tile: tile, post: post, pipeline: pipeline)
+            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
+        }
+        dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { [weak self] view, path, id in
+            if self?.tile(id)?.drawsStandardTile == true {
+                view.dequeueConfiguredReusableCell(using: mediaRegistration, for: path, item: id)
+            } else {
+                view.dequeueConfiguredReusableCell(using: registration, for: path, item: id)
+            }
         }
         dataSource.apply(snapshot(), animatingDifferences: false)
     }
@@ -148,7 +158,9 @@ final class SoundSheetGalleryViewController: UIViewController {
         ids = newIDs
         guard dataSource != nil else { return }
         var snapshot = snapshot()
-        snapshot.reconfigureItems(changed.filter { newIDs.contains($0) })
+        // Reloaded rather than reconfigured: a placeholder that arrives as a
+        // media post changes cell (#1280).
+        snapshot.reloadItems(changed.filter { newIDs.contains($0) })
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
         reconcileAutoplay()
         lookahead.setNeedsPlan()
@@ -174,7 +186,7 @@ final class SoundSheetGalleryViewController: UIViewController {
         guard let autoplay, dataSource != nil else { return }
         let items = collectionView.indexPathsForVisibleItems.compactMap { path -> SoundSheetAutoplay.Item? in
             guard let id = dataSource.itemIdentifier(for: path), let tile = tile(id),
-                  let cell = collectionView.cellForItem(at: path) as? SoundSheetTileCell
+                  let cell = collectionView.cellForItem(at: path) as? any SoundSheetTileDrawing
             else { return nil }
             return .init(tile: tile, cell: cell)
         }
@@ -183,9 +195,9 @@ final class SoundSheetGalleryViewController: UIViewController {
 
     // MARK: - Tiles, for the hero
 
-    func tileCell(for id: PostID) -> SoundSheetTileCell? {
+    func tileCell(for id: PostID) -> (any SoundSheetTileDrawing)? {
         guard isViewLoaded, let path = dataSource.indexPath(for: id) else { return nil }
-        return collectionView.cellForItem(at: path) as? SoundSheetTileCell
+        return collectionView.cellForItem(at: path) as? any SoundSheetTileDrawing
     }
 
     /// The tile's rect in `space` while it is on screen — nil once scrolled

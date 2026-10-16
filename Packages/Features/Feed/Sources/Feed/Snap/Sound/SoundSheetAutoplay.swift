@@ -28,9 +28,11 @@ final class SoundSheetAutoplay {
     static let concurrentPlayers = GridAutoplayRanking.concurrentPlayers(isMosaic: true)
 
     /// A tile on screen that its screen may let play.
+    /// A tile on screen and the cell drawing it — the standard tile for a
+    /// loaded media post (#1280), this sheet's own for words or a placeholder.
     struct Item {
         let tile: SoundSheetViewController.Tile
-        let cell: SoundSheetTileCell
+        let cell: any SoundSheetTileDrawing
     }
 
     let playback: GridVideoPlaybackCoordinator
@@ -114,7 +116,7 @@ final class SoundSheetAutoplay {
     /// that left gave it back as it went (`stop`).
     private func reserve(besides collectionView: UICollectionView) -> Int {
         let own = collectionView.visibleCells.filter { cell in
-            guard let surface = (cell as? SoundSheetTileCell)?.loadedVideoRenderView else { return false }
+            guard let surface = (cell as? any GridPlaybackCell)?.loadedVideoRenderView else { return false }
             return pool.hasPlayer(in: surface)
         }.count
         return max(0, pool.activePlayerCount - own)
@@ -123,7 +125,7 @@ final class SoundSheetAutoplay {
     /// A tile left the screen: its player goes back now, whatever the scroll
     /// is doing, or the pool starves.
     func stop(_ cell: UICollectionViewCell) {
-        guard let tile = cell as? SoundSheetTileCell else { return }
+        guard let tile = cell as? any GridPlaybackCell else { return }
         playback.stop(cell: tile)
     }
 
@@ -137,3 +139,8 @@ final class SoundSheetAutoplay {
         return true
     }
 }
+
+/// What draws a tile of the sound sheet: the standard tile (`PostGridTileCell`)
+/// for a loaded media post, the sheet's own (`SoundSheetTileCell`) for words
+/// and placeholders — a cell that plays like any grid's (#1280).
+typealias SoundSheetTileDrawing = UICollectionViewCell & GridPlaybackCell
