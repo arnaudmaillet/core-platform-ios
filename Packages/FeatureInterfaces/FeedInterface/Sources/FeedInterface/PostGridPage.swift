@@ -107,11 +107,15 @@ public protocol PostGridPage: UIView {
     /// of sight.
     func applyPendingReveal()
     /// A tile's opening, described for the shared flight — every hook For
-    /// You's tiles fly with. Opens the playback handoff.
+    /// You's tiles fly with. Opens the playback handoff. `pinsBeforeClose`:
+    /// the page pins its inset before a close is measured — false for a host
+    /// whose insets never move under a covered page (one under a floating
+    /// header).
     func heroOrigin(
         opening tapped: GalleryPost, stream: [GalleryPost], in host: UIView,
         textReveal: TextRevealOrigin?, opensComments: Bool,
-        willStageDismissal: @escaping () -> Void, continuation: SnapFeedContinuation?
+        willStageDismissal: @escaping () -> Void, pinsBeforeClose: Bool,
+        continuation: SnapFeedContinuation?
     ) -> SnapFeedHeroOrigin
     /// The window a post closes through when there is no picture to fly.
     func closeWindow(
