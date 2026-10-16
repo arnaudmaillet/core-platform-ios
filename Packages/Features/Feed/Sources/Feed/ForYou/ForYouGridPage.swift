@@ -27,8 +27,9 @@ private final class WeakPageBox {
 
 final class ForYouGridPage: UIView {
     /// The saved-posts pile, the app's one, shared with the post page and the
-    /// profile's Saved tab — see `PostBookmarkStore`.
-    private let bookmarks = PostBookmarkStore.shared
+    /// profile's Saved tab — see `PostBookmarkStore`. Nil where no pile exists
+    /// (a host that says so, #1273): the save control is then not drawn.
+    private let bookmarks: PostBookmarkStore?
 
     /// The viewer asked to repost. UNSET today — there is no client path that
     /// publishes a repost yet — so no card draws the control (#801): see the
@@ -125,6 +126,20 @@ final class ForYouGridPage: UIView {
     /// — the pull of a page whose host draws the indicator and owns the
     /// threshold (`handPullToHost`).
     var onPullReleased: ((CGFloat) -> Void)?
+    /// Where a release comes to rest while a hosted header is on screen, in
+    /// the travelled space (`ScrollDetents`). Empty — every host but the
+    /// profile — means free (#1273).
+    var snapDetents: [CGFloat] = []
+    /// Detents a release CROSSING them stops on, whatever its momentum — see
+    /// `ScrollDetents.snapped(target:detents:from:catching:)`.
+    var catchDetents: [CGFloat] = []
+    /// A snap decided at the release with no momentum behind it, which the
+    /// scroll view will not carry out on its own — see
+    /// `scrollViewDidEndDragging`.
+    private var pendingSnap: CGFloat?
+    /// The content length the next page was last asked at from a scroll —
+    /// see `askNextPageIfNearEnd`.
+    private var nextPageAskedAtLength: CGFloat?
     /// A row's author was tapped — its disc, its name or its handle.
     var onAuthorTapped: ((GalleryPost) -> Void)?
     /// What a row's "..." should offer. Asked at press time, per row.
@@ -713,8 +728,12 @@ final class ForYouGridPage: UIView {
         style == .grid ? (sliceLayout?.cellsPerSlice ?? ChaoticSliceEngine.defaultCellsPerSlice) * 2 : 6
     }
 
-    init(imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil) {
+    init(
+        imagePipeline: ImagePipeline, style: Style, videoPlayback: VideoPlaybackController? = nil,
+        bookmarks: PostBookmarkStore? = .shared
+    ) {
         self.imagePipeline = imagePipeline
+        self.bookmarks = bookmarks
         videoPool = videoPlayback
         chunkPlanner.chunksLeavePairableMedia = !ForYouPairedVertical.chunksTakeVerticals
         #if DEBUG
@@ -842,7 +861,7 @@ final class ForYouGridPage: UIView {
             // rule, for the same reason, as the profile grid's
             // `setMinimumScrollTravel`). The room is empty space below the
             // last row.
-            let needed = minimumScrollTravel
+            let needed = offeredTravel
                 + collectionView.bounds.height
                 - collectionView.contentSize.height
                 - collectionView.contentInset.top
@@ -948,7 +967,111 @@ final class ForYouGridPage: UIView {
         // Changing the inset moves the content under a stationary offset, so
         // the offset is restated to keep the page where it was.
         collectionView.contentOffset.y = travelled - top
+        hostStatusUnderHeader()
         applyBottomInset()
+        positionHostedStatus()
+    }
+
+    // MARK: - The status under a hosted header (#1273)
+
+    /// The empty/failed state's centre, while hosted — see `positionHostedStatus`.
+    private var hostedStatusCentre: NSLayoutConstraint?
+
+    /// Moves the status from filling the page to riding under the header:
+    /// pinned to the page, the block centred on a page taller than the room
+    /// left under the header, behind it on a short screen.
+    private func hostStatusUnderHeader() {
+        guard hostedStatusCentre == nil else { return }
+        emptyState.removeFromSuperview()
+        addSubview(emptyState)
+        emptyState.translatesAutoresizingMaskIntoConstraints = false
+        let centre = emptyState.centerYAnchor.constraint(equalTo: topAnchor)
+        hostedStatusCentre = centre
+        NSLayoutConstraint.activate([
+            centre,
+            emptyState.leadingAnchor.constraint(equalTo: leadingAnchor),
+            emptyState.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+    }
+
+    /// Puts the status where the first row would be: centred in the room
+    /// between the header and the chrome at the foot, riding the offset
+    /// (`HostedStatusPlacement`, the profile's rule).
+    private func positionHostedStatus() {
+        guard let hostedTopInset, let hostedStatusCentre, !emptyState.isHidden else { return }
+        let centre = HostedStatusPlacement.centreY(
+            visibleTop: hostedTopInset, visibleBottom: bounds.height - hostedBottomInset,
+            blockHeight: hostedStatusHeight
+        )
+        hostedStatusCentre.constant = centre - verticalOffset
+    }
+
+    /// The status block's own height, measured once per state and width — it
+    /// is read on every frame a hosted page moves.
+    private var hostedStatusHeight: CGFloat {
+        let key = HostedStatusKey(width: bounds.width, revision: statusRevision,
+                                  contentSize: traitCollection.preferredContentSizeCategory)
+        if let cached = hostedStatusHeightCache, cached.key == key { return cached.height }
+        let height = emptyState.systemLayoutSizeFitting(
+            CGSize(width: bounds.width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
+        ).height
+        hostedStatusHeightCache = (key, height)
+        return height
+    }
+
+    private struct HostedStatusKey: Equatable {
+        let width: CGFloat
+        let revision: Int
+        let contentSize: UIContentSizeCategory
+    }
+
+    private var hostedStatusHeightCache: (key: HostedStatusKey, height: CGFloat)?
+    /// Bumped by every status shown, so the measured height follows it.
+    private var statusRevision = 0
+
+    /// The travel a hosted page offers: the header's whole run with rows to
+    /// show; with only its status, none — there is nothing to scroll to — or
+    /// just what brings a block taller than the room under the header into
+    /// view (a small phone). The profile's rule (the owner, 2026-10-15).
+    private var offeredTravel: CGFloat {
+        guard let hostedTopInset, !emptyState.isHidden else { return minimumScrollTravel }
+        let roomBottom = bounds.height - hostedBottomInset
+        return max(0, hostedTopInset + hostedStatusHeight - roomBottom)
+    }
+
+    /// Shows a status in place of the posts — a host's own words (a private
+    /// profile, a tab's empty copy) as well as the page's.
+    func showStatus(
+        symbolName: String?, title: String, subtitle: String? = nil,
+        actionTitle: String? = nil, action: (() -> Void)? = nil
+    ) {
+        statusRevision += 1
+        emptyState.configure(
+            symbolName: symbolName, title: title, subtitle: subtitle,
+            actionTitle: actionTitle, actionHandler: action
+        )
+        emptyState.isHidden = false
+        apply([], skeleton: false)
+        settleHostedStatus()
+    }
+
+    /// An empty page offers no travel: one that became empty while scrolled
+    /// comes back to the top, its status centred under the header.
+    private func settleHostedStatus() {
+        guard hostedTopInset != nil else { return }
+        applyBottomInset()
+        if !emptyState.isHidden, verticalOffset > offeredTravel + 0.5 {
+            setVerticalOffset(offeredTravel)
+        }
+        positionHostedStatus()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // The status is placed from this view's height, which is zero until
+        // a layout pass gives it one.
+        positionHostedStatus()
     }
 
     /// How far this page must be able to scroll, whatever it holds — see the
@@ -976,7 +1099,16 @@ final class ForYouGridPage: UIView {
     /// Scrolls to a travel offset, clamped to what the content can hold.
     /// What keeps a floating header still across a tab switch: the page
     /// arriving is put level with the page leaving BEFORE it shows.
+    ///
+    /// `animated` is for the ONE case a viewer asked for the journey: a host
+    /// re-tapping the tab already showing (the profile, #1273). Every other
+    /// caller keeps a page in step with something else, where an animation is
+    /// a page arriving late.
     func setVerticalOffset(_ offset: CGFloat) {
+        setVerticalOffset(offset, animated: false)
+    }
+
+    func setVerticalOffset(_ offset: CGFloat, animated: Bool) {
         // Make room BEFORE asking the page to travel: on a tab switch the
         // page may not have laid out since its content arrived, and it would
         // clamp against a range that has not been extended yet.
@@ -989,7 +1121,12 @@ final class ForYouGridPage: UIView {
             - collectionView.bounds.height
         let target = offset < 0 ? offset : min(offset, max(0, travel))
         guard abs(verticalOffset - target) > 0.5 else { return }
-        collectionView.contentOffset = CGPoint(x: 0, y: target - inset)
+        let point = CGPoint(x: 0, y: target - inset)
+        if animated {
+            collectionView.setContentOffset(point, animated: true)
+        } else {
+            collectionView.contentOffset = point
+        }
     }
 
     // MARK: - Paging footer
@@ -2003,7 +2140,8 @@ final class ForYouGridPage: UIView {
             // state is read from the same store the row reads, so a post saved
             // a moment ago flies home filled in.
             actions: .init(
-                repost: onRepostRequested != nil, bookmark: true, saved: bookmarks.isSaved(postID.rawValue),
+                repost: onRepostRequested != nil, bookmark: bookmarks != nil,
+                saved: bookmarks?.isSaved(postID.rawValue) ?? false,
                 // The like stakes on every row `staking` binds, and its heart
                 // is red once the viewer has — the stand-in reads the same
                 // wallet, or the heart changes colour in the landing frame.
@@ -2895,25 +3033,21 @@ final class ForYouGridPage: UIView {
             emptyState.isHidden = true
             apply(posts, skeleton: false)
         case .empty(let empty):
-            emptyState.configure(
+            showStatus(
                 symbolName: style == .grid ? "photo.on.rectangle.angled" : "tray",
                 title: empty.title,
                 subtitle: empty.subtitle
             )
-            emptyState.isHidden = false
-            apply([], skeleton: false)
         case .failed(let message):
             // A failure gets the one thing an empty page does not: something to
             // press. Pull-to-refresh is already here, but a page with no rows
             // is a page with nothing to pull, so the retry has to be visible.
-            emptyState.configure(
+            showStatus(
                 symbolName: "exclamationmark.triangle",
                 title: message,
                 actionTitle: "Try Again",
-                actionHandler: { [weak self] in self?.onRefresh?() }
+                action: { [weak self] in self?.onRefresh?() }
             )
-            emptyState.isHidden = false
-            apply([], skeleton: false)
         }
         lookahead.setNeedsPlan()
     }
@@ -2938,6 +3072,7 @@ final class ForYouGridPage: UIView {
         // at launch. A layout pass here consumes the reload while the counts
         // are still the old ones; with nothing pending it costs nothing.
         collectionView.layoutIfNeeded()
+        if !mustReload, !completenessMoved, applyCountsOnly(incoming, skeleton: skeleton) { return }
         // Hydration retires the skeleton with a cross-dissolve, the same
         // in-place hand-off the profile gallery uses.
         let dissolving = showsSkeleton && !skeleton && !incoming.isEmpty && window != nil
@@ -2992,6 +3127,63 @@ final class ForYouGridPage: UIView {
         posts = partitioned(arrange(incoming, startingAt: 0))
         reloadAll(dissolving: dissolving)
     }
+
+    /// Whether `new` is `old` with other counters — the one change a cell can
+    /// take without being re-dressed or re-measured.
+    static func differOnlyInCounts(_ old: GalleryPost, _ new: GalleryPost) -> Bool {
+        var recounted = new
+        recounted.reactionCount = old.reactionCount
+        recounted.commentCount = old.commentCount
+        return recounted == old
+    }
+
+    /// ⚠️ THE SAME POSTS IN THE SAME ORDER, NEW COUNTS — a refresh landing —
+    /// re-dress nothing (the profile's rule, #1273). A reload rebuilt every
+    /// visible cell and its media, playing tiles handed back and restarted,
+    /// for a number. A count is a capsule's text: written straight onto the
+    /// cells on screen; anything else changed, or off screen, is
+    /// reconfigured. False — the caller goes on — for any other change.
+    private func applyCountsOnly(_ incoming: [GalleryPost], skeleton: Bool) -> Bool {
+        guard !showsSkeleton, !skeleton, !rawPosts.isEmpty, rawPosts.count == incoming.count,
+              zip(rawPosts, incoming).allSatisfy({ $0.id == $1.id && Self.differOnlyInCounts($0, $1) })
+        else { return false }
+        let fresh = Dictionary(incoming.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let before = posts
+        rawPosts = incoming
+        if style == .discover {
+            adoptSegments(segments.map { $0.mappingPosts { fresh[$0.id] ?? $0 } })
+        } else {
+            posts = posts.map { fresh[$0.id] ?? $0 }
+        }
+        let changed = posts.indices.filter { posts[$0] != before[$0] }
+        let visible = Set(collectionView.indexPathsForVisibleItems)
+        var reconfigured: [IndexPath] = []
+        for index in changed {
+            let path = indexPath(for: index)
+            switch visible.contains(path) ? collectionView.cellForItem(at: path) : nil {
+            case let row as PostGridListRowCell: row.updateCounts(from: posts[index])
+            case let tile as PostGridTileCell: tile.updateCounts(from: posts[index])
+            default: reconfigured.append(path)
+            }
+        }
+        if !reconfigured.isEmpty { collectionView.reconfigureItems(at: reconfigured) }
+        #if DEBUG
+        debugRecountedItems += changed.count - reconfigured.count
+        debugReconfiguredItems += reconfigured.count
+        #endif
+        return true
+    }
+
+    #if DEBUG
+    /// Cells a counts-only refresh wrote straight onto, and cells it had to
+    /// reconfigure — see `applyCountsOnly`.
+    private(set) var debugRecountedItems = 0
+    private(set) var debugReconfiguredItems = 0
+    /// The status block's frame while it shows, nil otherwise.
+    var debugStatusFrame: CGRect? { emptyState.isHidden ? nil : emptyState.frame }
+    /// The travel a hosted page offers now — see `offeredTravel`.
+    var debugOfferedTravel: CGFloat { offeredTravel }
+    #endif
 
     /// Discover's delivery: the stretches are re-planned over the whole corpus
     /// (the planner is cheap once its tilings are cached), and the difference
@@ -3245,16 +3437,19 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             cell.onRepostTapped = repostHandler(for: post)
             // The like chip stakes — see `PostCardStaking`.
             staking?.bind(cell, to: post.id)
-            cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
-            cell.onBookmarkTapped = { [weak self, weak cell] in
-                guard let self, let cell else { return }
-                MemberGates.perform(.save, from: cell) { [weak self, weak cell] in
-                    guard let self else { return }
-                    _ = bookmarks.toggle(post.id.rawValue)
-                    // The fill says it; the hand feels it (#803).
-                    Feedback.toggled()
-                    cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+            if let bookmarks {
+                cell.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                cell.onBookmarkTapped = { [weak cell] in
+                    guard let cell else { return }
+                    MemberGates.perform(.save, from: cell) { [weak cell] in
+                        _ = bookmarks.toggle(post.id.rawValue)
+                        // The fill says it; the hand feels it (#803).
+                        Feedback.toggled()
+                        cell?.isBookmarked = bookmarks.isSaved(post.id.rawValue)
+                    }
                 }
+            } else {
+                cell.onBookmarkTapped = nil
             }
             cell.onMediaTapped = { [weak self, weak cell] in
                 guard let self, let cell,
@@ -3390,6 +3585,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             // re-derive the travel room here (value-guarded, so this is a
             // comparison per tick, not a write) and report for the header.
             applyBottomInset()
+            positionHostedStatus()
             onVerticalScroll?(verticalOffset)
         }
         // Autoplay reconciles DURING the scroll, so a brick starts playing as
@@ -3405,7 +3601,20 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // flick outran it. Two screens of lead, three on a fling, is the same
         // lead on every shape (`LookaheadPaging`, #970). One page in flight is
         // the view model's.
+        askNextPageIfNearEnd(force: false)
+    }
+
+    /// Asks for the next page within the lookahead's lead. From a scroll,
+    /// ONCE PER CONTENT LENGTH (the profile's rule, #1273): a view model that
+    /// resumes a paging that failed would otherwise be asked again at the
+    /// display's rate, and a failure retried at once, over and over. A cell
+    /// coming on screen (`force`) asks as it always did — which is also what
+    /// asks for a first page too short to scroll.
+    private func askNextPageIfNearEnd(force: Bool) {
         guard !showsSkeleton, !posts.isEmpty, lookahead.wantsNextPage else { return }
+        let length = collectionView.contentSize.height
+        guard force || nextPageAskedAtLength != length else { return }
+        nextPageAskedAtLength = length
         onNearEnd?()
     }
 
@@ -3435,12 +3644,38 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
 
     /// A fling that ends without deceleration still needs a final reconcile:
     /// the throttled pass may have been velocity-gated right up to the stop.
+    /// ⚠️ THE SNAP IS WRITTEN INTO THE TARGET, not applied after the fact
+    /// (the profile's, #1273). Moving the offset once deceleration has
+    /// finished is a second motion the viewer sees start; rewriting where the
+    /// deceleration is heading folds the snap into the one motion already
+    /// under way.
+    func scrollViewWillEndDragging(
+        _ scrollView: UIScrollView, withVelocity velocity: CGPoint,
+        targetContentOffset: UnsafeMutablePointer<CGPoint>
+    ) {
+        pendingSnap = nil
+        guard !snapDetents.isEmpty else { return }
+        let inset = scrollView.adjustedContentInset.top
+        let target = targetContentOffset.pointee.y + inset
+        guard let snapped = ScrollDetents.snapped(
+            target: target, detents: snapDetents, from: verticalOffset, catching: catchDetents
+        ), abs(snapped - target) > 0.5 else { return }
+        targetContentOffset.pointee.y = snapped - inset
+        // With no momentum the scroll view stops where the finger left it and
+        // ignores the target, so the snap has to be driven by hand.
+        if abs(velocity.y) < 0.01 { pendingSnap = snapped - inset }
+    }
+
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         if !decelerate {
             updateAutoplay()
             lookahead.scrollViewDidEndScrolling()
         }
         onPullReleased?(max(0, -verticalOffset))
+        if !decelerate, let pendingSnap {
+            self.pendingSnap = nil
+            scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: pendingSnap), animated: true)
+        }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
@@ -3456,6 +3691,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     func collectionView(
         _ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath
     ) {
+        askNextPageIfNearEnd(force: true)
         guard !showsSkeleton, let onWillDisplayPost else { return }
         let index = flatIndex(for: indexPath)
         guard posts.indices.contains(index) else { return }

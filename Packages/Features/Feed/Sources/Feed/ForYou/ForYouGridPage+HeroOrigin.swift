@@ -92,4 +92,52 @@ extension ForYouGridPage {
             continuation: continuation
         )
     }
+
+    /// The window a post closes through when there is no picture to fly — a
+    /// TEXT post, or any post once the feed has paged onto words — for the
+    /// tile or row it sits on: the tile's own window (`tileWindow`), or the
+    /// row's card (#1273, the hosts' copies made one).
+    ///
+    /// - Parameters:
+    ///   - alignsPageToSource: the page grows out of the card caption on
+    ///     caption, the row's author band borrowed for the flight — honest only
+    ///     while the row and the page are the same post (search's cards, the
+    ///     profile's). False holds the page still and opens the card over it
+    ///     (a pager-backed list).
+    ///   - willStageDismissal: brings the post back clear of the chrome and
+    ///     pins the page before the landing is measured.
+    ///   - dismissalDidEnd: whether the close committed.
+    func closeWindow(
+        for post: GalleryPost,
+        alignsPageToSource: Bool,
+        willStageDismissal: @escaping () -> Void,
+        dismissalDidEnd: @escaping (Bool) -> Void
+    ) -> TextRevealOrigin? {
+        let anchor = post.id
+        if drawsAsTile(anchor) {
+            return tileWindow(for: post, willStageDismissal: willStageDismissal, dismissalDidEnd: dismissalDidEnd)
+        }
+        guard rowFrame(for: anchor, in: self) != nil else { return nil }
+        return TextRevealOrigin(
+            // The text row's rect, or any row's: the anchor may be a media
+            // row, which `textRowFrame` refuses on purpose.
+            rowFrame: { [weak self] space in
+                self?.textRowFrame(for: anchor, in: space) ?? self?.rowFrame(for: anchor, in: space)
+            },
+            // Read once, at the tap, while the row is realized by definition.
+            captionEnd: alignsPageToSource ? textRowCaptionEnd(for: anchor) : nil,
+            depthView: { [weak self] in self },
+            captionTop: alignsPageToSource ? textRowCaptionTop(for: anchor) : 0,
+            authorBand: alignsPageToSource ? textRowAuthorBand(for: anchor) : nil,
+            makeDismissStandIn: { [weak self] _ in self?.makeDismissStandIn(for: anchor) },
+            alignsPageToSource: alignsPageToSource,
+            // The media fills the window, always — see `RevealPageFit.covering`.
+            pageFit: .covering,
+            // The list's card, its own curve and fill (the initialiser's
+            // defaults are the card's).
+            setConcealed: { [weak self] concealed in self?.setRevealConcealed(concealed, for: anchor) },
+            willStageDismissal: { _ in willStageDismissal() },
+            dismissalDidEnd: dismissalDidEnd
+        )
+    }
 }

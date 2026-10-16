@@ -108,6 +108,16 @@ public enum DiscoverSegment: Sendable, Equatable {
     /// the next row).
     case pairs([GalleryPost])
 
+    /// The same stretch with each post replaced — for a change that cannot
+    /// move anything, such as new counters on the same posts.
+    public func mappingPosts(_ transform: (GalleryPost) -> GalleryPost) -> DiscoverSegment {
+        switch self {
+        case .rows(let posts): .rows(posts.map(transform))
+        case .chunk(let chunk, let posts): .chunk(chunk, posts.map(transform))
+        case .pairs(let posts): .pairs(posts.map(transform))
+        }
+    }
+
     public var posts: [GalleryPost] {
         switch self {
         case .rows(let posts): posts

@@ -1,4 +1,5 @@
 import CoreGraphics
+import PostGrid
 
 /// Where an empty tab's message sits on the profile.
 ///
@@ -24,8 +25,8 @@ enum ProfileEmptyStatePlacement {
     static func centreY(
         visibleTop: CGFloat, visibleBottom: CGFloat, blockHeight: CGFloat
     ) -> CGFloat {
-        let centred = (visibleTop + max(visibleTop, visibleBottom)) / 2
-        let flushWithTop = visibleTop + blockHeight / 2
-        return max(centred, flushWithTop)
+        HostedStatusPlacement.centreY(
+            visibleTop: visibleTop, visibleBottom: visibleBottom, blockHeight: blockHeight
+        )
     }
 }
