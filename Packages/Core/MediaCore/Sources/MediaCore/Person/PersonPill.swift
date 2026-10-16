@@ -124,6 +124,9 @@ public final class PersonPill: UIView {
     /// The relation's mark, centred on the face's edge — nil when the pill
     /// carries none (the profile).
     private let statusBadge: PersonPillBadgeView?
+    /// The relation's ring around the face (#1298): grey while the viewer
+    /// follows, pink once they are friends, none otherwise.
+    private let ring = UIView()
     /// Redacted stand-ins shown where the labels will be until the first
     /// person is set — the system placeholder idiom.
     private let namePlaceholder = PersonPill.makeRedactionBar(width: 96, height: 12)
@@ -195,6 +198,20 @@ public final class PersonPill: UIView {
             row.leadingAnchor.constraint(equalTo: parent.leadingAnchor, constant: breathing)
             row.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -Spacing.md)
             row.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        }
+
+        // The ring hugs the face from outside, inside the wrapper's
+        // breathing room, so it never moves the row or the pill's width.
+        ring.isUserInteractionEnabled = false
+        ring.layer.borderWidth = PersonPillRing.width
+        ring.layer.borderColor = UIColor.clear.cgColor
+        ring.layer.cornerCurve = .circular
+        ring.layer.cornerRadius = AvatarImageView.bubbleDiameter / 2 + PersonPillRing.width
+        ring.constrain(in: self) { _ in
+            ring.centerXAnchor.constraint(equalTo: avatar.centerXAnchor)
+            ring.centerYAnchor.constraint(equalTo: avatar.centerYAnchor)
+            ring.widthAnchor.constraint(equalTo: avatar.widthAnchor, constant: PersonPillRing.width * 2)
+            ring.heightAnchor.constraint(equalTo: avatar.heightAnchor, constant: PersonPillRing.width * 2)
         }
 
         // ⚠️ CENTRED ON THE DISC'S EDGE, AT ITS MID-HEIGHT (the owner,
@@ -314,8 +331,36 @@ public final class PersonPill: UIView {
         guard let statusBadge else { return }
         self.badge = badge
         statusBadge.show(badge, animated: animated)
+        setRing(badge, animated: animated)
         updateAccessibility()
     }
+
+    // MARK: - Ring
+
+    /// The relation the face's ring draws now (#1298).
+    public private(set) var ringRelation: Badge = .none
+
+    /// Rings the face for `relation`: grey while the viewer follows, pink
+    /// once they are friends, none otherwise. A pill with a badge follows
+    /// its badge (`setBadge`); one without (the profile's) is told.
+    /// Re-coloured in place, never resized: the ring sits in the face's
+    /// breathing room, outside anything the pill's width is made of.
+    public func setRing(_ relation: Badge, animated: Bool) {
+        guard relation != ringRelation else { return }
+        ringRelation = relation
+        let ink = PersonPillRing.ink(for: relation).cgColor
+        if animated, window != nil {
+            let fade = CABasicAnimation(keyPath: "borderColor")
+            fade.fromValue = ring.layer.presentation()?.borderColor ?? ring.layer.borderColor
+            fade.toValue = ink
+            fade.duration = 0.25
+            ring.layer.add(fade, forKey: "borderColor")
+        }
+        ring.layer.borderColor = ink
+    }
+
+    /// The ring's ink now — clear for none. Tests.
+    public var drawnRingColor: UIColor { UIColor(cgColor: ring.layer.borderColor ?? UIColor.clear.cgColor) }
 
     /// The symbol the badge draws now — nil for none. Tests.
     public var drawnBadgeSymbol: String? { statusBadge?.drawn.symbolName }
@@ -498,4 +543,21 @@ public enum PersonPillBadgeInks {
     public static let accent = Palette.tint.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
     /// A quiet grey disc.
     public static let quietDisc = UIColor.systemGray5.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+}
+
+/// The face's relation ring (#1298, the owner 2026-10-16): the badge's own
+/// inks, so the ring and the badge say the same thing in the same colour.
+public enum PersonPillRing {
+    /// The ring's thickness, outside the face.
+    public static let width: CGFloat = 2
+
+    /// Grey (the badge's quiet disc) while the viewer follows, pink (the
+    /// accent) once they are friends, clear otherwise.
+    public static func ink(for relation: PersonPill.Badge) -> UIColor {
+        switch relation {
+        case .following: PersonPillBadgeInks.quietDisc
+        case .friends: PersonPillBadgeInks.accent
+        case .none, .follow, .pending: .clear
+        }
+    }
 }

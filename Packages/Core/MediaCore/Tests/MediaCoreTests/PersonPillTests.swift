@@ -76,4 +76,30 @@ struct PersonPillTests {
         #expect(pill.badgeReplaceCount == 1)
         #expect(pill.drawnBadgeSymbol == "checkmark.circle.fill")
     }
+
+    /// THE FACE'S RELATION RING (#1298, the owner 2026-10-16): grey — the
+    /// badge's quiet disc — while the viewer follows, pink once they are
+    /// friends, none otherwise; re-coloured in place, the width unmoved.
+    @Test(arguments: [
+        (PersonPill.Badge.following, PersonPillBadgeInks.quietDisc),
+        (.friends, PersonPillBadgeInks.accent),
+        (.follow, UIColor.clear), (.pending, .clear), (.none, .clear),
+    ])
+    func theRingSaysTheRelation(_ relation: PersonPill.Badge, _ ink: UIColor) {
+        let pill = Self.laidOut(PersonPill(carriesBadge: true))
+        let width = pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        pill.setBadge(relation, animated: false)
+        #expect(pill.ringRelation == relation)
+        #expect(pill.drawnRingColor.cgColor == ink.cgColor || (ink == .clear && pill.drawnRingColor.cgColor.alpha == 0))
+        #expect(abs(pill.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width - width) < 0.5,
+                "the ring moved the pill's width")
+    }
+
+    /// A pill with no badge (the profile's) is told its relation.
+    @Test func aBadgeLessPillWearsTheRingItIsGiven() {
+        let pill = PersonPill(carriesBadge: false)
+        pill.setRing(.friends, animated: false)
+        #expect(pill.ringRelation == .friends)
+        #expect(pill.drawnRingColor.cgColor == PersonPillBadgeInks.accent.cgColor)
+    }
 }
