@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import DesignSystem
 import Foundation
 import MapsInterface
@@ -80,6 +81,17 @@ struct ProfileBellAndMapMenuTests {
 
     /// On screen `[coins][bell]`: the bell keeps the corner, a fixed space
     /// keeps the two bubbles apart.
+    /// The own profile, the Profile tab's root, answers the shell's re-tap
+    /// (#1309) and comes back to the profile's top.
+    @Test func theOwnProfileAnswersATabReTap() {
+        let (screen, _, _) = makeScreen(relationship: .me, own: true)
+        let stack = UINavigationController(rootViewController: screen)
+        let target = TabReselect.target(tappedSelectedTab: true, stack: stack)
+        #expect(target === screen)
+        target?.scrollToTopForTabReselect()
+        #expect(screen.galleryPager.verticalOffset <= 0.5)
+    }
+
     @Test func aFollowedProfileShowsTheBellInTheCorner() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
         try #require(await settle { screen.debugMuteBellItem != nil })

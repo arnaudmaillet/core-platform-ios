@@ -286,6 +286,8 @@ extension SuggestionsViewController: UITableViewDelegate {
 // MARK: - InboxSurface
 
 extension SuggestionsViewController: InboxSurface {
+    var listScrollView: UIScrollView? { tableView }
+
     var category: MessagesCategory { .suggestions }
 
     /// Loads on first arrival, and refreshes on every one after it.

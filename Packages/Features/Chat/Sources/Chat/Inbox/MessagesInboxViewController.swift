@@ -928,3 +928,21 @@ extension MessagesInboxViewController: UITextFieldDelegate {
         return true
     }
 }
+
+// MARK: - Tab re-tap (#1309)
+
+extension MessagesInboxViewController: TabReselectScrolling {
+    /// The page in front back to its first row, under the header.
+    func scrollToTopForTabReselect() {
+        guard let list = activeSurface?.listScrollView else { return }
+        Self.scrollToTop(list, animated: true)
+    }
+
+    /// A list back to its first row, under whatever it is inset by. Never
+    /// downwards: a list pulled past its top is already there.
+    static func scrollToTop(_ list: UIScrollView, animated: Bool) {
+        let top = -list.adjustedContentInset.top
+        guard list.contentOffset.y > top + 0.5 else { return }
+        list.setContentOffset(CGPoint(x: list.contentOffset.x, y: top), animated: animated)
+    }
+}

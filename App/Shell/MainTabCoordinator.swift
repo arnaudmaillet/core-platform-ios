@@ -542,7 +542,15 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// response; the selection is refused and the menu opens instead.
     /// VoiceOver and a hardware keyboard arrive by the same road.
     func tabBarController(_ tabBarController: UITabBarController, shouldSelectTab tab: UITab) -> Bool {
-        guard tab === createItem.tab else { return true }
+        guard tab === createItem.tab else {
+            // A re-tap on the tab already showing brings its root back to the
+            // top (#1309); UIKit still pops a pushed stack on its own.
+            TabReselect.target(
+                tappedSelectedTab: tab === tabBarController.selectedTab,
+                stack: tabBarController.selectedViewController as? UINavigationController
+            )?.scrollToTopForTabReselect()
+            return true
+        }
         // A guest's bubble is "Sign in" (#626): one tap, the login sheet — no
         // menu of things they cannot do yet.
         if createItem.isSignIn {
