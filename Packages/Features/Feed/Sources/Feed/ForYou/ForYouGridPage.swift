@@ -11,13 +11,10 @@ import UIKit
 /// One format page of the For You pager: a **real scrolling** collection view
 /// over the shared `PostGrid` layouts.
 ///
-/// This is where a discovery root parts company with the profile gallery.
-/// `ProfileGalleryGridView` is deliberately non-scrolling and self-sizing,
-/// because the profile's outer scroll view owns all vertical motion and one
-/// fetch fills it. A root tab has no outer scroll view, pages indefinitely, and
-/// must recycle cells — so it hosts the same pattern in an ordinary scrolling
-/// collection view instead. The pattern and the cells are shared; the host is
-/// not.
+/// ⚠️ THE ONE GRID FOR EVERY MEDIA TILE (epic #1269): For You's own page, and —
+/// vended through `PostGridPage` — the profile's pages and media gallery
+/// (#1273), the Discover gallery, search, the lists and the place page. A
+/// host under a floating header hosts it (`setHostedInsets`).
 /// Lets a layout built in `init` ask the page that owns it a question, without
 /// either holding the other alive. See `ForYouGridPage.init`.
 @MainActor
@@ -1422,8 +1419,7 @@ final class ForYouGridPage: UIView {
         // dragged to the top, a card cut off at the head dragged to the top.
         //
         // So a host whose insets are LAYOUT must say what actually covers this
-        // page. `ProfileGalleryGridView` reached the same conclusion first and
-        // states it in the same words; `nil` keeps For You on the inset.
+        // page — the profile, the place page; `nil` keeps For You on the inset.
         //
         // It matters more here than anywhere: this page deliberately does not
         // scroll at the LANDING (see `ForYouGridZoomSource`), so where the

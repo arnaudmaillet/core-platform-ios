@@ -6,14 +6,6 @@ import MediaPlayback
 import PostGrid
 import UIKit
 
-/// How a TILE meets the window closing onto it: its corner and its fill. The
-/// rest of a window's description is a row's — see
-/// `ProfileGalleryGridView.tileRevealShape`.
-struct ProfileTileRevealShape: Equatable {
-    let cornerRadius: CGFloat
-    let fill: UIColor
-}
-
 /// The profile's photos and videos as the media mosaic — what "View all"
 /// under one of Posts' chunks pushes (#631), the page that used to be the
 /// Gallery tab.

@@ -80,6 +80,11 @@ extension ForYouGridPage {
 
     var debugViewportHeight: CGFloat { collectionView.bounds.height }
 
+    /// Where `id` sits in the collection view, realized or not.
+    func debugIndexPath(for id: PostID) -> IndexPath? {
+        posts.firstIndex { $0.id == id }.map(indexPath(for:))
+    }
+
     /// The topmost realized item, and where its top edge is in `space` — what
     /// `-list-jump-trace` follows across a post's open and close.
     func debugFirstVisibleItem(in space: UICoordinateSpace) -> (id: String, minY: CGFloat)? {

@@ -1,6 +1,7 @@
 import MediaCore
 import Testing
 import UIKit
+@testable import Feed
 @testable import Profile
 
 /// The profile's gallery pages, and the pager over them, hide the system's top
@@ -18,9 +19,7 @@ struct ProfileClearHeaderEdgeTests {
     }
 
     @Test func aGalleryPageHidesTheEffectUnderTheHeader() throws {
-        let page = ProfileGalleryGridView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid, tab: .format(.activity)
-        )
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
         let list = try #require(page.subviews.compactMap { $0 as? UICollectionView }.first)
         #expect(list.topEdgeEffect.isHidden)
     }

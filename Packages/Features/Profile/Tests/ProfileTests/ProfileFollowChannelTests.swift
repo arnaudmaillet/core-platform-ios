@@ -9,6 +9,7 @@ import MediaCore
 import PostGrid
 import Testing
 import UIKit
+@testable import Feed
 @testable import Profile
 
 /// "Follow from Search → the profile header and the feed's '+' agree"
@@ -94,9 +95,7 @@ struct ProfileFollowChannelTests {
     /// own profile" drew no "..."; once it settles the rows are asked again,
     /// and Edit / Delete appear without the row being configured again.
     @Test func theOwnProfilesRowsGainTheirMenuWhenTheRelationshipSettles() throws {
-        let page = ProfileGalleryGridView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list, tab: .format(.activity)
-        )
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
         var isOwnProfile = false
         page.authorMenuActions = { _ in isOwnProfile ? [.edit {}, .delete {}] : [] }
         page.frame = CGRect(x: 0, y: 0, width: 402, height: 874)

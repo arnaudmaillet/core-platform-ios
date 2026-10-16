@@ -9,9 +9,10 @@ import UIKit
 @testable import Feed
 @testable import Profile
 
-/// #951 on the profile's gallery: the tap parks the tile's clip, a close from
-/// another post lands it back on the tile, and the round trip's scope ends
-/// when the screen is the viewer's again.
+/// #951 on the profile, through the screen's open: the round trip's scope
+/// ends when an open is refused, and the open hands the shared flight the
+/// whole tile contract (#1273). The page's own parking and landing are For
+/// You's, pinned in Feed (`ReturnPlayersEverywhereTests`).
 @MainActor
 struct ProfileReturnPlaybackTests {
     private struct SilentFetcher: ImageFetching {
@@ -49,13 +50,6 @@ struct ProfileReturnPlaybackTests {
         func posts(ids: [String]) async throws -> [GalleryPost] { [] }
     }
 
-    private static func picture() -> UIImage {
-        UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
-            UIColor.systemTeal.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
-        }
-    }
-
     /// Portrait clips, so every brick of the media mosaic autoplays.
     private func videos(_ count: Int = 12) -> [GalleryPost] {
         (0..<count).map { index in
@@ -66,102 +60,6 @@ struct ProfileReturnPlaybackTests {
                 aspectRatio: 0.75, caption: "clip \(index)", publishedAtMS: Int64(10_000 - index)
             )
         }
-    }
-
-    private func settle(_ condition: () -> Bool) async {
-        for _ in 0..<1_000 {
-            if condition() { return }
-            try? await Task.sleep(nanoseconds: 5_000_000)
-        }
-    }
-
-    /// The media mosaic in a window, its first tile playing.
-    private func playingGallery(
-        pool: VideoPlaybackController
-    ) async throws -> (page: ProfileGalleryGridView, tapped: GalleryPost, tile: VideoRenderView, window: UIWindow) {
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
-        let page = ProfileGalleryGridView(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            style: .grid, tab: .format(.media), videoPlayback: pool
-        )
-        page.frame = window.bounds
-        window.addSubview(page)
-        window.isHidden = false
-        page.layoutIfNeeded()
-        page.setCorpusComplete(true)
-        let posts = videos()
-        page.render(.content(posts))
-        page.layoutIfNeeded()
-        page.collectionView.layoutIfNeeded()
-        for cell in page.collectionView.visibleCells {
-            (cell as? any GridPlaybackCell)?.applyCover(Self.picture())
-        }
-        page.setAutoplayActive(true)
-        // The tile a finger would tap: one that is playing — which ones the
-        // ranking chose is the page's business.
-        func playing() -> (GalleryPost, VideoRenderView)? {
-            for post in posts {
-                guard let path = page.debugIndexPath(for: post.id),
-                      let surface = (page.collectionView.cellForItem(at: path) as? any GridPlaybackCell)?
-                        .loadedVideoRenderView,
-                      pool.hasPlayer(in: surface)
-                else { continue }
-                return (post, surface)
-            }
-            return nil
-        }
-        // Reconciled again until it takes: the app-wide autoplay gate is other
-        // suites' to flip, and a reconcile is idempotent.
-        await settle {
-            page.setAutoplayActive(true)
-            return playing() != nil
-        }
-        let (tapped, tile) = try #require(playing(), "precondition: a tile is playing")
-        return (page, tapped, tile, window)
-    }
-
-    @Test func theTapParksTheTilesClipAndStopsItsOwnPlayer() async throws {
-        let pool = VideoPlaybackController(source: FixedVideoSource(
-            url: FileManager.default.temporaryDirectory.appendingPathComponent("profile-return.mp4")
-        ))
-        let (page, tapped, tile, window) = try await playingGallery(pool: pool)
-        defer { window.isHidden = true }
-
-        page.beginReturnHandoff(of: tapped.id)
-        #expect(!pool.hasPlayer(in: tile), "the tapped tile kept decoding behind the feed")
-        await settle { pool.returnPlaybackCount == 1 }
-        #expect(pool.returnPlaybackCount == 1, "the tap parked nothing")
-        page.setAutoplayActive(false)
-
-        let flying = try #require(page.returnFlightSurface(for: tapped.id))
-        #expect(page.landReturnPlayback(flying, for: tapped.id))
-        #expect(pool.returnPlaybackCount == 0, "the landing did not claim the parked player")
-        #expect(pool.hasPlayer(in: tile))
-
-        // The screen is the viewer's again: the scope ends and the tile keeps
-        // the clip it landed.
-        page.setAutoplayActive(true)
-        #expect(pool.hasPlayer(in: tile))
-        // ⚠️ That appearance ran in the landing's own turn (#963): the hold,
-        // asked after it, still waits for the clip, not for the still.
-        #expect(!page.isReturnLandingReady(for: tapped.id), "the hold settled on the still")
-    }
-
-    /// Nothing parked: the close lands on the still, and the hold waits for it
-    /// alone; the scope's end releases a player nobody landed.
-    @Test func withNothingParkedTheCloseLandsOnTheStill() async throws {
-        let pool = VideoPlaybackController(source: FixedVideoSource(
-            url: FileManager.default.temporaryDirectory.appendingPathComponent("profile-return.mp4")
-        ))
-        let (page, tapped, _, window) = try await playingGallery(pool: pool)
-        defer { window.isHidden = true }
-        page.beginReturnHandoff(of: tapped.id)
-        await settle { pool.returnPlaybackCount == 1 }
-        page.setAutoplayActive(false)
-        page.setAutoplayActive(true)
-        #expect(pool.returnPlaybackCount == 0, "an unused return player outlived the trip")
-        #expect(page.returnFlightSurface(for: tapped.id) == nil)
-        #expect(page.isReturnLandingReady(for: tapped.id))
     }
 
     /// The page the profile draws its media on (#1273): For You's, with the

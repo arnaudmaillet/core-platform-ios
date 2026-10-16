@@ -1,4 +1,5 @@
 import CoreGraphics
+import PostGrid
 import Testing
 @testable import Profile
 
@@ -21,11 +22,11 @@ struct ProfileScrollDetentsTests {
     /// The nearest detent to where the scroll would have stopped.
     @Test func aReleaseRestsOnTheNearestDetent() {
         let detents: [CGFloat] = [0, 188, 600]
-        #expect(ProfileScrollDetents.snapped(target: 40, detents: detents) == 0)
-        #expect(ProfileScrollDetents.snapped(target: 150, detents: detents) == 188)
-        #expect(ProfileScrollDetents.snapped(target: 300, detents: detents) == 188)
-        #expect(ProfileScrollDetents.snapped(target: 500, detents: detents) == 600)
-        #expect(ProfileScrollDetents.snapped(target: 600, detents: detents) == 600)
+        #expect(ScrollDetents.snapped(target: 40, detents: detents) == 0)
+        #expect(ScrollDetents.snapped(target: 150, detents: detents) == 188)
+        #expect(ScrollDetents.snapped(target: 300, detents: detents) == 188)
+        #expect(ScrollDetents.snapped(target: 500, detents: detents) == 600)
+        #expect(ScrollDetents.snapped(target: 600, detents: detents) == 600)
     }
 
     /// A release heading a little past the first post is drawn back onto
@@ -33,11 +34,11 @@ struct ProfileScrollDetentsTests {
     /// pull.
     @Test func theListBeyondTheHeaderIsFree() {
         let detents: [CGFloat] = [0, 188, 600]
-        #expect(ProfileScrollDetents.snapped(target: 601, detents: detents) == 600)
-        #expect(ProfileScrollDetents.snapped(target: 600 + ProfileScrollDetents.beyondSlack, detents: detents) == 600)
-        #expect(ProfileScrollDetents.snapped(target: 600 + ProfileScrollDetents.beyondSlack + 1, detents: detents) == nil)
-        #expect(ProfileScrollDetents.snapped(target: 2000, detents: detents) == nil)
-        #expect(ProfileScrollDetents.snapped(target: -30, detents: detents) == nil)
-        #expect(ProfileScrollDetents.snapped(target: 100, detents: []) == nil)
+        #expect(ScrollDetents.snapped(target: 601, detents: detents) == 600)
+        #expect(ScrollDetents.snapped(target: 600 + ScrollDetents.beyondSlack, detents: detents) == 600)
+        #expect(ScrollDetents.snapped(target: 600 + ScrollDetents.beyondSlack + 1, detents: detents) == nil)
+        #expect(ScrollDetents.snapped(target: 2000, detents: detents) == nil)
+        #expect(ScrollDetents.snapped(target: -30, detents: detents) == nil)
+        #expect(ScrollDetents.snapped(target: 100, detents: []) == nil)
     }
 }
