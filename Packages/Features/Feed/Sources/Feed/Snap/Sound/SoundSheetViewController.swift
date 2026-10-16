@@ -166,11 +166,22 @@ final class SoundSheetViewController: UIViewController {
         /// (`SoundSheetAutoplay`, #884) — nil for a photograph, words or a
         /// placeholder.
         let videoURL: URL?
+        /// The post itself, once known — what the standard tile draws: its
+        /// picture, and its author, caption and likes by size (#1280).
+        let post: GalleryPost?
+
+        /// ⚠️ THE ONE TILE CONTRACT (#1280, epic #1269): a loaded MEDIA post is
+        /// drawn by the standard tile (`PostGridTileCell`), as on every other
+        /// surface. A text post and a placeholder keep this sheet's own tile.
+        var drawsStandardTile: Bool {
+            guard isLoaded, let post else { return false }
+            return post.kind != .text
+        }
 
         init(
             postID: PostID, thumbnailURL: URL?, caption: String?,
             isOriginal: Bool = false, isLoaded: Bool = true, likeCount: Int64? = nil,
-            videoURL: URL? = nil
+            videoURL: URL? = nil, post: GalleryPost? = nil
         ) {
             self.postID = postID
             self.thumbnailURL = thumbnailURL
@@ -179,6 +190,13 @@ final class SoundSheetViewController: UIViewController {
             self.isLoaded = isLoaded
             self.likeCount = likeCount
             self.videoURL = videoURL
+            self.post = post
+        }
+
+        func hash(into hasher: inout Hasher) {
+            hasher.combine(postID)
+            hasher.combine(isLoaded)
+            hasher.combine(likeCount)
         }
     }
 
@@ -876,7 +894,9 @@ final class SoundSheetViewController: UIViewController {
         )
         section.orthogonalScrollingBehavior = .continuousGroupLeadingBoundary
         section.interGroupSpacing = gutter
-        section.contentInsets = .init(top: 0, leading: gutter, bottom: bottom, trailing: gutter)
+        // Room above the tiles for "Original" across a tile's top edge: the
+        // row's own scroll view clips what reaches past it (#1280).
+        section.contentInsets = .init(top: ribbonRoom, leading: gutter, bottom: bottom, trailing: gutter)
         // Called from inside a layout pass: the listener defers its work.
         section.visibleItemsInvalidationHandler = { _, _, _ in onScroll() }
         return section
@@ -917,8 +937,27 @@ final class SoundSheetViewController: UIViewController {
 
     /// A row tile's height: 3:4. What the rows lay out AND what the collapsed
     /// detent counts — one function, so they cannot disagree.
+    /// What the tiles leave clear above them: half the "Original" chip that
+    /// straddles a tile's top edge (`TileRibbonView.overhang`, #1280).
+    static var ribbonRoom: CGFloat { TileRibbonView.overhang.rounded(.up) }
+
     static func rowTileHeight(width: CGFloat) -> CGFloat {
         (rowTileWidth(width: width) * 4 / 3).rounded()
+    }
+
+    /// The standard tile as the sheet wears it — shared by the sheet's rows
+    /// and its pushed gallery (#1280): the post with the sheet's own count,
+    /// its words by size (`PostTileInfo`), the sheet's corner, and
+    /// "Original" across the top edge of the post the sound was first
+    /// published with.
+    static func configureStandardTile(
+        _ cell: PostGridTileCell, tile: Tile, post: GalleryPost, pipeline: ImagePipeline
+    ) {
+        var drawn = post
+        if let likes = tile.likeCount { drawn.reactionCount = likes }
+        cell.cornerRadius = SoundSheetTileCell.cornerRadius
+        cell.configure(with: drawn, imagePipeline: pipeline, showsInfo: true)
+        cell.setRibbon(tile.isOriginal ? "Original" : nil, symbolName: "music.note")
     }
 
     private func configureDataSource() {
@@ -927,6 +966,16 @@ final class SoundSheetViewController: UIViewController {
             [weak self] cell, _, id in
             guard let tile = self?.tileByID[id] else { return }
             cell.configure(tile, pipeline: pipeline)
+            // A tile plays once its poster is up: its arrival asks again.
+            cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
+        }
+        // ⚠️ A LOADED MEDIA POST IS THE STANDARD TILE (#1280, epic #1269): its
+        // picture, its words by size, its likes — and "Original" across its
+        // top edge, as the shop marks its best pack.
+        let mediaRegistration = UICollectionView.CellRegistration<PostGridTileCell, PostID> {
+            [weak self] cell, _, id in
+            guard let self, let tile = tileByID[id], let post = tile.post else { return }
+            Self.configureStandardTile(cell, tile: tile, post: post, pipeline: pipeline)
             // A tile plays once its poster is up: its arrival asks again.
             cell.onCoverLoaded = { [weak self] in self?.reconcileAutoplay() }
         }
@@ -943,12 +992,16 @@ final class SoundSheetViewController: UIViewController {
             Self.configure(header, for: section)
             header.onTap = { [weak self] in self?.showSection(kind) }
         }
-        dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { view, path, item in
+        dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { [weak self] view, path, item in
             switch item {
             case .sound:
                 view.dequeueConfiguredReusableCell(using: soundRegistration, for: path, item: item)
             case .tile(let id, _):
-                view.dequeueConfiguredReusableCell(using: tileRegistration, for: path, item: id)
+                if self?.tileByID[id]?.drawsStandardTile == true {
+                    view.dequeueConfiguredReusableCell(using: mediaRegistration, for: path, item: id)
+                } else {
+                    view.dequeueConfiguredReusableCell(using: tileRegistration, for: path, item: id)
+                }
             }
         }
         dataSource.supplementaryViewProvider = { view, _, path in
@@ -982,6 +1035,11 @@ final class SoundSheetViewController: UIViewController {
     /// (`refreshFittedHeight`) — an input changing, never a layout pass.
     func update(sections newSections: [SoundSheetSection], tiles newTiles: [Tile]) {
         let changed = Set(newTiles.filter { tileByID[$0.postID] != nil && tileByID[$0.postID] != $0 }.map(\.postID))
+        // A placeholder that arrives as a media post changes CELL (#1280):
+        // reloaded, since a reconfigure keeps the cell it has.
+        let swapped = Set(changed.filter { id in
+            tileByID[id]?.drawsStandardTile != newTiles.first { $0.postID == id }?.drawsStandardTile
+        })
         sections = newSections
         tiles = newTiles
         tileByID = Dictionary(newTiles.map { ($0.postID, $0) }, uniquingKeysWith: { first, _ in first })
@@ -989,7 +1047,10 @@ final class SoundSheetViewController: UIViewController {
         var snapshot = makeSnapshot()
         // Every item of a changed post: in the row, in the grid, or both.
         snapshot.reconfigureItems(snapshot.itemIdentifiers.filter {
-            if case .tile(let id, _) = $0 { changed.contains(id) } else { false }
+            if case .tile(let id, _) = $0 { changed.contains(id) && !swapped.contains(id) } else { false }
+        })
+        snapshot.reloadItems(snapshot.itemIdentifiers.filter {
+            if case .tile(let id, _) = $0 { swapped.contains(id) } else { false }
         })
         dataSource.apply(snapshot, animatingDifferences: view.window != nil)
         lookahead.setNeedsPlan()
@@ -1114,7 +1175,7 @@ final class SoundSheetViewController: UIViewController {
     /// is no row.
     static func popularRowBottom(_ metrics: DetentMetrics) -> CGFloat {
         guard metrics.hasPopular else { return soundBottom(metrics) }
-        return soundBottom(metrics) + metrics.sectionHeaderHeight + rowTileHeight(width: metrics.width)
+        return soundBottom(metrics) + metrics.sectionHeaderHeight + ribbonRoom + rowTileHeight(width: metrics.width)
     }
 
     /// The "Recent" title's top in CONTENT coordinates: the section gap
@@ -1690,7 +1751,7 @@ final class SoundSheetViewController: UIViewController {
             guard case .tile(let id, let kind) = dataSource.itemIdentifier(for: path),
                   isRevealed(kind, item: path.item),
                   let tile = tileByID[id],
-                  let cell = collectionView.cellForItem(at: path) as? SoundSheetTileCell
+                  let cell = collectionView.cellForItem(at: path) as? any SoundSheetTileDrawing
             else { return nil }
             return .init(tile: tile, cell: cell)
         }
@@ -1727,13 +1788,24 @@ final class SoundSheetViewController: UIViewController {
         case .sheet(let section): kind = section
         }
         let fromGallery = gallery != nil
-        let cell: () -> SoundSheetTileCell? = { [weak self] in
+        let cell: () -> (any SoundSheetTileDrawing)? = { [weak self] in
             fromGallery ? gallery?.tileCell(for: id) : self?.tileCell(for: id, in: kind)
         }
+        // The standard tile hides whole for a flight; the sheet's own knows
+        // its own way (#1280).
+        let conceal: (Bool) -> Void = { concealed in
+            switch cell() {
+            case let own as SoundSheetTileCell: own.setConcealed(concealed)
+            case let standard?: standard.isHidden = concealed
+            case nil: break
+            }
+        }
+        let standard = tile.drawsStandardTile ? tile.post : nil
+        let pipeline = imagePipeline
         let frame: (UICoordinateSpace) -> CGRect? = { [weak self] space in
             fromGallery ? gallery?.tileFrame(for: id, in: space) : self?.tileFrame(for: id, in: kind, space: space)
         }
-        let cover = cell()?.cover
+        let cover = cell()?.renderedCover
         let presenter: UIViewController = gallery ?? self
         // Every tile is the same shape, and the one measured at the tap
         // stands in for a close that finds it scrolled out.
@@ -1741,9 +1813,16 @@ final class SoundSheetViewController: UIViewController {
         let traits = cell()?.traitCollection ?? traitCollection
         let standIn: () -> UIView? = {
             guard let size = cell()?.bounds.size ?? tappedSize else { return nil }
+            if let standard {
+                // The standard tile's twin, its words by size (#1280).
+                return PostGridTileStandInView(
+                    post: standard, size: size, cornerRadius: SoundSheetTileCell.cornerRadius,
+                    imagePipeline: pipeline, showsInfo: true
+                )
+            }
             // The picture the tile shows NOW, or the one it showed at the tap.
             return SoundSheetTileCell.makeStandIn(
-                for: tile, cover: cell()?.cover ?? cover, size: size, traits: traits
+                for: tile, cover: cell()?.renderedCover ?? cover, size: size, traits: traits
             )
         }
         // ⚠️ THE CARD WEARS THE TILE'S COUNT. A `.tile` flight card draws the
@@ -1772,7 +1851,7 @@ final class SoundSheetViewController: UIViewController {
                 guard let presenter else { return false }
                 return frame(presenter.view) != nil
             },
-            setConcealed: { concealed in cell()?.setConcealed(concealed) },
+            setConcealed: { concealed in conceal(concealed) },
             // ⚠️ THE ONE TILE CONTRACT (#1280, epic #1269): the card takes off
             // PLAYING on the tile's own surface, and a close onto the same
             // post hands it back — the playhead continues, the card waiting
@@ -1797,8 +1876,8 @@ final class SoundSheetViewController: UIViewController {
                 alignsPageToSource: false,
                 pageFit: .covering,
                 cornerRadius: SoundSheetTileCell.cornerRadius,
-                fill: SoundSheetTileCell.standInGround(traits: traits),
-                setConcealed: { concealed in cell()?.setConcealed(concealed) }
+                fill: standard.map(PostGridTileCell.fillColor(for:)) ?? SoundSheetTileCell.standInGround(traits: traits),
+                setConcealed: { concealed in conceal(concealed) }
             ),
             // ⚠️ THE TILE'S OWN CORNER, AND ITS CURVE. Left to the style, the
             // card rounded as a For You brick (16pt) and landed on a 12pt tile:
@@ -1809,7 +1888,7 @@ final class SoundSheetViewController: UIViewController {
             adoptLandingLiveMedia: { view in
                 guard let view = view as? VideoRenderView, let videoURL, let tileCell = cell() else { return }
                 // In a drawing hierarchy first, or the surface lands invisible.
-                tileCell.setConcealed(false)
+                conceal(false)
                 screenAutoplay()?.playback.adoptTileLanding(view, for: id, url: videoURL, cell: tileCell)
             },
             landingMediaIsReady: {
@@ -1835,14 +1914,18 @@ final class SoundSheetViewController: UIViewController {
             // grows, so a close does not pop them on at the landing.
             restingOverlay: {
                 guard let size = cell()?.bounds.size ?? tappedSize else { return nil }
+                // The standard tile's words, faded in on a close (#1280).
+                if let standard {
+                    return PostGridTileCell.makeInfoOverlay(for: standard, restingSize: size, imagePipeline: pipeline)
+                }
                 return SoundSheetTileCell.makeBadgeOverlay(for: tile, size: size)
             }
         )
     }
 
-    private func tileCell(for id: PostID, in kind: SoundSheetSection.Kind) -> SoundSheetTileCell? {
+    private func tileCell(for id: PostID, in kind: SoundSheetSection.Kind) -> (any SoundSheetTileDrawing)? {
         guard let path = dataSource.indexPath(for: .tile(id, kind)) else { return nil }
-        return collectionView.cellForItem(at: path) as? SoundSheetTileCell
+        return collectionView.cellForItem(at: path) as? any SoundSheetTileDrawing
     }
 
     /// The tile's rect in `space` while it is on screen — nil once it has

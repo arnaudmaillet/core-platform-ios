@@ -441,6 +441,41 @@ struct SoundSheetTests {
         )
     }
 
+    /// ⚠️ THE STANDARD TILE (#1280, epic #1269): a loaded MEDIA post is
+    /// `PostGridTileCell` — its words by size (`PostTileInfo`), "Original"
+    /// across its top edge for the post the sound was first published with —
+    /// and a text post keeps the sheet's own tile.
+    @Test func aLoadedMediaPostIsTheStandardTileAndWordsKeepTheirOwn() throws {
+        let controller = sheet(tiles: 3, original: 0)
+        let content = Self.content(3, original: 0)
+        let tiles = content.tiles.enumerated().map { index, tile in
+            let post = Self.galleryPost(tile.postID.rawValue, kind: index == 1 ? .text : .photo)
+            return Sheet.Tile(
+                postID: tile.postID, thumbnailURL: post.thumbnailURL, caption: post.caption,
+                isOriginal: tile.isOriginal, post: post
+            )
+        }
+        controller.update(sections: content.sections, tiles: tiles)
+        try laidOut(controller)
+        let grid = try grid(of: controller)
+        grid.layoutIfNeeded()
+        func cell(_ id: String) throws -> UICollectionViewCell {
+            let path = try #require(try dataSource(of: controller).indexPath(for: .tile(PostID(id), .popular)))
+            return try #require(grid.cellForItem(at: path))
+        }
+
+        let original = try #require(try cell("p0") as? PostGridTileCell, "a media post kept the sheet's own tile")
+        #expect(original.infoVariant == PostTileInfo.variant(for: original.bounds.size), "not the words by size")
+        let ribbon = try #require(original.debugRibbonFrame, "the original wears no mark")
+        #expect(abs(ribbon.midY) < 0.5, "the mark does not straddle the top edge")
+        #expect(abs(ribbon.midX - original.bounds.midX) < 0.5)
+
+        let photo = try #require(try cell("p2") as? PostGridTileCell)
+        #expect(photo.debugRibbonFrame == nil, "a post that is not the original wears the mark")
+
+        #expect(try cell("p1") is SoundSheetTileCell, "a text post lost its own tile")
+    }
+
     /// ⚠️ THE ONE TILE CONTRACT (#1280, epic #1269): a video tile's card takes
     /// off on the tile's own surface, and a close onto the same post hands it
     /// back, the card waiting for the tile to draw.
@@ -915,10 +950,10 @@ struct SoundSheetTests {
             hasPopular: true
         )
         #expect(Sheet.soundBottom(metrics) == 96 + gap)
-        #expect(Sheet.popularRowBottom(metrics) == 96 + gap + 44 + 144)
-        #expect(Sheet.recentTitleTop(metrics) == 96 + gap + 44 + 144 + gap,
+        #expect(Sheet.popularRowBottom(metrics) == 96 + gap + 44 + Sheet.ribbonRoom + 144)
+        #expect(Sheet.recentTitleTop(metrics) == 96 + gap + 44 + Sheet.ribbonRoom + 144 + gap,
                 "no section gap between the row and the Recent title")
-        #expect(Sheet.foldBottom(metrics) == Sheet.topInset + 96 + gap + 44 + 144 + gap + 44 + 41)
+        #expect(Sheet.foldBottom(metrics) == Sheet.topInset + 96 + gap + 44 + Sheet.ribbonRoom + 144 + gap + 44 + 41)
         #expect(Sheet.collapsedDetentHeight(metrics) == (Sheet.foldBottom(metrics) + 52.2).rounded(.up))
         #expect(Sheet.revealLine(metrics) == Sheet.recentTitleTop(metrics), "the Recent title does not fade")
 
@@ -927,7 +962,7 @@ struct SoundSheetTests {
         #expect(Sheet.gridHeight(width: 402, count: 3) == 164)
         #expect(Sheet.gridHeight(width: 402, count: 4) == 2 * 164 + Sheet.gutter)
         #expect(Sheet.contentHeight(metrics, recentCount: 5)
-                == 96 + gap + 44 + 144 + gap + 44 + 2 * 164 + Sheet.gutter + Sheet.contentBottom)
+                == 96 + gap + 44 + Sheet.ribbonRoom + 144 + gap + 44 + 2 * 164 + Sheet.gutter + Sheet.contentBottom)
         #expect(Sheet.fittedDetentHeight(metrics, recentCount: 5)
                 == (Sheet.topInset + Sheet.contentHeight(metrics, recentCount: 5) + 52.2).rounded(.up))
         // One post: still taller than collapsed — the sheet always grows.
@@ -959,7 +994,7 @@ struct SoundSheetTests {
         // The row alone: the sound and the whole row, then the gutter.
         var rowOnly = metrics
         rowOnly.hasRecent = false
-        #expect(Sheet.foldBottom(rowOnly) == Sheet.topInset + 96 + gap + 44 + 144 + Sheet.contentBottom)
+        #expect(Sheet.foldBottom(rowOnly) == Sheet.topInset + 96 + gap + 44 + Sheet.ribbonRoom + 144 + Sheet.contentBottom)
         #expect(Sheet.fittedDetentHeight(rowOnly, recentCount: 0) == Sheet.collapsedDetentHeight(rowOnly) + 1)
         #expect(Sheet.collapsedDetentHeight(soundOnly) < Sheet.collapsedDetentHeight(rowOnly))
 
@@ -1005,7 +1040,9 @@ struct SoundSheetTests {
         #expect(title.height == metrics.sectionHeaderHeight)
         let popular = try tileIDs(in: .popular, of: controller)
         let row = try popular.prefix(4).map { try frame(of: .tile(PostID($0), .popular), in: controller) }
-        #expect(row.allSatisfy { abs($0.minY - title.maxY) < 0.5 }, "the row is not one line under its title")
+        // The row leaves "Original"'s overhang clear under its title (#1280).
+        #expect(row.allSatisfy { abs($0.minY - title.maxY - Sheet.ribbonRoom) < 0.5 },
+                "the row is not one line under its title")
         let recent = try headerFrame(of: .recent, in: controller)
         #expect(abs(recent.minY - row[0].maxY - metrics.sectionGap) < 0.5,
                 "no section gap between the row and the Recent title")

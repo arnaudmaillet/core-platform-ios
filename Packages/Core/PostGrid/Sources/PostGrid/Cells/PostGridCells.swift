@@ -2706,8 +2706,51 @@ public final class PostGridTileCell: UICollectionViewCell {
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    // MARK: - The ribbon
+
+    /// A mark across the top edge (`TileRibbonView`) — on the CELL, not its
+    /// content view, which clips: the chip straddles the edge. Built on first
+    /// use; most tiles never wear one.
+    private var ribbon: TileRibbonView?
+
+    /// Wears `title` (and `symbolName`) as a chip across the tile's top
+    /// edge, or none for nil — the sound sheet's "Original" (#1280).
+    public func setRibbon(_ title: String?, symbolName: String? = nil) {
+        guard let title else {
+            ribbon?.isHidden = true
+            return
+        }
+        let chip = ribbon ?? makeRibbon()
+        chip.set(title: title, symbolName: symbolName)
+        chip.isHidden = false
+    }
+
+    private func makeRibbon() -> TileRibbonView {
+        let chip = TileRibbonView()
+        chip.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(chip)
+        NSLayoutConstraint.activate([
+            chip.centerYAnchor.constraint(equalTo: topAnchor),
+            chip.centerXAnchor.constraint(equalTo: centerXAnchor),
+            chip.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor, constant: -8),
+        ])
+        ribbon = chip
+        return chip
+    }
+
+    #if DEBUG
+    /// The chip's frame in the cell, nil when it wears none.
+    public var debugRibbonFrame: CGRect? {
+        guard let ribbon, !ribbon.isHidden else { return nil }
+        layoutIfNeeded()
+        return ribbon.frame
+    }
+    #endif
+
     override public func prepareForReuse() {
         super.prepareForReuse()
+        // The mark was this post's; the next host says whether it wants one.
+        ribbon?.isHidden = true
         // A recycled cell must come back VISIBLE. A hero flight hides the tile
         // it is flying from, and that hide lives on the cell — so a cell
         // recycled while hidden carries the invisibility to whatever post it is
