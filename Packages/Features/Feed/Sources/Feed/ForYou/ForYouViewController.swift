@@ -774,25 +774,20 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // words, at another post's height, and revealing a row the viewer had
         // not been reading.
         //
-        // A captured `var` rather than a parameter, because the hooks are
-        // escaping closures that all have to see the same answer, and the
-        // answer is decided between them: `willStageDismissal` adopts the
-        // landed post into the departure slot and rewrites this, and everything
-        // downstream — the rect, the stand-in, the concealment — reads it back.
-        // It is the same shape `ForYouGridZoomSource.anchorID` already has for
-        // the hero.
-        var anchorID = postID
+        // The row the window opened from, and the one it closes onto whatever
+        // the viewer paged to (#1283): the rect, the stand-in and the
+        // concealment all read it.
+        let anchorID = postID
         func sourceFrame(_ space: UICoordinateSpace) -> CGRect? {
             page.textRowFrame(for: anchorID, in: space)
         }
         /// The rect this window closes onto — the text row's, and the ROW's
         /// when the anchor turns out not to be a text row at all.
         ///
-        /// ⚠️ THE ANCHOR CAN CHANGE KIND UNDER THIS WINDOW. It is re-pointed at
-        /// whatever the viewer paged to, and `textRowFrame` refuses a row with
-        /// media on purpose (a row with a hero flies instead of opening as a
-        /// window). So a window that ends on a photograph asked for a rect,
-        /// was told nil, and closed into the middle of the screen.
+        /// ⚠️ `textRowFrame` refuses a row with media on purpose (a row with a
+        /// hero flies instead of opening as a window), so a window landing on
+        /// a media row would be told nil and close into the middle of the
+        /// screen: the row's own rect is the floor.
         ///
         /// Deliberately only for the CLOSE: the opening is still gated on a
         /// real text row, which is what decides that this window exists at all.
@@ -893,8 +888,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // nothing to align, no band, its own corner and floor. The stand-in is
         // the tile's twin (`ForYouGridPage.makeDismissStandIn`).
         //
-        // Stable for the window's life: on a list the anchor never moves, and
-        // on a mosaic — which may re-point it — every post is a tile.
+        // Stable for the window's life: the anchor never moves (#1283).
         let landsOnTile = page.drawsAsTile(postID)
         let landingPost = page.posts.first { $0.id == postID }
         textSlideDismissal.revealGeometry = TextRevealInstaller.geometry(
@@ -964,50 +958,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
                 willStageDismissal: { [weak self, weak page, weak feed] _ in
                     log("freeze    pre")
                     page?.beginHeroFreeze()
-                    // ⚠️ ONLY A MOSAIC MAY DO THIS — see
-                    // `ForYouGridPage.landsByAdoption`.
-                    //
-                    // On a grid the swap trades two bricks in a field of bricks
-                    // and costs no scrolling: the card flies home to the frame
-                    // it launched from. On a LIST it replaces the post that was
-                    // under the card with another one, which is the ranking
-                    // changing under a gesture the viewer made — and the
-                    // product rule for a list is that a close lands back on the
-                    // post the OPENING left from, with the order untouched.
-                    // A list therefore leaves `anchorID` alone: the tapped row
-                    // is still exactly where it was, already concealed by the
-                    // opening, and the window simply returns to it.
-                    //
-                    // Ordered first: `anchorID` is what the rect, the stand-in
-                    // and the concealment all resolve through, and every one of
-                    // them is read after this.
-                    if page?.landsByAdoption == true,
-                       let landed = (feed as? SnapFeedViewController)?.activePostID,
-                       landed != anchorID,
-                       page?.adoptForClose(
-                           landed, intoSlotOf: anchorID,
-                           orInsert: self?.viewModel.post(for: landed),
-                           // This close CARRIES the row, so the row stands aside.
-                           standingIn: true
-                       ) == true {
-                        // ⚠️ AND THE CONCEALMENT MOVES WITH THE SWAP.
-                        //
-                        // The window has been standing in for the row it opened
-                        // from since the opening — that row is hidden, which is
-                        // what stops the same post being on screen twice. The
-                        // swap has just put a DIFFERENT post in that slot, and
-                        // the flag still names the old one: the card the viewer
-                        // is returning to was visible under the window they
-                        // were dragging, while the card they had left sat
-                        // hidden somewhere further down.
-                        //
-                        // Reported from the first case tried — open text A,
-                        // page to text B, drag — and visible for the whole
-                        // gesture, so no end-of-close sweep can answer it. The
-                        // handover is `adoptForClose`'s, so both drivers get it
-                        // from one place.
-                        anchorID = landed
-                    }
+                    // HOME TO THE TAPPED ROW (#1283): the window returns to
+                    // the post the opening left from, already concealed by
+                    // the opening, and nothing in the list moves to meet it.
                     log("freeze   post")
                 },
                 dismissalDidEnd: { [weak self, weak page] committed in
@@ -1376,11 +1329,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // guard is `textRowFrame`, which REFUSES a row carrying media on
         // purpose, so rebuilding for a landed photo or video returned false and
         // cleared the reveal outright — the page then slid out as a strip while
-        // a stray card floated over the list. Filmed. And an adoption re-orders
-        // the very list this close is landing in.
+        // a stray card floated over the list. Filmed.
         //
-        // What moves instead is the ANCHOR: `willStageDismissal` re-points it,
-        // `closingFrame` finds that row whatever kind it turned out to be, and
+        // Nothing moves instead: the window closes onto the row it opened from
+        // (#1283), `closingFrame` finds it whatever kind it is, and
         // `pageFit: .covering` carries the departing page into it — which is
         // also what stops the veil and the borrowed band, both of them the
         // TAPPED post's, from being drawn over a landing that is somebody
@@ -1516,7 +1468,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // and never learns what a feed is.
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
             // And the post itself, for a landing this page no longer holds.
-            landedModel: { [weak self] id in self?.viewModel.post(for: id) },
             activeMediaPage: { [weak feed] in (feed as? SnapFeedViewController)?.activeMediaPage },
             // The gallery recedes; the tray and the title stay grounded.
             depthView: page,
@@ -1699,8 +1650,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     ///
     /// The mirror of `attachCardCloseAlongsideFlight`, and it needs no
     /// equivalent of that one's `prepareForSwipe`: a flight resolves everything
-    /// it carries through its source, which already adopts the landed post at
-    /// staging and declines a landing it cannot fly to.
+    /// it carries through its source, which lands on the tapped tile and
+    /// declines a landing it cannot fly to.
     ///
     /// Nothing here touches the opening. The controller is installed as the
     /// navigation delegate and then immediately shadowed by the slide, which is
@@ -1719,7 +1670,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             page: page,
             tappedID: tappedID,
             activePostID: { [weak feed] in (feed as? SnapFeedViewController)?.activePostID },
-            landedModel: { [weak self] id in self?.viewModel.post(for: id) },
             activeMediaPage: { [weak feed] in (feed as? SnapFeedViewController)?.activeMediaPage },
             depthView: page,
             // What the viewer is looking at, for a close that lands elsewhere —
@@ -1790,11 +1740,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     ///
     /// ⚠️ THEY DID DRIFT, and the drift only showed after paging DEEP. The
     /// flight path's copy asked `heroAppearance` for the post the viewer ENDED
-    /// on, which reads a REALIZED CELL — the trap `canLandHero(on:)` records
-    /// for the adoption. A mosaic adopts the settled post into the departure
-    /// slot whatever it is, so its hero accepts every landing; but a tile ~25
-    /// posts past the one tapped has no cell, so the copy answered "the hero
-    /// cannot land". The slide then claimed the grab, the chevron's pop was no
+    /// on, which reads a REALIZED CELL — but a tile ~25 posts past the one
+    /// tapped has no cell, so the copy answered "the hero cannot land". The slide then claimed the grab, the chevron's pop was no
     /// longer forwarded to the flight, and the feed left on a plain slide to
     /// the right. A shallow close never showed it: the settled tile was still
     /// realized next to the departure.
@@ -1823,17 +1770,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // a place page's flights make through `presentSnapFeedHero`, because
         // the copy a profile was missing is the defect that call ended. It
         // also resets whatever the last opening left on this driver.
-        //
-        // ⚠️ ADOPT FIRST, BUILD SECOND, and the order is not stylistic.
-        //
-        // The geometry's caption cut, its band and its stand-in are all read
-        // off the landed post's ROW, so that row has to be in the departure
-        // slot before any of them is asked for — otherwise they describe a card
-        // sitting somewhere off screen. `adoptPost` is what puts it there.
         textSlideDismissal.armAsCardCloseAlongsideFlight(on: feed) { [weak self] feed in
-            guard let self, let landed = (feed as? SnapFeedViewController)?.activePostID
-            else { return false }
-            stageCardClose(feed: feed, landed: landed, departureID: departureID)
+            guard let self, (feed as? SnapFeedViewController)?.activePostID != nil else { return false }
+            stageCardClose(feed: feed, departureID: departureID)
             return true
         }
         // ⚠️ THE MIRROR, ON THIS PATH TOO — and it was set on only one of the
@@ -1884,35 +1823,11 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// has paged onto a post with no media — the host half of
     /// `armAsCardCloseAlongsideFlight`, which has already decided that this is
     /// such a close and that it runs once.
-    private func stageCardClose(feed: UIViewController, landed: PostID, departureID: PostID) {
-        if landed != departureID {
-            // Only a mosaic moves its posts to meet a close — see
-            // `ForYouGridPage.landsByAdoption`. A list lands back on the
-            // post the opening left from, with its order untouched.
-            if page.landsByAdoption {
-                page.adoptPost(
-                    landed, intoSlotOf: departureID, orInsert: self.viewModel.post(for: landed)
-                )
-            }
-        }
-        // ⚠️ THE ROW THE WINDOW LANDS ON, WHICH IS NOT ALWAYS THE LANDED
-        // POST — and the two are the same question `adoptPost` above just
-        // answered.
-        //
-        // A mosaic has just MOVED the landed post into the departure slot,
-        // so there the landed post is what sits under the window. A list
-        // moved nothing: its rule is that a close returns to the post the
-        // opening left from, order untouched, so the window lands on
-        // `departureID` and anchoring on `landed` aimed it at a row the
-        // viewer had never scrolled to — unrealized, therefore nil, and the
-        // whole reveal was cleared.
-        //
-        // ⚠️ AND THIS CHANGE IS ONLY SAFE WITH THE GUARD ABOVE. Pointing the
-        // anchor here without widening the guard's predicate is the exact
-        // regression this replaces, from the other direction: the departure
-        // row carries media, `textRowFrame` refuses it, and the reveal is
-        // cleared again. Filmed twice, once each way.
-        let landingID = page.landsByAdoption ? landed : departureID
+    private func stageCardClose(feed: UIViewController, departureID: PostID) {
+        // ⚠️ THE ROW THE WINDOW LANDS ON IS THE DEPARTURE, whatever post the
+        // viewer paged to (#1283): a close comes home to the tapped tile, and
+        // nothing in the grid moves to meet it.
+        let landingID = departureID
         installTextReveal(feed: feed, postID: landingID, presenting: false)
         // ⚠️ AND HIDE THE ROW, which on this path nothing else has.
         //
@@ -1923,10 +1838,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // flies home over a grid already showing the same card, and the
         // landing has nothing to reveal. Measured as a close whose trace
         // carried a single `conceal=false` and no `conceal=true` at all.
-        //
-        // Last, because `adoptPost` deliberately un-hides both swapped
-        // cells — the hero's requirement, since a flight LANDS on one of
-        // them — and this is the opposite need.
         page.setRevealConcealed(true, for: landingID)
     }
 
