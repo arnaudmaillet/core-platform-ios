@@ -267,6 +267,10 @@ final class SnapAuthorIdentityView: UIView {
         let row = UIStackView(arrangedSubviews: [avatar, labelsStack])
         row.axis = .horizontal
         row.spacing = Spacing.sm
+        // The badge reaches half its width past the face (centred on its
+        // edge, #1277): the name starts clear of it, whatever the relation —
+        // a constant, so a badge arriving never moves the pill's width.
+        row.setCustomSpacing(AvatarStatusBadge.overhang + Spacing.xs, after: avatar)
         row.alignment = .center
         // Any width the pill has beyond (or short of) its content — the floor
         // while it hydrates, the cap — is the labels area's: its content is
@@ -298,14 +302,16 @@ final class SnapAuthorIdentityView: UIView {
         // otherwise touches fall through to the pill's author tap.
         // Trailing to trailing, not centre to trailing: only an edge-to-edge
         // offset mirrors under a right-to-left layout.
+        //
+        // ⚠️ CENTRED ON THE DISC'S EDGE, AT ITS MID-HEIGHT (the owner,
+        // 2026-10-16, #1277): the badge's centre sits over the far end of the
+        // face's disc, level with the face — no longer hanging off its
+        // bottom corner.
         statusBadge.constrain(in: contentView) { _ in
             statusBadge.trailingAnchor.constraint(
-                equalTo: avatar.trailingAnchor,
-                constant: AvatarStatusBadge.diameter / 2 - AvatarStatusBadge.cornerInset
+                equalTo: avatar.trailingAnchor, constant: AvatarStatusBadge.overhang
             )
-            statusBadge.centerYAnchor.constraint(
-                equalTo: avatar.bottomAnchor, constant: -AvatarStatusBadge.cornerInset
-            )
+            statusBadge.centerYAnchor.constraint(equalTo: avatar.centerYAnchor)
         }
         // 999, not required: the bar wraps items in its own fixed-height
         // container (36pt on iOS 26) via autoresizing constraints; a required
@@ -615,13 +621,13 @@ final class SnapAuthorIdentityView: UIView {
 /// BLACK DISC, WHITE GLYPH, in light and dark mode alike (owner, #968): the
 /// badge is one mark whatever the appearance or the photo behind the bar.
 private final class AvatarStatusBadge: UIButton {
-    /// The disc's side.
-    static let diameter: CGFloat = 16
-    /// How far inside the avatar's bounding square the badge's centre sits:
-    /// on its bottom-right corner, pulled in a little — the disc spills just
-    /// past the face, and stays inside the bar's 36pt item.
-    static let cornerInset: CGFloat = 5
-    /// The touch area around the disc: a 16pt disc is too small a target.
+    /// The disc's side — larger than the 16pt it was (the owner, 2026-10-16,
+    /// #1277).
+    static let diameter: CGFloat = 20
+    /// How far the badge reaches past the face's edge: half its side, its
+    /// centre being ON that edge.
+    static var overhang: CGFloat { diameter / 2 }
+    /// The touch area around the disc: a 20pt disc is still too small a target.
     private static let touchOutset: CGFloat = 8
 
     /// The badge — its disc and its mark are ONE circled symbol drawn with a
