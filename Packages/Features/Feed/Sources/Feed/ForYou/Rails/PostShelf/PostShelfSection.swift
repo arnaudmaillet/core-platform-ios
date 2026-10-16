@@ -1026,6 +1026,25 @@ extension PostShelfSection: UICollectionViewDelegateFlowLayout {
         guard cardID(in: collectionView, at: indexPath) == Self.viewAllID else { return size }
         return CGSize(width: ShelfViewAllCell.width, height: size.height)
     }
+
+    /// ⚠️ THE GAP, STATED HERE TOO (#1296 follow-up). Once this delegate sizes
+    /// the items, the layout stopped applying the row's `minimumLineSpacing`
+    /// and the cards touched (measured: spacing 16, gap 0) — filmed on device.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout collectionViewLayout: UICollectionViewLayout,
+        minimumLineSpacingForSectionAt section: Int
+    ) -> CGFloat {
+        LeadRowMetrics.itemGap
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        layout collectionViewLayout: UICollectionViewLayout,
+        minimumInteritemSpacingForSectionAt section: Int
+    ) -> CGFloat {
+        LeadRowMetrics.itemGap
+    }
 }
 
 extension PostShelfSection: UICollectionViewDelegate {

@@ -261,8 +261,8 @@ extension ProfileBellAndMapMenuTests {
         #expect(screen.debugBarIdentityPill.debugHandleFont.pointSize == BarIdentityStyle.handleFont.pointSize)
         // The profile's pill carries no relation badge (#1277).
         #expect(screen.debugBarIdentityPill.debugGeometry.badge == nil)
-        // But its face wears the relation's ring (#1298): followed, not mutual.
-        #expect(screen.debugBarIdentityPill.ringRelation == .following)
+        // And no ring either: the ring goes with the badge (the owner, 2026-10-16).
+        #expect(screen.debugBarIdentityPill.ringRelation == .none)
         let budget = screen.debugBarIdentityPill.widthCap
         #expect(budget > 0 && budget < screen.view.bounds.width, "the pill is not capped by the bar's room")
     }

@@ -14,7 +14,7 @@ final class ShelfViewAllCell: UICollectionViewCell {
     /// What VoiceOver calls it: the words the card does not draw.
     static let title = "View all"
     /// The card's width: a thumb's width, never a card's.
-    static let width: CGFloat = 56
+    static let width: CGFloat = 40
 
     private let chevron = UIImageView()
 
@@ -27,7 +27,7 @@ final class ShelfViewAllCell: UICollectionViewCell {
 
         chevron.image = UIImage(
             systemName: "chevron.right",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 20, weight: .semibold)
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
         )
         chevron.tintColor = .secondaryLabel
         chevron.contentMode = .center

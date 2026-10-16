@@ -134,6 +134,9 @@ struct PostShelfSectionTests {
         let chevron = try #require(shelf.mediaView.layoutAttributesForItem(at: IndexPath(item: 1, section: 0)))
         #expect(chevron.size.width == ShelfViewAllCell.width)
         #expect(chevron.size.height == card.size.height)
+        // ⚠️ AND THE ROW'S GAP between every two items — the cards touched once
+        // the delegate sized them (filmed on device).
+        #expect(chevron.frame.minX - card.frame.maxX == LeadRowMetrics.itemGap, "no gap before the chevron card")
 
         var opened: [Int] = []
         shelf.onCardTapped = { opened.append($0) }
@@ -231,5 +234,18 @@ struct PostShelfSectionTests {
             authorID: ProfileID("bo"), authorName: "Bo", authorHandle: "bo",
             reactionCount: 3, commentCount: 1
         )
+    }
+
+    /// ⚠️ THE CARDS KEEP THEIR GAP (the owner, on device): two media cards
+    /// side by side stand the row's gap apart, never touching.
+    @Test func theMediaCardsKeepTheRowsGap() throws {
+        let shelf = Self.shelf()
+        shelf.render((0..<4).map { Self.post("m\($0)", kind: .photo) })
+        shelf.onTitleTapped = {}
+        shelf.layoutIfNeeded()
+        shelf.mediaView.layoutIfNeeded()
+        let first = try #require(shelf.mediaView.layoutAttributesForItem(at: IndexPath(item: 0, section: 0)))
+        let second = try #require(shelf.mediaView.layoutAttributesForItem(at: IndexPath(item: 1, section: 0)))
+        #expect(second.frame.minX - first.frame.maxX == LeadRowMetrics.itemGap, "the cards touch")
     }
 }
