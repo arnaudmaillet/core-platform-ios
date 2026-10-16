@@ -57,16 +57,15 @@ final class SoundSheetAutoplay {
     /// A post opens from tile `id`: its clip is parked, paused at its
     /// playhead, for a close that pages on and comes home to it (#951).
     ///
-    /// ⚠️ AND EVERY TILE STOPS NOW, the tapped one included. The scope just
-    /// opened makes the surface invisible, so the `setActive(false)` that
-    /// follows finds nothing to change: the others would only be let go one
-    /// hop at a time (the scope's stagger, made for a flight that carries the
-    /// tapped tile's player — this sheet's carries its poster), and the tapped
-    /// one never, decoding behind the feed for the whole trip. The park has
-    /// read the playhead already.
+    /// ⚠️ THE TAPPED TILE KEEPS PLAYING (#1280, epic #1269): the flight
+    /// carries its player now — the card takes off on the tile's own surface
+    /// (`tileFlightSurface`) and a same-post close hands it back
+    /// (`adoptTileLanding`) — so it is no longer stopped here; the handoff
+    /// scope lets the other tiles go, one hop at a time, and keeps this one
+    /// out of the reconcile for the trip.
     func beginOpen(of id: PostID) {
+        playback.focus(id)
         playback.beginHandoff(id, parkingReturn: true)
-        playback.stopAll()
     }
 
     /// The feed opened from a tile is gone, whichever way: the scope ends, and
@@ -76,6 +75,8 @@ final class SoundSheetAutoplay {
     func endOpen() {
         guard playback.isHandingOff else { return }
         playback.endHandoff()
+        // The claim ends with the round trip — see `beginOpen`.
+        playback.focus(nil)
         if !isActive { playback.setSurfaceVisible(false) }
     }
 

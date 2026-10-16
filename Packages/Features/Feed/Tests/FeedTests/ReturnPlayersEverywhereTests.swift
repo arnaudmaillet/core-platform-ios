@@ -325,7 +325,9 @@ struct ReturnPlayersEverywhereTests {
         #expect(pool.hasPlayer(in: tile), "precondition: the tile is playing")
 
         autoplay.beginOpen(of: id)
-        #expect(!pool.hasPlayer(in: tile), "the tapped tile kept decoding behind the feed")
+        // ⚠️ The flight carries the tapped tile's player now (#1280, epic
+        // #1269): it takes off playing, as For You's tiles do.
+        #expect(pool.hasPlayer(in: tile), "the tapped tile's player was stopped before the flight took it")
         await Self.settle { pool.returnPlaybackCount == 1 }
         #expect(pool.returnPlaybackCount == 1)
         autoplay.setActive(false)
