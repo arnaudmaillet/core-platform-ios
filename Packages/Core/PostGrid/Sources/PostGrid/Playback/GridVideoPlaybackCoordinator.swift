@@ -134,6 +134,10 @@ public final class GridVideoPlaybackCoordinator {
     /// candidate only when nothing is playing for its id, which would have left
     /// page two's clip running under page three's.
     private var playingURLs: [PostID: URL] = [:]
+    /// Every visible video tile's stream at the last reconcile, chosen or not —
+    /// what a return player is parked on for a tile that had no player of its
+    /// own at the tap (`parkReturnPlayback`).
+    private var candidateURLs: [PostID: URL] = [:]
     /// Posts whose cap is currently lifted (a tile that went full screen), so a
     /// reconcile doesn't quietly re-cap the item mid-flight.
     private var uncappedIDs: Set<PostID> = []
@@ -264,6 +268,7 @@ public final class GridVideoPlaybackCoordinator {
     /// runs: a tile that has left the viewport must give its player back
     /// immediately whatever the scroll is doing, or the pool starves.
     public func update(candidates: [Candidate], allowingStarts: Bool = true) {
+        candidateURLs = Dictionary(candidates.map { ($0.id, $0.url) }) { first, _ in first }
         // The post in flight is excluded from BOTH halves. Stopping it would
         // kill the player the card is rendering; starting it would attach a
         // competing layer. Its lifecycle belongs to the handoff scope until
@@ -899,10 +904,16 @@ public final class GridVideoPlaybackCoordinator {
     /// app, oldest evicted first; an evicted one simply makes
     /// `makeReturnSurface` answer nil and the close lands on the tile's still.
     ///
-    /// Only a tile that is playing at the tap is parked: one that is not has
-    /// no clip on screen to come back to, and its still is the honest landing.
+    /// ⚠️ A VISIBLE VIDEO TILE IS PARKED WHETHER OR NOT IT IS PLAYING (the
+    /// owner, 2026-10-16, on a device: "if the original post is a video, it's
+    /// an image — put the media, playing"; #1267). Parking only a playing tile
+    /// landed every tile past the budget, or still waiting for its start, on
+    /// its thumbnail. One that is not playing is parked from the start of its
+    /// clip. Not when autoplay is off (Power Saving, the viewer's setting):
+    /// such a tile is a still on purpose, and lands as one.
     private func parkReturnPlayback(of id: PostID) {
-        guard let url = playingURLs[id] else { return }
+        guard let url = playingURLs[id] ?? (autoplayAllowed() ? candidateURLs[id] : nil)
+        else { return }
         let surface = loans[id].flatMap { $0.watchedClipSurface ?? $0.loadedVideoRenderView }
         let pool = pool
         let seconds = surface.flatMap { pool.playheadSeconds(in: $0) } ?? 0

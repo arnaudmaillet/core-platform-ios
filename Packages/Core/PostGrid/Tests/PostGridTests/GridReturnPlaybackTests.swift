@@ -81,6 +81,39 @@ struct GridReturnPlaybackTests {
         #expect(grid.makeReturnSurface(for: tapped.id) == nil)
     }
 
+    /// ⚠️ A VISIBLE VIDEO TILE WITH NO PLAYER IS PARKED TOO (#1267): one past
+    /// the budget lands on its own clip from the start, not on its thumbnail.
+    @Test func aVisibleTilePastTheBudgetParksFromTheStart() async throws {
+        let pool = makePool()
+        let grid = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 1)
+        grid.setSurfaceVisible(true)
+        let playing = candidate(0)
+        let tapped = candidate(1, distance: 10)
+        grid.update(candidates: [playing, tapped])
+        await grid.debugAwaitStarts()
+        #expect(!grid.playingIDs.contains(tapped.id), "past the budget")
+        grid.beginHandoff(tapped.id, parkingReturn: true)
+        await grid.debugAwaitReturnParks()
+        #expect(grid.hasReturnPlayback(for: tapped.id))
+        #expect(pool.returnPlaybackCount == 1)
+    }
+
+    /// With autoplay off a tile that is not playing is a still on purpose,
+    /// and lands as one.
+    @Test func aTileStilledByAutoplayOffParksNothing() async {
+        let pool = makePool()
+        let grid = GridVideoPlaybackCoordinator(pool: pool, maxConcurrent: 3)
+        grid.autoplayAllowed = { false }
+        grid.setSurfaceVisible(true)
+        let tapped = candidate(0)
+        grid.update(candidates: [tapped])
+        await grid.debugAwaitStarts()
+        grid.beginHandoff(tapped.id, parkingReturn: true)
+        await grid.debugAwaitReturnParks()
+        #expect(pool.returnPlaybackCount == 0)
+        #expect(grid.makeReturnSurface(for: tapped.id) == nil)
+    }
+
     // MARK: - Flown and landed
 
     /// The close flies the parked clip and the landing gives it to the tile:
