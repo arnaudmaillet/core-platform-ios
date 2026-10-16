@@ -176,6 +176,10 @@ final class ForYouGridPage: UIView {
     /// one with nothing but new is "New" alone, counted. Off (every other list
     /// page — a place's Activity) the page is one untitled run unless it has
     /// both halves, as before.
+    /// What the older section is called — "Recent" (the inbox's word), or
+    /// the caller's: the place page's Popular list names its one run so.
+    var earlierSectionTitle = "Recent"
+
     var titlesEverySection = false {
         didSet {
             guard titlesEverySection != oldValue, style == .list, !showsSkeleton else { return }
@@ -3125,7 +3129,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // describes. The separation between sections is the layout's bottom
         // inset on the one above; the header stands its line
         // `Spacing.sectionTitle` over the first row, as every title does.
-        header.setTitle(section.title, count: section == .new ? newRunLength : 0)
+        header.setTitle(section == .earlier ? earlierSectionTitle : section.title,
+                        count: section == .new ? newRunLength : 0)
         // Tapping a header means "show me this part" — the same gesture the
         // inbox's pills answer.
         header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }

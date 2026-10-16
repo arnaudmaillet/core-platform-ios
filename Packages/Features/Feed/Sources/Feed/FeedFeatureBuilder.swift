@@ -720,6 +720,28 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // (`installMapReturnIfTop`): hero to the marker, slide as fallback.
         gallery.mapReturn = mapReturn
         gallery.markerClose = markerClose
+        // The titles' pushes — For You's own pushed screens, with the header
+        // they wear there (`PushedScreenHeader`).
+        let staking = wallet.map { PostCardStaking(wallet: $0, entities: entities) }
+        let openHero: (UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void = { [self] presenter, origin, ids in
+            presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+        }
+        gallery.makePostList = { [self] in
+            ForYouPostListViewController(
+                kind: .popular, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+                staking: staking,
+                header: PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router),
+                openPost: openHero
+            )
+        }
+        gallery.makeGallery = { [self] in
+            DiscoverGalleryViewController(
+                imagePipeline: imagePipeline, videoPlayback: videoPlayback,
+                header: PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router),
+                staking: staking,
+                openPost: openHero
+            )
+        }
         return gallery
     }
 

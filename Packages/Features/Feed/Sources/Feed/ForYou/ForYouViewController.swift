@@ -2252,6 +2252,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             switch kind {
             case .following: list.render(lastSnapshot.following, newPosts: lastSnapshot.followingNew)
             case .friends: list.render(lastSnapshot.friends, newPosts: lastSnapshot.friendsUnseen)
+            case .popular: break  // the place page's, never pushed from here
             }
         }
         switch kind {
@@ -2260,6 +2261,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             viewModel.followingListOpened()
         case .friends:
             friendsList = list
+        case .popular:
+            break
         }
         #if DEBUG
         // The two numbers the product rule says are one: the header's badge and

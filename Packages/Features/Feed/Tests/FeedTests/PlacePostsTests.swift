@@ -113,9 +113,9 @@ struct PlacePostsTests {
         return condition()
     }
 
-    /// Done when: tiles shown stay in place as pages land (appended after the
-    /// pins, a repeat dropped, a text post on Activity only), and the end
-    /// loads once and stops.
+    /// Done when: posts shown stay in place as pages land (appended after the
+    /// pins in the server's order, a repeat dropped, every kind kept), and
+    /// the end loads once and stops.
     @Test func pagesAppendAfterThePinsAndStopAtTheEnd() async {
         let pages = Pages()
         pages.pins = [post("pin-a", reactions: 5), post("pin-b", reactions: 9)]
@@ -125,18 +125,20 @@ struct PlacePostsTests {
         ]
         let profile = makeProfile(pages)
         profile.beginLoading()
-        #expect(await settle { profile.renderedPosts.count == 2 })
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["pin-b", "pin-a"])
+        #expect(await settle { profile.renderedActivity.count == 2 })
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["pin-b", "pin-a"])
+
+        // A page with more behind it: For You's list holds its last mosaic
+        // stretch back until the place is whole (`MosaicChunkPlanner`), so
+        // what is shown is the pins, still first.
+        profile.loadMorePosts()
+        #expect(await settle { pages.asked == [nil] && profile.renderedActivity.count >= 2 })
+        #expect(Array(profile.renderedActivity.map(\.id.rawValue).prefix(2)) == ["pin-b", "pin-a"])
 
         profile.loadMorePosts()
-        #expect(await settle { profile.renderedPosts.count == 3 })
-        // The most liked post of the page still comes AFTER the pins.
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["pin-b", "pin-a", "x1"])
-        #expect(profile.renderedActivity.map(\.id.rawValue) == ["pin-b", "pin-a", "x1", "x2"])
-
-        profile.loadMorePosts()
-        #expect(await settle { profile.renderedPosts.count == 4 })
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["pin-b", "pin-a", "x1", "x3"])
+        #expect(await settle { profile.renderedActivity.count == 5 })
+        // The most liked post of the pages still comes AFTER the pins.
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["pin-b", "pin-a", "x1", "x2", "x3"])
         #expect(profile.debugIdentity.statViews.map(\.valueLabel.text).last == "5", "two pins and three new posts")
 
         profile.loadMorePosts()
@@ -155,13 +157,13 @@ struct PlacePostsTests {
         }
         let profile = makeProfile(pages)
         profile.beginLoading()
-        #expect(await settle { profile.renderedPosts.count == 1 })
+        #expect(await settle { profile.renderedActivity.count == 1 })
 
         profile.loadMorePosts()
         #expect(await settle { pages.asked.count == PlaceProfileViewController.maxEmptyPagesInARow })
         try? await Task.sleep(for: .milliseconds(100))
         #expect(pages.asked.count == PlaceProfileViewController.maxEmptyPagesInARow)
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["pin-a"])
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["pin-a"])
     }
 
     /// Done when: a refresh doesn't drop loaded pages.
@@ -171,15 +173,15 @@ struct PlacePostsTests {
         pages.answers = ["": PlacePostsPage(posts: [post("x1")], nextPageToken: "t1")]
         let profile = makeProfile(pages)
         profile.beginLoading()
-        #expect(await settle { profile.renderedPosts.count == 1 })
+        #expect(await settle { profile.renderedActivity.count == 1 })
         profile.loadMorePosts()
-        #expect(await settle { profile.renderedPosts.count == 2 })
+        #expect(await settle { profile.renderedActivity.count == 2 })
 
         // The pins move: a new one, the old one more liked.
         pages.pins = [post("pin-a", reactions: 50), post("pin-c", reactions: 7)]
         profile.refresh()
-        #expect(await settle { profile.renderedPosts.count == 3 })
-        #expect(profile.renderedPosts.map(\.id.rawValue) == ["pin-a", "pin-c", "x1"])
+        #expect(await settle { profile.renderedActivity.count == 3 })
+        #expect(profile.renderedActivity.map(\.id.rawValue) == ["pin-a", "pin-c", "x1"])
     }
 
     /// Done when: a feed opened from a place tile goes on into the place's
@@ -192,9 +194,9 @@ struct PlacePostsTests {
         let profile = makeProfile(pages, opened: { origin = $0 })
         profile.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         profile.beginLoading()
-        #expect(await settle { profile.renderedPosts.count == 1 })
+        #expect(await settle { profile.renderedActivity.count == 1 })
 
-        #expect(await settle { profile.debugOpenDiscoverTile(at: 0) })
+        #expect(await settle { profile.debugOpenTile(at: 0) })
         let continuation = try #require(origin?.continuation)
         let next = await continuation(PostID("pin-a"))
         #expect(next?.map(\.rawValue) == ["x1", "x2"])
@@ -214,8 +216,8 @@ struct PlacePostsTests {
             loadPosts: { pins }, openPost: { _, opened, _ in origin = opened }
         )
         profile.beginLoading()
-        #expect(await settle { profile.renderedPosts.count == 1 })
-        #expect(await settle { profile.debugOpenDiscoverTile(at: 0) })
+        #expect(await settle { profile.renderedActivity.count == 1 })
+        #expect(await settle { profile.debugOpenTile(at: 0) })
         #expect(origin != nil)
         #expect(origin?.continuation == nil)
     }

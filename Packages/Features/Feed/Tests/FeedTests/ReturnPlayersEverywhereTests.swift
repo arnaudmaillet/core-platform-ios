@@ -237,10 +237,9 @@ struct ReturnPlayersEverywhereTests {
         defer { window.isHidden = true }
         // The builder starts the hydration at creation, not on appearance.
         place.beginLoading()
-        place.debugSelectTab(.discover)
         await Self.settle {
             window.layoutIfNeeded()
-            return place.debugOpenDiscoverTile(at: 0) && opened != nil
+            return place.debugOpenTile(at: 0) && opened != nil
         }
         try Self.expectReturnWired(opened)
     }
