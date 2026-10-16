@@ -855,7 +855,7 @@ final class PlaceProfileViewController: UIViewController {
         else { return }
         let list = makePostList()
         list.render(.content(Self.popular(self.corpus, limit: nil)), newPosts: [])
-        navigationController.pushViewController(list, animated: true)
+        pushLeavingTheBackSwipe(list, on: navigationController)
     }
 
     /// "Recent" and every "View all": For You's media gallery over the
@@ -867,7 +867,22 @@ final class PlaceProfileViewController: UIViewController {
         else { return }
         let gallery = makeGallery()
         gallery.render(.content(GalleryFilter.Format.media.filtering(activityPage.posts)))
-        navigationController.pushViewController(gallery, animated: true)
+        pushLeavingTheBackSwipe(gallery, on: navigationController)
+    }
+
+    /// ⚠️ A PLAIN PUSH LEAVES THE DELEGATE SLOT EMPTY — the pushed screens'
+    /// full-surface back swipe (the owner, 2026-10-16: "only from the left
+    /// edge"; For You's own contract, #670 / `ForYouPushedBackSwipeTests`).
+    /// UIKit refuses the iOS 26+ full-surface back swipe on a screen whose pop
+    /// brings the tab bar back while ANY navigation delegate is in the slot,
+    /// and this page holds it with its way home to the map (the marker's
+    /// window, or the hero return) whenever it is top. Released for the push;
+    /// `viewDidAppear` takes it back (`installMapReturnIfTop`).
+    private func pushLeavingTheBackSwipe(_ screen: UIViewController, on nav: UINavigationController) {
+        let hub = NavigationDelegateHub.existing(on: nav)
+        if let markerCloseDriver { hub?.release(markerCloseDriver) }
+        if let mapReturnTransition { hub?.release(mapReturnTransition) }
+        nav.pushViewController(screen, animated: true)
     }
 
     /// A Popular card opens the way For You's Following cards do
