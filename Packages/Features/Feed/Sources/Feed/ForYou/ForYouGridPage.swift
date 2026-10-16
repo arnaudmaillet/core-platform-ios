@@ -150,13 +150,17 @@ final class ForYouGridPage: UIView {
     /// back — including nothing, which hides the control.
     var authorMenuActions: ((AuthorMenuContext) -> [PostCardMenuAction])?
 
-    /// Everything a host needs to build one row's menu.
-    struct AuthorMenuContext {
-        let post: GalleryPost
-        let authorID: ProfileID
-        /// The control that was pressed, for a popover-shaped follow-up sheet.
-        let anchor: UIView
-    }
+    /// Everything a host needs to build one row's menu — the vended page's
+    /// own type (`PostGridPage`), so a host across the package line reads the
+    /// same context.
+    typealias AuthorMenuContext = PostGridAuthorMenuContext
+
+    /// A post was tapped, with its stream — the vended page's tap
+    /// (`PostGridPage.onPostTapped`). When set, it answers instead of
+    /// `onItemTapped` / `onItemCommentsTapped`.
+    var onPostTapped: ((_ post: GalleryPost, _ stream: [GalleryPost], _ comments: Bool) -> Void)?
+    /// How many posts a vended page's tap hands on as the stream.
+    static let vendedStreamWindow = 30
 
     /// Display order — the mosaic's arrangement of `rawPosts`. What the cells,
     /// the hero, and a tile tap all read.
@@ -3571,6 +3575,11 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // like any other (the card has one affordance), and lands where the
         // card itself lands — by the text reveal, never the media flight the
         // comments route would pick for a post with no media to fly.
+        if let onPostTapped {
+            let stream = Array(posts[index...].prefix(Self.vendedStreamWindow))
+            onPostTapped(posts[index], stream, showingComments && posts[index].kind != .text)
+            return
+        }
         if showingComments, posts[index].kind != .text, let openComments = onItemCommentsTapped {
             openComments(index)
         } else {

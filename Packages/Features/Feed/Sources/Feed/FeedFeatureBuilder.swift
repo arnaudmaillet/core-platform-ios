@@ -595,6 +595,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         }
     }
 
+    public func makePostGridPage(style: PostGridPageStyle, savesPosts: Bool) -> any PostGridPage {
+        ForYouGridPage(
+            imagePipeline: imagePipeline, style: ForYouGridPage.Style(style),
+            // The app's one pool, the same instance For You's tabs borrow from.
+            videoPlayback: videoPlayback,
+            bookmarks: savesPosts ? .shared : nil
+        )
+    }
+
     public func makePostSetSurface(style: PostSetSurfaceStyle) -> any PostSetSurface {
         let base = repository
         let counterClient = counterClient

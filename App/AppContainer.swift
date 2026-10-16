@@ -1453,6 +1453,10 @@ final class AppContainer {
                 postIDs: postIDs, from: presenter, origin: origin
             )
         }
+        // The profile's pages are For You's own grid (#1273, epic #1269).
+        builder.makePostGridPage = { [unowned self] style, savesPosts in
+            feedFeature.makePostGridPage(style: style, savesPosts: savesPosts)
+        }
         // Pinning a profile onto the map's people rail, from the profile
         // screen. The SAME service the map itself writes through, so the rail
         // and the button cannot hold different opinions about who is pinned.

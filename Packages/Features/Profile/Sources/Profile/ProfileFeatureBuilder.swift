@@ -464,6 +464,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     public var mapPinning: (any MapProfilePinning)?
     public var videoPlayback: VideoPlaybackController?
     public var openFeedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
+    /// For You's grid page, built by the composition root (#1273): the pages
+    /// the profile's posts are drawn on. `savesPosts` offers the save control.
+    public var makePostGridPage: ((_ style: PostGridPageStyle, _ savesPosts: Bool) -> any PostGridPage)?
     /// The wallet the gallery cards' like chips stake from — the app's one
     /// instance. Nil leaves the chips counters.
     public var wallet: WalletStore?
