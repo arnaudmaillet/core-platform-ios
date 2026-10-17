@@ -44,10 +44,27 @@ protocol InboxSurface: UIViewController {
     /// its top (#1309). Nil for a page with no list.
     var listScrollView: UIScrollView? { get }
 
+    /// The section the page's list has scrolled into, which the inbox names
+    /// in its bar after the bell (#1301). Nil at the list's top, and for a
+    /// page with no sections.
+    var pinnedSection: InboxPinnedSection? { get }
+    /// Fired when `pinnedSection` changes — its section, or its count.
+    var onPinnedSectionChange: ((InboxPinnedSection?) -> Void)? { get set }
+    /// Puts the pinned section's first row under the bar: the bar item's tap,
+    /// which is the tap its header's pill used to take.
+    func scrollToPinnedSection()
 }
 
 extension InboxSurface {
     var listScrollView: UIScrollView? { nil }
+
+    /// A page with no sections names none.
+    var pinnedSection: InboxPinnedSection? { nil }
+    var onPinnedSectionChange: ((InboxPinnedSection?) -> Void)? {
+        get { nil }
+        set {}
+    }
+    func scrollToPinnedSection() {}
 }
 
 extension MessagesCategory {

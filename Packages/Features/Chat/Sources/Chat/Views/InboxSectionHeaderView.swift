@@ -11,8 +11,11 @@ import UIKit
 /// of. Left alone it would put a frosted bar behind a floating pill, which is
 /// two headers stacked and the pill reduced to a label on one of them.
 ///
-/// The rows scroll UNDER it: a plain table pins its section headers, so the
-/// pill hangs over the list exactly as For You's does.
+/// The rows scroll UNDER it: a plain table pins its section headers. ⚠️ But
+/// the pinned CAPSULE is not drawn here (`hidesWhenPinned`): the inbox names
+/// the stuck section in its navigation bar, after the bell (#1301), so this
+/// header leaves as it reaches the line and the bar's item takes over. In
+/// the flow it is still the large title it always was.
 final class InboxSectionHeaderView: UITableViewHeaderFooterView {
     static let reuseIdentifier = "InboxSectionHeaderView"
 
@@ -27,6 +30,7 @@ final class InboxSectionHeaderView: UITableViewHeaderFooterView {
         super.init(reuseIdentifier: reuseIdentifier)
         backgroundConfiguration = .clear()
         pill.pinAsHeader(in: contentView)
+        pill.hidesWhenPinned = true
     }
 
     @available(*, unavailable)

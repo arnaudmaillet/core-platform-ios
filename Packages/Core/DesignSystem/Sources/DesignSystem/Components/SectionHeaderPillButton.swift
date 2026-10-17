@@ -81,6 +81,16 @@ public final class SectionHeaderPillButton: UIButton {
 
     public private(set) var presentation: Presentation = .inline
 
+    /// When set, the pinned shape is not drawn here at all: the header leaves
+    /// as it reaches the pin line instead of forming its capsule, because the
+    /// pinned section is named SOMEWHERE ELSE — the Messages inbox names it in
+    /// a navigation bar item after the bell (#1301). The inline title in the
+    /// flow is untouched; only the stuck state moves, and the same dissolve
+    /// that would have formed the capsule carries the title out.
+    public var hidesWhenPinned = false {
+        didSet { applyConfiguration(for: presentation) }
+    }
+
     /// The pill's distance from its host's leading edge — restated from the
     /// surface on every host layout (`alignToSurface`).
     private var leadingConstraint: NSLayoutConstraint?
@@ -425,18 +435,39 @@ public final class SectionHeaderPillButton: UIButton {
     private func applyConfiguration(for presentation: Presentation) {
         var configuration: UIButton.Configuration
         switch presentation {
-        case .pinned:
+        // ⚠️ A header named elsewhere never forms the glass: it fades out
+        // instead, and an alpha ramp on glass samples a wrong backdrop.
+        case .pinned where !hidesWhenPinned:
             configuration = .glass()
             configuration.cornerStyle = .capsule
-        case .inline:
+        case .pinned, .inline:
             configuration = .plain()
         }
         // The capsule and nothing in it: the title is `titleView`.
         configuration.contentInsets = .zero
         self.configuration = configuration
         titleView.style = presentation == .pinned ? .compact : .standard
+        // Alpha, not `isHidden`: a hidden layer is not rendered, so the morph's
+        // dissolve would have nothing to carry out — the header would cut.
+        alpha = hidesWhenPinned && presentation == .pinned ? 0 : 1
         invalidateIntrinsicContentSize()
         setNeedsLayout()
+    }
+
+    /// Which section is at the pin line — the section a bar should NAME when
+    /// its headers hide once pinned (`hidesWhenPinned`). `sectionTops` are
+    /// the sections' natural top edges in content coordinates, in order;
+    /// `pinLine` is `contentOffset.y + adjustedContentInset.top`.
+    ///
+    /// Each header's own rule (`updatePresentation`), asked once for a list:
+    /// the LAST section whose top has reached the line within
+    /// `Metrics.morphDistance` — an earlier header pushed off by the next is
+    /// still "at the line" by distance, and choosing the last resolves that
+    /// the way the eye does — and nothing while the list rests at its top,
+    /// where the first header is a title in the flow, not a stuck one.
+    public static func pinnedSection(sectionTops: [CGFloat], pinLine: CGFloat) -> Int? {
+        guard pinLine > Metrics.morphDistance else { return nil }
+        return sectionTops.lastIndex { $0 - pinLine <= Metrics.morphDistance }
     }
 
     /// The title's distance from the button's edges: none inline — the title

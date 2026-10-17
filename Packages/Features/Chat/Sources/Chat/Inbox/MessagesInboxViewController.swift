@@ -121,9 +121,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         super.viewDidLoad()
         // ⚠️ NO TITLE. "Messages" sat here for a while (the tab bar says the
         // word already); it went on 2026-09-22 with the map tab's and For
-        // You's. The pinned section pill ("New", "Recent") stays IN THE LIST,
-        // under the bar, as on the search screen — a leading bar item was tried
-        // in its place and taken out again the same day.
+        // You's. The section the list has scrolled into ("New", "Recent") is
+        // named in the bar, after the bell (#1301; first tried in #179 and
+        // reverted in #181, when it had the leading group to itself).
         navigationItem.largeTitleDisplayMode = .never
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
@@ -250,6 +250,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         for surface in surfaces {
             apply(surface.chrome, from: surface)
             surface.onChromeChange = { [weak self] chrome in self?.apply(chrome, from: surface) }
+            // Only the page in front names its section; the others are read
+            // again when they come in front (`didSettle`).
+            surface.onPinnedSectionChange = { [weak self, weak surface] pinned in
+                guard let self, let surface, surface === activeSurface else { return }
+                applyPinnedSection(pinned)
+            }
         }
 
         categoryBar.setProgress(CGFloat(pagerView.activeIndex))
@@ -545,11 +551,13 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// `[ bell ]———————————————————[ coins ][ search ]`
+    /// `[ bell ][ New 8 ]————————————[ coins ][ search ]`
     ///
     /// The resting bar is the magnifier plus whatever the shell hands in: the
     /// bell leading, the balance inboard of the magnifier (`[0]` is the screen
-    /// edge, so search keeps the corner — the Maps and For You arrangement).
+    /// edge, so search keeps the corner — the Maps and For You arrangement) —
+    /// and, after the bell, the section the page in front has scrolled into
+    /// (`applyPinnedSection`, #1301).
     ///
     /// ⚠️ AND THE EMPTY `titleView` IS GONE WITH THE SELECTOR. It was there
     /// because a nil title view leaves UIKit a central reservation the LEADING
@@ -559,9 +567,76 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// with a zero-sized view would now be cargo.
     private func applyRestingBar() {
         navigationItem.rightBarButtonItems = [searchItem, trailingAccessoryItem].compactMap { $0 }
-        navigationItem.leftBarButtonItems = [leadingAccessoryItem].compactMap { $0 }
+        navigationItem.leftBarButtonItems = restingLeadingItems
         navigationItem.titleView = nil
     }
+
+    private var restingLeadingItems: [UIBarButtonItem] {
+        [leadingAccessoryItem, pinnedSection == nil ? nil : sectionItem].compactMap { $0 }
+    }
+
+    // MARK: - The pinned section (#1301)
+
+    /// The section the page in front has scrolled into, as last published.
+    private var pinnedSection: InboxPinnedSection?
+
+    /// Its name after the bell. One item for the life of the screen, re-titled
+    /// in place as the list scrolls from one section into the next, so only
+    /// its arrival and departure rewrite the leading group.
+    ///
+    /// ⚠️ ONLY THE LEADING GROUP. Toasts own the trailing one while they show
+    /// (`NavigationBarToasts`, #1066); rewriting the whole resting bar on every
+    /// change would put the magnifier back over a toast.
+    private lazy var sectionButton: SectionTitleBarButton = {
+        let button = SectionTitleBarButton()
+        // What tapping the header's pill did: that section's first row under
+        // the bar.
+        button.onTap = { [weak self] in self?.activeSurface?.scrollToPinnedSection() }
+        return button
+    }()
+
+    private lazy var sectionItem = makeSectionItem()
+
+    /// A fresh wrapper around the same button. ⚠️ The bar freezes an item's
+    /// width when the item is made, so "New 4" scrolling into "Recent 18" needs
+    /// a new item; the shared identifier makes it the same slot, not a new
+    /// one (the balance's re-mint, `WalletBadgeInstaller`).
+    private func makeSectionItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(customView: sectionButton)
+        // Its own glass, not a shared platter with the bell.
+        item.sharesBackground = false
+        item.identifier = "inbox.pinned-section"
+        return item
+    }
+
+    /// Names `section` after the bell, or takes the name away. While search
+    /// holds the bar it is only remembered: the resting bar picks it up on the
+    /// way back.
+    private func applyPinnedSection(_ section: InboxPinnedSection?) {
+        let wasShown = pinnedSection != nil
+        pinnedSection = section
+        let width = sectionButton.intrinsicContentSize.width
+        if let section { sectionButton.setSection(title: section.title, count: section.count) }
+        let resized = abs(sectionButton.intrinsicContentSize.width - width) > 0.5
+        if resized { sectionItem = makeSectionItem() }
+        guard isViewLoaded, !isSearching else { return }
+        if wasShown != (section != nil) {
+            // ⚠️ Not animated under a transition: an animated item change
+            // mid-push lands unanimated, popping in (#756).
+            navigationItem.setLeftBarButtonItems(
+                restingLeadingItems, animated: view.window != nil && transitionCoordinator == nil
+            )
+        } else if section != nil, resized {
+            navigationItem.leftBarButtonItems = restingLeadingItems
+        }
+    }
+
+    #if DEBUG
+    /// The bar's section item while it is shown — what a test reads.
+    var debugSectionButton: SectionTitleBarButton? {
+        navigationItem.leftBarButtonItems?.contains { $0.customView === sectionButton } == true ? sectionButton : nil
+    }
+    #endif
 
     /// `[ field ————————————————— ][ Cancel ]`
     private func applySearchingBar() {
@@ -871,6 +946,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // and finding All's count gone is losing the comparison you switched
         // for. Only leaving the screen retires them; see `viewWillDisappear`.
         apply(surface.chrome, from: surface)
+        // The bar names the section of the page now in front, or none.
+        applyPinnedSection(surface.pinnedSection)
         // The shared bar follows whichever page is now in front, and the new page
         // gets the same clearance. Re-syncing here is what keeps a bar collapsed
         // on one tab from sitting half-open over another.
