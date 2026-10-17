@@ -433,6 +433,7 @@ final class ProfileRelationshipsViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        subordinatePagerToBackSwipes()
         #if DEBUG
         // ARMED ONCE — see `hasArmedDebugHooks`.
         defer { hasArmedDebugHooks = true }
@@ -601,6 +602,27 @@ final class ProfileRelationshipsViewController: UIViewController {
 
     private var suspendedPans: [(UIGestureRecognizer, Bool)] = []
 
+    /// Whether the pager's pan waits on the stack's back swipes yet.
+    private var didSubordinatePagerToPop = false
+
+    /// ⚠️ THE PAGER WAITS FOR THE BACK SWIPE (#1300), as a pushed profile's
+    /// gallery does (#1324). Left simultaneous, a rightward drag on Followers
+    /// began the pager's pan — which on the first page can only bounce — and
+    /// the screen stayed: only the 28pt edge strip, which the pager yields,
+    /// went back. The full-surface swipe declines on Following and Friends
+    /// (`allowsContentPop`), and the pager pages there. Deferred to the first
+    /// appearance: the navigation controller is not set at `viewDidLoad`.
+    private func subordinatePagerToBackSwipes() {
+        guard !didSubordinatePagerToPop, let navigationController else { return }
+        didSubordinatePagerToPop = true
+        if let pop = navigationController.interactivePopGestureRecognizer {
+            pager.horizontalPan.require(toFail: pop)
+        }
+        if #available(iOS 26.0, *), let content = navigationController.interactiveContentPopGestureRecognizer {
+            pager.horizontalPan.require(toFail: content)
+        }
+    }
+
     /// The field itself; where the magnifier goes is `applySearchAvailability`'s job.
     private func configureSearch() {
         searchField.placeholder = "Search..."
@@ -656,6 +678,24 @@ final class ProfileRelationshipsViewController: UIViewController {
         }
     }
 
+}
+
+// MARK: - The native back swipe (#1300)
+
+/// A pushed paged screen pops with the system's full-surface swipe on its
+/// FIRST tab only (`PagedScreenDismissalPolicy`): nothing lies to the left of
+/// Followers, while on Following and Friends a rightward drag pages back. The
+/// edge strip pops on every tab — that is the other recogniser's, ungated.
+/// Not while the search field holds the bar: a drag across a half-typed query
+/// leaves the screen only from the edge, as it always has (#1300).
+extension ProfileRelationshipsViewController: ContentPopGating {
+    func allowsContentPop(beginningAt point: CGPoint, in view: UIView) -> Bool {
+        guard let navigationController, !isSearching else { return false }
+        return PagedScreenDismissalPolicy.allowsFullWidthDismissal(
+            activeIndex: pager.activeIndex,
+            isPushed: navigationController.viewControllers.first !== self
+        )
+    }
 }
 
 private extension Array {
