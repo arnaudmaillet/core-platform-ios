@@ -11,7 +11,8 @@ import Foundation
 /// - **Loop** (`loopKeyframes`): the ring turns once per `rotationPeriod`
 ///   while its arcs trade length — seeded keyframes that begin and end on
 ///   equal quarters, over a whole number of turns, so the loop has no seam.
-/// - **Exit**: ring → disc → square, then the mark fades and shrinks a little.
+/// - **Exit**: the mark fades and shrinks a little where it is, still
+///   turning (the owner, 2026-10-17: no closing back into the square).
 public enum AppLoaderTimeline {
     /// One frame of the four pieces.
     public struct Frame: Equatable {
@@ -31,9 +32,7 @@ public enum AppLoaderTimeline {
     public static let loopDuration: TimeInterval = 3.6
     /// Without a pull: pills in, square → disc → ring.
     public static let entryDuration: TimeInterval = 0.6
-    /// Ring → disc → square once loading ends.
-    public static let exitMorphDuration: TimeInterval = 0.9
-    /// Then the mark fades and shrinks.
+    /// Loading ended: the mark fades and shrinks where it is.
     public static let exitFadeDuration: TimeInterval = 0.2
     public static let exitScale: CGFloat = 0.85
 

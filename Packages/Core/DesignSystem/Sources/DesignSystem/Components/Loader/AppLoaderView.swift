@@ -14,9 +14,9 @@ import UIKit
 /// - **Loading** (`startAnimating`): from wherever the pull left it — the rest
 ///   of the entry if it had not reached the ring, then the loop, turning on
 ///   from the angle the pull reached, with no jump.
-/// - **Done** (`stopAnimating`): ring → disc → square, then a fade. Stopped
-///   during the entry, it reverses from the current frame instead — no forced
-///   cycle for a short load.
+/// - **Done** (`stopAnimating`): the mark fades where it is, still turning —
+///   no closing back into the square (the owner, 2026-10-17), so a short
+///   load never plays more than it showed.
 ///
 /// ⚠️ **CORE ANIMATION, NOT LOTTIE.** DesignSystem is under every package and
 /// does not pull Lottie in, and CA animations run on the render server, so the
@@ -157,38 +157,15 @@ public final class AppLoaderView: UIView {
         generation += 1
         let run = generation
         guard window != nil else { return finishExit() }
-        if reducesMotion() {
-            removeAllAnimations()
-            phase = .exiting
-            fadeOut(run: run)
-            return
-        }
-        let current = presentedFrame()
-        let route: [AppLoaderTimeline.Frame]
-        let duration: CFTimeInterval
-        if case let .entering(begin, start, length) = phase {
-            // Reverse from where the entry had got to, back to the square.
-            let elapsed = min(1, max(0, (CACurrentMediaTime() - begin) / length))
-            let reached = start + (1 - start) * CGFloat(elapsed)
-            let floor = min(reached, AppLoaderTimeline.appearEnd)
-            route = [current] + stride(from: 1, through: 16, by: 1).map { step in
-                AppLoaderTimeline.pull(reached + (floor - reached) * CGFloat(step) / 16)
-            }
-            duration = AppLoaderTimeline.entryDuration * Double(reached - floor)
-        } else {
-            route = exitRoute(from: current)
-            duration = AppLoaderTimeline.exitMorphDuration
-        }
-        removeAllAnimations()
+        // ⚠️ THE RING FADES WHERE IT IS, STILL TURNING (the owner, 2026-10-17,
+        // on device). It used to close back into the square first — ≈0.9 s
+        // that outlived the load: a refresh control had already folded away
+        // and the square reappeared at the top of the list, and a load that
+        // ended during the entry showed the whole ring before fading. Nothing
+        // is removed here: whatever runs — the loop, or the entry still on its
+        // way — carries on under the fade.
         phase = .exiting
-        guard duration > 0.01 else { return fadeOut(run: run) }
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { [weak self] in
-            guard let self, generation == run else { return }
-            fadeOut(run: run)
-        }
-        play(route, duration: duration, timing: .easeInEaseOut)
-        CATransaction.commit()
+        fadeOut(run: run)
     }
 
     // MARK: - Window
@@ -254,26 +231,6 @@ public final class AppLoaderView: UIView {
         mark.add(spin, forKey: Self.loopKey)
     }
 
-    /// Ring → disc → square from the frame on screen, turning on to upright
-    /// (each colour back on its quadrant).
-    private func exitRoute(from current: AppLoaderTimeline.Frame) -> [AppLoaderTimeline.Frame] {
-        let upright: CGFloat = current.rotation > 0 ? 2 * .pi : 0
-        return stride(from: 0, through: 24, by: 1).map { step in
-            let s = CGFloat(step) / 24
-            let outlines = (0..<AppLoaderGeometry.pieceCount).map { piece -> [CGPoint] in
-                let disc = AppLoaderGeometry.disc(piece)
-                return s < 0.5
-                    ? AppLoaderGeometry.mix(current.outlines[piece], disc, AppLoaderTimeline.easeInOut(s * 2))
-                    : AppLoaderGeometry.mix(disc, AppLoaderGeometry.square(piece), AppLoaderTimeline.easeInOut((s - 0.5) * 2))
-            }
-            let turn = AppLoaderTimeline.easeOut(s)
-            return AppLoaderTimeline.Frame(
-                outlines: outlines, opacities: [1, 1, 1, 1],
-                rotation: current.rotation + (upright - current.rotation) * turn
-            )
-        }
-    }
-
     /// Keyframes through `route`, over `duration`; the model left on its last.
     private func play(_ route: [AppLoaderTimeline.Frame], duration: CFTimeInterval, timing: CAMediaTimingFunctionName) {
         guard let last = route.last else { return }
@@ -296,7 +253,8 @@ public final class AppLoaderView: UIView {
         apply(last)
     }
 
-    /// The mark fades and shrinks a little, then rests hidden.
+    /// The mark fades and shrinks a little — over whatever is still running —
+    /// then rests hidden.
     private func fadeOut(run: Int) {
         CATransaction.begin()
         CATransaction.setCompletionBlock { [weak self] in
@@ -368,17 +326,6 @@ public final class AppLoaderView: UIView {
             opacities: Array(repeating: opacity, count: AppLoaderGeometry.pieceCount),
             rotation: 0
         ))
-    }
-
-    /// What is on screen now — the presentation layers, mid-animation.
-    private func presentedFrame() -> AppLoaderTimeline.Frame {
-        let outlines = pieces.map { piece -> [CGPoint] in
-            let shown = (piece.presentation()?.path ?? piece.path)?.loaderPoints ?? []
-            return shown.map { CGPoint(x: $0.x / side, y: $0.y / side) }
-        }
-        let opacities = pieces.map { CGFloat(($0.presentation() ?? $0).opacity) }
-        let rotation = ((mark.presentation() ?? mark).value(forKeyPath: "transform.rotation.z") as? CGFloat) ?? 0
-        return AppLoaderTimeline.Frame(outlines: outlines, opacities: opacities, rotation: rotation)
     }
 
     private func path(_ points: [CGPoint]) -> CGPath {

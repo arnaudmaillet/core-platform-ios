@@ -176,6 +176,21 @@ struct AppLoaderTests {
         #expect(!view.isAnimating && view.debugIsExiting)
     }
 
+    /// ⚠️ DONE, IT FADES WHERE IT IS, STILL TURNING (the owner, 2026-10-17):
+    /// no closing back into the square, which outlived the load on device —
+    /// the loop keeps running under the fade, and the model stays the ring.
+    @Test func doneFadesTheRingWhereItIs() {
+        let (view, window) = loader()
+        defer { window.isHidden = true }
+        view.setProgress(1)
+        view.startAnimating()
+        let loops = view.debugAnimationCount
+        view.stopAnimating()
+        #expect(view.debugIsExiting)
+        #expect(view.debugAnimationCount > loops, "the loop stopped instead of fading on")
+        #expect(isClose(view.debugModelFrame, AppLoaderTimeline.pull(1)), "it closed back into the square")
+    }
+
     /// ⚠️ #580: nothing animates off-window, and the loop comes back with it.
     @Test func itStopsOffWindow() {
         let (view, window) = loader()
