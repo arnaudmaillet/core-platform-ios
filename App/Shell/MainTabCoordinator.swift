@@ -399,16 +399,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         }
     }
 
-    /// Renders an avatar into a circular bar-sized image (`.alwaysOriginal` so
-    /// the photo isn't tinted).
+    /// Renders an avatar into a circular bar-sized image — aspect-filled, not
+    /// squeezed (#1339) — `.alwaysOriginal` so the photo isn't tinted.
     private static func circularBarImage(_ image: UIImage) -> UIImage {
-        let side: CGFloat = 30
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
-        return renderer.image { _ in
-            let rect = CGRect(x: 0, y: 0, width: side, height: side)
-            UIBezierPath(ovalIn: rect).addClip()
-            image.draw(in: rect)
-        }.withRenderingMode(.alwaysOriginal)
+        image.circularThumbnail(side: 30)
     }
 
     /// Mirrors the unread notifications count onto every bell (a `bell` ↔
