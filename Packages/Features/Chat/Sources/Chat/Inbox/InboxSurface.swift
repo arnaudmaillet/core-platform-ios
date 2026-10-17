@@ -40,6 +40,14 @@ protocol InboxSurface: UIViewController {
     /// simply no-op here and lazy ones guard their first load.
     func surfaceDidBecomeActive()
 
+    /// The page's list, which a re-tap on the Messages tab scrolls back to
+    /// its top (#1309). Nil for a page with no list.
+    var listScrollView: UIScrollView? { get }
+
+}
+
+extension InboxSurface {
+    var listScrollView: UIScrollView? { nil }
 }
 
 extension MessagesCategory {

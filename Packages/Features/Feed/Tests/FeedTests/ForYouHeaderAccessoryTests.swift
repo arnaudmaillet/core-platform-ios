@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import Foundation
 import MediaCore
 import Testing
@@ -36,6 +37,18 @@ struct ForYouHeaderAccessoryTests {
         let item = UIBarButtonItem(customView: UIView())
         item.accessibilityLabel = "Balance"
         return item
+    }
+
+    /// For You is a tab root the shell's re-tap reaches (#1309), and a page
+    /// already at its top is left where it is.
+    @Test func forYouAnswersATabReTap() {
+        let screen = screen()
+        screen.loadViewIfNeeded()
+        let stack = UINavigationController(rootViewController: screen)
+        let target = TabReselect.target(tappedSelectedTab: true, stack: stack)
+        #expect(target === screen)
+        target?.scrollToTopForTabReselect()
+        #expect(screen.page.verticalOffset <= 0.5)
     }
 
     /// With nothing injected the header is what it always was: one trailing

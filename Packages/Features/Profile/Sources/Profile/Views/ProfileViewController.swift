@@ -3060,3 +3060,13 @@ extension ProfileViewController {
         }
     }
 }
+
+// MARK: - Tab re-tap (#1309)
+
+extension ProfileViewController: TabReselectScrolling {
+    /// Back to the PROFILE's top — the identity and its tray at rest, as the
+    /// bar's identity pill does — not merely the active tab's first row.
+    func scrollToTopForTabReselect() {
+        galleryPager.scrollActivePageToProfileTop()
+    }
+}

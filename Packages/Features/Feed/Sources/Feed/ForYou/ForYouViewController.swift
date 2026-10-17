@@ -2354,3 +2354,13 @@ extension ForYouViewController: ForYouModeMenuProviding {
         makeContextMenu()
     }
 }
+
+// MARK: - Tab re-tap (#1309)
+
+extension ForYouViewController: TabReselectScrolling {
+    /// The page back to its first row — the friends row and the shelves.
+    func scrollToTopForTabReselect() {
+        guard page.verticalOffset > 0.5 else { return }
+        page.setVerticalOffset(0, animated: true)
+    }
+}
