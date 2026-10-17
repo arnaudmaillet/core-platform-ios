@@ -38,7 +38,7 @@ struct ForYouRowsTests {
         let rails = ForYouViewModel.rails(
             following: following, followingNew: [PostID("new")],
             friends: friends, friendsUnseen: [PostID("dee-new"), PostID("dee-newer")],
-            limit: 20
+            limit: 20, rowLimit: 10
         )
         #expect(rails.following.map(\.id.rawValue) == ["new", "mid", "old"])
         // Dee has unseen posts: first, ringed, opening onto ONLY those.
@@ -50,12 +50,20 @@ struct ForYouRowsTests {
         #expect(rails.friends[1].posts.map(\.id.rawValue) == ["eve-recent"])
     }
 
+    /// Ten photos and videos, ten texts (the owner, 2026-10-17): each
+    /// Following row its own share, so a run of media posts cannot spend the
+    /// text row's — and a friend's story still opens onto up to `limit`.
     @Test func theRowsAreCapped() {
-        let many = (0..<30).map { post("p\($0)", by: "bo", at: Int64($0)) }
+        let media = (0..<30).map { post("m\($0)", by: "bo", at: Int64(100 + $0)) }
+        let texts = (0..<30).map { post("t\($0)", by: "bo", at: Int64($0), kind: .text) }
         let rails = ForYouViewModel.rails(
-            following: many, followingNew: [], friends: many, friendsUnseen: [], limit: 20
+            following: media + texts, followingNew: [], friends: media, friendsUnseen: [],
+            limit: 20, rowLimit: 10
         )
-        #expect(rails.following.count == 20)
+        let shown = PostShelfRows.partition(rails.following)
+        #expect(shown.media.count == 10)
+        #expect(shown.text.count == 10, "the media posts spent the text row's share")
+        #expect(shown.media.first?.id.rawValue == "m29", "not newest first")
         #expect(rails.friends.first?.posts.count == 20)
     }
 

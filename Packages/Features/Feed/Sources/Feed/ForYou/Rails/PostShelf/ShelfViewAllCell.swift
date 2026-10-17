@@ -7,6 +7,9 @@ import UIKit
 /// its end arrives.
 ///
 /// The chevron points RIGHT because it pushes a screen, as the title's does.
+/// And the row PULLED past its end opens it too (`setPull`, the owner
+/// 2026-10-17): the card stretches with the finger, its chevron turns into an
+/// arrow past the threshold, and a release there pushes "View all".
 /// As tall as the row and rounded like its cards, so it reads as the row's
 /// last card rather than as a control floating after it.
 final class ShelfViewAllCell: UICollectionViewCell {
@@ -16,29 +19,72 @@ final class ShelfViewAllCell: UICollectionViewCell {
     /// The card's width: a thumb's width, never a card's.
     static let width: CGFloat = 40
 
+    private let ground = UIView()
     private let chevron = UIImageView()
+    /// How far the row is pulled past its end, the card stretching with it.
+    private var pull: CGFloat = 0
+    private var isArmed = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = .tertiarySystemFill
-        contentView.layer.cornerRadius = PostShelfMediaCardCell.cornerRadius
-        contentView.layer.cornerCurve = .continuous
-        contentView.clipsToBounds = true
+        // ⚠️ THE CARD STRETCHES PAST ITS CELL while the row is pulled past its
+        // end (`setPull`), so neither the cell nor its content clips; the row
+        // itself still does.
+        clipsToBounds = false
+        contentView.clipsToBounds = false
+        ground.backgroundColor = .tertiarySystemFill
+        ground.layer.cornerRadius = PostShelfMediaCardCell.cornerRadius
+        ground.layer.cornerCurve = .continuous
+        contentView.addSubview(ground)
 
-        chevron.image = UIImage(
-            systemName: "chevron.right",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
-        )
         chevron.tintColor = .secondaryLabel
         chevron.contentMode = .center
-        chevron.constrain(in: contentView) { parent in
-            chevron.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            chevron.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
+        ground.addSubview(chevron)
+        applySymbol()
         isAccessibilityElement = true
         accessibilityLabel = Self.title
         accessibilityTraits = .button
     }
+
+    /// The row pulled `distance` past its end: the card stretches to cover it
+    /// and its chevron grows; `armed` — past the threshold, where a release
+    /// opens "View all" — turns it into an arrow (the owner, 2026-10-17).
+    func setPull(_ distance: CGFloat, armed: Bool) {
+        let distance = max(0, distance)
+        guard distance != pull || armed != isArmed else { return }
+        pull = distance
+        if armed != isArmed {
+            isArmed = armed
+            applySymbol()
+        }
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
+
+    private func applySymbol() {
+        chevron.image = UIImage(
+            systemName: isArmed ? "arrow.right" : "chevron.right",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+        )
+        chevron.tintColor = isArmed ? .label : .secondaryLabel
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        ground.frame = CGRect(x: 0, y: 0, width: bounds.width + pull, height: bounds.height)
+        chevron.sizeToFit()
+        chevron.center = CGPoint(x: ground.bounds.midX, y: ground.bounds.midY)
+    }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        setPull(0, armed: false)
+    }
+
+    #if DEBUG
+    /// What a test reads.
+    var debugPull: (width: CGFloat, armed: Bool) { (ground.frame.width, isArmed) }
+    #endif
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }

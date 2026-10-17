@@ -144,6 +144,44 @@ struct PostShelfSectionTests {
         #expect(opened.isEmpty, "the chevron card opened a post")
     }
 
+    /// PULLED PAST ITS END, A ROW OPENS "VIEW ALL" (the owner, 2026-10-17):
+    /// the chevron card stretches with the pull and turns into an arrow past
+    /// the threshold; released there, the title's action runs. Short of it,
+    /// nothing opens.
+    @Test func aRowPulledPastItsEndOpensViewAll() async throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let shelf = Self.shelf()
+        window.addSubview(shelf)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        var opened = 0
+        shelf.onTitleTapped = { opened += 1 }
+        shelf.render((0..<6).map { Self.post("m\($0)", kind: .photo) })
+        shelf.layoutIfNeeded()
+        let row = shelf.mediaView
+        row.layoutIfNeeded()
+        let end = row.contentSize.width + row.adjustedContentInset.right - row.bounds.width
+
+        func release(pulledBy pull: CGFloat) async {
+            row.contentOffset.x = end + pull
+            var target = row.contentOffset
+            shelf.scrollViewWillEndDragging(row, withVelocity: .zero, targetContentOffset: &target)
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+
+        await release(pulledBy: PostShelfSection.endPullThreshold - 10)
+        #expect(opened == 0, "a short pull opened View all")
+        let card = try #require(row.visibleCells.lazy.compactMap { $0 as? ShelfViewAllCell }.first)
+        #expect(!card.debugPull.armed)
+        #expect(abs(card.debugPull.width - (ShelfViewAllCell.width + PostShelfSection.endPullThreshold - 10)) < 0.5,
+                "the card did not stretch with the pull")
+
+        await release(pulledBy: PostShelfSection.endPullThreshold + 10)
+        #expect(card.debugPull.armed, "past the threshold the chevron did not turn into an arrow")
+        #expect(opened == 1, "a release past the threshold did not open View all")
+    }
+
     /// TEN CARDS A ROW by default (#1296), the section's order.
     @Test func aRowDrawsTenCardsByDefault() {
         let shelf = Self.shelf()
