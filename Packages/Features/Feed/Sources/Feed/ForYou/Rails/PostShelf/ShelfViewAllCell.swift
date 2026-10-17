@@ -65,15 +65,21 @@ final class ShelfViewAllCell: UICollectionViewCell {
 
     /// The armed symbol: the chevron, ringed.
     static let armedSymbol = "chevron.right.circle"
+    /// The chevron's size at rest, and the ringed one's: bigger and bolder,
+    /// in the same grey (#1353, the owner 2026-10-17).
+    static let restingPointSize: CGFloat = 17
+    static let armedPointSize: CGFloat = 28
 
-    /// The symbol drawn now.
+    /// The symbol drawn now, and at what size.
     private(set) var symbolName = "chevron.right"
+    private(set) var symbolPointSize = ShelfViewAllCell.restingPointSize
 
     private func applySymbol(animated: Bool = false) {
         symbolName = isArmed ? Self.armedSymbol : "chevron.right"
+        symbolPointSize = isArmed ? Self.armedPointSize : Self.restingPointSize
         guard let image = UIImage(
             systemName: symbolName,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: symbolPointSize, weight: .semibold)
         ) else { return }
         // The symbol's own replace, as the app's other glyph swaps do
         // (`PersonPill`, `PointsHeartView`); a plain swap off screen.
@@ -82,7 +88,8 @@ final class ShelfViewAllCell: UICollectionViewCell {
         } else {
             chevron.image = image
         }
-        chevron.tintColor = isArmed ? .label : .secondaryLabel
+        // One grey in both states: the ring is the change, not the ink.
+        chevron.tintColor = .secondaryLabel
     }
 
     override func layoutSubviews() {
@@ -100,6 +107,7 @@ final class ShelfViewAllCell: UICollectionViewCell {
     #if DEBUG
     /// What a test reads.
     var debugPull: (width: CGFloat, armed: Bool) { (ground.frame.width, isArmed) }
+    var debugChevronTint: UIColor? { chevron.tintColor }
     #endif
 
     @available(*, unavailable)

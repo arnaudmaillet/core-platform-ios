@@ -181,6 +181,8 @@ struct PostShelfSectionTests {
         await release(pulledBy: PostShelfSection.endPullThreshold + 10)
         #expect(card.debugPull.armed, "past the threshold the chevron did not arm")
         #expect(card.symbolName == ShelfViewAllCell.armedSymbol, "the armed card is not the ringed chevron")
+        #expect(card.symbolPointSize > ShelfViewAllCell.restingPointSize, "the ringed chevron is not bigger")
+        #expect(card.debugChevronTint == .secondaryLabel, "the ringed chevron left the chevron's grey")
         #expect(opened == 1, "a release past the threshold did not open View all")
     }
 
