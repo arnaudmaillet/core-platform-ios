@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import MediaCore
 import ProfileInterface
 import UIKit
@@ -103,12 +104,7 @@ final class ProfileSwitcherMenuFactory: ProfileSwitcherPresenting {
     /// so the photo shows through the menu's tinting (incl. the active row's red).
     private func thumbnail(for url: URL?) async -> UIImage? {
         guard let url, let image = try? await imagePipeline.image(for: url, size: .avatar) else { return nil }
-        let side: CGFloat = 36
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side))
-        return renderer.image { _ in
-            let rect = CGRect(x: 0, y: 0, width: side, height: side)
-            UIBezierPath(ovalIn: rect).addClip()
-            image.draw(in: rect)
-        }.withRenderingMode(.alwaysOriginal)
+        // Aspect-filled, never squeezed into the square (#1339).
+        return image.circularThumbnail(side: 36)
     }
 }
