@@ -488,9 +488,31 @@ final class CommentRowView: UIView {
             sendingSpinner.alpha = 1
             return
         }
-        sendingSpinner.startAnimating()
-        if !wasSending { bounceInSpinner() }
+        guard !wasSending else { return }
+        guard loaderDelay > 0 else {
+            sendingSpinner.startAnimating()
+            return bounceInSpinner()
+        }
+        // ⚠️ NO LOADER FOR A SEND THAT IS ALREADY DONE (the owner,
+        // 2026-10-17): it shows only once the send has taken `loaderDelay`.
+        // Delivered sooner, the time simply comes in (`playDelivered`).
+        isLoaderShown = false
+        sendingSpinner.alpha = 0
+        let run = deliveryRun
+        DispatchQueue.main.asyncAfter(deadline: .now() + loaderDelay) { [weak self] in
+            guard let self, deliveryRun == run, delivery == .sending else { return }
+            sendingSpinner.startAnimating()
+            bounceInSpinner()
+        }
     }
+
+    /// How long a send may take before its loader shows; zero shows it at
+    /// once. The conversation sets it (`ConversationThreadViewController
+    /// .sendingLoaderDelay`).
+    var loaderDelay: TimeInterval = 0
+
+    /// Whether the sending loader has been drawn for the current send.
+    private var isLoaderShown = true
 
     /// Back to a row with nothing pending: recycling.
     ///
@@ -500,6 +522,7 @@ final class CommentRowView: UIView {
     private func resetDelivery() {
         guard installedDeliveryIndicators else { return }
         deliveryRun += 1
+        isLoaderShown = true
         timeReveal.layer.removeAllAnimations()
         timeReveal.isHidden = true
         isBouncingInTime = false
@@ -511,6 +534,7 @@ final class CommentRowView: UIView {
     /// The spinner arrives with a bounce: from nothing, past its size and
     /// back (#725).
     private func bounceInSpinner() {
+        isLoaderShown = true
         isBouncingInSpinner = true
         sendingSpinner.layer.removeAllAnimations()
         sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
@@ -566,12 +590,19 @@ final class CommentRowView: UIView {
         deliveryRun += 1
         let run = deliveryRun
         isBouncingInSpinner = false
-        isScalingOutSpinner = true
         // The line holds its full width, without the time, while the loader
         // leaves its place.
         let prefix = String(full.dropLast(time.count))
         reserveHeaderWidth(full)
         label.text = prefix
+        // Delivered before its loader ever showed: the time comes in at once.
+        guard carryingSpinner || isLoaderShown else {
+            sendingSpinner.stopAnimating(animated: false)
+            sendingSpinner.alpha = 1
+            isLoaderShown = true
+            return bounceInTime(time, after: prefix, completing: full)
+        }
+        isScalingOutSpinner = true
         UIView.animate(withDuration: Self.loaderOutDuration, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
             self.sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
             self.sendingSpinner.alpha = 0

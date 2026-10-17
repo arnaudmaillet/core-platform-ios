@@ -87,14 +87,17 @@ struct ConversationThreadSendAndMuteTests {
         )
     }
 
+    /// `loaderDelay`: the sending loader shows at once by default here, as
+    /// the tests below read it; the app's own delay is pinned on its own.
     private func makeScreen(
-        phase: ConversationThreadPhase, muted: Bool? = false
+        phase: ConversationThreadPhase, muted: Bool? = false, loaderDelay: TimeInterval = 0
     ) -> (ConversationThreadViewController, Driver, UIWindow) {
         let driver = Driver(initial: phase, muted: muted)
         let screen = ConversationThreadViewController(
             driver: driver, mode: .full, prefill: "",
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
         )
+        screen.sendingLoaderDelay = loaderDelay
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = UINavigationController(rootViewController: screen)
         window.isHidden = false
@@ -453,6 +456,38 @@ struct ConversationThreadSendAndMuteTests {
         #expect(await settle { !delivered.isScalingOutSpinner && !delivered.isBouncingInTime })
         let time = try #require(delivered.row.headerTextLabel.text)
         #expect(time.hasPrefix("You · ") && time.count > "You · ".count, "the time did not come back: \(time)")
+    }
+
+    /// ⚠️ A SEND THAT LANDS QUICKLY SHOWS NO LOADER (the owner, 2026-10-17):
+    /// the loader waits `sendingLoaderDelay`; delivered within it, the time
+    /// comes straight in and the loader never draws.
+    @Test func aQuickSendShowsNoLoader() async throws {
+        let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
+        let (screen, driver, window) = makeScreen(phase: .content([pending]), loaderDelay: 0.4)
+        defer { window.isHidden = true }
+        let row = try #require(cell("Message p1", in: screen))
+        #expect(!row.sendingSpinnerView.isAnimating, "the loader showed at once")
+        #expect(row.sendingSpinnerView.alpha == 0)
+
+        driver.onPhaseChange?(.content([ConversationThreadMessage(
+            id: "t1", senderID: ProfileID("me"), body: "Message p1", sentAt: pending.sentAt, isMine: true, quote: nil
+        )]))
+        #expect(!row.isScalingOutSpinner, "a loader that never showed played its way out")
+        #expect(await settle { !row.isBouncingInTime && row.row.headerTextLabel.text != "You · " })
+        #expect(!row.sendingSpinnerView.isAnimating)
+        // Well past the delay: the loader of a delivered send never comes.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(!row.sendingSpinnerView.isAnimating, "the loader showed after the send had landed")
+    }
+
+    /// A slow send shows the loader once the delay has passed.
+    @Test func aSlowSendShowsTheLoaderAfterTheDelay() async throws {
+        let pending = Self.message("p1", mine: true, minutes: 3, delivery: .sending)
+        let (screen, _, window) = makeScreen(phase: .content([pending]), loaderDelay: 0.1)
+        defer { window.isHidden = true }
+        let row = try #require(cell("Message p1", in: screen))
+        #expect(!row.sendingSpinnerView.isAnimating)
+        #expect(await settle { row.sendingSpinnerView.isAnimating }, "the loader never came for a slow send")
     }
 
     // MARK: - Arrival and departure (#920)

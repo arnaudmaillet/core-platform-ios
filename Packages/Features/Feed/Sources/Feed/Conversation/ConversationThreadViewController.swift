@@ -114,6 +114,11 @@ final class ConversationThreadViewController: UIViewController {
     /// The clock a rise is timed on. Tests stop it, so whether a delivery
     /// lands mid-rise never hangs on how fast the test runs.
     var mediaTime: () -> CFTimeInterval = CACurrentMediaTime
+
+    /// How long a message may take to send before its row shows the loader
+    /// (the owner, 2026-10-17): on a good connection a send lands within it
+    /// and the time simply comes in — a loader there is noise. Tests set 0.
+    var sendingLoaderDelay: TimeInterval = 0.4
     /// The phase held back until a rise lands; the newest one wins.
     private var deferredPhase: ConversationThreadPhase?
     /// Delivered messages whose pending row already played the delivery
@@ -1062,6 +1067,7 @@ final class ConversationThreadViewController: UIViewController {
         cell.mediaView.configure(message.media, delivery: message.delivery, pipeline: imagePipeline)
         // A text message of the viewer's shows whether it is on its way
         // (#719); a failed one is sent again by a tap.
+        cell.loaderDelay = sendingLoaderDelay
         cell.setDelivery(
             message.isMine && message.media == nil ? message.delivery : nil,
             time: Self.timeFormatter.string(from: message.sentAt)

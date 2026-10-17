@@ -116,12 +116,17 @@ final class ThreadRowCell: UICollectionViewCell {
     /// ⚠️ ALWAYS AT FULL INK (#919, the owner's call 2026-10-11). A pending
     /// message used to be drawn faded until it was sent; the spinner standing
     /// in for the time is now the only sign it is on its way.
+    /// How long a send may take before its loader shows — the conversation's
+    /// `sendingLoaderDelay`; zero shows it at once.
+    var loaderDelay: TimeInterval = 0
+
     func setDelivery(_ delivery: ConversationThreadDelivery?, time: String? = nil) {
         let awaiting: CommentRowView.Delivery? = switch delivery {
         case .sending: .sending
         case .failed: .failed
         case .sent, nil: nil
         }
+        row.loaderDelay = loaderDelay
         row.setDelivery(awaiting, time: time)
         accessibilityValue = switch delivery {
         case .sending: "Sending"
