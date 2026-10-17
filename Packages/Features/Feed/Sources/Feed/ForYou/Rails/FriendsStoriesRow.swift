@@ -68,12 +68,9 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     /// screen width ahead decoded, two and a half on disk. Outside the list's
     /// display window it plans nothing (`refreshLookaheadReach`).
     ///
-    /// The faces carry their story's first pictures too: a tap flies the face
-    /// into its first post, and nothing else on this screen shows the
-    /// friends' posts, so a flight asking the cache at the tap found it cold
-    /// every time (`ForYouRowOrigins.storyPictures` rescues a late one
-    /// mid-air; a picture there from the first frame is the transition as
-    /// designed).
+    /// The faces carry their story's first pictures too: a tap opens the
+    /// face's window onto its first post (#1356), and nothing else on this
+    /// screen shows the friends' posts, so the page would open cold.
     private lazy var storyLookahead: ScrollLookahead = {
         let lookahead = ScrollLookahead(pipeline: imagePipeline, name: "foryou.friends", kind: .rail) { [weak self] path in
             self?.storyImages(at: path) ?? []
@@ -284,8 +281,11 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
         ForYouStoryCell.Metrics.faceShape.cornerRadius(side: storyFaceDiameter)
     }
 
+    /// The face a flight carries: the avatar's own picture, or — for a
+    /// friend drawn as initials — the cell's render of them (#1356).
     func storyFace(for id: ProfileID) -> UIImage? {
-        storyCell(for: id)?.renderedFace()
+        guard let cell = storyCell(for: id) else { return nil }
+        return cell.shownPicture ?? cell.renderedFace()
     }
 
     func isStoryOnScreen(_ id: ProfileID) -> Bool {

@@ -55,14 +55,42 @@ struct ForYouRowsCloseTests {
         let story = Self.story("pal", posts: [Self.post("s1", kind: kind), Self.post("s2", kind: .text)])
         let fixture = Fixture(stories: [story])
         let origin = try #require(ForYouRowOrigins.story(
-            story, friends: fixture.lead.friends, page: fixture.page, host: fixture.host.view, pagePicture: nil
+            story, friends: fixture.lead.friends, page: fixture.page, host: fixture.host.view
         ))
 
-        #expect(origin.hasHero == (kind != .text))
+        // Never a flight (#1356): a face is the friend's avatar, not their
+        // post's picture, and the window opens whatever the first post is.
+        #expect(!origin.hasHero, "a story flew the avatar into the post's media")
         #expect(origin.textReveal != nil)
         #expect(FeedFeatureBuilder.cardCloseLanding(
             for: fixture.host, origin: origin, pipeline: nil, dock: { $0 }
         ) is RowCardCloseLanding)
+    }
+
+    /// The window opens onto the post itself — no avatar drawn over it — and
+    /// closes onto the avatar's own picture, the sharper one once it has
+    /// loaded (#1356): never a render of the cell, whose initials fill showed
+    /// as a light rim.
+    @Test func aStoryOpensOntoThePostAndClosesOntoTheAvatarPicture() throws {
+        let story = Self.story("pal", posts: [Self.post("s1", kind: .photo)])
+        let fixture = Fixture(stories: [story])
+        let sharp = UIGraphicsImageRenderer(size: CGSize(width: 512, height: 512)).image { context in
+            UIColor.systemPink.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 512, height: 512))
+        }
+        var deliver: (@MainActor (UIImage) -> Void)?
+        let origin = try #require(ForYouRowOrigins.story(
+            story, friends: fixture.lead.friends, page: fixture.page, host: fixture.host.view,
+            largerFace: { deliver = $0 }
+        ))
+        let reveal = try #require(origin.textReveal)
+        #expect(reveal.makePresentStandIn() == nil, "the avatar was drawn over the opening post")
+
+        let hand = try #require(deliver)
+        hand(sharp)
+        let standIn = try #require(reveal.makeDismissStandIn(nil) as? UIImageView)
+        #expect(standIn.image === sharp, "the close landed on something other than the avatar's picture")
+        #expect(standIn.layer.cornerRadius == fixture.lead.friends.storyFaceCornerRadius)
     }
 
     /// The window a MEDIA card's close lands as is that card — its picture on

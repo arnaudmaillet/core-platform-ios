@@ -202,6 +202,11 @@ final class ForYouStoryCell: UICollectionViewCell {
     /// context menu's preview.
     var faceView: UIView { monogram }
 
+    /// The avatar's own picture while one is shown — what a flight carries
+    /// for this face (#1356): the photograph alone, never a render of the
+    /// cell, whose initials fill bled into the clip's edge as a light rim.
+    var shownPicture: UIImage? { picture.isHidden ? nil : picture.image }
+
     /// The face's rect — the disc without its ring — in `space`, AT REST:
     /// with no transform between the face and `row` counted.
     ///
