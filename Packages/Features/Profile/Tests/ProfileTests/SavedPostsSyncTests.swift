@@ -64,7 +64,17 @@ private actor FakeSavesServer: SavedPostsTransport {
     }
 }
 
-/// One isolated world: its own defaults, scope, pile, outbox and sync.
+/// The sync's clock, moved by the test: freshness (`listFreshness`) never
+/// depends on how fast the runner is (#1360 — a starved CI runner let two
+/// back-to-back refreshes land 30 s apart on the wall clock).
+private final class TestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var current = Date(timeIntervalSince1970: 1_000_000)
+    var now: Date { lock.withLock { current } }
+    func advance(by seconds: TimeInterval) { lock.withLock { current += seconds } }
+}
+
+/// One isolated world: its own defaults, scope, pile, outbox, clock and sync.
 @MainActor
 private struct World {
     let defaults: UserDefaults
@@ -73,6 +83,7 @@ private struct World {
     let outbox: SaveOutbox
     let server: FakeSavesServer
     let sync: SavedPostsSync
+    let clock = TestClock()
     let connectivity = ConnectivityMonitor(offlineGrace: 0)
 
     static let member = StorageScope.Owner.member(account: "acct-1", profile: "prof-1")
@@ -86,9 +97,10 @@ private struct World {
         for id in pile.reversed() { store.toggle(id) }
         outbox = SaveOutbox(defaults: defaults)
         self.server = server
+        let testClock = self.clock
         sync = SavedPostsSync(
             store: store, outbox: outbox, transport: server, scope: scope, defaults: defaults,
-            retryDelays: [0.02]
+            retryDelays: [0.02], now: { testClock.now }
         )
         sync.connectivity = connectivity
         store.sync = sync
@@ -305,6 +317,19 @@ struct SavedPostsReadTests {
         await world.sync.refreshFromServer()
 
         #expect(await server.listCalls == 1)
+    }
+
+    /// The same list, once its freshness has run out, is asked again — the
+    /// rule `aFreshListIsNotAskedAgain` keeps from firing too early.
+    @Test func aStaleListIsAskedAgain() async {
+        let server = FakeSavesServer(lists: ["prof-1": ["s1"]])
+        let world = World(server: server)
+
+        await world.sync.refreshFromServer()
+        world.clock.advance(by: 31)
+        await world.sync.refreshFromServer()
+
+        #expect(await server.listCalls == 2)
     }
 }
 
