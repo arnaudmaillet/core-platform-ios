@@ -253,6 +253,24 @@ struct ForYouDiscoveryCorpusTests {
         #expect(provider.followingTokens == ["f2"])
     }
 
+    /// #1341: the Following rows page the following timeline on their own
+    /// while either row is short of its ten cards — the first page also holds
+    /// friends' posts, which go to their own row — and stop once it ends.
+    @Test func shortFollowingRowsTopUpFromTheFollowingTimeline() async {
+        let provider = RecordingCorporaProvider()
+        provider.followingFirst = ForYouPage(posts: [tile("f1", author: "followed")], nextPageToken: "f2")
+        provider.followingPages["f2"] = ForYouPage(posts: [tile("f2p", author: "followed")], nextPageToken: nil)
+        provider.discoveryFirst = ForYouPage(posts: [tile("d1")], nextPageToken: nil)
+        let model = ForYouViewModel(repository: provider, unreadStore: ForYouUnreadStore(defaults: UserDefaults(suiteName: UUID().uuidString)!))
+        await loading(model) { model.viewDidLoad() }
+        for _ in 0..<200 where provider.followingTokens.isEmpty || model.hasMoreFollowingPages {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(provider.followingTokens == ["f2"], "the short rows did not page the following timeline")
+        #expect(provider.discoveryTokens.isEmpty, "a top-up paged Discover")
+        #expect(!model.hasMoreFollowingPages)
+    }
+
     /// Paging appends the pool in order and drops a post served twice (it
     /// moved between rankings, which the contract allows).
     @Test func pagingAppendsThePoolOnce() async {

@@ -183,6 +183,30 @@ public final class ForYouViewModel {
     /// opens onto. The row is a way INTO the list; the list is one tap away.
     nonisolated static let railLimit = 20
 
+    /// How many more following pages the rows may fetch to fill up. The
+    /// following timeline's first page also carries FRIENDS' posts, which go
+    /// to their own row: on the mock, 7 of its 20 posts were the Following
+    /// row's, so its two rows showed a handful each. The rows page on until
+    /// each holds `PostShelfSection.rowLimit` cards or the timeline ends —
+    /// capped, so a timeline of friends alone does not page through everything.
+    nonisolated static let maxFollowingTopUps = 3
+    private var followingTopUps = 0
+
+    /// Fetches the following timeline's next page when either Following row is
+    /// short of its limit — once per page, the next decided when it lands.
+    private func topUpFollowingIfShort(_ cards: [GalleryPost]) {
+        let text = cards.filter { $0.kind == .text }.count
+        let short = cards.count - text < PostShelfSection.rowLimit || text < PostShelfSection.rowLimit
+        // ⚠️ ONLY WITH DISCOVERY WIRED (always, in the app). Without it the
+        // following timeline IS Discover's grid, which pages itself as the
+        // viewer nears its end — a top-up there would page the grid unasked.
+        guard hasDiscovery, short, followingTopUps < Self.maxFollowingTopUps,
+              followingPageLoad == nil, load == nil, nextPageToken != nil
+        else { return }
+        followingTopUps += 1
+        loadNextPageIfNeeded(.following)
+    }
+
     /// What a failed first page says when the device is online (#794). The
     /// page's Try Again sits under it, so it promises no pull.
     nonisolated static let failureMessage = "Couldn't load these posts."
@@ -737,6 +761,7 @@ public final class ForYouViewModel {
                 onPagingChange?(false)
             }
             followingPageLoad = nil
+            followingTopUps = 0
             // ⚠️ The corpus and its cursors are NOT dropped here (#798): what
             // the viewer is looking at stays on screen while the refresh is in
             // flight, and stays there if it fails. Only a page that has
@@ -872,8 +897,12 @@ public final class ForYouViewModel {
             snapshot.rails = Self.rails(
                 following: following, followingNew: snapshot.followingNew,
                 friends: friends, friendsUnseen: snapshot.friendsUnseen,
-                limit: Self.railLimit
+                limit: Self.railLimit, rowLimit: PostShelfSection.rowLimit
             )
+            // On the next turn: the first page publishes from inside its own
+            // load, which is only over once this returns.
+            let cards = snapshot.rails.following
+            Task { [weak self] in self?.topUpFollowingIfShort(cards) }
             // A forced count is `-foryou-badges` only, and overrides the
             // derivation for the BADGE alone — see `forcedCount`.
             snapshot.rails.followingBadge = unreadStore.forcedCount(for: Self.unreadKey)
@@ -901,10 +930,14 @@ public final class ForYouViewModel {
     /// Pure and static so a test can pin the ordering rules rather than a
     /// screenshot: unseen first on both rows; within each half the newest
     /// first; a friend opens onto their unseen posts, or their recent ones.
+    ///
+    /// The Following rows take up to `rowLimit` cards EACH (the owner,
+    /// 2026-10-17): ten photos and videos, ten texts — not twenty between
+    /// them, which a run of media posts used to spend on one row.
     nonisolated static func rails(
         following: [GalleryPost], followingNew: Set<PostID>,
         friends: [GalleryPost], friendsUnseen: Set<PostID>,
-        limit: Int
+        limit: Int, rowLimit: Int
     ) -> Rails {
         func newestFirst(_ posts: [GalleryPost]) -> [GalleryPost] {
             posts.sorted { $0.publishedAtMS > $1.publishedAtMS }
@@ -912,7 +945,18 @@ public final class ForYouViewModel {
         var rails = Rails()
         let unseenCards = newestFirst(following.filter { followingNew.contains($0.id) })
         let seenCards = newestFirst(following.filter { !followingNew.contains($0.id) })
-        rails.following = Array((unseenCards + seenCards).prefix(limit))
+        // Each row its own share, in the rows' order; the kind is the rows'
+        // own rule (`PostShelfRows.Row`: words alone are the text row).
+        var media = 0
+        var text = 0
+        rails.following = (unseenCards + seenCards).filter { post in
+            if post.kind == .text {
+                text += 1
+                return text <= rowLimit
+            }
+            media += 1
+            return media <= rowLimit
+        }
 
         var byAuthor: [ProfileID: [GalleryPost]] = [:]
         var order: [ProfileID] = []

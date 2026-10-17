@@ -922,6 +922,42 @@ final class PostShelfSection: UIView {
     }
 
     /// Whether `scrollView` is one of the shelf's rows.
+    // MARK: - Pulled past the end (the owner, 2026-10-17)
+
+    /// How far a row must be pulled past its end for a release to open
+    /// "View all": past the chevron card, a thumb's travel more.
+    static let endPullThreshold: CGFloat = 72
+
+    /// How far `row` is pulled past its last card; negative short of it. A row
+    /// narrower than the section counts from its rest.
+    static func endPull(of row: UIScrollView) -> CGFloat {
+        let end = max(
+            -row.adjustedContentInset.left,
+            row.contentSize.width + row.adjustedContentInset.right - row.bounds.width
+        )
+        return row.contentOffset.x - end
+    }
+
+    private let pullHaptic = HapticSelection()
+    /// The rows past the threshold right now, each announced once.
+    private var armedRows: Set<ObjectIdentifier> = []
+
+    /// The chevron card follows the pull; crossing the threshold under the
+    /// finger is felt once.
+    private func followEndPull(_ row: UICollectionView) {
+        guard drawsViewAll else { return }
+        let pull = max(0, Self.endPull(of: row))
+        let armed = pull >= Self.endPullThreshold
+        row.visibleCells.lazy.compactMap { $0 as? ShelfViewAllCell }.first?.setPull(pull, armed: armed)
+        let id = ObjectIdentifier(row)
+        if armed, row.isTracking, !armedRows.contains(id) {
+            armedRows.insert(id)
+            pullHaptic.selectionChanged()
+        } else if !armed {
+            armedRows.remove(id)
+        }
+    }
+
     func owns(_ scrollView: UIScrollView) -> Bool {
         scrollView === mediaView || scrollView === textView
     }
@@ -1064,6 +1100,7 @@ extension PostShelfSection: UICollectionViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         snapper.didScroll(scrollView)
+        if let row = scrollView as? UICollectionView, owns(row) { followEndPull(row) }
         guard scrollView === mediaView else { return }
         cardLookahead.scrollViewDidScroll()
         // Only the media row plays; the text row scrolls past nothing to
@@ -1081,6 +1118,7 @@ extension PostShelfSection: UICollectionViewDelegate {
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         guard owns(scrollView) else { return }
         snapper.willBeginDragging(scrollView)
+        if drawsViewAll { pullHaptic.prepare() }
     }
 
     /// The row comes to rest on an item's edge — the text row ONE card per
@@ -1091,6 +1129,11 @@ extension PostShelfSection: UICollectionViewDelegate {
         targetContentOffset: UnsafeMutablePointer<CGPoint>
     ) {
         guard let row = scrollView as? UICollectionView, owns(row) else { return }
+        // Released past the end's threshold: "View all", on the next turn so
+        // the row's own spring back is under way first.
+        if drawsViewAll, Self.endPull(of: row) >= Self.endPullThreshold {
+            DispatchQueue.main.async { [weak self] in self?.onTitleTapped?() }
+        }
         snapper.willEndDragging(
             row, velocity: velocity, targetContentOffset: targetContentOffset, stepped: row === textView
         )
