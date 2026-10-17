@@ -1415,7 +1415,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 wallet: wallet
             )
         }
-        return SnapFeedViewController(
+        let feed = SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
@@ -1451,6 +1451,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // the same cache, which `galleryPost` then answers from.
             prewarmPosts: { ids in await repository.prewarm(ids) }
         )
+        // Every vertical feed records what the viewer viewed (#1344).
+        feed.viewHistory = .shared
+        return feed
     }
 
     /// The comments panel every snap page embeds. ONE construction, so the
