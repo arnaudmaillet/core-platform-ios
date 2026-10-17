@@ -145,7 +145,7 @@ struct PostShelfSectionTests {
     }
 
     /// PULLED PAST ITS END, A ROW OPENS "VIEW ALL" (the owner, 2026-10-17):
-    /// the chevron card stretches with the pull and turns into an arrow past
+    /// the chevron card stretches with the pull and turns into a ringed chevron past
     /// the threshold; released there, the title's action runs. Short of it,
     /// nothing opens.
     @Test func aRowPulledPastItsEndOpensViewAll() async throws {
@@ -174,11 +174,13 @@ struct PostShelfSectionTests {
         #expect(opened == 0, "a short pull opened View all")
         let card = try #require(row.visibleCells.lazy.compactMap { $0 as? ShelfViewAllCell }.first)
         #expect(!card.debugPull.armed)
+        #expect(card.symbolName == "chevron.right")
         #expect(abs(card.debugPull.width - (ShelfViewAllCell.width + PostShelfSection.endPullThreshold - 10)) < 0.5,
                 "the card did not stretch with the pull")
 
         await release(pulledBy: PostShelfSection.endPullThreshold + 10)
-        #expect(card.debugPull.armed, "past the threshold the chevron did not turn into an arrow")
+        #expect(card.debugPull.armed, "past the threshold the chevron did not arm")
+        #expect(card.symbolName == ShelfViewAllCell.armedSymbol, "the armed card is not the ringed chevron")
         #expect(opened == 1, "a release past the threshold did not open View all")
     }
 

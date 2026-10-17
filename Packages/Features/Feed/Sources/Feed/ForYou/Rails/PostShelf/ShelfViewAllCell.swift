@@ -8,8 +8,9 @@ import UIKit
 ///
 /// The chevron points RIGHT because it pushes a screen, as the title's does.
 /// And the row PULLED past its end opens it too (`setPull`, the owner
-/// 2026-10-17): the card stretches with the finger, its chevron turns into an
-/// arrow past the threshold, and a release there pushes "View all".
+/// 2026-10-17): the card stretches with the finger, its chevron turns into
+/// `chevron.right.circle` past the threshold (SF Symbols' replace), and a
+/// release there pushes "View all".
 /// As tall as the row and rounded like its cards, so it reads as the row's
 /// last card rather than as a control floating after it.
 final class ShelfViewAllCell: UICollectionViewCell {
@@ -47,25 +48,40 @@ final class ShelfViewAllCell: UICollectionViewCell {
     }
 
     /// The row pulled `distance` past its end: the card stretches to cover it
-    /// and its chevron grows; `armed` — past the threshold, where a release
-    /// opens "View all" — turns it into an arrow (the owner, 2026-10-17).
+    /// with the finger; `armed` — past the threshold, where a release opens
+    /// "View all" — turns the chevron into `chevron.right.circle` through
+    /// SF Symbols' replace transition (the owner, 2026-10-17).
     func setPull(_ distance: CGFloat, armed: Bool) {
         let distance = max(0, distance)
         guard distance != pull || armed != isArmed else { return }
         pull = distance
         if armed != isArmed {
             isArmed = armed
-            applySymbol()
+            applySymbol(animated: window != nil)
         }
         setNeedsLayout()
         layoutIfNeeded()
     }
 
-    private func applySymbol() {
-        chevron.image = UIImage(
-            systemName: isArmed ? "arrow.right" : "chevron.right",
+    /// The armed symbol: the chevron, ringed.
+    static let armedSymbol = "chevron.right.circle"
+
+    /// The symbol drawn now.
+    private(set) var symbolName = "chevron.right"
+
+    private func applySymbol(animated: Bool = false) {
+        symbolName = isArmed ? Self.armedSymbol : "chevron.right"
+        guard let image = UIImage(
+            systemName: symbolName,
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
-        )
+        ) else { return }
+        // The symbol's own replace, as the app's other glyph swaps do
+        // (`PersonPill`, `PointsHeartView`); a plain swap off screen.
+        if animated {
+            chevron.setSymbolImage(image, contentTransition: .replace)
+        } else {
+            chevron.image = image
+        }
         chevron.tintColor = isArmed ? .label : .secondaryLabel
     }
 
