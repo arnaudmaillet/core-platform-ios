@@ -12,7 +12,7 @@ import UIKit
 /// edge-only (this pan covers the whole surface, like the grab), it is
 /// disabled by the feed's custom back item, and it completes on UIKit's own
 /// threshold — both dismissals must release on the one shared contract
-/// (`ZoomTransitionGeometry.shouldCompleteDismissal`: 35% of width, or a
+/// (`ZoomTransitionGeometry.shouldCompleteDismissal`: half the width, or a
 /// 900 pt/s flick).
 ///
 /// Deliberately NOT the pin path's free-floating interaction controller:
@@ -269,6 +269,8 @@ public final class InteractiveSlideDismissal: NSObject {
         pan.delegate = self
         feedViewController.view.addGestureRecognizer(pan)
         dismissalPan = pan
+        // Installed before the pan existed: subordinate now.
+        if let nav = navigationController { subordinateNativePops(on: nav) }
     }
 
     /// Takes the stack's delegate slot for the feed's time on `nav`. The
@@ -353,6 +355,37 @@ public final class InteractiveSlideDismissal: NSObject {
         // used to swallow, which leaked every post opened from the place page.
         hub.lease(self)
         navigationController = nav
+        subordinateNativePops(on: nav)
+    }
+
+    /// ⚠️ ONE OWNER FOR THE FULL-SURFACE GRAB (#1316, #1143): UIKit's own
+    /// pops wait for this pan to fail.
+    ///
+    /// Two full-surface recognizers used to race on a screen pushed above a
+    /// bar-hiding parent (a post, a chat thread): this pan and iOS 26's
+    /// content pop, which the delegate slot does not veto there. Whichever
+    /// began first won, and when it was UIKit's, the pop it started had no
+    /// driver of ours behind it — the screen slid away whole on a small drag,
+    /// "the threshold ignored" (filmed by the owner). Required to fail, the
+    /// native pops only ever begin where this pan declines (another tab of a
+    /// profile, a carousel's drag), and the shared release rule decides
+    /// everywhere else.
+    private func subordinateNativePops(on nav: UINavigationController) {
+        guard let pan = dismissalPan else { return }
+        nav.interactivePopGestureRecognizer?.require(toFail: pan)
+        if #available(iOS 26.0, *) {
+            nav.interactiveContentPopGestureRecognizer?.require(toFail: pan)
+        }
+    }
+
+    /// Whether one of UIKit's own pop gestures is driving a pop right now — a
+    /// seam, so a test can say so without a finger.
+    var nativePopIsDriving: @MainActor (UINavigationController) -> Bool = InteractiveSlideDismissal.nativePopGestureIsDriving
+
+    private static func nativePopGestureIsDriving(_ nav: UINavigationController) -> Bool {
+        var recognizers = [nav.interactivePopGestureRecognizer]
+        if #available(iOS 26.0, *) { recognizers.append(nav.interactiveContentPopGestureRecognizer) }
+        return recognizers.contains { $0?.state == .began || $0?.state == .changed }
     }
 
     private func teardown() {
@@ -423,8 +456,8 @@ public final class InteractiveSlideDismissal: NSObject {
                 axis: activeAxis
             )
         } else {
+            // The release's curve is set at the release (`releaseSpring`).
             let interaction = UIPercentDrivenInteractiveTransition()
-            interaction.completionCurve = .easeOut
             self.interaction = interaction
         }
         // The restaging window — see `onWillBeginPop`. Before the pop, so a
@@ -462,8 +495,36 @@ public final class InteractiveSlideDismissal: NSObject {
         let commit = ended && ZoomTransitionGeometry.shouldCompleteDismissal(
             progress: progress, velocity: activeAxis.along(velocity)
         )
+        // ⚠️ A SPRING, CARRYING THE HAND'S SPEED (#1316). The release used to
+        // ease out of a linear scrub, which read stiff next to the zoom grab's
+        // spring (the owner: "brute/raide"). The remainder now springs from the
+        // finger's velocity, on the slide animator's own property animator
+        // (`TimelineSlidePopAnimator.interruptibleAnimator`).
+        interaction.timingCurve = Self.releaseSpring(
+            progress: progress, velocity: activeAxis.along(velocity),
+            span: activeAxis.span(of: view.bounds.size), commit: commit
+        )
         commit ? interaction.finish() : interaction.cancel()
     }
+
+    /// The release's spring, launched at the finger's speed over what is
+    /// left, so the screen carries the hand's motion and settles instead of
+    /// starting a fresh curve.
+    static func releaseSpring(
+        progress: CGFloat, velocity: CGFloat, span: CGFloat, commit: Bool
+    ) -> UISpringTimingParameters {
+        let remaining = max((commit ? 1 - progress : progress) * span, 1)
+        // Toward the target is positive: a commit travels with the finger, a
+        // cancel against it.
+        let toward = commit ? velocity : -velocity
+        let launch = min(max(toward / remaining, 0), 8)
+        return UISpringTimingParameters(dampingRatio: releaseDamping, initialVelocity: CGVector(dx: launch, dy: 0))
+    }
+
+    /// The release spring's damping: CRITICAL. Any give would carry a
+    /// cancelled screen past its rest and bare a sliver of the one beneath at
+    /// its edge; the organic part is the launch speed, not an overshoot.
+    static let releaseDamping: CGFloat = 1
 
     #if DEBUG
     /// Scripted swipe for sim recordings (`-feed-swipe-demo`): touch injection
@@ -561,6 +622,17 @@ extension InteractiveSlideDismissal: UINavigationControllerDelegate {
             return forwarded
         }
         guard operation == .pop, fromVC === feedViewController else { return nil }
+        // ⚠️ A POP ONE OF UIKIT'S GESTURES IS DRIVING IS UIKIT'S (#1316).
+        //
+        // Answered with our slide, it was a custom animator with no
+        // interaction controller (see `interactionControllerFor`): UIKit
+        // played it to the end, whatever the finger did — the screen left on a
+        // small drag. Nil keeps UIKit's own interactive pop, driven by the
+        // finger and released on the platform's rule. Rare now that the native
+        // pops wait for this pan to fail (`subordinateNativePops`).
+        if interaction == nil, revealGrab == nil, nativePopIsDriving(navigationController) {
+            return nil
+        }
         // ⚠️ A POP WITH NO GESTURE BEHIND IT still has to be prepared.
         //
         // A swipe passes through `beginSwipe`, which asks for this first. The
@@ -844,9 +916,8 @@ extension InteractiveSlideDismissal: UIGestureRecognizerDelegate {
 /// The pop leg the swipe scrubs: a native-style slide — the feed exits along
 /// the swipe's axis (rightward, or downward for the forward-only feed's
 /// vertical swipe) at 1:1 while the underlying screen advances from its
-/// parallax offset under a fading dim. Linear inside, so scrubbed progress
-/// tracks the finger; the percent driver's completion curve eases the
-/// remainder on release.
+/// parallax offset under a fading dim. Scrubbed linearly, so progress tracks
+/// the finger; the release springs the remainder (`releaseSpring`).
 final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransitioning {
     /// How far (fraction of the travel span) the underlying screen sits
     /// shifted against the exit direction before the pop reveals it — the
@@ -867,15 +938,39 @@ final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransiti
     }
 
     func transitionDuration(using context: (any UIViewControllerContextTransitioning)?) -> TimeInterval {
-        0.35
+        0.45
     }
 
+    /// The one animator of this leg, built on first ask (#1316): UIKit asks
+    /// for it when a percent driver scrubs the pop, and drives the release
+    /// with the driver's `timingCurve` — the spring — instead of a linear
+    /// tail eased out.
+    private var propertyAnimator: UIViewPropertyAnimator?
+
     func animateTransition(using context: any UIViewControllerContextTransitioning) {
+        interruptibleAnimator(using: context).startAnimation()
+    }
+
+    func animationEnded(_ transitionCompleted: Bool) {
+        propertyAnimator = nil
+    }
+
+    func interruptibleAnimator(
+        using context: any UIViewControllerContextTransitioning
+    ) -> any UIViewImplicitlyAnimating {
+        if let propertyAnimator { return propertyAnimator }
+        // A back-button pop, run on its own: the same spring, at rest.
+        let animator = UIViewPropertyAnimator(
+            duration: transitionDuration(using: context),
+            timingParameters: UISpringTimingParameters(dampingRatio: 1)
+        )
+        propertyAnimator = animator
         guard let fromView = context.view(forKey: .from),
               let toVC = context.viewController(forKey: .to),
               let toView = context.view(forKey: .to) else {
-            context.completeTransition(false)
-            return
+            animator.addAnimations {}
+            animator.addCompletion { _ in context.completeTransition(false) }
+            return animator
         }
         let container = context.containerView
         // ⚠️ SETUP WITH VIEW ANIMATIONS OFF — see `ZoomAnimator.present` for the
@@ -929,15 +1024,12 @@ final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransiti
         let exit = axis.offset(along: span, across: 0)
         toView.transform = CGAffineTransform(translationX: entry.x, y: entry.y)
         UIView.setAnimationsEnabled(animationsWereEnabled)
-        UIView.animate(
-            withDuration: transitionDuration(using: context),
-            delay: 0,
-            options: [.curveLinear]
-        ) {
+        animator.addAnimations {
             fromView.transform = CGAffineTransform(translationX: exit.x, y: exit.y)
             toView.transform = .identity
             dim.alpha = 0
-        } completion: { _ in
+        }
+        animator.addCompletion { _ in
             dim.removeFromSuperview()
             fromView.transform = .identity
             toView.transform = .identity
@@ -951,6 +1043,7 @@ final class TimelineSlidePopAnimator: NSObject, UIViewControllerAnimatedTransiti
             restingCorners.restore(on: fromView.layer)
             context.completeTransition(!context.transitionWasCancelled)
         }
+        return animator
     }
 }
 
