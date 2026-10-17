@@ -104,6 +104,39 @@ struct HeroPushHardeningFeedTests {
         #expect(nav.toolbar.overrideUserInterfaceStyle == .unspecified)
     }
 
+    // MARK: - A grab keeps the bottom bar's style until it is decided (#1315)
+
+    /// ⚠️ THE BOTTOM BAR STAYS ON SCREEN THROUGH A GRAB: handed back at its
+    /// first frame, it turned light over the media page for the whole grab
+    /// and after a cancel (filmed by the owner, 2026-10-17). The header goes
+    /// at once — it is the destination's — the toolbar only on a commit.
+    @Test(arguments: [true, false])
+    func aGrabKeepsTheToolbarsStyleUntilItIsDecided(commits: Bool) {
+        let feed = Self.feed()
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        nav.navigationBar.overrideUserInterfaceStyle = .dark   // lent for the visit
+        nav.toolbar.overrideUserInterfaceStyle = .dark
+
+        var decide: ((Bool) -> Void)?
+        feed.handBackChromeTheme(interactive: true) { decide = $0 }
+        #expect(nav.navigationBar.overrideUserInterfaceStyle == .unspecified, "the header kept the feed's style")
+        #expect(nav.toolbar.overrideUserInterfaceStyle == .dark, "the bottom bar went light mid-grab")
+
+        decide?(commits)
+        #expect(nav.toolbar.overrideUserInterfaceStyle == (commits ? .unspecified : .dark))
+    }
+
+    /// An ordinary disappearance hands everything back at once.
+    @Test func aPlainDisappearanceHandsTheToolbarBackAtOnce() {
+        let feed = Self.feed()
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(feed, animated: false)
+        nav.toolbar.overrideUserInterfaceStyle = .dark
+        feed.handBackChromeTheme(interactive: false) { _ in }
+        #expect(nav.toolbar.overrideUserInterfaceStyle == .unspecified)
+    }
+
     // MARK: - A media page arrives under dark bars
 
     /// ⚠️ A FEED PUSHED FRESH WITH A SEED (a For You rail card's hero) has no
