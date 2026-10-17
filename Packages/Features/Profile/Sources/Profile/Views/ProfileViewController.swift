@@ -2276,7 +2276,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             guard let self else { return }
             self.applyHeaderOffset(offset)
             // Negative travel is the overscroll the indicator draws from.
-            self.pullIndicator.setPull(max(0, -offset))
+            self.pullIndicator.setPull(
+                max(0, -offset), isTracking: self.galleryPager.activePage?.scrollView.isTracking ?? false
+            )
         }
         galleryPager.onPullReleased = { [weak self] distance in
             guard let self, self.pullIndicator.shouldRefresh(releasedAt: distance) else { return }
