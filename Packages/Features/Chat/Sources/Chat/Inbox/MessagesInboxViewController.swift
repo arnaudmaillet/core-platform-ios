@@ -121,9 +121,9 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         super.viewDidLoad()
         // ⚠️ NO TITLE. "Messages" sat here for a while (the tab bar says the
         // word already); it went on 2026-09-22 with the map tab's and For
-        // You's. The pinned section pill ("New", "Recent") stays IN THE LIST,
-        // under the bar, as on the search screen — a leading bar item was tried
-        // in its place and taken out again the same day.
+        // You's. The section the list has scrolled into ("New", "Recent") is
+        // named in the bar, after the bell (#1301; first tried in #179 and
+        // reverted in #181, when it had the leading group to itself).
         navigationItem.largeTitleDisplayMode = .never
         // ⚠️ **AND THE CHEVRON KEEPS ITS SILENCE.** A titled root gives every
         // screen pushed from it a WORDED back button, and two pushed bars were
@@ -250,6 +250,12 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         for surface in surfaces {
             apply(surface.chrome, from: surface)
             surface.onChromeChange = { [weak self] chrome in self?.apply(chrome, from: surface) }
+            // Only the page in front names its section; the others are read
+            // again when they come in front (`didSettle`).
+            surface.onPinnedSectionChange = { [weak self, weak surface] pinned in
+                guard let self, let surface, surface === activeSurface else { return }
+                applyPinnedSection(pinned)
+            }
         }
 
         categoryBar.setProgress(CGFloat(pagerView.activeIndex))
@@ -545,11 +551,13 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         applyRestingBar()
     }
 
-    /// `[ bell ]———————————————————[ coins ][ search ]`
+    /// `[ bell ][ New · 8 ]——————————[ coins ][ search ]`
     ///
     /// The resting bar is the magnifier plus whatever the shell hands in: the
     /// bell leading, the balance inboard of the magnifier (`[0]` is the screen
-    /// edge, so search keeps the corner — the Maps and For You arrangement).
+    /// edge, so search keeps the corner — the Maps and For You arrangement) —
+    /// and, after the bell, the section the page in front has scrolled into
+    /// (`applyPinnedSection`, #1301).
     ///
     /// ⚠️ AND THE EMPTY `titleView` IS GONE WITH THE SELECTOR. It was there
     /// because a nil title view leaves UIKit a central reservation the LEADING
@@ -559,9 +567,102 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     /// with a zero-sized view would now be cargo.
     private func applyRestingBar() {
         navigationItem.rightBarButtonItems = [searchItem, trailingAccessoryItem].compactMap { $0 }
-        navigationItem.leftBarButtonItems = [leadingAccessoryItem].compactMap { $0 }
+        navigationItem.leftBarButtonItems = restingLeadingItems
         navigationItem.titleView = nil
     }
+
+    private var restingLeadingItems: [UIBarButtonItem] {
+        [leadingAccessoryItem, sectionItem].compactMap { $0 }
+    }
+
+    // MARK: - The pinned section (#1301)
+
+    /// The section the page in front has scrolled into, as last published.
+    private var pinnedSection: InboxPinnedSection?
+
+    /// Its name after the bell — the conversation's day item, exactly (#750,
+    /// #755; the owner, 2026-10-17): a system-titled glass bubble in the bar's
+    /// own type, interactive. ⚠️ ONE ITEM PER SECTION AND COUNT, EACH WITH ITS
+    /// OWN IDENTIFIER: a title edited in place swaps in a frame, while a new
+    /// item under a new identifier gets UIKit's Liquid Glass morph — "New · 4"
+    /// becoming "Recent · 18" is that morph.
+    ///
+    /// ⚠️ ONLY THE LEADING GROUP. Toasts own the trailing one while they show
+    /// (`NavigationBarToasts`, #1066); rewriting the whole resting bar on every
+    /// change would put the magnifier back over a toast.
+    private var sectionItem: UIBarButtonItem?
+
+    private func makeSectionItem(_ section: InboxPinnedSection) -> UIBarButtonItem {
+        let title = section.count > 0 ? "\(section.title) · \(section.count.formatted())" : section.title
+        let item = UIBarButtonItem(
+            title: title, image: nil,
+            // What tapping the header's pill did: that section's first row
+            // under the bar.
+            primaryAction: UIAction { [weak self] _ in self?.activeSurface?.scrollToPinnedSection() }
+        )
+        item.identifier = "inbox.section.\(section.title).\(section.count)"
+        item.tintColor = .label
+        // Its own glass, not a shared platter with the bell.
+        item.sharesBackground = false
+        item.accessibilityLabel = section.count > 0 ? "\(section.title), \(section.count) unread" : section.title
+        item.accessibilityHint = "Scrolls to the \(section.title) section"
+        return item
+    }
+
+    /// Names `section` after the bell, or takes the name away. While search
+    /// holds the bar it is only remembered: the resting bar picks it up on the
+    /// way back.
+    private func applyPinnedSection(_ section: InboxPinnedSection?) {
+        guard section != pinnedSection else { return }
+        pinnedSection = section
+        sectionItem = section.map(makeSectionItem)
+        guard isViewLoaded, !isSearching else { return }
+        scheduleSectionPlacement()
+    }
+
+    /// Puts the leading group where the state says, ONCE, on the next turn —
+    /// the day item's placement (#756): a scroll can publish a section twice
+    /// in one turn, and a second `setLeftBarButtonItems` cut the first one's
+    /// animation short.
+    private func scheduleSectionPlacement() {
+        guard view.window != nil else {
+            navigationItem.leftBarButtonItems = restingLeadingItems
+            return
+        }
+        guard !sectionPlacementScheduled else { return }
+        sectionPlacementScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.placeSectionAfterTransition() }
+    }
+
+    /// ⚠️ NOT DURING A PUSH (#756): items set while the bar is in its push
+    /// transition land with it, unanimated, when it ends. A placement due
+    /// mid-transition waits for its end, then animates.
+    private func placeSectionAfterTransition() {
+        if let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               // Off the completion's turn, which still belongs to the transition.
+               DispatchQueue.main.async { self?.placeSectionAfterTransition() }
+           }) {
+            return
+        }
+        sectionPlacementScheduled = false
+        guard !isSearching else { return }
+        navigationItem.setLeftBarButtonItems(restingLeadingItems, animated: true)
+    }
+
+    private var sectionPlacementScheduled = false
+
+    #if DEBUG
+    /// The bar's section item while it is shown — what a test reads.
+    var debugSectionItem: UIBarButtonItem? {
+        guard let sectionItem, navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
+        else { return nil }
+        return sectionItem
+    }
+
+    /// What a tap on the section item does. Tests.
+    func debugTapSectionItem() { activeSurface?.scrollToPinnedSection() }
+    #endif
 
     /// `[ field ————————————————— ][ Cancel ]`
     private func applySearchingBar() {
@@ -871,6 +972,8 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // and finding All's count gone is losing the comparison you switched
         // for. Only leaving the screen retires them; see `viewWillDisappear`.
         apply(surface.chrome, from: surface)
+        // The bar names the section of the page now in front, or none.
+        applyPinnedSection(surface.pinnedSection)
         // The shared bar follows whichever page is now in front, and the new page
         // gets the same clearance. Re-syncing here is what keeps a bar collapsed
         // on one tab from sitting half-open over another.

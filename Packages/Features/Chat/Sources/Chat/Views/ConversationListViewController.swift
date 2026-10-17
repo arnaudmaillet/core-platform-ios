@@ -46,8 +46,24 @@ final class ConversationListViewController: UIViewController {
                   let header = tableView.headerView(forSection: index) as? InboxSectionHeaderView else { continue }
             header.setCount(renderedSections.unreadMessages(in: section))
         }
+        // The bar names the stuck section with the same count.
+        updatePinnedSection()
     }
     private var hasRenderedContent = false
+
+    /// The section the list has scrolled into, which the inbox names in its
+    /// bar (#1301). Re-read on every scroll and every render.
+    private let pinnedTracker = InboxPinnedSectionTracker()
+
+    private func updatePinnedSection() {
+        // A list off screen behind the skeleton or a status names nothing.
+        let isShowing = !tableView.isHidden
+        pinnedTracker.update(
+            in: tableView,
+            headedSection: { isShowing ? adapter.headedSection(at: $0) : nil },
+            count: { renderedSections.unreadMessages(in: $0) }
+        )
+    }
 
     /// Builds the thread screen a context-menu long-press previews — injected
     /// by the feature builder so preview and push share one construction.
@@ -334,6 +350,7 @@ final class ConversationListViewController: UIViewController {
             )
             statusView.isHidden = false
         }
+        updatePinnedSection()
     }
 
     /// Swaps the skeleton for the populated table. The rows are applied
@@ -380,6 +397,10 @@ final class ConversationListViewController: UIViewController {
 }
 
 extension ConversationListViewController: UITableViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        updatePinnedSection()
+    }
+
     /// Paging: one of the last rows coming on screen asks for the next page
     /// (#593), early enough that it usually lands before the end does.
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
@@ -525,6 +546,18 @@ extension ConversationListViewController: UITableViewDelegate {
 
 extension ConversationListViewController: InboxSurface {
     var listScrollView: UIScrollView? { tableView }
+
+    var pinnedSection: InboxPinnedSection? { pinnedTracker.pinned }
+
+    var onPinnedSectionChange: ((InboxPinnedSection?) -> Void)? {
+        get { pinnedTracker.onChange }
+        set { pinnedTracker.onChange = newValue }
+    }
+
+    func scrollToPinnedSection() {
+        guard let index = pinnedTracker.index else { return }
+        adapter.scroll(tableView, toSectionAt: index)
+    }
 
     var category: MessagesCategory { .all }
 

@@ -253,4 +253,36 @@ struct SectionHeaderCountTests {
         #expect(title.style == .compact)
         #expect(title.debugCountText == "3")
     }
+
+    // MARK: - Named elsewhere once pinned (#1301)
+
+    /// A header whose stuck state is named by a bar item leaves as it pins,
+    /// and is the title in the flow again as it unpins.
+    @Test func aHeaderNamedElsewhereHidesOnlyWhilePinned() {
+        let pill = SectionHeaderPillButton()
+        pill.hidesWhenPinned = true
+        #expect(pill.alpha == 1, "an inline title went with the stuck state")
+        pill.setPresentation(.pinned, animated: false)
+        #expect(pill.alpha == 0)
+        pill.setPresentation(.inline, animated: false)
+        #expect(pill.alpha == 1)
+
+        let plain = SectionHeaderPillButton()
+        plain.setPresentation(.pinned, animated: false)
+        #expect(plain.alpha == 1, "a header with no bar to name it lost its capsule")
+    }
+
+    /// The section a bar names: nothing at rest, the first once the list
+    /// moves past the grace, the next once its top reaches the line.
+    @Test func thePinnedSectionIsTheLastAtTheLine() {
+        let grace = SectionHeaderPillButton.Metrics.morphDistance
+        let tops: [CGFloat] = [0, 400]
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: 0) == nil)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: grace) == nil)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: grace + 1) == 0)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: 400 - grace - 1) == 0)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: 400 - grace) == 1)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: 900) == 1)
+        #expect(SectionHeaderPillButton.pinnedSection(sectionTops: [], pinLine: 900) == nil)
+    }
 }
