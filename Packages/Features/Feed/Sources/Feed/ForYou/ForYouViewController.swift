@@ -2116,22 +2116,23 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// A friend's avatar was tapped: their posts, flown out of their FACE.
     ///
-    /// ⚠️ THE CARD LEAVES AS THE FACE AND ARRIVES AS THE POST. A disc is not a
-    /// post's picture, so the flight cross-dissolves from one to the other as
-    /// it grows (`SnapFeedHeroOrigin.pagePicture`), in the face's own outline
-    /// at the row (`cornerRadius` + `cornerCurve`), and a close lands back on the face, dissolving from
-    /// whatever post the viewer ended on — the map marker's arrangement, the
-    /// app's other small source. A friend whose first post is TEXT has no
-    /// picture to fly: it opens as a window out of the disc instead, the
-    /// marker's text-post window — and every story carries that window, since
-    /// a media one closes through it once the viewer pages onto words
-    /// (`ForYouRowOrigins`).
+    /// ⚠️ A WINDOW, NEVER A FLIGHT (#1356). A face is the friend's avatar,
+    /// not their post's picture: a flight cross-dissolved the one into the
+    /// other, the avatar seen over the media as it grew. The post opens as a
+    /// window out of the face's own outline, the page itself from the first
+    /// frame, and closes onto the avatar's picture (`ForYouRowOrigins`).
     func openStory(_ story: ForYouViewModel.FriendStory) {
-        guard canOpenFromRow, let openPostHero, let first = story.posts.first,
+        guard canOpenFromRow, let openPostHero,
               let origin = ForYouRowOrigins.story(
                   story, friends: friendsRow, page: page, host: view,
-                  pagePicture: first.thumbnailURL.flatMap { imagePipeline.cachedImage(for: $0) },
-                  pictures: .init(pipeline: imagePipeline, peek: { [weak self] in self?.cachedPicture($0) }),
+                  largerFace: story.avatarURL.map { url in
+                      { [imagePipeline] deliver in
+                          Task { @MainActor in
+                              guard let image = try? await imagePipeline.image(for: url, size: .px512) else { return }
+                              deliver(image)
+                          }
+                      }
+                  },
                   closeStaged: rowCloseStaged
               )
         else { return }
@@ -2141,12 +2142,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         page.setAutoplayActive(false)
         setLeadActive(false)
         openPostHero(self, origin, story.posts.map(\.id))
-    }
-
-    /// The pipeline's memory, read synchronously — see
-    /// `ForYouRowOrigins.StoryPictureSource`.
-    private func cachedPicture(_ url: URL) -> UIImage? {
-        imagePipeline.cachedImage(for: url)
     }
 
     /// A Following card was tapped: the row's posts from it on, flown out of

@@ -38,7 +38,7 @@ import UIKit
 /// row's view, and hand the inset back when the close is over.
 @MainActor
 enum ForYouRowOrigins {
-    /// A friend's story: their posts, flown out of their face.
+    /// A friend's story: their posts, opened out of their face.
     ///
     /// `nil` for a friend with nothing to open.
     static func story(
@@ -46,19 +46,26 @@ enum ForYouRowOrigins {
         friends: FriendsStoriesRow,
         page: ForYouGridPage,
         host: UIView,
-        pagePicture: UIImage?,
-        pictures: StoryPictureSource? = nil,
+        largerFace: ((@escaping @MainActor (UIImage) -> Void) -> Void)? = nil,
         closeStaged: @escaping () -> Void = {}
     ) -> SnapFeedHeroOrigin? {
-        guard let first = story.posts.first else { return nil }
+        guard story.posts.first != nil else { return nil }
         let author = story.authorID
-        let face = friends.storyFace(for: author)
-        let hasMedia = first.kind != .text
+        let face = StoryFace(friends.storyFace(for: author))
+        // A sharper picture for the close, read while the posts are open: the
+        // row's is decoded for a 60 pt face, and the close draws it at the
+        // size of the screen first.
+        largerFace? { [face] image in face.image = image }
         return SnapFeedHeroOrigin(
-            post: first,
+            post: story.posts[0],
             stream: story.posts,
-            hasHero: hasMedia && friends.storyFrame(for: author, in: host) != nil,
-            cover: face,
+            // ⚠️ NEVER A FLIGHT (#1356): a face is the friend's AVATAR, not
+            // their post's picture, and a flight cross-dissolved the one into
+            // the other — the avatar seen over the media as it grew, then the
+            // landing's bounce. The window opens instead, the post itself
+            // growing out of the face, as a story does (`storyReveal`).
+            hasHero: false,
+            cover: face.image,
             style: .listMedia,
             frame: { [weak friends] space in friends?.storyFrame(for: author, in: space) },
             isOnScreen: { [weak friends] in friends?.isStoryOnScreen(author) ?? false },
@@ -68,8 +75,7 @@ enum ForYouRowOrigins {
                 if !concealed { page?.endHeroFreeze() }
             },
             depthView: { [weak page] in page },
-            // EVERY story — a text first post opens through it, and a media
-            // one closes through it once the viewer pages onto words.
+            // Every story opens and closes through it, whatever its posts.
             textReveal: storyReveal(
                 for: author, face: face, friends: friends, page: page, closeStaged: closeStaged
             ),
@@ -77,53 +83,17 @@ enum ForYouRowOrigins {
             // so the card leaves as the face and lands as it.
             cornerRadius: friends.storyFaceCornerRadius,
             cornerCurve: ForYouStoryCell.Metrics.faceShape.cornerCurve,
-            // The post's own picture, if the pipeline has it: the far end of
-            // the cross-dissolve. Without it the face grows into the page and
-            // the page takes over at the landing — still the right motion.
-            pagePicture: pagePicture,
-            // ⚠️ AND THE PICTURE OF ANY OF THEIR POSTS, loaded when the peek
-            // above misses — which it usually did: a friend's posts are drawn
-            // nowhere on this screen, so nothing had loaded them, and the face
-            // flew into the page and back without the post's media ever in the
-            // window. The media now dissolves over the face as it grows, and
-            // the face over the media the viewer ended on as it shrinks — the
-            // map marker's arrangement.
-            pagePictureOf: pictures.map { storyPictures(of: story.posts, from: $0) },
             willStageDismissal: { [weak friends, weak page] in
                 stageClose(page: page, then: closeStaged) { friends?.bringStoryIntoView(author) }
             }
         )
     }
 
-    /// Where a story's pictures come from: the pipeline that loads them, and
-    /// the screen's own synchronous read of its cache.
-    ///
-    /// The read is the SCREEN's, not made here: every cell on For You peeks
-    /// the pipeline's cache from a UIKit-isolated method, which the compiler
-    /// accepts with a warning, and the same call from this plain main-actor
-    /// type is an error.
-    struct StoryPictureSource {
-        let pipeline: ImagePipeline
-        let peek: (URL) -> UIImage?
-    }
-
-    /// A story's post pictures: from memory when they are there, loaded — and
-    /// handed over late, once — when they are not
-    /// (`SnapFeedHeroOrigin.pagePictureOf`).
-    static func storyPictures(
-        of posts: [GalleryPost], from source: StoryPictureSource
-    ) -> (PostID, @escaping (UIImage) -> Void) -> UIImage? {
-        let pipeline = source.pipeline
-        let peek = source.peek
-        return { id, late in
-            guard let url = posts.first(where: { $0.id == id })?.thumbnailURL else { return nil }
-            if let cached = peek(url) { return cached }
-            Task { @MainActor in
-                guard let image = try? await pipeline.image(for: url) else { return }
-                late(image)
-            }
-            return nil
-        }
+    /// The face a story's window carries back: the row's picture at the
+    /// open, a sharper one once it has loaded.
+    final class StoryFace {
+        var image: UIImage?
+        init(_ image: UIImage?) { self.image = image }
     }
 
     /// The window a story opens and closes through: the map marker's text-post
@@ -132,15 +102,15 @@ enum ForYouRowOrigins {
     /// at both ends — whatever post the viewer ended on.
     static func storyReveal(
         for author: ProfileID,
-        face: UIImage?,
+        face: StoryFace,
         friends: FriendsStoriesRow,
         page: ForYouGridPage,
         closeStaged: @escaping () -> Void = {}
     ) -> TextRevealOrigin {
         let radius = friends.storyFaceCornerRadius
         func standIn() -> UIView? {
-            guard let face else { return nil }
-            let view = UIImageView(image: face)
+            guard let image = face.image else { return nil }
+            let view = UIImageView(image: image)
             view.contentMode = .scaleAspectFill
             view.clipsToBounds = true
             view.layer.cornerRadius = radius
@@ -157,7 +127,10 @@ enum ForYouRowOrigins {
             captionEnd: nil,
             depthView: { [weak page] in page },
             makeDismissStandIn: { _ in standIn() },
-            makePresentStandIn: { standIn() },
+            // No stand-in on the way in (#1356): the window opens onto the
+            // post itself, covering the face's shape from its first frame —
+            // the avatar never drawn over the media.
+            makePresentStandIn: { nil },
             alignsPageToSource: false,
             pageFit: .covering,
             cornerRadius: radius,
