@@ -1883,6 +1883,17 @@ final class SnapFeedViewController: UIViewController {
 
     /// A fresh item wearing THE pill, under the slot's one identifier.
     private func makeAuthorItem() -> UIBarButtonItem {
+        // ⚠️ THE BAR'S THEME, THE MOMENT ITS GLASS EXISTS (#1325). Every
+        // opening themed at appearance, and again alongside the push — but
+        // UIKit hosts the toolbar's items (and creates the glass container
+        // `toolbarGlassHost` themes) on ITS schedule, which on a shelf card's
+        // flight came after both: the bottom bar flew in light over a media
+        // post for its first frames (filmed by the owner) while a grid tile's
+        // did not. Themed when the pill joins the window, whatever the path.
+        authorIdentityView.onDidMoveToWindow = { [weak self] in
+            guard let self, let model = self.arrivalModel, !self.isHandingChromeBack else { return }
+            self.applyChromeTheme(hasMedia: model.mediaURL != nil)
+        }
         let item = UIBarButtonItem(customView: authorIdentityView)
         item.identifier = Self.authorItemIdentifier
         return item
@@ -4978,26 +4989,31 @@ final class SnapFeedViewController: UIViewController {
     /// a dark-pinned bar because the feed happened to be showing a photo is
     /// exactly the kind of leak that shared chrome invites.
     ///
-    /// `keepingToolbar` hands back everything but the bottom bar and its
-    /// glass — the part still on screen while a grab is undecided (#1315).
-    ///
     /// The disappearance's hand-back: at once, or — an interactive one —
-    /// all but the toolbar now and the toolbar once `whenDecided` reports a
-    /// committed close (a cancel keeps it). Internal so a test can decide.
+    /// once `whenDecided` reports a committed close (a cancel keeps it).
+    /// Internal so a test can decide.
     func handBackChromeTheme(interactive: Bool, whenDecided: (@escaping (Bool) -> Void) -> Void) {
         guard interactive else { return releaseChromeTheme() }
-        releaseChromeTheme(keepingToolbar: true)
+        // ⚠️ BOTH BARS, NOT ONLY THE BOTTOM ONE (#1325). The header was handed
+        // back at the grab's first frame, on the reading that it is the
+        // destination's — and it turned light over the media page for the
+        // whole grab (filmed by the owner). It stays on screen too until the
+        // close is decided: a media post's bars are dark for as long as it is.
+        isHandingChromeBack = true
         whenDecided { [weak self] committed in
-            if committed { self?.releaseChromeTheme() }
+            guard let self else { return }
+            self.isHandingChromeBack = false
+            if committed { self.releaseChromeTheme() }
         }
     }
 
-    private func releaseChromeTheme(keepingToolbar: Bool = false) {
-        if !keepingToolbar {
-            themedToolbarGlassHost?.overrideUserInterfaceStyle = .unspecified
-            themedToolbarGlassHost = nil
-            navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
-        }
+    /// A grab is undecided: nothing re-themes or hands back meanwhile.
+    private var isHandingChromeBack = false
+
+    private func releaseChromeTheme() {
+        themedToolbarGlassHost?.overrideUserInterfaceStyle = .unspecified
+        themedToolbarGlassHost = nil
+        navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
         navigationController?.navigationBar.overrideUserInterfaceStyle = .unspecified
         overrideUserInterfaceStyle = .unspecified
         statusBarBlur?.returnStyle(from: self)

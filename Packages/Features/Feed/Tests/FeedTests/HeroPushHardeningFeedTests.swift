@@ -108,8 +108,8 @@ struct HeroPushHardeningFeedTests {
 
     /// ⚠️ THE BOTTOM BAR STAYS ON SCREEN THROUGH A GRAB: handed back at its
     /// first frame, it turned light over the media page for the whole grab
-    /// and after a cancel (filmed by the owner, 2026-10-17). The header goes
-    /// at once — it is the destination's — the toolbar only on a commit.
+    /// and after a cancel (filmed by the owner, 2026-10-17). Neither bar is
+    /// handed back before a commit (#1325).
     @Test(arguments: [true, false])
     func aGrabKeepsTheToolbarsStyleUntilItIsDecided(commits: Bool) {
         let feed = Self.feed()
@@ -120,11 +120,14 @@ struct HeroPushHardeningFeedTests {
 
         var decide: ((Bool) -> Void)?
         feed.handBackChromeTheme(interactive: true) { decide = $0 }
-        #expect(nav.navigationBar.overrideUserInterfaceStyle == .unspecified, "the header kept the feed's style")
+        // Both bars, the header too (#1325): it turned light over the media
+        // page for the whole grab when it was handed back at the first frame.
+        #expect(nav.navigationBar.overrideUserInterfaceStyle == .dark, "the header went light mid-grab")
         #expect(nav.toolbar.overrideUserInterfaceStyle == .dark, "the bottom bar went light mid-grab")
 
         decide?(commits)
         #expect(nav.toolbar.overrideUserInterfaceStyle == (commits ? .unspecified : .dark))
+        #expect(nav.navigationBar.overrideUserInterfaceStyle == (commits ? .unspecified : .dark))
     }
 
     /// An ordinary disappearance hands everything back at once.

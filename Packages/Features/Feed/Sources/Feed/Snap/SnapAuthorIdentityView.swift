@@ -27,6 +27,16 @@ final class SnapAuthorIdentityView: UIView {
     /// What the avatar's badge says about the viewer and the person.
     typealias FollowBadge = PersonPill.Badge
 
+    /// Told when the pill joins a window — the moment UIKit has hosted the
+    /// bottom bar's items, and so the moment their glass container exists
+    /// to be themed (#1325).
+    var onDidMoveToWindow: (() -> Void)?
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { onDidMoveToWindow?() }
+    }
+
     /// Matches the bar's standard control height.
     private static let height: CGFloat = 40
     /// Long display names truncate here rather than crowding the back item.
