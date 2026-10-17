@@ -57,13 +57,51 @@ struct PostViewHistoryStoreTests {
     }
 
     @Test func aChangeIsAnnounced() {
-        let store = PostViewHistoryStore(defaults: Self.defaults(), scope: Self.member("P1"))
+        // One instant: a re-view at another time is a change (`eachViewKeepsItsTime`).
+        let store = PostViewHistoryStore(
+            defaults: Self.defaults(), scope: Self.member("P1"), now: { Date(timeIntervalSince1970: 1) }
+        )
         var changes = 0
         store.onChange = { changes += 1 }
         store.record("a")
-        store.record("a") // already at the front: no change
+        store.record("a") // already at the front, at the same time: no change
         store.remove("missing")
         store.clear()
         #expect(changes == 2)
+    }
+
+    /// Each view keeps when it happened (#1344's days): a re-view restamps,
+    /// and a post taken out leaves no time behind.
+    @Test func eachViewKeepsItsTime() {
+        final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1_000) }
+        let clock = Clock()
+        let defaults = Self.defaults()
+        let store = PostViewHistoryStore(defaults: defaults, scope: Self.member("P1"), now: { clock.now })
+        store.record("a")
+        clock.now = Date(timeIntervalSince1970: 2_000)
+        store.record("b")
+        #expect(store.views == [
+            .init(postID: "b", viewedAt: Date(timeIntervalSince1970: 2_000)),
+            .init(postID: "a", viewedAt: Date(timeIntervalSince1970: 1_000))
+        ])
+        var announced = 0
+        store.onChange = { announced += 1 }
+        clock.now = Date(timeIntervalSince1970: 3_000)
+        store.record("b")
+        #expect(announced == 1, "a re-view of the front post moved its day without saying so")
+        #expect(store.views.first?.viewedAt == Date(timeIntervalSince1970: 3_000))
+        store.remove("a")
+        let times = defaults.dictionary(forKey: StorageScope(owner: .member(account: "A", profile: "P1"))
+            .profileKey(PostViewHistoryStore.timesBaseKey)) as? [String: Double]
+        #expect(times?.keys.sorted() == ["b"], "a removed post left its time behind")
+    }
+
+    /// A pile written before the times were kept still reads, undated.
+    @Test func aPileWithoutTimesReadsUndated() {
+        let defaults = Self.defaults()
+        let scope = Self.member("P1")
+        defaults.set(["x", "y"], forKey: scope.profileKey(PostViewHistoryStore.baseKey))
+        let store = PostViewHistoryStore(defaults: defaults, scope: scope)
+        #expect(store.views == [.init(postID: "x", viewedAt: nil), .init(postID: "y", viewedAt: nil)])
     }
 }

@@ -1735,6 +1735,97 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         applyNavigationState()
     }
 
+    // MARK: - History's day in the bar (#1344)
+
+    /// The leading group: the bell, then the day History has scrolled into.
+    private var leadingItems: [UIBarButtonItem] {
+        [leadingAccessoryItem, sectionItem].compactMap { $0 }
+    }
+
+    /// The day the page in front has scrolled into, as last published.
+    private var pinnedSection: PostGridPinnedSection?
+
+    /// Its name after the bell — the Messages inbox's section item, exactly
+    /// (#1301; the owner, 2026-10-17): a system-titled glass bubble in the
+    /// bar's own type, which may truncate. ⚠️ ONE ITEM PER DAY, EACH WITH ITS
+    /// OWN IDENTIFIER: a new item under a new identifier gets UIKit's Liquid
+    /// Glass morph, a title edited in place swaps in a frame.
+    ///
+    /// ⚠️ ONLY THE LEADING GROUP: toasts own the trailing one while they show
+    /// (#1066).
+    private var sectionItem: UIBarButtonItem?
+
+    private func makeSectionItem(_ section: PostGridPinnedSection) -> UIBarButtonItem {
+        let index = section.index
+        let item = UIBarButtonItem(
+            title: section.title, image: nil,
+            // What tapping the day's title in the list does: its first post
+            // under the bar.
+            primaryAction: UIAction { [weak self] _ in self?.galleryPager.scrollActivePageToSection(index) }
+        )
+        item.identifier = "profile.history.section.\(section.index).\(section.title)"
+        item.tintColor = .label
+        // Its own glass, not a shared platter with the bell.
+        item.sharesBackground = false
+        item.accessibilityLabel = section.title
+        item.accessibilityHint = "Scrolls to the \(section.title) section"
+        return item
+    }
+
+    /// Names `section` after the bell, or takes the name away.
+    private func applyPinnedSection(_ section: PostGridPinnedSection?) {
+        guard section != pinnedSection else { return }
+        pinnedSection = section
+        sectionItem = section.map(makeSectionItem)
+        guard isViewLoaded else { return }
+        scheduleSectionPlacement()
+    }
+
+    /// Puts the leading group where the state says, ONCE, on the next turn —
+    /// the inbox's placement (#756): a scroll can publish a day twice in one
+    /// turn, and a second `setLeftBarButtonItems` cut the first one's
+    /// animation short.
+    private func scheduleSectionPlacement() {
+        guard view.window != nil else {
+            navigationItem.leftBarButtonItems = leadingItems
+            return
+        }
+        guard !sectionPlacementScheduled else { return }
+        sectionPlacementScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.placeSectionAfterTransition() }
+    }
+
+    /// ⚠️ NOT DURING A PUSH (#756): items set while the bar is in its push
+    /// transition land with it, unanimated, when it ends. A placement due
+    /// mid-transition waits for its end, then animates.
+    private func placeSectionAfterTransition() {
+        if let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               // Off the completion's turn, which still belongs to the transition.
+               DispatchQueue.main.async { self?.placeSectionAfterTransition() }
+           }) {
+            return
+        }
+        sectionPlacementScheduled = false
+        navigationItem.setLeftBarButtonItems(leadingItems, animated: true)
+    }
+
+    private var sectionPlacementScheduled = false
+
+    #if DEBUG
+    /// The bar's day item while it is shown — what a test reads.
+    var debugSectionItem: UIBarButtonItem? {
+        guard let sectionItem, navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
+        else { return nil }
+        return sectionItem
+    }
+
+    /// What a tap on the day item does. Tests.
+    func debugTapSectionItem() {
+        if let index = pinnedSection?.index { galleryPager.scrollActivePageToSection(index) }
+    }
+    #endif
+
     #if DEBUG
     /// Recomposes the trailing run, so a test can put the screen through the
     /// rebuild an injected item has to survive without having to move the
@@ -1859,8 +1950,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         //             one once the tray has scrolled away)
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
-        let leading = [leadingAccessoryItem].compactMap { $0 }
-        if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
+        let leading = leadingItems
+        if !sectionPlacementScheduled,
+           !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
             navigationItem.leftBarButtonItems = leading
         }
         // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
@@ -2191,6 +2283,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             self.viewModel.refresh()
         }
         galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
+        galleryPager.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
         galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
         // The band's minimize rides whichever page is in front. The pager is
         // what knows, and it is what says so — see `onActiveScrollViewChanged`.

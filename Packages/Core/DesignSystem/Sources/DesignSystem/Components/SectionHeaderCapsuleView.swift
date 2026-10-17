@@ -15,6 +15,19 @@ public final class SectionHeaderCapsuleView: UICollectionReusableView {
         set { pill.onTap = newValue }
     }
 
+    /// The pill leaves as it reaches the pin line instead of forming its
+    /// capsule — see `SectionHeaderPillButton.hidesWhenPinned`.
+    public var hidesWhenPinned: Bool {
+        get { pill.hidesWhenPinned }
+        set { pill.hidesWhenPinned = newValue }
+    }
+
+    /// See `SectionHeaderPillButton.pinLineInset`.
+    public var pinLineInset: CGFloat? {
+        get { pill.pinLineInset }
+        set { pill.pinLineInset = newValue }
+    }
+
     private let pill = SectionHeaderPillButton()
 
     public override init(frame: CGRect) {
