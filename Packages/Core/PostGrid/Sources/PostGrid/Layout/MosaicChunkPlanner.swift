@@ -355,10 +355,21 @@ public struct MosaicChunkPlanner: Sendable {
     /// tail's undecided chunk be decided (smaller, or skipped) and everything
     /// behind it shown.
     public mutating func segments(for corpus: [GalleryPost], isComplete: Bool) -> [DiscoverSegment] {
+        var ordinal = 0
+        return segments(for: corpus, isComplete: isComplete, ordinal: &ordinal)
+    }
+
+    /// The same, for one of several lists drawn one after the other (the
+    /// profile's History, one per day, #1344): its chunks are numbered from
+    /// `ordinal`, which is left at the next list's first — so the groups'
+    /// chunks vary down the page as one list's do, rather than every group
+    /// opening on chunk 0's shape.
+    public mutating func segments(
+        for corpus: [GalleryPost], isComplete: Bool, ordinal: inout Int
+    ) -> [DiscoverSegment] {
         var placed = [Bool](repeating: false, count: corpus.count)
         var cursor = 0
         var segments: [DiscoverSegment] = []
-        var ordinal = 0
 
         func nextUnplaced() -> Int? {
             while cursor < corpus.count, placed[cursor] { cursor += 1 }

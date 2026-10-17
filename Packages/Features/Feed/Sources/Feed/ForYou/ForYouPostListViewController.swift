@@ -169,7 +169,7 @@ final class ForYouPostListViewController: UIViewController {
         page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
         // The pinned section in the bar, after the back chevron (#1378).
         navigationItem.leftItemsSupplementBackButton = true
-        page.onPinnedSectionChange = { [weak self] section in self?.applyPinnedSection(section) }
+        page.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
     }
 
     // MARK: - The pinned section (#1378)
@@ -184,7 +184,7 @@ final class ForYouPostListViewController: UIViewController {
     /// first leading item only — this one, after the chevron.
     private var sectionItem: UIBarButtonItem?
 
-    private func applyPinnedSection(_ section: ForYouGridPage.PinnedSection?) {
+    private func applyPinnedSection(_ section: PostGridPinnedSection?) {
         sectionItem = section.map { section in
             SectionBarItem.make(
                 title: section.title, count: section.count, countNoun: "new", scope: "postList.\(kind.rawValue)"

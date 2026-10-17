@@ -100,11 +100,54 @@ public enum DiscoverListLayout {
     /// reload in flight — which is laid out as cards). `isPairs(section)` says
     /// a section is a block of paired half-width cards (see
     /// `DiscoverSegment.pairs`).
+    ///
+    /// `isTitled(section)` puts a title over the section — the first
+    /// stretch of a titled group (the profile's History, #1344, by date);
+    /// `showsViewAll` keeps or drops the chunks' "View all" footers, and
+    /// `endsGroup(section)` spends the app's section gap after the last
+    /// stretch of a group, before the next one's title.
     public static func layout(
         chunk: @escaping @MainActor (Int) -> MosaicChunk?,
-        isPairs: @escaping @MainActor (Int) -> Bool = { _ in false }
+        isPairs: @escaping @MainActor (Int) -> Bool = { _ in false },
+        isTitled: @escaping @MainActor (Int) -> Bool = { _ in false },
+        endsGroup: @escaping @MainActor (Int) -> Bool = { _ in false },
+        showsViewAll: @escaping @MainActor () -> Bool = { true }
     ) -> UICollectionViewCompositionalLayout {
         UICollectionViewCompositionalLayout { index, environment in
+            let section = stretch(
+                index, environment: environment, chunk: chunk, isPairs: isPairs, showsViewAll: showsViewAll()
+            )
+            if endsGroup(index) {
+                var insets = section.contentInsets
+                insets.bottom = PostGridListLayout.sectionGap(traits: environment.traitCollection)
+                section.contentInsets = insets
+            }
+            if isTitled(index) {
+                let header = NSCollectionLayoutBoundarySupplementaryItem(
+                    layoutSize: .init(widthDimension: .fractionalWidth(1), heightDimension: .estimated(44)),
+                    elementKind: PostGridListLayout.headerElementKind,
+                    alignment: .top
+                )
+                // ⚠️ NOT PINNED: a group spans several sections, so a pinned
+                // header would leave with its first stretch anyway — and the
+                // host names the group in its bar once the title has gone
+                // under it (the Messages inbox's rule, #1301).
+                header.zIndex = 2
+                section.boundarySupplementaryItems.insert(header, at: 0)
+            }
+            return section
+        }
+    }
+
+    /// One stretch's section: a run of cards, a block of pairs, or a chunk.
+    private static func stretch(
+        _ index: Int,
+        environment: any NSCollectionLayoutEnvironment,
+        chunk: @MainActor (Int) -> MosaicChunk?,
+        isPairs: @MainActor (Int) -> Bool,
+        showsViewAll: Bool
+    ) -> NSCollectionLayoutSection {
+        do {
             let margin = PostGridListLayout.sideMargin
             if isPairs(index) {
                 return pairsSection(environment: environment)
@@ -142,19 +185,21 @@ public enum DiscoverListLayout {
             // spans the chunk's width, margin to margin, so a control on its
             // trailing edge ends where the tiles do.
             section.contentInsets = NSDirectionalEdgeInsets(
-                top: 0, leading: margin, bottom: 0, trailing: margin
+                top: 0, leading: margin, bottom: showsViewAll ? 0 : gapAboveChunk, trailing: margin
             )
             section.supplementariesFollowContentInsets = true
-            section.boundarySupplementaryItems = [
-                NSCollectionLayoutBoundarySupplementaryItem(
-                    layoutSize: .init(
-                        widthDimension: .fractionalWidth(1),
-                        heightDimension: .absolute(viewAllHeight)
-                    ),
-                    elementKind: viewAllElementKind,
-                    alignment: .bottom
-                )
-            ]
+            if showsViewAll {
+                section.boundarySupplementaryItems = [
+                    NSCollectionLayoutBoundarySupplementaryItem(
+                        layoutSize: .init(
+                            widthDimension: .fractionalWidth(1),
+                            heightDimension: .absolute(viewAllHeight)
+                        ),
+                        elementKind: viewAllElementKind,
+                        alignment: .bottom
+                    )
+                ]
+            }
             return section
         }
     }

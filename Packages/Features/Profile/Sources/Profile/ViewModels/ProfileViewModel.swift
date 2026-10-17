@@ -128,6 +128,9 @@ public final class ProfileViewModel {
         public var tagged: GalleryPageState = .empty(message: "")
         /// The posts the viewer viewed (#1344), on their own profile only.
         public var history: GalleryPageState = .empty(message: "")
+        /// History's groups by day, over its posts in order — what the page
+        /// titles (#1344). Empty: one untitled list.
+        public var historyGroups: [HistoryGroup] = []
         /// Whether no further page is coming for Reposts and for Tagged: each
         /// follows its own corpus, apart from `isComplete`.
         public var repostsComplete = true
@@ -1619,14 +1622,21 @@ public final class ProfileViewModel {
     /// the refresh runs.
     func loadHistory() {
         guard let viewHistory, let gallery else { return }
-        let ids = viewHistory.postIDs
-        guard ids != shownHistoryIDs || !hasShownHistory else { return }
-        shownHistoryIDs = ids
+        // Undated views (recorded before the times were kept) last, under
+        // "Earlier".
+        let pile = viewHistory.views
+        let views = pile.filter { $0.viewedAt != nil } + pile.filter { $0.viewedAt == nil }
+        let ids = views.map(\.postID)
+        // The day is part of what is shown: "Today" is yesterday's by now.
+        let shown = HistoryShown(views: views, day: Calendar.current.startOfDay(for: now()))
+        guard shown != shownHistory || !hasShownHistory else { return }
+        shownHistory = shown
         historyGeneration += 1
         let generation = historyGeneration
         guard !ids.isEmpty else {
             hasShownHistory = true
             galleryStore.history = .empty(message: "")
+            galleryStore.historyGroups = []
             renderGallery()
             return
         }
@@ -1638,7 +1648,11 @@ public final class ProfileViewModel {
             let tiles = (try? await gallery.posts(ids: ids)) ?? []
             guard let self, generation == historyGeneration else { return }
             hasShownHistory = true
+            let viewedAt = Dictionary(views.map { ($0.postID, $0.viewedAt) }, uniquingKeysWith: { first, _ in first })
             galleryStore.history = tiles.isEmpty ? .empty(message: "") : .content(tiles)
+            galleryStore.historyGroups = HistoryDayGroups.groups(
+                for: tiles.map { viewedAt[$0.id.rawValue] ?? nil }, now: now()
+            )
             renderGallery()
         }
     }
@@ -1658,7 +1672,15 @@ public final class ProfileViewModel {
     /// Whether there is any history to clear.
     var hasHistory: Bool { !(viewHistory?.postIDs.isEmpty ?? true) }
 
-    private var shownHistoryIDs: [String]?
+    /// The clock History's days are read against. Tests set it.
+    var now: @Sendable () -> Date = Date.init
+
+    /// What the History page was last built from.
+    private struct HistoryShown: Equatable {
+        var views: [PostViewHistoryStore.View]
+        var day: Date
+    }
+    private var shownHistory: HistoryShown?
     private var hasShownHistory = false
     private var historyGeneration = 0
 

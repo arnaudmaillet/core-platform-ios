@@ -107,6 +107,13 @@ final class ProfileGalleryPagerView: UIView {
     /// The tab is the page's: History adds its own row (#1344).
     var authorMenuActions: ((PostGridAuthorMenuContext, ProfileTab) -> [PostCardMenuAction])?
 
+    /// The day the page in front has scrolled into, once its title has gone
+    /// under the bar — History's (#1344); nil on every other page. The host
+    /// names it after the bell, as the Messages inbox names its sections.
+    var onPinnedSectionChanged: ((PostGridPinnedSection?) -> Void)?
+    /// What `onPinnedSectionChanged` last said.
+    private(set) var pinnedSection: PostGridPinnedSection?
+
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
     var horizontalPan: UIPanGestureRecognizer { scrollView.panGestureRecognizer }
@@ -131,7 +138,10 @@ final class ProfileGalleryPagerView: UIView {
     /// comes or goes.
     private var chainConstraints: [NSLayoutConstraint] = []
     private var activeIndex = 0 {
-        didSet { syncAutoplay() }
+        didSet {
+            syncAutoplay()
+            publishPinnedSection()
+        }
     }
     /// Whether this screen may autoplay at all — set by the owner's appearance
     /// callbacks and ANDed with per-page activity below.
@@ -202,6 +212,7 @@ final class ProfileGalleryPagerView: UIView {
                 }
             }
             page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
+            page.onPinnedSectionChanged = { [weak self] _ in self?.publishPinnedSection() }
             page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
             page.postMenuActions = { [weak self] context in
                 self?.authorMenuActions?(context, tab) ?? []
@@ -283,18 +294,33 @@ final class ProfileGalleryPagerView: UIView {
             // Whether more pages are coming decides the Discover list's tail
             // chunk, so it is told before the posts.
             allPages[index].setCorpusComplete(snapshot.isComplete(for: tab))
-            allPages[index].show(Self.pageState(snapshot.state(for: tab), for: tab))
+            allPages[index].show(Self.pageState(
+                snapshot.state(for: tab), for: tab,
+                groups: tab == .history ? snapshot.historyGroups : []
+            ))
         }
     }
 
     /// A profile page's state, as the page draws it: the tab's own words
     /// for an empty page, the lock for a private profile, the failure.
-    static func pageState(_ state: ProfileViewModel.GalleryPageState, for tab: ProfileTab) -> PostGridPageState {
+    ///
+    /// `groups` title the posts in order (History's days, #1344) — dropped
+    /// unless they cover the posts exactly.
+    static func pageState(
+        _ state: ProfileViewModel.GalleryPageState, for tab: ProfileTab, groups: [HistoryGroup] = []
+    ) -> PostGridPageState {
         switch state {
         case .loading:
             return .loading
         case .content(let posts):
-            return .content(posts)
+            guard !groups.isEmpty, groups.reduce(0, { $0 + $1.count }) == posts.count else {
+                return .content(posts)
+            }
+            var start = 0
+            return .sections(groups.map { group in
+                defer { start += group.count }
+                return PostGridPageSection(title: group.title, posts: Array(posts[start..<start + group.count]))
+            })
         case .empty(let message):
             let copy = tab.emptyState
             return .status(PostGridPageStatus(
@@ -577,9 +603,25 @@ final class ProfileGalleryPagerView: UIView {
         onActiveScrollViewChanged?(scroller)
     }
 
+    /// Says which day the page in front has scrolled into, when that changed.
+    private func publishPinnedSection() {
+        let next = pages.indices.contains(activeIndex) ? pages[activeIndex].pinnedSection : nil
+        guard next != pinnedSection else { return }
+        pinnedSection = next
+        onPinnedSectionChanged?(next)
+    }
+
+    /// Puts a day of the page in front under the bar — a tap on its name.
+    func scrollActivePageToSection(_ index: Int) {
+        activePage?.scrollToSection(index)
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         publishActiveScrollView()
+        // The pages are inset by the whole floating header, but their titles
+        // go under the BAR — the header docks away (#1344).
+        for page in allPages { page.setPinLineInset(safeAreaInsets.top) }
         // Keep the offset page-aligned through width changes (first layout,
         // rotation) — offsets are in points, not page indices.
         let target = CGFloat(activeIndex) * bounds.width

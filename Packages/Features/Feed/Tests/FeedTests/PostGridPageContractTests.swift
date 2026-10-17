@@ -85,4 +85,41 @@ struct PostGridPageContractTests {
         ))
         #expect(asked == PostID("p0"))
     }
+
+    /// History's days (#1344): titled groups, each title over its group's
+    /// first stretch, no "View all"; the group gone under the bar is named,
+    /// and a tap on its name brings its first post to the bar.
+    @Test func titledGroupsAreTitledAndNamedOnceUnderTheBar() throws {
+        let all = posts(30)
+        let page = vended(.discover, posts: [])
+        let grid = try #require(page as? ForYouGridPage)
+        var named: [PostGridPinnedSection?] = []
+        page.onPinnedSectionChanged = { named.append($0) }
+        page.show(.sections([
+            PostGridPageSection(title: "Today", posts: Array(all[0..<12])),
+            PostGridPageSection(title: "Yesterday", posts: Array(all[12..<30]))
+        ]))
+        page.layoutIfNeeded()
+        #expect(grid.groupTitles == ["Today", "Yesterday"])
+        #expect(grid.isTitled(inSection: 0))
+        let second = try #require((1..<grid.segments.count).first { grid.isTitled(inSection: $0) })
+        #expect(grid.endsGroup(inSection: second - 1))
+        #expect(grid.debugSectionHeaders().first?.title == "Today")
+        #expect(page.pinnedSection == nil, "a list at its top named a group")
+
+        // Where a tap on "Yesterday" lands (`scrollToSection`, animated):
+        // its first post on the pin line.
+        let first = try #require(grid.collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: second)))
+        grid.collectionView.contentOffset.y = first.frame.minY - grid.collectionView.adjustedContentInset.top
+        grid.updatePinnedSection()
+        #expect(page.pinnedSection == PostGridPinnedSection(index: 1, title: "Yesterday"))
+        #expect(named.last == PostGridPinnedSection(index: 1, title: "Yesterday"))
+
+        // Back to one untitled list.
+        page.show(.content(all))
+        page.layoutIfNeeded()
+        #expect(!grid.isGrouped)
+        #expect(!grid.isTitled(inSection: 0))
+        #expect(page.pinnedSection == nil)
+    }
 }
