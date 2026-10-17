@@ -121,7 +121,7 @@ struct NavigationBarToastsTests {
         try hosting { screen in
             let toast = Feedback.loading("Posting…", id: "post", from: screen)
             toast.isCollapsedInBar = true
-            let spinner = try #require(Self.views(of: UIActivityIndicatorView.self, in: toast).first)
+            let spinner = try #require(Self.views(of: AppLoaderView.self, in: toast).first)
             #expect(!spinner.isHidden)
             let shownLabels = Self.views(of: UILabel.self, in: toast).filter { !$0.isHidden }
             #expect(shownLabels.isEmpty)

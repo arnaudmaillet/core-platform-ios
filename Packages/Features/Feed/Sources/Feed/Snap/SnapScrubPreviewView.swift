@@ -28,13 +28,10 @@ final class SnapScrubPreviewView: UIView {
 
     /// Shown while a frame is being decoded and there is nothing yet to show.
     ///
-    /// ⚠️ White, not `.label`, for the reason every overlay on this surface is:
-    /// the ground is the post's photograph or black, never the page's theme, so
-    /// a semantic colour would resolve against a background this view does not
-    /// have.
-    private let spinner: UIActivityIndicatorView = {
-        let view = UIActivityIndicatorView(style: .medium)
-        view.color = .white
+    /// The branded loader (#1329), in its own tones over the post's photograph
+    /// or black.
+    private let spinner: AppLoaderView = {
+        let view = AppLoaderView(size: .medium)
         view.hidesWhenStopped = true
         return view
     }()

@@ -83,7 +83,7 @@ final class ConversationThreadViewController: UIViewController {
     /// screen rather than to the content, so it is where the reader is
     /// looking — at the top — whatever the scroll. Turns only while a page
     /// is out; an idle spinner redraws the screen every frame (#580).
-    private let olderSpinner = UIActivityIndicatorView(style: .medium)
+    private let olderSpinner = AppLoaderView(size: .medium)
     private let peerPill = SnapAuthorIdentityView()
     /// The conversation's mute (#719), at the bar's trailing corner beside
     /// the points badge: `bell`, or `bell.slash` once muted. Hidden while
@@ -840,7 +840,6 @@ final class ConversationThreadViewController: UIViewController {
 
     private func configureOlderSpinner() {
         olderSpinner.hidesWhenStopped = true
-        olderSpinner.color = .secondaryLabel
         olderSpinner.isUserInteractionEnabled = false
         olderSpinner.constrain(in: view) { parent in
             olderSpinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)

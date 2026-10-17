@@ -28,7 +28,7 @@ final class ThreadMediaView: UIView {
     private let frameView = UIView()
     private let imageView = UIImageView()
     private let dim = UIView()
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
     private let playBadge = UIImageView()
     private let durationLabel = UILabel()
     private let failedStack = UIStackView()
@@ -49,7 +49,6 @@ final class ThreadMediaView: UIView {
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         dim.backgroundColor = UIColor.black.withAlphaComponent(0.35)
-        spinner.color = .white
         playBadge.image = UIImage(
             systemName: "play.circle.fill",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 34, weight: .regular)

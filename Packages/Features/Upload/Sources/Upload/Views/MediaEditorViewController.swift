@@ -509,9 +509,8 @@ final class MediaEditorViewController: UIViewController {
     /// The busy stretch's pending reveal — see `beginRender`.
     private var spinnerReveal: DispatchWorkItem?
 
-    private let busy: UIActivityIndicatorView = {
-        let spinner = UIActivityIndicatorView(style: .large)
-        spinner.color = .label
+    private let busy: AppLoaderView = {
+        let spinner = AppLoaderView(size: .large)
         spinner.hidesWhenStopped = true
         spinner.translatesAutoresizingMaskIntoConstraints = false
         return spinner

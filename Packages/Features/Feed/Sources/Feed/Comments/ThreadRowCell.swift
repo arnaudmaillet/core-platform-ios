@@ -141,7 +141,7 @@ final class ThreadRowCell: UICollectionViewCell {
     var isBouncingInSpinner: Bool { row.isBouncingInSpinner }
     var isScalingOutSpinner: Bool { row.isScalingOutSpinner }
     var isBouncingInTime: Bool { row.isBouncingInTime }
-    var sendingSpinnerView: UIActivityIndicatorView { row.sendingSpinnerView }
+    var sendingSpinnerView: AppLoaderView { row.sendingSpinnerView }
     var debugHeaderWidthFloor: CGFloat { row.debugHeaderWidthFloor }
 
     // MARK: - Arrival and departure (#920)

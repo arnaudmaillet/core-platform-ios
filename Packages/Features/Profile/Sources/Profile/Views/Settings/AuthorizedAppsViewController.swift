@@ -78,8 +78,15 @@ final class AuthorizedAppsViewController: UIViewController {
             content.imageProperties.reservedLayoutSize = CGSize(width: 36, height: 36)
             content.imageProperties.cornerRadius = 8
             cell.contentConfiguration = content
+            // ⚠️ STARTED: a loader that is not animating hides itself, and the
+            // stock spinner this replaced never showed here for that reason.
+            let removing: () -> AppLoaderView = {
+                let loader = AppLoaderView(size: .medium)
+                loader.startAnimating()
+                return loader
+            }
             cell.accessories = self?.viewModel.removing.contains(app.id) == true
-                ? [.customView(configuration: .init(customView: UIActivityIndicatorView(style: .medium), placement: .trailing()))]
+                ? [.customView(configuration: .init(customView: removing(), placement: .trailing()))]
                 : []
             self?.loadIcon(app, into: cell)
         }

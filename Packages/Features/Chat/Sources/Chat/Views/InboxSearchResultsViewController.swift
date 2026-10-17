@@ -366,11 +366,10 @@ private extension Array {
 /// The People section's footer while a next page is on its way: a spinner
 /// where the next rows will be (#614).
 final class PeoplePagingFooterView: UICollectionReusableView {
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        spinner.color = .tertiaryLabel
         spinner.startAnimating()
         spinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(spinner)
