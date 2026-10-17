@@ -3,7 +3,7 @@
 
     Scripts/import-mock-photos.py ~/Downloads/photos
 
-One GALLERY per subfolder that holds `.jpg` or `.heic` files (subfolders with
+One GALLERY per subfolder that holds `.jpg`, `.heic` or `.webp` files (subfolders with
 none — the video-only ones — and `.DS_Store` are ignored). A photo that is a
 byte-for-byte copy of one already taken (a gallery downloaded with a page
 twice) is skipped. An EXIF rotation (3, 6, 8) is applied to the pixels before
@@ -90,12 +90,12 @@ def main():
         sys.exit(__doc__)
     source = Path(sys.argv[1]).expanduser()
     def pictures(folder: Path):
-        return sorted((p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".heic")),
+        return sorted((p for p in folder.iterdir() if p.suffix.lower() in (".jpg", ".jpeg", ".heic", ".webp")),
                       key=natural_key)
 
     folders = sorted(d for d in source.iterdir() if d.is_dir() and pictures(d))
     if not folders:
-        sys.exit(f"no subfolder of {source} holds .jpg or .heic files")
+        sys.exit(f"no subfolder of {source} holds .jpg, .heic or .webp files")
     seen = set()
 
     OUT.mkdir(parents=True, exist_ok=True)

@@ -379,6 +379,287 @@
     ]
   },
   {
+    "id": "singles",
+    "photos": [
+      {
+        "id": "single-01",
+        "file": "single-01.jpg",
+        "width": 1152,
+        "height": 1440
+      },
+      {
+        "id": "single-02",
+        "file": "single-02.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-03",
+        "file": "single-03.jpg",
+        "width": 1152,
+        "height": 1440
+      },
+      {
+        "id": "single-04",
+        "file": "single-04.jpg",
+        "width": 1152,
+        "height": 1440
+      },
+      {
+        "id": "single-05",
+        "file": "single-05.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-06",
+        "file": "single-06.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-07",
+        "file": "single-07.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-08",
+        "file": "single-08.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-09",
+        "file": "single-09.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-10",
+        "file": "single-10.jpg",
+        "width": 1170,
+        "height": 780
+      },
+      {
+        "id": "single-11",
+        "file": "single-11.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-12",
+        "file": "single-12.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-13",
+        "file": "single-13.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-14",
+        "file": "single-14.jpg",
+        "width": 1170,
+        "height": 878
+      },
+      {
+        "id": "single-15",
+        "file": "single-15.jpg",
+        "width": 1152,
+        "height": 1440
+      },
+      {
+        "id": "single-16",
+        "file": "single-16.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-17",
+        "file": "single-17.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-18",
+        "file": "single-18.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-19",
+        "file": "single-19.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-20",
+        "file": "single-20.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-21",
+        "file": "single-21.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-22",
+        "file": "single-22.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-23",
+        "file": "single-23.jpg",
+        "width": 1151,
+        "height": 1440
+      },
+      {
+        "id": "single-24",
+        "file": "single-24.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-25",
+        "file": "single-25.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-26",
+        "file": "single-26.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-27",
+        "file": "single-27.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-28",
+        "file": "single-28.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-29",
+        "file": "single-29.jpg",
+        "width": 1090,
+        "height": 1440
+      },
+      {
+        "id": "single-30",
+        "file": "single-30.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-31",
+        "file": "single-31.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-32",
+        "file": "single-32.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-33",
+        "file": "single-33.jpg",
+        "width": 1079,
+        "height": 1440
+      },
+      {
+        "id": "single-34",
+        "file": "single-34.jpg",
+        "width": 1079,
+        "height": 1440
+      },
+      {
+        "id": "single-35",
+        "file": "single-35.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-36",
+        "file": "single-36.jpg",
+        "width": 1079,
+        "height": 1440
+      },
+      {
+        "id": "single-37",
+        "file": "single-37.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-38",
+        "file": "single-38.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-39",
+        "file": "single-39.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-40",
+        "file": "single-40.jpg",
+        "width": 1079,
+        "height": 1440
+      },
+      {
+        "id": "single-41",
+        "file": "single-41.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-42",
+        "file": "single-42.jpg",
+        "width": 1079,
+        "height": 1440
+      },
+      {
+        "id": "single-43",
+        "file": "single-43.jpg",
+        "width": 1080,
+        "height": 1440
+      },
+      {
+        "id": "single-44",
+        "file": "single-44.jpg",
+        "width": 1079,
+        "height": 1440
+      },
+      {
+        "id": "single-45",
+        "file": "single-45.jpg",
+        "width": 1079,
+        "height": 1440
+      },
+      {
+        "id": "single-46",
+        "file": "single-46.jpg",
+        "width": 1080,
+        "height": 1440
+      }
+    ]
+  },
+  {
     "id": "gallery-6",
     "photos": [
       {

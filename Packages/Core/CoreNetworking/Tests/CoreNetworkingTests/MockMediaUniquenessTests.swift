@@ -51,6 +51,32 @@ struct MockMediaUniquenessTests {
         #expect(Set(singles).count == min(singles.count, pool))
     }
 
+    /// The owner's 46 unique photographs are posts' pictures, every one of
+    /// them, before any gallery page is borrowed (#1314).
+    @Test func everyUniquePhotoIsASinglePhotoPost() {
+        let used = Set(dataset.posts.filter { $0.extraMedia.isEmpty }.compactMap(\.media?.url))
+        #expect(photos.singles.count >= 46)
+        for single in photos.singles {
+            #expect(used.contains(single.media.url), "\(single.id) is no post's picture")
+        }
+    }
+
+    /// No avatar — and so no banner — is a post's TILE picture (a single
+    /// photo, or a carousel's cover), and no two authors (nor the viewer)
+    /// wear the same one (#1314). A carousel's inner page may be one: every
+    /// gallery photo belongs to a carousel, and 86 single posts plus ~40
+    /// avatars outrun the 46 unique photos.
+    @Test func noAvatarIsAPostsPicture() {
+        let postPictures = Set(dataset.posts.compactMap(\.media?.url))
+        let avatars = dataset.authors.map(\.avatarURL).filter { !$0.isEmpty }
+            + [MockSocialDataset.syntheticViewerAvatarURL]
+        #expect(avatars.count > 30)
+        for avatar in avatars {
+            #expect(!postPictures.contains(avatar), "\(avatar) is also a post's picture")
+        }
+        #expect(Set(avatars).count == avatars.count, "two people wear one avatar")
+    }
+
     /// Each gallery feeds ONE post, and a carousel post is ONE gallery: the
     /// main corpus's carousels carry their gallery whole, in order.
     @Test func eachGalleryIsOneCarouselPost() {

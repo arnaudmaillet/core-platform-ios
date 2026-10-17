@@ -72,7 +72,29 @@ public struct MockPhotoCatalog: Sendable {
     /// shoot is spent in one run rather than scattered. Cycles only when the
     /// whole catalog is spent.
     public func singlePhoto(forOrdinal ordinal: Int) -> Photo? {
-        let pool = singles + galleries.flatMap { $0.photos.dropFirst() }
+        let pool = singlePool
+        guard !pool.isEmpty else { return nil }
+        return pool[Self.wrap(ordinal, pool.count)]
+    }
+
+    /// Every picture a single-photo post may take, in the order posts spend
+    /// it: the singles, then gallery pages past their heads.
+    private var singlePool: [Photo] { singles + galleries.flatMap { $0.photos.dropFirst() } }
+
+    /// The picture of an AVATAR — and so of a profile's banner — `ordinal`
+    /// counting avatars of one orientation (#1314).
+    ///
+    /// ⚠️ FROM THE OTHER END OF THE POSTS' POOL. Avatars used to stride over
+    /// every photo, so a dozen authors wore a picture that was also a post's
+    /// (the owner, 2026-10-17: "éviter le plus possible d'avoir des
+    /// doublons"). Posts spend the pool from its head (the 46 singles first)
+    /// and avatars from its tail, landscape and portrait in two disjoint
+    /// runs, so the two meet only once the whole pool is spent. A landscape
+    /// avatar gives a band banner, the rest a poster.
+    public func avatarPhoto(forOrdinal ordinal: Int, landscape: Bool) -> Photo? {
+        let tail = singlePool.reversed()
+        let run = tail.filter { ($0.width > $0.height) == landscape }
+        let pool = run.isEmpty ? Array(tail) : run
         guard !pool.isEmpty else { return nil }
         return pool[Self.wrap(ordinal, pool.count)]
     }

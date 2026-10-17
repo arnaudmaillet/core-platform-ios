@@ -1114,25 +1114,24 @@ public struct MockSocialDataset: Sendable {
     /// picture or none (`avatarShape` nil → initials, no banner). A stride of
     /// 7 over the catalogue spreads neighbours across shoots; the banner takes
     /// its shape from the photo, so most are posters.
+    ///
+    /// Drawn from the TAIL of the single-photo pool (#1314,
+    /// `MockPhotoCatalog.avatarPhoto`), so no avatar is a post's picture: the
+    /// authors whose index is a multiple of four take landscape photographs
+    /// (the corpus keeps band banners), the others portrait ones, each run in
+    /// author order. The viewer takes the first landscape one.
     public static func syntheticAvatarURL(index: Int) -> String {
-        let photos = MockPhotoCatalog.shared.photos
-        guard !photos.isEmpty else { return "" }
-        // The landscape AVATARS (`avatarShape` even) take the catalogue's
-        // landscape photographs in turn, so the corpus keeps band banners;
-        // the rest spread over every photo.
-        let landscape = photos.filter { $0.width > $0.height }
-        if let shape = avatarShape(index: index), shape.0 > shape.1, !landscape.isEmpty, index % 4 == 0 {
-            return landscape[(index / 4) % landscape.count].media.url
-        }
-        return photos[(index * 7 + 3) % photos.count].media.url
+        let catalog = MockPhotoCatalog.shared
+        let landscape = index % 4 == 0
+        // Two runs, one per orientation; the viewer is landscape ordinal 0.
+        let ordinal = landscape ? index / 4 + 1 : (index / 4) * 3 + (index % 4 - 1)
+        return catalog.avatarPhoto(forOrdinal: ordinal, landscape: landscape)?.media.url ?? ""
     }
 
     /// The viewer's avatar in the default catalogue: a LANDSCAPE photograph,
-    /// so the viewer's own profile wears a band.
+    /// so the viewer's own profile wears a band — the landscape run's first.
     public static var syntheticViewerAvatarURL: String {
-        let catalog = MockPhotoCatalog.shared
-        let landscape = catalog.photos.first { $0.width > $0.height }
-        return (landscape ?? catalog.photos.first)?.media.url ?? ""
+        MockPhotoCatalog.shared.avatarPhoto(forOrdinal: 0, landscape: true)?.media.url ?? ""
     }
 
     public static func avatarShape(index: Int) -> (Int, Int)? {
