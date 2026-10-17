@@ -36,7 +36,7 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     /// Where the viewer stopped, and what that page is showing. Nil for a
     /// caller with no pager behind the flight, which keeps the card single-
     /// pictured exactly as it has always been.
-    private let settle: (() -> (id: PostID?, cover: UIImage?))?
+    private let settle: (() -> (id: PostID?, cover: UIImage?, page: Int?))?
     /// The picture the card must wear at the page end, resolved at staging.
     /// Nil on every present, and on any dismissal that leaves from the post it
     /// opened — which is the row that must not blend at all, since blending
@@ -45,7 +45,7 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
 
     init(
         origin: SnapFeedHeroOrigin,
-        settle: (() -> (id: PostID?, cover: UIImage?))? = nil
+        settle: (() -> (id: PostID?, cover: UIImage?, page: Int?))? = nil
     ) {
         self.origin = origin
         self.settle = settle
@@ -120,12 +120,15 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
                 ?? (id == origin.post.id ? origin.pagePicture : nil)
             return
         }
-        guard let settled = settle?(), let id = settled.id, id != origin.post.id else {
+        guard let settled = settle?(),
+              SettledDeparture.blends(departure: settled.id, arrival: origin.post.id, mediaPage: settled.page)
+        else {
             departurePicture = nil
             return
         }
         departurePicture = settled.cover
-        landsOnAnotherPost = true
+        // The same collection on a later page (#1326) is not another post.
+        landsOnAnotherPost = settled.id != origin.post.id
     }
 
     /// A close's departure picture that loaded after staging: kept for any
@@ -134,6 +137,11 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
         guard isStagingDismissal, departurePicture == nil else { return }
         departurePicture = image
         flyingCard?.setLateDeparturePicture(image)
+    }
+
+    /// What a close dissolves from, and whether it lands elsewhere — for tests.
+    var debugDeparture: (picture: UIImage?, landsOnAnotherPost: Bool) {
+        (departurePicture, landsOnAnotherPost)
     }
 
     /// `-zoom-blend-log`: the same channel the map's flight reports on, because

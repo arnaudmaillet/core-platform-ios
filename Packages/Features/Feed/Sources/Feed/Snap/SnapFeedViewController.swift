@@ -6647,6 +6647,8 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// Read off the SETTLED page's cell for the same reason `activePostID` is:
     /// the screen is already reporting itself invisible by the time a close
     /// asks, so anything gated on visibility answers about the wrong post.
+    public var settledMediaPage: Int? { activeMediaPage }
+
     var activeMediaPage: Int? {
         let index = settledPageIndex
         return (collectionView.cellForItem(at: IndexPath(item: index, section: 0))

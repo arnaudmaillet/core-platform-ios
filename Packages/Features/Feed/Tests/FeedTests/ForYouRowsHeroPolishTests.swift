@@ -254,7 +254,7 @@ struct ForYouRowsHeroPolishTests {
             cornerRadius: 32, pagePicture: nil,
             pagePictureOf: { id, _ in asked.append(id); return id == posts[1].id ? Self.picture(.systemTeal) : nil }
         )
-        let source = ExternalHeroZoomSource(origin: origin, settle: { (id: posts[1].id, cover: nil) })
+        let source = ExternalHeroZoomSource(origin: origin, settle: { (id: posts[1].id, cover: nil, page: nil) })
 
         source.zoomSourceWillStageDismissal()
         let card = try #require(source.makeZoomFlightCard() as? PostGridFlightCard)

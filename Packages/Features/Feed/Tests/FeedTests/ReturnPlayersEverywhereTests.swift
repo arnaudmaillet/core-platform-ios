@@ -444,7 +444,7 @@ struct ReturnPlayersEverywhereTests {
                 returnLandingIsReady: { returnGateAsked += 1; return true }
             )
         }
-        let other = ExternalHeroZoomSource(origin: origin(), settle: { (id: PostID("elsewhere"), cover: nil) })
+        let other = ExternalHeroZoomSource(origin: origin(), settle: { (id: PostID("elsewhere"), cover: nil, page: nil) })
         other.zoomSourceWillStageDismissal()
         _ = other.makeZoomFlightCard()
         other.zoomAdoptLiveMediaView(VideoRenderView())
@@ -455,7 +455,7 @@ struct ReturnPlayersEverywhereTests {
         _ = other.zoomLandingMediaIsReady
         #expect(returnGateAsked == 1)
 
-        let same = ExternalHeroZoomSource(origin: origin(), settle: { (id: PostID("v0"), cover: nil) })
+        let same = ExternalHeroZoomSource(origin: origin(), settle: { (id: PostID("v0"), cover: nil, page: nil) })
         same.zoomSourceWillStageDismissal()
         _ = same.makeZoomFlightCard()
         let departure = VideoRenderView()

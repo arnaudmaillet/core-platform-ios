@@ -58,7 +58,28 @@ struct ReturnToOriginTileTests {
             returnLiveMedia: { close.parked ? close.returnSurface : nil },
             pauseReturnLiveMedia: { close.pauses += 1 }
         )
-        return (ExternalHeroZoomSource(origin: origin, settle: { (id: settled, cover: nil) }), tapped)
+        return (ExternalHeroZoomSource(origin: origin, settle: { (id: settled, cover: nil, page: nil) }), tapped)
+    }
+
+    /// ⚠️ A CAROUSEL LEFT ON PAGE 2 LEAVES ON PAGE 2 (#1326): the close from
+    /// the post it opened from dissolves FROM the page on screen into the
+    /// tile's cover (the head), instead of flying the head from the grab's
+    /// first frame — and it is still the same post, so the return path stays.
+    @Test func aCarouselLeftOnALaterPageLeavesOnThatPage() {
+        let tapped = Self.post("tapped")
+        let page2 = Self.picture()
+        let origin = SnapFeedHeroOrigin(
+            post: tapped, cover: Self.picture(), style: .listMedia,
+            frame: { _ in .zero }, isOnScreen: { true }, setConcealed: { _ in }
+        )
+        let onPage2 = ExternalHeroZoomSource(origin: origin, settle: { (id: tapped.id, cover: page2, page: 1) })
+        onPage2.zoomSourceWillStageDismissal()
+        #expect(onPage2.debugDeparture.picture === page2, "the close flew the carousel's head")
+        #expect(!onPage2.debugDeparture.landsOnAnotherPost)
+
+        let onHead = ExternalHeroZoomSource(origin: origin, settle: { (id: tapped.id, cover: page2, page: 0) })
+        onHead.zoomSourceWillStageDismissal()
+        #expect(onHead.debugDeparture.picture == nil, "page 1 is the tile's own picture: nothing to blend")
     }
 
     /// ⚠️ THE FILMED DEFECT. Closing from another post, the landing hands the

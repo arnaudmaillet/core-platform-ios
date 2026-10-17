@@ -1,4 +1,5 @@
 import CoreModels
+import FeedInterface
 import UIKit
 
 /// The picture a flight home has to show at its DEPARTURE end, over the marker
@@ -69,12 +70,17 @@ enum MapReturnCover: Equatable {
     ///     post the flight opened from; the map never substitutes.
     ///   - picture: the departure's cover, if one can be had. A miss degrades
     ///     to `none` — today's flight — rather than to a blank operand.
+    ///   - mediaPage: the page of a collection the departure shows (#1326):
+    ///     the same post left on a later page still blends, from that page.
     static func resolve(
         departure: PostID?,
         arrival: PostID?,
+        mediaPage: Int? = nil,
         picture: (PostID) -> UIImage?
     ) -> MapReturnCover {
-        guard let departure, departure != arrival else { return .none }
+        guard let departure,
+              SettledDeparture.blends(departure: departure, arrival: arrival, mediaPage: mediaPage)
+        else { return .none }
         guard let image = picture(departure) else { return .none }
         return .picture(image)
     }
