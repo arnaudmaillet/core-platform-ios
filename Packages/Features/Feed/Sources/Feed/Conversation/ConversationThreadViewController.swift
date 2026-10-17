@@ -859,10 +859,16 @@ final class ConversationThreadViewController: UIViewController {
     // MARK: - Render
 
     private func render(_ phase: ConversationThreadPhase) {
-        if let wait = riseStillLanding(before: phase) {
-            // The server answered mid-rise: the spinner goes at once — the
-            // row it sits in is swapped once the rise has landed.
-            playEarlyDeliveries(in: phase)
+        // ⚠️ A DELIVERY PLAYS ON THE PENDING ROW ON SCREEN, and the delivered
+        // row takes its place only once it has played: the loader out, THEN
+        // the time in (the owner, 2026-10-17). Played on the delivered row
+        // instead, a freshly dequeued cell ran it before it was on screen —
+        // the time came in over the loader — and a swap mid-reveal showed
+        // the time at once. Mid-rise, the swap waits for the rise as well.
+        let rise = riseStillLanding(before: phase)
+        let delivering = playEarlyDeliveries(in: phase)
+        if rise != nil || delivering {
+            let wait = max(rise ?? 0, delivering ? ThreadRowCell.deliveryRevealDuration : 0)
             let pending = deferredPhase
             deferredPhase = phase
             guard pending == nil else { return }
@@ -1096,9 +1102,12 @@ final class ConversationThreadViewController: UIViewController {
         renderedRows = renderedRows.filter { messagesByID[$0.key] != nil }
     }
 
-    /// The pending rows a held-back phase delivers play their delivery now.
-    private func playEarlyDeliveries(in phase: ConversationThreadPhase) {
-        guard case .content(let messages) = phase else { return }
+    /// The pending rows a held-back phase delivers play their delivery now;
+    /// true when one did.
+    @discardableResult
+    private func playEarlyDeliveries(in phase: ConversationThreadPhase) -> Bool {
+        guard case .content(let messages) = phase else { return false }
+        var played = false
         var pending = messagesByID.values.filter { $0.isMine && $0.delivery == .sending && $0.media == nil }
         for message in messages where message.isMine && message.delivery == .sent && messagesByID[message.id] == nil
             && !deliveredEarly.contains(message.id) {
@@ -1109,7 +1118,9 @@ final class ConversationThreadViewController: UIViewController {
                   let cell = collectionView.cellForItem(at: path) as? ThreadRowCell else { continue }
             cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt), carryingSpinner: false)
             deliveredEarly.insert(message.id)
+            played = true
         }
+        return played
     }
 
     /// Delivered messages that took a pending row's place in this render.

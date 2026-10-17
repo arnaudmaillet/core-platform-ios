@@ -483,7 +483,7 @@ final class CommentRowView: UIView {
         placeDeliveryIndicators()
         guard delivery == .sending else {
             sendingSpinner.layer.removeAllAnimations()
-            sendingSpinner.stopAnimating()
+            sendingSpinner.stopAnimating(animated: false)
             sendingSpinner.transform = Self.spinnerScale
             sendingSpinner.alpha = 1
             return
@@ -499,6 +499,7 @@ final class CommentRowView: UIView {
     /// the delivery stays with the row that played it.
     private func resetDelivery() {
         guard installedDeliveryIndicators else { return }
+        deliveryRun += 1
         timeReveal.layer.removeAllAnimations()
         timeReveal.isHidden = true
         isBouncingInTime = false
@@ -550,6 +551,11 @@ final class CommentRowView: UIView {
             if current.hasSuffix(time) { label.text = String(current.dropLast(time.count)) }
             sendingSpinner.transform = Self.spinnerScale
             sendingSpinner.alpha = 1
+            // ⚠️ THE CARRIED LOADER GOES ON TURNING, it does not start over:
+            // started from rest it replayed its entry — the pills appearing
+            // again over the time (filmed by the owner, 2026-10-17). From a
+            // full pull it is the ring at once.
+            sendingSpinner.setProgress(1)
             sendingSpinner.startAnimating()
             placeDeliveryIndicators()
             layoutNow()
@@ -557,23 +563,48 @@ final class CommentRowView: UIView {
             full = current.hasSuffix(time) ? current : current + time
         }
         delivery = nil
+        deliveryRun += 1
+        let run = deliveryRun
         isBouncingInSpinner = false
         isScalingOutSpinner = true
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
+        // The line holds its full width, without the time, while the loader
+        // leaves its place.
+        let prefix = String(full.dropLast(time.count))
+        reserveHeaderWidth(full)
+        label.text = prefix
+        UIView.animate(withDuration: Self.loaderOutDuration, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
             self.sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
             self.sendingSpinner.alpha = 0
         } completion: { _ in
             self.isScalingOutSpinner = false
             guard self.delivery != .sending else { return }
-            self.sendingSpinner.stopAnimating()
+            self.sendingSpinner.stopAnimating(animated: false)
             self.sendingSpinner.transform = Self.spinnerScale
             self.sendingSpinner.alpha = 1
+            // ⚠️ THE TIME ONLY ONCE THE LOADER IS GONE — no crossfade (the
+            // owner, 2026-10-17): the two shared the place for the loader's
+            // way out, and read as the loader landing on the time.
+            // Not on a row recycled meanwhile: its time is another message's.
+            guard self.deliveryRun == run else { return }
+            self.bounceInTime(time, after: prefix, completing: full)
         }
-        // The time bounces in where the spinner was, on the same beat as the
-        // spinner leaving; the line takes it back once it has landed.
-        let prefix = String(full.dropLast(time.count))
-        reserveHeaderWidth(full)
-        label.text = prefix
+    }
+
+    /// The loader's way out, then the time's way in: one after the other, so
+    /// the whole delivery takes their sum — what a host holding the delivered
+    /// row's swap waits for (`ConversationThreadViewController`).
+    static let loaderOutDuration: TimeInterval = 0.25
+    static let timeInDuration: TimeInterval = 0.5
+    static var deliveryRevealDuration: TimeInterval { loaderOutDuration + timeInDuration }
+
+    /// Bumped by every delivery played and every recycling, so a loader's
+    /// way out that ends late reveals nothing on a row that moved on.
+    private var deliveryRun = 0
+
+    /// The time bounces in where the loader was; the line takes it back once
+    /// it has landed.
+    private func bounceInTime(_ time: String, after prefix: String, completing full: String) {
+        let label = headerLabel
         timeReveal.font = label.font
         timeReveal.textColor = label.textColor
         timeReveal.text = time
@@ -584,7 +615,7 @@ final class CommentRowView: UIView {
         timeReveal.transform = CGAffineTransform(scaleX: 0.01, y: 0.01)
         timeReveal.alpha = 0
         isBouncingInTime = true
-        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.55,
+        UIView.animate(withDuration: Self.timeInDuration, delay: 0, usingSpringWithDamping: 0.55,
                        initialSpringVelocity: 0.8, options: [.allowUserInteraction]) {
             self.timeReveal.transform = .identity
             self.timeReveal.alpha = 1
