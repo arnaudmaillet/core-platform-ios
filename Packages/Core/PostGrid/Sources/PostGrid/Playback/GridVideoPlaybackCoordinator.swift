@@ -993,6 +993,13 @@ public final class GridVideoPlaybackCoordinator {
         pool.pauseReturnPlayback(of: url, scope: id.rawValue, owner: returnOwner)
     }
 
+    /// The clip `id`'s return player was parked on — the page that played at
+    /// the tap. A carousel row that has paged on since shows another page,
+    /// and its close must not come home with this one (#1332).
+    public func returnURL(for id: PostID) -> URL? {
+        returnURLs[id]
+    }
+
     /// Whether a return player is parked for `id` right now.
     public func hasReturnPlayback(for id: PostID) -> Bool {
         guard let url = returnURLs[id] else { return false }

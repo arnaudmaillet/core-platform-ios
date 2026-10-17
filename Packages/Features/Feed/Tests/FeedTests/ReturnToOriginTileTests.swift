@@ -94,6 +94,31 @@ struct ReturnToOriginTileTests {
         #expect(onHead.debugDeparture.picture == nil, "page 1 is the tile's own picture: nothing to blend")
     }
 
+    /// ⚠️ A ROW REMEMBERS ITS PAGE (#1332). Filmed: open a carousel from a
+    /// row, page to 2, swipe on to another post, close — the card dissolved
+    /// into page 1, the picture captured at the tap, while the row it landed
+    /// on showed page 2. The card lands on what the origin draws NOW.
+    @Test func aCloseFromAnotherPostLandsOnTheRowsRememberedPage() throws {
+        let tapped = Self.post("tapped")
+        let head = Self.picture()
+        let page2 = Self.picture()
+        let row = SnapFeedHeroOrigin(
+            post: tapped, cover: head, style: .listMedia,
+            frame: { _ in .zero }, isOnScreen: { true }, setConcealed: { _ in },
+            followMediaPage: { _, _ in },
+            currentCover: { page2 }
+        )
+        let other = Self.picture()
+        let source = ExternalHeroZoomSource(origin: row, settle: { (id: PostID("other"), cover: other, page: nil) })
+        source.zoomSourceWillStageDismissal()
+        #expect(source.debugDeparture.picture === other)
+        #expect(source.debugDeparture.landsOnAnotherPost)
+
+        let card = try #require(source.makeZoomFlightCard() as? PostGridFlightCard)
+        let landing = try #require(card.subviews.first as? UIImageView)
+        #expect(landing.image === page2, "the card landed on the page captured at the tap")
+    }
+
     /// ⚠️ THE FILMED DEFECT. Closing from another post, the landing hands the
     /// tile its OWN clip (the return surface the card faded in), never the
     /// departure surface, which is the page's post.
