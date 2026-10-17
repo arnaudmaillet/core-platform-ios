@@ -54,6 +54,15 @@ private enum StreamItem: Hashable {
 }
 
 final class PostDetailViewController: UIViewController {
+    /// Where an opened post is recorded — the profile's History tab
+    /// (#1344): every post opened counts, here as in the vertical feed.
+    var viewHistory: PostViewHistoryStore?
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        if let postID = viewModel.postID { viewHistory?.record(postID.rawValue) }
+    }
+
     private enum Metrics {
         static let avatarSize: CGFloat = 44
     }

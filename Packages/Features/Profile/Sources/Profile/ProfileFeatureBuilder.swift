@@ -195,6 +195,8 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
                 // store handed to a profile that cannot show one would be a
                 // dependency nothing reads.
                 bookmarks: bookmarks,
+                // The History tab's pile (#1344): the own profile's only.
+                viewHistory: .shared,
                 source: .currentUser,
                 router: router,
                 cache: cache,

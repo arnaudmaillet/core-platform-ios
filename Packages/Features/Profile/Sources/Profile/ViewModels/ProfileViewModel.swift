@@ -126,6 +126,11 @@ public final class ProfileViewModel {
         /// (#696; your own profile too since #772).
         public var reposts: GalleryPageState = .empty(message: "")
         public var tagged: GalleryPageState = .empty(message: "")
+        /// The posts the viewer viewed (#1344), on their own profile only.
+        public var history: GalleryPageState = .empty(message: "")
+        /// History's groups by day, over its posts in order — what the page
+        /// titles (#1344). Empty: one untitled list.
+        public var historyGroups: [HistoryGroup] = []
         /// Whether no further page is coming for Reposts and for Tagged: each
         /// follows its own corpus, apart from `isComplete`.
         public var repostsComplete = true
@@ -135,7 +140,7 @@ public final class ProfileViewModel {
         /// instead (#447): the server withholds them from the viewer.
         mutating func restrictEmptyPages() {
             let locked = GalleryPageState.restricted(title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage)
-            for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.tagged] {
+            for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.tagged, \.history] {
                 if case .empty = self[keyPath: page] { self[keyPath: page] = locked }
             }
         }
@@ -150,6 +155,7 @@ public final class ProfileViewModel {
             case .reactions: reactions
             case .reposts: reposts
             case .tagged: tagged
+            case .history: history
             }
         }
 
@@ -250,6 +256,8 @@ public final class ProfileViewModel {
     /// Read by the gallery's rows too, so a card's save control and the
     /// Saved tab share one pile.
     let bookmarks: PostBookmarkStore?
+    /// The viewer's viewing history (#1344): the own profile's only.
+    let viewHistory: PostViewHistoryStore?
     /// `var` for one transition only: a `.lookup` becomes the `.profile` it
     /// resolves to.
     private var source: Source
@@ -401,6 +409,7 @@ public final class ProfileViewModel {
         gallery: (any ProfileGalleryProviding)? = nil,
         galleryPreferences: GalleryPreferences? = nil,
         bookmarks: PostBookmarkStore? = nil,
+        viewHistory: PostViewHistoryStore? = nil,
         source: Source = .currentUser,
         router: (any Router)? = nil,
         cache: ProfileCache? = nil,
@@ -419,6 +428,7 @@ public final class ProfileViewModel {
         self.gallery = gallery
         self.galleryPreferences = galleryPreferences
         self.bookmarks = bookmarks
+        self.viewHistory = viewHistory
         self.source = source
         self.router = router
         self.cache = cache
@@ -1603,6 +1613,76 @@ public final class ProfileViewModel {
             renderGallery()
         }
     }
+
+    // MARK: - History (#1344)
+
+    /// The History page from the device's pile, newest first — on every
+    /// appearance and on every change. Like Saved: a post that no longer
+    /// resolves drops out, and a page already showing tiles keeps them while
+    /// the refresh runs.
+    func loadHistory() {
+        guard let viewHistory, let gallery else { return }
+        // Undated views (recorded before the times were kept) last, under
+        // "Earlier".
+        let pile = viewHistory.views
+        let views = pile.filter { $0.viewedAt != nil } + pile.filter { $0.viewedAt == nil }
+        let ids = views.map(\.postID)
+        // The day is part of what is shown: "Today" is yesterday's by now.
+        let shown = HistoryShown(views: views, day: Calendar.current.startOfDay(for: now()))
+        guard shown != shownHistory || !hasShownHistory else { return }
+        shownHistory = shown
+        historyGeneration += 1
+        let generation = historyGeneration
+        guard !ids.isEmpty else {
+            hasShownHistory = true
+            galleryStore.history = .empty(message: "")
+            galleryStore.historyGroups = []
+            renderGallery()
+            return
+        }
+        if case .content = galleryStore.history {} else {
+            galleryStore.history = .loading
+            renderGallery()
+        }
+        Task { [weak self] in
+            let tiles = (try? await gallery.posts(ids: ids)) ?? []
+            guard let self, generation == historyGeneration else { return }
+            hasShownHistory = true
+            let viewedAt = Dictionary(views.map { ($0.postID, $0.viewedAt) }, uniquingKeysWith: { first, _ in first })
+            galleryStore.history = tiles.isEmpty ? .empty(message: "") : .content(tiles)
+            galleryStore.historyGroups = HistoryDayGroups.groups(
+                for: tiles.map { viewedAt[$0.id.rawValue] ?? nil }, now: now()
+            )
+            renderGallery()
+        }
+    }
+
+    /// Takes one post out of the history (its menu's "Remove from History").
+    func removeFromHistory(_ id: PostID) {
+        viewHistory?.remove(id.rawValue)
+        loadHistory()
+    }
+
+    /// Empties the history (the profile menu's "Clear History").
+    func clearHistory() {
+        viewHistory?.clear()
+        loadHistory()
+    }
+
+    /// Whether there is any history to clear.
+    var hasHistory: Bool { !(viewHistory?.postIDs.isEmpty ?? true) }
+
+    /// The clock History's days are read against. Tests set it.
+    var now: @Sendable () -> Date = Date.init
+
+    /// What the History page was last built from.
+    private struct HistoryShown: Equatable {
+        var views: [PostViewHistoryStore.View]
+        var day: Date
+    }
+    private var shownHistory: HistoryShown?
+    private var hasShownHistory = false
+    private var historyGeneration = 0
 
     // MARK: - Loading
 

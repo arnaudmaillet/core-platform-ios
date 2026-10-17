@@ -27,6 +27,9 @@ public enum ProfileTab: Equatable, Sendable {
     /// Posts by others that mention the profile (#696): the tagged corpus.
     /// Every profile since #772.
     case tagged
+    /// Posts the viewer viewed (#1344): their own profile only, newest
+    /// first, kept on the device until the backend keeps it (#944).
+    case history
 
     /// What the selector calls it.
     ///
@@ -45,6 +48,7 @@ public enum ProfileTab: Equatable, Sendable {
         case .reactions: "Liked"
         case .reposts: "Reposts"
         case .tagged: "Tagged"
+        case .history: "History"
         }
     }
 
@@ -53,7 +57,7 @@ public enum ProfileTab: Equatable, Sendable {
     var pages: Bool {
         switch self {
         case .format, .reposts, .tagged: true
-        case .saved, .reactions: false
+        case .saved, .reactions, .history: false
         }
     }
 
@@ -82,7 +86,10 @@ public enum ProfileTab: Equatable, Sendable {
     /// Reposts / Tagged) narrowing one Posts list; they are pages in the
     /// selector now, exactly as on someone else's profile, and like every
     /// source they show only with something in them (#742).
-    public static let ownTabs: [ProfileTab] = publicTabs + [.saved, .reactions]
+    ///
+    /// History follows Saved (#1344, the owner 2026-10-17): the viewer's own
+    /// profile only — its data is empty anywhere else, so it never shows there.
+    public static let ownTabs: [ProfileTab] = publicTabs + [.saved, .history, .reactions]
 }
 
 // MARK: - What a tab says when it is empty
@@ -118,6 +125,8 @@ extension ProfileTab {
             (PostActionSymbol.repost, "No Reposts Yet", "Reposts will appear here.")
         case .tagged:
             ("at", "No Tagged Posts", "Posts that mention them will appear here.")
+        case .history:
+            ("clock.arrow.circlepath", "No History Yet", "Posts you watch will appear here.")
         }
     }
 }
