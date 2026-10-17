@@ -39,7 +39,7 @@ final class ProfileRelationshipListViewController: UIViewController {
     private let imagePipeline: ImagePipeline?
 
     private(set) var collectionView: UICollectionView!
-    private let refreshControl = UIRefreshControl()
+    private let refreshControl = AppRefreshControl()
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private var rowsByID: [ProfileID: ProfileRelationshipsViewModel.Row] = [:]
     private var phase: ProfileRelationshipsViewModel.Phase = .loading

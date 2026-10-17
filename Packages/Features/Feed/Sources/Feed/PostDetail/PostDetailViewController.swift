@@ -179,7 +179,7 @@ final class PostDetailViewController: UIViewController {
     /// The full-mode post section (header/media/engagement), built once
     /// and hosted by the stream's leading cell.
     private let postSectionHost = UIView()
-    private let refreshControl = UIRefreshControl()
+    private let refreshControl = AppRefreshControl()
     private let spinner = UIActivityIndicatorView(style: .large)
     /// A failed first load, with its way out (#797).
     private let statusView = EmptyStateView()
