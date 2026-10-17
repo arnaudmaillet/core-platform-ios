@@ -9,9 +9,10 @@ import PostGrid
 /// own — never the grid's list continued from the tap, and nothing the grid
 /// has already shown.
 ///
-/// One session per opening: `begin(with:)` hands the feed its first window
-/// (the tapped post and what was read ahead), `next(after:)` pages on, and the
-/// next opening starts a fresh cursor. A provider with no discovery answers
+/// One cursor for the screen's life: `begin(with:)` hands the feed its first
+/// window (the tapped post and what was read ahead), `next(after:)` pages on,
+/// and the next opening carries on from where the last one stopped — only a
+/// refresh starts the pool over (`reset`). A provider with no discovery answers
 /// nothing, and the caller keeps the grid's own window — what it did before.
 @MainActor
 final class ForYouOwnFeed {
@@ -47,7 +48,7 @@ final class ForYouOwnFeed {
         readAheadTask = Task { [weak self] in
             guard let self else { return }
             defer { readAheadTask = nil }
-            readAhead = await read(Self.windowSize, skipping: [])
+            readAhead = await read(Self.windowSize, skipping: served)
         }
     }
 
@@ -62,7 +63,8 @@ final class ForYouOwnFeed {
             prepare()
             return nil
         }
-        served = Set(ahead.map(\.id)).union([tapped.id])
+        served.formUnion(ahead.map(\.id))
+        served.insert(tapped.id)
         return [tapped] + ahead
     }
 
@@ -76,9 +78,22 @@ final class ForYouOwnFeed {
         return posts.map(\.id)
     }
 
-    /// The session is over (the feed closed): the next opening starts a
-    /// fresh cursor, read ahead now.
+    /// The feed closed: the next opening carries on from where this one
+    /// stopped, read ahead now.
+    ///
+    /// ⚠️ THE CURSOR CARRIES ON, it does not start over (the owner,
+    /// 2026-10-17, filmed): starting over replayed the same posts after the
+    /// tapped one on every opening. What was served stays served, so the
+    /// next window is posts the viewer has not been shown yet.
     func end() {
+        prepare()
+    }
+
+    /// A new corpus (a refresh): the pool starts over.
+    func reset() {
+        readAheadTask?.cancel()
+        readAheadTask = nil
+        readAhead = []
         cursor = .start
         served = []
         prepare()

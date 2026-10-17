@@ -86,4 +86,30 @@ struct ForYouOwnFeedTests {
         try? await Task.sleep(for: .milliseconds(20))
         #expect(feed.begin(with: Self.post("g1")) == nil)
     }
+
+    /// ⚠️ THE NEXT OPENING CARRIES ON (filmed 2026-10-17): it used to start
+    /// over and replay the same posts after the tapped one every time.
+    @Test func theNextOpeningCarriesOnWhereTheLastStopped() async throws {
+        let pool = Pool()
+        pool.pages[""] = Self.page((0..<12).map { "a\($0)" }, next: "t2")
+        pool.pages["t2"] = Self.page((0..<12).map { "b\($0)" }, next: "t3")
+        pool.pages["t3"] = Self.page((0..<12).map { "c\($0)" }, next: nil)
+        let feed = ForYouOwnFeed(repository: pool) { [] }
+        feed.prepare()
+        await settle { !feed.debugReadAhead.isEmpty }
+        let first = try #require(feed.begin(with: Self.post("tap1")))
+        feed.end()
+        await settle { !feed.debugReadAhead.isEmpty }
+        let second = try #require(feed.begin(with: Self.post("tap2")))
+        let firstRest = Set(first.dropFirst().map(\.id))
+        let secondRest = second.dropFirst().map(\.id)
+        #expect(!secondRest.isEmpty)
+        #expect(secondRest.allSatisfy { !firstRest.contains($0) }, "the second opening replayed the first: \(secondRest)")
+
+        // A refresh starts the pool over.
+        feed.reset()
+        await settle { !feed.debugReadAhead.isEmpty }
+        let third = try #require(feed.begin(with: Self.post("tap3")))
+        #expect(third.dropFirst().first?.id.rawValue == "a0")
+    }
 }

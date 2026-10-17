@@ -342,6 +342,8 @@ public final class ForYouViewModel {
     /// with it. What is on screen stays there until the answer lands, and a
     /// failed answer leaves it there (`onRefreshFailed`, #798).
     public func refresh() {
+        // A new corpus: the vertical feed's own list starts over (#1343).
+        ownFeed.reset()
         rearmMockNewActivity()
         loadFirstPage(reset: true)
     }
