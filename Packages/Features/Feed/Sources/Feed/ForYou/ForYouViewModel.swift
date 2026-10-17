@@ -606,6 +606,13 @@ public final class ForYouViewModel {
     /// serves every author's posts.
     public var followingPosts: [GalleryPost] { posts(in: .following) }
 
+    /// The vertical feed's own list for a post opened from the "For you"
+    /// section or its gallery (#1343): the discovery pool on a cursor of its
+    /// own, past everything the grid holds.
+    private(set) lazy var ownFeed = ForYouOwnFeed(repository: repository) { [weak self] in
+        Set((self?.discoverPosts ?? []).map(\.id))
+    }
+
     /// FRIENDS' posts: mutual follows.
     public var friendPosts: [GalleryPost] { posts(in: .friend) }
 

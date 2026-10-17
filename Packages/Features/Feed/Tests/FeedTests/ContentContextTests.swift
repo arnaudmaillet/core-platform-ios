@@ -255,7 +255,7 @@ struct ContentContextMenuTests {
                 repository: StubContextProvider(first: ForYouPage(posts: [], nextPageToken: nil))
             ),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeSnapFeed: { _ in UIViewController() },
+            makeSnapFeed: { _, _ in UIViewController() },
             prewarm: { _ in }
         )
     }

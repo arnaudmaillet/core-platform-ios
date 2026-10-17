@@ -77,7 +77,7 @@ struct ForYouRowsInteractionTests {
             let screen = ForYouViewController(
                 viewModel: ForYouViewModel(repository: EmptyForYouProvider()),
                 imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-                makeSnapFeed: { _ in UIViewController() },
+                makeSnapFeed: { _, _ in UIViewController() },
                 prewarm: { _ in }
             )
             let nav = UINavigationController(rootViewController: screen)

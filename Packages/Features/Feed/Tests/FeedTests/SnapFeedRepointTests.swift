@@ -122,7 +122,7 @@ struct SnapFeedRepointTests {
         let grid = ForYouViewController(
             viewModel: ForYouViewModel(repository: StubForYouProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            makeSnapFeed: { _ in counter.make() },
+            makeSnapFeed: { _, _ in counter.make() },
             prewarm: { _ in }
         )
         return (grid, counter)

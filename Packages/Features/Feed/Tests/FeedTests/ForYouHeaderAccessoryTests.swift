@@ -28,7 +28,7 @@ struct ForYouHeaderAccessoryTests {
                 repository: StubHeaderProvider()
             ),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
-            makeSnapFeed: { _ in UIViewController() },
+            makeSnapFeed: { _, _ in UIViewController() },
             prewarm: { _ in }
         )
     }

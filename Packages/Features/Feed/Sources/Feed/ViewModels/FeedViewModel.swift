@@ -5,6 +5,7 @@ import CoreNetworking
 import CoreRealtime
 import CoreStorage
 import EntityStore
+import FeedInterface
 import Foundation
 import MediaCore
 
@@ -507,7 +508,7 @@ public final class FeedViewModel {
     ///
     /// Silent no-op when the provider cannot be re-aimed: the open-ended
     /// timeline has no fixed window to replace, and its caller does not reuse.
-    public func repoint(to ids: [PostID]) {
+    public func repoint(to ids: [PostID], continuation: SnapFeedContinuation? = nil) {
         guard let repointable = repository as? any RepointableFeedProviding else { return }
         initialLoad?.cancel()
         pagingLoad?.cancel()
@@ -531,7 +532,7 @@ public final class FeedViewModel {
         builder = FeedDisplayModelBuilder()
         let generation = nextInitialLoadGeneration()
         initialLoad = Task {
-            await repointable.repoint(to: ids)
+            await repointable.repoint(to: ids, continuation: continuation)
             guard !Task.isCancelled else { return }
             await loadInitial(generation: generation)
         }

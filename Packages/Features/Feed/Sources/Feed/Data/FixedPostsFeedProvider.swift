@@ -21,6 +21,15 @@ import Foundation
 /// push (see `ZoomFlightProfiler`).
 protocol RepointableFeedProviding: FeedProviding {
     func repoint(to ids: [PostID]) async
+    /// `continuation`: what follows the new window, nil for nothing (#1343).
+    func repoint(to ids: [PostID], continuation: SnapFeedContinuation?) async
+}
+
+extension RepointableFeedProviding {
+    /// A provider that cannot carry a continuation takes the window alone.
+    func repoint(to ids: [PostID], continuation: SnapFeedContinuation?) async {
+        await repoint(to: ids)
+    }
 }
 
 actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
@@ -54,14 +63,19 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
 
     /// Aims this provider at a different set. The next `loadFirstPage` serves
     /// it; nothing is cached here, so there is nothing else to invalidate. A
-    /// re-aimed window is a whole set: whatever followed the old one does not
-    /// follow this one.
-    func repoint(to ids: [PostID]) {
+    /// re-aimed window is a whole set unless it brings its own continuation:
+    /// whatever followed the old one does not follow this one.
+    func repoint(to ids: [PostID], continuation: SnapFeedContinuation?) {
         self.ids = ids
-        continuation = nil
+        self.continuation = continuation
         lastServed = nil
         // A re-aimed window is somebody's window, not a whole set.
         isCompleteSet = false
+    }
+
+    /// A re-aimed window with nothing after it.
+    func repoint(to ids: [PostID]) {
+        repoint(to: ids, continuation: nil)
     }
 
     func cachedFirstPage() async -> [FeedEntry]? { nil }

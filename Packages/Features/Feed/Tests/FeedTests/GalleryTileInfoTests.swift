@@ -73,7 +73,7 @@ struct GalleryTileInfoTests {
         let screen = ForYouViewController(
             viewModel: ForYouViewModel(repository: EmptyProvider()),
             imagePipeline: pipeline(),
-            makeSnapFeed: { _ in UIViewController() },
+            makeSnapFeed: { _, _ in UIViewController() },
             prewarm: { _ in }
         )
         #expect(screen.debugShowsTileInfo)
