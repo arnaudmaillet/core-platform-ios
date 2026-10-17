@@ -3421,6 +3421,106 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         lookahead.scrollViewDidEndScrolling()
     }
 
+    // MARK: - The native preview (#1318)
+
+    /// ⚠️ EVERY TILE OF EVERY GRID LIFTS ITS POST (the owner, 2026-10-17):
+    /// the long press For You's shelves had, here once for every surface this
+    /// page serves — For You's lists, the profile's pages, the place page.
+    /// The menu is built from what every host already hands the page (its
+    /// author tap and its author menu), so no host has anything new to wire;
+    /// a clip plays inside the lift (`ForYouPostPreviewViewController`).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard !showsSkeleton, let indexPath = indexPaths.first else { return nil }
+        let index = flatIndex(for: indexPath)
+        guard posts.indices.contains(index) else { return nil }
+        let post = posts[index]
+        let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
+        let pipeline = imagePipeline
+        let pool = videoPool
+        return UIContextMenuConfiguration(
+            identifier: post.id.rawValue as NSString,
+            previewProvider: {
+                ForYouPostPreviewViewController(
+                    post: post, imagePipeline: pipeline, width: width, videoPlayback: pool
+                )
+            },
+            actionProvider: { [weak self] _ in self?.tileMenu(for: post, at: indexPath) }
+        )
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        tilePreview(at: indexPath)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        tilePreview(at: indexPath)
+    }
+
+    /// Tapping the lift opens the post — the tap's own open, through the same
+    /// flight. `.dismiss` first, then ours, one turn past the completion: the
+    /// flight leaves FROM the tile, so UIKit must have put it back (the
+    /// shelf's rule, `PostShelfSection`).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+        animator: UIContextMenuInteractionCommitAnimating
+    ) {
+        guard let raw = configuration.identifier as? String else { return }
+        animator.preferredCommitStyle = .dismiss
+        animator.addCompletion { [weak self] in
+            DispatchQueue.main.async { self?.openPost(rawID: raw) }
+        }
+    }
+
+    /// Open, the author's profile, then the host's author rows (Unfollow,
+    /// Report — none on the viewer's own posts, which the host decides).
+    func tileMenu(for post: GalleryPost, at indexPath: IndexPath) -> UIMenu {
+        let id = post.id.rawValue
+        var children: [UIMenuElement] = [RowGeometry.openAction { [weak self] in self?.openPost(rawID: id) }]
+        if let onAuthorTapped, post.authorID != nil {
+            children.append(UIAction(title: "View Profile", image: UIImage(systemName: "person.crop.circle")) { _ in
+                onAuthorTapped(post)
+            })
+        }
+        if let authorID = post.authorID, let authorMenuActions {
+            let anchor: UIView = collectionView.cellForItem(at: indexPath) ?? self
+            let rows = authorMenuActions(AuthorMenuContext(post: post, authorID: authorID, anchor: anchor))
+            if let menu = PostCardMenu.menu(for: rows) {
+                children.append(UIMenu(options: .displayInline, children: menu.children))
+            }
+        }
+        return UIMenu(children: children)
+    }
+
+    /// Opens the post with this id, wherever it now sits.
+    private func openPost(rawID: String) {
+        guard let index = posts.firstIndex(where: { $0.id.rawValue == rawID }) else { return }
+        open(at: indexPath(for: index), showingComments: false)
+    }
+
+    /// The tile the lift is made of, on its own rounded shape.
+    private func tilePreview(at indexPath: IndexPath) -> UITargetedPreview? {
+        guard let cell = collectionView.cellForItem(at: indexPath), cell.window != nil else { return nil }
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        let card = cell.contentView
+        let radius = max(card.layer.cornerRadius, cell.layer.cornerRadius)
+        parameters.visiblePath = UIBezierPath(roundedRect: card.bounds, cornerRadius: radius)
+        return UITargetedPreview(view: card, parameters: parameters)
+    }
+
     func collectionView(
         _ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath
     ) {

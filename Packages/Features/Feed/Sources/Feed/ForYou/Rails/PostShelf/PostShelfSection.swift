@@ -288,8 +288,12 @@ final class PostShelfSection: UIView {
     private var concealedCard: PostID?
     private let snapper = RowSnapper()
 
+    /// The pool itself, for a lifted card's live clip (#1318).
+    private let videoPool: VideoPlaybackController?
+
     init(imagePipeline: ImagePipeline, videoPlayback: VideoPlaybackController?) {
         self.imagePipeline = imagePipeline
+        videoPool = videoPlayback
         playback = videoPlayback.map {
             GridVideoPlaybackCoordinator(pool: $0, maxConcurrent: Self.concurrentPlayers)
         }
@@ -1114,10 +1118,11 @@ extension PostShelfSection: UICollectionViewDelegate {
               let post = cards.first(where: { $0.id == id }) else { return nil }
         let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
         let pipeline = imagePipeline
+        let pool = videoPool
         return UIContextMenuConfiguration(
             identifier: RowMenuTarget.card(id).identifier,
             previewProvider: {
-                ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width)
+                ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width, videoPlayback: pool)
             },
             actionProvider: { [weak self] _ in self?.cardMenu(for: post) }
         )

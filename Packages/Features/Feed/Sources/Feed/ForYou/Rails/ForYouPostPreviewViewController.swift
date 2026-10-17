@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -24,13 +25,15 @@ import UIKit
 /// A card's preview is its post; a friend's is the post a tap on their face
 /// opens first, so the preview answers "what would I see" in both rows.
 ///
-/// ⚠️ A STILL, NOT THE CLIP. The row's card is already playing this post from
-/// the shared pool, and a second surface on that playback is a render slot
-/// MOVED rather than shared outside the sample-buffer path
-/// (`VideoPlaybackController.attachSurface`) — the card under the lifted
-/// preview would go black, and it is the card the flight takes off from if
-/// the preview is committed. The cover is the frame the card showed before it
-/// played, and a preview is looked at for a second.
+/// ⚠️ THE CLIP, PLAYING (the owner, 2026-10-17, #1318) — over its cover. The
+/// tile under the lift is already playing this post from the shared pool, and
+/// the preview JOINS that playback as one more surface
+/// (`VideoPlaybackController.attachSurface(_:to:scope:)`): under the default
+/// sample-buffer backing a second surface is an insertion, so the tile keeps
+/// playing and simply carries on when the preview closes — the card the
+/// flight takes off from if the preview is committed. A tile that was not
+/// playing gets a playback of the preview's own, returned when it closes.
+/// Without a pool (or for a photograph) the cover is the preview.
 ///
 /// The caption is the card's own overlay (`ForYouCardCaptionOverlay`), so its
 /// emotes animate here too (`EmoteLabel`).
@@ -38,7 +41,14 @@ import UIKit
 final class ForYouPostPreviewViewController: UIViewController {
     let post: GalleryPost
     private let imagePipeline: ImagePipeline
+    private let videoPlayback: VideoPlaybackController?
     private let imageView = UIImageView()
+    /// The clip, over the cover, once its first frame is in.
+    private let videoView = VideoRenderView()
+    /// Whether the preview runs a playback of its OWN (the tile had none to
+    /// join), which it must hand back.
+    private var ownsPlayback = false
+    private var playTask: Task<Void, Never>?
     /// The cover's load, on the loading ladder's rules (#1085).
     private let cover = ImageLoadSlot(size: .full)
 
@@ -58,9 +68,10 @@ final class ForYouPostPreviewViewController: UIViewController {
         return CGSize(width: width, height: (width / aspect).rounded())
     }
 
-    init(post: GalleryPost, imagePipeline: ImagePipeline, width: CGFloat) {
+    init(post: GalleryPost, imagePipeline: ImagePipeline, width: CGFloat, videoPlayback: VideoPlaybackController? = nil) {
         self.post = post
         self.imagePipeline = imagePipeline
+        self.videoPlayback = videoPlayback
         super.init(nibName: nil, bundle: nil)
         preferredContentSize = Self.preferredSize(for: post, width: width)
     }
@@ -68,9 +79,41 @@ final class ForYouPostPreviewViewController: UIViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        startClip()
+    }
+
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
         cover.cancel()
+        stopClip()
+    }
+
+    /// Joins the tile's playback of this post, or starts one of its own.
+    private func startClip() {
+        guard let videoPlayback, post.kind != .text, let url = post.videoURL else { return }
+        if videoPlayback.attachSurface(videoView, to: url, scope: post.id.rawValue) { return }
+        ownsPlayback = true
+        let view = videoView
+        let scope = post.id.rawValue
+        playTask = Task { @MainActor in
+            await videoPlayback.play(url, in: view, scope: scope)
+        }
+    }
+
+    /// Leaves the playback as it found it: a joined surface detaches (the
+    /// tile carries on), an own playback is stopped and its loan returned.
+    private func stopClip() {
+        playTask?.cancel()
+        playTask = nil
+        guard let videoPlayback else { return }
+        if ownsPlayback {
+            ownsPlayback = false
+            videoPlayback.stop(videoView)
+        } else {
+            videoPlayback.detachSurface(videoView, reason: "preview closed")
+        }
     }
 
     override func viewDidLoad() {
@@ -83,6 +126,10 @@ final class ForYouPostPreviewViewController: UIViewController {
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.pin(to: view)
+        if videoPlayback != nil, !isText, post.videoURL != nil {
+            videoView.isUserInteractionEnabled = false
+            videoView.pin(to: view)
+        }
         let overlay = ForYouCardCaptionOverlay(
             post: post, placement: isText ? .onCard : .onMedia, imagePipeline: imagePipeline
         )
@@ -97,5 +144,8 @@ final class ForYouPostPreviewViewController: UIViewController {
 
     #if DEBUG
     var debugShowsCover: Bool { imageView.image != nil }
+    /// The clip's surface and whether the preview owns its playback (#1318).
+    var debugVideoView: VideoRenderView { videoView }
+    var debugOwnsPlayback: Bool { ownsPlayback }
     #endif
 }

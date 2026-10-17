@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import PostGrid
 import UIKit
 
@@ -108,6 +109,9 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
     /// The story whose disc a flight is carrying, hidden until it lands.
     private var concealedStory: ProfileID?
     private let snapper = RowSnapper()
+
+    /// The pool a lifted post's clip plays from (#1318); nil lifts the cover.
+    var videoPlayback: VideoPlaybackController?
 
     init(imagePipeline: ImagePipeline) {
         self.imagePipeline = imagePipeline
@@ -417,10 +421,15 @@ extension FriendsStoriesRow: UICollectionViewDelegate {
               let story = stories.first(where: { $0.authorID == id }) else { return nil }
         let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
         let pipeline = imagePipeline
+        let pool = videoPlayback
         return UIContextMenuConfiguration(
             identifier: RowMenuTarget.story(id).identifier,
             previewProvider: story.posts.first.map { post in
-                { ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width) }
+                {
+                    ForYouPostPreviewViewController(
+                        post: post, imagePipeline: pipeline, width: width, videoPlayback: pool
+                    )
+                }
             },
             actionProvider: { [weak self] _ in self?.storyMenu(for: story) }
         )
