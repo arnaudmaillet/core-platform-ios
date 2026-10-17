@@ -297,3 +297,35 @@ struct AppLoaderTests {
     }
 }
 
+
+/// The tick a pull gives as it crosses its threshold (#1354): once per
+/// crossing, under a finger only.
+@MainActor
+struct PullThresholdFeedbackTests {
+    @Test func ticksOncePerCrossingUnderAFinger() {
+        let feedback = PullThresholdFeedback()
+        #expect(!feedback.update(pulled: 60, threshold: 120, isTracking: true))
+        #expect(feedback.update(pulled: 125, threshold: 120, isTracking: true), "crossing did not tick")
+        #expect(!feedback.update(pulled: 160, threshold: 120, isTracking: true), "holding past it ticked again")
+        #expect(!feedback.update(pulled: 100, threshold: 120, isTracking: true))
+        #expect(feedback.update(pulled: 130, threshold: 120, isTracking: true), "a second crossing did not tick")
+    }
+
+    @Test func aDriftWithoutAFingerSaysNothing() {
+        let feedback = PullThresholdFeedback()
+        #expect(!feedback.update(pulled: 140, threshold: 120, isTracking: false), "a bounce-back ticked")
+        #expect(!feedback.isArmed)
+    }
+
+    /// Both indicators wear it.
+    @Test func bothRefreshIndicatorsTick() {
+        let hero = HeroPullToRefreshView()
+        hero.setPull(HeroPullToRefreshView.threshold + 4, isTracking: true)
+        #expect(hero.debugThresholdFeedback.isArmed)
+        hero.setPull(10, isTracking: true)
+        #expect(!hero.debugThresholdFeedback.isArmed)
+
+        let control = AppRefreshControl()
+        #expect(!control.debugThresholdFeedback.isArmed)
+    }
+}

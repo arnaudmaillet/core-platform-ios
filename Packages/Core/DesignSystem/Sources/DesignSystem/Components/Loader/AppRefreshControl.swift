@@ -18,6 +18,8 @@ import UIKit
 public final class AppRefreshControl: UIRefreshControl {
     private let loader = AppLoaderView(size: .medium)
     private var offsetObservation: NSKeyValueObservation?
+    /// The tick as the pull crosses the threshold (#1354).
+    private let thresholdFeedback = PullThresholdFeedback()
 
     public override init() {
         super.init()
@@ -49,6 +51,10 @@ public final class AppRefreshControl: UIRefreshControl {
         guard !isRefreshing else { return }
         let pulled = -(scrollView.contentOffset.y + scrollView.adjustedContentInset.top)
         loader.setProgress(pulled / HeroPullToRefreshView.threshold)
+        if pulled > 0, scrollView.isTracking, !thresholdFeedback.isArmed { thresholdFeedback.prepare() }
+        thresholdFeedback.update(
+            pulled: pulled, threshold: HeroPullToRefreshView.threshold, isTracking: scrollView.isTracking
+        )
     }
 
     public override func beginRefreshing() {
@@ -64,5 +70,6 @@ public final class AppRefreshControl: UIRefreshControl {
     #if DEBUG
     /// The loader this control drives — what a test reads.
     var debugLoader: AppLoaderView { loader }
+    var debugThresholdFeedback: PullThresholdFeedback { thresholdFeedback }
     #endif
 }
