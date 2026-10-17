@@ -528,8 +528,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             self?.viewModel.galleryAuthorTapped(post)
         }
         galleryPager.onViewAllTapped = { [weak self] in self?.pushMediaGallery() }
-        galleryPager.authorMenuActions = { [weak self] context in
-            self?.galleryMenuActions(for: context) ?? []
+        galleryPager.authorMenuActions = { [weak self] context, tab in
+            guard let self else { return [] }
+            var actions = galleryMenuActions(for: context)
+            // History's own row (#1344): out of the history, not the post.
+            if tab == .history {
+                let id = context.post.id
+                actions.insert(.removeFromHistory { [weak self] in self?.viewModel.removeFromHistory(id) }, at: 0)
+            }
+            return actions
         }
         // Swipe ↔ tabs: a settled swipe adopts the tab and mirrors the
         // selectors; a tab tap records it and pages.
@@ -633,6 +640,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // store — so a Saved tab bound at load would be stale the first time
         // the viewer saved something and came back to look at it.
         viewModel.loadSavedPosts()
+        // What the viewer viewed in the feed they just closed (#1344).
+        viewModel.loadHistory()
     }
 
     /// Puts the dock back, idempotently — through UIKit, never an alpha.
@@ -1437,7 +1446,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 isGuest: MemberGates.gate(from: self)?.isMember == false,
                 canRestrict: viewModel.canRestrict,
                 isRestricted: viewModel.isRestricted,
-                isBlocked: viewModel.isBlocked
+                isBlocked: viewModel.isBlocked,
+                canClearHistory: viewModel.isOwnProfile && viewModel.hasHistory
             ),
             handlers: ProfileMenuBuilder.MoreMenuHandlers(
                 share: { [weak self] in self?.presentShareSheet() },
@@ -1446,9 +1456,24 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 report: { [weak self] in self?.presentReportReasons() },
                 toggleRestrict: { [weak self] in self?.viewModel.toggleRestrict() },
                 unblock: { [weak self] in self?.viewModel.unblock() },
-                confirmBlock: { [weak self] in self?.confirmBlock() }
+                confirmBlock: { [weak self] in self?.confirmBlock() },
+                clearHistory: { [weak self] in self?.confirmClearHistory() }
             )
         )
+    }
+
+    /// "Clear History" asks once (#1344): the list cannot be brought back.
+    private func confirmClearHistory() {
+        let alert = UIAlertController(
+            title: "Clear History?",
+            message: "Posts you watched will no longer appear in History.",
+            preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "Clear History", style: .destructive) { [weak self] _ in
+            self?.viewModel.clearHistory()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, animated: true)
     }
 
     /// Opens the unified share surface — the QR sheet — rather than jumping

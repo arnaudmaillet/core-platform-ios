@@ -104,7 +104,8 @@ final class ProfileGalleryPagerView: UIView {
     /// A row's author was tapped, on whichever page is showing.
     var onAuthorTapped: ((GalleryPost) -> Void)?
     /// What a row's "..." offers — see `PostGridPage.postMenuActions`.
-    var authorMenuActions: ((PostGridAuthorMenuContext) -> [PostCardMenuAction])?
+    /// The tab is the page's: History adds its own row (#1344).
+    var authorMenuActions: ((PostGridAuthorMenuContext, ProfileTab) -> [PostCardMenuAction])?
 
     /// The pan that pages; exposed so the owner can subordinate it to the
     /// navigation stack's edge-swipe pop.
@@ -203,7 +204,7 @@ final class ProfileGalleryPagerView: UIView {
             page.onViewAllTapped = { [weak self] in self?.onViewAllTapped?() }
             page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
             page.postMenuActions = { [weak self] context in
-                self?.authorMenuActions?(context) ?? []
+                self?.authorMenuActions?(context, tab) ?? []
             }
             page.onPullReleased = { [weak self] distance in
                 guard let self, page === pages[activeIndex] else { return }
@@ -269,7 +270,9 @@ final class ProfileGalleryPagerView: UIView {
     /// The shape a tab's page takes.
     static func style(for tab: ProfileTab) -> PostGridPageStyle {
         switch tab {
-        case .format(.activity), .reposts, .tagged: .discover
+        // History lays out like For You (the owner, 2026-10-17): cards,
+        // mosaic chunks and tiles.
+        case .format(.activity), .reposts, .tagged, .history: .discover
         case .format(.media): .grid
         case .format(.short), .saved, .reactions: .list
         }

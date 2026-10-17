@@ -63,6 +63,8 @@ final class ProfileGalleryStore {
     /// What ANOTHER profile saved (#837): the server's list, empty unless its
     /// owner shows the tab. Apart from `saved`, the viewer's own pile.
     var othersSaved: PageState = .empty(message: "")
+    /// The viewer's viewing history (#1344), shown on their own profile only.
+    var history: PageState = .empty(message: "")
 
     private struct TileKey: Hashable {
         let format: GalleryFilter.Format
@@ -327,6 +329,8 @@ final class ProfileGalleryStore {
             reactions: reactions,
             reposts: page(.activity, .reposts, emptyMessage: ""),
             tagged: page(.activity, .tagged, emptyMessage: ""),
+            // The viewer's own viewing history (#1344): nowhere else.
+            history: isOwnProfile ? history : .empty(message: ""),
             repostsComplete: isComplete(.reposts),
             taggedComplete: isComplete(.tagged)
         )

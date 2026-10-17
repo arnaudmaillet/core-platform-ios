@@ -4332,7 +4332,32 @@ final class SnapFeedViewController: UIViewController {
         if let index { reconcileRestingInterface(activeIndex: index) }
     }
 
+    // MARK: - Viewing history (#1344)
+
+    /// Where a post viewed long enough is recorded — the profile's History
+    /// tab. Nil records nothing (tests, previews); the app's feeds get
+    /// `PostViewHistoryStore.shared` from the builder.
+    var viewHistory: PostViewHistoryStore?
+
+    /// A post that stays the settled, visible page for
+    /// `PostViewHistoryStore.dwell` counts as viewed (`PostViewDwell`). The
+    /// lifecycle's activation and resignation drive it, so covering the feed,
+    /// leaving the app or closing it resign the page and cancel the record.
+    private lazy var viewDwell = PostViewDwell { [weak self] id in
+        self?.viewHistory?.record(id.rawValue)
+    }
+
+    private func beginViewDwell(on id: PostID) {
+        guard viewHistory != nil else { return }
+        viewDwell.begin(id)
+    }
+
+    private func endViewDwell() {
+        viewDwell.end()
+    }
+
     private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
+        if transition.resign != nil { endViewDwell() }
         if let resign = transition.resign {
             // Paging within the feed: the page stays alive and a swipe away, so
             // it keeps its player and simply stops advancing.
@@ -4416,6 +4441,7 @@ final class SnapFeedViewController: UIViewController {
             if orderedIDs.indices.contains(activate) {
                 let id = orderedIDs[activate]
                 viewModel.pageDidBecomeActive(id)
+                beginViewDwell(on: id)
                 // Text-only pages REST in the comments layout — the format
                 // itself is the trigger, no user gesture. The VISUAL
                 // interface was already pre-rendered on visibility (as the

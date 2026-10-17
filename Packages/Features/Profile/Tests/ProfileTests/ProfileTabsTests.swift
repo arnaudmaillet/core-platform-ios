@@ -25,8 +25,8 @@ struct ProfileTabsTests {
     /// left the bar's source menu for the selector, as on anyone else's
     /// profile; Saved and Liked stay yours alone (#631).
     @Test func yourOwnProfileCarriesThePublicPagesThenSavedAndLiked() {
-        #expect(ProfileTab.ownTabs == [.format(.activity), .reposts, .tagged, .saved, .reactions])
-        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Reposts", "Tagged", "Saved", "Liked"])
+        #expect(ProfileTab.ownTabs == [.format(.activity), .reposts, .tagged, .saved, .history, .reactions])
+        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Reposts", "Tagged", "Saved", "History", "Liked"])
     }
 
     /// ⚠️ And nobody else's does. A saved pile has no owner but the device it
@@ -109,7 +109,7 @@ struct ProfileTabsTests {
     /// count used to be a constant, and a selector with more segments than
     /// the pager has pages indexes past the end on the last tab.
     @Test func thePagerBuildsOnePageForEachTab() {
-        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 5)
+        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 6)
         #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 3)
     }
 
@@ -133,7 +133,8 @@ struct ProfileTabsTests {
         let pager = pager(ProfileTab.ownTabs)
         var settled: [ProfileTab] = []
         pager.onPageSettled = { settled.append($0) }
-        pager.debugScrollView.contentOffset = CGPoint(x: 4 * pager.bounds.width, y: 0)
+        let last = CGFloat(ProfileTab.ownTabs.count - 1)
+        pager.debugScrollView.contentOffset = CGPoint(x: last * pager.bounds.width, y: 0)
         pager.scrollViewDidEndDecelerating(pager.debugScrollView)
         #expect(settled == [.reactions])
     }
@@ -254,5 +255,26 @@ struct ProfileEmptyStateTests {
             ProfileTab.reactions.emptyState.subtitle
                 == "Posts you react to or like will show up here."
         )
+    }
+}
+
+/// History (#1344): laid out like For You, and the viewer's own profile only.
+@MainActor
+struct ProfileHistoryTabTests {
+    @Test func historyIsLaidOutLikeForYou() {
+        #expect(ProfileGalleryPagerView.style(for: .history) == .discover)
+        #expect(ProfileTab.history.title == "History")
+        #expect(!ProfileTab.history.pages)
+    }
+
+    @Test func historyIsTheOwnProfilesOnly() {
+        let store = ProfileGalleryStore()
+        store.history = .content([])
+        if case .content = store.snapshot(isOwnProfile: false).history {
+            Issue.record("someone else's profile showed the viewer's history")
+        }
+        if case .content = store.snapshot(isOwnProfile: true).history {} else {
+            Issue.record("the own profile lost its history")
+        }
     }
 }
