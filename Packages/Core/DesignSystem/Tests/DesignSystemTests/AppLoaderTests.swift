@@ -248,6 +248,32 @@ struct AppLoaderTests {
         #expect(!loader.isAnimating && loader.debugIsExiting)
     }
 
+    /// The plain lists' refresh control (#1329 slice 3): the stock spinner
+    /// tinted away, the loader following the list's pull, turning when the
+    /// control refreshes and closing when it ends.
+    @Test func theRefreshControlDrawsTheLoader() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let list = UIScrollView(frame: window.bounds)
+        list.contentSize = CGSize(width: 390, height: 2000)
+        window.addSubview(list)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let control = AppRefreshControl()
+        list.refreshControl = control
+        let loader = control.debugLoader
+        loader.reducesMotion = { false }
+
+        #expect(control.tintColor == .clear, "the stock spinner still draws")
+        #expect(loader.isHidden)
+        list.contentOffset.y = -list.adjustedContentInset.top - HeroPullToRefreshView.threshold / 2
+        #expect(!loader.isHidden, "the pull did not draw the mark")
+
+        control.beginRefreshing()
+        #expect(loader.isAnimating)
+        control.endRefreshing()
+        #expect(!loader.isAnimating)
+    }
+
     /// Two frames within float noise — the view's model reads back through a
     /// path in points.
     private func isClose(_ a: AppLoaderTimeline.Frame, _ b: AppLoaderTimeline.Frame) -> Bool {

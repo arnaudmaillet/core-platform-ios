@@ -28,7 +28,7 @@ final class NotificationsViewController: UIViewController {
     private let imagePipeline: ImagePipeline?
 
     private lazy var collectionView = UICollectionView(frame: .zero, collectionViewLayout: makeLayout())
-    private let refreshControl = UIRefreshControl()
+    private let refreshControl = AppRefreshControl()
     /// Rows where the rows will be, until the first page lands (charter P8).
     private let skeleton = PersonListSkeletonView(avatarSize: NotificationCell.Metrics.avatarArea, showsTrailingBone: true)
     private let emptyState = EmptyStateView()
