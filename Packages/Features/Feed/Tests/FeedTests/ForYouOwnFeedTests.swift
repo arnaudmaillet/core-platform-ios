@@ -75,16 +75,24 @@ struct ForYouOwnFeedTests {
         #expect(await feed.next(after: PostID("o3")) == nil, "the spent pool did not end the feed")
     }
 
-    /// No discovery (or nothing past the grid): no own list — the caller
-    /// keeps the grid's window, as before.
-    @Test func withNothingPastTheGridThereIsNoOwnList() async {
-        let pool = Pool()
-        pool.pages[""] = Self.page(["g1"], next: nil)
-        let feed = ForYouOwnFeed(repository: pool) { [PostID("g1")] }
-        feed.prepare()
-        await settle { !pool.reads.isEmpty }
-        try? await Task.sleep(for: .milliseconds(20))
+    /// No discovery: no own list — the caller keeps the grid's window.
+    @Test func withoutDiscoveryThereIsNoOwnList() {
+        let feed = ForYouOwnFeed(repository: Pool(), isAvailable: { false }) { [] }
         #expect(feed.begin(with: Self.post("g1")) == nil)
+    }
+
+    /// ⚠️ A TAP BEFORE THE FIRST READ LANDS (filmed 2026-10-17): the feed
+    /// opens on the tapped post alone — never the grid's order — and its
+    /// continuation brings the own posts once read.
+    @Test func aTapBeforeTheFirstReadStillOpensTheOwnList() async throws {
+        let pool = Pool()
+        pool.pages[""] = Self.page(["g1", "o1", "o2"], next: nil)
+        let feed = ForYouOwnFeed(repository: pool) { [PostID("g1")] }
+        let window = try #require(feed.begin(with: Self.post("g1")))
+        #expect(window.map(\.id.rawValue) == ["g1"], "the grid's window came back")
+        let next = await feed.next(after: PostID("g1"))
+        #expect(next?.map(\.rawValue) == ["o1", "o2"])
+        #expect(await feed.next(after: PostID("o2")) == nil)
     }
 
     /// ⚠️ THE NEXT OPENING CARRIES ON (filmed 2026-10-17): it used to start
