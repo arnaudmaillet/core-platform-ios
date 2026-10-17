@@ -1262,7 +1262,23 @@ final class SnapFeedViewController: UIViewController {
         // that landing schedules its own.
         cancelIdleCommentsWarm()
         // Hand the shared bars back on the way out (see `releaseChromeTheme`).
-        releaseChromeTheme()
+        //
+        // ⚠️ BUT NOT THE TOOLBAR'S GLASS UNTIL A GRAB IS DECIDED (#1315). A
+        // grab-to-dismiss is a disappearance that may yet come back, and the
+        // bottom bar stays on screen through it (`concealToolbar` fades it,
+        // and restores it on a cancel): handed back at the grab's first
+        // frame, its platters turned LIGHT over the dark media page for the
+        // whole grab and after the cancel, until the page re-appeared (filmed
+        // by the owner; the top bar rides the card and kept its look). The
+        // navigation bar goes now — it is the destination's header — and the
+        // toolbar's style follows only once the close commits.
+        if let coordinator = transitionCoordinator, coordinator.isInteractive {
+            handBackChromeTheme(interactive: true) { decided in
+                coordinator.animate(alongsideTransition: nil) { decided(!$0.isCancelled) }
+            }
+        } else {
+            handBackChromeTheme(interactive: false) { _ in }
+        }
         // And the pills sharp: nothing scrubs them under a presentation.
         endBarPillScrub()
         // Unlike the visibility bookkeeping below, the toolbar choreography
@@ -4961,11 +4977,28 @@ final class SnapFeedViewController: UIViewController {
     /// them under the keep-and-stack contract. A pushed profile inheriting
     /// a dark-pinned bar because the feed happened to be showing a photo is
     /// exactly the kind of leak that shared chrome invites.
-    private func releaseChromeTheme() {
-        themedToolbarGlassHost?.overrideUserInterfaceStyle = .unspecified
-        themedToolbarGlassHost = nil
+    ///
+    /// `keepingToolbar` hands back everything but the bottom bar and its
+    /// glass — the part still on screen while a grab is undecided (#1315).
+    ///
+    /// The disappearance's hand-back: at once, or — an interactive one —
+    /// all but the toolbar now and the toolbar once `whenDecided` reports a
+    /// committed close (a cancel keeps it). Internal so a test can decide.
+    func handBackChromeTheme(interactive: Bool, whenDecided: (@escaping (Bool) -> Void) -> Void) {
+        guard interactive else { return releaseChromeTheme() }
+        releaseChromeTheme(keepingToolbar: true)
+        whenDecided { [weak self] committed in
+            if committed { self?.releaseChromeTheme() }
+        }
+    }
+
+    private func releaseChromeTheme(keepingToolbar: Bool = false) {
+        if !keepingToolbar {
+            themedToolbarGlassHost?.overrideUserInterfaceStyle = .unspecified
+            themedToolbarGlassHost = nil
+            navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
+        }
         navigationController?.navigationBar.overrideUserInterfaceStyle = .unspecified
-        navigationController?.toolbar.overrideUserInterfaceStyle = .unspecified
         overrideUserInterfaceStyle = .unspecified
         statusBarBlur?.returnStyle(from: self)
         styledBottomEdgeBlur?.returnStyle(from: self)
