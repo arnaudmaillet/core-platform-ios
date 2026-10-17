@@ -36,8 +36,17 @@ final class ForYouOwnFeed {
     private var readAhead: [GalleryPost] = []
     private var readAheadTask: Task<Void, Never>?
 
-    init(repository: any ForYouProviding, excluded: @escaping () -> Set<PostID>) {
+    /// Whether the pool exists at all (discovery wired). Without it there is
+    /// no own list, and the caller keeps the grid's window.
+    private let isAvailable: () -> Bool
+
+    init(
+        repository: any ForYouProviding,
+        isAvailable: @escaping () -> Bool = { true },
+        excluded: @escaping () -> Set<PostID>
+    ) {
         self.repository = repository
+        self.isAvailable = isAvailable
         self.excluded = excluded
     }
 
@@ -55,16 +64,23 @@ final class ForYouOwnFeed {
     /// The feed's first window for `tapped`: the tapped post, then the posts
     /// read ahead. Nil when there are none — no discovery, or nothing beyond
     /// the grid — and the caller keeps the grid's own window.
+    ///
+    /// ⚠️ THE OWN LIST EVEN BEFORE ITS FIRST READ HAS LANDED (the owner,
+    /// 2026-10-17, filmed): a tap made before the read ahead came back fell
+    /// back to the grid's window — the first opening after launch replayed
+    /// the For You order. It now opens on the tapped post alone, and the
+    /// feed's continuation brings the own posts as soon as they are read.
     func begin(with tapped: GalleryPost) -> [GalleryPost]? {
+        guard isAvailable() else { return nil }
         let hidden = excluded().union([tapped.id])
         let ahead = readAhead.filter { !hidden.contains($0.id) }
         readAhead = []
+        served.insert(tapped.id)
         guard !ahead.isEmpty else {
             prepare()
-            return nil
+            return [tapped]
         }
         served.formUnion(ahead.map(\.id))
-        served.insert(tapped.id)
         return [tapped] + ahead
     }
 
@@ -72,7 +88,12 @@ final class ForYouOwnFeed {
     /// the pool is spent. The session's cursor carries on; the next opening
     /// reads ahead a fresh one.
     func next(after _: PostID) async -> [PostID]? {
-        let posts = await read(Self.windowSize, skipping: served)
+        // A read ahead still on its way is the next window: waited for, never
+        // read twice on the same cursor.
+        if let pending = readAheadTask { await pending.value }
+        var posts = readAhead.filter { !served.contains($0.id) && !excluded().contains($0.id) }
+        readAhead = []
+        if posts.isEmpty { posts = await read(Self.windowSize, skipping: served) }
         guard !posts.isEmpty else { return nil }
         served.formUnion(posts.map(\.id))
         return posts.map(\.id)

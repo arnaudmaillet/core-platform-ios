@@ -611,7 +611,10 @@ public final class ForYouViewModel {
     /// The vertical feed's own list for a post opened from the "For you"
     /// section or its gallery (#1343): the discovery pool on a cursor of its
     /// own, past everything the grid holds.
-    private(set) lazy var ownFeed = ForYouOwnFeed(repository: repository) { [weak self] in
+    private(set) lazy var ownFeed = ForYouOwnFeed(
+        repository: repository,
+        isAvailable: { [weak self] in self?.hasDiscovery ?? false }
+    ) { [weak self] in
         Set((self?.discoverPosts ?? []).map(\.id))
     }
 
