@@ -639,11 +639,26 @@ final class CommentRowView: UIView {
         timeReveal.font = label.font
         timeReveal.textColor = label.textColor
         timeReveal.text = time
-        timeRevealLeading?.constant = ceil(Self.textWidth(prefix, in: label))
+        // ⚠️ WHERE THE LINE WILL DRAW IT, to the point: the full line's width
+        // less the time's, not the prefix's own — the kerning between the
+        // prefix's trailing space and the first digit belongs to the full
+        // line, and the ceil'd prefix width stood the time a fraction right
+        // of where the line put it: it jumped left in the swap's frame
+        // (filmed by the owner, 2026-10-17).
+        let scale = window?.screen.scale ?? traitCollection.displayScale
+        let lead = Self.textWidth(full, in: label) - Self.textWidth(time, in: label)
+        timeRevealLeading?.constant = (lead * max(scale, 1)).rounded() / max(scale, 1)
         timeReveal.isHidden = false
         layoutNow()
         timeReveal.layer.removeAllAnimations()
-        timeReveal.transform = CGAffineTransform(scaleX: 0.01, y: 0.01)
+        // ⚠️ GROWN FROM ITS LEADING EDGE, not its centre: scaled about the
+        // centre, the overshoot pushed the time left over the "·" before it
+        // (filmed by the owner, 2026-10-17). The translation keeps the
+        // leading edge put at every scale the spring passes through — both
+        // components move on the same curve.
+        let from: CGFloat = 0.01
+        let half = timeReveal.bounds.width / 2
+        timeReveal.transform = CGAffineTransform(a: from, b: 0, c: 0, d: from, tx: -(1 - from) * half, ty: 0)
         timeReveal.alpha = 0
         isBouncingInTime = true
         UIView.animate(withDuration: Self.timeInDuration, delay: 0, usingSpringWithDamping: 0.55,
@@ -652,9 +667,14 @@ final class CommentRowView: UIView {
             self.timeReveal.alpha = 1
         } completion: { _ in
             self.isBouncingInTime = false
-            label.text = full
-            self.reserveHeaderWidth(nil)
-            self.timeReveal.isHidden = true
+            // One pass: the line takes the time back and the reveal goes in
+            // the same frame, laid out before it draws.
+            UIView.performWithoutAnimation {
+                label.text = full
+                self.reserveHeaderWidth(nil)
+                self.timeReveal.isHidden = true
+                self.layoutNow()
+            }
         }
     }
 
