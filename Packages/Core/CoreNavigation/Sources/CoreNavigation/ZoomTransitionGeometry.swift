@@ -10,7 +10,12 @@ import Foundation
 /// velocity. Tune them here, never per-surface.
 public enum ZoomTransitionGeometry {
     /// Fraction of the view's *width* a drag must cover to complete on release.
-    public static let completionThreshold: CGFloat = 0.35
+    ///
+    /// HALF, the platform's own back swipe (the owner, 2026-10-17, #1316): one
+    /// contract on every screen, decided the way iOS decides — half the way,
+    /// or a fling. It was 0.35, which read as a screen that leaves too easily
+    /// next to the system's.
+    public static let completionThreshold: CGFloat = 0.5
     /// A rightward flick above this speed (pt/s) completes regardless of distance.
     public static let flickVelocity: CGFloat = 900
 

@@ -6,7 +6,7 @@ struct ZoomTransitionGeometryTests {
     @Test func sharedReleaseContractDefaults() {
         // Both dismissals (pin grab, timeline slide) release on these; a tune
         // here is a deliberate, app-wide decision.
-        #expect(ZoomTransitionGeometry.completionThreshold == 0.35)
+        #expect(ZoomTransitionGeometry.completionThreshold == 0.5)
         #expect(ZoomTransitionGeometry.flickVelocity == 900)
     }
 
