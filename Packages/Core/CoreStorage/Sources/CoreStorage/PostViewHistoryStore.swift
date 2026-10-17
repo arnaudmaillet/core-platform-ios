@@ -1,9 +1,9 @@
 import Foundation
 
 /// The posts the viewer viewed (#1344): the profile's History tab, newest
-/// first. A post counts once it has stayed on screen in the vertical feed for
-/// `PostViewHistoryStore.dwell` — the feed records it; a fast swipe-past
-/// never reaches here.
+/// first. Every post opened or swiped onto in the vertical feed counts, the
+/// moment it becomes the page on screen (the owner, 2026-10-17: like
+/// Instagram or TikTok).
 ///
 /// **On the device, for now.** The backend keeps no viewing history yet
 /// (arnaudmaillet/core-platform-backend#944): this pile is the whole truth,
@@ -15,10 +15,6 @@ import Foundation
 public final class PostViewHistoryStore: @unchecked Sendable {
     /// The app's one pile: the feed records into it, the profile reads it.
     public static let shared = PostViewHistoryStore()
-
-    /// How long a post must stay on screen to count as viewed (the owner,
-    /// 2026-10-17): a fast swipe-past is not a view.
-    public static let dwell: TimeInterval = 2
 
     static let baseKey = "profile.viewHistory"
     /// The most recent posts kept.

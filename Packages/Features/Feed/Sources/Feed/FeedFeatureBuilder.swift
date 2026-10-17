@@ -1540,7 +1540,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public func makePostDetailViewController(for postID: PostID, mode: PostDetailMode) -> UIViewController {
-        PostDetailViewController(
+        let detail = PostDetailViewController(
             viewModel: PostDetailViewModel(
                 postID: postID,
                 repository: repository,
@@ -1553,6 +1553,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             mode: mode,
             wallet: wallet
         )
+        // An opened post is a viewed one (#1344).
+        detail.viewHistory = .shared
+        return detail
     }
 }
 
