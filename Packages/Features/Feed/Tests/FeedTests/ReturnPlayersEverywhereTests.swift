@@ -406,7 +406,7 @@ struct ReturnPlayersEverywhereTests {
             viewModel: ForYouViewModel(repository: EmptyForYouProvider()),
             imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
             videoPlayback: Self.makePool(),
-            makeSnapFeed: { _ in UIViewController() },
+            makeSnapFeed: { _, _ in UIViewController() },
             openPostHero: { _, origin, _ in opened = origin },
             prewarm: { _ in }
         )

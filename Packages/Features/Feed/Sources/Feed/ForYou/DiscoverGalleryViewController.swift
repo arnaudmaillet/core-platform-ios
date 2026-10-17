@@ -88,6 +88,10 @@ final class DiscoverGalleryViewController: UIViewController {
 
     /// The ids after `id` in this list's order, for a feed opened from it —
     /// see `GridFeedContinuation`.
+    /// The vertical feed's own list (#1343): For You's, so the gallery and
+    /// the section open alike. Nil keeps the gallery's own window.
+    var ownFeed: ForYouOwnFeed?
+
     func postIDs(after id: PostID) async -> [PostID]? {
         await feedContinuation.postIDs(after: id)
     }
@@ -167,6 +171,8 @@ final class DiscoverGalleryViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Back from a post: its own list's session is over (#1343).
+        ownFeed?.end()
         // Back: the inset tracks the safe area again, offset carried across.
         page.endHeroFreeze()
         #if DEBUG
@@ -215,7 +221,20 @@ final class DiscoverGalleryViewController: UIViewController {
               navigationController.map({ FeedFeatureBuilder.canOpen(from: self, on: $0) }) ?? true
         else { return }
         let tapped = posts[index]
-        let stream = Array(posts[index...].prefix(Self.seedWindow))
+        // ⚠️ ITS OWN LIST (#1343, the owner 2026-10-17): the tapped post, then
+        // the vertical feed's own posts — not this gallery's list from the
+        // tap. Without one (no discovery, nothing beyond the mosaic yet) it
+        // keeps the gallery's window and paging, as before.
+        let ownWindow = ownFeed?.begin(with: tapped)
+        let stream = ownWindow ?? Array(posts[index...].prefix(Self.seedWindow))
+        // On past the window: the own list's next posts, or the mosaic's next
+        // posts then Discover's next page (#638).
+        let continuation: SnapFeedContinuation
+        if ownWindow != nil, let ownFeed {
+            continuation = { [weak ownFeed] after in await ownFeed?.next(after: after) }
+        } else {
+            continuation = { [weak self] after in await self?.postIDs(after: after) }
+        }
         #if DEBUG
         PushedListJumpTrace.mark("gallery open", page: page, host: view)
         #endif
@@ -242,9 +261,7 @@ final class DiscoverGalleryViewController: UIViewController {
                     if !committed { page?.clearRevealConcealment() }
                 }
             ),
-            // On past the window into the mosaic's next posts, then
-            // Discover's next page (#638).
-            continuation: { [weak self] after in await self?.postIDs(after: after) }
+            continuation: continuation
         )
         page.openHoldingStill(from: self) { openPost(self, origin, stream.map(\.id)) }
     }

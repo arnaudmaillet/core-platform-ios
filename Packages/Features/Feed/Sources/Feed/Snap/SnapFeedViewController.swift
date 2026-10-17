@@ -6183,7 +6183,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// caller can build a fresh one rather than push a controller that is
     /// still on screen.
     @discardableResult
-    public func repoint(to ids: [PostID]) -> Bool {
+    public func repoint(to ids: [PostID], continuation: SnapFeedContinuation? = nil) -> Bool {
         guard navigationController == nil, parent == nil else { return false }
         loadViewIfNeeded()
 
@@ -6227,7 +6227,7 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         // under one.
         collectionView.setContentOffset(.zero, animated: false)
 
-        viewModel.repoint(to: ids)
+        viewModel.repoint(to: ids, continuation: continuation)
         return true
     }
 

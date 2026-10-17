@@ -71,7 +71,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     let lead: GridLeadStack
     /// The cards' stakes — see `PostCardStaking`.
     private let staking: PostCardStaking?
-    private let makeSnapFeed: ([PostID]) -> UIViewController
+    /// The feed over a window of posts and, with a continuation, past it.
+    private let makeSnapFeed: ([PostID], SnapFeedContinuation?) -> UIViewController
     /// The builder's shared flight (`presentSnapFeedHero`): the rows' opens,
     /// and the pushed screens' — Discover's whole mosaic and the two lists.
     /// See `DiscoverGalleryViewController` for why they do not borrow
@@ -203,7 +204,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         viewModel: ForYouViewModel,
         imagePipeline: ImagePipeline,
         videoPlayback: VideoPlaybackController? = nil,
-        makeSnapFeed: @escaping ([PostID]) -> UIViewController,
+        makeSnapFeed: @escaping ([PostID], SnapFeedContinuation?) -> UIViewController,
         openPostHero: ((UIViewController, SnapFeedHeroOrigin, [PostID]) -> Void)? = nil,
         prewarm: @escaping ([PostID]) async -> Void,
         prefetchTopComments: ((PostID) async -> Void)? = nil,
@@ -413,6 +414,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             // BEFORE the render it is for: Discover plans its tail on it.
             page.setCorpusComplete(!viewModel.hasMorePages)
             page.render(snapshot.discover)
+            // The vertical feed's own list, read ahead for the next tap (#1343).
+            viewModel.ownFeed.prepare()
             // The stories' pictures are the Friends row's lookahead (#970).
             renderLead(snapshot.rails, loading: snapshot.following == .loading)
             lastSnapshot = snapshot
@@ -694,8 +697,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// driving a whole hero flight — the rules that matter (a push must not
     /// drop it, leaving the tab must) are lifecycle-ordering rules, and those
     /// are exactly what a sim run is worst at pinning.
-    func snapFeed(for ids: [PostID]) -> UIViewController {
-        if let cached = reusableFeed, cached.repoint(to: ids) {
+    func snapFeed(for ids: [PostID], continuation: SnapFeedContinuation? = nil) -> UIViewController {
+        if let cached = reusableFeed, cached.repoint(to: ids, continuation: continuation) {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
                 print("[feed-reuse] REPOINTED to \(ids.prefix(3).map(\.rawValue))")
@@ -703,7 +706,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             #endif
             return cached
         }
-        let feed = makeSnapFeed(ids)
+        let feed = makeSnapFeed(ids, continuation)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-zoom-profile") {
             print("[feed-reuse] BUILT fresh for \(ids.prefix(3).map(\.rawValue))")
@@ -1181,6 +1184,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
             staking: staking,
             openPost: openPostHero
         )
+        // Its posts open onto the vertical feed's own list too (#1343).
+        gallery.ownFeed = viewModel.ownFeed
         gallery.onNearEnd = { [weak self] in self?.viewModel.loadNextPageIfNeeded(.discover) }
         gallery.onWillDisplayPost = { [weak self] id in self?.viewModel.didShow(id) }
         gallery.hasMore = { [weak self] in self?.viewModel.hasMorePages ?? false }
@@ -1208,7 +1213,18 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
               navigationController.transitionCoordinator == nil
         else { return }
         let tapped = posts[index]
-        let ids = posts[index...].prefix(Self.seedWindow).map(\.id)
+        // ⚠️ ITS OWN LIST (#1343, the owner 2026-10-17): the tapped post, then
+        // the vertical feed's own posts — not the grid's list from the tap.
+        // Without discovery (or nothing beyond the grid yet) it keeps the
+        // grid's window, as before.
+        let ownWindow = viewModel.ownFeed.begin(with: tapped)
+        let window = ownWindow ?? Array(posts[index...].prefix(Self.seedWindow))
+        let ids = window.map(\.id)
+        let ownFeed = viewModel.ownFeed
+        var continuation: SnapFeedContinuation?
+        if ownWindow != nil {
+            continuation = { [weak ownFeed] after in await ownFeed?.next(after: after) }
+        }
 
         // Open the handoff scope. Everything else stops — the grid is about to
         // be covered and its slots are what the feed needs — and the tapped
@@ -1219,7 +1235,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         page.beginPlaybackHandoff(of: tapped.id, parkingReturn: true)
         // The rows are covered too, and their one player is not the flight's.
         setLeadActive(false)
-        let feed = snapFeed(for: Array(ids))
+        let feed = snapFeed(for: ids, continuation: continuation)
         // ⚠️ NO `onWillCloseFeed` FOR THE DOCK any more. It put the bar's
         // state back at alpha 0 before the chevron's pop, to be shown at the
         // landing. The feed brings the dock back itself, through UIKit, when
@@ -1229,9 +1245,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // page configures at push time rather than when its own fetch returns.
         // Measured at ~0.69s of empty destination without it.
         if let seedable = feed as? SnapFeedViewController {
-            seedable.seedProjection(GalleryPostProjection.seedModels(
-                from: Array(posts[index...].prefix(Self.seedWindow))
-            ))
+            seedable.seedProjection(GalleryPostProjection.seedModels(from: window))
             // A COLLECTION opens on the page the card was showing.
             //
             // The flight already carries the right photograph — the row's cover
@@ -1850,6 +1864,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // Back from a post: its own list's session is over; the next opening
+        // reads a fresh one (#1343).
+        viewModel.ownFeed.end()
         // A tab root always shows the bar (#769).
         ensureAppTabBarAsTabRoot()
         // BELT (#758): no band here, so nothing for the bar's collapse to make

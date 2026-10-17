@@ -311,7 +311,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // every video at 0:00 on tap.
             videoPlayback: videoPlayback,
             // The same seeded surface a Maps pin opens, from a tile instead.
-            makeSnapFeed: { postIDs in makeSnapFeedViewController(postIDs: postIDs) },
+            makeSnapFeed: { postIDs, continuation in
+                makeSnapFeedViewController(postIDs: postIDs, ownsInteractiveDismissal: true, continuation: continuation)
+            },
             // Discover's pushed mosaic opens its tiles through the shared
             // flight, the one the place page and the search results use —
             // see `DiscoverGalleryViewController`.
