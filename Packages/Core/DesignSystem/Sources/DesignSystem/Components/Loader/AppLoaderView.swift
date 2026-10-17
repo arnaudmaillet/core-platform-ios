@@ -151,6 +151,21 @@ public final class AppLoaderView: UIView {
         enter(from: progress)
     }
 
+    /// Stops at once, with no fade of its own — for a host that has already
+    /// taken the loader off screen (scaled it out, faded it): the loader's own
+    /// fade, still running when the host put its alpha back, drew it again over
+    /// what replaced it (the message time, filmed 2026-10-17).
+    public func stopAnimating(animated: Bool) {
+        guard animated else {
+            guard isAnimating || phase != .idle else { return }
+            isAnimating = false
+            generation += 1
+            finishExit()
+            return
+        }
+        stopAnimating()
+    }
+
     public func stopAnimating() {
         guard isAnimating else { return }
         isAnimating = false

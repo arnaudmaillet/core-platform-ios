@@ -150,6 +150,10 @@ final class ThreadRowCell: UICollectionViewCell {
     /// sooner waits for it (`ConversationThreadViewController`).
     static let arrivalDuration = CommentRowView.Variant.message.effect.appearDuration
 
+    /// How long a delivery takes to play — the loader out, then the time in —
+    /// which a delivered row's swap waits for too.
+    static var deliveryRevealDuration: TimeInterval { CommentRowView.deliveryRevealDuration }
+
     /// The row arrives with its effect (#920): a message rises in from the
     /// composer, a comment bounces in.
     func playArrival() {

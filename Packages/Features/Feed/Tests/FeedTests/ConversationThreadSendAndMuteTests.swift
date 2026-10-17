@@ -445,8 +445,12 @@ struct ConversationThreadSendAndMuteTests {
         screen.view.layoutIfNeeded()
         let delivered = try #require(cell("Message p1", in: screen))
         #expect(delivered.isScalingOutSpinner, "the spinner did not scale out on delivery")
-        #expect(delivered.isBouncingInTime, "the time did not bounce in with the spinner leaving")
-        #expect(await settle { !delivered.isBouncingInTime })
+        // ⚠️ The time waits for the loader to be gone — no crossfade (the
+        // owner, 2026-10-17) — and the carried loader goes on turning rather
+        // than replaying its entry.
+        #expect(!delivered.isBouncingInTime, "the time came in over the leaving loader")
+        #expect(delivered.row.headerTextLabel.text == "You · ", "the time shows while the loader leaves")
+        #expect(await settle { !delivered.isScalingOutSpinner && !delivered.isBouncingInTime })
         let time = try #require(delivered.row.headerTextLabel.text)
         #expect(time.hasPrefix("You · ") && time.count > "You · ".count, "the time did not come back: \(time)")
     }
