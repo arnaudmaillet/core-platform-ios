@@ -17,11 +17,13 @@ import UIKit
 /// and rendered here, pinned to the top of the screen. The list keeps ownership
 /// of the gesture; this view owns only the threshold and the animation.
 ///
-/// **Two states, deliberately, and no third.** Below the threshold the spinner
-/// tracks the finger by fading and turning in proportion to the pull, so the
-/// gesture feels connected. At or past it the spinner is solid. Nothing snaps,
-/// and there is no "release to refresh" text — the arc filling IS the message,
-/// which is the same language the platform's own control speaks.
+/// **Two states, deliberately, and no third.** Below the threshold the branded
+/// loader (`AppLoaderView`, #1329) follows the finger frame for frame — the
+/// pills appear, the square rounds into the disc and opens into the ring,
+/// turning — so the gesture feels connected. At the threshold it is the ring.
+/// Nothing snaps, and there is no "release to refresh" text — the mark taking
+/// shape IS the message. Released past it, the ring turns on from where the
+/// pull left it; done, it closes back into the square and fades.
 ///
 /// ⚠️ **ON THE PLACE PAGE THE STOCK CONTROL WAS WORSE THAN MISPLACED.** Its
 /// lists kept a `UIRefreshControl` under the same floating header, and a real
@@ -36,7 +38,7 @@ public final class HeroPullToRefreshView: UIView {
     /// same effort here as everywhere else in the app.
     public static let threshold: CGFloat = 120
 
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let loader = AppLoaderView(size: .medium)
     private var isRefreshing = false
 
     override public init(frame: CGRect) {
@@ -50,11 +52,9 @@ public final class HeroPullToRefreshView: UIView {
         // driving it was correct. `zPosition` is what the retired
         // `UIRefreshControl` used here for the same reason.
         layer.zPosition = 10
-        spinner.hidesWhenStopped = false
-        spinner.alpha = 0
-        spinner.constrain(in: self) { parent in
-            spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
+        loader.constrain(in: self) { parent in
+            loader.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
+            loader.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
         }
     }
 
@@ -65,11 +65,8 @@ public final class HeroPullToRefreshView: UIView {
     /// top, in points.
     public func setPull(_ distance: CGFloat) {
         guard !isRefreshing else { return }
-        let progress = min(max(distance / Self.threshold, 0), 1)
-        spinner.alpha = progress
-        // Turns with the pull, so the mark reads as being drawn out rather
-        // than waiting to appear.
-        spinner.transform = CGAffineTransform(rotationAngle: progress * .pi)
+        // The mark is drawn out by the pull, rather than waiting to appear.
+        loader.setProgress(min(max(distance / Self.threshold, 0), 1))
     }
 
     /// Whether a release at `distance` should refresh.
@@ -80,9 +77,8 @@ public final class HeroPullToRefreshView: UIView {
     public func beginRefreshing() {
         guard !isRefreshing else { return }
         isRefreshing = true
-        spinner.transform = .identity
-        spinner.startAnimating()
-        UIView.animate(withDuration: 0.15) { self.spinner.alpha = 1 }
+        // From the frame the pull reached: no jump on release.
+        loader.startAnimating()
     }
 
     #if DEBUG
@@ -94,11 +90,12 @@ public final class HeroPullToRefreshView: UIView {
     public func endRefreshing() {
         guard isRefreshing else { return }
         isRefreshing = false
-        UIView.animate(withDuration: 0.2) {
-            self.spinner.alpha = 0
-        } completion: { _ in
-            guard !self.isRefreshing else { return }
-            self.spinner.stopAnimating()
-        }
+        // Ring → disc → square, then a fade.
+        loader.stopAnimating()
     }
+
+    #if DEBUG
+    /// The loader this indicator drives — what a test reads.
+    var debugLoader: AppLoaderView { loader }
+    #endif
 }
