@@ -34,7 +34,7 @@ struct TileNativePreviewTests {
         }
     }
 
-    private func page() -> ForYouGridPage {
+    private func makePage() -> ForYouGridPage {
         let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .grid)
         page.frame = CGRect(x: 0, y: 0, width: 393, height: 3000)
         page.setCorpusComplete(true)
@@ -52,15 +52,15 @@ struct TileNativePreviewTests {
 
     /// The shared grid offers the lift — so every surface built on it does.
     @Test func everyGridTileLiftsItsPost() throws {
-        let page = page()
-        let configuration = try #require(configuration(page, item: 3))
-        #expect(configuration.identifier as? String == "p3")
+        let page = makePage()
+        let lift = try #require(configuration(page, item: 3))
+        #expect(lift.identifier as? String == "p3")
     }
 
     /// Open, View Profile, then the host's author rows: the Following shelf's
     /// menu, from the seams every host already sets.
     @Test func theMenuIsTheShelfsFromTheHostsSeams() {
-        let page = page()
+        let page = makePage()
         page.onAuthorTapped = { _ in }
         page.authorMenuActions = { _ in [PostCardMenuAction.unfollow {}] }
         let menu = page.tileMenu(for: page.posts[2], at: page.indexPath(for: 2))
@@ -74,7 +74,7 @@ struct TileNativePreviewTests {
     /// A host that offers nothing about the author (the viewer's own posts)
     /// leaves Open alone — no Unfollow, no Report.
     @Test func ownPostsOfferOnlyOpen() {
-        let page = page()
+        let page = makePage()
         page.authorMenuActions = { _ in [] }
         let menu = page.tileMenu(for: page.posts[0], at: page.indexPath(for: 0))
         #expect(menu.children.count == 1)
