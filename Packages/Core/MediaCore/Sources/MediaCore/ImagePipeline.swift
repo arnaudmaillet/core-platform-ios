@@ -436,6 +436,13 @@ public final class ImagePipeline: Sendable {
         return CacheUsage(bytes: large.bytes + small.bytes, count: large.count + small.count)
     }
 
+    /// How many callers (and prefetches) wait on `url`'s decode at `size`,
+    /// for tests: a coalescing test releases its held fetch only once every
+    /// caller has joined (#1290).
+    func decodeInterestCount(for url: URL, size: ImageBucket = .full) -> Int {
+        decodes.interestCount(for: ImageKey(url: url, bucket: size))
+    }
+
     /// How many decodes (and prefetches) wait on `url`'s download, for tests.
     func downloadInterestCount(for url: URL) -> Int {
         bytes.interestCount(for: ImageKey(url: url, bucket: .full).media)
