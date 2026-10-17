@@ -65,10 +65,11 @@ struct ImagePipelineTests {
             for _ in 0..<callers {
                 group.addTask { try await pipeline.image(for: url) }
             }
-            // Every caller in the ONE fill before it may answer. A bounded
-            // wait on a count, not a sleep: without coalescing the count
-            // never reaches eight and the test fails here.
-            let joined = await Self.wait(seconds: 60) { pipeline.decodeInterestCount(for: url) >= callers }
+            // Every caller in the ONE fill before it may answer. A look
+            // budget on a count, not a sleep: without coalescing the count
+            // never reaches eight and the test fails here. Released either
+            // way, so a failure never leaves the group waiting.
+            let joined = await Self.look(until: { pipeline.decodeInterestCount(for: url) >= callers })
             fetcher.release()
             #expect(joined, "the callers never joined one fill")
             return try await group.reduce(into: [UIImage]()) { $0.append($1) }
@@ -78,14 +79,18 @@ struct ImagePipelineTests {
         #expect(fetcher.fetchCount == 1)
     }
 
-    /// Yields until `condition` holds or `seconds` pass.
-    private static func wait(seconds: Double, until condition: () -> Bool) async -> Bool {
-        let deadline = Date().addingTimeInterval(seconds)
-        while !condition() {
-            guard Date() < deadline else { return false }
-            try? await Task.sleep(nanoseconds: 1_000_000)
+    /// Looks for `condition` up to `looks` times, 10 ms apart.
+    ///
+    /// ⚠️ A LOOK BUDGET, NOT A DEADLINE: it counts its looks instead of
+    /// reading the clock. On a starved runner the process is suspended while
+    /// the wall clock runs on, and a deadline can pass with almost no looks
+    /// taken — how #967, #1046 and #1059 flaked.
+    private static func look(looks: Int = 6_000, until condition: () -> Bool) async -> Bool {
+        for _ in 0..<looks {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
-        return true
+        return condition()
     }
 
     @Test func secondRequestIsServedFromCache() async throws {
