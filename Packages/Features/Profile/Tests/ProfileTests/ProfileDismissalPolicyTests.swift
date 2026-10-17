@@ -58,3 +58,4 @@ struct ProfileDismissalPolicyTests {
         #expect(!asked, "the edge is absolute — the carousel is not even asked")
     }
 }
+

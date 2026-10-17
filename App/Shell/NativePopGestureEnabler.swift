@@ -31,6 +31,29 @@ final class NativePopGestureEnabler: NSObject {
         // whose view hasn't displayed yet.
         navigationController.loadViewIfNeeded()
         navigationController.interactivePopGestureRecognizer?.delegate = self
+        // ⚠️ AND THE FULL-SURFACE ONE, THROUGH A PROXY (#1324): UIKit's own
+        // delegate vetoes it whenever the stack has a delegate, which left
+        // plain pushes (a profile) carrying a custom slide that raced it. The
+        // proxy relays everything but that veto and adds the same policy as
+        // the edge's, plus the screen's own gate (`ContentPopGating`).
+        if #available(iOS 26.0, *), let content = navigationController.interactiveContentPopGestureRecognizer {
+            let proxy = ContentPopDelegateProxy(system: content.delegate) { [weak self] recognizer in
+                self?.contentPopShouldBegin(recognizer) ?? false
+            }
+            content.delegate = proxy
+            contentPopProxy = proxy
+        }
+    }
+
+    /// Held here: a recognizer's delegate is weak.
+    private var contentPopProxy: ContentPopDelegateProxy?
+
+    /// The edge's policy, then the screen's gate at the touch's origin.
+    private func contentPopShouldBegin(_ recognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizerShouldBegin(recognizer),
+              let top = navigationController?.topViewController else { return false }
+        guard let gate = top as? any ContentPopGating else { return true }
+        return gate.allowsContentPop(beginningAt: recognizer.location(in: top.view), in: top.view)
     }
 }
 

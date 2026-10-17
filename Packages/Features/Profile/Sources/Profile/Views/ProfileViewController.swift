@@ -149,11 +149,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// Launch-argument hooks are one-shot; see `viewDidAppear`.
     private var hasArmedDebugHooks = false
     #endif
-    /// Full-width swipe-to-dismiss, live only on the first tab — see
-    /// `ProfileDismissalPolicy`. Held for the screen's lifetime; the gate is
-    /// what changes, not the wiring.
-    private let slideDismissal = InteractiveSlideDismissal()
-    private var didInstallSlideDismissal = false
     #if DEBUG
     /// Latches the `-profile-map-pin-demo` tap to a single firing.
     private var didTapMapPinForQA = false
@@ -704,8 +699,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         if !didSubordinatePagerToPop, let pop = navigationController?.interactivePopGestureRecognizer {
             didSubordinatePagerToPop = true
             galleryPager.horizontalPan.require(toFail: pop)
+            // ⚠️ AND THE FULL-SURFACE ONE (#1324): it is this screen's back
+            // swipe now, in place of the slide the pager used to wait for. Left
+            // simultaneous, a drag on the first tab paged the gallery instead of
+            // popping (traced: the swipe began, the pager took the drag). The
+            // swipe declines on the later tabs (`allowsContentPop`), and the
+            // pager pages there.
+            if #available(iOS 26.0, *), let content = navigationController?.interactiveContentPopGestureRecognizer {
+                galleryPager.horizontalPan.require(toFail: content)
+            }
         }
-        installSlideDismissalIfNeeded()
         #if DEBUG
         // ARMED ONCE. `viewDidAppear` runs again when a pushed post is dismissed,
         // and re-running these drove a second scroll on top of the background
@@ -966,24 +969,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                     print("[dock] PROBE plainItemHosted=\(swatch.window != nil) "
                         + "frame=\(swatch.frame) leftCount=\(self.navigationItem.leftBarButtonItems?.count ?? -1)")
-                }
-            }
-        }
-        // `-profile-swipe-demo <peak>` drives the full-width dismissal the way
-        // a finger would. The simulator injects no touches, and the gate this
-        // exercises — whole surface on the first tab, edge only after it — is
-        // otherwise only observable with a thumb.
-        if let position = arguments.firstIndex(of: "-profile-swipe-demo"),
-           position + 1 < arguments.count, let peak = Double(arguments[position + 1]) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-                guard let self else { return }
-                let allowed = ProfileDismissalPolicy.allowsFullWidthDismissal(
-                    activeIndex: galleryPager.activePageIndex,
-                    isPushed: navigationController?.viewControllers.first !== self
-                )
-                print("[profile-swipe] tab=\(galleryPager.activePageIndex) fullWidthAllowed=\(allowed)")
-                Task { @MainActor [slideDismissal] in
-                    await slideDismissal.debugPerformSwipe(peakProgress: CGFloat(peak))
                 }
             }
         }
@@ -2273,71 +2258,6 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// Ordering the pager behind it is safe on every tab precisely because
     /// the gate decides. Past the first tab the dismissal pan never begins,
     /// fails immediately, and the pager pages exactly as it always did.
-    private func installSlideDismissalIfNeeded() {
-        guard let nav = navigationController, nav.viewControllers.first !== self else { return }
-        // RE-ASSERTED on every appearance, not installed once.
-        //
-        // A child pushed above this screen may take the stack's delegate for
-        // its own transition and hand back something else — nil, historically
-        // — which leaves this object installed in its own view but no longer
-        // consulted. The pan still begins and still pops; UIKit just never
-        // asks for the interaction controller, so the page jumps instead of
-        // following the finger, and nothing ever repairs it.
-        //
-        // Re-installing costs nothing when it is already the delegate
-        // (`install` returns early) and is the difference between a screen
-        // that recovers by itself and one that stays broken for its lifetime.
-        if !didInstallSlideDismissal {
-            didInstallSlideDismissal = true
-            slideDismissal.canBeginDismissal = { [weak self] in
-                guard let self, let nav = navigationController else { return false }
-                return ProfileDismissalPolicy.allowsFullWidthDismissal(
-                    activeIndex: galleryPager.activePageIndex,
-                    isPushed: nav.viewControllers.first !== self
-                )
-            }
-            // ⚠️ AND THE CAROUSEL UNDER THE DRAG (#691). This screen is not a
-            // `ZoomTransitionDestination`, so the slide never asked it — and on
-            // photograph 2/3 one rightward drag both paged the carousel back
-            // and dragged the profile off. Asked at the drag's origin.
-            slideDismissal.permitsDrag = { origin, axis, view in
-                guard axis == .horizontal else { return true }
-                return ProfileDismissalPolicy.dragMayDismiss(originX: origin.x) {
-                    MediaCarouselTouchRouting.dragPassesThroughCarousel(
-                        at: origin, in: view, towardsPageDelta: -1
-                    )
-                }
-            }
-            slideDismissal.attach(to: self)
-            if let pan = slideDismissal.dismissalPan {
-                galleryPager.horizontalPan.require(toFail: pan)
-            }
-        }
-        // ⚠️ NEVER while a transition is still settling. `viewDidAppear` for a
-        // popped-back-to profile runs INSIDE `completeTransition`, before the
-        // stack delegate's `didShow` — and the delegate at that instant is the
-        // returning flight's `ZoomTransitionController`. Installing over it
-        // routed `didShow` to this slide, which forwards only to its
-        // captured-once saved delegate, so the flight never heard its own
-        // completion: its dormant interruptor, its retainer and its grab
-        // drivers leaked once per profile-opened post, and `onSourceReturned`
-        // (the tab-bar and delegate hand-back) never ran. Measured by the
-        // hero census as `interruptors=1` forever after a tap-back.
-        //
-        // Deferred to after the transition — completion block, plus one
-        // runloop hop so `didShow` (which UIKit sends after completion) has
-        // landed. The recovery this re-assert exists for (a child that handed
-        // the slot back to nobody) still happens, one beat later; and when
-        // the flight restored this very slide via its own hand-back, the
-        // deferred install finds itself already the delegate and returns.
-        if let coordinator = transitionCoordinator {
-            coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-                DispatchQueue.main.async { self?.installSlideDismissalIfNeeded() }
-            }
-            return
-        }
-        slideDismissal.install(on: nav)
-    }
 
     /// Records the choice.
     ///
@@ -2932,16 +2852,7 @@ extension ProfileViewController {
 #endif
 
 #if DEBUG
-extension ProfileViewController: DebugInteractivelyDismissible {
-    /// Grabs this screen the way a finger would, through the same recogniser
-    /// path — including its own tab gate, so a refusal here is a real refusal.
-    func debugDismissInteractively() async -> Bool {
-        guard slideDismissal.canBeginDismissal?() != false else { return false }
-        // The RETURN VALUE matters: it reports whether the pop was driven by
-        // the gesture, not merely that it happened.
-        return await slideDismissal.debugPerformSwipe(peakProgress: 0.7)
-    }
-}
+
 #endif
 
 extension ProfileViewController {
@@ -3068,5 +2979,26 @@ extension ProfileViewController: TabReselectScrolling {
     /// bar's identity pill does — not merely the active tab's first row.
     func scrollToTopForTabReselect() {
         galleryPager.scrollActivePageToProfileTop()
+    }
+}
+
+// MARK: - The native back swipe (#1324)
+
+/// ⚠️ A PROFILE IS A PLAIN PUSH, SO IT POPS WITH THE SYSTEM'S SWIPE. It used to
+/// carry a custom slide only because UIKit vetoed its own full-surface swipe
+/// under a stack delegate; the shell now lifts that veto (`ContentPopDelegateProxy`),
+/// and this screen keeps only its own limits on where the swipe may begin:
+/// the whole surface on the first tab, never a drag a carousel takes.
+extension ProfileViewController: ContentPopGating {
+    func allowsContentPop(beginningAt point: CGPoint, in view: UIView) -> Bool {
+        guard let nav = navigationController,
+              ProfileDismissalPolicy.allowsFullWidthDismissal(
+                  activeIndex: galleryPager.activePageIndex,
+                  isPushed: nav.viewControllers.first !== self
+              )
+        else { return false }
+        return ProfileDismissalPolicy.dragMayDismiss(originX: point.x) {
+            MediaCarouselTouchRouting.dragPassesThroughCarousel(at: point, in: view, towardsPageDelta: -1)
+        }
     }
 }

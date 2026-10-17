@@ -81,6 +81,29 @@ struct ProfileBellAndMapMenuTests {
 
     /// On screen `[coins][bell]`: the bell keeps the corner, a fixed space
     /// keeps the two bubbles apart.
+    /// ⚠️ A PUSHED PROFILE POPS WITH THE SYSTEM'S SWIPE (#1324): it carries
+    /// no slide of its own and installs no stack delegate; it only says where
+    /// the swipe may begin — anywhere on its first tab (the others page, by
+    /// the shared policy), and never at a root.
+    @Test func aPushedProfileGatesTheSystemSwipe() {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        let nav = UINavigationController(rootViewController: UIViewController())
+        nav.pushViewController(screen, animated: false)
+        screen.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        screen.view.layoutIfNeeded()
+        let header = CGPoint(x: 200, y: 120)
+        #expect(screen.allowsContentPop(beginningAt: header, in: screen.view))
+        #expect(nav.delegate == nil, "the profile installed a stack delegate")
+        // The later tabs' refusal is the policy's (`ProfileDismissalPolicyTests`):
+        // this screen asks it with its pager's live index.
+    }
+
+    @Test func aProfileAtTheRootNeverAsksForTheSwipe() {
+        let (screen, _, _) = makeScreen(relationship: .me, own: true)
+        _ = UINavigationController(rootViewController: screen)
+        #expect(!screen.allowsContentPop(beginningAt: CGPoint(x: 200, y: 120), in: screen.view))
+    }
+
     /// The own profile, the Profile tab's root, answers the shell's re-tap
     /// (#1309) and comes back to the profile's top.
     @Test func theOwnProfileAnswersATabReTap() {
