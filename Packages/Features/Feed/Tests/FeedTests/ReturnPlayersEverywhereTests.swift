@@ -26,6 +26,14 @@ struct ReturnPlayersEverywhereTests {
         func fetchImageData(for url: URL) async throws -> Data { Data() }
     }
 
+    /// A real picture for every URL: a collection's pages hold their own
+    /// pictures, and a row autoplays only once its current page has one.
+    private struct PictureFetcher: ImageFetching {
+        func fetchImageData(for url: URL) async throws -> Data {
+            await MainActor.run { ReturnPlayersEverywhereTests.picture().pngData() ?? Data() }
+        }
+    }
+
     private struct FixedVideoSource: VideoSource {
         let url: URL
         func playableURL(for url: URL) async throws -> URL { self.url }
@@ -78,16 +86,17 @@ struct ReturnPlayersEverywhereTests {
     /// A page in a window whose first tile is PLAYING, as the one a finger
     /// taps is.
     private func playingPage(
-        _ style: ForYouGridPage.Style, pool: VideoPlaybackController, prefix: String = "v"
+        _ style: ForYouGridPage.Style, pool: VideoPlaybackController, prefix: String = "v",
+        posts: [GalleryPost]? = nil, fetcher: any ImageFetching = SilentFetcher()
     ) async throws -> (page: ForYouGridPage, tapped: PostID, window: UIWindow) {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
         let page = ForYouGridPage(
-            imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: style, videoPlayback: pool
+            imagePipeline: ImagePipeline(fetcher: fetcher), style: style, videoPlayback: pool
         )
         page.frame = window.bounds
         window.addSubview(page)
         window.isHidden = false
-        page.render(.content(Self.videos(prefix: prefix)))
+        page.render(.content(posts ?? Self.videos(prefix: prefix)))
         page.layoutIfNeeded()
         for post in page.posts {
             (page.debugCell(for: post.id) as? any GridPlaybackCell)?.applyCover(Self.picture())
@@ -138,6 +147,42 @@ struct ReturnPlayersEverywhereTests {
         page.endPlaybackHandoff()
         #expect(pool.hasPlayer(in: tile), "the scope's end took the landed clip away")
         #expect(!page.isReturnLandingReady(for: tapped), "the hold settled on the still")
+    }
+
+    /// ⚠️ A ROW THAT PAGED ON COMES HOME ON ITS STILL (#1332). The tap parks
+    /// the clip of the page that played; the row then follows the post's
+    /// carousel to a still page and keeps it while the viewer swipes on. A
+    /// close from another post used to fade that parked clip in over the
+    /// page's picture and hand it to the row.
+    @Test func aCarouselRowThatPagedOffItsClipComesHomeOnItsStill() async throws {
+        let pool = Self.makePool()
+        let carousels = (0..<8).map { index in
+            GalleryPost(
+                id: PostID("c\(index)"), kind: .video, isRepost: false,
+                pages: [
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "https://example.test/c\(index)-0.jpg"),
+                        videoURL: URL(string: "mock://video/c\(index)"), aspectRatio: 0.75
+                    ),
+                    GalleryPost.MediaPage(
+                        thumbnailURL: URL(string: "https://example.test/c\(index)-1.jpg"), aspectRatio: 0.75
+                    ),
+                ],
+                caption: "carousel \(index)", publishedAtMS: 0
+            )
+        }
+        let (page, tapped, window) = try await playingPage(.list, pool: pool, posts: carousels, fetcher: PictureFetcher())
+        defer { window.isHidden = true }
+
+        page.beginPlaybackHandoff(of: tapped, parkingReturn: true)
+        await Self.settle { pool.returnPlaybackCount == 1 }
+        #expect(pool.returnPlaybackCount == 1, "the tap parked nothing")
+
+        page.setMediaPage(1, for: tapped)
+        #expect(page.returnFlightSurface(for: tapped) == nil, "the close brought page 1's clip home to page 2")
+
+        page.setMediaPage(0, for: tapped)
+        #expect(page.returnFlightSurface(for: tapped) != nil, "back on its clip, the row lost its return")
     }
 
     // MARK: - The card window (#1294)

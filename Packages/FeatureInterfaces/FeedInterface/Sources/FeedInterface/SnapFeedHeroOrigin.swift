@@ -280,6 +280,12 @@ public struct SnapFeedHeroOrigin {
     /// The pixels the origin is showing right now, so the card starts as its
     /// twin rather than as an approximation of it.
     public let cover: UIImage?
+    /// The pixels the origin is showing NOW, re-asked when a close stages
+    /// (#1332): a row that followed its carousel to page N while the viewer
+    /// was on the post, then kept that page when the viewer swiped on to
+    /// another post, wears page N — not the page `cover` captured at the tap.
+    /// `nil`: the origin's picture does not change while the post is open.
+    public let currentCover: (() -> UIImage?)?
     public let style: SnapFeedHeroStyle
     /// Where the origin is, in the given space — RE-ASKED at dismissal, since
     /// the surface may have scrolled. `nil` means off screen, and the flight
@@ -466,6 +472,7 @@ public struct SnapFeedHeroOrigin {
         willStageDismissal: @escaping () -> Void = {},
         mediaPage: Int? = nil,
         followMediaPage: ((PostID, Int) -> Void)? = nil,
+        currentCover: (() -> UIImage?)? = nil,
         continuation: SnapFeedContinuation? = nil
     ) {
         self.post = post
@@ -495,6 +502,7 @@ public struct SnapFeedHeroOrigin {
         self.willStageDismissal = willStageDismissal
         self.mediaPage = mediaPage
         self.followMediaPage = followMediaPage
+        self.currentCover = currentCover
         self.continuation = continuation
     }
 }

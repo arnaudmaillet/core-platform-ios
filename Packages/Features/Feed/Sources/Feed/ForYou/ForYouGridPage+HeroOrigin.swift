@@ -89,6 +89,9 @@ extension ForYouGridPage {
             // post's carousel back, so the close lands on the page left open.
             mediaPage: index.flatMap { currentMediaPage(atIndex: $0) },
             followMediaPage: { [weak self] id, mediaPage in self?.setMediaPage(mediaPage, for: id) },
+            // A row draws the page it is on (`renderedCover`), and that page
+            // outlives the viewer swiping on to another post (#1332).
+            currentCover: { [weak self] in self?.heroAppearance(for: id)?.cover },
             continuation: continuation
         )
     }

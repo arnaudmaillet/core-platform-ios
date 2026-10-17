@@ -1574,8 +1574,20 @@ final class ForYouGridPage: UIView {
     /// The tile's own clip, resumed from where it was parked at the tap — the
     /// arriving picture of a close from another post (#923). Nil when nothing
     /// is parked, and the close lands on the tile's still.
+    ///
+    /// ⚠️ A ROW THAT PAGED ON IS NOT SHOWING THAT CLIP (#1332). The row
+    /// follows the post's carousel, and keeps that page when the viewer
+    /// swipes on to another post; the clip was parked on the page that played
+    /// at the tap. Filmed: page 1 a clip, closed from another post with the
+    /// row on page 2 — the card faded page 1's clip in over page 2's picture,
+    /// and the landing handed it to the row. Such a close lands on the row's
+    /// still, the page it shows (`SnapFeedHeroOrigin.currentCover`).
     func returnFlightSurface(for postID: PostID) -> VideoRenderView? {
-        playback?.makeReturnSurface(for: postID)
+        if let row = cell(for: postID) as? PostGridListRowCell, row.currentMediaPage != nil,
+           row.currentPageVideoURL != playback?.returnURL(for: postID) {
+            return nil
+        }
+        return playback?.makeReturnSurface(for: postID)
     }
 
     /// A close that resumed the return player was abandoned.

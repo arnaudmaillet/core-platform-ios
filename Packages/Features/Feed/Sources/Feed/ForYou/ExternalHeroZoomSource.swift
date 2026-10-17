@@ -189,7 +189,12 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let card = PostGridFlightCard(
             post: origin.post,
-            cover: isStagingDismissal ? (landingCover ?? origin.cover) : origin.cover,
+            // A close lands on what the origin draws NOW (#1332): a row kept
+            // the carousel page the post left it on, whichever post the
+            // viewer closes from.
+            cover: isStagingDismissal
+                ? (landingCover ?? origin.currentCover?() ?? origin.cover)
+                : origin.cover,
             style: origin.style == .tile ? .tile : .listMedia,
             cornerRadius: origin.cornerRadius,
             cornerCurve: origin.cornerCurve,
