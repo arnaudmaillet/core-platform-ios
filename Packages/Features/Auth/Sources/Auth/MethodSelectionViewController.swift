@@ -97,7 +97,7 @@ final class MethodSelectionViewController: BottomAnchoredTableViewController {
             cell.accessoryView = nil
             return
         }
-        let spinner = UIActivityIndicatorView(style: .medium)
+        let spinner = AppLoaderView(size: .medium)
         spinner.startAnimating()
         cell.accessoryView = spinner
     }

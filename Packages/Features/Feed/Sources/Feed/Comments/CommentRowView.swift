@@ -458,7 +458,7 @@ final class CommentRowView: UIView {
     /// a freshly dequeued row has no frame of its own yet. Nil lays out the row.
     weak var layoutHost: UIView?
 
-    private let sendingSpinner = UIActivityIndicatorView(style: .medium)
+    private let sendingSpinner = AppLoaderView(size: .medium)
     private let failedMark = UIImageView(image: UIImage(systemName: "exclamationmark.circle.fill"))
 
     /// The spinner is drawn at the time's size, not a control's (#725).
@@ -530,7 +530,7 @@ final class CommentRowView: UIView {
     /// Whether the time is on its way in. Internal for tests.
     private(set) var isBouncingInTime = false
 
-    var sendingSpinnerView: UIActivityIndicatorView { sendingSpinner }
+    var sendingSpinnerView: AppLoaderView { sendingSpinner }
 
     /// Delivered: the spinner — carried over from the pending row this one
     /// replaces — scales out, and the time it stood in for bounces in in its

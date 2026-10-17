@@ -453,7 +453,7 @@ final class AppealComposerViewController: UIViewController, UITextViewDelegate {
         guard Self.canSend(textView.text), !isSending else { return }
         isSending = true
         textView.isEditable = false
-        let spinner = UIActivityIndicatorView(style: .medium)
+        let spinner = AppLoaderView(size: .medium)
         spinner.startAnimating()
         navigationItem.rightBarButtonItem = UIBarButtonItem(customView: spinner)
         let statement = textView.text ?? ""

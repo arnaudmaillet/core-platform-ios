@@ -36,7 +36,7 @@ final class SearchPeoplePage: UIViewController {
     private let imagePipeline: ImagePipeline
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Int, ProfileID>!
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
     /// The first query's wait, before there is a list to re-query over
     /// (charter P8): rows where the rows will be. A LATER query keeps its
     /// results on screen and the small spinner over them.
@@ -302,11 +302,10 @@ extension SearchPeoplePage: UICollectionViewDelegate {
 /// The Users tab's footer while a next page is on its way: a spinner where
 /// the next rows will be (#612).
 final class SearchPagingFooterView: UICollectionReusableView {
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        spinner.color = .tertiaryLabel
         spinner.startAnimating()
         spinner.translatesAutoresizingMaskIntoConstraints = false
         addSubview(spinner)

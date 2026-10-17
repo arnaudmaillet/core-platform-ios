@@ -50,7 +50,7 @@ final class SupervisionInviteViewController: UIViewController {
     private let qrView = UIImageView()
     private let codeLabel = UILabel()
     private let expiryLabel = UILabel()
-    private let spinner = UIActivityIndicatorView(style: .large)
+    private let spinner = AppLoaderView(size: .large)
     let failureView = EmptyStateView()
     private var shareButton: UIButton!
     private var copyButton: UIButton!

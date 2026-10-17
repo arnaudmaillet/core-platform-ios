@@ -1,4 +1,5 @@
 import CoreModels
+import DesignSystem
 import Testing
 import UIKit
 @testable import Auth
@@ -153,7 +154,7 @@ struct AuthBusyStateTests {
     }
 
     private func resendRowIsWorking(_ code: VerificationCodeViewController) -> Bool {
-        code.trailingRows.first?.accessoryView is UIActivityIndicatorView
+        code.trailingRows.first?.accessoryView is AppLoaderView
     }
 
     @Test func aSecondResendWhileOneIsOutSendsNothingMore() async throws {

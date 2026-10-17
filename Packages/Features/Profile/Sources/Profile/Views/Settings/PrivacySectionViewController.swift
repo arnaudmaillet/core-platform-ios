@@ -195,7 +195,7 @@ final class PrivacySectionViewController: UIViewController {
         case .loading:
             content.text = "Private Account"
             content.secondaryText = nil
-            let spinner = UIActivityIndicatorView(style: .medium)
+            let spinner = AppLoaderView(size: .medium)
             spinner.startAnimating()
             cell.accessories = [.customView(configuration: .init(customView: spinner, placement: .trailing()))]
         case .failed:

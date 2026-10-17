@@ -82,7 +82,7 @@ final class MediaSoundtrackToolsView: UIView {
     }()
 
     private let title = UILabel()
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
     private let message = UILabel()
     private let excerpt = MediaWaveformExcerptView()
     private let musicLevel = UISlider()

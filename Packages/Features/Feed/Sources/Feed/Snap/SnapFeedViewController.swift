@@ -4064,9 +4064,8 @@ final class SnapFeedViewController: UIViewController {
     /// The spinner shown under the last reachable page, exactly as the timeline
     /// shows one at the end of a loaded batch — because to the viewer it is the
     /// same situation: there IS more, and it is not here yet.
-    private lazy var pagingFooter: UIActivityIndicatorView = {
-        let spinner = UIActivityIndicatorView(style: .medium)
-        spinner.color = .white
+    private lazy var pagingFooter: AppLoaderView = {
+        let spinner = AppLoaderView(size: .medium)
         spinner.hidesWhenStopped = true
         spinner.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(spinner)
