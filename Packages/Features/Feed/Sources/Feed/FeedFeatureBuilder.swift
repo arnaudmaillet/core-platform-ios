@@ -427,7 +427,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             origin: origin,
             settle: { [weak destination] in
                 let feed = destination as? any SnapFeedSettleReporting
-                return (id: feed?.settledPostID, cover: feed?.settledCoverImage)
+                return (id: feed?.settledPostID, cover: feed?.settledCoverImage, page: feed?.settledMediaPage)
             }
         )
         // ⚠️ THE SESSION OWNS THE FLIGHT'S LIFE (`HeroPushSession`): this

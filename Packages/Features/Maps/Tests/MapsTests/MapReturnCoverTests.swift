@@ -27,6 +27,20 @@ struct MapReturnCoverTests {
         #expect(cover == .none)
     }
 
+    /// ⚠️ THE SAME CAROUSEL LEFT ON A LATER PAGE STILL BLENDS (#1326): the
+    /// marker's picture is the collection's head, and flying it swapped the
+    /// page on screen for page 1 at the grab (filmed by the owner).
+    @Test("the same carousel left on page 2 leaves on that page")
+    func sameCarouselOnALaterPageBlendsFromThatPage() {
+        let cover = MapReturnCover.resolve(
+            departure: post(1), arrival: post(1), mediaPage: 1, picture: { _ in self.blue }
+        )
+        #expect(cover == .picture(blue))
+        #expect(MapReturnCover.resolve(
+            departure: post(1), arrival: post(1), mediaPage: 0, picture: { _ in self.blue }
+        ) == .none, "page 1 is the marker's own picture")
+    }
+
     @Test("two different media posts blend their two pictures")
     func differentMediaPostsCrossFade() {
         let cover = MapReturnCover.resolve(
@@ -77,5 +91,22 @@ private extension UIImage {
             color.setFill()
             context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
         }
+    }
+
+}
+
+@MainActor
+struct PinCardDepartureLayoutTests {
+    /// ⚠️ THE DEPARTURE COVER IS POSED BY ITS CENTRE (#1326): a transition
+    /// card zeroes its children's anchors, and under a zero anchor the
+    /// departure page was drawn from the card's middle into its corner.
+    @Test func aTransitionCardsDepartureCoversTheCard() {
+        let card = PinCardView()
+        card.markAsTransitionCard()
+        card.frame = CGRect(x: 0, y: 0, width: 402, height: 500)
+        card.setDeparturePicture(UIImage.solid(.blue))
+        card.layoutIfNeeded()
+        let departure = card.debugDepartureCover.frame
+        #expect(abs(departure.minX) < 0.5 && abs(departure.minY) < 0.5, "departure drawn off-centre: \(departure)")
     }
 }

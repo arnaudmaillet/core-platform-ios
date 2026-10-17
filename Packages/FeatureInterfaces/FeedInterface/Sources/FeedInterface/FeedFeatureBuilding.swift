@@ -599,4 +599,24 @@ public protocol SnapFeedSettleReporting: AnyObject {
     /// rendered cover to give). Nil for a text page, which has no picture — and
     /// for a text page alone: a video answers with its current frame.
     var settledCoverImage: UIImage? { get }
+    /// The page of a collection the settled post is showing, 0-based; nil for
+    /// a single picture (#1326). A close from page N of the post a source
+    /// opened from must still LEAVE on page N: the source's own cover is the
+    /// collection's head.
+    var settledMediaPage: Int? { get }
+}
+
+public extension SnapFeedSettleReporting {
+    var settledMediaPage: Int? { nil }
+}
+
+/// Whether a close must dissolve FROM the page on screen into the source's
+/// own cover (#1326): it lands on another post, or on the same collection
+/// left on a page past its head — the cover is the head, so flying it would
+/// swap the picture the viewer is looking at for page 1 at the grab.
+public enum SettledDeparture {
+    public static func blends(departure: PostID?, arrival: PostID?, mediaPage: Int?) -> Bool {
+        guard let departure else { return false }
+        return departure != arrival || (mediaPage ?? 0) > 0
+    }
 }

@@ -1,6 +1,7 @@
 import CoreModels
 import CoreNavigation
 import EmoteKit
+import FeedInterface
 import MediaPlayback
 import PostGrid
 import UIKit
@@ -188,9 +189,19 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
 
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let appearance = page?.heroAppearance(for: anchorID)
+        // ⚠️ A ROW FOLLOWS ITS CAROUSEL'S PAGE, BUT ITS PICTURE MAY NOT BE IN
+        // (#1326). Staging moves the row to the page on screen; a page the row
+        // never showed has no picture yet, and a nil cover made the card load
+        // the post's HEAD — the carousel's first page, at the grab's first
+        // frame (filmed on a profile's row). The page's own still stands in.
+        let leavesOnLaterPage = isStagingDismissal && activePostID() == anchorID
+            && (activeMediaPage?() ?? 0) > 0
+        let rowCover = leavesOnLaterPage && appearance?.style == .listMedia
+            ? appearance?.cover ?? settledCover?()
+            : appearance?.cover
         let card = PostGridFlightCard(
             post: page?.post(for: anchorID) ?? Self.placeholder(id: anchorID),
-            cover: appearance?.cover,
+            cover: rowCover,
             style: appearance?.style ?? .tile,
             // A brick's heart is red once the viewer has staked — the card
             // wears what the brick wears.
@@ -216,7 +227,13 @@ final class ForYouGridZoomSource: ZoomTransitionSource {
         //
         // The anchor is the tapped tile (#1283): a close from any other post
         // is exactly the case that needs this.
-        if isStagingDismissal, let settled = activePostID(), settled != anchorID {
+        if leavesOnLaterPage, appearance?.style == .tile {
+            // ⚠️ THE SAME COLLECTION, LEFT ON A LATER PAGE (#1326): a TILE shows
+            // the head, so its card would show page 1 from the grab's first
+            // frame. It leaves on the page on screen and dissolves into the
+            // tile's own picture — the same post, so nothing says "another".
+            card.setDeparturePicture(settledCover?())
+        } else if isStagingDismissal, let settled = activePostID(), settled != anchorID {
             landsOnAnotherPost = true
             card.setDeparturePicture(settledCover?())
             // ⚠️ A VIDEO PAGE HAS NO STILL, so `settledCover` is nil there and

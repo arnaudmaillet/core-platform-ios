@@ -2242,6 +2242,7 @@ final class MapsViewController: UIViewController {
         let cover = MapReturnCover.resolve(
             departure: departure,
             arrival: arrival,
+            mediaPage: settled?.settledMediaPage,
             // ⚠️ THE FEED'S OWN STILL FIRST, and the map's thumbnail only as a
             // fallback.
             //
