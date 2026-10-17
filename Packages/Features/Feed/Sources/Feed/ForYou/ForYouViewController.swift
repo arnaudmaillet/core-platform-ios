@@ -228,6 +228,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         self.socialGraph = socialGraph
         page = ForYouGridPage(imagePipeline: imagePipeline, style: .discover, videoPlayback: videoPlayback)
         friendsRow = FriendsStoriesRow(imagePipeline: imagePipeline)
+        friendsRow.videoPlayback = videoPlayback
         shelf = PostShelfSection(imagePipeline: imagePipeline, videoPlayback: videoPlayback)
         lead = GridLeadStack(sections: [friendsRow, shelf])
         // The cards' counts are the posts' live ones (#896): a like in the
