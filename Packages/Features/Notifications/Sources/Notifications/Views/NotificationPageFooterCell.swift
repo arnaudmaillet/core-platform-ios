@@ -5,13 +5,12 @@ import UIKit
 /// a spinner while the next page is on its way, or "Try Again" after one
 /// failed.
 final class NotificationPageFooterCell: UICollectionViewListCell {
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
     private let retryLabel = UILabel()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundConfiguration = .clear()
-        spinner.color = .tertiaryLabel
         spinner.hidesWhenStopped = true
         retryLabel.text = "Try Again"
         retryLabel.font = .appFont(forTextStyle: .subheadline)

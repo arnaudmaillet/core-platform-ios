@@ -9,13 +9,12 @@ import UIKit
 /// as the list continuing. (The first load is the opposite situation and gets
 /// the opposite treatment: `PersonSkeletonCell` fills the empty screen.)
 final class PagingSpinnerCell: UICollectionViewListCell {
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         spinner.hidesWhenStopped = false
-        spinner.color = .tertiaryLabel
         spinner.constrain(in: contentView) { parent in
             spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             spinner.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.md)
@@ -50,13 +49,12 @@ enum InboxPaging {
 /// under it. An endless spinner under rows the viewer is not looking at still
 /// redraws the screen every frame (#580).
 final class PagingSpinnerFooterView: UIView {
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
 
     init() {
         super.init(frame: CGRect(x: 0, y: 0, width: 0, height: 56))
         isUserInteractionEnabled = false
         spinner.hidesWhenStopped = false
-        spinner.color = .tertiaryLabel
         spinner.constrain(in: self) { parent in
             spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             spinner.centerYAnchor.constraint(equalTo: parent.centerYAnchor)

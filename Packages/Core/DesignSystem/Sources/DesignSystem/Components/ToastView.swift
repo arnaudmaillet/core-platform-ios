@@ -829,8 +829,7 @@ public final class ToastView: UIView {
         var arranged: [UIView] = []
         hasGlyph = false
         if content.style == .loading {
-            let spinner = UIActivityIndicatorView(style: .medium)
-            spinner.color = .label
+            let spinner = AppLoaderView(size: .medium)
             spinner.startAnimating()
             arranged.append(spinner)
             // The leading mark a collapsed bar item keeps (#1058).

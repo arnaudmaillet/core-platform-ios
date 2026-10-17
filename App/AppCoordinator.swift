@@ -675,7 +675,7 @@ private final class LaunchViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
 
-        let spinner = UIActivityIndicatorView(style: .large)
+        let spinner = AppLoaderView(size: .large)
         spinner.startAnimating()
         spinner.constrain(in: view) { parent in
             spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)

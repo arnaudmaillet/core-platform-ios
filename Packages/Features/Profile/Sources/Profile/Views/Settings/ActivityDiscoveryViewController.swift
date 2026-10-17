@@ -158,7 +158,7 @@ final class ActivityDiscoveryViewController: UIViewController {
                 content.text = Self.resetTitle
                 content.textProperties.color = resetting ? .secondaryLabel : .systemRed
                 if resetting {
-                    let spinner = UIActivityIndicatorView(style: .medium)
+                    let spinner = AppLoaderView(size: .medium)
                     spinner.startAnimating()
                     cell.accessories = [.customView(configuration: .init(customView: spinner, placement: .trailing(displayed: .always)))]
                 }

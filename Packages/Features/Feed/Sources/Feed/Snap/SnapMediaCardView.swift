@@ -475,13 +475,10 @@ final class SnapMediaCardView: UIView {
     /// mid-fetch was indistinguishable from a page that had arrived. This is
     /// the difference, and it sits over the media area rather than over the
     /// chrome: it belongs to the picture that is missing.
-    private lazy var spinner: UIActivityIndicatorView = {
-        let view = UIActivityIndicatorView(style: .medium)
-        // ⚠️ WHITE, not `.label`. The ground here is the post's photograph or
-        // black — never the page's theme — so a semantic colour would resolve
-        // against a background this view does not have. White is what every
-        // other overlay on this surface uses, for the same reason.
-        view.color = .white
+    private lazy var spinner: AppLoaderView = {
+        let view = AppLoaderView(size: .medium)
+        // The branded loader (#1329) wears its own tones, whatever the
+        // ground — the post's photograph or black, never the page's theme.
         view.hidesWhenStopped = true
         view.translatesAutoresizingMaskIntoConstraints = false
         addSubview(view)

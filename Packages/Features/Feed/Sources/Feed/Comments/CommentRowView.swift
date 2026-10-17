@@ -458,7 +458,7 @@ final class CommentRowView: UIView {
     /// a freshly dequeued row has no frame of its own yet. Nil lays out the row.
     weak var layoutHost: UIView?
 
-    private let sendingSpinner = UIActivityIndicatorView(style: .medium)
+    private let sendingSpinner = AppLoaderView(size: .medium)
     private let failedMark = UIImageView(image: UIImage(systemName: "exclamationmark.circle.fill"))
 
     /// The spinner is drawn at the time's size, not a control's (#725).
@@ -483,14 +483,36 @@ final class CommentRowView: UIView {
         placeDeliveryIndicators()
         guard delivery == .sending else {
             sendingSpinner.layer.removeAllAnimations()
-            sendingSpinner.stopAnimating()
+            sendingSpinner.stopAnimating(animated: false)
             sendingSpinner.transform = Self.spinnerScale
             sendingSpinner.alpha = 1
             return
         }
-        sendingSpinner.startAnimating()
-        if !wasSending { bounceInSpinner() }
+        guard !wasSending else { return }
+        guard loaderDelay > 0 else {
+            sendingSpinner.startAnimating()
+            return bounceInSpinner()
+        }
+        // ⚠️ NO LOADER FOR A SEND THAT IS ALREADY DONE (the owner,
+        // 2026-10-17): it shows only once the send has taken `loaderDelay`.
+        // Delivered sooner, the time simply comes in (`playDelivered`).
+        isLoaderShown = false
+        sendingSpinner.alpha = 0
+        let run = deliveryRun
+        DispatchQueue.main.asyncAfter(deadline: .now() + loaderDelay) { [weak self] in
+            guard let self, deliveryRun == run, delivery == .sending else { return }
+            sendingSpinner.startAnimating()
+            bounceInSpinner()
+        }
     }
+
+    /// How long a send may take before its loader shows; zero shows it at
+    /// once. The conversation sets it (`ConversationThreadViewController
+    /// .sendingLoaderDelay`).
+    var loaderDelay: TimeInterval = 0
+
+    /// Whether the sending loader has been drawn for the current send.
+    private var isLoaderShown = true
 
     /// Back to a row with nothing pending: recycling.
     ///
@@ -499,6 +521,8 @@ final class CommentRowView: UIView {
     /// the delivery stays with the row that played it.
     private func resetDelivery() {
         guard installedDeliveryIndicators else { return }
+        deliveryRun += 1
+        isLoaderShown = true
         timeReveal.layer.removeAllAnimations()
         timeReveal.isHidden = true
         isBouncingInTime = false
@@ -510,6 +534,7 @@ final class CommentRowView: UIView {
     /// The spinner arrives with a bounce: from nothing, past its size and
     /// back (#725).
     private func bounceInSpinner() {
+        isLoaderShown = true
         isBouncingInSpinner = true
         sendingSpinner.layer.removeAllAnimations()
         sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
@@ -530,7 +555,7 @@ final class CommentRowView: UIView {
     /// Whether the time is on its way in. Internal for tests.
     private(set) var isBouncingInTime = false
 
-    var sendingSpinnerView: UIActivityIndicatorView { sendingSpinner }
+    var sendingSpinnerView: AppLoaderView { sendingSpinner }
 
     /// Delivered: the spinner — carried over from the pending row this one
     /// replaces — scales out, and the time it stood in for bounces in in its
@@ -550,6 +575,11 @@ final class CommentRowView: UIView {
             if current.hasSuffix(time) { label.text = String(current.dropLast(time.count)) }
             sendingSpinner.transform = Self.spinnerScale
             sendingSpinner.alpha = 1
+            // ⚠️ THE CARRIED LOADER GOES ON TURNING, it does not start over:
+            // started from rest it replayed its entry — the pills appearing
+            // again over the time (filmed by the owner, 2026-10-17). From a
+            // full pull it is the ring at once.
+            sendingSpinner.setProgress(1)
             sendingSpinner.startAnimating()
             placeDeliveryIndicators()
             layoutNow()
@@ -557,42 +587,94 @@ final class CommentRowView: UIView {
             full = current.hasSuffix(time) ? current : current + time
         }
         delivery = nil
+        deliveryRun += 1
+        let run = deliveryRun
         isBouncingInSpinner = false
+        // The line holds its full width, without the time, while the loader
+        // leaves its place.
+        let prefix = String(full.dropLast(time.count))
+        reserveHeaderWidth(full)
+        label.text = prefix
+        // Delivered before its loader ever showed: the time comes in at once.
+        guard carryingSpinner || isLoaderShown else {
+            sendingSpinner.stopAnimating(animated: false)
+            sendingSpinner.alpha = 1
+            isLoaderShown = true
+            return bounceInTime(time, after: prefix, completing: full)
+        }
         isScalingOutSpinner = true
-        UIView.animate(withDuration: 0.25, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
+        UIView.animate(withDuration: Self.loaderOutDuration, delay: 0, options: [.beginFromCurrentState, .curveEaseIn, .allowUserInteraction]) {
             self.sendingSpinner.transform = Self.spinnerScale.scaledBy(x: 0.01, y: 0.01)
             self.sendingSpinner.alpha = 0
         } completion: { _ in
             self.isScalingOutSpinner = false
             guard self.delivery != .sending else { return }
-            self.sendingSpinner.stopAnimating()
+            self.sendingSpinner.stopAnimating(animated: false)
             self.sendingSpinner.transform = Self.spinnerScale
             self.sendingSpinner.alpha = 1
+            // ⚠️ THE TIME ONLY ONCE THE LOADER IS GONE — no crossfade (the
+            // owner, 2026-10-17): the two shared the place for the loader's
+            // way out, and read as the loader landing on the time.
+            // Not on a row recycled meanwhile: its time is another message's.
+            guard self.deliveryRun == run else { return }
+            self.bounceInTime(time, after: prefix, completing: full)
         }
-        // The time bounces in where the spinner was, on the same beat as the
-        // spinner leaving; the line takes it back once it has landed.
-        let prefix = String(full.dropLast(time.count))
-        reserveHeaderWidth(full)
-        label.text = prefix
+    }
+
+    /// The loader's way out, then the time's way in: one after the other, so
+    /// the whole delivery takes their sum — what a host holding the delivered
+    /// row's swap waits for (`ConversationThreadViewController`).
+    static let loaderOutDuration: TimeInterval = 0.25
+    static let timeInDuration: TimeInterval = 0.5
+    static var deliveryRevealDuration: TimeInterval { loaderOutDuration + timeInDuration }
+
+    /// Bumped by every delivery played and every recycling, so a loader's
+    /// way out that ends late reveals nothing on a row that moved on.
+    private var deliveryRun = 0
+
+    /// The time bounces in where the loader was; the line takes it back once
+    /// it has landed.
+    private func bounceInTime(_ time: String, after prefix: String, completing full: String) {
+        let label = headerLabel
         timeReveal.font = label.font
         timeReveal.textColor = label.textColor
         timeReveal.text = time
-        timeRevealLeading?.constant = ceil(Self.textWidth(prefix, in: label))
+        // ⚠️ WHERE THE LINE WILL DRAW IT, to the point: the full line's width
+        // less the time's, not the prefix's own — the kerning between the
+        // prefix's trailing space and the first digit belongs to the full
+        // line, and the ceil'd prefix width stood the time a fraction right
+        // of where the line put it: it jumped left in the swap's frame
+        // (filmed by the owner, 2026-10-17).
+        let scale = window?.screen.scale ?? traitCollection.displayScale
+        let lead = Self.textWidth(full, in: label) - Self.textWidth(time, in: label)
+        timeRevealLeading?.constant = (lead * max(scale, 1)).rounded() / max(scale, 1)
         timeReveal.isHidden = false
         layoutNow()
         timeReveal.layer.removeAllAnimations()
-        timeReveal.transform = CGAffineTransform(scaleX: 0.01, y: 0.01)
+        // ⚠️ GROWN FROM ITS LEADING EDGE, not its centre: scaled about the
+        // centre, the overshoot pushed the time left over the "·" before it
+        // (filmed by the owner, 2026-10-17). The translation keeps the
+        // leading edge put at every scale the spring passes through — both
+        // components move on the same curve.
+        let from: CGFloat = 0.01
+        let half = timeReveal.bounds.width / 2
+        timeReveal.transform = CGAffineTransform(a: from, b: 0, c: 0, d: from, tx: -(1 - from) * half, ty: 0)
         timeReveal.alpha = 0
         isBouncingInTime = true
-        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.55,
+        UIView.animate(withDuration: Self.timeInDuration, delay: 0, usingSpringWithDamping: 0.55,
                        initialSpringVelocity: 0.8, options: [.allowUserInteraction]) {
             self.timeReveal.transform = .identity
             self.timeReveal.alpha = 1
         } completion: { _ in
             self.isBouncingInTime = false
-            label.text = full
-            self.reserveHeaderWidth(nil)
-            self.timeReveal.isHidden = true
+            // One pass: the line takes the time back and the reveal goes in
+            // the same frame, laid out before it draws.
+            UIView.performWithoutAnimation {
+                label.text = full
+                self.reserveHeaderWidth(nil)
+                self.timeReveal.isHidden = true
+                self.layoutNow()
+            }
         }
     }
 
