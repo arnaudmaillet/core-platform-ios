@@ -994,6 +994,13 @@ final class PinCardView: UIView {
     /// The shared rule — see `DepartureCoverLayout`, which states why the
     /// cover is scaled uniformly rather than re-fitted to the card.
     private func layoutDepartureCover() {
+        // ⚠️ A CENTRED ANCHOR (#1326). A transition card zeroes its children's
+        // anchors (`markAsTransitionCard`), and the shared rule poses this
+        // cover by `center` and a scale: under a zero anchor its top-left sat
+        // at the card's middle — the departure page drawn from the centre into
+        // the corner (`-blend-frame-log`: departure origin == card mid, filmed
+        // on a carousel left on page 2 and grabbed back to its marker).
+        departureCoverView.layer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
         departureBaseSize = DepartureCoverLayout.apply(
             to: departureCoverView, in: bounds, departureBase: departureBaseSize
         )

@@ -184,11 +184,18 @@ final class MapPinZoomSource: ZoomTransitionSource {
         // one post, so its departure and arrival are the same post and the
         // cover is already `none`); this keeps that true if a cluster ever
         // learns to preview.
-        if mirrorLive == nil {
+        // ⚠️ THEY MEET NOW (#1326): a lone pin's carousel left on a later page
+        // has a departure (that page) AND, when its head is a clip, a mirrored
+        // preview (the head, playing). The departure wins: the window carries
+        // the page on screen and dissolves into the marker — mirroring the head
+        // put page 1 in the window from the grab's first frame (filmed).
+        let departs: Bool
+        if case .picture = stagedCover { departs = true } else { departs = false }
+        if mirrorLive == nil || departs {
             card.setDeparturePicture(stagedCover.image())
             flyingCard = card
         }
-        if let mirrorLive {
+        if let mirrorLive, !departs {
             card.adoptZoomLiveMedia { surface in
                 guard let renderView = surface as? VideoRenderView else { return false }
                 return mirrorLive(renderView)

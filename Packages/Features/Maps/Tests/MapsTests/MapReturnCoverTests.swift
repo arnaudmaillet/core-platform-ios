@@ -92,4 +92,21 @@ private extension UIImage {
             context.fill(CGRect(x: 0, y: 0, width: 2, height: 2))
         }
     }
+
+}
+
+@MainActor
+struct PinCardDepartureLayoutTests {
+    /// ⚠️ THE DEPARTURE COVER IS POSED BY ITS CENTRE (#1326): a transition
+    /// card zeroes its children's anchors, and under a zero anchor the
+    /// departure page was drawn from the card's middle into its corner.
+    @Test func aTransitionCardsDepartureCoversTheCard() {
+        let card = PinCardView()
+        card.markAsTransitionCard()
+        card.frame = CGRect(x: 0, y: 0, width: 402, height: 500)
+        card.setDeparturePicture(UIImage.solid(.blue))
+        card.layoutIfNeeded()
+        let departure = card.debugDepartureCover.frame
+        #expect(abs(departure.minX) < 0.5 && abs(departure.minY) < 0.5, "departure drawn off-centre: \(departure)")
+    }
 }

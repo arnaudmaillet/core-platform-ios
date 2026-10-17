@@ -69,6 +69,9 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     /// Whether this close leaves from ANOTHER post than the item it lands on
     /// (#923) — resolved at staging, like `departurePicture`.
     private var landsOnAnotherPost = false
+    /// The picture a close back onto the same row wears in place of the one
+    /// captured at the tap: the carousel page the viewer left the post on.
+    private var landingCover: UIImage?
     /// The item's own clip as the card's arriving operand carries it
     /// (`SnapFeedHeroOrigin.returnLiveMedia`) — what the landing hands the item
     /// on such a close, never the card's departure surface.
@@ -90,6 +93,7 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     func zoomSourceWillStageDismissal() {
         isStagingDismissal = true
         landsOnAnotherPost = false
+        landingCover = nil
         landingSurface = nil
         didAdoptLanding = false
         // FIRST, before anything here or in the flight reads a rect: the
@@ -126,6 +130,17 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
             departurePicture = nil
             return
         }
+        // ⚠️ THE SAME COLLECTION ON A LATER PAGE (#1326), AND A SOURCE THAT
+        // FOLLOWS THE PAGE (a row: `followMediaPage`): it lands on that very
+        // page, so there is nothing to dissolve — the card simply wears the
+        // page on screen (`landingCover`). The owner: "le media est le même,
+        // pas besoin de fade". Only a source that keeps showing the head (a
+        // tile, a face) blends from the page into its own picture.
+        if settled.id == origin.post.id, origin.followMediaPage != nil {
+            landingCover = settled.cover
+            departurePicture = nil
+            return
+        }
         departurePicture = settled.cover
         // The same collection on a later page (#1326) is not another post.
         landsOnAnotherPost = settled.id != origin.post.id
@@ -140,8 +155,8 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     }
 
     /// What a close dissolves from, and whether it lands elsewhere — for tests.
-    var debugDeparture: (picture: UIImage?, landsOnAnotherPost: Bool) {
-        (departurePicture, landsOnAnotherPost)
+    var debugDeparture: (picture: UIImage?, landsOnAnotherPost: Bool, landingCover: UIImage?) {
+        (departurePicture, landsOnAnotherPost, landingCover)
     }
 
     /// `-zoom-blend-log`: the same channel the map's flight reports on, because
@@ -174,7 +189,7 @@ final class ExternalHeroZoomSource: ZoomTransitionSource {
     func makeZoomFlightCard() -> any ZoomFlightCard {
         let card = PostGridFlightCard(
             post: origin.post,
-            cover: origin.cover,
+            cover: isStagingDismissal ? (landingCover ?? origin.cover) : origin.cover,
             style: origin.style == .tile ? .tile : .listMedia,
             cornerRadius: origin.cornerRadius,
             cornerCurve: origin.cornerCurve,

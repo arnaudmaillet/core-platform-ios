@@ -77,6 +77,18 @@ struct ReturnToOriginTileTests {
         #expect(onPage2.debugDeparture.picture === page2, "the close flew the carousel's head")
         #expect(!onPage2.debugDeparture.landsOnAnotherPost)
 
+        // A ROW follows the carousel: it lands on that very page, so the card
+        // WEARS the page and nothing fades (the owner, 2026-10-17).
+        let row = SnapFeedHeroOrigin(
+            post: tapped, cover: Self.picture(), style: .listMedia,
+            frame: { _ in .zero }, isOnScreen: { true }, setConcealed: { _ in },
+            followMediaPage: { _, _ in }
+        )
+        let fromRow = ExternalHeroZoomSource(origin: row, settle: { (id: tapped.id, cover: page2, page: 1) })
+        fromRow.zoomSourceWillStageDismissal()
+        #expect(fromRow.debugDeparture.picture == nil, "a row's close faded into the head")
+        #expect(fromRow.debugDeparture.landingCover === page2)
+
         let onHead = ExternalHeroZoomSource(origin: origin, settle: { (id: tapped.id, cover: page2, page: 0) })
         onHead.zoomSourceWillStageDismissal()
         #expect(onHead.debugDeparture.picture == nil, "page 1 is the tile's own picture: nothing to blend")
