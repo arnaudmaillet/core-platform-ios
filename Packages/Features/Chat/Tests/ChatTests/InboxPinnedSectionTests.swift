@@ -127,44 +127,44 @@ struct InboxPinnedSectionTests {
         }
     }
 
-    private func bell() -> UIBarButtonItem {
+    private func makeBell() -> UIBarButtonItem {
         let item = UIBarButtonItem(customView: UIView())
         item.accessibilityLabel = "Bell"
         return item
     }
 
-    /// `[bell][New 8]`: the item comes after the bell, is re-titled in place
-    /// as the list scrolls on, goes at the top, and its tap is the header's.
+    /// `[bell][New · 8]`: the item comes after the bell — the conversation's
+    /// day item, a system-titled bubble — is a NEW item under a new identifier
+    /// when the list scrolls on (UIKit's morph, not a title swapped in place),
+    /// goes at the top, and its tap is the header's.
     @Test func theBarNamesTheSectionAfterTheBell() throws {
         let surface = SectionedSurface(.all)
         let screen = MessagesInboxViewController(surfaces: [surface])
-        let bell = bell()
+        let bell = makeBell()
         screen.setLeadingAccessoryItem(bell)
         screen.loadViewIfNeeded()
         #expect(screen.navigationItem.leftBarButtonItems?.count == 1)
-        #expect(screen.debugSectionButton == nil)
+        #expect(screen.debugSectionItem == nil)
 
         surface.pin(.new, count: 8)
         let leading = try #require(screen.navigationItem.leftBarButtonItems)
         #expect(leading.count == 2 && leading.first === bell, "the section did not follow the bell")
-        let button = try #require(screen.debugSectionButton)
-        #expect(button.title == "New")
-        #expect(button.countText == "8")
-        #expect(button.frame.width == button.intrinsicContentSize.width, "the bar would wrap a stale width")
+        let new = try #require(screen.debugSectionItem)
+        #expect(new.title == "New · 8")
+        #expect(new.customView == nil, "not the bar's own titled bubble")
 
         surface.pin(.earlier)
-        #expect(screen.debugSectionButton === button, "a new section minted a new button")
+        let recent = try #require(screen.debugSectionItem)
+        #expect(recent.title == "Recent", "a zero count was drawn")
+        #expect(recent !== new && recent.identifier != new.identifier, "a title edited in place gets no morph")
         #expect(screen.navigationItem.leftBarButtonItems?.count == 2)
-        #expect(screen.navigationItem.leftBarButtonItems?.last?.customView === button)
-        #expect(button.title == "Recent")
-        #expect(button.countText == nil, "a zero count was drawn")
 
-        button.sendActions(for: .touchUpInside)
+        screen.debugTapSectionItem()
         #expect(surface.scrolls == 1, "the item's tap did not scroll to its section")
 
         surface.pin(nil)
         #expect(screen.navigationItem.leftBarButtonItems?.count == 1)
-        #expect(screen.debugSectionButton == nil)
+        #expect(screen.debugSectionItem == nil)
     }
 
     /// The item follows the page in front: a page behind it is not named, and
@@ -179,15 +179,15 @@ struct InboxPinnedSectionTests {
 
         chats.pin(.new, count: 2)
         requests.pin(.earlier)
-        #expect(screen.debugSectionButton?.title == "New", "a page behind named its section")
+        #expect(screen.debugSectionItem?.title == "New · 2", "a page behind named its section")
 
         screen.setCategory(.requests, animated: false)
-        #expect(screen.debugSectionButton?.title == "Recent")
+        #expect(screen.debugSectionItem?.title == "Recent")
 
         requests.pin(nil)
         screen.setCategory(.all, animated: false)
-        #expect(screen.debugSectionButton?.title == "New")
+        #expect(screen.debugSectionItem?.title == "New · 2")
         screen.setCategory(.requests, animated: false)
-        #expect(screen.debugSectionButton == nil)
+        #expect(screen.debugSectionItem == nil)
     }
 }
