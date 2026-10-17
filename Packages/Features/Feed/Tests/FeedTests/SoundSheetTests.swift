@@ -730,6 +730,35 @@ struct SoundSheetTests {
         #expect(try tileIDs(in: .recent, of: alone).count == 7)
     }
 
+    // MARK: - The native preview (#1318)
+
+    /// A loaded tile lifts its post — Open its one action — and a placeholder
+    /// lifts nothing: its post is still on its way.
+    @Test func aLoadedTileLiftsItsPostAndAPlaceholderDoesNot() throws {
+        let content = Self.content(6, loaded: { $0 != 1 })
+        let tiles = content.tiles.map { tile in
+            SoundSheetViewController.Tile(
+                postID: tile.postID, thumbnailURL: nil, caption: nil, isLoaded: tile.isLoaded,
+                post: tile.isLoaded ? GalleryPost(
+                    id: tile.postID, kind: .photo, isRepost: false,
+                    thumbnailURL: URL(string: "https://example.com/\(tile.postID.rawValue).jpg"),
+                    aspectRatio: 0.75, caption: "", publishedAtMS: 1
+                ) : nil
+            )
+        }
+        let controller = SoundSheetViewController(
+            sound: PostSound(id: "clip-01", title: nil, artist: nil, previewURL: nil, artworkURL: nil, duration: 30),
+            authorHandle: "ava", fallbackArtworkURL: nil,
+            sections: content.sections, tiles: tiles,
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        _ = controller.wrappedInSheet()
+        controller.loadViewIfNeeded()
+        let loaded = try #require(controller.debugTileMenuConfiguration(at: IndexPath(item: 0, section: 1)))
+        #expect(loaded.identifier as? String == "p0")
+        #expect(controller.debugTileMenuConfiguration(at: IndexPath(item: 1, section: 1)) == nil, "a placeholder lifted")
+    }
+
     // MARK: - Placeholders
 
     /// Posts outside the feed arrive as placeholders and are filled in —

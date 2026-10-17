@@ -2046,6 +2046,92 @@ extension SoundSheetViewController: UICollectionViewDelegate {
         // A tile that left gives its player back now — the pool is shared.
         autoplay?.stop(cell)
     }
+
+    // MARK: - The native preview (#1318)
+
+    /// ⚠️ THE SOUND SHEET'S TILES LIFT TOO (the owner, 2026-10-17: every
+    /// tile). The lift is the grid's (`ForYouPostPreviewViewController`, the
+    /// clip playing inside it); the menu is Open alone — the sheet has no
+    /// road to a profile and no author rows of its own, and it is a sheet
+    /// over the post, where the post itself carries them.
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemsAt indexPaths: [IndexPath],
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let indexPath = indexPaths.first,
+              case .tile(let id, let kind) = dataSource.itemIdentifier(for: indexPath),
+              isRevealed(kind, item: indexPath.item),
+              let tile = tileByID[id], tile.isLoaded, let post = tile.post
+        else { return nil }
+        let width = max(0, view.bounds.width - Spacing.lg * 2)
+        let pipeline = imagePipeline
+        let pool = videoPlayback
+        return UIContextMenuConfiguration(
+            identifier: id.rawValue as NSString,
+            previewProvider: {
+                ForYouPostPreviewViewController(post: post, imagePipeline: pipeline, width: width, videoPlayback: pool)
+            },
+            actionProvider: { [weak self] _ in
+                UIMenu(children: [RowGeometry.openAction { [weak self] in self?.openFromPreview(id, kind: kind) }])
+            }
+        )
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        highlightPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        tilePreview(at: indexPath)
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfiguration configuration: UIContextMenuConfiguration,
+        dismissalPreviewForItemAt indexPath: IndexPath
+    ) -> UITargetedPreview? {
+        tilePreview(at: indexPath)
+    }
+
+    /// Tapping the lift opens the post — the tap's own open, once UIKit has
+    /// put the tile back (the grid's rule).
+    func collectionView(
+        _ collectionView: UICollectionView,
+        willPerformPreviewActionForMenuWith configuration: UIContextMenuConfiguration,
+        animator: UIContextMenuInteractionCommitAnimating
+    ) {
+        guard let raw = configuration.identifier as? String else { return }
+        let id = PostID(raw)
+        guard let kind = sections.first(where: { $0.ids.contains(id) || $0.all.contains(id) })?.kind else { return }
+        animator.preferredCommitStyle = .dismiss
+        animator.addCompletion { [weak self] in
+            DispatchQueue.main.async { self?.openFromPreview(id, kind: kind) }
+        }
+    }
+
+    /// The tap's open, for a post lifted from `kind`'s tiles.
+    private func openFromPreview(_ id: PostID, kind: SoundSheetSection.Kind) {
+        guard let section = sections.first(where: { $0.kind == kind }) else { return }
+        select(id, order: kind.isRow ? section.all : section.ids, source: .sheet(kind))
+    }
+
+    private func tilePreview(at indexPath: IndexPath) -> UITargetedPreview? {
+        guard let cell = collectionView.cellForItem(at: indexPath), cell.window != nil else { return nil }
+        let parameters = UIPreviewParameters()
+        parameters.backgroundColor = .clear
+        let card = cell.contentView
+        let radius = max(card.layer.cornerRadius, cell.layer.cornerRadius)
+        parameters.visiblePath = UIBezierPath(roundedRect: card.bounds, cornerRadius: radius)
+        return UITargetedPreview(view: card, parameters: parameters)
+    }
+
+    #if DEBUG
+    /// The lift a long press on item `item` of the posts would raise.
+    func debugTileMenuConfiguration(at indexPath: IndexPath) -> UIContextMenuConfiguration? {
+        collectionView(collectionView, contextMenuConfigurationForItemsAt: [indexPath], point: .zero)
+    }
+    #endif
 }
 
 // MARK: - Scrolling
