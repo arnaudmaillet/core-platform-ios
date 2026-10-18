@@ -15,12 +15,13 @@ final class ActivityDiscoveryViewController: UIViewController {
     }
 
     enum Section: Hashable {
-        case activity, discovery, links
+        case activity, discovery, links, contacts
     }
 
     private enum Item: Hashable {
         case toggle(ActivityDiscoverySettings.Switch)
         case resetLink
+        case findContacts
         case loading
         case failed
     }
@@ -31,6 +32,8 @@ final class ActivityDiscoveryViewController: UIViewController {
 
     private let manager: any ActivityDiscoveryManaging
     private let shareLinks: (any ShareLinkManaging)?
+    /// Find Friends from Contacts (#412); nil hides the row.
+    private let makeContactFriends: (() -> UIViewController)?
     private var phase: Phase = .loading {
         didSet { applySnapshot() }
     }
@@ -43,9 +46,14 @@ final class ActivityDiscoveryViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
-    init(manager: any ActivityDiscoveryManaging, shareLinks: (any ShareLinkManaging)? = nil) {
+    init(
+        manager: any ActivityDiscoveryManaging,
+        shareLinks: (any ShareLinkManaging)? = nil,
+        makeContactFriends: (() -> UIViewController)? = nil
+    ) {
         self.manager = manager
         self.shareLinks = shareLinks
+        self.makeContactFriends = makeContactFriends
         super.init(nibName: nil, bundle: nil)
         title = "Activity and Discovery"
         hidesBottomBarWhenPushed = true
@@ -101,6 +109,7 @@ final class ActivityDiscoveryViewController: UIViewController {
     }
 
     static let resetTitle = "Reset QR Code and Link"
+    static let findContactsTitle = "Find Friends from Contacts"
 
     static func symbol(_ key: ActivityDiscoverySettings.Switch) -> String {
         switch key {
@@ -119,6 +128,7 @@ final class ActivityDiscoveryViewController: UIViewController {
         case .activity: "In Messages"
         case .discovery: "Finding You"
         case .links: "QR Code and Links"
+        case .contacts: "Your Contacts"
         }
     }
 
@@ -130,6 +140,8 @@ final class ActivityDiscoveryViewController: UIViewController {
             "Turn these off to keep your profile out of search, out of contact matches for people who have your phone number or email, and out of suggestions. People can still reach it through your posts and your followers."
         case .links:
             "When this is off, your QR code and the links you've shared don't open your profile. Resetting gives you a new code and link; the old ones stop working right away."
+        case .contacts:
+            "See which of your contacts are here. Only codes made from their email addresses and phone numbers are checked, and nothing is stored."
         }
     }
 
@@ -162,6 +174,11 @@ final class ActivityDiscoveryViewController: UIViewController {
                     spinner.startAnimating()
                     cell.accessories = [.customView(configuration: .init(customView: spinner, placement: .trailing(displayed: .always)))]
                 }
+            case .findContacts:
+                content.text = Self.findContactsTitle
+                content.image = UIImage(systemName: "person.crop.circle.badge.plus")
+                content.imageProperties.tintColor = .label
+                cell.accessories = [.disclosureIndicator()]
             case .loading:
                 content.text = "Loading…"
                 content.textProperties.color = .secondaryLabel
@@ -213,6 +230,10 @@ final class ActivityDiscoveryViewController: UIViewController {
             snapshot.appendItems([.toggle(.activityStatus), .toggle(.readReceipts)], toSection: .activity)
             snapshot.appendItems(Self.discoverySwitches.map(Item.toggle), toSection: .discovery)
             snapshot.appendItems([.toggle(.reachableByLink)] + (shareLinks == nil ? [] : [.resetLink]), toSection: .links)
+            if makeContactFriends != nil {
+                snapshot.appendSections([.contacts])
+                snapshot.appendItems([.findContacts], toSection: .contacts)
+            }
             snapshot.reconfigureItems(ActivityDiscoverySettings.Switch.allCases.map(Item.toggle) + (shareLinks == nil ? [] : [.resetLink]))
         }
         dataSource.apply(snapshot, animatingDifferences: false)
@@ -284,6 +305,7 @@ extension ActivityDiscoveryViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed: true
         case .resetLink: !resetting
+        case .findContacts: true
         default: false
         }
     }
@@ -293,6 +315,8 @@ extension ActivityDiscoveryViewController: UICollectionViewDelegate {
         switch dataSource.itemIdentifier(for: indexPath) {
         case .failed: load()
         case .resetLink: confirmReset()
+        case .findContacts:
+            if let screen = makeContactFriends?() { navigationController?.pushViewController(screen, animated: true) }
         default: break
         }
     }

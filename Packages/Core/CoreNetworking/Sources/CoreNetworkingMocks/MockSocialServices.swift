@@ -680,6 +680,13 @@ public final class MockSocialServices: @unchecked Sendable {
         (lock.withLock { discoverySettings[profileID] } ?? Self.defaultDiscoverySettings).inSuggestions
     }
 
+    /// Whether a contact's phone number (`byPhone`) or email finds
+    /// `profileID` (backend #806: `by_phone` / `by_email`).
+    public func isFindableByContact(_ profileID: String, byPhone: Bool) -> Bool {
+        let settings = lock.withLock { discoverySettings[profileID] } ?? Self.defaultDiscoverySettings
+        return byPhone ? settings.byPhone : settings.byEmail
+    }
+
     /// Whether search may show `profileID` (backend #726: `discoverable`).
     public func isFindableInSearch(_ profileID: String) -> Bool {
         (lock.withLock { discoverySettings[profileID] } ?? Self.defaultDiscoverySettings).byHandleSearch
