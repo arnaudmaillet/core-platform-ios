@@ -37,6 +37,14 @@ public final class PostDetailViewModel {
 
     nonisolated static let unavailableMessage = "This post isn\u{2019}t available"
 
+    /// Whether the server shows this post to the viewer no more (#447). Its
+    /// actions then do nothing (#1404): the screen has taken them away, and
+    /// a like or a comment the server would refuse never leaves.
+    var isUnavailable: Bool {
+        if case .unavailable = phase { return true }
+        return false
+    }
+
     public struct EngagementState: Equatable, Sendable {
         public var likeCount: Int64
         public var isLiked: Bool
@@ -383,7 +391,7 @@ public final class PostDetailViewModel {
     /// at a time. The point goes on the store's count, so every screen
     /// showing the post shows it (#896); the store's change re-draws this one.
     public func like() {
-        guard let engagementProvider, let postID, !likeInFlight else { return }
+        guard let engagementProvider, let postID, !likeInFlight, !isUnavailable else { return }
         let wasLiked = engagement.isLiked
         let before = engagementState.likeCount
         engagement.isLiked = true
@@ -425,7 +433,7 @@ public final class PostDetailViewModel {
         let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty, !isComposing else { return }
         if let draft { return publish(body, through: draft) }
-        guard let commentsProvider, let postID else { return }
+        guard let commentsProvider, let postID, !isUnavailable else { return }
         let commentID: String
         if let unsent, unsent.body == body, unsent.parentID == parentID {
             commentID = unsent.commentID
@@ -1015,7 +1023,7 @@ public final class PostDetailViewModel {
     /// per comment. Re-emits so the row shows it, but Trending does not
     /// re-rank on a tap (`likedForRanking`).
     public func likeComment(commentID: String) {
-        guard let commentLiking, !commentLikesInFlight.contains(commentID) else { return }
+        guard let commentLiking, !commentLikesInFlight.contains(commentID), !isUnavailable else { return }
         let before = commentLikes[commentID] ?? CommentLikes(count: 0, mine: 0)
         commentLikes[commentID] = CommentLikes(count: before.count + 1, mine: before.mine + 1)
         commentLikesInFlight.insert(commentID)
