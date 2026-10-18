@@ -185,21 +185,26 @@ enum TimecodeClipWriter {
         }
     }
 
-    /// Waits for `input` to take more, and gives up after a minute — a
-    /// writer that never becomes ready again is a failure, not a hang.
+    /// Waits for `input` to take more, and gives up after a budget of looks
+    /// — a writer that never becomes ready again is a failure, not a hang.
+    ///
+    /// ⚠️ LOOKS, NOT A WALL-CLOCK DEADLINE (#1115). Readiness is AVAssetWriter
+    /// draining its own queue, not a system timeout this waits out: a minute
+    /// of `Date` ran out on a starved runner (CI's slowest lane took two
+    /// hundred seconds for a suite this machine runs in forty) while the
+    /// writer was only slow. 30,000 looks of 2 ms is the same minute on a
+    /// free machine, and a starved one spends none of it. The failure stays
+    /// asserted: it throws, and the clip's caller fails the test.
     private static func ready(_ input: AVAssetWriterInput, of writer: AVAssetWriter, _ name: String) async throws {
-        // A minute, not ten seconds: the clip is written once per process, and
-        // CI's slowest lane took two hundred seconds for a suite this machine
-        // runs in forty.
-        let deadline = Date().addingTimeInterval(60)
-        while !input.isReadyForMoreMediaData {
+        for _ in 0..<30_000 {
+            if input.isReadyForMoreMediaData { return }
             if writer.status == .failed { throw writer.error ?? CocoaError(.fileWriteUnknown) }
-            guard Date() < deadline else {
-                throw CocoaError(.fileWriteUnknown, userInfo: [
-                    NSLocalizedDescriptionKey: "the \(name) input never became ready (writer status \(writer.status.rawValue))"
-                ])
-            }
             try await Task.sleep(for: .milliseconds(2))
+        }
+        guard input.isReadyForMoreMediaData else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [
+                NSLocalizedDescriptionKey: "the \(name) input never became ready (writer status \(writer.status.rawValue))"
+            ])
         }
     }
 

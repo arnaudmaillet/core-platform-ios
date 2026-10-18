@@ -53,7 +53,7 @@ struct InteractivePopToStackTests {
         let feed = UIViewController()
 
         stack.nav.setViewControllers([stack.root, gallery, feed], animated: true)
-        stack.pump(until: { feed.viewIfLoaded?.window != nil })
+        #expect(stack.pump(until: { feed.viewIfLoaded?.window != nil }))
 
         #expect(stack.nav.viewControllers == [stack.root, gallery, feed])
         #expect(stack.nav.topViewController === feed)
@@ -78,7 +78,7 @@ struct InteractivePopToStackTests {
         #expect(stack.delegate.observedPairs.last?.from === feed,
                 "the transition is asked for the TOP pair, not per removed controller")
         #expect(stack.delegate.observedPairs.last?.to === stack.root)
-        stack.pump(until: { stack.nav.viewControllers == [stack.root] })
+        #expect(stack.pump(until: { stack.nav.viewControllers == [stack.root] }))
 
         #expect(stack.delegate.observedOperations == [.pop], "one pop, not two")
         #expect(stack.nav.viewControllers == [stack.root])
@@ -111,19 +111,22 @@ struct InteractivePopToStackTests {
         func host(_ controllers: [UIViewController]) {
             nav.setViewControllers(controllers, animated: false)
             window.layoutIfNeeded()
-            pump(until: { nav.transitionCoordinator == nil })
+            #expect(self.pump(until: { self.nav.transitionCoordinator == nil }))
             delegate.observedOperations.removeAll()
             delegate.observedPairs.removeAll()
         }
 
         /// Condition-based settle — never a fixed sleep (see the CI flake
-        /// history in InboxTests): pumps the main run loop until `condition`
-        /// or a generous ceiling, whichever first.
-        func pump(until condition: () -> Bool, timeout: TimeInterval = 5) {
-            let deadline = Date().addingTimeInterval(timeout)
-            while !condition() && Date() < deadline {
-                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        /// history in InboxTests): pumps the main run loop until `condition`,
+        /// in looks (6,000 turns of 10 ms), never wall-clock time: a starved
+        /// runner spends none of the budget (#1115). Returns whether
+        /// `condition` came to hold; every caller asserts it.
+        func pump(until condition: () -> Bool) -> Bool {
+            for _ in 0..<6_000 {
+                if condition() { return true }
+                RunLoop.main.run(until: Date().addingTimeInterval(0.01))
             }
+            return condition()
         }
     }
 

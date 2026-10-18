@@ -681,19 +681,25 @@ struct PlaceProfileTests {
         )
     }
 
-    /// Waits for `condition`, for at most two seconds — long enough for any
-    /// hydration here, short enough that a spinner that never stops fails
-    /// the test instead of hanging it.
-    private func settle(until condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(2)
-        while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
+    /// starved runner spends none of the budget (#1115) — the two-second
+    /// `Date` deadline this replaces ran out on a loaded machine. A spinner
+    /// that never stops still fails the test: the wait returns false, and
+    /// every caller asserts it.
+    private func settle(until condition: () -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            await Task.yield()
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
     }
 
     /// The first hydration, landed.
     private func hydrated(_ answers: Answers) async -> PlaceProfileViewController {
         let profile = makeProfile(answers: answers)
         profile.beginLoading()
-        await settle(until: { !profile.renderedActivity.isEmpty })
+        #expect(await settle(until: { !profile.renderedActivity.isEmpty }))
         return profile
     }
 
@@ -719,7 +725,7 @@ struct PlaceProfileTests {
 
         profile.debugReleasePull()
         #expect(profile.debugIsRefreshing, "the release did not start the spinner")
-        await settle(until: { !profile.debugIsRefreshing })
+        #expect(await settle(until: { !profile.debugIsRefreshing }))
 
         #expect(!profile.debugIsRefreshing, "the spinner never stopped")
         #expect(answers.calls == 2, "the pull must load the place again")
@@ -734,7 +740,9 @@ struct PlaceProfileTests {
         #expect(!profile.debugPagesCarryRefreshControl)
 
         profile.debugReleasePull(by: HeroPullToRefreshView.threshold - 20)
-        await settle(until: { answers.calls > 1 })
+        // "Nothing more happens": a short pull starts no load, so there is no
+        // landing to wait for — only time for a wrong one to show.
+        try? await Task.sleep(for: .milliseconds(150))
 
         #expect(answers.calls == 1, "a pull short of the threshold refreshed")
         #expect(!profile.debugIsRefreshing)
@@ -747,7 +755,7 @@ struct PlaceProfileTests {
         #expect(profile.debugRenderCount == 1)
 
         profile.debugReleasePull()
-        await settle(until: { !profile.debugIsRefreshing })
+        #expect(await settle(until: { !profile.debugIsRefreshing }))
 
         #expect(profile.debugRenderCount == 1, "an identical answer re-rendered the page")
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1", "p2"])
@@ -763,7 +771,7 @@ struct PlaceProfileTests {
         let profile = await hydrated(answers)
 
         profile.debugReleasePull()
-        await settle(until: { !profile.debugIsRefreshing })
+        #expect(await settle(until: { !profile.debugIsRefreshing }))
 
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["p2", "p1"])
         #expect(profile.renderedPopular.map(\.id.rawValue) == ["p2", "p1"])
@@ -776,7 +784,7 @@ struct PlaceProfileTests {
         let profile = await hydrated(answers)
 
         profile.debugReleasePull()
-        await settle(until: { !profile.debugIsRefreshing })
+        #expect(await settle(until: { !profile.debugIsRefreshing }))
 
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1"])
     }
@@ -788,12 +796,12 @@ struct PlaceProfileTests {
         answers.held = true
         let profile = makeProfile(answers: answers)
         profile.beginLoading()
-        await settle(until: { answers.calls == 1 })
+        #expect(await settle(until: { answers.calls == 1 }))
 
         profile.debugReleasePull()
         #expect(profile.debugIsRefreshing)
         answers.held = false
-        await settle(until: { !profile.debugIsRefreshing })
+        #expect(await settle(until: { !profile.debugIsRefreshing }))
 
         #expect(!profile.debugIsRefreshing, "the coalesced pull's spinner never stopped")
         #expect(answers.calls == 1, "a pull in flight must not start a second load")
@@ -806,11 +814,11 @@ struct PlaceProfileTests {
         let answers = Answers([.failure(Answers.Failure()), .success([post("p1", reactions: 10)])])
         let profile = makeProfile(answers: answers)
         profile.beginLoading()
-        await settle(until: { answers.calls == 1 && !profile.debugIsLoading })
+        #expect(await settle(until: { answers.calls == 1 && !profile.debugIsLoading }))
         #expect(profile.renderedActivity.isEmpty)
 
         profile.debugReleasePull()
-        await settle(until: { !profile.renderedActivity.isEmpty && !profile.debugIsRefreshing })
+        #expect(await settle(until: { !profile.renderedActivity.isEmpty && !profile.debugIsRefreshing }))
 
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["p1"])
         #expect(!profile.debugIsRefreshing)

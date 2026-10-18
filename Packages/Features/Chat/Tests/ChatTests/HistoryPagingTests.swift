@@ -60,12 +60,16 @@ struct HistoryPagingTests {
         var ids: [String] = []
     }
 
-    /// A ceiling, not a pace: returns as soon as `condition` holds.
-    private func settle(until condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while !(await condition()), ContinuousClock.now < deadline {
+    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
+    /// starved runner spends none of the budget (#1115). Returns whether
+    /// `condition` came to hold; every caller asserts it.
+    private func settle(until condition: () async -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            await Task.yield()
+            if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return await condition()
     }
 
     /// Grace for "nothing more should happen".
@@ -81,7 +85,7 @@ struct HistoryPagingTests {
             shown.ids = models.map(\.id)
         }
         viewModel.viewDidLoad()
-        await settle { !shown.ids.isEmpty }
+        #expect(await settle { !shown.ids.isEmpty })
         return (viewModel, shown)
     }
 
@@ -100,7 +104,7 @@ struct HistoryPagingTests {
             if case .failed(let message) = $0 { failed = message }
         }
         viewModel.viewDidLoad()
-        await settle { failed != nil }
+        #expect(await settle { failed != nil })
 
         #expect(failed == expected)
     }
@@ -115,7 +119,7 @@ struct HistoryPagingTests {
 
         viewModel.loadOlder()
         viewModel.loadOlder() // the same approach, reported twice
-        await settle { shown.ids.count == 4 }
+        #expect(await settle { shown.ids.count == 4 })
         #expect(shown.ids == ["a", "b", "c", "d"])
 
         viewModel.loadOlder() // the start: nothing left to ask
@@ -135,7 +139,7 @@ struct HistoryPagingTests {
         viewModel.onLoadingOlderChange = { loading.append($0) }
 
         viewModel.loadOlder()
-        await settle { shown.ids.count == 2 }
+        #expect(await settle { shown.ids.count == 2 })
         viewModel.loadOlder() // nothing older: nothing announced
 
         #expect(loading == [true, false])
@@ -148,14 +152,16 @@ struct HistoryPagingTests {
         ])
         await provider.failOnce("p2")
         let (viewModel, shown) = await open(provider)
+        var loading: [Bool] = []
+        viewModel.onLoadingOlderChange = { loading.append($0) }
 
         viewModel.loadOlder()
-        await settle { await provider.requests.count == 2 }
-        await settle()
+        // The page answered — failed — when the top stops saying it loads.
+        #expect(await settle { loading == [true, false] })
         #expect(shown.ids == ["b"])
 
         viewModel.loadOlder()
-        await settle { shown.ids.count == 2 }
+        #expect(await settle { shown.ids.count == 2 })
         #expect(shown.ids == ["a", "b"])
     }
 
@@ -176,7 +182,7 @@ struct HistoryPagingTests {
         }
 
         viewModel.loadOlder()
-        await settle { shown.ids.count == 3 }
+        #expect(await settle { shown.ids.count == 3 })
 
         #expect(shown.ids == ["a", "b", "c"])
         #expect(await provider.requests == [nil, "p2", "p3"])
@@ -191,13 +197,13 @@ struct HistoryPagingTests {
         ])
         let (viewModel, shown) = await open(provider)
         viewModel.loadOlder()
-        await settle { shown.ids.count == 4 }
+        #expect(await settle { shown.ids.count == 4 })
 
         await provider.setPage(
             MessagePage(messages: [message("d", at: 40), message("e", at: 50)], olderPageToken: "p2"), for: nil
         )
         viewModel.refresh()
-        await settle { shown.ids.last == "e" }
+        #expect(await settle { shown.ids.last == "e" })
 
         // "c" slid back out of the newest page: older than its oldest, kept.
         #expect(shown.ids == ["a", "b", "c", "d", "e"])
