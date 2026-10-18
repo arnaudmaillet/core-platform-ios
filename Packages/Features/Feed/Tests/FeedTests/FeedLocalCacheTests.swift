@@ -218,6 +218,32 @@ final class FollowingColdStartTests {
         )
     }
 
+    /// A cached post keeps its media asset (#907) — what a cold-started
+    /// video post is made a banner from (#944) — and a row stored before it
+    /// decodes with none.
+    @Test func aCachedPostKeepsItsMediaAsset() {
+        var view = Post_V1_PostView()
+        view.postID = "p1"
+        view.profileID = "a1"
+        var media = Post_V1_MediaAttachmentView()
+        media.cdnURL = "mock://video/clip-18"
+        media.mimeType = "video/mp4"
+        media.width = 720
+        media.height = 1280
+        media.assetID = "asset-18"
+        view.attachments = [media]
+        let post = FeedRepository.makePost(from: view)
+        #expect(post.attachments.first?.assetID == "asset-18")
+
+        let stored = FeedLocalCache.postView(from: post)
+        #expect(stored.attachments.first?.assetID == "asset-18")
+        #expect(FeedRepository.makePost(from: stored).attachments.first?.assetID == "asset-18")
+
+        var old = stored
+        old.attachments[0].assetID = ""
+        #expect(FeedRepository.makePost(from: old).attachments.first?.assetID == nil)
+    }
+
     @Test func theFollowingFeedOpensOnItsLastFirstPageAfterAColdStart() async throws {
         let session = try makeRepository()
         #expect(await session.cachedFirstPage() == nil, "nothing stored yet")

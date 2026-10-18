@@ -168,6 +168,9 @@ struct ProfileDiskRecord: Codable, Equatable {
             var thumbnailURL: URL?
             var videoURL: URL?
             var aspectRatio: Double
+            /// The media asset (#907), for the video banner's picker (#944);
+            /// optional, so a row stored before it decodes with none.
+            var assetID: String?
         }
     }
 }
@@ -304,7 +307,9 @@ extension ProfileDiskRecord.Post {
         case .text: "text"
         }
         isRepost = post.isRepost
-        pages = post.pages.map { Page(thumbnailURL: $0.thumbnailURL, videoURL: $0.videoURL, aspectRatio: $0.aspectRatio) }
+        pages = post.pages.map {
+            Page(thumbnailURL: $0.thumbnailURL, videoURL: $0.videoURL, aspectRatio: $0.aspectRatio, assetID: $0.assetID)
+        }
         caption = post.caption
         publishedAtMS = post.publishedAtMS
         authorID = post.authorID?.rawValue
@@ -328,7 +333,9 @@ extension ProfileDiskRecord.Post {
             id: PostID(id),
             kind: postKind,
             isRepost: isRepost,
-            pages: pages.map { GalleryPost.MediaPage(thumbnailURL: $0.thumbnailURL, videoURL: $0.videoURL, aspectRatio: $0.aspectRatio) },
+            pages: pages.map { GalleryPost.MediaPage(
+                thumbnailURL: $0.thumbnailURL, videoURL: $0.videoURL, aspectRatio: $0.aspectRatio, assetID: $0.assetID
+            ) },
             caption: caption,
             publishedAtMS: publishedAtMS,
             authorID: authorID.map { ProfileID($0) },

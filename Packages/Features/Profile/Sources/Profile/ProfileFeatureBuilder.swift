@@ -55,6 +55,9 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
     /// Push preferences (Settings → Notifications, #392). Nil leaves the
     /// section on its coming-soon page.
     private let notificationPreferences: (any NotificationPreferencesManaging)?
+    /// The gem-shop items a profile wears (#944): Edit Profile's Video
+    /// Banner row. Nil hides the row.
+    private let profileItems: (any ProfileItemAccess)?
 
     public init(
         repository: any ProfileProviding,
@@ -69,6 +72,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         accountSessions: (any AccountSessionsManaging)? = nil,
         accountStatus: (any AccountStatusProviding)? = nil,
         notificationPreferences: (any NotificationPreferencesManaging)? = nil,
+        profileItems: (any ProfileItemAccess)? = nil,
         /// The device store (#893): the viewer's own profile and the profiles
         /// they visited open on their last content at a cold start. Nil keeps
         /// the profile cache in memory.
@@ -87,6 +91,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
         self.accountSessions = accountSessions
         self.accountStatus = accountStatus
         self.notificationPreferences = notificationPreferences
+        self.profileItems = profileItems
     }
 
     private func makeSwitcherFactory() -> ProfileSwitcherMenuFactory? {
@@ -207,9 +212,13 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             makeGridPage: gridPageFactory,
             shareTargeting: shareTargeting,
             onLogout: onLogout,
-            makeEditViewController: { [imagePipeline] profile, onSaved in
+            makeEditViewController: { [imagePipeline, gallery, profileItems] profile, onSaved in
                 let editor = EditProfileViewController(
-                    viewModel: EditProfileViewModel(repository: repository, seed: profile, onSaved: onSaved),
+                    viewModel: EditProfileViewModel(
+                        repository: repository, seed: profile,
+                        banner: repository as? any ProfileBannerManaging, gallery: gallery, items: profileItems,
+                        onSaved: onSaved
+                    ),
                     imagePipeline: imagePipeline
                 )
                 if let types = repository as? any AccountTypeManaging {

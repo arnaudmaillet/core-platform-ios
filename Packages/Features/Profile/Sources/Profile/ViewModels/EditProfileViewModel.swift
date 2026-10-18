@@ -1,4 +1,7 @@
+import CoreModels
+import CoreStorage
 import Foundation
+import PostGrid
 
 @MainActor
 public final class EditProfileViewModel {
@@ -69,10 +72,78 @@ public final class EditProfileViewModel {
     /// another (never dropped) so two quick field edits both persist, in order.
     private var saveTask: Task<Void, Never>?
 
-    public init(repository: any ProfileProviding, seed: UserProfile? = nil, onSaved: @escaping () -> Void) {
+    public init(
+        repository: any ProfileProviding, seed: UserProfile? = nil,
+        banner: (any ProfileBannerManaging)? = nil, gallery: (any ProfileGalleryProviding)? = nil,
+        items: (any ProfileItemAccess)? = nil,
+        onSaved: @escaping () -> Void
+    ) {
         self.repository = repository
         self.seed = seed
+        self.banner = banner
+        self.gallery = gallery
+        self.items = items
         self.onSaved = onSaved
+        bannerVideoURL = seed?.bannerVideoURL
+    }
+
+    // MARK: - Video banner (#944)
+
+    private let banner: (any ProfileBannerManaging)?
+    private let gallery: (any ProfileGalleryProviding)?
+    private let items: (any ProfileItemAccess)?
+
+    /// The banner's loop now, nil for none.
+    public private(set) var bannerVideoURL: URL? {
+        didSet { if bannerVideoURL != oldValue { onBannerChange?() } }
+    }
+    public var onBannerChange: (() -> Void)?
+
+    /// The Video banner row: absent where it cannot work (no banner write,
+    /// no shop, no gallery to pick from), else the item's price until it is
+    /// owned, then whether a loop is set.
+    public nonisolated enum VideoBannerRow: Equatable, Sendable {
+        case hidden
+        case locked(price: Int)
+        case off
+        case on
+    }
+
+    public var videoBannerRow: VideoBannerRow {
+        guard banner != nil, gallery != nil, let items else { return .hidden }
+        guard items.owns(.videoBanner) else { return .locked(price: ProfileItem.videoBanner.gemPrice) }
+        return bannerVideoURL == nil ? .off : .on
+    }
+
+    public var gems: Int { items?.gems ?? 0 }
+
+    /// Buys the item with gems — bought once, for the account, for good.
+    public func buyVideoBanner() -> ProfileItemPurchase {
+        guard let items else { return .unavailable }
+        let purchase = items.buy(.videoBanner)
+        onBannerChange?()
+        return purchase
+    }
+
+    /// The viewer's own video posts a banner can be made from: a video whose
+    /// first page names its media asset.
+    public func ownVideoPosts() async throws -> [GalleryPost] {
+        guard let gallery else { return [] }
+        let id: ProfileID
+        if let seed { id = seed.id } else { id = try await repository.currentUserProfile().id }
+        return try await gallery.authoredPosts(for: id).filter {
+            $0.kind == .video && !$0.isRepost && $0.pages.first?.assetID != nil
+        }
+    }
+
+    /// Makes `post`'s loop the banner, or clears it (nil).
+    public func setVideoBanner(_ post: GalleryPost?) {
+        guard let banner, let items, items.owns(.videoBanner) || post == nil else { return }
+        let assetID = post?.pages.first?.assetID
+        performSave { [weak self] _ in
+            let profile = try await banner.setBannerVideo(assetID: assetID)
+            self?.bannerVideoURL = profile.bannerVideoURL
+        }
     }
 
     // MARK: - Load
@@ -111,6 +182,7 @@ public final class EditProfileViewModel {
             do {
                 let profile = try await self.repository.currentUserProfile()
                 self.onAvatarURLChange?(profile.avatarURL)
+                self.bannerVideoURL = profile.bannerVideoURL
                 self.phase = .ready(Self.fields(from: profile))
             } catch {
                 self.phase = .failed(message: "Couldn't load your profile.")

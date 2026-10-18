@@ -301,6 +301,10 @@ public final class FeedLocalCache: Sendable {
             media.mimeType = attachment.mimeType
             media.width = UInt32(clamping: attachment.pixelWidth)
             media.height = UInt32(clamping: attachment.pixelHeight)
+            // The media asset too (#907): what a cold-started video post is
+            // made a banner from (#944). A row stored before it decodes
+            // with none — the field's empty default.
+            media.assetID = attachment.assetID ?? ""
             return media
         }
         view.publishedAtMs = Int64((post.publishedAt.timeIntervalSince1970 * 1000).rounded())

@@ -32,7 +32,7 @@ final class EditProfileViewController: UIViewController {
     var onOpenAccountType: (() -> Void)?
 
     private enum Section: Int, CaseIterable {
-        case hero, identity, links, privacy
+        case hero, banner, identity, links, privacy
     }
 
     /// The editable fields, one row each. `Item` wraps this plus the hero so the
@@ -59,6 +59,9 @@ final class EditProfileViewController: UIViewController {
         case privacy
         /// Pushes Account Type; navigates like `privacy`.
         case accountType
+        /// The video banner (#944): the shop item until it is owned, then
+        /// the picker of the viewer's own videos.
+        case videoBanner
         // Shimmer placeholders shown while the profile loads. They ride the same
         // sections + list layout as the real items, so the skeleton mirrors the
         // grouped geometry exactly; `rowSkeleton`'s index only varies the value
@@ -99,6 +102,7 @@ final class EditProfileViewController: UIViewController {
         viewModel.onPhaseChange = { [weak self] phase in self?.render(phase) }
         viewModel.onSaveStateChange = { [weak self] state in self?.render(save: state) }
         viewModel.onAvatarURLChange = { [weak self] url in self?.loadAvatar(url) }
+        viewModel.onBannerChange = { [weak self] in self?.reconfigureBanner() }
         viewModel.viewDidLoad()
     }
 
@@ -149,6 +153,26 @@ final class EditProfileViewController: UIViewController {
             cell.accessories = [.disclosureIndicator()]
         }
 
+        let videoBannerRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, _ in
+            var content = UIListContentConfiguration.valueCell()
+            content.text = "Video Banner"
+            content.image = UIImage(systemName: "play.rectangle")
+            switch self?.viewModel.videoBannerRow {
+            case .locked(let price)?:
+                content.secondaryText = "\(price) gems"
+                cell.accessories = [.customView(configuration: .init(
+                    customView: UIImageView(image: UIImage(systemName: "lock.fill")), placement: .trailing()
+                )), .disclosureIndicator()]
+            case .on?:
+                content.secondaryText = "On"
+                cell.accessories = [.disclosureIndicator()]
+            default:
+                content.secondaryText = "Off"
+                cell.accessories = [.disclosureIndicator()]
+            }
+            cell.contentConfiguration = content
+        }
+
         let heroSkeletonRegistration = UICollectionView.CellRegistration<EditProfileHeroSkeletonCell, Item> { _, _, _ in }
 
         let rowSkeletonRegistration = UICollectionView.CellRegistration<EditProfileSkeletonRowCell, Int> { cell, _, index in
@@ -165,6 +189,8 @@ final class EditProfileViewController: UIViewController {
                 return collectionView.dequeueConfiguredReusableCell(using: privacyRegistration, for: indexPath, item: item)
             case .accountType:
                 return collectionView.dequeueConfiguredReusableCell(using: accountTypeRegistration, for: indexPath, item: item)
+            case .videoBanner:
+                return collectionView.dequeueConfiguredReusableCell(using: videoBannerRegistration, for: indexPath, item: item)
             case .heroSkeleton:
                 return collectionView.dequeueConfiguredReusableCell(using: heroSkeletonRegistration, for: indexPath, item: item)
             case .rowSkeleton(let index):
@@ -217,8 +243,10 @@ final class EditProfileViewController: UIViewController {
 
     private func applyRealSnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.hero, .identity, .links, .privacy])
+        let banner = viewModel.videoBannerRow != .hidden
+        snapshot.appendSections(banner ? [.hero, .banner, .identity, .links, .privacy] : [.hero, .identity, .links, .privacy])
         snapshot.appendItems([.hero], toSection: .hero)
+        if banner { snapshot.appendItems([.videoBanner], toSection: .banner) }
         snapshot.appendItems([.field(.name), .field(.username), .field(.bio), .field(.website)], toSection: .identity)
         snapshot.appendItems([.field(.links)], toSection: .links)
         snapshot.appendItems([.privacy] + (onOpenAccountType == nil ? [] : [.accountType]), toSection: .privacy)
@@ -233,6 +261,13 @@ final class EditProfileViewController: UIViewController {
         UIView.transition(with: collectionView, duration: 0.3, options: .transitionCrossDissolve) {
             self.dataSource.apply(snapshot, animatingDifferences: false)
         }
+    }
+
+    private func reconfigureBanner() {
+        var snapshot = dataSource.snapshot()
+        guard snapshot.itemIdentifiers.contains(.videoBanner) else { return }
+        snapshot.reconfigureItems([.videoBanner])
+        dataSource.apply(snapshot, animatingDifferences: false)
     }
 
     /// Reflects a single field's new value without rebuilding the list.
@@ -430,8 +465,64 @@ extension EditProfileViewController: UICollectionViewDelegate {
         case .field(let field): edit(field)
         case .privacy: onOpenPrivacy?()
         case .accountType: onOpenAccountType?()
+        case .videoBanner: openVideoBanner()
         default: break
         }
+    }
+}
+
+// MARK: - Video banner (#944)
+
+extension EditProfileViewController {
+    /// Owned: the picker. Not yet: the item, its price and what it does.
+    func openVideoBanner() {
+        switch viewModel.videoBannerRow {
+        case .hidden: return
+        case .locked(let price): presentVideoBannerOffer(price: price)
+        case .off, .on: pushVideoBannerPicker()
+        }
+    }
+
+    private func presentVideoBannerOffer(price: Int) {
+        let gems = viewModel.gems
+        var message = "A muted loop from one of your own videos plays at the top of your profile. Bought once, yours for good."
+        if gems < price { message += "\n\nYou have \(gems) gems: \(price - gems) more needed." }
+        let sheet = UIAlertController(title: "Video Banner", message: message, preferredStyle: .actionSheet)
+        let buy = UIAlertAction(title: "Buy for \(price) gems", style: .default) { [weak self] _ in
+            self?.buyVideoBanner()
+        }
+        buy.isEnabled = gems >= price
+        sheet.addAction(buy)
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+        }
+        present(sheet, animated: true)
+    }
+
+    private func buyVideoBanner() {
+        switch viewModel.buyVideoBanner() {
+        case .bought, .alreadyOwned:
+            HapticNotification().notificationOccurred(.success)
+            Feedback.success("Video banner unlocked", from: self)
+            pushVideoBannerPicker()
+        case .insufficientGems(let needed, let have):
+            HapticNotification().notificationOccurred(.error)
+            Feedback.warning("\(needed - have) more gems needed", from: self)
+        case .unavailable:
+            Feedback.warning("Not available on this account", from: self)
+        }
+    }
+
+    private func pushVideoBannerPicker() {
+        let viewModel = viewModel
+        push(VideoBannerPickerViewController(
+            load: { try await viewModel.ownVideoPosts() },
+            imagePipeline: imagePipeline,
+            current: viewModel.bannerVideoURL,
+            onPick: { post in viewModel.setVideoBanner(post) }
+        ))
     }
 }
 
