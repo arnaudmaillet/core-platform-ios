@@ -279,3 +279,67 @@ struct RowMediaTravelTests {
         #expect(!indicator.gestureRecognizer(indicator.scrubGesture, shouldBeRequiredToFailBy: UITapGestureRecognizer()))
     }
 }
+
+/// Any horizontal scroller with room towards the drag keeps it (#1373): the
+/// place page's Popular shelf is a plain horizontal collection view, and its
+/// scroll-back ran together with the page's close.
+@MainActor
+struct HorizontalScrollerRoutingTests {
+    /// A host with a horizontal row at the top and a vertical list below.
+    private func host() -> (UIView, UIScrollView, UIScrollView) {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let row = UIScrollView(frame: CGRect(x: 0, y: 100, width: 402, height: 200))
+        row.contentSize = CGSize(width: 1600, height: 200)
+        let list = UIScrollView(frame: CGRect(x: 0, y: 320, width: 402, height: 554))
+        list.contentSize = CGSize(width: 402, height: 3000)
+        host.addSubview(row)
+        host.addSubview(list)
+        return (host, row, list)
+    }
+
+    @Test func aRowScrolledPastItsStartKeepsARightwardDrag() {
+        let (host, row, _) = host()
+        row.contentOffset.x = 500
+        #expect(!MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: CGPoint(x: 200, y: 200), in: host, towardsPageDelta: -1
+        ), "the shelf's scroll-back went to the page's close")
+    }
+
+    @Test func aRowAtItsStartLetsARightwardDragThrough() {
+        let (host, row, _) = host()
+        row.contentOffset.x = 0
+        #expect(MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: CGPoint(x: 200, y: 200), in: host, towardsPageDelta: -1
+        ), "a shelf at its first card kept a drag it cannot use")
+    }
+
+    @Test func aLeftwardDragNeedsRoomBeforeTheEnd() {
+        let (host, row, _) = host()
+        row.contentOffset.x = 1600 - 402
+        #expect(MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: CGPoint(x: 200, y: 200), in: host, towardsPageDelta: 1
+        ))
+        row.contentOffset.x = 300
+        #expect(!MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: CGPoint(x: 200, y: 200), in: host, towardsPageDelta: 1
+        ))
+    }
+
+    /// A vertical list has no horizontal travel: it never keeps a sideways drag.
+    @Test func aVerticalListIsNoTenant() {
+        let (host, _, list) = host()
+        list.contentOffset.y = 800
+        #expect(MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: CGPoint(x: 200, y: 600), in: host, towardsPageDelta: -1
+        ))
+    }
+
+    /// The asker's own scroller is not a tenant.
+    @Test func theAskersOwnScrollerIsIgnored() {
+        let (host, row, _) = host()
+        row.contentOffset.x = 500
+        #expect(MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: CGPoint(x: 200, y: 200), in: host, towardsPageDelta: -1, ignoring: row
+        ))
+    }
+}

@@ -56,8 +56,12 @@ public enum MediaCarouselTouchRouting {
     ///
     /// A touch that lands on no carousel passes through: that is the answer for
     /// the whole of a screen with no collection on it, and for a text post.
+    ///
+    /// `ignoring` is the asker's own scroller, when the asker is itself a
+    /// horizontal pager deciding whether to take the drag — its own travel is
+    /// not a tenant's.
     public static func dragPassesThroughCarousel(
-        at point: CGPoint, in host: UIView, towardsPageDelta pageDelta: Int
+        at point: CGPoint, in host: UIView, towardsPageDelta pageDelta: Int, ignoring own: UIScrollView? = nil
     ) -> Bool {
         // ⚠️ A VIEW THAT OWNS ITS HORIZONTAL DRAG KEEPS IT (#771): the
         // carousel's page indicator sits BESIDE the carousel, not inside it,
@@ -68,7 +72,40 @@ public enum MediaCarouselTouchRouting {
                .contains(where: { $0 is HorizontalDragOwning }) {
             return false
         }
+        // ⚠️ ANY HORIZONTAL SCROLLER WITH ROOM TOWARDS THE DRAG KEEPS IT
+        // (#1373): a shelf of cards is a plain horizontal collection view, not
+        // a carousel, and the walk below passed its scroll-back straight to
+        // the place page's close — both ran at once. The rule is the pager's
+        // (`HorizontalPagerScrollView.ownsHorizontalDrag`): content with
+        // travel in the drag's direction scrolls; at its start, the drag
+        // passes through to the surface's dismissal.
+        if let hit = host.hitTest(point, with: nil),
+           sequence(first: hit, next: { $0.superview }).prefix(while: { $0 !== host })
+               .contains(where: { view in
+                   guard let scroller = view as? UIScrollView, scroller !== own else { return false }
+                   return hasTravel(scroller, towardsPageDelta: pageDelta)
+               }) {
+            return false
+        }
         guard let carousel = carousel(at: point, in: host) else { return true }
         return !carousel.hasTravel(towardsPageDelta: pageDelta)
+    }
+
+    /// Movement a scroller needs left before it counts as having travel —
+    /// the pager's own slack, so a rubber-band's last point is no tenant.
+    static let travelSlack: CGFloat = 1
+
+    /// Whether `scrollView` can still move horizontally the way a drag asking
+    /// for `pageDelta` pushes it. Pages run opposite to the finger: a
+    /// rightward drag (`-1`) brings content back towards its start, so it
+    /// needs offset behind the current one; a leftward drag (`+1`) needs room
+    /// before the end. A vertical list (no horizontal overflow) never has any.
+    static func hasTravel(_ scrollView: UIScrollView, towardsPageDelta pageDelta: Int) -> Bool {
+        let inset = scrollView.adjustedContentInset
+        let start = -inset.left
+        let end = scrollView.contentSize.width + inset.right - scrollView.bounds.width
+        guard end - start > travelSlack, scrollView.isScrollEnabled else { return false }
+        let offset = scrollView.contentOffset.x
+        return pageDelta < 0 ? offset > start + travelSlack : offset < end - travelSlack
     }
 }
