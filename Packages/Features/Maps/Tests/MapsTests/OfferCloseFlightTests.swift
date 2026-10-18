@@ -93,9 +93,10 @@ struct OfferCloseFlightTests {
         var events: [String] = []
 
         func attach(to sheet: CountryUnlockSheetViewController) {
-            sheet.onClosing = { [unowned self] in events.append("closing") }
-            sheet.onCloseCancelled = { [unowned self] in events.append("cancelled") }
-            sheet.onDismissed = { [unowned self] in events.append("dismissed") }
+            // Weak: the sheet can call back after the recorder is gone.
+            sheet.onClosing = { [weak self] in self?.events.append("closing") }
+            sheet.onCloseCancelled = { [weak self] in self?.events.append("cancelled") }
+            sheet.onDismissed = { [weak self] in self?.events.append("dismissed") }
         }
     }
 

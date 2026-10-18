@@ -14,8 +14,13 @@ import Testing
 private final class StaleRevisit {
     private var offset: TimeInterval = 0
     /// Moves only when the test says so, never with the wall (#1042).
-    private(set) lazy var cache = ProfileCache(now: { [unowned self] in
-        Date(timeIntervalSinceReferenceDate: 800_000_000).addingTimeInterval(self.offset)
+    ///
+    /// ⚠️ WEAK, NOT UNOWNED: the cache — or a task it started — can outlive
+    /// this fixture, and an unowned read then traps the whole test process,
+    /// blamed on whichever parallel test is running (#1367's red run). Past
+    /// the fixture's life the clock stands still at its last reading.
+    private(set) lazy var cache = ProfileCache(now: { [weak self] in
+        Date(timeIntervalSinceReferenceDate: 800_000_000).addingTimeInterval(self?.offset ?? 0)
     })
 
     func pastTheWindow() { offset = LocalStorePolicy.profileScreenRevalidation + 1 }
