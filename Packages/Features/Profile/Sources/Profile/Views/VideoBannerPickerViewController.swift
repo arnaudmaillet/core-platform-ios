@@ -16,7 +16,8 @@ final class VideoBannerPickerViewController: UIViewController {
 
     private(set) var posts: [GalleryPost] = []
     private var collectionView: UICollectionView!
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    /// The branded loader (#1329), never a stock spinner (`StockSpinnerGuardTests`).
+    private let spinner = AppLoaderView(size: .medium)
     private let emptyLabel = UILabel()
 
     init(
