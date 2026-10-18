@@ -787,6 +787,8 @@ final class PostDetailViewController: UIViewController {
 
     #if DEBUG
     func debugSend(_ text: String) { composeBar.debugSend(text) }
+    /// The boost button's spend, as its tap hands it over.
+    func debugBoost(_ spend: WalletStakeSpend) { composeBar.onBoost?(spend) }
     #endif
 
     /// The composer of a post that does not exist yet.
@@ -887,7 +889,9 @@ final class PostDetailViewController: UIViewController {
             guard let self else { return }
             // A guest signs up first; the boost then lands as asked.
             MemberGates.perform(.like, from: self) { [weak self] in
-                guard let self, let wallet = self.wallet else { return }
+                // A sign-up that finished after the post went unavailable
+                // (#1404) has nothing left to boost.
+                guard let self, self.showsPostActions, let wallet = self.wallet else { return }
                 // A DRAFT is not a post yet, and a boost has nothing to land on —
                 // said, rather than spent against an id that does not exist.
                 guard let postID = self.viewModel.postID else {
@@ -1205,7 +1209,7 @@ final class PostDetailViewController: UIViewController {
             top: max(0, top),
             bottom: max(0, bottomInset) + engagedFooterClearance
         )
-        composerBackdrop.isHidden = false
+        updateComposerBackdropVisibility()
         // Z-ORDER, load-bearing: the scroll view is added AFTER the compose
         // bar at build time (harmless while it ended at the bar's top), so
         // at full height it would sit ABOVE the footer and swallow every
@@ -1279,6 +1283,7 @@ final class PostDetailViewController: UIViewController {
             refreshControl.endRefreshing()
             statusView.isHidden = true
             collectionView.isHidden = false
+            setPostActionsShown(true)
             configure(model)
         case .failed(let message):
             spinner.stopAnimating()
@@ -1298,14 +1303,55 @@ final class PostDetailViewController: UIViewController {
             statusView.isHidden = false
         case .unavailable(let message):
             // A draft, a deleted post or one withheld from this viewer
-            // (#447): the same block, without Try Again.
+            // (#447): the same block, without Try Again — and nothing left
+            // to act on it with (#1404).
             spinner.stopAnimating()
             refreshControl.endRefreshing()
             collectionView.isHidden = true
+            setPostActionsShown(false)
             statusView.configure(symbolName: "eye.slash", title: message)
             if composerBackdrop.superview === view { view.insertSubview(statusView, belowSubview: composerBackdrop) }
             statusView.isHidden = false
         }
+    }
+
+    /// Whether the post's actions are on screen: the composer — its field,
+    /// the stake (like) bubble, the boost and the rail slot — and the engaged
+    /// footer's band under it. (The post section's like goes with the stream,
+    /// which the unavailable block hides.)
+    ///
+    /// A post the server shows the viewer no more (#447) has none (#1404):
+    /// a like or a comment would only be refused. The way back stays, and it
+    /// is the host's — the back button, the sheet's grabber. IN PLACE: a post
+    /// that turns unavailable while shown (its revalidation answers
+    /// not-found) loses them where it stands, as one that opens unavailable
+    /// never shows them.
+    private var showsPostActions = true
+
+    private func setPostActionsShown(_ shown: Bool) {
+        guard shown != showsPostActions else { return }
+        showsPostActions = shown
+        if !shown {
+            // What was being typed has nowhere to go: the keyboard leaves
+            // with the field, and the reply it was aimed at with it.
+            composeBar.endEditing(true)
+            clearReplyState()
+            // A boost still in its undo window keeps its toast, Undo live; if
+            // it is sent, the server refuses the stake and the outbox's
+            // answer puts it back (`settleCommittedStake`, #676).
+        }
+        composeBar.isHidden = !shown
+        updateComposerBackdropVisibility()
+        // Back, the band's material comes back with it: the entrance builds
+        // one only for a band that is showing, and this one was not.
+        if shown { setComposerEntranceState(offstage: composeBar.alpha == 0) }
+    }
+
+    /// The footer band shows in the engaged context (`setEngagedInsets`)
+    /// under a composer that is shown — never under one an unavailable post
+    /// took away (#1404).
+    private func updateComposerBackdropVisibility() {
+        composerBackdrop.isHidden = !showsPostActions || engagedStreamInsets == nil
     }
 
     private func configure(_ model: PostDetailDisplayModel) {
