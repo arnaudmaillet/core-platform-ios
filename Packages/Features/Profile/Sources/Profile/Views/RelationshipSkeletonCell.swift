@@ -104,12 +104,11 @@ final class RelationshipSkeletonCell: UICollectionViewListCell {
 /// The footer row under the last loaded page: a spinner that says the list is
 /// continuing, not that it has ended.
 final class RelationshipPagingCell: UICollectionViewListCell {
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
-        spinner.color = .tertiaryLabel
         spinner.constrain(in: contentView) { parent in
             spinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
             spinner.topAnchor.constraint(equalTo: parent.topAnchor, constant: Spacing.lg)

@@ -189,7 +189,7 @@ final class PostDetailViewController: UIViewController {
     /// and hosted by the stream's leading cell.
     private let postSectionHost = UIView()
     private let refreshControl = AppRefreshControl()
-    private let spinner = UIActivityIndicatorView(style: .large)
+    private let spinner = AppLoaderView(size: .large)
     /// A failed first load, with its way out (#797).
     private let statusView = EmptyStateView()
 

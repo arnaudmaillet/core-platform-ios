@@ -72,7 +72,7 @@ final class SearchViewController: UIViewController {
     private let searchField = UISearchTextField()
 
     private var collectionView: UICollectionView!
-    private let spinner = UIActivityIndicatorView(style: .medium)
+    private let spinner = AppLoaderView(size: .medium)
     private let statusView = EmptyStateView()
 
     private var dataSource: UICollectionViewDiffableDataSource<SearchSection, SearchItem>!

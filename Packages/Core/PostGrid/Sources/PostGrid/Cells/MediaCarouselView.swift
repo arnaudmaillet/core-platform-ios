@@ -1330,7 +1330,7 @@ final class CarouselPageView: UIView {
     /// page is what carries the answer, exactly as it carries its stopped mark.
     ///
     /// Minted on first use: most pages never wait long enough to show one.
-    private var loader: UIActivityIndicatorView?
+    private var loader: AppLoaderView?
 
     /// The surface this page is REALLY holding — both halves again, for the
     /// same reason `hosts(_:)` asks both: a weak reference outlives the view
@@ -1494,11 +1494,9 @@ final class CarouselPageView: UIView {
     func setLoadingVisible(_ visible: Bool) {
         guard visible || loader != nil else { return }
         let spinner = loader ?? {
-            let view = UIActivityIndicatorView(style: .medium)
-            // ⚠️ WHITE, not `.label`: the ground here is a photograph or black,
-            // never a theme, so a semantic colour would resolve against a
-            // background this view does not have. Same rule as the card's own.
-            view.color = .white
+            let view = AppLoaderView(size: .medium)
+            // The branded loader (#1329) wears its own tones, whatever the
+            // ground — a photograph or black, never a theme.
             view.hidesWhenStopped = true
             view.sizeToFit()
             view.center = CGPoint(x: bounds.midX, y: bounds.midY)

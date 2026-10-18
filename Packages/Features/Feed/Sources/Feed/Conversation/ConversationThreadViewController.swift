@@ -83,7 +83,7 @@ final class ConversationThreadViewController: UIViewController {
     /// screen rather than to the content, so it is where the reader is
     /// looking — at the top — whatever the scroll. Turns only while a page
     /// is out; an idle spinner redraws the screen every frame (#580).
-    private let olderSpinner = UIActivityIndicatorView(style: .medium)
+    private let olderSpinner = AppLoaderView(size: .medium)
     private let peerPill = SnapAuthorIdentityView()
     /// The conversation's mute (#719), at the bar's trailing corner beside
     /// the points badge: `bell`, or `bell.slash` once muted. Hidden while
@@ -114,6 +114,11 @@ final class ConversationThreadViewController: UIViewController {
     /// The clock a rise is timed on. Tests stop it, so whether a delivery
     /// lands mid-rise never hangs on how fast the test runs.
     var mediaTime: () -> CFTimeInterval = CACurrentMediaTime
+
+    /// How long a message may take to send before its row shows the loader
+    /// (the owner, 2026-10-17): on a good connection a send lands within it
+    /// and the time simply comes in — a loader there is noise. Tests set 0.
+    var sendingLoaderDelay: TimeInterval = 0.4
     /// The phase held back until a rise lands; the newest one wins.
     private var deferredPhase: ConversationThreadPhase?
     /// Delivered messages whose pending row already played the delivery
@@ -840,7 +845,6 @@ final class ConversationThreadViewController: UIViewController {
 
     private func configureOlderSpinner() {
         olderSpinner.hidesWhenStopped = true
-        olderSpinner.color = .secondaryLabel
         olderSpinner.isUserInteractionEnabled = false
         olderSpinner.constrain(in: view) { parent in
             olderSpinner.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
@@ -860,10 +864,16 @@ final class ConversationThreadViewController: UIViewController {
     // MARK: - Render
 
     private func render(_ phase: ConversationThreadPhase) {
-        if let wait = riseStillLanding(before: phase) {
-            // The server answered mid-rise: the spinner goes at once — the
-            // row it sits in is swapped once the rise has landed.
-            playEarlyDeliveries(in: phase)
+        // ⚠️ A DELIVERY PLAYS ON THE PENDING ROW ON SCREEN, and the delivered
+        // row takes its place only once it has played: the loader out, THEN
+        // the time in (the owner, 2026-10-17). Played on the delivered row
+        // instead, a freshly dequeued cell ran it before it was on screen —
+        // the time came in over the loader — and a swap mid-reveal showed
+        // the time at once. Mid-rise, the swap waits for the rise as well.
+        let rise = riseStillLanding(before: phase)
+        let delivering = playEarlyDeliveries(in: phase)
+        if rise != nil || delivering {
+            let wait = max(rise ?? 0, delivering ? ThreadRowCell.deliveryRevealDuration : 0)
             let pending = deferredPhase
             deferredPhase = phase
             guard pending == nil else { return }
@@ -1057,6 +1067,7 @@ final class ConversationThreadViewController: UIViewController {
         cell.mediaView.configure(message.media, delivery: message.delivery, pipeline: imagePipeline)
         // A text message of the viewer's shows whether it is on its way
         // (#719); a failed one is sent again by a tap.
+        cell.loaderDelay = sendingLoaderDelay
         cell.setDelivery(
             message.isMine && message.media == nil ? message.delivery : nil,
             time: Self.timeFormatter.string(from: message.sentAt)
@@ -1097,9 +1108,12 @@ final class ConversationThreadViewController: UIViewController {
         renderedRows = renderedRows.filter { messagesByID[$0.key] != nil }
     }
 
-    /// The pending rows a held-back phase delivers play their delivery now.
-    private func playEarlyDeliveries(in phase: ConversationThreadPhase) {
-        guard case .content(let messages) = phase else { return }
+    /// The pending rows a held-back phase delivers play their delivery now;
+    /// true when one did.
+    @discardableResult
+    private func playEarlyDeliveries(in phase: ConversationThreadPhase) -> Bool {
+        guard case .content(let messages) = phase else { return false }
+        var played = false
         var pending = messagesByID.values.filter { $0.isMine && $0.delivery == .sending && $0.media == nil }
         for message in messages where message.isMine && message.delivery == .sent && messagesByID[message.id] == nil
             && !deliveredEarly.contains(message.id) {
@@ -1110,7 +1124,9 @@ final class ConversationThreadViewController: UIViewController {
                   let cell = collectionView.cellForItem(at: path) as? ThreadRowCell else { continue }
             cell.playDelivered(revealing: Self.timeFormatter.string(from: message.sentAt), carryingSpinner: false)
             deliveredEarly.insert(message.id)
+            played = true
         }
+        return played
     }
 
     /// Delivered messages that took a pending row's place in this render.

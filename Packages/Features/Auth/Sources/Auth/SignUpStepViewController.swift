@@ -82,7 +82,7 @@ class SignUpStepViewController: BottomAnchoredTableViewController {
         guard trailingRows.indices.contains(index) else { return }
         let row = trailingRows[index]
         if working {
-            let spinner = UIActivityIndicatorView(style: .medium)
+            let spinner = AppLoaderView(size: .medium)
             spinner.startAnimating()
             row.accessoryView = spinner
         } else {

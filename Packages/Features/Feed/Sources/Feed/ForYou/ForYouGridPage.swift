@@ -1305,7 +1305,7 @@ final class ForYouGridPage: UIView {
     /// scroll. The footer adds its own space above that.
     private static let footerHeight: CGFloat = 56
 
-    private let pagingSpinner = UIActivityIndicatorView(style: .medium)
+    private let pagingSpinner = AppLoaderView(size: .medium)
     private var isPaging = false
 
     /// Shows or hides the next-page spinner beneath the last tile.
