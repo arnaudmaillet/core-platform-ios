@@ -341,8 +341,11 @@ public final class ShopStorefrontViewController: UIViewController {
     /// it is used instead.
     func itemMenu(_ item: ProfileItem, owned: Bool) -> UIMenu {
         if owned {
-            let used = UIAction(title: "Owned", image: UIImage(systemName: "checkmark.circle")) { _ in }
-            used.attributes = .disabled
+            // A label, not an action: disabled in its own arguments, which is
+            // what `EmptyActionGuardTests` reads (#801).
+            let used = UIAction(
+                title: "Owned", image: UIImage(systemName: "checkmark.circle"), attributes: .disabled
+            ) { _ in }
             used.subtitle = item.whereToUse
             return UIMenu(title: item.shopTitle, children: [used])
         }
