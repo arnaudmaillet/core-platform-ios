@@ -568,7 +568,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         installBottomChromeWhenAppearing(hasActiveFlight: false,
                                          handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
             guard let self else { return }
-            selectorAccessory?.install(into: tabBarController,
+            selectorAccessory?.install(into: tabBarController, owner: self,
                                    // ⚠️ THE TAB ROOT ONLY. A pushed profile keeps
                                    // `hidesBottomBarWhenPushed`, so there is no bar
                                    // under it to collapse — and the behaviour is
@@ -688,7 +688,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
         // and a committed close install from `viewWillAppear` and find nothing
         // to do here.
-        selectorAccessory?.install(into: tabBarController,
+        selectorAccessory?.install(into: tabBarController, owner: self,
                                    minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
                                    alongside: transitionCoordinator)
         #if DEBUG
@@ -2424,7 +2424,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             // no band to remove. The next `viewWillAppear` puts it up.
             guard !wasPlaced, isShownOnScreen else { return }
             // Arrived while on screen: up now, not at the next appearance.
-            selectorAccessory?.install(into: tabBarController,
+            selectorAccessory?.install(into: tabBarController, owner: self,
                                        minimizesOnScroll: trayPlacement == .aboveBottomSafeArea,
                                        alongside: nil)
             if navigationController?.topViewController === self {

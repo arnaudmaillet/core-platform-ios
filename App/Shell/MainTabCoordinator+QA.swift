@@ -49,6 +49,16 @@ extension MainTabCoordinator {
                 self?.selectTab(AppTab.allCases[tabIndex])
             }
         }
+        // `-switch-tab-after <seconds> <index>`: the same, at a time of the
+        // run's choosing — after a scripted sign-in, say (`-guest
+        // -guest-sign-in-after`), when the member's tabs exist.
+        if let index = arguments.firstIndex(of: "-switch-tab-after"), index + 2 < arguments.count,
+           let delay = Double(arguments[index + 1]), let tabIndex = Int(arguments[index + 2]),
+           AppTab.allCases.indices.contains(tabIndex) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                self?.selectTab(AppTab.allCases[tabIndex])
+            }
+        }
         // `-open-feed` pushes the open-ended timeline — the `AppRoute.feed`
         // path, which no longer has a bar button behind it. Deferred a tick:
         // at `start()` the shell isn't the window root yet, so an immediate

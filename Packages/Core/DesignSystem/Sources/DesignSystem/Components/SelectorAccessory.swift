@@ -63,6 +63,9 @@ public final class SelectorAccessoryHost: UIView {
     public typealias Options = SelectorAccessoryOptions
 
     private let options: Options
+    /// The accessory this view is the content of — what the shell's sweep
+    /// reads the owner off (`SelectorAccessory.removeOrphan(from:)`).
+    fileprivate weak var accessory: SelectorAccessory?
 
     /// The gap between a trailing control and the container.
     ///
@@ -606,6 +609,20 @@ public final class SelectorAccessory {
     private var holdsMinimize = false
     /// The store's generation the arm was taken in (`MinimizeBehaviourStore.reconcile`).
     private var minimizeGeneration = 0
+    /// The tab bar controller this band was last put into.
+    ///
+    /// ⚠️ REMOVED FROM IT EVEN WHEN THE OWNER NO LONGER HAS ONE. A sign-out
+    /// replaced the Messages stack and took the Messages tab out of the bar
+    /// in the same turn; the stack's transition is deferred to the next
+    /// layout, so the inbox's `viewWillDisappear` arrived detached —
+    /// `tabBarController` nil — and `remove(from: nil)` did nothing. The band
+    /// stayed over the guest's bar for good (the owner's device, 2026-10-18).
+    private weak var installedController: UITabBarController?
+    /// The screen that put the band up, the one it belongs to.
+    private weak var owner: UIViewController?
+    /// Whether an owner was ever named: a band installed without one is not
+    /// the net's to judge.
+    private var knowsOwner = false
 
     /// Gives the shell its own collapse behaviour back when no band is up —
     /// what a screen without one calls as it appears (#758).
@@ -623,6 +640,7 @@ public final class SelectorAccessory {
                 options: Options = Options()) {
         self.options = options
         hostView = SelectorAccessoryHost(strip: strip, trailing: trailing, options: options)
+        hostView.accessory = self
     }
 
     /// - Parameter minimizesOnScroll: arms the tab bar's scroll-driven
@@ -647,10 +665,18 @@ public final class SelectorAccessory {
     ///   writes its host's alpha (see `TabBarRevealPolicy`). An unanimated
     ///   form existed for a while, to land the band "at once" with a bar held
     ///   back for the landing by hand; that rule is gone and so is the form.
+    /// `owner` is the screen putting the band up: a band whose owner has left
+    /// the screen is an orphan the shell takes down (`removeOrphan(from:)`).
     public func install(into controller: UITabBarController?,
+                        owner: UIViewController? = nil,
                         minimizesOnScroll: Bool = false,
                         alongside coordinator: UIViewControllerTransitionCoordinator? = nil) {
         guard let controller else { return }
+        installedController = controller
+        if let owner {
+            self.owner = owner
+            knowsOwner = true
+        }
         // ⚠️ **"ALREADY OURS" IS NOT THE SAME AS "ALREADY WORKING", AND THE
         // GUARD USED TO CONFLATE THEM.** Setting `bottomAccessory` during a
         // PUSH that hides the tab bar leaves the accessory assigned and never
@@ -722,7 +748,8 @@ public final class SelectorAccessory {
     /// captured from somewhere else.
     public func remove(from controller: UITabBarController?,
                        alongside coordinator: UIViewControllerTransitionCoordinator? = nil) {
-        guard let controller else { return }
+        // The owner's own, or — detached already — the one it went into.
+        guard let controller = controller ?? installedController else { return }
         // ⚠️ **RELEASED WHETHER OR NOT THE BAND IS STILL OURS, AND THE IDENTITY
         // GUARD BELOW IS WHY.** This instance armed the minimize, so this
         // instance gives it up — even on the hand-over path where the newcomer
@@ -773,6 +800,25 @@ public final class SelectorAccessory {
     /// pass here, unanimated, means the block only ever moves views that
     /// already have a place — which is what "riding the transition" was meant
     /// to be.
+    /// ⚠️ THE SHELL'S SAFETY NET, after anything that swaps screens under the
+    /// bar without their appearance callbacks being trustworthy — a sign-in
+    /// or a sign-out (`MainTabCoordinator.viewerDidChange`). The band belongs
+    /// to the screen on show; one whose owner is gone, or no longer in the
+    /// window, is taken down. Returns whether it took one down.
+    @discardableResult
+    public static func removeOrphan(from controller: UITabBarController?) -> Bool {
+        guard let controller,
+              let host = controller.bottomAccessory?.contentView as? SelectorAccessoryHost,
+              let accessory = host.accessory
+        else { return false }
+        guard accessory.knowsOwner, accessory.owner?.viewIfLoaded?.window == nil else { return false }
+        SelectorAccessoryHost.emit("orphan removed me=\(shortID(host))", options: accessory.options)
+        accessory.remove(from: controller)
+        // A band no screen owns any more holds no collapse either.
+        MinimizeBehaviourStore.reconcile(controller)
+        return true
+    }
+
     private static func settlePendingLayout(of controller: UITabBarController) {
         guard controller.isViewLoaded, controller.view.window != nil else { return }
         UIView.performWithoutAnimation { controller.view.layoutIfNeeded() }

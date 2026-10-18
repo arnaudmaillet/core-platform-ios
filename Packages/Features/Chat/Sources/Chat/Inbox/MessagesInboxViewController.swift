@@ -284,7 +284,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         installBottomChromeWhenAppearing(hasActiveFlight: false,
                                          handsOver: tabBarController?.bottomAccessory != nil) { [weak self] in
             guard let self else { return }
-            selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+            selectorAccessory?.install(into: tabBarController, owner: self, minimizesOnScroll: true,
                                        alongside: transitionCoordinator)
         }
 
@@ -303,7 +303,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     override func viewDidAppear(_ animated: Bool) {
         // ⚠️ THE MINIMIZE NEEDS A SCROLLER NAMED, or arming it does nothing
         // here and gives every other tab a collapsing bar for free.
-        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true,
+        selectorAccessory?.install(into: tabBarController, owner: self, minimizesOnScroll: true,
                                    alongside: transitionCoordinator)
         super.viewDidAppear(animated)
         // A tab root always shows the bar (#769) — search mode hides it on
@@ -794,7 +794,7 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
         // The band comes back with the bar it left with. `minimizesOnScroll`
         // is re-armed here for the same reason it is armed on appearing: the
         // remove restored the shell's own behaviour on the way out.
-        selectorAccessory?.install(into: tabBarController, minimizesOnScroll: true)
+        selectorAccessory?.install(into: tabBarController, owner: self, minimizesOnScroll: true)
         UIView.animate(withDuration: 0.2) {
             results?.view.alpha = 0
         } completion: { _ in

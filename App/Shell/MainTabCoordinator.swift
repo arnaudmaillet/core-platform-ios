@@ -203,11 +203,32 @@ final class MainTabCoordinator: NSObject, Coordinator {
             (tab as? ExploreTabCoordinator)?.viewerDidChange()
         }
         profileMenuOverlay.isContextMenuInteractionEnabled = isMember
+        sweepOrphanedAccessory()
         loadAvatar()
         refreshUnreadBadge()
         Task { [weak self] in
             await self?.profileSwitcher?.reload()
             self?.rebuildSwitcherMenu()
+        }
+    }
+
+    /// ⚠️ NO BAND OUTLIVES ITS SCREEN ACROSS A CHANGE OF VIEWER. A sign-out
+    /// swaps the account's stacks and takes tabs out of the bar in one turn,
+    /// and the screens going away hear of it late or detached: the Messages
+    /// band stayed over the guest's bar for good (the owner's device,
+    /// 2026-10-18). `SelectorAccessory` now removes itself from the
+    /// controller it went into; this is the net under it — once the swapped
+    /// stacks have laid out, and again after their transitions, a band whose
+    /// screen is no longer on show is taken down.
+    private func sweepOrphanedAccessory() {
+        let controller = tabBarController
+        DispatchQueue.main.async { [weak controller] in
+            guard let controller else { return }
+            controller.view.layoutIfNeeded()
+            SelectorAccessory.removeOrphan(from: controller)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak controller] in
+            SelectorAccessory.removeOrphan(from: controller)
         }
     }
 
