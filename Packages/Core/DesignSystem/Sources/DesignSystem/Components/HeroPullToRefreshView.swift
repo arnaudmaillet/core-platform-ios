@@ -42,6 +42,8 @@ public final class HeroPullToRefreshView: UIView {
     private var isRefreshing = false
     /// The tick as the pull crosses the threshold (#1354).
     private let thresholdFeedback = PullThresholdFeedback()
+    /// A refresh just ended and the list is folding back (#1400).
+    private var isSettling = false
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
@@ -70,6 +72,14 @@ public final class HeroPullToRefreshView: UIView {
     /// threshold tick (#1354) — a bounce-back drifting past it says nothing.
     public func setPull(_ distance: CGFloat, isTracking: Bool = false) {
         guard !isRefreshing else { return }
+        // ⚠️ THE FOLD-BACK IS NOT A PULL (#1400): once the ring's fade ended,
+        // the loader took the list still closing for a pull and drew its
+        // first pills for a frame or two. It follows again from rest, or
+        // from a new drag.
+        if isSettling {
+            guard distance <= 0 || isTracking else { return }
+            isSettling = false
+        }
         // The mark is drawn out by the pull, rather than waiting to appear.
         loader.setProgress(min(max(distance / Self.threshold, 0), 1))
         if distance > 0, isTracking, !thresholdFeedback.isArmed { thresholdFeedback.prepare() }
@@ -97,6 +107,7 @@ public final class HeroPullToRefreshView: UIView {
     public func endRefreshing() {
         guard isRefreshing else { return }
         isRefreshing = false
+        isSettling = true
         // Ring → disc → square, then a fade.
         loader.stopAnimating()
     }
