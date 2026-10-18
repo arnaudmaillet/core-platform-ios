@@ -1168,6 +1168,16 @@ final class AppContainer {
     private static let unavailableIconCatalog: AnimatedIconCatalog? = nil
     #endif
 
+    /// Animated avatars (#1358): which avatar has a sprite sheet. The mock
+    /// gives about half of its faces one, cut from the map's baked clip
+    /// previews in the geometry the backend is asked to bake
+    /// (core-platform-backend#945). Off the mock, none until that ships.
+    @MainActor
+    func installAnimatedAvatars() {
+        guard environment == .mock, !Self.previewsUnavailable else { return }
+        AnimatedAvatars.shared.resolver = MockAnimatedAvatarResolver(catalog: Self.mapPreviewCatalog)
+    }
+
     /// Baked from real clips by `Tools/IconBaker` — 24 frames at a 172px cell,
     /// which is the 56pt media face at @3x plus the contract's 2px gutter.
     private static let mapPreviewCatalog = AnimatedIconCatalog(
@@ -1832,5 +1842,28 @@ extension SessionManager: @retroactive SessionReauthenticating {
         } catch AuthError.wrongSecondStepCode {
             throw StepUpError.wrongCode
         }
+    }
+}
+
+/// The mock's animated avatars (#1358): a stable half of the faces, each the
+/// square sheet cut from one clip preview — the same face, the same clip.
+private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked Sendable {
+    let catalog: AnimatedIconCatalog
+
+    func sheet(for avatarURL: URL) async -> AnimatedIconSheet? {
+        let key = Self.stableHash(avatarURL.absoluteString)
+        guard key % 2 == 0 else { return nil }
+        let clips = await MainActor.run { catalog.ids.filter { $0.hasSuffix("-0") } }
+        guard !clips.isEmpty,
+              case .sheet(let source)? = try? await catalog.art(for: clips[Int(key / 2) % clips.count])
+        else { return nil }
+        return await Task.detached(priority: .utility) {
+            AnimatedAvatars.bakeSquareSheet(from: source)
+        }.value
+    }
+
+    /// FNV-1a: the same half every launch, unlike `hashValue`.
+    private static func stableHash(_ text: String) -> UInt64 {
+        text.utf8.reduce(14_695_981_039_346_656_037) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
     }
 }

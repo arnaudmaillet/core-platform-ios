@@ -29,6 +29,8 @@ import UIKit
 /// With no friends it is zero tall — no heading over nothing.
 @MainActor
 final class FriendsStoriesRow: UIView, GridLeadSection {
+    /// Each animated face plays once on its first display in this row (#1358).
+    let animationScope = AnimatedAvatarScope()
     /// The height the row needs at `width` with `friends` faces.
     static func height(forWidth width: CGFloat, friends: Int) -> CGFloat {
         guard friends > 0 else { return 0 }
@@ -124,7 +126,7 @@ final class FriendsStoriesRow: UIView, GridLeadSection {
                 withReuseIdentifier: ForYouStoryCell.reuseID, for: indexPath
             ) as! ForYouStoryCell
             guard let self, let story = stories.first(where: { $0.authorID == id }) else { return cell }
-            cell.configure(with: story, imagePipeline: imagePipeline)
+            cell.configure(with: story, imagePipeline: imagePipeline, animationScope: self.animationScope)
             cell.isDiscConcealed = id == concealedStory
             return cell
         }

@@ -196,6 +196,7 @@ public final class PostAuthorBandView: UIView {
 
     private let avatar = MonogramAvatarView(diameter: PostAuthorBandView.avatarDiameter)
     private let avatarImage = AvatarImageView()
+    private lazy var animation = AnimatedAvatarPlayer.attach(to: avatarImage)
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let menuButton = PostActionPillView.makeGlyphControl(systemName: "ellipsis", label: "More actions")
@@ -357,6 +358,9 @@ public final class PostAuthorBandView: UIView {
         nameLabel.text = model.name
         renderHandleLine()
         avatar.setMonogram(model.monogram)
+        // A post card's author is large enough to play an animated avatar,
+        // on scrolling into view (#1358).
+        animation.setAvatar(showsIdentity ? model.avatarURL : nil)
 
         guard showsIdentity, let url = model.avatarURL, let imagePipeline else { return }
         // Decoded at the avatar's bucket, not at 1200 px (#894).

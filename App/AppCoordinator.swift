@@ -80,6 +80,8 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         container.memberGate.presenter = self
         window.rootViewController = LaunchViewController()
         window.makeKeyAndVisible()
+        // Which avatars have a sprite sheet (#1358).
+        container.installAnimatedAvatars()
         // The blur behind the status bar, on every screen and through every
         // transition: one band in the window, over everything the app draws —
         // see `StatusBarBlurView`. Root swaps replace the root's view only.
