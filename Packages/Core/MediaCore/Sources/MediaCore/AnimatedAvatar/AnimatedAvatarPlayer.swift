@@ -228,13 +228,18 @@ public final class AnimatedAvatarPlayer: UIView {
     // MARK: Playing
 
     private func requestPlay() {
-        guard let sheet, !isPlaying,
-              min(bounds.width, bounds.height) >= Self.minimumDiameter,
-              !MotionPreference.stillsDecoration,
-              concurrency.playing < Self.maxConcurrent
-        else { return }
+        guard let sheet else { return refuse("no sheet") }
+        guard !isPlaying else { return refuse("already playing") }
+        guard min(bounds.width, bounds.height) >= Self.minimumDiameter else {
+            return refuse("under \(Self.minimumDiameter) pt: \(bounds.size)")
+        }
+        guard !MotionPreference.stillsDecoration else {
+            return refuse("decoration stilled (reduce motion \(MotionPreference.reducesMotion), idle calm \(IdleCalm.isCalm))")
+        }
+        guard concurrency.playing < Self.maxConcurrent else { return refuse("\(concurrency.playing) already playing") }
         concurrency.playing += 1
         isPlaying = true
+        playCount += 1
         // The sheets play on a shared clock: shift so frame 0 is the one now.
         sheetView.setArt(.sheet(sheet), phase: 0)
         let now = sheetView.displayedFrame ?? 0
@@ -246,6 +251,19 @@ public final class AnimatedAvatarPlayer: UIView {
             guard let self, self.playToken == token else { return }
             self.stop()
         }
+    }
+
+    /// How many times it has started playing — what a test reads: a play
+    /// lasts one loop (a test sheet's is 0.2 s), so `isPlaying` can have
+    /// come and gone before a starved test looks again.
+    private(set) var playCount = 0
+
+    /// Why the last asked-for play was refused, nil when none was — what a
+    /// failing test prints.
+    private(set) var lastRefusal: String?
+
+    private func refuse(_ reason: String) {
+        lastRefusal = reason
     }
 
     /// Back to the still — the last frame, which is where the loop ended.

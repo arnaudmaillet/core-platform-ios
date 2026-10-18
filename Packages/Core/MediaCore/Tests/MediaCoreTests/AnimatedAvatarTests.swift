@@ -110,7 +110,7 @@ struct AnimatedAvatarTests {
         let player = await hosted(Self.face, registry: makeRegistry(), in: window)
         #expect(!player.isHidden, "an animated avatar showed no still")
         #expect(player.still != nil)
-        #expect(!player.isPlaying, "an avatar present at arrival played")
+        #expect(player.playCount == 0, "an avatar present at arrival played")
     }
 
     /// The two screens where the avatar is large and alone play it once on
@@ -121,9 +121,10 @@ struct AnimatedAvatarTests {
         let scope = AnimatedAvatarScope()
         let registry = makeRegistry()
         let first = await hosted(Self.face, trigger: .firstAppearance(scope), registry: registry, in: window)
-        #expect(first.isPlaying, "the first display did not play")
+        #expect(await eventually { first.playCount > 0 },
+                "the first display did not play: \(first.lastRefusal ?? "never asked")")
         let again = await hosted(Self.face, trigger: .firstAppearance(scope), registry: registry, in: window)
-        #expect(!again.isPlaying, "a second display in the same screen played again")
+        #expect(again.playCount == 0, "a second display in the same screen played again")
         // And it rests on the still once the loop is over.
         try? await Task.sleep(for: .milliseconds(400))
         #expect(!first.isPlaying)
@@ -136,7 +137,7 @@ struct AnimatedAvatarTests {
         let player = await hosted(
             Self.face, side: 20, trigger: .firstAppearance(AnimatedAvatarScope()), registry: makeRegistry(), in: window
         )
-        #expect(!player.isPlaying, "a 20 pt avatar played")
+        #expect(player.playCount == 0, "a 20 pt avatar played")
         #expect(AnimatedAvatarPlayer.minimumDiameter == 32)
     }
 
@@ -147,12 +148,15 @@ struct AnimatedAvatarTests {
         defer { window.isHidden = true }
         let registry = makeRegistry()
         let player = await hosted(Self.still, trigger: .change, registry: registry, in: window)
-        #expect(!player.isPlaying)
+        #expect(player.playCount == 0)
         player.setAvatar(Self.face)
-        #expect(await eventually { player.isPlaying }, "the next author did not play")
+        // ⚠️ `playCount`, not `isPlaying`: the test sheet's loop is 0.2 s, and
+        // a starved test can look again only after it has ended (#1357's run).
+        #expect(await eventually { player.playCount > 0 },
+                "the next author did not play: \(player.lastRefusal ?? "never asked")")
 
         let first = await hosted(Self.face, trigger: .change, registry: registry, in: window)
-        #expect(!first.isPlaying, "a pill's first avatar played")
+        #expect(first.playCount == 0, "a pill's first avatar played")
     }
 
     /// A profile's avatar arrives after its header is on show: its first
@@ -167,6 +171,7 @@ struct AnimatedAvatarTests {
         player.trigger = .firstAppearance(AnimatedAvatarScope())
         window.addSubview(host)
         player.setAvatar(Self.face)
-        #expect(await eventually { player.isPlaying }, "an avatar that arrived on a screen already up never played")
+        #expect(await eventually { player.playCount > 0 },
+                "an avatar that arrived on a screen already up never played: \(player.lastRefusal ?? "never asked")")
     }
 }
