@@ -811,7 +811,7 @@ final class ForYouGridPage: UIView {
     /// The centred "nothing here" block, shared with every other surface that
     /// has to say it. Hidden unless the page is genuinely empty or failed.
     private let emptyState = EmptyStateView()
-    private let refreshControl = UIRefreshControl()
+    private let refreshControl = AppRefreshControl()
     private var showsSkeleton = false
     /// The post whose cell is standing in for a flight card and must stay
     /// invisible until the card lands. See `setHeroHidden`.
