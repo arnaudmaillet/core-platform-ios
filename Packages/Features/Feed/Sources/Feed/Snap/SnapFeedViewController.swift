@@ -2701,12 +2701,43 @@ final class SnapFeedViewController: UIViewController {
             refreshVisibleBoostControls()
             // The burst so far, with Undo for all of it (#957): one toast
             // per post, updated by every tap.
+            // ⚠️ THE TOAST IS THE UNDO WINDOW (#1375): it follows the
+            // screen on top through a push or a pop, its Undo live until it
+            // ends — when it sends the burst. Paging away or leaving no
+            // longer closes it.
             stakeToastPostID = id
-            stakeToast = StakeMenu.undoToast(staked: boost.undoable(on: id), on: id.rawValue, from: self) {
-                [weak self] in
-                guard let self else { return }
-                performBoostUndo(on: id, feedbackCell: snapCell(for: id))
-            }
+            boost.toastHolds = id
+            let burst = stakeBursts[id] ?? StakeMenu.Burst()
+            stakeBursts[id] = burst
+            let generation = burst.next()
+            let amount = boost.undoable(on: id)
+            let wallet = wallet
+            stakeToast = StakeMenu.undoToast(
+                staked: amount, on: id.rawValue, from: self,
+                commit: { [weak self] in
+                    guard burst.isCurrent(generation) else { return }
+                    wallet?.commitStakes(on: id.rawValue)
+                    guard let self else { return }
+                    stakeBursts[id] = nil
+                    if boost.toastHolds == id { boost.toastHolds = nil }
+                    if stakeToastPostID == id {
+                        stakeToast = nil
+                        stakeToastPostID = nil
+                    }
+                },
+                undo: { [weak self] in
+                    // The session still names the post: the screen's own
+                    // undo. Moved on (paged away, or the screen is gone): the
+                    // burst straight from the wallet.
+                    if let self, boost.undoable(on: id) > 0 {
+                        performBoostUndo(on: id, feedbackCell: snapCell(for: id))
+                    } else if let refund = wallet?.undoBoost(targetID: id.rawValue, amount: amount) {
+                        self?.snapCell(for: id)?.setBoostTotal(refund.targetTotal, animated: true)
+                        self?.refreshVisibleBoostControls()
+                    }
+                    if self?.boost.toastHolds == id { self?.boost.toastHolds = nil }
+                }
+            )
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-wallet-log"), let wallet {
                 print("[wallet] boosted post=\(id.rawValue) requested=\(spend) spent=\(spent) targetTotal=\(targetTotal) balance=\(wallet.balance) shots=\(wallet.stakeShots)")
@@ -2734,6 +2765,9 @@ final class SnapFeedViewController: UIViewController {
     /// (`SnapBoostController.undo`).
     private func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
         guard let refund = boost.undo(on: id) else { return }
+        // Taken back: the toast closing must not send it.
+        _ = stakeBursts.removeValue(forKey: id)?.next()
+        if boost.toastHolds == id { boost.toastHolds = nil }
         HapticImpact(style: .light).impactOccurred()
         feedbackCell?.setBoostTotal(refund.targetTotal, animated: true)
         feedbackCell?.playBoostRefund(amount: refund.refunded)
@@ -2754,11 +2788,18 @@ final class SnapFeedViewController: UIViewController {
     /// undone from the menu, or finalized by paging away or leaving — so its
     /// Undo never outlives the session tally it would take back.
     private func closeStakeToastIfSettled() {
-        guard let id = stakeToastPostID, boost.undoable(on: id) == 0 else { return }
+        // A toast whose burst moved on (paged away, the screen leaving) stays:
+        // it is the undo window now (#1375). Only a burst taken back closes it.
+        guard let id = stakeToastPostID, boost.undoable(on: id) == 0, boost.toastHolds != id else { return }
         StakeMenu.closeUndoToast(stakeToast)
         stakeToast = nil
         stakeToastPostID = nil
     }
+
+    /// Numbers each post's stake toasts (`StakeMenu.Burst`) — per post: a
+    /// stake on the next post settles the previous post's toast (the one
+    /// undo slot), which must still send ITS burst.
+    private var stakeBursts: [PostID: StakeMenu.Burst] = [:]
 
     private func snapCell(for id: PostID) -> SnapFeedCell? {
         guard let indexPath = dataSource.indexPath(for: id) else { return nil }

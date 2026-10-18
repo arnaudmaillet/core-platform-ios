@@ -158,6 +158,23 @@ struct SnapBoostControllerTests {
         #expect(outbox.batches.map(\.isSealed) == [true])
     }
 
+    /// The post whose stake toast is still up commits when that toast ends,
+    /// not when the screen leaves (#1375): leaving keeps its taps open, and
+    /// the toast's Undo still takes them back through the wallet.
+    @Test func leavingWithTheToastUpLeavesItsTapsToTheToast() {
+        let (boost, wallet, outbox) = Self.member()
+        let before = wallet.balance
+        _ = boost.stake(.points(2), on: first)
+        boost.toastHolds = first
+        boost.finalize()
+        #expect(boost.sessionID == nil)
+        #expect(outbox.batches.map(\.isSealed) == [false], "a push does not commit the toast's burst")
+
+        let refund = wallet.undoBoost(targetID: first.rawValue, amount: 2)
+        #expect(refund?.targetTotal == 0)
+        #expect(wallet.balance == before)
+    }
+
     // MARK: - Anchors
 
     @Test func theAnchorContextIsTheWalletsAnswerAndTheTally() {

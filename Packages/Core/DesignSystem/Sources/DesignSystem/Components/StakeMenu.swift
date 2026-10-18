@@ -176,14 +176,36 @@ public enum StakeMenu {
         "Staked \(points(amount))"
     }
 
+    /// One burst's toasts (#1375): every tap updates the burst's toast in
+    /// place, and an update settles the toast before it — whose commit must
+    /// then do nothing, the burst going on. `next()` numbers each toast; a
+    /// toast's commit asks `isCurrent` first. A class, so a toast's commit
+    /// can still ask once the surface that staked is gone.
+    @MainActor
+    public final class Burst {
+        public private(set) var generation = 0
+        public init() {}
+        /// Numbers the toast about to show.
+        public func next() -> Int {
+            generation += 1
+            return generation
+        }
+        /// Whether `generation` is still the burst's latest toast.
+        public func isCurrent(_ generation: Int) -> Bool { generation == self.generation }
+    }
+
     /// The toast a stake shows (#957), with Undo for the WHOLE burst: every
     /// tap on the same post updates the one toast in place (its id) — the
     /// amount, and the countdown restarted — rather than stacking one per
-    /// tap; one per surface, whose tally it shows. The countdown running out
-    /// commits nothing: the points are in
-    /// the wallet already, and the burst stays undoable from the menu until
-    /// the surface closes its undo window — when it closes this toast too
-    /// (`closeUndoToast`), so an Undo never outlives what it can take back.
+    /// tap; one per surface, whose tally it shows.
+    ///
+    /// ⚠️ THE TOAST IS THE UNDO WINDOW (#1375, the owner 2026-10-18). It
+    /// follows the screen on top through a push or a pop
+    /// (`NavigationBarToasts`), its Undo working until its countdown ends —
+    /// and `commit` runs when it ends without an undo (time, a swipe, the
+    /// background, another undoable toast): that is when the burst is sent.
+    /// Leaving the screen that staked no longer closes it. A caller numbers
+    /// its toasts with a `Burst` so an in-place update does not commit.
     /// No haptic of its own: each tap already played one.
     @discardableResult
     public static func undoToast(
@@ -191,6 +213,7 @@ public enum StakeMenu {
         on targetID: String,
         from source: UIViewController,
         above floor: UIView? = nil,
+        commit: @escaping @MainActor () -> Void = {},
         undo: @escaping @MainActor () -> Void
     ) -> ToastView {
         Feedback.undoable(
@@ -199,7 +222,7 @@ public enum StakeMenu {
             // same post from another surface is its own toast (the one undo
             // slot settles the other).
             id: "stake-\(ObjectIdentifier(source).hashValue)-\(targetID)",
-            playsHaptic: false, commit: {}, undo: undo
+            playsHaptic: false, commit: commit, undo: undo
         )
     }
 

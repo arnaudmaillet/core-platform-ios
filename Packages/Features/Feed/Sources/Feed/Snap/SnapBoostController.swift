@@ -143,9 +143,17 @@ final class SnapBoostController {
     /// retained timeline can come back to the same post; the spend is
     /// still final: the window is the visit, not the post.)
     /// The taps are committed now, not 10 s after the last one (#676).
+    ///
+    /// ⚠️ EXCEPT the post whose stake toast is still up (`toastHolds`): the
+    /// toast follows the screen on top, its Undo live, and sends the burst
+    /// when it ends (#1375, the owner 2026-10-18).
     func finalize() {
-        if let id = sessionID { wallet?.commitStakes(on: id.rawValue) }
+        if let id = sessionID, id != toastHolds { wallet?.commitStakes(on: id.rawValue) }
         sessionID = nil
         sessionAmount = 0
     }
+
+    /// The post whose stake toast is up, and which therefore commits when
+    /// that toast ends rather than when the session does.
+    var toastHolds: PostID?
 }

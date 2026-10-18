@@ -97,6 +97,52 @@ struct CardStakeTests {
         #expect(staking.debugUndoable(on: PostID("post-1")) == 0)
     }
 
+    /// The toast is the undo window (#1375): leaving the screen (a push)
+    /// keeps the burst undoable while its toast is up, Undo still refunds it,
+    /// and the toast ending is what sends a burst.
+    @Test func leavingTheScreenKeepsTheToastsBurstUndoable() throws {
+        let defaults = Self.defaults()
+        let scope = StorageScope(owner: .member(account: "acct-1", profile: "prof-1"))
+        let wallet = WalletStore(defaults: defaults, scope: scope)
+        let outbox = LikeOutbox(defaults: defaults, scope: scope)
+        wallet.likeOutbox = outbox
+        let before = wallet.balance
+        let staking = PostCardStaking(wallet: wallet)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let screen = UIViewController()
+        window.rootViewController = screen
+        window.isHidden = false
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        let cell = row()
+        screen.view.addSubview(cell)
+        staking.bind(cell, to: PostID("post-1"))
+        let post = PostID("post-1")
+
+        #expect(cell.debugTapLikesChip())
+        staking.endSession()
+        let amount = WalletStore.Policy.defaultStakeAmount
+        #expect(staking.debugUndoable(on: post) == amount, "a push does not commit the toast's burst")
+        #expect(outbox.batches.map(\.isSealed) == [false])
+
+        let toast = try #require(screen.view.subviews.compactMap { $0 as? ToastView }.first)
+        let undo = try #require(toast.accessibilityCustomActions?.first { $0.name == "Undo" })
+        _ = undo.actionHandler?(undo)
+        #expect(wallet.balance == before)
+        #expect(staking.debugUndoable(on: post) == 0)
+
+        // A second burst, left alone: the toast ending sends it.
+        #expect(cell.debugTapLikesChip())
+        staking.endSession()
+        let second = try #require(screen.view.subviews.compactMap { $0 as? ToastView }.first { !$0.isDismissing })
+        StakeMenu.closeUndoToast(second)
+        #expect(staking.debugUndoable(on: post) == 0)
+        #expect(outbox.batches.map(\.isSealed) == [true], "the toast ending sends the burst")
+        #expect(wallet.boostTotal(forTarget: "post-1") == amount)
+    }
+
     /// The card's menu reads the wallet's pack: the default only without one,
     /// "×100 — N left" with one.
     @Test func theCardMenuReadsThePack() {

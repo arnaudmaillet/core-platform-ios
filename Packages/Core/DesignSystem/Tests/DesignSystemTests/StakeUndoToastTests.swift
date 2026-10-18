@@ -11,6 +11,8 @@ struct StakeUndoToastTests {
     private final class Ledger {
         var undos = 0
         var haptics = 0
+        var commits = 0
+        var advance: (TimeInterval) -> Void = { _ in }
     }
 
     private func hosting(_ body: (UIViewController, Ledger) throws -> Void) rethrows {
@@ -20,7 +22,8 @@ struct StakeUndoToastTests {
         window.isHidden = false
         window.layoutIfNeeded()
         let ledger = Ledger()
-        let (clock, _) = ToastClock.manual()
+        let (clock, advance) = ToastClock.manual()
+        ledger.advance = advance
         let previousClock = ToastClock.current
         let previousHaptic = Feedback.playHaptic
         ToastClock.current = clock
@@ -61,15 +64,66 @@ struct StakeUndoToastTests {
         }
     }
 
-    /// Closed by the surface (it moved on): no Undo left, nothing undone.
+    /// Closed by the surface (it moved on): no Undo left, nothing undone —
+    /// the burst is sent, once.
     @Test func closingLeavesWithoutUndoing() {
         hosting { screen, ledger in
-            let toast = StakeMenu.undoToast(staked: 1, on: "post-1", from: screen) { ledger.undos += 1 }
+            let toast = StakeMenu.undoToast(
+                staked: 1, on: "post-1", from: screen, commit: { ledger.commits += 1 }
+            ) { ledger.undos += 1 }
             StakeMenu.closeUndoToast(toast)
             StakeMenu.closeUndoToast(toast)
             #expect(toast.isDismissing)
             #expect(ledger.undos == 0)
+            #expect(ledger.commits == 1)
         }
+    }
+
+    /// The toast IS the undo window (#1375): its countdown ending sends the
+    /// burst — and a burst numbered by `Burst` is sent once, by its LAST
+    /// toast, however many taps updated it in place.
+    @Test func theCountdownEndingSendsTheBurstOnce() {
+        hosting { screen, ledger in
+            let burst = StakeMenu.Burst()
+            @MainActor func tap(_ amount: Int) -> ToastView {
+                let generation = burst.next()
+                return StakeMenu.undoToast(
+                    staked: amount, on: "post-1", from: screen,
+                    commit: { if burst.isCurrent(generation) { ledger.commits += 1 } }
+                ) { ledger.undos += 1 }
+            }
+            _ = tap(1)
+            _ = tap(2)
+            let toast = tap(3)
+            #expect(ledger.commits == 0, "an in-place update is not an end")
+            ledger.advance(60)
+            #expect(toast.isDismissing)
+            #expect(ledger.commits == 1)
+            #expect(ledger.undos == 0)
+        }
+    }
+
+    /// Undo takes the burst back: nothing is sent, then or later.
+    @Test func anUndoneBurstIsNeverSent() throws {
+        try hosting { screen, ledger in
+            let toast = StakeMenu.undoToast(
+                staked: 2, on: "post-1", from: screen, commit: { ledger.commits += 1 }
+            ) { ledger.undos += 1 }
+            try #require(toast.undoButton).sendActions(for: .primaryActionTriggered)
+            ledger.advance(60)
+            StakeMenu.closeUndoToast(toast)
+            #expect(ledger.undos == 1)
+            #expect(ledger.commits == 0)
+        }
+    }
+
+    /// A burst's numbering: only the latest toast is current.
+    @Test func aBurstNumbersItsToasts() {
+        let burst = StakeMenu.Burst()
+        let first = burst.next()
+        let second = burst.next()
+        #expect(!burst.isCurrent(first))
+        #expect(burst.isCurrent(second))
     }
 
     /// Another post is another toast.
