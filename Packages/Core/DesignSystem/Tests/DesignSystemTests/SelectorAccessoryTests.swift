@@ -192,6 +192,56 @@ struct SelectorAccessoryTests {
                 "a foreign remove must not take down the accessory in the slot")
     }
 
+    /// ⚠️ A SCREEN THAT LEAVES DETACHED STILL TAKES ITS BAND DOWN. On a
+    /// sign-out the Messages stack was swapped and its tab taken out of the
+    /// bar in one turn; the inbox's `viewWillDisappear` arrived with no
+    /// `tabBarController`, and the band stayed over the guest's bar (the
+    /// owner's device, 2026-10-18). The band remembers where it went.
+    @Test func aDetachedOwnerStillTakesItsBandDown() {
+        let controller = UITabBarController()
+        let band = SelectorAccessory(strip: PagedTabBar(titles: ["A"], style: .navigationTitle))
+        band.install(into: controller, minimizesOnScroll: true)
+        #expect(controller.bottomAccessory?.contentView === band.hostView)
+
+        band.remove(from: nil)
+        #expect(controller.bottomAccessory == nil, "a detached owner left its band up")
+        #expect(controller.tabBarMinimizeBehavior != .onScrollDown, "the collapse outlived the band")
+    }
+
+    /// The shell's net under it (`MainTabCoordinator.viewerDidChange`): a band
+    /// whose owner is no longer in the window comes down; one whose owner is
+    /// on show stays.
+    @Test func anOrphanedBandIsTakenDownAndAnOwnedOneStays() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let controller = UITabBarController()
+        let screen = UIViewController()
+        controller.viewControllers = [screen]
+        window.rootViewController = controller
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer { window.isHidden = true }
+        let band = SelectorAccessory(strip: PagedTabBar(titles: ["A"], style: .navigationTitle))
+        band.install(into: controller, owner: screen)
+
+        #expect(!SelectorAccessory.removeOrphan(from: controller), "the owner is on show")
+        #expect(controller.bottomAccessory?.contentView === band.hostView)
+
+        controller.viewControllers = [UIViewController()]
+        window.layoutIfNeeded()
+        #expect(screen.viewIfLoaded?.window == nil, "precondition: the owner left the window")
+        #expect(SelectorAccessory.removeOrphan(from: controller))
+        #expect(controller.bottomAccessory == nil, "an orphaned band stayed up")
+    }
+
+    /// A band installed without naming its owner is not the net's to judge.
+    @Test func aBandWithNoNamedOwnerIsLeftAlone() {
+        let controller = UITabBarController()
+        let band = SelectorAccessory(strip: PagedTabBar(titles: ["A"], style: .navigationTitle))
+        band.install(into: controller)
+        #expect(!SelectorAccessory.removeOrphan(from: controller))
+        #expect(controller.bottomAccessory?.contentView === band.hostView)
+    }
+
     /// ⚠️ **THE HAND-OVER, WHICH IS WHAT MAKES A TAB SWITCH SEAMLESS.** On a
     /// tab switch the incoming screen's `viewWillAppear` lands SIX
     /// MILLISECONDS BEFORE the outgoing screen's `viewWillDisappear`
