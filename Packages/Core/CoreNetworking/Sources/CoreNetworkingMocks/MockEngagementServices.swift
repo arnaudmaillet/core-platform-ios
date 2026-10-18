@@ -361,6 +361,10 @@ public final class MockWalletService: @unchecked Sendable {
     private var hourLedger: [String: [(Date, Int64)]] = [:]
     private var answers: [String: Wallet_V1_StakeResponse] = [:]
     private var claimAnswers: [String: Wallet_V1_ClaimRewardResponse] = [:]
+    /// Whether `account` may stake on `postID` at all: a post it may not
+    /// read (taken down, deleted, withheld — `MockSocialServices.mayReadPost`)
+    /// is not stakeable, and the points come back (#1409).
+    private let mayStakeOnPost: @Sendable (_ account: String, _ postID: String) -> Bool
 
     public init(
         store: MockCounterStore,
@@ -368,8 +372,10 @@ public final class MockWalletService: @unchecked Sendable {
         startingPoints: Int64 = MockWalletService.generousStartingPoints,
         persistence: UserDefaults? = nil,
         demoPositions: [String] = [],
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        mayStakeOnPost: @escaping @Sendable (_ account: String, _ postID: String) -> Bool = { _, _ in true }
     ) {
+        self.mayStakeOnPost = mayStakeOnPost
         self.demoPositions = demoPositions
         self.store = store
         self.dataset = dataset
@@ -685,15 +691,25 @@ public final class MockWalletService: @unchecked Sendable {
         guard request.useStakeShot || request.points > 0 else {
             return .failure(ConnectError(code: .invalidArgument, message: "points"))
         }
+        // Asked OUTSIDE the wallet's lock: the rule reaches into the social
+        // services and the graph, each behind a lock of its own.
+        let stakeable: Bool
+        if case .postID(let id) = request.target {
+            stakeable = mayStakeOnPost(caller, id)
+        } else {
+            stakeable = true
+        }
         return .success(lock.withLock {
             if let answer = answers["\(caller)/\(key)"] { return answer }
-            let answer = decideLocked(request, account: caller, target: target)
+            let answer = decideLocked(request, account: caller, target: target, stakeable: stakeable)
             answers["\(caller)/\(key)"] = answer
             return answer
         })
     }
 
-    private func decideLocked(_ request: Wallet_V1_StakeRequest, account: String, target: String) -> Wallet_V1_StakeResponse {
+    private func decideLocked(
+        _ request: Wallet_V1_StakeRequest, account: String, target: String, stakeable: Bool = true
+    ) -> Wallet_V1_StakeResponse {
         let moment = now()
         var response = Wallet_V1_StakeResponse()
         let mine = store.myLikes(account: account, target: target)
@@ -712,6 +728,7 @@ public final class MockWalletService: @unchecked Sendable {
            dataset.accountID(for: post.authorProfileID) == account {
             return answer(.ownContent)
         }
+        if !stakeable { return answer(.targetNotStakeable) }
         var wallet = accountLocked(account)
         let balance = wallet.points
         let recent = (hourLedger[account] ?? []).filter { moment.timeIntervalSince($0.0) < 3600 }

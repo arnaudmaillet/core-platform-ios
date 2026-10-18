@@ -108,7 +108,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // Read from the store, not the band's cached appearance: the band
         // reads it when it starts streaming, which can come after this page
         // became active.
-        guard isActive, playsVideo, !isChromeHeldForFlight, let surface = audibleSurface,
+        guard isActive, playsVideo, !isPostUnavailable, !isChromeHeldForFlight, let surface = audibleSurface,
               MediaCommentPreferencesStore.standard.preferences.avoidsPeople
         else {
             personOcclusion.stop()
@@ -168,7 +168,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // fresh decode. Paused, the page keeps its last frame and returning is
         // free. The player is released when the page itself goes: `didResignActive`
         // and `prepareForReuse` both already stop it.
-        guard isActive, let url = activeVideoURL else {
+        guard isActive, !isPostUnavailable, let url = activeVideoURL else {
             #if DEBUG
             CarouselPlaybackAudit.trace("post setPaused true page=\(mediaCard.currentPage)")
             #endif
@@ -542,6 +542,67 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// The anchor's menu asked to take back this post's session spend —
     /// the VC owns the tally and the refund.
     var onRequestBoostUndo: ((PostID) -> Void)?
+
+    // MARK: Unavailable post (#1409)
+
+    /// Whether the represented post is one the server shows the viewer no
+    /// more (#447) — taken down, deleted, withheld. Its page then reads
+    /// "This post isn't available" over the page's ground, with nothing to
+    /// act on: the chrome (caption, streams, reactions rail, the comments'
+    /// entry points) and the like / sound column stand down, and no clip
+    /// plays. The screen says so — at configure, from what it has learnt,
+    /// so paging away and back keeps it; in place, the moment it learns it.
+    private(set) var isPostUnavailable = false
+
+    /// The block, over everything the page draws. Opaque and touchable, so
+    /// the picture under it takes no tap; the pager's own pan still pages.
+    private lazy var unavailableBlock: UIView = {
+        let ground = UIView()
+        ground.backgroundColor = .systemBackground
+        let block = EmptyStateView()
+        block.configure(symbolName: "eye.slash", title: PostDetailViewModel.unavailableMessage)
+        block.pin(to: ground)
+        // VoiceOver reads the block, never the post under it.
+        ground.accessibilityViewIsModal = true
+        ground.isHidden = true
+        contentView.addSubview(ground)
+        ground.pin(to: contentView)
+        return ground
+    }()
+
+    func setPostUnavailable(_ unavailable: Bool) {
+        guard unavailable != isPostUnavailable else { return }
+        isPostUnavailable = unavailable
+        chrome.isHidden = unavailable
+        chrome.setActionColumnShown(!unavailable)
+        if unavailable {
+            // What was playing stops where it stands, and nothing starts it
+            // again: every start asks `isPostUnavailable`, and a resume a hold
+            // or a sheet still owed is void. The player stays the page's,
+            // released by the usual doors (resign, reuse).
+            videoPlayback?.setPaused(true, in: mediaCard.renderView)
+            if mediaCard.showsCollection, let surface = mediaCard.currentPageSurface {
+                videoPlayback?.setPaused(true, in: surface)
+            }
+            playback.forgetOwedResumes()
+            setPauseGlyphVisible(false)
+            // The clip bar's feed, the occlusion and the comment streams
+            // stand down with it.
+            updatePlayheadFeed()
+            chrome.setTickerActive(false)
+            chrome.setSubtitlesActive(false)
+            // A media page's ground is dark whatever the system says; a text
+            // page's follows it.
+            unavailableBlock.overrideUserInterfaceStyle = pageHasMedia ? .dark : .unspecified
+            contentView.bringSubviewToFront(unavailableBlock)
+        }
+        unavailableBlock.isHidden = !unavailable
+    }
+
+    #if DEBUG
+    /// Whether the page shows "This post isn't available", for a test.
+    var debugShowsUnavailableBlock: Bool { isPostUnavailable && !unavailableBlock.isHidden }
+    #endif
 
     /// Boost feedback pass-throughs — the chrome owns the anchor and its
     /// theatre; the VC owns the wallet verdict that picks which one plays.
@@ -1918,8 +1979,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // but it is the restart edge after backgrounding: foregrounding
         // re-activates the settled page without a fresh `willDisplay`.
         // Both comment surfaces share it.
-        chrome.setTickerActive(true)
-        chrome.setSubtitlesActive(true)
+        chrome.setTickerActive(!isPostUnavailable)
+        chrome.setSubtitlesActive(!isPostUnavailable)
+        // Nothing of a post the viewer may no longer see plays (#1409).
+        guard !isPostUnavailable else { return }
         // A COLLECTION asks its page, not the post. Everything below is the
         // same sequence either way — the flight deferral, the warm attach, the
         // start — because the surface it all works on is the same object.
@@ -2120,7 +2183,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// Shared by activation and by the viewport door above, so the two cannot
     /// drift into two different ideas of what "playing" means.
     private func startWatchedClip() {
-        guard let url = activeVideoURL, let videoPlayback else { return }
+        guard !isPostUnavailable, let url = activeVideoURL, let videoPlayback else { return }
         // ⚠️ THE GLYPH IS NOT A STICKER. It says "you stopped this", and this
         // door is the page starting the clip for a reason of its own — the
         // viewer came back to a page they had paused, and it is playing again.
@@ -2229,7 +2292,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// playhead — so the page continues rather than restarting.
     func startDeferredPlayback() {
         defersPlaybackForFlight = false
-        guard isActive, let url = activeVideoURL, let videoPlayback else { return }
+        guard isActive, !isPostUnavailable, let url = activeVideoURL, let videoPlayback else { return }
         // The flight is over: lift the tile's thumbnail-rung cap NOW, at
         // rest, whether playback was warm-attached or is about to start. The
         // lift used to ride the warm attach — flight staging — which invited
@@ -2647,7 +2710,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// means "bring the media back").
     func beginMediaHold(at point: CGPoint) {
         guard !isCommentsEngaged, playbackTapRegionContains(point) else { return }
-        guard playsVideo else { return }
+        guard playsVideo, !isPostUnavailable else { return }
         playback.beginHold()
     }
 
@@ -2668,7 +2731,7 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// page is active and the clip under the viewer is a video. The feed
     /// itself (a display link) is `SnapCellPlayback.startPlayheadFeed`.
     private func updatePlayheadFeed() {
-        let wanted = isActive && playsVideo
+        let wanted = isActive && playsVideo && !isPostUnavailable
         defer { refreshPersonOcclusion() }
         guard wanted else {
             stopPlayheadFeed()
@@ -2788,10 +2851,10 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
     /// No-op for image/text cells (no player).
     /// Whether the page's own player can be paused — a clip; a photo or text
     /// page's song is the feed's (#1148).
-    var canTogglePlayback: Bool { playsVideo }
+    var canTogglePlayback: Bool { playsVideo && !isPostUnavailable }
 
     func togglePlayback() {
-        guard playsVideo, let paused = playback.toggle() else { return }
+        guard canTogglePlayback, let paused = playback.toggle() else { return }
         setPauseGlyphVisible(paused)
     }
 
@@ -3099,6 +3162,8 @@ final class SnapFeedCell: UICollectionViewCell, SnapCellLifecycle {
         // arrive with no chrome at all and nothing on the way to bring it back.
         chrome.alpha = 1
         chrome.setColumnHeld(false)
+        // The next post to land here is told whether it is still available.
+        setPostUnavailable(false)
         cancelPrewarming()
         // A swiped-past page keeps its paused player until its cell is reused:
         // this is where −1 (or +1, after a swipe back) is handed to the feed's

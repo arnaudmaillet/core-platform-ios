@@ -134,6 +134,15 @@ public final class MockSocialServices: @unchecked Sendable {
         noContact.mentions = .noOne
         noContact.messages = .noOne
         interactionSettings[Self.noContactProfileID] = noContact
+        // `-mock-takedown-after <seconds> <postID>` (#1409): a post seen in a
+        // feed, taken down while the app runs — what a revalidation then
+        // answers not-found for.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-mock-takedown-after"), index + 2 < arguments.count,
+           let delay = Double(arguments[index + 1]) {
+            let postID = arguments[index + 2]
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) { [weak self] in self?.takeDown(postID) }
+        }
     }
 
     /// The profile that takes no mentions and no messages.

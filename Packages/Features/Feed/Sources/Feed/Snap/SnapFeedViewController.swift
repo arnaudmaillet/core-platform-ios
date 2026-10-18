@@ -1474,6 +1474,9 @@ final class SnapFeedViewController: UIViewController {
                 )
                 // The live count, not the one the page was loaded with.
                 cell.setPostLikeCount(self.viewModel.visibleLikeCount(for: model))
+                // A post learnt unavailable stays so on every page it lands
+                // on (#1409) — paging away and back included.
+                cell.setPostUnavailable(self.unavailablePostIDs.contains(id))
                 // Paging this post's collection travels back to whoever opened
                 // the feed — see `onMediaPageChanged`.
                 cell.onMediaPageChanged = { [weak self] page in
@@ -2169,6 +2172,7 @@ final class SnapFeedViewController: UIViewController {
         // publishes one. Pressing it does nothing today.
         let repost = SnapNavControls.makeToolbarActionButton(systemName: PostActionSymbol.repost)
         repost.accessibilityLabel = "Repost"
+        repostToolbarButton = repost
         let actions = UIStackView(arrangedSubviews: [bookmarkButton, repost])
         actions.axis = .horizontal
 
@@ -2177,6 +2181,7 @@ final class SnapFeedViewController: UIViewController {
         // VoiceOver, and the composition test needs a handle on it.
         more.accessibilityLabel = "More actions"
         more.showsMenuAsPrimaryAction = true
+        moreToolbarButton = more
         more.menu = UIMenu(children: [
             UIDeferredMenuElement.uncached { [weak self] completion in
                 guard let self, let model = self.activeModel else { return completion([]) }
@@ -2259,6 +2264,7 @@ final class SnapFeedViewController: UIViewController {
     /// Optimistic local toggle (no backend seam yet — see the set's comment);
     /// the glyph flips immediately, scoped to the acted-on post.
     private func toggleBookmark(for id: PostID) {
+        guard !unavailablePostIDs.contains(id) else { return }
         MemberGates.perform(.save, from: self) { [weak self] in
             self?.bookmarks.toggle(id.rawValue)
             // The fill says it; the hand feels it (#803).
@@ -2690,7 +2696,9 @@ final class SnapFeedViewController: UIViewController {
     }
 
     private func commitBoost(on id: PostID, spend: WalletStakeSpend, feedbackCell: SnapFeedCell?) {
-        guard let verdict = boost.stake(spend, on: id) else { return }
+        // Nothing to like on a post the viewer may no longer see (#1409) — a
+        // tap that finished a member gate after it turned unavailable.
+        guard !unavailablePostIDs.contains(id), let verdict = boost.stake(spend, on: id) else { return }
         switch verdict {
         case .boosted(let targetTotal, let spent):
             HapticImpact(style: .medium).impactOccurred()
@@ -2764,15 +2772,7 @@ final class SnapFeedViewController: UIViewController {
     /// Takes back the whole session spend on `id` — the menu's Undo entry
     /// (`SnapBoostController.undo`).
     private func performBoostUndo(on id: PostID, feedbackCell: SnapFeedCell?) {
-        guard let refund = boost.undo(on: id) else { return }
-        // Taken back: the toast closing must not send it.
-        _ = stakeBursts.removeValue(forKey: id)?.next()
-        if boost.toastHolds == id { boost.toastHolds = nil }
-        HapticImpact(style: .light).impactOccurred()
-        feedbackCell?.setBoostTotal(refund.targetTotal, animated: true)
-        feedbackCell?.playBoostRefund(amount: refund.refunded)
-        refreshVisibleBoostControls()
-        closeStakeToastIfSettled()
+        guard let refund = takeBackSessionStake(on: id, feedbackCell: feedbackCell, withFeedback: true) else { return }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-wallet-log") {
             print("[wallet] boost UNDO post=\(id.rawValue) refunded=\(refund.refunded) targetTotal=\(refund.targetTotal) balance=\(refund.newBalance)")
@@ -2783,6 +2783,26 @@ final class SnapFeedViewController: UIViewController {
     /// The stake toast up (#957), and the post its burst is on.
     private weak var stakeToast: ToastView?
     private var stakeToastPostID: PostID?
+
+    /// Takes back the session's spend on `id` and settles its toast — the
+    /// menu's Undo (`withFeedback`: the haptic, the refund's float) and a
+    /// post that turned unavailable (#1409), quietly. Nil when there was
+    /// nothing to take back.
+    @discardableResult
+    private func takeBackSessionStake(
+        on id: PostID, feedbackCell: SnapFeedCell?, withFeedback: Bool
+    ) -> SnapBoostController.Refund? {
+        guard let refund = boost.undo(on: id) else { return nil }
+        // Taken back: the toast closing must not send it.
+        _ = stakeBursts.removeValue(forKey: id)?.next()
+        if boost.toastHolds == id { boost.toastHolds = nil }
+        if withFeedback { HapticImpact(style: .light).impactOccurred() }
+        feedbackCell?.setBoostTotal(refund.targetTotal, animated: withFeedback)
+        if withFeedback { feedbackCell?.playBoostRefund(amount: refund.refunded) }
+        refreshVisibleBoostControls()
+        closeStakeToastIfSettled()
+        return refund
+    }
 
     /// Closes the stake toast once its burst can no longer be taken back —
     /// undone from the menu, or finalized by paging away or leaving — so its
@@ -2800,6 +2820,65 @@ final class SnapFeedViewController: UIViewController {
     /// stake on the next post settles the previous post's toast (the one
     /// undo slot), which must still send ITS burst.
     private var stakeBursts: [PostID: StakeMenu.Burst] = [:]
+
+    // MARK: - Unavailable posts (#1409)
+
+    /// Posts the server shows the viewer no more (#447: taken down, deleted,
+    /// withheld), learnt while this screen is up — today from a comments
+    /// panel whose revalidation answered not-found (`onPostUnavailable`).
+    /// Their pages read "This post isn't available" with nothing to act on,
+    /// on every page they land on; other posts are untouched.
+    private(set) var unavailablePostIDs: Set<PostID> = []
+
+    /// Takes `id`'s actions away, in place: its page, its bars when it is
+    /// the page in front, what it plays, and the like still inside its undo
+    /// window, which goes back to the wallet. A burst its toast has already
+    /// sent comes back through the outbox: the server refuses the stake and
+    /// its answer refunds it (`WalletStore.settleCommittedStake`, #676).
+    func markPostUnavailable(_ id: PostID) {
+        guard unavailablePostIDs.insert(id).inserted else { return }
+        takeBackSessionStake(on: id, feedbackCell: snapCell(for: id), withFeedback: false)
+        // A media page's open thread closes: the page under it is the block
+        // now, and the ✕ would sit over nothing. (A text page's thread is the
+        // page itself; its panel already says so.)
+        if commentsEngagedID == id, modelsByID[id]?.mediaURL != nil { dismissComments() }
+        // On screen now; a page already dequeued but not yet shown is told
+        // at `willDisplay`, every later one at configure.
+        snapCell(for: id)?.setPostUnavailable(true)
+        if activeModel?.id == id { applyToolbarPostActions(for: id) }
+        refreshAudibleSurface()
+    }
+
+    /// The toolbar's post actions — save, repost, ⋯ — for the page in front:
+    /// disabled on a post no one may act on (#1409), never removed, so the
+    /// bar keeps its shape from page to page.
+    private func applyToolbarPostActions(for id: PostID) {
+        let available = !unavailablePostIDs.contains(id)
+        bookmarkButton.isEnabled = available
+        repostToolbarButton?.isEnabled = available
+        moreToolbarButton?.isEnabled = available
+    }
+
+    private weak var repostToolbarButton: UIButton?
+    private weak var moreToolbarButton: UIButton?
+
+    #if DEBUG
+    /// The toolbar's post actions, for a test: save, repost, ⋯.
+    var debugToolbarPostActions: [UIButton] {
+        [bookmarkButton, repostToolbarButton, moreToolbarButton].compactMap { $0 }
+    }
+
+    /// A like staked straight through the wallet, as a tap's spend lands —
+    /// without the toast, whose one undo slot is shared by the whole process.
+    func debugStake(_ spend: WalletStakeSpend, on id: PostID) {
+        _ = boost.stake(spend, on: id)
+    }
+
+    /// A tap on the page's like, through the screen's own path.
+    func debugTapBoost(on id: PostID, spend: WalletStakeSpend) {
+        snapCell(for: id)?.onRequestBoost?(id, spend)
+    }
+    #endif
 
     private func snapCell(for id: PostID) -> SnapFeedCell? {
         guard let indexPath = dataSource.indexPath(for: id) else { return nil }
@@ -2860,8 +2939,11 @@ final class SnapFeedViewController: UIViewController {
     /// bubble's frame — and answers as the bubble does: a tap opens the sound
     /// sheet, a hold mutes (#683). Internal for tests.
     func applySoundRail(to panel: UIViewController?, hostedByPage: Bool = true) {
-        guard let detail = panel as? PostDetailViewController,
-              let id = detail.postID, let model = modelsByID[id] else { return }
+        guard let detail = panel as? PostDetailViewController else { return }
+        // Every panel this screen mounts passes here: the one place it learns
+        // that the panel's post turned out unavailable (#1409).
+        detail.onPostUnavailable = { [weak self] id in self?.markPostUnavailable(id) }
+        guard let id = detail.postID, let model = modelsByID[id] else { return }
         // A panel inside a page sits under that page's action column (#695);
         // the loading page has no page above it and keeps its own.
         detail.setActionColumnHostedByPage(hostedByPage)
@@ -4555,6 +4637,7 @@ final class SnapFeedViewController: UIViewController {
         // come from the theme above.
         authorIdentityView.setOverMedia(overMedia)
         refreshBookmarkGlyph(for: model.id)
+        applyToolbarPostActions(for: model.id)
         // The page's sound bubble and the panel's rail slot (#671).
         activeSnapCell?.setSoundFace(soundFace(for: model))
         applySoundRail(to: commentsContentVC)
@@ -4713,7 +4796,8 @@ final class SnapFeedViewController: UIViewController {
         if isOnScreen, isForeground, !isAudioYielded,
            let owner = playbackOwner, orderedIDs.indices.contains(owner),
            let model = modelsByID[orderedIDs[owner]] {
-            song = model.id == songPausedFor ? nil : soundState.song(for: model, playingClip: playingClip(of: model))
+            song = model.id == songPausedFor || unavailablePostIDs.contains(model.id)
+                ? nil : soundState.song(for: model, playingClip: playingClip(of: model))
         }
         songPlayer.play(song)
     }
@@ -5138,6 +5222,8 @@ final class SnapFeedViewController: UIViewController {
     /// (`configureToolbarItems`), and a second door to it in a menu would be
     /// the kind of duplicate this menu exists to avoid.
     private func moreMenuActions(for id: PostID) -> [UIMenuElement] {
+        // Nothing to share, hide or report of a post no one may read (#1409).
+        guard !unavailablePostIDs.contains(id) else { return [] }
         var actions: [UIMenuElement] = []
         // Share left the toolbar's capsule for here (#671), with the same sheet.
         actions.append(UIAction(title: "Share", image: AppSymbol.share.image()) { [weak self] _ in
@@ -5388,6 +5474,12 @@ final class SnapFeedViewController: UIViewController {
 
 extension SnapFeedViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        // Before any activation below: a page learnt unavailable (#1409)
+        // after its cell was configured — prefetched, off screen — is told
+        // now, so nothing of it starts.
+        if let snapCell = cell as? SnapFeedCell, let id = snapCell.representedPostID {
+            snapCell.setPostUnavailable(unavailablePostIDs.contains(id))
+        }
         viewModel.willDisplayItem(at: indexPath.item)
         // Recompute the active index (a new page may have become active), then —
         // crucially — activate THIS cell if it's the active one. The dispatcher
