@@ -274,6 +274,60 @@ struct AppLoaderTests {
         #expect(!loader.isAnimating)
     }
 
+    /// After a refresh, the list folding back is not a pull (#1400): once
+    /// the ring's fade is over, nothing shows again until the list is at
+    /// rest — or a finger pulls anew.
+    @Test func theFoldBackAfterARefreshDrawsNothing() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 200, height: 200))
+        let indicator = HeroPullToRefreshView(frame: CGRect(x: 0, y: 0, width: 200, height: 60))
+        window.addSubview(indicator)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let loader = indicator.debugLoader
+        loader.reducesMotion = { false }
+        indicator.setPull(HeroPullToRefreshView.threshold * 2, isTracking: true)
+        indicator.beginRefreshing()
+        indicator.endRefreshing()
+        // The fade over (the loader back to rest), the list still closing.
+        loader.stopAnimating(animated: false)
+        for distance in stride(from: HeroPullToRefreshView.threshold, to: 0, by: -10) {
+            indicator.setPull(distance)
+            #expect(loader.isHidden, "the fold-back drew the loader at \(distance)")
+        }
+        // A new drag mid-fold-back scrubs again.
+        indicator.setPull(HeroPullToRefreshView.threshold / 2, isTracking: true)
+        #expect(!loader.isHidden, "a new pull drew nothing")
+    }
+
+    /// The same for the plain lists' control: the offset folding back after
+    /// `endRefreshing` draws nothing; from rest, a pull draws again.
+    @Test func theRefreshControlsFoldBackDrawsNothing() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 600))
+        let list = UIScrollView(frame: window.bounds)
+        list.contentSize = CGSize(width: 390, height: 2000)
+        window.addSubview(list)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let control = AppRefreshControl()
+        list.refreshControl = control
+        let loader = control.debugLoader
+        loader.reducesMotion = { false }
+        let top = list.adjustedContentInset.top
+        control.beginRefreshing()
+        control.endRefreshing()
+        loader.stopAnimating(animated: false)
+        for distance in stride(from: HeroPullToRefreshView.threshold, to: 0, by: -10) {
+            list.contentOffset.y = -top - distance
+            control.debugFollow(list)
+            #expect(loader.isHidden, "the fold-back drew the loader at \(distance)")
+        }
+        list.contentOffset.y = -top
+        control.debugFollow(list)
+        list.contentOffset.y = -top - HeroPullToRefreshView.threshold / 2
+        control.debugFollow(list)
+        #expect(!loader.isHidden, "a pull from rest drew nothing")
+    }
+
     /// Two frames within float noise — the view's model reads back through a
     /// path in points.
     private func isClose(_ a: AppLoaderTimeline.Frame, _ b: AppLoaderTimeline.Frame) -> Bool {

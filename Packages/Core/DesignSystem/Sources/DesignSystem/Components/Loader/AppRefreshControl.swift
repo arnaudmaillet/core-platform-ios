@@ -20,6 +20,8 @@ public final class AppRefreshControl: UIRefreshControl {
     private var offsetObservation: NSKeyValueObservation?
     /// The tick as the pull crosses the threshold (#1354).
     private let thresholdFeedback = PullThresholdFeedback()
+    /// A refresh just ended and the list is folding back (#1400).
+    private var isSettling = false
 
     public override init() {
         super.init()
@@ -50,6 +52,14 @@ public final class AppRefreshControl: UIRefreshControl {
     private func follow(_ scrollView: UIScrollView) {
         guard !isRefreshing else { return }
         let pulled = -(scrollView.contentOffset.y + scrollView.adjustedContentInset.top)
+        // ⚠️ THE FOLD-BACK IS NOT A PULL (#1400): once the ring's fade ended,
+        // the loader took the inset still closing for a pull and drew its
+        // first pills for a frame or two. It follows again from rest, or
+        // from a new drag.
+        if isSettling {
+            guard pulled <= 0 || scrollView.isTracking else { return }
+            isSettling = false
+        }
         loader.setProgress(pulled / HeroPullToRefreshView.threshold)
         if pulled > 0, scrollView.isTracking, !thresholdFeedback.isArmed { thresholdFeedback.prepare() }
         thresholdFeedback.update(
@@ -63,6 +73,7 @@ public final class AppRefreshControl: UIRefreshControl {
     }
 
     public override func endRefreshing() {
+        if isRefreshing { isSettling = true }
         super.endRefreshing()
         loader.stopAnimating()
     }
@@ -71,5 +82,7 @@ public final class AppRefreshControl: UIRefreshControl {
     /// The loader this control drives — what a test reads.
     var debugLoader: AppLoaderView { loader }
     var debugThresholdFeedback: PullThresholdFeedback { thresholdFeedback }
+    /// Drives the pull as an offset would (#1400). Tests.
+    func debugFollow(_ scrollView: UIScrollView) { follow(scrollView) }
     #endif
 }
