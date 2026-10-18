@@ -17,6 +17,14 @@ public final class SectionHeaderCapsuleView: UICollectionReusableView {
 
     private let pill = SectionHeaderPillButton()
 
+    /// The pinned section is named elsewhere — a bar item (#1301, #1378):
+    /// the header leaves as it pins instead of forming its capsule
+    /// (`SectionHeaderPillButton.hidesWhenPinned`). Set on every configure.
+    public var hidesWhenPinned: Bool {
+        get { pill.hidesWhenPinned }
+        set { if pill.hidesWhenPinned != newValue { pill.hidesWhenPinned = newValue } }
+    }
+
     public override init(frame: CGRect) {
         super.init(frame: frame)
         pill.pinAsHeader(in: self)

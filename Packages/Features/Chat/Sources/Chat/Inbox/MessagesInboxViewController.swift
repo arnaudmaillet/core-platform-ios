@@ -593,20 +593,11 @@ final class MessagesInboxViewController: UIViewController, MessagesInboxCategory
     private var sectionItem: UIBarButtonItem?
 
     private func makeSectionItem(_ section: InboxPinnedSection) -> UIBarButtonItem {
-        let title = section.count > 0 ? "\(section.title) · \(section.count.formatted())" : section.title
-        let item = UIBarButtonItem(
-            title: title, image: nil,
-            // What tapping the header's pill did: that section's first row
-            // under the bar.
-            primaryAction: UIAction { [weak self] _ in self?.activeSurface?.scrollToPinnedSection() }
-        )
-        item.identifier = "inbox.section.\(section.title).\(section.count)"
-        item.tintColor = .label
-        // Its own glass, not a shared platter with the bell.
-        item.sharesBackground = false
-        item.accessibilityLabel = section.count > 0 ? "\(section.title), \(section.count) unread" : section.title
-        item.accessibilityHint = "Scrolls to the \(section.title) section"
-        return item
+        // What tapping the header's pill did: that section's first row under
+        // the bar.
+        SectionBarItem.make(title: section.title, count: section.count, countNoun: "unread", scope: "inbox") {
+            [weak self] in self?.activeSurface?.scrollToPinnedSection()
+        }
     }
 
     /// Names `section` after the bell, or takes the name away. While search
