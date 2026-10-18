@@ -1062,6 +1062,19 @@ final class AppContainer {
         )
     }()
 
+    /// The gem-shop items a profile wears (#944): the account's, bought with
+    /// the wallet's gems. Mock mode only, like `countryAccess`: the fleet
+    /// carries no ownership yet (core-platform-backend#915).
+    private(set) lazy var profileItems: ProfileItemService? = {
+        guard environment == .mock else { return nil }
+        return ProfileItemService(
+            accountID: MockAuthService.accountID,
+            wallet: walletStore,
+            store: ProfileItemStore(),
+            isMember: { [unowned self] in self.memberGate.isMember }
+        )
+    }()
+
     /// Where the device is, as a country — asked for in context from the map
     /// (guest mode §3.1), never at launch. Opens that country for free.
     private(set) lazy var currentCountry: CurrentCountryProvider = CurrentCountryProvider(
@@ -1424,6 +1437,7 @@ final class AppContainer {
             accountSessions: accountSessionsRepository,
             accountStatus: accountStatusRepository,
             notificationPreferences: notificationPreferencesRepository,
+            profileItems: profileItems,
             localStore: localStore
         )
         // The one place that can see both features, which is the whole reason

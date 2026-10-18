@@ -46,11 +46,15 @@ public struct GalleryPost: Equatable, Sendable {
         /// This PAGE's own shape. Pages of one post need not agree, which is
         /// why it lives here rather than on the post.
         public let aspectRatio: Double
+        /// The media asset this page shows (`asset_id`, #907), nil when the
+        /// post names none — what a video banner is set from (#944).
+        public let assetID: String?
 
-        public init(thumbnailURL: URL?, videoURL: URL? = nil, aspectRatio: Double = 1) {
+        public init(thumbnailURL: URL?, videoURL: URL? = nil, aspectRatio: Double = 1, assetID: String? = nil) {
             self.thumbnailURL = thumbnailURL
             self.videoURL = videoURL
             self.aspectRatio = aspectRatio
+            self.assetID = assetID
         }
     }
 

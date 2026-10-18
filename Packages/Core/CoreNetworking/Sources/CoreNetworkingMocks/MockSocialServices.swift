@@ -91,6 +91,10 @@ public final class MockSocialServices: @unchecked Sendable {
     /// `SetCommentFilters` writes, by profile (backend #728); absent means
     /// no hidden words and the offensive filter on.
     private var commentFilters: [String: Profile_V1_CommentFilters] = [:]
+    /// The viewer's video banner (#944): the clip `UpdateBanner` set from one
+    /// of their own video posts, nil for none — they start without one, the
+    /// shop item not yet bought.
+    private var viewerBannerClip: String?
     private var viewerDisplayName = MockPostStore.viewer.displayName
     private var viewerBio = MockPostStore.viewer.bio
     private var viewerWebsite = MockPostStore.viewer.websiteURL
@@ -235,6 +239,9 @@ public final class MockSocialServices: @unchecked Sendable {
         }
         bff.register(path: "/profile.v1.ProfileService/UpdateProfile") { [self] (request: Profile_V1_UpdateProfileRequest) in
             updateProfile(request)
+        }
+        bff.register(path: "/profile.v1.ProfileService/UpdateBanner") { [self] (request: Profile_V1_UpdateBannerRequest) in
+            updateBanner(request)
         }
         bff.register(path: "/profile.v1.ProfileService/SetFeedSettings") { [self] (request: Profile_V1_SetFeedSettingsRequest) in
             lock.withLock {
@@ -885,6 +892,11 @@ public final class MockSocialServices: @unchecked Sendable {
         attachment.mimeType = MockMediaFixtures.mimeType(for: url)
         attachment.width = UInt32(width)
         attachment.height = UInt32(height)
+        // A clip names itself as the attachment's media asset (#907), so a
+        // video post can become a banner (`UpdateBanner`, #944).
+        if MockMediaFixtures.isVideoURL(url), let clip = MockMediaFixtures.bakedClip(for: url) {
+            attachment.assetID = Self.clipAssetPrefix + clip
+        }
         // A still poster for video, mirroring what `thumbnail_url` means on the
         // wire — never the video URL itself, which an image pipeline cannot
         // decode.
@@ -914,18 +926,25 @@ public final class MockSocialServices: @unchecked Sendable {
 
     // MARK: - profile.v1
 
-    /// The mock's video banners (#944): the viewer's, so the owner sees one,
-    /// and a stable quarter of the roster — a muted LANDSCAPE clip, its
-    /// poster the still (`banner_url` and the `POSTER` rendition), the clip
-    /// the `MANIFEST` rendition, the shape core-platform-backend#915 asks the
+    /// The mock's video banners (#944): a stable quarter of the roster, and
+    /// the viewer once `UpdateBanner` set one — a muted clip, its poster the
+    /// still (`banner_url` and the `POSTER` rendition), the clip the
+    /// `MANIFEST` rendition, the shape core-platform-backend#915 asks the
     /// read to carry. Owning the shop item is the backend's to check; the
     /// mock's banners are owned.
-    static let videoBannerClips = ["clip-65", "clip-18", "clip-74", "clip-39", "clip-31", "clip-54"]
+    public static let videoBannerClips = ["clip-65", "clip-18", "clip-74", "clip-39", "clip-31", "clip-54"]
 
-    static func applyVideoBanner(to view: inout Profile_V1_ProfileView, isViewer: Bool) {
+    static func applyVideoBanner(to view: inout Profile_V1_ProfileView) {
         let key = view.profileID.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
-        guard isViewer || key % 4 == 0 else { return }
-        let id = videoBannerClips[Int(key % UInt64(videoBannerClips.count))]
+        guard key % 4 == 0 else { return }
+        applyVideoBanner(clipID: videoBannerClips[Int(key % UInt64(videoBannerClips.count))], to: &view)
+    }
+
+    /// A video post's attachment names its clip as its media asset
+    /// (`asset_id`, #907) — what `UpdateBanner` sets a banner from.
+    public static let clipAssetPrefix = "mock-clip-asset:"
+
+    static func applyVideoBanner(clipID id: String, to view: inout Profile_V1_ProfileView) {
         guard let clip = MockClipCatalog.shared.clip(id: id),
               let poster = MockClipCatalog.shared.posterFileURL(clipID: id) else { return }
         var manifest = Media_V1_DeliveredRendition()
@@ -959,7 +978,7 @@ public final class MockSocialServices: @unchecked Sendable {
             view.handle = snapshot.handle
             view.displayName = snapshot.name
             view.avatarURL = MockPostStore.viewer.avatarURL
-            Self.applyVideoBanner(to: &view, isViewer: true)
+            if let clip = lock.withLock({ viewerBannerClip }) { Self.applyVideoBanner(clipID: clip, to: &view) }
             view.bio = snapshot.bio
             view.websiteURL = snapshot.website
             view.customLinks = snapshot.links.map { link in
@@ -998,7 +1017,7 @@ public final class MockSocialServices: @unchecked Sendable {
         view.handle = author.handle
         view.displayName = author.displayName
         view.avatarURL = author.avatarURL
-        Self.applyVideoBanner(to: &view, isViewer: false)
+        Self.applyVideoBanner(to: &view)
         view.bio = author.bio
         view.websiteURL = author.websiteURL
         // Relationship-list privacy, carried on the whole-profile flag because
@@ -1077,6 +1096,29 @@ public final class MockSocialServices: @unchecked Sendable {
             viewerWebsite = request.websiteURL
             viewerLinks = request.customLinks.map { (label: $0.label, url: $0.url) }
         }
+        return .success(Self.accepted(profileID: request.profileID))
+    }
+
+    /// Sets the viewer's video banner from one of their video posts' media
+    /// asset (`banner_asset_id`), or clears it (both fields empty) — the
+    /// read then carries the clip as the banner (#944). A still banner
+    /// (`banner_url` alone) has no upload path yet, so it is refused.
+    private func updateBanner(_ request: Profile_V1_UpdateBannerRequest) -> Result<Profile_V1_CommandResponse, ConnectError> {
+        guard request.profileID == MockPostStore.viewer.profileID else {
+            return .failure(ConnectError(code: .permissionDenied, message: "can only edit your own banner"))
+        }
+        if request.bannerAssetID.isEmpty, request.bannerURL.isEmpty {
+            lock.withLock { viewerBannerClip = nil }
+            return .success(Self.accepted(profileID: request.profileID))
+        }
+        guard request.bannerAssetID.hasPrefix(Self.clipAssetPrefix) else {
+            return .failure(ConnectError(code: .invalidArgument, message: "not one of your video posts"))
+        }
+        let clip = String(request.bannerAssetID.dropFirst(Self.clipAssetPrefix.count))
+        guard MockClipCatalog.shared.clip(id: clip) != nil else {
+            return .failure(ConnectError(code: .failedPrecondition, message: "unknown media asset"))
+        }
+        lock.withLock { viewerBannerClip = clip }
         return .success(Self.accepted(profileID: request.profileID))
     }
 

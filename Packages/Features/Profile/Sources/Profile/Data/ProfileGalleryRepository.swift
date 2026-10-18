@@ -361,7 +361,8 @@ struct HydratedPost {
                     // `GalleryPost.aspectRatio`.
                     aspectRatio: attachment.width > 0 && attachment.height > 0
                         ? Double(attachment.width) / Double(attachment.height)
-                        : 1
+                        : 1,
+                    assetID: attachment.assetID.isEmpty ? nil : attachment.assetID
                 )
             },
             caption: view.caption,
