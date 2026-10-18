@@ -25,7 +25,8 @@ import UIKit
 ///
 /// ⚠️ **ONE PRESS (#866).** `PressFeedback` is attached once, at init, and is
 /// the only thing that scales the button under a finger; UIKit's configuration
-/// only resolves a highlight, which is the dim. The sound option is decided at
+/// only resolves a highlight, which is the dim. Its symbol animation stays OFF
+/// (#1376): on, UIKit shrinks the icon alone on every highlight. The sound option is decided at
 /// init for the same reason: re-attaching would stack a second press.
 ///
 /// ⚠️ **EVERY MOTION ASKS `reducesMotion`** (by default `MotionPreference`:
@@ -280,7 +281,11 @@ open class AppButton: UIButton {
         self.shape = shape
         self.content = content
         super.init(frame: .zero)
-        isSymbolAnimationEnabled = true
+        // ⚠️ OFF (#1376). On, UIKit shrinks the symbol to about half on every
+        // highlight — a second press on the icon alone, the title left at
+        // `PressFeedback`'s scale. The symbol replace it brought comes from
+        // the configuration's `symbolContentTransition` instead.
+        isSymbolAnimationEnabled = false
         setUp()
         pressFeedback = PressFeedback.attach(
             to: self, sound: sound, dims: dims ?? (aspect == .bare),
@@ -1075,6 +1080,10 @@ open class AppButton: UIButton {
             UIImage.SymbolConfiguration(pointSize: $0, weight: .medium, scale: .medium)
         } ?? UIImage.SymbolConfiguration(font: font, scale: size == .icon ? .medium : .small)
         config.image = content.symbol.flatMap { UIImage.symbol(named: $0) }
+        // A symbol swapped for another is replaced — the one symbol motion
+        // UIKit does here; under reduced motion the swap cross-fades instead
+        // (`replaceSymbol`).
+        config.symbolContentTransition = reducesMotion() ? nil : UISymbolContentTransition(.replace)
         config.titleLineBreakMode = .byTruncatingTail
         if let text = content.text {
             config.attributedTitle = AttributedString(text, attributes: AttributeContainer([.font: font]))
