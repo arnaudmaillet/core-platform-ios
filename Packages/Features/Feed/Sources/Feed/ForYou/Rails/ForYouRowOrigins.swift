@@ -127,10 +127,15 @@ enum ForYouRowOrigins {
             captionEnd: nil,
             depthView: { [weak page] in page },
             makeDismissStandIn: { _ in standIn() },
-            // No stand-in on the way in (#1356): the window opens onto the
-            // post itself, covering the face's shape from its first frame —
-            // the avatar never drawn over the media.
-            makePresentStandIn: { nil },
+            // ⚠️ THE FACE OPENS THE WINDOW TOO, UNDER THE PAGE (the owner,
+            // 2026-10-18). Without a stand-in the reveal has nothing to carry
+            // the page over: it keyholed the post through the face's shape,
+            // the face blanked out the instant it started. With it, the page
+            // travels WHOLE inside the window, scaled to cover it, and fades
+            // in over the face — the close's arrangement, reversed. The face
+            // is BELOW the page (`RevealTransition`), never drawn over the
+            // media, which is what #1356 was about.
+            makePresentStandIn: { standIn() },
             alignsPageToSource: false,
             pageFit: .covering,
             cornerRadius: radius,
