@@ -1044,6 +1044,9 @@ final class PlaceProfileViewController: UIViewController {
         // with the type.
         bannerView.pin(to: bannerBox)
         bannerRamp.pin(to: bannerBox)
+        // A light black over the picture, under the ramp (#1372): picture →
+        // dim → blur, the ink read through it (`HeroBannerPictureView.dim`).
+        bannerView.dim = Self.bannerDim
         // The blurred picture decides the type's ink — read it again the
         // moment it changes, off the bake's own dissolve when on screen.
         bannerView.onLevelsChanged = { [weak self] in
@@ -1277,6 +1280,13 @@ final class PlaceProfileViewController: UIViewController {
     /// Both went (30 September 2026): the plate's long climb was the white
     /// halo over the photograph, the scrim a black veil. `HeroBannerFade` is
     /// the profile banner's run-out too, so the two screens cannot drift.
+    /// The picture's dim (#1372): light, not #327's black veil — the owner
+    /// asked for "slightly darkened", to be tuned on a device.
+    static let bannerDim: CGFloat = 0.25
+    /// The share of the blur's run, at its foot, over which the page's tone
+    /// arrives (#1372; the poster's 30 %, #718).
+    static let footFadeShare: CGFloat = 0.7
+
     private func placeHeroFade() {
         // The identity stands in the floating header, over the box.
         headerHost.layoutIfNeeded()
@@ -1287,10 +1297,14 @@ final class PlaceProfileViewController: UIViewController {
         let name = restingFrame(of: identityView)
         let foot = bannerBox.bounds.height - restingDrop
         guard name.height > 0, foot > name.minY else { return }
-        // Shouldered, as a profile's poster: the name stands on the picture
-        // where the blur is still nil, so the page's tone is already half
-        // there under it.
-        let fade = HeroBannerFade.shoulderedGeometry(identityTop: name.minY, foot: foot)
+        // ⚠️ NO PAGE-TONED WASH (#1372, the owner 2026-10-18): the type
+        // stands on the dimmed, blurred picture alone, and the page's tone
+        // arrives only over the blur's LAST 30 %, so the banner's edge melts
+        // into the page rather than ending on a line — the poster's rule
+        // (#718), set here explicitly. It was shouldered: the page already
+        // at 0.55 under the flag and the name, a white haze in light mode.
+        var fade = HeroBannerFade.geometry(identityTop: name.minY, foot: foot)
+        fade.rampStart = fade.blurStart + Self.footFadeShare * (fade.blurFull - fade.blurStart)
         bannerView.fade = fade
         bannerRamp.fade = fade
         updateHeroInk()
@@ -2540,6 +2554,9 @@ extension PlaceProfileViewController {
     var debugBannerPictureCover: CGRect { bannerView.convert(bannerView.debugPictureCover, to: view) }
     var debugRampLocations: [CGFloat] { bannerRamp.debugLocations }
     var debugRampAlphas: [CGFloat] { bannerRamp.debugAlphas }
+    /// The picture's dim and where it lies, in this view's space (#1372).
+    var debugBannerDim: CGFloat { bannerView.dim }
+    var debugBannerDimFrame: CGRect { bannerView.convert(bannerView.debugDimFrame, to: view) }
     var debugBlurBakeMilliseconds: Double { bannerView.debugLastBakeMilliseconds }
     /// The banner box's frame, in the view's space.
     var debugBannerBoxFrame: CGRect { bannerBox.convert(bannerBox.bounds, to: view) }

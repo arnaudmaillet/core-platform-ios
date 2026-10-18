@@ -210,14 +210,15 @@ struct PlaceProfileTests {
     }
 
     /// The picture runs under the whole identity — the name and the counters
-    /// — fading into the page from just above the name, whole by the
-    /// banner's edge, so the list below starts on the page with no seam.
+    /// — fading into the page only over the blur's last 30 % (#1372), whole
+    /// by the banner's edge, so the list below starts on the page with no
+    /// seam and the name stands on the picture alone.
     @Test func thePictureRunsUnderTheIdentityToTheFoot() throws {
         let profile = makeProfile()
         laidOut(profile)
         let fade = try #require(profile.debugBannerFade)
         let box = profile.debugBannerBoxFrame
-        #expect(fade.rampStart < profile.debugNameFrame.minY)
+        #expect(fade.rampStart > profile.debugNameFrame.maxY)
         #expect(abs(fade.rampEnd - box.maxY) < 0.5)
         #expect(profile.debugRampAlphas.last == 1)
     }

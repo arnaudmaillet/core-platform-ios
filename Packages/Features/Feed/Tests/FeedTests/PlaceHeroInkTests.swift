@@ -19,9 +19,10 @@ import UIKit
 @Suite("Place hero ink")
 struct PlaceHeroInkTests {
     /// The extremes a picture can be under the type: pure white and black,
-    /// hard 2px white/black stripes, and a mid grey near where the inks cross.
+    /// hard 2px white/black stripes, a mid grey, and a light grey that only
+    /// the dim turns to the white ink's side (#1372).
     enum Picture: String, CaseIterable, CustomTestStringConvertible {
-        case white, black, stripes, grey
+        case white, black, stripes, grey, lightGrey
 
         var testDescription: String { rawValue }
 
@@ -33,6 +34,7 @@ struct PlaceHeroInkTests {
                 switch self {
                 case .white: UIColor.white.setFill()
                 case .grey: UIColor(white: 0.5, alpha: 1).setFill()
+                case .lightGrey: UIColor(white: 0.55, alpha: 1).setFill()
                 case .black, .stripes: UIColor.black.setFill()
                 }
                 context.fill(CGRect(origin: .zero, size: size))
@@ -77,11 +79,16 @@ struct PlaceHeroInkTests {
         return profile
     }
 
-    /// AA for the name and for every counter's value and caption over any
-    /// picture — hard stripes included — in both appearances: the page's
-    /// tone half under the name (the shoulder) closes a sharp picture's
-    /// spread where the blur, nil at the container's top, cannot.
-    @Test(arguments: Picture.allCases, [UIUserInterfaceStyle.light, .dark])
+    /// AA for the name and for every counter's value and caption over an
+    /// even picture, in both appearances: the dimmed picture's own side of
+    /// the inks (#1372).
+    ///
+    /// ⚠️ NOT OVER HARD STRIPES ANY MORE. The page's tone half under the name
+    /// (the shoulder) closed a sharp picture's spread; the owner took that
+    /// white wash away (2026-10-18), and with the blur nil under the name a
+    /// 2px black/white stripe is both inks' worst ground. The mock banners
+    /// are measured on the simulator (`-place-ink-audit`).
+    @Test(arguments: [Picture.white, .black, .grey, .lightGrey], [UIUserInterfaceStyle.light, .dark])
     func theTypeClearsAAOverAnyBanner(picture: Picture, style: UIUserInterfaceStyle) throws {
         let profile = place(picture, style: style)
         #expect(profile.debugHasBannerPicture)
@@ -124,18 +131,38 @@ struct PlaceHeroInkTests {
         #expect(profile.debugInkReadCount == reads)
     }
 
-    /// With half the page's tone under the type (the shoulder), every block
-    /// wears the page's side of the inks whatever the picture — black on a
-    /// light page, white on a dark one.
+    /// No page under the type (#1372): the DIMMED picture picks the ink,
+    /// whatever the appearance — black over white, white over black.
     @Test(arguments: [UIUserInterfaceStyle.light, .dark])
-    func thePageSidePicksTheInk(style: UIUserInterfaceStyle) {
-        let pageSide: HeroInk.Tone = style == .dark ? .light : .dark
-        for picture in [Picture.white, .black] {
+    func theDimmedPicturePicksTheInk(style: UIUserInterfaceStyle) {
+        for (picture, side) in [(Picture.white, HeroInk.Tone.dark), (.black, .light)] {
             let profile = place(picture, style: style)
-            #expect(profile.debugHeroInkTones.name == pageSide, "\(picture)")
-            #expect(profile.debugHeroInkTones.likes == pageSide, "\(picture)")
-            #expect(profile.debugHeroNameInk == pageSide.primary, "\(picture)")
+            #expect(profile.debugHeroInkTones.name == side, "\(picture)")
+            #expect(profile.debugHeroInkTones.likes == side, "\(picture)")
+            #expect(profile.debugHeroNameInk == side.primary, "\(picture)")
         }
+    }
+
+    /// The ink is read through the dim: a light grey that takes black ink
+    /// on its own is darkened to the white ink's side (#1372).
+    @Test func theInkSeesTheDim() {
+        let profile = place(.lightGrey, style: .light)
+        #expect(profile.debugBannerDim > 0)
+        #expect(profile.debugHeroInkTones.name == .light)
+    }
+
+    /// The dim covers the whole picture, the stretched part under a
+    /// pull-down included.
+    @Test func theDimCoversTheStretchedBanner() {
+        let profile = place(.grey, style: .light)
+        for pull: CGFloat in [0, 80] {
+            profile.debugScrollActivePage(to: -pull)
+            profile.view.layoutIfNeeded()
+            let box = profile.debugBannerBoxFrame
+            let dim = profile.debugBannerDimFrame
+            #expect(dim.minY <= box.minY + 0.5 && dim.maxY >= box.maxY - 0.5, "pull \(pull): \(dim) over \(box)")
+        }
+        profile.debugScrollActivePage(to: 0)
     }
 
     /// The blur is next to nothing under the name — the top of its
@@ -148,10 +175,10 @@ struct PlaceHeroInkTests {
         #expect(name.1.median - name.1.min > 1, "name \(name.1)")
     }
 
-    /// The blur and the page's tone climbing from just above the identity
-    /// row — its flag's top, as a profile's avatar's — all the way down to the banner's foot, under the
-    /// counters too: the whole identity on the picture, as on a profile's
-    /// poster, half the page already behind it and whole at the foot.
+    /// The blur climbing from just above the identity row — its flag's top,
+    /// as a profile's avatar's — all the way down to the banner's foot, and
+    /// the page's tone only over the blur's last 30 % (#1372): none under
+    /// the name, whole at the foot.
     @Test func theFadeRunsTheIdentityOnThePicture() throws {
         let profile = place(.grey, style: .light)
         let fade = try #require(profile.debugBannerFade)
@@ -161,9 +188,11 @@ struct PlaceHeroInkTests {
         #expect(abs(fade.blurFull - box.maxY) < 0.5)
         #expect(abs(name.minY - fade.blurStart - HeroBannerFade.blurLead) < 0.5)
         #expect(abs(fade.rampEnd - box.maxY) < 0.5)
-        // Shouldered: half the page's tone already under the name.
-        #expect(abs((fade.rampShoulder ?? .nan) - fade.blurStart) < 0.5)
-        #expect(HeroBannerFade.rampAlpha(at: name.minY, geometry: fade) >= HeroBannerFade.shoulderAlpha - 0.001)
+        // No shoulder, no wash: the page arrives over the last 30 % only.
+        #expect(fade.rampShoulder == nil)
+        #expect(abs(fade.rampStart - (fade.blurStart + 0.7 * (fade.blurFull - fade.blurStart))) < 0.5)
+        #expect(HeroBannerFade.rampAlpha(at: name.minY, geometry: fade) == 0)
+        #expect(HeroBannerFade.rampAlpha(at: profile.debugNameFrame.maxY, geometry: fade) == 0, "none under the flag and the name")
         #expect(HeroBannerFade.rampAlpha(at: metrics.maxY, geometry: fade) < 0.9)
         let levels = profile.debugBannerBlurLevels
         try #require(levels.count == HeroBannerFade.blurSigmas.count)
