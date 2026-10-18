@@ -148,39 +148,39 @@ struct ProfileReferenceLookupTests {
         #expect(phases() == [.failed(message: expected)])
     }
 
-    // MARK: - The bell (#778, #756)
+    // MARK: - The bell (#1398)
 
-    /// Bar items are decided at frame 0 so none pops in mid-push: a handle
-    /// route wears the bell from the start, unusable until the lookup has
-    /// named someone else.
-    @Test func aHandleRouteWearsADisabledBellFromTheFirstFrameUntilItNamesSomeoneElse() async {
+    /// No bell is presumed (#1398): a handle route has none until the lookup
+    /// names someone the viewer follows, then it comes, usable.
+    @Test func aHandleRouteGetsTheBellOnceItNamesSomeoneFollowed() async {
         let lookup = ScriptedLookup([.found(ProfileID("prof-7"))], held: true)
-        // Followed: a profile the viewer does not follow wears no bell once
-        // its relationship lands (the owner, 2026-10-15).
         let screen = Self.screen(lookup: lookup, relationship: .other(isFollowing: true, isBlocked: false))
 
         screen.loadViewIfNeeded()
-        #expect(screen.debugMuteBellItem != nil)
-        #expect(screen.debugMuteBellItem?.isEnabled == false)
+        #expect(screen.debugMuteBellItem == nil, "a bell presumed before the lookup")
 
         await lookup.release()
         await settle { screen.debugMuteBellItem?.isEnabled == true }
     }
 
-    @Test func aHandleThatNamesNoOneTakesTheBellAway() async {
+    @Test func aHandleThatNamesNoOneNeverShowsABell() async {
         let screen = Self.screen(lookup: ScriptedLookup([.missing]), relationship: .other(isFollowing: false, isBlocked: false))
 
         screen.loadViewIfNeeded()
-        #expect(screen.debugMuteBellItem != nil)
-        await settle { screen.debugMuteBellItem == nil }
+        #expect(screen.debugMuteBellItem == nil)
+        // Its lookup and relationship land; no bell ever comes.
+        for _ in 0..<500 { await Task.yield() }
+        #expect(screen.debugMuteBellItem == nil)
     }
 
-    @Test func aHandleThatNamesTheViewerTakesTheBellAway() async {
+    @Test func aHandleThatNamesTheViewerNeverShowsABell() async {
         let screen = Self.screen(lookup: ScriptedLookup([.found(ProfileID("prof-7"))]), relationship: .me)
 
         screen.loadViewIfNeeded()
-        #expect(screen.debugMuteBellItem != nil)
-        await settle { screen.debugMuteBellItem == nil }
+        #expect(screen.debugMuteBellItem == nil)
+        // Its lookup and relationship land; no bell ever comes.
+        for _ in 0..<500 { await Task.yield() }
+        #expect(screen.debugMuteBellItem == nil)
     }
 
     private struct SilentFetcher: ImageFetching {
