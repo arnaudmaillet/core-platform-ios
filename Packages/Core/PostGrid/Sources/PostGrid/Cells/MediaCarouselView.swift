@@ -498,6 +498,12 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     /// The current page's rect in a given view's space. The flight departs from
     /// the PAGE, not the box: the box holds other items of the strip, so
     /// flying it would carry several images.
+    /// The page on screen's own view — what a lift of the media alone
+    /// targets (#1377).
+    public var currentPageView: UIView? {
+        pageViews.indices.contains(currentPage) ? pageViews[currentPage] : nil
+    }
+
     public func currentPageRect(in view: UIView) -> CGRect? {
         guard pageViews.indices.contains(currentPage) else { return nil }
         return pageViews[currentPage].convert(pageViews[currentPage].bounds, to: view)

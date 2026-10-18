@@ -170,6 +170,15 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         return mediaView.frame
     }
 
+    /// The view the media is drawn in — a collection's page on screen — nil
+    /// for a text-only row: what a native preview lifts, the media alone and
+    /// not the card around it (#1377). `mediaHeroRect` is its rect.
+    public var mediaPreviewView: UIView? {
+        guard !mediaView.isHidden else { return nil }
+        if let carousel, !carousel.isHidden, let page = carousel.currentPageView { return page }
+        return mediaView
+    }
+
     /// The image the preview is currently showing — the exact pixels the
     /// viewer is looking at, so a flight starts from them rather than from a
     /// cache lookup that could miss.

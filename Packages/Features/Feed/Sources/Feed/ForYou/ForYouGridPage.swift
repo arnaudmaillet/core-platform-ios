@@ -23,6 +23,21 @@ private final class WeakPageBox {
 }
 
 final class ForYouGridPage: UIView {
+    /// A long press on a list card OFF its media does nothing (#1377): no
+    /// lift (the configuration refuses it) — and no open on release either,
+    /// which the card's tap would otherwise make of it. This hold begins
+    /// there and only there, and its beginning cancels the card's touches;
+    /// a control (the action row's buttons and their own hold) keeps its
+    /// press.
+    private lazy var offMediaHold: UILongPressGestureRecognizer = {
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(swallowHold))
+        offMediaHoldGate.page = self
+        hold.delegate = offMediaHoldGate
+        return hold
+    }()
+
+    private let offMediaHoldGate = OffMediaHoldGate()
+
     /// The saved-posts pile, the app's one, shared with the post page and the
     /// profile's Saved tab — see `PostBookmarkStore`. Nil where no pile exists
     /// (a host that says so, #1273): the save control is then not drawn.
@@ -802,6 +817,7 @@ final class ForYouGridPage: UIView {
         )
         collectionView.dataSource = self
         collectionView.delegate = self
+        collectionView.addGestureRecognizer(offMediaHold)
         refreshControl.addAction(UIAction { [weak self] _ in self?.onRefresh?() }, for: .valueChanged)
         collectionView.refreshControl = refreshControl
         collectionView.pin(to: self)
@@ -3449,6 +3465,14 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         guard !showsSkeleton, let indexPath = indexPaths.first else { return nil }
         let index = flatIndex(for: indexPath)
         guard posts.indices.contains(index) else { return nil }
+        // ⚠️ A LIST CARD'S PREVIEW BELONGS TO ITS MEDIA (#1377, the owner
+        // 2026-10-18): only a press that starts on the media (a carousel's
+        // page on screen) lifts it; the header, the caption, the action row
+        // and a text-only card lift nothing. A grid tile IS its media.
+        if let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell {
+            guard let media = row.mediaHeroRect,
+                  media.contains(collectionView.convert(point, to: row)) else { return nil }
+        }
         let post = posts[index]
         let width = max(0, bounds.width - LeadRowMetrics.sideMargin * 2)
         let pipeline = imagePipeline
@@ -3522,12 +3546,42 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         open(at: indexPath(for: index), showingComments: false)
     }
 
-    /// The tile the lift is made of, on its own rounded shape.
-    private func tilePreview(at indexPath: IndexPath) -> UITargetedPreview? {
+    @objc private func swallowHold() {}
+
+    /// Whether a long press at `point` (in the collection view) lands on a
+    /// list card off its media and off any control.
+    func swallowsHold(at point: CGPoint) -> Bool {
+        guard let indexPath = collectionView.indexPathForItem(at: point),
+              let row = collectionView.cellForItem(at: indexPath) as? PostGridListRowCell else { return false }
+        let local = collectionView.convert(point, to: row)
+        if let media = row.mediaHeroRect, media.contains(local) { return false }
+        var view = row.hitTest(local, with: nil)
+        while let current = view, current !== row {
+            if current is UIControl { return false }
+            view = current.superview
+        }
+        return true
+    }
+
+    /// The tile the lift is made of, on its own rounded shape — on a list
+    /// card, its MEDIA alone (a carousel's page on screen), on the media's
+    /// own corners: the card's header, text and actions never take part in
+    /// the morph, and stay in place while it is up (#1377).
+    func tilePreview(at indexPath: IndexPath) -> UITargetedPreview? {
         guard let cell = collectionView.cellForItem(at: indexPath), cell.window != nil else { return nil }
         let parameters = UIPreviewParameters()
         parameters.backgroundColor = .clear
         let card = cell.contentView
+        // The media's OWN view, not the card clipped to it: UIKit hides the
+        // targeted view while the lift is up, and the card's header, text
+        // and actions must stay where they are.
+        if let row = cell as? PostGridListRowCell {
+            guard let media = row.mediaPreviewView else { return nil }
+            parameters.visiblePath = UIBezierPath(
+                roundedRect: media.bounds, cornerRadius: PostGridListRowCell.mediaCornerRadius
+            )
+            return UITargetedPreview(view: media, parameters: parameters)
+        }
         let radius = max(card.layer.cornerRadius, cell.layer.cornerRadius)
         parameters.visiblePath = UIBezierPath(roundedRect: card.bounds, cornerRadius: radius)
         return UITargetedPreview(view: card, parameters: parameters)
@@ -3572,5 +3626,17 @@ private final class LeadHostView: UICollectionReusableView {
         }
         view.frame = bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+    }
+}
+
+/// `ForYouGridPage.offMediaHold`'s gate — its own object: a view's
+/// `gestureRecognizerShouldBegin` is UIView's.
+@MainActor
+private final class OffMediaHoldGate: NSObject, UIGestureRecognizerDelegate {
+    weak var page: ForYouGridPage?
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard let page else { return false }
+        return page.swallowsHold(at: gestureRecognizer.location(in: page.collectionView))
     }
 }

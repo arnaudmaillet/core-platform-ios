@@ -80,6 +80,145 @@ struct TileNativePreviewTests {
         #expect(menu.children.count == 1)
     }
 
+    // MARK: - List cards: the media alone (#1377)
+
+    private func listPosts() -> [GalleryPost] {
+        [
+            GalleryPost(
+                id: PostID("photo"), kind: .photo, isRepost: false,
+                thumbnailURL: URL(string: "https://example.com/photo.jpg"), aspectRatio: 1,
+                caption: "New city, same habits.", publishedAtMS: 3,
+                authorID: ProfileID("a1"), authorName: "Noah", authorHandle: "noah"
+            ),
+            GalleryPost(
+                id: PostID("text"), kind: .text, isRepost: false, thumbnailURL: nil,
+                caption: "Third coffee.", publishedAtMS: 2,
+                authorID: ProfileID("a2"), authorName: "Yuki", authorHandle: "yuki"
+            ),
+            GalleryPost(
+                id: PostID("set"), kind: .photo, isRepost: false,
+                pages: (0..<4).map {
+                    GalleryPost.MediaPage(thumbnailURL: URL(string: "https://example.com/s\($0).jpg"), aspectRatio: 1)
+                },
+                caption: "Four of them.", publishedAtMS: 1,
+                authorID: ProfileID("a3"), authorName: "Lena", authorHandle: "lena"
+            ),
+        ]
+    }
+
+    /// A list page in a window: the previews need the cell on screen.
+    private func hostingList(_ body: (ForYouGridPage) throws -> Void) rethrows {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 3000))
+        let page = ForYouGridPage(imagePipeline: ImagePipeline(fetcher: SilentFetcher()), style: .list)
+        page.frame = window.bounds
+        window.addSubview(page)
+        window.isHidden = false
+        defer { window.isHidden = true }
+        page.setCorpusComplete(true)
+        page.render(.content(listPosts()))
+        page.layoutIfNeeded()
+        page.collectionView.layoutIfNeeded()
+        try body(page)
+    }
+
+    private func row(_ page: ForYouGridPage, item: Int) throws -> PostGridListRowCell {
+        try #require(page.collectionView.cellForItem(at: page.indexPath(for: item)) as? PostGridListRowCell)
+    }
+
+    private func press(_ page: ForYouGridPage, item: Int, at point: CGPoint) throws -> UIContextMenuConfiguration? {
+        let cell = try row(page, item: item)
+        return page.collectionView(
+            page.collectionView, contextMenuConfigurationForItemsAt: [page.indexPath(for: item)],
+            point: cell.convert(point, to: page.collectionView)
+        )
+    }
+
+    /// Only a press that starts on the media lifts a list card: the caption,
+    /// the header and the card's margins lift nothing.
+    @Test func aListCardLiftsOnlyFromItsMedia() throws {
+        try hostingList { page in
+            let cell = try row(page, item: 0)
+            let media = try #require(cell.mediaHeroRect)
+            #expect(try press(page, item: 0, at: CGPoint(x: media.midX, y: media.midY)) != nil)
+            #expect(try press(page, item: 0, at: CGPoint(x: media.midX, y: media.minY - 8)) == nil, "the header")
+            #expect(try press(page, item: 0, at: CGPoint(x: media.midX, y: media.maxY + 8)) == nil, "below the media")
+            #expect(try press(page, item: 0, at: CGPoint(x: 2, y: media.midY)) == nil, "the card's margin")
+        }
+    }
+
+    /// Off the media a long press does nothing — not even the card's open
+    /// on release: the hold swallows it there, and only there. The action
+    /// row's controls keep their own press, the media its lift.
+    @Test func offTheMediaALongPressIsSwallowed() throws {
+        try hostingList { page in
+            let cell = try row(page, item: 0)
+            let media = try #require(cell.mediaHeroRect)
+            func swallows(_ point: CGPoint, in cell: UIView) -> Bool {
+                page.swallowsHold(at: cell.convert(point, to: page.collectionView))
+            }
+            #expect(swallows(CGPoint(x: media.midX, y: media.minY - 8), in: cell), "the caption")
+            #expect(!swallows(CGPoint(x: media.midX, y: media.midY), in: cell), "the media lifts")
+            let control = try #require(Self.firstControl(in: cell))
+            let center = control.convert(CGPoint(x: control.bounds.midX, y: control.bounds.midY), to: cell)
+            #expect(!swallows(center, in: cell), "a control keeps its press")
+            let text = try row(page, item: 1)
+            #expect(swallows(CGPoint(x: text.bounds.midX, y: 30), in: text), "a text card")
+        }
+    }
+
+    private static func firstControl(in view: UIView) -> UIControl? {
+        for subview in view.subviews where !subview.isHidden && subview.alpha > 0.01 {
+            if let control = subview as? UIControl, control.isUserInteractionEnabled, control.bounds.width > 0 {
+                return control
+            }
+            if let found = firstControl(in: subview) { return found }
+        }
+        return nil
+    }
+
+    /// A text-only card has no preview anywhere on it.
+    @Test func aTextCardHasNoPreview() throws {
+        try hostingList { page in
+            let cell = try row(page, item: 1)
+            #expect(cell.mediaHeroRect == nil)
+            for y in stride(from: 4, to: cell.bounds.height, by: 24) {
+                #expect(try press(page, item: 1, at: CGPoint(x: cell.bounds.midX, y: y)) == nil)
+            }
+            #expect(page.tilePreview(at: page.indexPath(for: 1)) == nil)
+        }
+    }
+
+    /// The lift and the drop are the media's rect and corners, never the
+    /// card's.
+    @Test func aListCardsPreviewIsItsMedia() throws {
+        try hostingList { page in
+            let cell = try row(page, item: 0)
+            let media = try #require(cell.mediaHeroRect)
+            let preview = try #require(page.tilePreview(at: page.indexPath(for: 0)))
+            #expect(preview.view !== cell.contentView, "the card itself stays in place")
+            let shown = preview.view.convert(try #require(preview.parameters.visiblePath).bounds, to: cell)
+            #expect(abs(shown.minX - media.minX) < 0.5 && abs(shown.minY - media.minY) < 0.5)
+            #expect(abs(shown.width - media.width) < 0.5 && abs(shown.height - media.height) < 0.5)
+            #expect(shown.height < cell.bounds.height - 40, "the card's header and text are outside it")
+        }
+    }
+
+    /// On a carousel, the page on screen: page 2 lifts page 2's rect.
+    @Test func aCarouselLiftsThePageOnScreen() throws {
+        try hostingList { page in
+            let cell = try row(page, item: 2)
+            let first = try #require(cell.mediaHeroRect)
+            cell.setMediaPage(1, animated: false)
+            cell.layoutIfNeeded()
+            let second = try #require(cell.mediaHeroRect)
+            #expect(second != first)
+            let preview = try #require(page.tilePreview(at: page.indexPath(for: 2)))
+            let shown = preview.view.convert(try #require(preview.parameters.visiblePath).bounds, to: cell)
+            #expect(abs(shown.minX - second.minX) < 0.5 && abs(shown.width - second.width) < 0.5)
+            #expect(try press(page, item: 2, at: CGPoint(x: second.midX, y: second.midY)) != nil)
+        }
+    }
+
     /// A clip's preview carries a live surface over its cover.
     @Test func aClipsPreviewCarriesItsSurface() {
         let clip = GalleryPost(
