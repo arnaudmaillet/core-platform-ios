@@ -1,5 +1,6 @@
 import MapsInterface
 import MediaCore
+import MediaPlayback
 import PostGrid
 import DesignSystem
 import EmoteKit
@@ -83,6 +84,24 @@ final class ProfileHeaderView: UIView {
     static let pageMargin = Metrics.horizontalInset
 
     private let bannerView: ProfileBannerView
+    /// The player pool the video banner plays on (#944) — the screen's.
+    var bannerVideoPool: VideoPlaybackController?
+
+    /// Whether the banner has a loop to play.
+    var hasBannerVideo: Bool { bannerView.videoURL != nil }
+
+    /// Plays the video banner or stops it; nothing for a still banner.
+    func setBannerVideoPlaying(_ playing: Bool) {
+        bannerView.setVideoPlaying(playing, pool: bannerVideoPool)
+    }
+
+    /// Whether the banner shows on screen at all: in its window, faded in,
+    /// and below the bar.
+    var isBannerOnScreen: Bool {
+        guard let window = bannerView.window, bannerView.visibility > 0.05 else { return false }
+        let frame = bannerView.convert(bannerView.bounds, to: window)
+        return frame.intersects(window.bounds) && frame.maxY > window.safeAreaInsets.top
+    }
     /// The disc's frame: sized by layout, ringed in the page's tone.
     private let avatarView = CircleAvatarView()
     /// The app's avatar (#943) inside it: the initials, a smaller face
@@ -744,6 +763,7 @@ final class ProfileHeaderView: UIView {
 
         applyBannerPresence(model.bannerImageURL)
         bannerView.setImageURL(model.bannerImageURL)
+        bannerView.setVideoURL(model.bannerVideoURL, pool: bannerVideoPool)
         loadAvatar(model.avatarURL)
     }
 
@@ -809,6 +829,7 @@ final class ProfileHeaderView: UIView {
             self.verifiedBadge.isHidden = !model.isVerified
             self.applyBannerPresence(model.bannerImageURL)
             self.bannerView.setImageURL(model.bannerImageURL)
+            self.bannerView.setVideoURL(model.bannerVideoURL, pool: self.bannerVideoPool)
             self.loadAvatar(model.avatarURL)
         }
         dissolve([followersStat, followingStat, likesStat], after: Metrics.stagger, generation: generation) {

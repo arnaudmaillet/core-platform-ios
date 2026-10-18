@@ -1,5 +1,6 @@
 import DesignSystem
 import MediaCore
+import MediaPlayback
 import UIKit
 
 /// The immersive media backdrop behind the profile identity block. It runs
@@ -86,6 +87,14 @@ final class ProfileBannerView: UIView {
         // banner's floor at the top — see `setTravelled`.
         picture.pictureOutset.top = Self.parallaxReserve
         picture.pin(to: mediaContainer)
+        // The video banner's loop (#944), over the still. Clear until its
+        // first frame, so the still shows through rather than a black card.
+        video.paintsOpaqueGround = false
+        video.videoGravity = .resizeAspectFill
+        video.isUserInteractionEnabled = false
+        video.isHidden = true
+        mediaContainer.addSubview(video)
+        video.pin(to: mediaContainer)
         ramp.pin(to: self)
 
         topScrim.locations = [0, 1]
@@ -105,6 +114,46 @@ final class ProfileBannerView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    // MARK: - The video banner (#944)
+
+    private let video = VideoRenderView()
+    /// The banner's loop, nil for a still banner.
+    private(set) var videoURL: URL?
+    private(set) var isVideoPlaying = false
+
+    /// Names the banner's loop — or none. A new one stops the old.
+    func setVideoURL(_ url: URL?, pool: VideoPlaybackController?) {
+        guard url != videoURL else { return }
+        setVideoPlaying(false, pool: pool)
+        videoURL = url
+    }
+
+    /// Plays the loop over the still — muted, on the shared pool — or stops
+    /// it, the still showing again. The host decides when (on show, the
+    /// banner on screen, motion allowed).
+    func setVideoPlaying(_ playing: Bool, pool: VideoPlaybackController?) {
+        guard playing != isVideoPlaying else { return }
+        guard playing, let url = videoURL, let pool else {
+            if isVideoPlaying { pool?.stop(video) }
+            isVideoPlaying = false
+            video.isHidden = true
+            return
+        }
+        isVideoPlaying = true
+        video.isHidden = false
+        Task { [weak self] in
+            // Stopped before the task ran: never start a player nobody shows.
+            guard let self, isVideoPlaying, videoURL == url else { return }
+            await pool.play(url, in: video, peakBitRate: 1_500_000, scope: Self.playbackScope)
+        }
+    }
+
+    static let playbackScope = "profile.banner"
+
+    #if DEBUG
+    var debugVideoView: UIView { video }
+    #endif
 
     func setImageURL(_ url: URL?) {
         guard url != currentImageURL || picture.image == nil else { return }

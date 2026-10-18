@@ -914,6 +914,37 @@ public final class MockSocialServices: @unchecked Sendable {
 
     // MARK: - profile.v1
 
+    /// The mock's video banners (#944): the viewer's, so the owner sees one,
+    /// and a stable quarter of the roster — a muted LANDSCAPE clip, its
+    /// poster the still (`banner_url` and the `POSTER` rendition), the clip
+    /// the `MANIFEST` rendition, the shape core-platform-backend#915 asks the
+    /// read to carry. Owning the shop item is the backend's to check; the
+    /// mock's banners are owned.
+    static let videoBannerClips = ["clip-65", "clip-18", "clip-74", "clip-39", "clip-31", "clip-54"]
+
+    static func applyVideoBanner(to view: inout Profile_V1_ProfileView, isViewer: Bool) {
+        let key = view.profileID.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+        guard isViewer || key % 4 == 0 else { return }
+        let id = videoBannerClips[Int(key % UInt64(videoBannerClips.count))]
+        guard let clip = MockClipCatalog.shared.clip(id: id),
+              let poster = MockClipCatalog.shared.posterFileURL(clipID: id) else { return }
+        var manifest = Media_V1_DeliveredRendition()
+        manifest.kind = .mediaRenditionKindManifest
+        manifest.url = "mock://video/\(clip.id)?w=\(clip.width)&h=\(clip.height)"
+        manifest.width = UInt32(clip.width)
+        manifest.height = UInt32(clip.height)
+        var still = Media_V1_DeliveredRendition()
+        still.kind = .mediaRenditionKindPoster
+        still.url = poster.absoluteString
+        still.width = UInt32(clip.width)
+        still.height = UInt32(clip.height)
+        var media = Media_V1_DeliveredMedia()
+        media.state = .mediaAssetStateReady
+        media.renditions = [manifest, still]
+        view.banner = media
+        view.bannerURL = poster.absoluteString
+    }
+
     private func getProfileByID(_ request: Profile_V1_GetProfileByIdRequest) -> Result<Profile_V1_ProfileView, ConnectError> {
         // The viewer's own profile, so their authored posts hydrate. Identity
         // fields come from the mutable overlay so a save via UpdateProfile /
@@ -928,6 +959,7 @@ public final class MockSocialServices: @unchecked Sendable {
             view.handle = snapshot.handle
             view.displayName = snapshot.name
             view.avatarURL = MockPostStore.viewer.avatarURL
+            Self.applyVideoBanner(to: &view, isViewer: true)
             view.bio = snapshot.bio
             view.websiteURL = snapshot.website
             view.customLinks = snapshot.links.map { link in
@@ -966,6 +998,7 @@ public final class MockSocialServices: @unchecked Sendable {
         view.handle = author.handle
         view.displayName = author.displayName
         view.avatarURL = author.avatarURL
+        Self.applyVideoBanner(to: &view, isViewer: false)
         view.bio = author.bio
         view.websiteURL = author.websiteURL
         // Relationship-list privacy, carried on the whole-profile flag because

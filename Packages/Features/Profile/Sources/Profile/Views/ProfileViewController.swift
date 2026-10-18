@@ -330,6 +330,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         self.videoPlayback = videoPlayback
         self.shareTargeting = shareTargeting
         headerView = ProfileHeaderView(imagePipeline: imagePipeline)
+        headerView.bannerVideoPool = videoPlayback
         // Every profile can carry Saved and Liked (#411, #837): someone
         // else's only when its owner shows them — the server answers empty
         // otherwise, and an empty source is no tab (#742).
@@ -392,6 +393,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // The video banner rests under Reduce Motion, Power Saving and idle
+        // calm, and plays again when they end (#944).
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(decorativeMotionDidChange), name: .decorativeMotionDidChange, object: nil
+        )
         // The page the cards lie on, a step below them — see `Surface`.
         view.backgroundColor = Surface.page
         // Selector-based, so UIKit drops it with this object — no token to hold
@@ -660,6 +666,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Stops as this screen is covered — including by the post it just
         // opened, whose own player is what should be heard.
         galleryPager.setAutoplayActive(false)
+        headerView.setBannerVideoPlaying(false)
     }
 
     /// The post has finished covering this screen, so the tapped tile can be
@@ -690,6 +697,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Both facts are true only here: the screen owns the display AND its
         // cells are realized. Reconciling any earlier finds no candidates.
         galleryPager.setAutoplayActive(true)
+        updateBannerVideo()
         // The pager's horizontal pan yields to the stack's edge-swipe pop:
         // without this, an edge-start drag over the grid PAGES instead of
         // popping (verified in-sim) — the platform contract loses. Mid-surface
@@ -2568,6 +2576,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // negative offset can reach.
         headerTopConstraint?.constant = -min(travelled, headerTravel)
         headerView.setTravelled(travelled)
+        if headerView.hasBannerVideo { updateBannerVideo() }
         applyIdentityFade(travelled: travelled)
         updateBarTransparency(travelled: travelled)
         let trayGone = trayIsScrolledAway(travelled: travelled)
@@ -2575,6 +2584,20 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             isTrayScrolledAway = trayGone
             updateActionBarItem(followButtonState, animated: view.window != nil && transitionCoordinator == nil)
         }
+    }
+
+    /// The video banner (#944) plays while this screen is on show, the
+    /// banner on screen and decorative motion allowed — the poster under
+    /// Reduce Motion, Power Saving and idle calm (#580), and as soon as the
+    /// banner has scrolled away.
+    private func updateBannerVideo() {
+        let plays = isShownOnScreen && view.window != nil && headerView.isBannerOnScreen
+            && !MotionPreference.stillsDecoration
+        headerView.setBannerVideoPlaying(plays)
+    }
+
+    @objc private func decorativeMotionDidChange() {
+        updateBannerVideo()
     }
 
     /// Fades the identity block out as it reaches the navigation bar, and back
@@ -2726,6 +2749,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             // lightly staggered, so one identity becomes another rather than
             // the whole screen blinking over at once.
             headerView.configure(with: model, staggered: isSwitchingProfile)
+            updateBannerVideo()
             headerView.setRedacted(false, animated: view.window != nil)
 
         case .failed(let message):
