@@ -53,6 +53,8 @@ final class SupervisionAcceptViewController: UIViewController {
     private let onLinked: (SupervisionAcceptViewController, Supervision) -> Void
     let codeField = UITextField()
     private let explanation = UILabel()
+    /// What a teen's link shares (#1116).
+    let consentView = SupervisionConsentView()
 
     init(
         model: SupervisionAcceptModel,
@@ -96,6 +98,9 @@ final class SupervisionAcceptViewController: UIViewController {
         explanation.textColor = .secondaryLabel
         explanation.numberOfLines = 0
         stack.addArrangedSubview(explanation)
+        // What a teen shares by linking, before the code and before Link
+        // (#1116): said plainly, not left to the explanation above.
+        stack.addArrangedSubview(consentView)
 
         // A code from a link reads in two halves, as the invite showed it.
         codeField.text = model.normalizedCode.map(SupervisionInviteCode.display) ?? model.code
@@ -141,18 +146,29 @@ final class SupervisionAcceptViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if model.normalizedCode == nil { codeField.becomeFirstResponder() }
+        // A teen reads what is shared first: the keyboard would cover the
+        // card at large text sizes (#1116). An adult types at once.
+        if model.normalizedCode == nil, consentView.isHidden { codeField.becomeFirstResponder() }
     }
 
     static func explanation(for role: SupervisionRole?) -> String {
         guard let role else {
-            return "Enter the code the other person shared. A parent or guardian who supervises a teen sees the teen's daily time in the app and can set limits. The teen always sees who supervises them, and either of them can end it."
+            // The card below says what a teen's link shares (#1116).
+            return "Enter the code the other person shared. The teen always sees who supervises them, and either of you can end it."
         }
         return SupervisionCopy.acceptExplanation(teen: role == .teen)
     }
 
     private func renderExplanation() {
         explanation.text = Self.explanation(for: model.viewerRole)
+        // A teen, or a side not read yet, is told what linking shares; an
+        // adult shares nothing by accepting.
+        if let title = SupervisionConsent.acceptTitle(for: model.viewerRole) {
+            consentView.configure(title: title, lines: SupervisionConsent.lines(linked: false))
+            consentView.isHidden = false
+        } else {
+            consentView.isHidden = true
+        }
     }
 
     private func codeChanged() {

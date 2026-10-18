@@ -15,11 +15,13 @@ import UIKit
 /// supervisor's page, read-only: what their supervisors see.
 final class SupervisionDetailViewController: UIViewController {
     enum Section: Hashable {
-        case profiles, screenTime, limits, about, end
+        case profiles, sharing, screenTime, limits, about, end
     }
 
     enum Item: Hashable {
         case profile(SupervisionProfile)
+        /// What the teen shares with this supervisor (#1116), on the teen's side.
+        case sharing(SupervisionConsent.Line)
         case overviewLoading
         case overviewFailed
         case day(ScreenTimeDay)
@@ -106,6 +108,7 @@ final class SupervisionDetailViewController: UIViewController {
 
     static func header(_ section: Section) -> String? {
         switch section {
+        case .sharing: SupervisionConsent.linkedTitle
         case .screenTime: SupervisionCopy.screenTimeHeader
         case .limits: SupervisionCopy.limitsHeader
         default: nil
@@ -115,11 +118,10 @@ final class SupervisionDetailViewController: UIViewController {
     static func footer(_ section: Section, supervision: Supervision) -> String? {
         switch section {
         case .profiles:
-            supervision.otherRole == .teen
-                ? "The teen's profiles. They see that you supervise them."
-                : "This person sees your daily time in the app and your limits, below, and can change the limits."
+            // The teen's side says what is shared in the section below (#1116).
+            supervision.otherRole == .teen ? "The teen's profiles. They see that you supervise them." : nil
         case .screenTime: SupervisionCopy.screenTimeFooter
-        case .limits, .about: nil
+        case .sharing, .limits, .about: nil
         case .end:
             supervision.otherRole == .supervisor
                 ? "\(supervision.handleText) is told when you end it. Supervision also ends by itself when you turn 18."
@@ -213,6 +215,12 @@ final class SupervisionDetailViewController: UIViewController {
                 content.textProperties.color = isEnding ? .secondaryLabel : .systemRed
                 content.textProperties.alignment = .center
                 cell.accessibilityTraits.insert(.button)
+            case .sharing(let line):
+                content = .cell()
+                content.text = line.text
+                content.textProperties.numberOfLines = 0
+                content.image = UIImage(systemName: line.symbol)
+                content.imageProperties.tintColor = .secondaryLabel
             case .profile:
                 break
             }
@@ -255,6 +263,12 @@ final class SupervisionDetailViewController: UIViewController {
         if !supervision.profiles.isEmpty {
             snapshot.appendSections([.profiles])
             snapshot.appendItems(supervision.profiles.map(Item.profile), toSection: .profiles)
+        }
+        // The teen re-reads what linking shares, as the accept screen said
+        // it before Link (#1116).
+        if viewerIsTeen {
+            snapshot.appendSections([.sharing])
+            snapshot.appendItems(SupervisionConsent.lines(linked: true).map(Item.sharing), toSection: .sharing)
         }
         if let overview {
             let items = Self.overviewItems(overview.phase, canEdit: overview.canEditLimits)
