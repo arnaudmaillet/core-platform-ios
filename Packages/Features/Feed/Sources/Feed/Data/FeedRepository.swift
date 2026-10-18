@@ -37,6 +37,11 @@ public protocol FeedProviding: Sendable {
     /// A single post hydrated with its author and like count — the post-detail
     /// read path.
     func loadPost(_ id: PostID) async throws -> FeedEntry
+    /// The post as the server holds it NOW, past any warm copy — what a
+    /// screen opened on one post (its detail, its comments) confirms with
+    /// (#447). A post taken down, deleted or withheld since it was cached
+    /// reads as `FeedError.notFound`, and leaves the cache.
+    func revalidatePost(_ id: PostID) async throws -> FeedEntry
     /// Best-effort, cancellable warming of `ids` into the repository's post
     /// cache, so a later `loadPost` (e.g. a Maps pin tap opening the snap feed)
     /// resolves from memory instead of the network. Safe to call for ids that
@@ -68,6 +73,9 @@ public protocol FeedProviding: Sendable {
 }
 
 public extension FeedProviding {
+    /// A provider with no cache of its own: its read is already fresh.
+    func revalidatePost(_ id: PostID) async throws -> FeedEntry { try await loadPost(id) }
+
     /// The viewer was shown `id`: a page fetched ahead that carries it is
     /// promoted on the device (#970). Nothing for a provider with no device
     /// cache.
@@ -241,6 +249,38 @@ public actor FeedRepository: FeedProviding {
         localCache?.didShow(id)
     }
 
+    /// Past the warm cache (#447): `loadPost` answers from memory, so a post
+    /// moderation took down after it was cached kept opening until the cache
+    /// let it go.
+    ///
+    /// - **Warm:** one `GetPost` confirms the post is still shown. The copy's
+    ///   author and like count stay (the `EntityStore` keeps the live count),
+    ///   so the entry differs from the copy only if the post itself changed:
+    ///   no counter read, no second render for a count.
+    /// - **Cold:** `loadPost`, single-flight with any read already on its way.
+    /// - **The viewer's own just-published post** (`remember`): the fleet may
+    ///   not serve it yet, so a `NOT_FOUND` keeps the copy until the fleet has
+    ///   served it once.
+    public func revalidatePost(_ id: PostID) async throws -> FeedEntry {
+        let warm = cachedPost(id)
+        do {
+            let entry: FeedEntry
+            if let warm {
+                let post = try await fetchPost(id)
+                entry = FeedEntry(post: post, author: warm.author, likeCount: warm.likeCount)
+                storeInCache(entry)
+            } else {
+                entry = try await loadPost(id)
+            }
+            rememberedPosts.remove(id)
+            return entry
+        } catch FeedError.notFound {
+            if rememberedPosts.contains(id), let warm { return warm }
+            forgetPosts([id])
+            throw FeedError.notFound
+        }
+    }
+
     /// Cache-first, single-flight hydration of one post. A warm id returns from
     /// memory; concurrent callers for the same cold id (e.g. a prewarm sweep and
     /// the tap that races it) share a single fetch.
@@ -281,14 +321,7 @@ public actor FeedRepository: FeedProviding {
             try? await Task.sleep(for: .milliseconds(ms))
         }
         #endif
-        var request = Post_V1_GetPostRequest()
-        request.postID = id.rawValue
-        let response = await postClient.getPost(request: request, headers: [:])
-        if response.error?.code == .notFound { throw FeedError.notFound }
-        guard let view = response.message else {
-            throw FeedError.transport(message: response.error?.message ?? "post \(id) unavailable", failure: response.error.map { NetworkFailure($0) })
-        }
-        let post = Self.makePost(from: view)
+        let post = try await fetchPost(id)
 
         async let author = fetchAuthor(id: post.authorID)
         async let count = likeCount(for: post.id)
@@ -296,6 +329,19 @@ public actor FeedRepository: FeedProviding {
             throw FeedError.transport(message: "author \(post.authorID) unavailable")
         }
         return FeedEntry(post: post, author: resolvedAuthor, likeCount: await count)
+    }
+
+    /// The post alone, as the server shows it to this viewer now: `NOT_FOUND`
+    /// (a draft, deleted, taken down or withheld) is `FeedError.notFound`.
+    private func fetchPost(_ id: PostID) async throws -> Post {
+        var request = Post_V1_GetPostRequest()
+        request.postID = id.rawValue
+        let response = await postClient.getPost(request: request, headers: [:])
+        if response.error?.code == .notFound { throw FeedError.notFound }
+        guard let view = response.message else {
+            throw FeedError.transport(message: response.error?.message ?? "post \(id) unavailable", failure: response.error.map { NetworkFailure($0) })
+        }
+        return Self.makePost(from: view)
     }
 
     // MARK: - Post cache (LRU)
@@ -314,7 +360,25 @@ public actor FeedRepository: FeedProviding {
     /// Into the same cache a warm read fills, so both `loadPost` and the
     /// synchronous peek answer with it.
     public func remember(_ entry: FeedEntry) async {
+        rememberedPosts.insert(entry.post.id)
         storeInCache(entry)
+    }
+
+    /// Posts the client wrote itself and holds in full (`remember`), until
+    /// the fleet has served them once (`revalidatePost`).
+    private var rememberedPosts: Set<PostID> = []
+
+    /// Out of every cache: the server no longer shows it (#447). The device's
+    /// copy goes too, so a cold start, or an offline page read from the
+    /// device, does not open on it before the network has answered.
+    private func forgetPosts(_ ids: Set<PostID>) {
+        guard !ids.isEmpty else { return }
+        for id in ids {
+            postCache[id] = nil
+            peekablePostCache.remove(id)
+        }
+        postCacheOrder.removeAll { ids.contains($0) }
+        localCache?.forgetPosts(ids)
     }
 
     private func cachedPost(_ id: PostID) -> FeedEntry? {
@@ -421,22 +485,29 @@ public actor FeedRepository: FeedProviding {
         }
 
         let client = postClient
-        let posts = await withTaskGroup(of: (Int, Post?).self) { group in
+        let fetched = await withTaskGroup(of: (Int, Post?, Bool).self) { group in
             for (index, item) in items.enumerated() {
                 group.addTask {
                     var request = Post_V1_GetPostRequest()
                     request.postID = item.postID
                     let response = await client.getPost(request: request, headers: [:])
-                    guard let view = response.message else { return (index, nil) }
-                    return (index, Self.makePost(from: view))
+                    guard let view = response.message else { return (index, nil, response.error?.code == .notFound) }
+                    return (index, Self.makePost(from: view), false)
                 }
             }
-            var indexed: [(Int, Post?)] = []
+            var indexed: [(Int, Post?, Bool)] = []
             for await result in group {
                 indexed.append(result)
             }
-            return indexed.sorted { $0.0 < $1.0 }.map(\.1)
+            return indexed.sorted { $0.0 < $1.0 }
         }
+        let posts = fetched.map(\.1)
+        // A post the server no longer shows (#447: taken down, deleted,
+        // withheld) leaves the post caches too, memory and device, or a stream
+        // opened on it later, or the next cold start, would still serve the copy.
+        // The viewer's own just-published post stays: the fleet may not serve
+        // it yet (`revalidatePost`).
+        forgetPosts(Set(fetched.filter { $0.2 }.map { PostID(items[$0.0].postID) }).subtracting(rememberedPosts))
 
         var hydrated: [(Timeline_V1_FeedItem, Post)] = []
         for (item, post) in zip(items, posts) {

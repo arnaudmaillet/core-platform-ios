@@ -554,6 +554,15 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
         if let index = arguments.firstIndex(of: "-open-post"), index + 1 < arguments.count {
             container.router.route(to: .post(PostID(arguments[index + 1])))
         }
+        // `-open-unavailable-profile [hidden|suspended]` (#447): one of the
+        // mock's seeded profiles no one but their owner reads
+        // (`MockSocialServices.hiddenProfiles`), which reads "This account
+        // isn't available". Pair `-open-post <id>` with `-mock-takedown <id>`
+        // for a post moderation removed.
+        if let index = arguments.firstIndex(of: "-open-unavailable-profile") {
+            let kind = index + 1 < arguments.count ? arguments[index + 1] : "suspended"
+            container.router.route(to: .profile(ProfileID(kind == "hidden" ? "prof-hidden" : "prof-suspended"), stub: nil))
+        }
         // `-open-hashtag <tag>`: a tag's posts (#524), as a tapped `#tag` opens them.
         if let index = arguments.firstIndex(of: "-open-hashtag"), index + 1 < arguments.count {
             container.router.route(to: .hashtag(arguments[index + 1]))

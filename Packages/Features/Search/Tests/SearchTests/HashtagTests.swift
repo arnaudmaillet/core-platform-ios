@@ -52,6 +52,16 @@ private actor TagSearch: SearchProviding {
     }
 }
 
+/// Whether the demo viewer may see `author`'s posts in search (#447,
+/// backend #693): their own, a public author's, or a private author they
+/// follow — as the seed has it.
+private func seenByTheViewer(_ author: String, in dataset: MockSocialDataset) -> Bool {
+    let viewer = MockSocialDataset.viewerProfileID
+    return dataset.profileIDs(inAccount: MockAuthService.accountID).contains(author)
+        || !dataset.isRelationshipsPrivate(author)
+        || dataset.followingByProfileID[viewer]?.contains(author) == true
+}
+
 private func hits(_ count: Int, prefix: String = "p") -> [PostSearchHit] {
     (0..<count).map { PostSearchHit(id: PostID("\(prefix)\($0)")) }
 }
@@ -272,9 +282,13 @@ struct HashtagRepositoryTests {
         let dataset = MockSocialDataset()
         let tagged = dataset.posts.filter { $0.caption.lowercased().contains("#travel") }
         #expect(!tagged.isEmpty, "the mock corpus carries #travel")
+        // Search shows only the posts the viewer may see (#447): a private
+        // author's they don't follow are left out; the tag's count is still
+        // every post carrying it.
+        let seen = tagged.filter { seenByTheViewer($0.authorProfileID, in: dataset) }
 
         let recent = try await repository().searchPosts(matching: "#travel", sort: .recency, limit: 200)
-        #expect(Set(recent.map(\.id)) == Set(tagged.map { PostID($0.postID) }))
+        #expect(Set(recent.map(\.id)) == Set(seen.map { PostID($0.postID) }))
         let stamps = recent.compactMap { hit in tagged.first { $0.postID == hit.id.rawValue }?.publishedAtMS }
         #expect(stamps == stamps.sorted(by: >), "Recent is newest first")
 
@@ -285,8 +299,9 @@ struct HashtagRepositoryTests {
     /// The mock pages as the fleet does (#579): a page size, a token for the
     /// rest, every tagged post once across the pages, none past the end.
     @Test func aTagsPostsComePageByPage() async throws {
-        let tagged = Set(MockSocialDataset().posts
-            .filter { $0.caption.lowercased().contains("#travel") }
+        let dataset = MockSocialDataset()
+        let tagged = Set(dataset.posts
+            .filter { $0.caption.lowercased().contains("#travel") && seenByTheViewer($0.authorProfileID, in: dataset) }
             .map { PostID($0.postID) })
         let repository = repository()
         var seen: [PostID] = []

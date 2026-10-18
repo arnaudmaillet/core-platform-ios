@@ -80,6 +80,10 @@ public actor DiscoveryFeedRepository: FeedProviding {
         try await base.loadPost(id)
     }
 
+    public func revalidatePost(_ id: PostID) async throws -> FeedEntry {
+        try await base.revalidatePost(id)
+    }
+
     /// Hydrated through `base.loadPost`, whose cache keeps a count as it was
     /// fetched.
     public nonisolated var pagesCarryFreshCounts: Bool { false }

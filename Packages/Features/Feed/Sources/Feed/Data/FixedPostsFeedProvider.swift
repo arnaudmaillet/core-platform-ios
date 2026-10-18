@@ -147,6 +147,10 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
         try await base.loadPost(id)
     }
 
+    func revalidatePost(_ id: PostID) async throws -> FeedEntry {
+        try await base.revalidatePost(id)
+    }
+
     /// Each post comes from `base.loadPost`, whose cache keeps a count as it
     /// was fetched.
     nonisolated var pagesCarryFreshCounts: Bool { false }

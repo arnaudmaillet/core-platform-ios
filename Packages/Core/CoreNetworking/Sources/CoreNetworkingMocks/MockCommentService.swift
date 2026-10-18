@@ -25,6 +25,14 @@ public final class MockCommentService: @unchecked Sendable {
     /// A comment's likes (its stakes, counted by engagement): what
     /// `ListReplies` ranks a thread by under `REPLY_SORT_POPULARITY` (#637).
     private let likeCount: @Sendable (String) -> Int64
+    /// Whether `readers` may read a post's comments at all (backend #692):
+    /// the post itself must be readable to them — `MockSocialServices.
+    /// mayReadPost`. Unreadable, the lists come back empty.
+    private let mayReadPost: @Sendable (_ readers: [String], _ postID: String) -> Bool
+    /// Whether a comment's author is hidden from `readers` (a block either
+    /// way, a hidden or suspended profile): their comments are dropped.
+    /// The readers' own comments never are.
+    private let hidesAuthor: @Sendable (_ readers: [String], _ author: String) -> Bool
 
     public init(
         dataset: MockSocialDataset,
@@ -32,8 +40,12 @@ public final class MockCommentService: @unchecked Sendable {
         hiddenWords: @escaping @Sendable (String) -> [String] = { _ in [] },
         mayComment: @escaping @Sendable (String, String) -> Bool = { _, _ in true },
         seedsHeldComments: Bool = false,
-        likeCount: @escaping @Sendable (String) -> Int64 = { _ in 0 }
+        likeCount: @escaping @Sendable (String) -> Int64 = { _ in 0 },
+        mayReadPost: @escaping @Sendable ([String], String) -> Bool = { _, _ in true },
+        hidesAuthor: @escaping @Sendable ([String], String) -> Bool = { _, _ in false }
     ) {
+        self.mayReadPost = mayReadPost
+        self.hidesAuthor = hidesAuthor
         self.dataset = dataset
         self.postStore = postStore
         self.hiddenWords = hiddenWords
@@ -78,15 +90,26 @@ public final class MockCommentService: @unchecked Sendable {
         }
     }
 
+    /// Viewer-aware (#447, backend #692): nothing for a post the readers
+    /// may not read; otherwise the page without the authors hidden from
+    /// them. A page can come back short while its token stays valid.
+    private func visible(
+        _ comments: [Comment_V1_CommentView], readers: [String]
+    ) -> [Comment_V1_CommentView] {
+        comments.filter { readers.contains($0.authorID) || !hidesAuthor(readers, $0.authorID) }
+    }
+
     public func register(on bff: MockBFF) {
-        bff.register(path: "/comment.v1.CommentService/ListTopLevel") { [self] (request: Comment_V1_ListTopLevelRequest) in
+        bff.register(path: "/comment.v1.CommentService/ListTopLevel") { [self] (request: Comment_V1_ListTopLevelRequest, headers: Headers) in
+            let readers = MockEdgePolicy.readers(from: headers, in: dataset)
+            guard mayReadPost(readers, request.postID) else { return .success(Comment_V1_ListCommentsResponse()) }
             let page = Self.page(
                 store.comments(for: request.postID, seed: seedComments(for: request.postID)),
                 limit: request.limit, token: request.pageToken
             )
             var response = Comment_V1_ListCommentsResponse()
             // Each thread's reply count, held replies included (#637).
-            response.comments = filtered(page.comments, postID: request.postID).map { comment in
+            response.comments = visible(filtered(page.comments, postID: request.postID), readers: readers).map { comment in
                 var counted = comment
                 counted.replyCount = UInt64(replies(to: comment.commentID, postID: request.postID).count)
                 return counted
@@ -108,7 +131,9 @@ public final class MockCommentService: @unchecked Sendable {
             }
             return .success(Comment_V1_CommandResponse())
         }
-        bff.register(path: "/comment.v1.CommentService/ListReplies") { [self] (request: Comment_V1_ListRepliesRequest) in
+        bff.register(path: "/comment.v1.CommentService/ListReplies") { [self] (request: Comment_V1_ListRepliesRequest, headers: Headers) in
+            let readers = MockEdgePolicy.readers(from: headers, in: dataset)
+            guard mayReadPost(readers, request.postID) else { return .success(Comment_V1_ListCommentsResponse()) }
             let page = Self.page(
                 Self.sorted(
                     replies(to: request.commentID, postID: request.postID), by: request.sort, likes: likeCount
@@ -116,7 +141,7 @@ public final class MockCommentService: @unchecked Sendable {
                 limit: request.limit, token: request.pageToken
             )
             var response = Comment_V1_ListCommentsResponse()
-            response.comments = filtered(page.comments, postID: request.postID)
+            response.comments = visible(filtered(page.comments, postID: request.postID), readers: readers)
             response.nextToken = page.nextToken
             return .success(response)
         }

@@ -103,6 +103,14 @@ public enum MockEdgePolicy {
         return bearer.hasPrefix("Bearer gt-") ? .guest : .member
     }
 
+    /// The profiles reading (backend #686 `Viewer`), for the viewer-aware
+    /// reads (#447): none for a guest, whose token (`gt-…`) holds no
+    /// profile; the demo account's otherwise — unauthenticated calls too,
+    /// which only tests and previews make (the app's edge refuses them).
+    static func readers(from headers: Headers, in dataset: MockSocialDataset) -> [String] {
+        caller(from: headers) == .guest ? [] : dataset.profileIDs(inAccount: MockAuthService.accountID)
+    }
+
     /// The edge's answer: nil lets the call through, an error refuses it —
     /// `unauthenticated`, what the fleet answers a call without the session
     /// the route needs.
