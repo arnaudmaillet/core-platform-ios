@@ -1335,30 +1335,22 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     // MARK: - Mute bell
 
-    /// Whether the bell stands in the bar: someone else's profile, in a
-    /// composition that can mute, for a member. The same rule the see-more
+    /// Whether the bell stands in the bar: a profile the viewer FOLLOWS, in
+    /// a composition that can mute, for a member. The same rule the see-more
     /// menu's Mute submenu had (#689): a guest has no account to mute from.
     ///
-    /// ⚠️ DECIDED AT FRAME 0 FOR A ROUTED PROFILE (#778). The relationship
-    /// read used to land before the (held) push; pushed at once, the bar went
-    /// `[coins]` → `[bell][coins]` mid-slide, and bar items changed during a
-    /// push land unanimated at its end on device (#756). Someone else's
-    /// profile — what a routed profile that is not the viewer's own is —
-    /// wears the bell from the first frame; the relationship only confirms it.
-    ///
-    /// A handle or link route (#800) wears it from frame 0 too, DISABLED until
-    /// the lookup names someone else (`isMuteBellEnabled`); a lookup that
-    /// names no one, or the viewer, takes it away once the push has settled
-    /// (`applyNavigationStateAtRest`).
+    /// ⚠️ NO BELL UNTIL THE READ SAYS FOLLOWING (the owner, 2026-10-18,
+    /// #1398). It used to be presumed from frame 0 on someone else's profile
+    /// (#778) and taken away once the read said "not followed" — so every
+    /// profile the viewer does not follow showed a bell for the whole push,
+    /// then lost it. There is nothing of theirs to mute until they are
+    /// followed (2026-10-15), and an unknown relationship is not "followed".
+    /// The bell ARRIVES once the push has settled, animated
+    /// (`updateActionBarItem`): an item added mid-push lands unanimated at
+    /// its end on device (#756).
     private var showsMuteBell: Bool {
-        guard !viewModel.namesNoOne else { return false }
-        let isOtherProfile = viewModel.canModerate
-            || (presumesOtherProfile && !viewModel.isRelationshipSettled)
-        // ⚠️ NO BELL ON A PROFILE THE VIEWER DOES NOT FOLLOW (the owner,
-        // 2026-10-15): there is nothing of theirs to mute yet, and the corner
-        // goes to the bar's Follow once the tray has scrolled away.
-        guard followButtonState != .follow else { return false }
-        return viewModel.canMute && isOtherProfile && MemberGates.gate(from: self)?.isMember != false
+        guard !viewModel.namesNoOne, followButtonState == .following else { return false }
+        return viewModel.canMute && MemberGates.gate(from: self)?.isMember != false
     }
 
     /// Whether the bell can be used yet: a handle or link route has no one to
@@ -2137,6 +2129,16 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // what used to tear the capsule down and rebuild it mid-transition.
         // Nothing changed, so nothing is said.
         guard items != appliedBarItems else { return }
+        // ⚠️ THE BELL ARRIVING waits for rest too, then comes in animated
+        // (#1398): added mid-push it would pop in unanimated at the end
+        // (#756).
+        if showsMuteBell, !isShowingMuteBell, transitionCoordinator != nil {
+            navigationController?.whenAtRest { [weak self] in
+                guard let self else { return }
+                updateActionBarItem(followButtonState, animated: view.window != nil)
+            }
+            return
+        }
         // ⚠️ Items leaving a page for no one wait for rest: one removed
         // mid-push pops unanimated at its end (#756) — whichever call got
         // here first (a late relationship, the shell re-sending its balance).

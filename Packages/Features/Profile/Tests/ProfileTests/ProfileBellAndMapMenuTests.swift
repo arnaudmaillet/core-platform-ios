@@ -129,8 +129,7 @@ struct ProfileBellAndMapMenuTests {
     /// again when none is — and the menu's checkmarks with it.
     @Test func theBellsGlyphFollowsTheMutedScopes() async throws {
         let (screen, viewModel, repository) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
-        // The bell is up from frame 0 (#778); muting waits for the
-        // relationship to say whose profile this is.
+        // The bell comes once the read says the viewer follows (#1398).
         let bell = try #require(
             await settle { screen.debugMuteBellItem != nil && viewModel.canModerate } ? screen.debugMuteBellItem : nil
         )
@@ -164,6 +163,27 @@ struct ProfileBellAndMapMenuTests {
         #expect(screen.debugMuteBellItem == nil, "a bell on a profile the viewer does not follow")
         #expect(screen.navigationItem.rightBarButtonItems?.map(\.accessibilityLabel) == ["Balance"])
         #expect(mapSubmenu(screen) == nil)
+    }
+
+    /// No bell before the relationship is read (#1398): an unknown
+    /// relationship is not "followed", so no bell is shown during the push
+    /// only to be taken away.
+    @Test func noBellBeforeTheRelationshipIsRead() {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        #expect(screen.followButtonState == .hidden)
+        #expect(screen.debugMuteBellItem == nil, "a bell presumed before the read")
+    }
+
+    /// Following from the profile brings the bell; unfollowing takes it.
+    @Test func followingBringsTheBellAndUnfollowingTakesIt() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        #expect(screen.debugMuteBellItem == nil)
+        viewModel.toggleFollow()
+        try #require(await settle { screen.debugMuteBellItem != nil }, "following brought no bell")
+        try #require(await settle { !viewModel.followInFlight })
+        viewModel.toggleFollow()
+        #expect(await settle { screen.debugMuteBellItem == nil }, "unfollowing left the bell")
     }
 
     /// Your own profile: no bell, the bar as it was.
