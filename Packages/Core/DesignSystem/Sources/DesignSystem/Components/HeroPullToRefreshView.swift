@@ -40,6 +40,8 @@ public final class HeroPullToRefreshView: UIView {
 
     private let loader = AppLoaderView(size: .medium)
     private var isRefreshing = false
+    /// The tick as the pull crosses the threshold (#1354).
+    private let thresholdFeedback = PullThresholdFeedback()
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
@@ -63,10 +65,15 @@ public final class HeroPullToRefreshView: UIView {
 
     /// Tracks an in-progress pull. `distance` is how far the list is past its
     /// top, in points.
-    public func setPull(_ distance: CGFloat) {
+    ///
+    /// `isTracking` says a finger is on the list: only then does crossing the
+    /// threshold tick (#1354) — a bounce-back drifting past it says nothing.
+    public func setPull(_ distance: CGFloat, isTracking: Bool = false) {
         guard !isRefreshing else { return }
         // The mark is drawn out by the pull, rather than waiting to appear.
         loader.setProgress(min(max(distance / Self.threshold, 0), 1))
+        if distance > 0, isTracking, !thresholdFeedback.isArmed { thresholdFeedback.prepare() }
+        thresholdFeedback.update(pulled: distance, threshold: Self.threshold, isTracking: isTracking)
     }
 
     /// Whether a release at `distance` should refresh.
@@ -97,5 +104,6 @@ public final class HeroPullToRefreshView: UIView {
     #if DEBUG
     /// The loader this indicator drives — what a test reads.
     var debugLoader: AppLoaderView { loader }
+    var debugThresholdFeedback: PullThresholdFeedback { thresholdFeedback }
     #endif
 }

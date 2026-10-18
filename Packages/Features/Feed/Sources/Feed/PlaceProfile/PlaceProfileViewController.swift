@@ -1188,7 +1188,7 @@ final class PlaceProfileViewController: UIViewController {
                 guard let self, index == activeIndex else { return }
                 applyHeaderOffset(offset)
                 // Negative travel is the overscroll the indicator draws from.
-                pullIndicator.setPull(max(0, -offset))
+                pullIndicator.setPull(max(0, -offset), isTracking: hosted.scrollView.isTracking)
             }
             // The profile's release rule, verbatim: the indicator owns the
             // threshold, and a release past it refreshes the whole place.
@@ -2671,6 +2671,8 @@ protocol PlaceProfileHostedPage: UIView {
     func setVerticalOffset(_ offset: CGFloat)
     func setHostedInsets(top: CGFloat, bottom: CGFloat)
     func setMinimumScrollTravel(_ travel: CGFloat)
+    /// Whether a finger is on it is what lets a pull tick (#1354).
+    var scrollView: UIScrollView { get }
 }
 
 extension ForYouGridPage: PlaceProfileHostedPage {}
