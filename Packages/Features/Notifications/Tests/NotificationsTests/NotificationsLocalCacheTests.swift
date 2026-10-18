@@ -48,7 +48,7 @@ private func item(_ index: Int, read: Bool = true) -> NotificationItem {
 /// Pages of 20 by token ("p20", "p40"…), or no network at all.
 private actor PagedDrawer: NotificationsProviding {
     private var offline = false
-    private var total: Int
+    nonisolated let total: Int
     private(set) var asks: [String?] = []
 
     init(total: Int) { self.total = total }
@@ -72,11 +72,16 @@ struct NotificationsLocalCacheTests {
     private let folder = DeviceFolder()
     private let viewer = ViewerBox()
 
-    private func settle(until condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while !(await condition()), ContinuousClock.now < deadline {
+    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
+    /// starved runner spends none of the budget (#1115). Returns whether
+    /// `condition` came to hold; every caller asserts it.
+    private func settle(until condition: () async -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            await Task.yield()
+            if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return await condition()
     }
 
     private func launch() throws -> (LocalStore, NotificationsLocalCache) {
@@ -106,15 +111,19 @@ struct NotificationsLocalCacheTests {
     /// A first launch online that scrolled `pages` pages deep.
     private func firstLaunch(_ network: PagedDrawer, pages: Int) async throws {
         let (_, cache) = try launch()
-        let (viewModel, _) = drawer(network, cache)
+        let (viewModel, shown) = drawer(network, cache)
         viewModel.viewDidLoad()
-        await settle { await network.asks.count == 1 }
+        #expect(await settle { await network.asks.count == 1 })
         for page in 1..<pages {
-            await settle { viewModel.pageFooter == .loading }
+            #expect(await settle { viewModel.pageFooter == .loading })
             viewModel.loadNextPageIfNeeded()
-            await settle { await network.asks.count == page + 1 }
+            #expect(await settle { await network.asks.count == page + 1 })
         }
-        try? await Task.sleep(for: .milliseconds(100))
+        // The last page landed: each page is stored before it renders
+        // (`reload`, `loadPages`), so its rows on screen mean its write is
+        // queued — and `waitForPendingWrites` waits for it.
+        let read = min(pages * 20, network.total)
+        #expect(await settle { shown.ids.count == read })
         cache.waitForPendingWrites()
     }
 
@@ -135,7 +144,9 @@ struct NotificationsLocalCacheTests {
         #expect(rows.count == 20)
         #expect(viewModel.pageFooter == .loading, "the stored cursor says there is more")
         // Offline: the failed load leaves them.
-        await settle { await network.asks.count >= 2 }
+        #expect(await settle { await network.asks.count >= 2 })
+        // "Nothing more happens": the failed load leaves the stored rows, so
+        // there is no landing to wait for, only time for one to be wrong.
         try? await Task.sleep(for: .milliseconds(100))
         #expect(shown.ids.count == 20)
     }
@@ -163,10 +174,10 @@ struct NotificationsLocalCacheTests {
         await network.goOffline(true)
         viewModel.viewDidLoad()
         #expect(shown.ids.count >= 1)
-        await settle { await network.asks.count >= 7 }
+        #expect(await settle { await network.asks.count >= 7 })
         await network.goOffline(false)
         viewModel.loadNextPageIfNeeded()
-        await settle { await network.asks.count >= 8 }
+        #expect(await settle { await network.asks.count >= 8 })
         #expect(await network.asks.last == "p100")
     }
 
@@ -202,10 +213,10 @@ struct NotificationsLocalCacheTests {
         await network.goOffline(true)
         center.post(name: .viewerDidChange, object: nil)
         #expect(shown.ids.isEmpty)
-        await settle {
+        #expect(await settle {
             if case .failed = shown.phase { return true }
             return false
-        }
+        })
         #expect(shown.ids.isEmpty)
     }
 }

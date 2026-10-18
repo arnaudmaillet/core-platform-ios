@@ -100,12 +100,22 @@ struct ChatLocalCacheTests {
     private let viewer = ViewerBox()
     private let conversation = ConversationID("conv-1")
 
-    /// A ceiling, not a pace: returns as soon as `condition` holds.
-    private func settle(until condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while !(await condition()), ContinuousClock.now < deadline {
+    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
+    /// starved runner spends none of the budget (#1115). Returns whether
+    /// `condition` came to hold; every caller asserts it.
+    private func settle(until condition: () async -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            await Task.yield()
+            if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return await condition()
+    }
+
+    /// "Nothing more happens": a failed load leaves the screen as it was,
+    /// so there is no landing to wait for — only time for one to be wrong.
+    private func letAFailedLoadLand() async {
+        try? await Task.sleep(for: .milliseconds(100))
     }
 
     /// The device as a launch opens it: the same folder, a fresh store.
@@ -124,6 +134,9 @@ struct ChatLocalCacheTests {
     private final class Transcript {
         var ids: [String] = []
         var phase: ConversationViewModel.Phase = .loading
+        /// Every render: a load that lands renders, even when it changes
+        /// nothing on screen.
+        var renders = 0
     }
 
     private func openThread(_ network: DeviceTestNetwork, _ cache: ChatLocalCache) -> (ConversationViewModel, Transcript) {
@@ -132,6 +145,7 @@ struct ChatLocalCacheTests {
         viewModel.connectivity = ConnectivityMonitor(offlineGrace: 0)
         let shown = Transcript()
         viewModel.onPhaseChange = { phase in
+            shown.renders += 1
             shown.phase = phase
             if case .content(let models) = phase { shown.ids = models.map(\.id) }
         }
@@ -151,15 +165,15 @@ struct ChatLocalCacheTests {
         let (_, cache) = try launch()
         let inbox = catalog(network, cache)
         inbox.reload()
-        await settle { inbox.snapshot.phase == .loaded }
+        #expect(await settle { inbox.snapshot.phase == .loaded })
         inbox.loadMore(.inbox)
-        await settle { inbox.snapshot.active.count == 3 }
+        #expect(await settle { inbox.snapshot.active.count == 3 })
 
         let (thread, shown) = openThread(network, cache)
         thread.viewDidLoad()
-        await settle { shown.ids.count == 50 }
+        #expect(await settle { shown.ids.count == 50 })
         thread.loadOlder()
-        await settle { shown.ids.count == 100 }
+        #expect(await settle { shown.ids.count == 100 })
         cache.waitForPendingWrites()
         return network
     }
@@ -183,8 +197,8 @@ struct ChatLocalCacheTests {
 
         // Offline, the failed load leaves the stored rows on screen.
         inbox.reload()
-        await settle { await network.inboxAsks.count >= 7 }
-        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await settle { await network.inboxAsks.count >= 7 })
+        await letAFailedLoadLand()
         #expect(inbox.snapshot.phase == .loaded)
         #expect(inbox.snapshot.active.count == 3)
         #expect(inbox.showsDeviceRows)
@@ -193,7 +207,7 @@ struct ChatLocalCacheTests {
         await network.setInbox(InboxPage(conversations: [row("c4", at: 40), row("c1", at: 30)], nextPageToken: "t1"), of: .inbox)
         await network.goOffline(false)
         inbox.reload()
-        await settle { inbox.snapshot.active.first?.id.rawValue == "c4" }
+        #expect(await settle { inbox.snapshot.active.first?.id.rawValue == "c4" })
         #expect(inbox.snapshot.active.map(\.id.rawValue) == ["c4", "c1", "c2", "c3"], "merged over the stored rows older than it")
         #expect(!inbox.showsDeviceRows)
         withExtendedLifetime(token) {}
@@ -207,7 +221,7 @@ struct ChatLocalCacheTests {
         #expect(inbox.snapshot.hasMore.contains(.inbox))
         let before = await network.inboxAsks.count
         inbox.loadMore(.inbox)
-        await settle { await network.inboxAsks.count > before }
+        #expect(await settle { await network.inboxAsks.count > before })
         let ask = await network.inboxAsks.last
         #expect(ask?.0 == .inbox)
         #expect(ask?.1 == "t2", "the next page after the two stored ones")
@@ -223,8 +237,8 @@ struct ChatLocalCacheTests {
         thread.viewDidLoad()
         // Inside `viewDidLoad`: the push's first frame shows them.
         #expect(shown.ids == ids(100...199))
-        await settle { await network.historyAsks.count >= 3 }
-        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await settle { await network.historyAsks.count >= 3 })
+        await letAFailedLoadLand()
         #expect(shown.ids == ids(100...199), "offline, the failed load leaves them")
         if case .failed = shown.phase { Issue.record("a failed load must not replace stored messages") }
 
@@ -232,7 +246,7 @@ struct ChatLocalCacheTests {
         await network.goOffline(false)
         await network.setHistory(MessagePage(messages: messages(50...99), olderPageToken: "h50"), for: "h100")
         thread.loadOlder()
-        await settle { shown.ids.count == 150 }
+        #expect(await settle { shown.ids.count == 150 })
         #expect(await network.historyAsks.last == "h100")
         #expect(shown.ids == ids(50...199))
     }
@@ -248,10 +262,10 @@ struct ChatLocalCacheTests {
         let (_, cache) = try launch()
         let (thread, shown) = openThread(network, cache)
         thread.viewDidLoad()
-        await settle { shown.ids.count == 50 }
+        #expect(await settle { shown.ids.count == 50 })
         for expected in stride(from: 100, through: 250, by: 50) {
             thread.loadOlder()
-            await settle { shown.ids.count == expected }
+            #expect(await settle { shown.ids.count == expected })
         }
         #expect(shown.ids.count == 250, "on screen, the whole history read")
         cache.waitForPendingWrites()
@@ -269,11 +283,11 @@ struct ChatLocalCacheTests {
         let (thread, shown) = openThread(network, cache)
         thread.viewDidLoad()
         #expect(shown.ids == ids(100...199))
-        await settle { shown.ids.first == "m400" }
+        #expect(await settle { shown.ids.first == "m400" })
         #expect(shown.ids == ids(400...449), "no hole between the stored messages and the new ones")
         await network.setHistory(MessagePage(messages: messages(350...399), olderPageToken: "h350"), for: "h400")
         thread.loadOlder()
-        await settle { shown.ids.count == 100 }
+        #expect(await settle { shown.ids.count == 100 })
         #expect(await network.historyAsks.last == "h400")
     }
 
@@ -284,18 +298,19 @@ struct ChatLocalCacheTests {
         let (_, cache) = try launch()
         let (thread, shown) = openThread(network, cache)
         thread.viewDidLoad()
-        await settle { await network.historyAsks.count >= 3 }
+        #expect(await settle { await network.historyAsks.count >= 3 })
         await network.setSentID("m200")
         thread.send("hello")
-        await settle { shown.ids.last == "m200" }
+        #expect(await settle { shown.ids.last == "m200" })
         cache.waitForPendingWrites()
         #expect(cache.transcript(of: conversation)?.messages.last?.body == "hello")
 
         // The next load carries it, as the server stored it.
         await network.setHistory(MessagePage(messages: messages(151...200), olderPageToken: "h151"))
+        let rendered = shown.renders
         thread.refresh()
-        await settle { await network.historyAsks.count >= 4 }
-        try? await Task.sleep(for: .milliseconds(100))
+        // The load lands: stored first, then rendered (`reload`).
+        #expect(await settle { shown.renders > rendered })
         cache.waitForPendingWrites()
         let stored = try #require(cache.transcript(of: conversation))
         #expect(stored.messages.filter { $0.id == "m200" }.count == 1)
@@ -361,10 +376,10 @@ struct ChatLocalCacheTests {
         await network.goOffline(true)
         inbox.reload()
         #expect(inbox.snapshot.active.isEmpty, "the previous viewer's rows are never put back")
-        await settle {
+        #expect(await settle {
             if case .failed = inbox.snapshot.phase { return true }
             return false
-        }
+        })
         #expect(inbox.snapshot.active.isEmpty)
         withExtendedLifetime(token) {}
     }
@@ -377,15 +392,15 @@ struct ChatLocalCacheTests {
         let inbox = InboxCatalog(repository: network, deviceCache: cache)
         inbox.connectivity = monitor
         inbox.reload()
-        await settle { await network.inboxAsks.count >= 7 }
-        try? await Task.sleep(for: .milliseconds(100))
+        #expect(await settle { await network.inboxAsks.count >= 7 })
+        await letAFailedLoadLand()
         #expect(inbox.showsDeviceRows)
 
         await network.setInbox(InboxPage(conversations: [row("c9", at: 90)], nextPageToken: nil), of: .inbox)
         await network.goOffline(false)
         monitor.report(online: false)
         monitor.report(online: true)
-        await settle { inbox.snapshot.active.first?.id.rawValue == "c9" }
+        #expect(await settle { inbox.snapshot.active.first?.id.rawValue == "c9" })
         #expect(!inbox.showsDeviceRows)
     }
 }

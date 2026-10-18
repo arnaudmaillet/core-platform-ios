@@ -16,6 +16,10 @@ private actor StubChatProvider: ChatProviding {
         self.messages = messages
     }
 
+    /// What the next load answers — so a reload is seen to land.
+    func setConversations(_ value: [Conversation]) { conversations = value }
+    func setMessages(_ value: [ChatMessage]) { messages = value }
+
     func viewerProfileID() async throws -> ProfileID { ProfileID("me") }
     func loadConversations() async throws -> [Conversation] { conversations }
     func loadMessages(in conversationID: ConversationID) async throws -> [ChatMessage] { messages }
@@ -52,18 +56,33 @@ private func message(_ id: String, mine: Bool) -> ChatMessage {
 
 @MainActor
 struct ChatViewModelTests {
-    private func settle() async {
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(50))
-    }
-
-    /// A ceiling, not a pace: a send hops through several tasks, which a
-    /// busy parallel run can hold past any fixed wait.
-    private func settle(until condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(60))
-        while !(await condition()), ContinuousClock.now < deadline {
+    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
+    /// starved runner spends none of the budget (#1115). Returns whether
+    /// `condition` came to hold, and every caller asserts it — a wait that
+    /// gives up silently lets the next line read the state from before.
+    private func settle(until condition: () async -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            await Task.yield()
+            if await condition() { return true }
             try? await Task.sleep(for: .milliseconds(10))
         }
+        return await condition()
+    }
+
+    private func isContent(_ phase: ConversationListViewModel.Phase?) -> Bool {
+        if case .content = phase { true } else { false }
+    }
+
+    private func ids(_ phase: ConversationListViewModel.Phase?) -> [ConversationID] {
+        if case .content(let sections) = phase { sections.all.map(\.id) } else { [] }
+    }
+
+    private func isContent(_ phase: ConversationViewModel.Phase?) -> Bool {
+        if case .content = phase { true } else { false }
+    }
+
+    private func messageIDs(_ phase: ConversationViewModel.Phase?) -> [String] {
+        if case .content(let models) = phase { models.map(\.id) } else { [] }
     }
 
     // MARK: - Conversation list
@@ -74,14 +93,9 @@ struct ChatViewModelTests {
         viewModel.onPhaseChange = { last = $0 }
 
         viewModel.viewWillAppear()
-        await settle()
+        #expect(await settle { isContent(last) })
 
-        guard case .content(let modelsSections) = last else {
-            Issue.record("expected content, got \(String(describing: last))")
-            return
-        }
-        let models = modelsSections.all
-        #expect(models.map(\.id) == [ConversationID("c1"), ConversationID("c2")])
+        #expect(ids(last) == [ConversationID("c1"), ConversationID("c2")])
     }
 
     @Test func emptyConversationList() async {
@@ -89,15 +103,16 @@ struct ChatViewModelTests {
         var last: ConversationListViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewWillAppear()
-        await settle()
-        #expect(last == .empty)
+        #expect(await settle { last == .empty })
     }
 
     @Test func selectingConversationRoutesToIt() async {
         let router = SpyRouter()
         let viewModel = ConversationListViewModel(repository: StubChatProvider(conversations: [conversation("c7")]), router: router)
+        var last: ConversationListViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
         viewModel.viewWillAppear()
-        await settle()
+        #expect(await settle { isContent(last) })
 
         viewModel.didSelect(ConversationID("c7"))
         #expect(router.routes == [.conversation(ConversationID("c7"))])
@@ -110,7 +125,7 @@ struct ChatViewModelTests {
         var last: ConversationListViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewWillAppear()
-        await settle()
+        #expect(await settle { isContent(last) })
 
         viewModel.togglePin(ConversationID("c2"))
 
@@ -132,7 +147,7 @@ struct ChatViewModelTests {
         var last: ConversationListViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewWillAppear()
-        await settle()
+        #expect(await settle { isContent(last) })
 
         viewModel.toggleMute(ConversationID("c1"))
 
@@ -147,13 +162,12 @@ struct ChatViewModelTests {
     }
 
     @Test func deletionRemovesRowsAndSurvivesReloads() async {
-        let viewModel = ConversationListViewModel(
-            repository: StubChatProvider(conversations: [conversation("c1"), conversation("c2")])
-        )
+        let provider = StubChatProvider(conversations: [conversation("c1"), conversation("c2")])
+        let viewModel = ConversationListViewModel(repository: provider)
         var last: ConversationListViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewWillAppear()
-        await settle()
+        #expect(await settle { isContent(last) })
 
         viewModel.delete([ConversationID("c1")])
         guard case .content(let afterDeleteSections) = last else {
@@ -163,16 +177,13 @@ struct ChatViewModelTests {
         let afterDelete = afterDeleteSections.all
         #expect(afterDelete.map(\.id) == [ConversationID("c2")])
 
-        // A refresh re-fetches both from the repository; the local delete
-        // filter must keep the row out for the session.
+        // A refresh re-fetches c1 from the repository; the local delete
+        // filter must keep the row out for the session. The reload also
+        // brings c3, which says it landed.
+        await provider.setConversations([conversation("c1"), conversation("c2"), conversation("c3")])
         viewModel.refresh()
-        await settle()
-        guard case .content(let afterReloadSections) = last else {
-            Issue.record("expected content, got \(String(describing: last))")
-            return
-        }
-        let afterReload = afterReloadSections.all
-        #expect(afterReload.map(\.id) == [ConversationID("c2")])
+        #expect(await settle { ids(last).contains(ConversationID("c3")) })
+        #expect(ids(last) == [ConversationID("c2"), ConversationID("c3")])
     }
 
     @Test func deletingEverythingLandsOnEmpty() async {
@@ -182,7 +193,7 @@ struct ChatViewModelTests {
         var last: ConversationListViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewWillAppear()
-        await settle()
+        #expect(await settle { isContent(last) })
 
         viewModel.delete([ConversationID("c1")])
         #expect(last == .empty)
@@ -196,9 +207,7 @@ struct ChatViewModelTests {
             directory: directory
         )
         viewModel.viewWillAppear()
-        await settle()
-
-        #expect(directory.title(for: ConversationID("c1")) == "Ava Moreau")
+        #expect(await settle { directory.title(for: ConversationID("c1")) == "Ava Moreau" })
     }
 
     /// The push-transition contract: a warm directory binds the header
@@ -244,8 +253,10 @@ struct ChatViewModelTests {
             repository: StubChatProvider(conversations: [conversation("c1", others: ["peer-9"])]),
             router: router
         )
+        var peer: ProfileID?
+        viewModel.onPeerChange = { peer = $0 }
         viewModel.viewDidLoad()
-        await settle()
+        #expect(await settle { peer == ProfileID("peer-9") })
 
         viewModel.didTapIdentity()
         #expect(router.routes == [.profile(ProfileID("peer-9"), stub: nil)])
@@ -275,8 +286,10 @@ struct ChatViewModelTests {
     @Test func forwardSurfacesHonestNotice() async {
         let provider = StubChatProvider(messages: [message("m1", mine: false)])
         let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
+        var last: ConversationViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
-        await settle()
+        #expect(await settle { messageIDs(last) == ["m1"] })
 
         var noticeTitles: [String] = []
         viewModel.onActionNotice = { title, _ in noticeTitles.append(title) }
@@ -295,15 +308,17 @@ struct ChatViewModelTests {
         let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
         var drafts: [ConversationViewModel.ReplyDraft?] = []
         viewModel.onReplyStateChange = { drafts.append($0) }
+        var last: ConversationViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
-        await settle()
+        #expect(await settle { messageIDs(last) == ["m1"] })
 
         viewModel.beginReply(to: "m1")
         #expect(drafts.last??.messageID == "m1")
         #expect(drafts.last??.snippet == "m1") // body used as the excerpt
 
         viewModel.send("on it")
-        await settle { await !provider.sentReplyTos.isEmpty }
+        #expect(await settle { await !provider.sentReplyTos.isEmpty })
 
         #expect(await provider.sentReplyTos == ["m1"]) // reply reference threaded through
         #expect(drafts.last == .some(nil))             // reply state cleared on send
@@ -314,8 +329,10 @@ struct ChatViewModelTests {
         let viewModel = ConversationViewModel(conversationID: ConversationID("c1"), repository: provider)
         var drafts: [ConversationViewModel.ReplyDraft?] = []
         viewModel.onReplyStateChange = { drafts.append($0) }
+        var last: ConversationViewModel.Phase?
+        viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
-        await settle()
+        #expect(await settle { messageIDs(last) == ["m1"] })
 
         viewModel.beginReply(to: "m1")
         viewModel.cancelReply()
@@ -328,7 +345,7 @@ struct ChatViewModelTests {
         var last: ConversationViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
-        await settle()
+        #expect(await settle { messageIDs(last) == ["m1", "m2"] })
 
         viewModel.deleteMessage("m1")
         guard case .content(let afterDelete) = last else {
@@ -338,14 +355,11 @@ struct ChatViewModelTests {
         #expect(afterDelete.map(\.id) == ["m2"])
 
         // A reload re-fetches m1 from the repository; the session-local delete
-        // set must keep it out.
+        // set must keep it out. It also brings m3, which says it landed.
+        await provider.setMessages([message("m1", mine: false), message("m2", mine: true), message("m3", mine: false)])
         viewModel.refresh()
-        await settle()
-        guard case .content(let afterReload) = last else {
-            Issue.record("expected content, got \(String(describing: last))")
-            return
-        }
-        #expect(afterReload.map(\.id) == ["m2"])
+        #expect(await settle { messageIDs(last).contains("m3") })
+        #expect(messageIDs(last) == ["m2", "m3"])
     }
 
     @Test func threadLoadsMessagesAndMarksRead() async {
@@ -355,14 +369,10 @@ struct ChatViewModelTests {
         viewModel.onPhaseChange = { last = $0 }
 
         viewModel.viewDidLoad()
-        await settle()
+        #expect(await settle { isContent(last) })
 
-        guard case .content(let models) = last else {
-            Issue.record("expected content")
-            return
-        }
-        #expect(models.map(\.id) == ["m1", "m2"])
-        #expect(await provider.markReadCalls >= 1)
+        #expect(messageIDs(last) == ["m1", "m2"])
+        #expect(await settle { await provider.markReadCalls >= 1 })
     }
 
     @Test func sendingAppendsMessage() async {
@@ -371,19 +381,12 @@ struct ChatViewModelTests {
         var last: ConversationViewModel.Phase?
         viewModel.onPhaseChange = { last = $0 }
         viewModel.viewDidLoad()
-        await settle()
+        #expect(await settle { messageIDs(last) == ["m1"] })
 
         viewModel.send("  hello  ")
-        await settle {
-            guard case .content(let models) = last else { return false }
-            return models.last?.id == "sent"
-        }
+        #expect(await settle { messageIDs(last).last == "sent" })
 
         #expect(await provider.sentBodies == ["hello"]) // trimmed
-        guard case .content(let models) = last else {
-            Issue.record("expected content")
-            return
-        }
-        #expect(models.map(\.id) == ["m1", "sent"]) // appended
+        #expect(messageIDs(last) == ["m1", "sent"]) // appended
     }
 }

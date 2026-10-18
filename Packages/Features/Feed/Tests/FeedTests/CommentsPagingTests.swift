@@ -123,20 +123,20 @@ private func entry(_ id: String, at seconds: TimeInterval = 0, parent: String? =
 
 @MainActor
 struct CommentsPagingTests {
-    /// A ceiling, not a pace — see `PostDetailCommentsTests.settle(until:)`.
-    private func settle(until condition: () -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(120))
-        while !condition(), ContinuousClock.now < deadline {
-            await Task.yield()
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+    /// Waits for STATE, in looks (6,000 × 10 ms), never wall-clock time: a
+    /// starved runner spends none of the budget (#1115). Returns whether
+    /// `condition` came to hold; every caller asserts it.
+    private func settle(until condition: () -> Bool) async -> Bool {
+        await settle(untilAsync: condition)
     }
 
-    private func settle(untilAsync condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(120))
-        while !(await condition()), ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
+    private func settle(untilAsync condition: () async -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            await Task.yield()
+            if await condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
         }
+        return await condition()
     }
 
     /// Grace for "nothing more should happen".
@@ -167,9 +167,9 @@ struct CommentsPagingTests {
         var postLoads = 0
         viewModel.onPhaseChange = { if case .content = $0 { postLoads += 1 } }
         viewModel.viewDidLoad()
-        await settle { shown.loaded }
+        #expect(await settle { shown.loaded })
         if waitingForThePost {
-            await settle { postLoads >= 1 && !viewModel.isLoadingFirstPage }
+            #expect(await settle { postLoads >= 1 && !viewModel.isLoadingFirstPage })
         }
         return (viewModel, shown)
     }
@@ -180,36 +180,36 @@ struct CommentsPagingTests {
     /// (#993): the refresh a stream opened on its cached page starts at once,
     /// and when it lands after a post — late, on a loaded machine — its
     /// answer must not take the viewer's comment back off the screen.
-    @Test func aFirstPageAskedBeforeAPostKeepsThePostedComment() async {
+    @Test func aFirstPageAskedBeforeAPostKeepsThePostedComment() async throws {
         let provider = PagedComments([nil: CommentPage(entries: [entry("a"), entry("b")], nextPageToken: nil)])
         await provider.acceptComments()
         let (viewModel, shown) = await load(provider, waitingForThePost: true)
         await provider.gateFirstPage()
         viewModel.refresh()
-        await settle(untilAsync: { await provider.firstPageWaitingCount == 1 })
+        #expect(await settle(untilAsync: { await provider.firstPageWaitingCount == 1 }))
 
         viewModel.submitComment("mine")
-        await settle { shown.ids.count == 3 }
+        try #require(await settle { shown.ids.count == 3 })
         let mine = shown.ids[0]
         #expect(!["a", "b"].contains(mine))
         #expect(shown.ids == [mine, "a", "b"])
 
         await provider.releaseOldestFirstPage() // asked before the post: no "mine"
-        await settle { !viewModel.isLoadingFirstPage }
+        #expect(await settle { !viewModel.isLoadingFirstPage })
         await settle()
         #expect(shown.ids == [mine, "a", "b"])
 
         // A page asked for after it is the truth about it.
         viewModel.refresh()
-        await settle(untilAsync: { await provider.firstPageWaitingCount == 1 })
+        #expect(await settle(untilAsync: { await provider.firstPageWaitingCount == 1 }))
         await provider.releaseOldestFirstPage()
-        await settle { shown.ids == ["a", "b"] }
+        #expect(await settle { shown.ids == ["a", "b"] })
         #expect(shown.ids == ["a", "b"])
     }
 
     /// The same with later pages on screen: the refreshed first page goes
     /// over the old one (`merging`), and still keeps the viewer's comment.
-    @Test func aMergedFirstPageAskedBeforeAPostKeepsThePostedComment() async {
+    @Test func aMergedFirstPageAskedBeforeAPostKeepsThePostedComment() async throws {
         let provider = PagedComments([
             nil: CommentPage(entries: [entry("a", at: 20), entry("b", at: 10)], nextPageToken: "p2"),
             "p2": CommentPage(entries: [entry("c", at: 5)], nextPageToken: nil),
@@ -217,16 +217,16 @@ struct CommentsPagingTests {
         await provider.acceptComments()
         let (viewModel, shown) = await load(provider, waitingForThePost: true)
         viewModel.loadMoreComments()
-        await settle { shown.ids.count == 3 }
+        #expect(await settle { shown.ids.count == 3 })
         await provider.gateFirstPage()
         viewModel.refresh()
-        await settle(untilAsync: { await provider.firstPageWaitingCount == 1 })
+        #expect(await settle(untilAsync: { await provider.firstPageWaitingCount == 1 }))
 
         viewModel.submitComment("mine")
-        await settle { shown.ids.count == 4 }
+        try #require(await settle { shown.ids.count == 4 })
         let mine = shown.ids[0]
         await provider.releaseOldestFirstPage()
-        await settle { !viewModel.isLoadingFirstPage }
+        #expect(await settle { !viewModel.isLoadingFirstPage })
         await settle()
         #expect(shown.ids == [mine, "a", "b", "c"])
     }
@@ -241,7 +241,7 @@ struct CommentsPagingTests {
 
         viewModel.loadMoreComments()
         viewModel.loadMoreComments() // the same approach, reported twice
-        await settle { shown.ids.count == 4 }
+        #expect(await settle { shown.ids.count == 4 })
         #expect(shown.ids == ["a", "b", "c", "d"])
 
         viewModel.loadMoreComments() // the end: nothing left to ask
@@ -268,7 +268,7 @@ struct CommentsPagingTests {
         }
 
         viewModel.loadMoreComments()
-        await settle { shown.ids.count == 3 }
+        #expect(await settle { shown.ids.count == 3 })
 
         #expect(shown.ids == ["a", "b", "c"])
         #expect(await provider.requests == [nil, "p2", "p3"])
@@ -287,13 +287,14 @@ struct CommentsPagingTests {
         let (viewModel, shown) = await load(provider)
 
         viewModel.loadMoreComments() // the stale fetch
-        await settle(untilAsync: { await provider.waitingCount("p2") == 1 })
+        #expect(await settle(untilAsync: { await provider.waitingCount("p2") == 1 }))
         viewModel.resetPaging()
         viewModel.refresh() // the first page again, and its token
-        await settle(untilAsync: { await provider.requests.count == 3 })
-        await settle()
+        #expect(await settle(untilAsync: { await provider.requests.count == 3 }))
+        // The refreshed first page has landed.
+        #expect(await settle { !viewModel.isLoadingFirstPage })
         viewModel.loadMoreComments() // the new fetch
-        await settle(untilAsync: { await provider.waitingCount("p2") == 2 })
+        #expect(await settle(untilAsync: { await provider.waitingCount("p2") == 2 }))
 
         await provider.releaseOldest("p2") // the stale page answers first
         await settle()
@@ -303,7 +304,7 @@ struct CommentsPagingTests {
         #expect(await provider.requests == [nil, "p2", nil, "p2"])
 
         await provider.releaseOldest("p2")
-        await settle { shown.ids.count == 2 }
+        #expect(await settle { shown.ids.count == 2 })
         #expect(shown.ids == ["a", "b"])
     }
 
@@ -316,7 +317,7 @@ struct CommentsPagingTests {
         let (viewModel, shown) = await load(provider)
 
         viewModel.loadMoreComments()
-        await settle { shown.ids.count == 2 }
+        #expect(await settle { shown.ids.count == 2 })
 
         #expect(shown.ids == ["a", "b"])
         #expect(await provider.requests == [nil, "p2", "p3"])
@@ -331,12 +332,14 @@ struct CommentsPagingTests {
         let (viewModel, shown) = await load(provider)
 
         viewModel.loadMoreComments()
-        await settle(untilAsync: { await provider.requests.count == 2 })
+        #expect(await settle(untilAsync: { await provider.requests.count == 2 }))
+        // "Nothing more happens": the failed page leaves the stream as it
+        // was, so there is no landing to wait for.
         await settle()
         #expect(shown.ids == ["a"])
 
         viewModel.loadMoreComments()
-        await settle { shown.ids.count == 2 }
+        #expect(await settle { shown.ids.count == 2 })
         #expect(shown.ids == ["a", "b"])
     }
 
@@ -352,13 +355,13 @@ struct CommentsPagingTests {
         var states: [PostDetailViewModel.CommentsState] = []
         viewModel.onCommentsChange = { states.append($0) }
         viewModel.viewDidLoad()
-        await settle { states.last == .failed(message: PostDetailViewModel.commentsFailureMessage) }
+        #expect(await settle { states.last == .failed(message: PostDetailViewModel.commentsFailureMessage) })
 
         #expect(states == [.loading, .failed(message: "Couldn't load comments")])
 
         viewModel.retryComments()
         viewModel.retryComments() // a second tap while the first is out
-        await settle { if case .loaded = states.last { true } else { false } }
+        #expect(await settle { if case .loaded = states.last { true } else { false } })
 
         guard case .loaded(let models) = states.last else {
             Issue.record("the retry should land the comments, got \(states)")
@@ -380,7 +383,7 @@ struct CommentsPagingTests {
         var states: [PostDetailViewModel.CommentsState] = []
         viewModel.onCommentsChange = { states.append($0) }
         viewModel.viewDidLoad()
-        await settle { if case .failed = states.last { true } else { false } }
+        #expect(await settle { if case .failed = states.last { true } else { false } })
 
         #expect(states == [.loading, .failed(message: FailureCopy.offline)])
     }
@@ -423,17 +426,17 @@ struct CommentsPagingTests {
         var postLoads = 0
         viewModel.onPhaseChange = { if case .content = $0 { postLoads += 1 } }
         viewModel.viewDidLoad()
-        await settle { shownIDs == ["a"] && postLoads == 1 }
+        #expect(await settle { shownIDs == ["a"] && postLoads == 1 })
 
         await provider.failFirstPageOnce()
         viewModel.refresh() // fails
-        await settle { postLoads == 2 }
-        await settle(untilAsync: { await provider.requests.count == 2 })
+        #expect(await settle { postLoads == 2 })
+        #expect(await settle(untilAsync: { await provider.requests.count == 2 }))
         // A later refresh that succeeds: whatever the failed one was going to
         // say has been said by the time this one's page is on screen.
         await provider.setPage(CommentPage(entries: [entry("b"), entry("a")], nextPageToken: nil), for: nil)
         viewModel.refresh()
-        await settle { shownIDs == ["b", "a"] }
+        #expect(await settle { shownIDs == ["b", "a"] })
 
         #expect(!states.contains { if case .failed = $0 { true } else { false } })
         #expect(!states.contains(.loaded([])))
@@ -456,17 +459,17 @@ struct CommentsPagingTests {
         var postLoads = 0
         viewModel.onPhaseChange = { if case .content = $0 { postLoads += 1 } }
         viewModel.viewDidLoad()
-        await settle(untilAsync: { await provider.firstPageWaitingCount == 1 })
-        await settle { postLoads == 1 } // `refresh()` waits for the post's load
+        #expect(await settle(untilAsync: { await provider.firstPageWaitingCount == 1 }))
+        #expect(await settle { postLoads == 1 }) // `refresh()` waits for the post's load
 
         viewModel.refresh()
-        await settle(untilAsync: { await provider.firstPageWaitingCount == 2 })
+        #expect(await settle(untilAsync: { await provider.firstPageWaitingCount == 2 }))
         await provider.releaseOldestFirstPage() // the first load: empty, valid
-        await settle { states.contains(.loaded([])) }
+        #expect(await settle { states.contains(.loaded([])) })
         #expect(viewModel.isLoadingFirstPage, "the pull's load is still out")
 
         await provider.releaseOldestFirstPage() // the pull's: fails
-        await settle { !viewModel.isLoadingFirstPage }
+        #expect(await settle { !viewModel.isLoadingFirstPage })
 
         #expect(!states.contains { if case .failed = $0 { true } else { false } })
         #expect(states.last == .loaded([]))
@@ -481,7 +484,7 @@ struct CommentsPagingTests {
         let (viewModel, shown) = await load(provider)
 
         viewModel.loadMoreComments()
-        await settle { shown.ids.count == 3 }
+        #expect(await settle { shown.ids.count == 3 })
 
         #expect(shown.ids == ["a", "b", "c"])
     }
@@ -495,13 +498,13 @@ struct CommentsPagingTests {
         ])
         let (viewModel, shown) = await load(provider)
         viewModel.loadMoreComments()
-        await settle { shown.ids.count == 4 }
+        #expect(await settle { shown.ids.count == 4 })
 
         await provider.setPage(
             CommentPage(entries: [entry("new", at: 110), entry("a", at: 100)], nextPageToken: "p2"), for: nil
         )
         viewModel.refresh()
-        await settle { shown.ids.first == "new" }
+        #expect(await settle { shown.ids.first == "new" })
 
         #expect(shown.ids == ["new", "a", "b", "c", "d"])
     }
