@@ -128,6 +128,26 @@ struct EditProfileVideoBannerTests {
         #expect(await banner.sent == ["asset-ok", nil])
     }
 
+    /// The profile's device cache keeps a page's media asset, so the picker
+    /// still finds a cold-started video post (#944); a row stored before
+    /// decodes with none.
+    @Test func theDiskCacheKeepsAPagesAsset() throws {
+        let post = Self.video("ok", asset: "asset-ok")
+        let record = ProfileDiskRecord.Post(post)
+        let data = try JSONEncoder().encode(record)
+        let back = try JSONDecoder().decode(ProfileDiskRecord.Post.self, from: data)
+        #expect(back.galleryPost?.pages.first?.assetID == "asset-ok")
+
+        var old = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var pages = try #require(old["pages"] as? [[String: Any]])
+        pages[0]["assetID"] = nil
+        old["pages"] = pages
+        let legacy = try JSONDecoder().decode(
+            ProfileDiskRecord.Post.self, from: JSONSerialization.data(withJSONObject: old)
+        )
+        #expect(legacy.galleryPost?.pages.first?.assetID == nil)
+    }
+
     /// Not owned, a pick sends nothing.
     @Test func withoutTheItemAPickSendsNothing() async throws {
         let banner = Banner()
