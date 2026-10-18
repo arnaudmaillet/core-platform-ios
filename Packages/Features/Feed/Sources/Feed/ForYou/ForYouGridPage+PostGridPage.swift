@@ -14,6 +14,8 @@ extension ForYouGridPage: PostGridPage {
             render(ForYouViewModel.PageState.loading)
         case .content(let posts):
             render(ForYouViewModel.PageState.content(posts))
+        case .sections(let groups):
+            applyGroups(groups)
         case .status(let status):
             showStatus(
                 symbolName: status.symbolName, title: status.title, subtitle: status.subtitle,

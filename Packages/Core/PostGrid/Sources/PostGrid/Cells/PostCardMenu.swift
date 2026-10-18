@@ -28,6 +28,9 @@ public enum PostCardMenuAction {
     case edit(perform: () -> Void)
     /// The viewer's own post: remove it. Same terms as `edit`.
     case delete(perform: () -> Void)
+    /// Takes the post out of the viewer's viewing history (#1344): the
+    /// History tab's rows and tiles.
+    case removeFromHistory(perform: () -> Void)
 
     /// Public so a surface can audit what it composed — the menu itself is a
     /// system surface no screenshot can read.
@@ -43,6 +46,7 @@ public enum PostCardMenuAction {
         case .report: "Report"
         case .edit: "Edit post"
         case .delete: "Delete post"
+        case .removeFromHistory: "Remove from History"
         }
     }
 
@@ -52,6 +56,7 @@ public enum PostCardMenuAction {
         case .report: "flag"
         case .edit: "pencil"
         case .delete: "trash"
+        case .removeFromHistory: "clock.badge.xmark"
         }
     }
 
@@ -61,7 +66,7 @@ public enum PostCardMenuAction {
     /// serious row indistinguishable from its routine one.
     var attributes: UIMenuElement.Attributes {
         switch self {
-        case .unfollow, .edit: []
+        case .unfollow, .edit, .removeFromHistory: []
         case .report, .delete: .destructive
         }
     }
@@ -69,7 +74,7 @@ public enum PostCardMenuAction {
     var handler: () -> Void {
         switch self {
         case .unfollow(let perform), .report(let perform),
-             .edit(let perform), .delete(let perform): perform
+             .edit(let perform), .delete(let perform), .removeFromHistory(let perform): perform
         }
     }
 

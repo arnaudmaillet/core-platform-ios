@@ -1415,7 +1415,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 wallet: wallet
             )
         }
-        return SnapFeedViewController(
+        let feed = SnapFeedViewController(
             viewModel: viewModel,
             imagePipeline: imagePipeline,
             videoPlayback: videoPlayback,
@@ -1451,6 +1451,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // the same cache, which `galleryPost` then answers from.
             prewarmPosts: { ids in await repository.prewarm(ids) }
         )
+        // Every vertical feed records what the viewer viewed (#1344).
+        feed.viewHistory = .shared
+        return feed
     }
 
     /// The comments panel every snap page embeds. ONE construction, so the
@@ -1537,7 +1540,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     }
 
     public func makePostDetailViewController(for postID: PostID, mode: PostDetailMode) -> UIViewController {
-        PostDetailViewController(
+        let detail = PostDetailViewController(
             viewModel: PostDetailViewModel(
                 postID: postID,
                 repository: repository,
@@ -1550,6 +1553,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             mode: mode,
             wallet: wallet
         )
+        // An opened post is a viewed one (#1344).
+        detail.viewHistory = .shared
+        return detail
     }
 }
 

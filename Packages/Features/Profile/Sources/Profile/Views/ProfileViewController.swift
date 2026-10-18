@@ -534,8 +534,15 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             self?.viewModel.galleryAuthorTapped(post)
         }
         galleryPager.onViewAllTapped = { [weak self] in self?.pushMediaGallery() }
-        galleryPager.authorMenuActions = { [weak self] context in
-            self?.galleryMenuActions(for: context) ?? []
+        galleryPager.authorMenuActions = { [weak self] context, tab in
+            guard let self else { return [] }
+            var actions = galleryMenuActions(for: context)
+            // History's own row (#1344): out of the history, not the post.
+            if tab == .history {
+                let id = context.post.id
+                actions.insert(.removeFromHistory { [weak self] in self?.viewModel.removeFromHistory(id) }, at: 0)
+            }
+            return actions
         }
         // Swipe ↔ tabs: a settled swipe adopts the tab and mirrors the
         // selectors; a tab tap records it and pages.
@@ -639,6 +646,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // store — so a Saved tab bound at load would be stale the first time
         // the viewer saved something and came back to look at it.
         viewModel.loadSavedPosts()
+        // What the viewer viewed in the feed they just closed (#1344).
+        viewModel.loadHistory()
     }
 
     /// Puts the dock back, idempotently — through UIKit, never an alpha.
@@ -1445,7 +1454,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 isGuest: MemberGates.gate(from: self)?.isMember == false,
                 canRestrict: viewModel.canRestrict,
                 isRestricted: viewModel.isRestricted,
-                isBlocked: viewModel.isBlocked
+                isBlocked: viewModel.isBlocked,
+                canClearHistory: viewModel.isOwnProfile && viewModel.hasHistory
             ),
             handlers: ProfileMenuBuilder.MoreMenuHandlers(
                 share: { [weak self] in self?.presentShareSheet() },
@@ -1454,9 +1464,24 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 report: { [weak self] in self?.presentReportReasons() },
                 toggleRestrict: { [weak self] in self?.viewModel.toggleRestrict() },
                 unblock: { [weak self] in self?.viewModel.unblock() },
-                confirmBlock: { [weak self] in self?.confirmBlock() }
+                confirmBlock: { [weak self] in self?.confirmBlock() },
+                clearHistory: { [weak self] in self?.confirmClearHistory() }
             )
         )
+    }
+
+    /// "Clear History" asks once (#1344): the list cannot be brought back.
+    private func confirmClearHistory() {
+        let alert = UIAlertController(
+            title: "Clear History?",
+            message: "Posts you watched will no longer appear in History.",
+            preferredStyle: .actionSheet
+        )
+        alert.addAction(UIAlertAction(title: "Clear History", style: .destructive) { [weak self] _ in
+            self?.viewModel.clearHistory()
+        })
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        present(alert, animated: true)
     }
 
     /// Opens the unified share surface — the QR sheet — rather than jumping
@@ -1718,6 +1743,90 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         applyNavigationState()
     }
 
+    // MARK: - History's day in the bar (#1344)
+
+    /// The leading group: the bell, then the day History has scrolled into.
+    private var leadingItems: [UIBarButtonItem] {
+        [leadingAccessoryItem, sectionItem].compactMap { $0 }
+    }
+
+    /// The day the page in front has scrolled into, as last published.
+    private var pinnedSection: PostGridPinnedSection?
+
+    /// Its name after the bell — the Messages inbox's section item, exactly
+    /// (#1301; the owner, 2026-10-17): a system-titled glass bubble in the
+    /// bar's own type, which may truncate. ⚠️ ONE ITEM PER DAY, EACH WITH ITS
+    /// OWN IDENTIFIER: a new item under a new identifier gets UIKit's Liquid
+    /// Glass morph, a title edited in place swaps in a frame.
+    ///
+    /// ⚠️ ONLY THE LEADING GROUP: toasts own the trailing one while they show
+    /// (#1066).
+    private var sectionItem: UIBarButtonItem?
+
+    private func makeSectionItem(_ section: PostGridPinnedSection) -> UIBarButtonItem {
+        let index = section.index
+        // The inbox's and the post lists' item, one look (`SectionBarItem`):
+        // what tapping the day's title in the list does — its first post
+        // under the bar.
+        return SectionBarItem.make(
+            title: section.title, count: section.count, countNoun: "new", scope: "profile.history.\(index)"
+        ) { [weak self] in self?.galleryPager.scrollActivePageToSection(index) }
+    }
+
+    /// Names `section` after the bell, or takes the name away.
+    private func applyPinnedSection(_ section: PostGridPinnedSection?) {
+        guard section != pinnedSection else { return }
+        pinnedSection = section
+        sectionItem = section.map(makeSectionItem)
+        guard isViewLoaded else { return }
+        scheduleSectionPlacement()
+    }
+
+    /// Puts the leading group where the state says, ONCE, on the next turn —
+    /// the inbox's placement (#756): a scroll can publish a day twice in one
+    /// turn, and a second `setLeftBarButtonItems` cut the first one's
+    /// animation short.
+    private func scheduleSectionPlacement() {
+        guard view.window != nil else {
+            navigationItem.leftBarButtonItems = leadingItems
+            return
+        }
+        guard !sectionPlacementScheduled else { return }
+        sectionPlacementScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.placeSectionAfterTransition() }
+    }
+
+    /// ⚠️ NOT DURING A PUSH (#756): items set while the bar is in its push
+    /// transition land with it, unanimated, when it ends. A placement due
+    /// mid-transition waits for its end, then animates.
+    private func placeSectionAfterTransition() {
+        if let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               // Off the completion's turn, which still belongs to the transition.
+               DispatchQueue.main.async { self?.placeSectionAfterTransition() }
+           }) {
+            return
+        }
+        sectionPlacementScheduled = false
+        navigationItem.setLeftBarButtonItems(leadingItems, animated: true)
+    }
+
+    private var sectionPlacementScheduled = false
+
+    #if DEBUG
+    /// The bar's day item while it is shown — what a test reads.
+    var debugSectionItem: UIBarButtonItem? {
+        guard let sectionItem, navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
+        else { return nil }
+        return sectionItem
+    }
+
+    /// What a tap on the day item does. Tests.
+    func debugTapSectionItem() {
+        if let index = pinnedSection?.index { galleryPager.scrollActivePageToSection(index) }
+    }
+    #endif
+
     #if DEBUG
     /// Recomposes the trailing run, so a test can put the screen through the
     /// rebuild an injected item has to survive without having to move the
@@ -1842,8 +1951,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         //             one once the tray has scrolled away)
         // Written only when it changed — the same "say nothing" rule as the
         // trailing run below, for the same torn-capsule reason.
-        let leading = [leadingAccessoryItem].compactMap { $0 }
-        if !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
+        let leading = leadingItems
+        if !sectionPlacementScheduled,
+           !(navigationItem.leftBarButtonItems ?? []).elementsEqual(leading, by: ===) {
             navigationItem.leftBarButtonItems = leading
         }
         // ⚠️ **WITHOUT THIS THE ITEM REPLACES THE BACK BUTTON**, and UIKit
@@ -2174,6 +2284,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             self.viewModel.refresh()
         }
         galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
+        galleryPager.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
         galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
         // The band's minimize rides whichever page is in front. The pager is
         // what knows, and it is what says so — see `onActiveScrollViewChanged`.

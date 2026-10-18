@@ -28,6 +28,8 @@ enum ProfileMenuBuilder {
         var canRestrict: Bool
         var isRestricted: Bool
         var isBlocked: Bool
+        /// The own profile with a viewing history to clear (#1344).
+        var canClearHistory = false
     }
 
     /// What the see-more menu's rows do.
@@ -39,6 +41,7 @@ enum ProfileMenuBuilder {
         var toggleRestrict: () -> Void
         var unblock: () -> Void
         var confirmBlock: () -> Void
+        var clearHistory: () -> Void = {}
     }
 
     static func moreMenuElements(_ state: MoreMenuState, handlers: MoreMenuHandlers) -> [UIMenuElement] {
@@ -54,6 +57,16 @@ enum ProfileMenuBuilder {
                     handlers.copyLink()
                 }
             ]))
+        }
+        // The History tab's "clear all" (#1344, the owner 2026-10-17): the
+        // page has no header of its own, and the profile's menu is the
+        // owner's.
+        if state.canClearHistory {
+            groups.append(UIMenu(options: .displayInline, children: [UIAction(
+                title: "Clear History",
+                image: UIImage(systemName: "clock.badge.xmark"),
+                attributes: .destructive
+            ) { _ in handlers.clearHistory() }]))
         }
         // The map's rails (#689), where the star beside Message used to be.
         if let map = mapFavoriteSubmenu(state.mapPin, onToggle: handlers.toggleMapCategory) {

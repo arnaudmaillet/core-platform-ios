@@ -34,7 +34,41 @@ public enum PostGridPageState: Equatable, Sendable {
     /// Skeletons on a page with nothing yet; the posts it has otherwise.
     case loading
     case content([GalleryPost])
+    /// The posts in titled groups, in order — Discover only (the profile's
+    /// History by day, #1344). Each group's title stands over its first
+    /// stretch; once it has scrolled under the bar, the page names it
+    /// (`onPinnedSectionChanged`) for the host to show in its own bar.
+    case sections([PostGridPageSection])
     case status(PostGridPageStatus)
+}
+
+/// One titled group of a `.sections` page.
+public struct PostGridPageSection: Equatable, Sendable {
+    public let title: String
+    public let posts: [GalleryPost]
+
+    public init(title: String, posts: [GalleryPost]) {
+        self.title = title
+        self.posts = posts
+    }
+}
+
+/// The group a `.sections` page has scrolled into: its title has gone under
+/// the bar. What a host names in its bar — the Messages inbox's rule (#1301).
+public struct PostGridPinnedSection: Equatable, Sendable {
+    /// Its place among the page's groups (a list's sections) — what
+    /// `scrollToSection` takes.
+    public let index: Int
+    public let title: String
+    /// Shown after the title, "New · 3"; zero for none (a list's new run,
+    /// #1378).
+    public let count: Int
+
+    public init(index: Int, title: String, count: Int = 0) {
+        self.index = index
+        self.title = title
+        self.count = count
+    }
 }
 
 /// Everything a host needs to build one row's "..." menu.
@@ -101,6 +135,21 @@ public protocol PostGridPage: UIView {
     var snapDetents: [CGFloat] { get set }
     var catchDetents: [CGFloat] { get set }
     func handPullToHost()
+
+    // MARK: Titled groups (`.sections`)
+
+    /// Where the pin line — the bar's foot — stands below the page's offset.
+    /// Nil (the default) is the scroll view's own top inset; a page hosted
+    /// under a header that docks away (the profile's) says where the bar is.
+    func setPinLineInset(_ inset: CGFloat?)
+    /// The group whose title has gone under the bar, or nil — published only
+    /// when it changes.
+    var onPinnedSectionChanged: ((PostGridPinnedSection?) -> Void)? { get set }
+    /// What `onPinnedSectionChanged` last said.
+    var pinnedSection: PostGridPinnedSection? { get }
+    /// Puts a group's first post on the pin line, under the bar — what tapping
+    /// its title, or the bar's name for it, means.
+    func scrollToSection(_ index: Int)
 
     // MARK: Playback, opening and closing
 

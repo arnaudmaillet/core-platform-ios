@@ -211,29 +211,26 @@ final class ForYouGridPage: UIView {
     /// the caller's: the place page's Popular list names its one run so.
     var earlierSectionTitle = "Recent"
 
-    /// The section a list has scrolled into, named somewhere else — the
-    /// pushed lists name it in their bar, after the back chevron (#1378), as
-    /// the Messages inbox does (#1301).
-    struct PinnedSection: Equatable {
-        let title: String
-        /// "New · 3": the new run's count; zero for none.
-        let count: Int
-        let index: Int
-    }
-
-    /// Set, the list's section headers LEAVE as they pin instead of forming
-    /// their capsule (`SectionHeaderCapsuleView.hidesWhenPinned`), and the
-    /// pinned one is told here — once per change, nil back at the top.
-    var onPinnedSectionChange: ((PinnedSection?) -> Void)? {
+    /// The section the page has scrolled into, named somewhere else — the
+    /// ONE tracker for both kinds of titled page: a list's New / Recent /
+    /// Popular, named in the pushed lists' bar after the back chevron
+    /// (#1378), and Discover's titled groups, the profile's History by day,
+    /// named after the bell (#1344) — the Messages inbox's rule (#1301).
+    ///
+    /// Set, a list's section headers LEAVE as they pin instead of forming
+    /// their capsule (`SectionHeaderCapsuleView.hidesWhenPinned`; a group's
+    /// always do), and the pinned one is told here — once per change, nil
+    /// back at the top.
+    var onPinnedSectionChanged: ((PostGridPinnedSection?) -> Void)? {
         didSet {
-            guard style == .list, !showsSkeleton else { return }
+            guard style == .list, !showsSkeleton else { return schedulePinnedSectionCheck() }
             collectionView.reloadData()
             schedulePinnedSectionCheck()
         }
     }
 
-    /// The section last told to `onPinnedSectionChange`.
-    private(set) var pinnedSection: PinnedSection?
+    /// What `onPinnedSectionChanged` last said.
+    private(set) var pinnedSection: PostGridPinnedSection?
     private var pinnedSectionCheckScheduled = false
 
     /// Re-reads which section is pinned on the next turn — after the layout
@@ -241,7 +238,7 @@ final class ForYouGridPage: UIView {
     /// for the same reason, `SectionHeaderPillButton`), and once however many
     /// times a turn asks.
     private func schedulePinnedSectionCheck() {
-        guard onPinnedSectionChange != nil, !pinnedSectionCheckScheduled else { return }
+        guard onPinnedSectionChanged != nil, !pinnedSectionCheckScheduled else { return }
         pinnedSectionCheckScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -250,14 +247,21 @@ final class ForYouGridPage: UIView {
         }
     }
 
-    /// The headers' own rule asked once for the list
+    /// The headers' own rule asked once for the page
     /// (`SectionHeaderPillButton.pinnedSection`), on their frames as laid out
-    /// now: a pinned header sits on the pin line, a later one below it.
+    /// now, against the pin line (`pinLine`, which a hosted page moves): a
+    /// group's title on Discover, a section's on a list.
     func updatePinnedSection() {
-        guard let onPinnedSectionChange else { return }
-        var next: PinnedSection?
-        if style == .list, !showsSkeleton, !posts.isEmpty {
-            let pinLine = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+        var next: PostGridPinnedSection?
+        if isGrouped, !showsSkeleton {
+            let tops = groupFirstSections.map { section -> CGFloat in
+                collectionView.layoutAttributesForSupplementaryElement(
+                    ofKind: PostGridListLayout.headerElementKind, at: IndexPath(item: 0, section: section)
+                )?.frame.minY ?? .greatestFiniteMagnitude
+            }
+            next = SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: pinLine)
+                .map { PostGridPinnedSection(index: $0, title: groupTitles[$0]) }
+        } else if style == .list, !showsSkeleton, !posts.isEmpty {
             let current = sections
             let tops: [CGFloat] = current.indices.map { index in
                 guard hasHeader(inSection: index), index < collectionView.numberOfSections,
@@ -267,34 +271,57 @@ final class ForYouGridPage: UIView {
                 return header.frame.minY
             }
             next = SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: pinLine).map { index in
-                PinnedSection(
+                PostGridPinnedSection(
+                    index: index,
                     title: current[index] == .earlier ? earlierSectionTitle : current[index].title,
-                    count: current[index] == .new ? newRunLength : 0,
-                    index: index
+                    count: current[index] == .new ? newRunLength : 0
                 )
             }
         }
         guard next != pinnedSection else { return }
         pinnedSection = next
-        onPinnedSectionChange(next)
+        onPinnedSectionChanged?(next)
     }
 
-    /// The pinned section's first row on the pin line — what tapping its name
-    /// in the bar means. By hand, not `scrollToItem(.top)`: that keeps the
-    /// header's box in front of the row, and the header is hidden while it
-    /// is pinned (the inbox's `scrollFirstRow` explains the empty band).
+    /// The pin line, in content coordinates: the bar's foot.
+    private var pinLine: CGFloat {
+        collectionView.contentOffset.y + (pinLineInset ?? collectionView.adjustedContentInset.top)
+    }
+
+    /// The pinned section's first post on the pin line — what tapping its
+    /// name in the bar means.
     func scrollToPinnedSection(animated: Bool = true) {
         guard let index = pinnedSection?.index else { return }
-        scrollFirstRowToPinLine(ofSection: index, animated: animated)
+        scrollToSection(index, animated: animated)
     }
 
+    /// Puts section `index` (a group's index on Discover, a list section's
+    /// otherwise) with its first post on the pin line, under the bar.
+    func scrollToSection(_ index: Int) {
+        scrollToSection(index, animated: true)
+    }
+
+    func scrollToSection(_ index: Int, animated: Bool) {
+        if isGrouped {
+            guard groupFirstSections.indices.contains(index) else { return }
+            scrollFirstRowToPinLine(ofSection: groupFirstSections[index], animated: animated)
+        } else {
+            scrollFirstRowToPinLine(ofSection: index, animated: animated)
+        }
+    }
+
+    /// ⚠️ A HAND-SET OFFSET, NOT `scrollToItem(.top)` — the inbox's rule
+    /// (`scrollFirstRow(ofSection:)`): the header hides as it reaches the
+    /// bar, which names it instead, so `.top` would leave the post under the
+    /// empty band of a header nobody sees. Clamped for a list too short to
+    /// scroll.
     private func scrollFirstRowToPinLine(ofSection index: Int, animated: Bool = true) {
         guard collectionView.numberOfSections > index, collectionView.numberOfItems(inSection: index) > 0 else { return }
         collectionView.layoutIfNeeded()
         guard let row = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: index)) else { return }
         let inset = collectionView.adjustedContentInset
         let furthest = collectionView.contentSize.height + inset.bottom - collectionView.bounds.height
-        let target = min(row.frame.minY - inset.top, furthest)
+        let target = min(row.frame.minY - (pinLineInset ?? inset.top), furthest)
         collectionView.setContentOffset(
             CGPoint(x: collectionView.contentOffset.x, y: max(-inset.top, target)), animated: animated
         )
@@ -432,6 +459,21 @@ final class ForYouGridPage: UIView {
     /// delivery that changes only that is still a change worth applying.
     private var plannedCorpusComplete = false
 
+    // MARK: Discover's titled groups (`.sections`, #1344)
+
+    /// The groups' titles, in order — empty unless the page shows titled
+    /// groups (the profile's History, by day).
+    private(set) var groupTitles: [String] = []
+    /// The section each group's first stretch is — where its title stands.
+    private var groupFirstSections: [Int] = []
+    /// Whether the page draws titled groups.
+    var isGrouped: Bool { !groupTitles.isEmpty }
+    /// The groups were just left — see `leaveGroups`.
+    private var leftGroups = false
+    /// The pin line's distance below the offset, when the scroll view's own
+    /// top inset is not it — see `setPinLineInset`.
+    private(set) var pinLineInset: CGFloat?
+
     /// No further page is coming (or one is). Read by the next `render`.
     func setCorpusComplete(_ complete: Bool) {
         isCorpusComplete = complete
@@ -461,6 +503,25 @@ final class ForYouGridPage: UIView {
     func chunk(inSection section: Int) -> MosaicChunk? {
         guard style == .discover, !showsSkeleton, segments.indices.contains(section) else { return nil }
         return segments[section].chunk
+    }
+
+    /// Whether `section` opens a titled group, and wears its title. Asked by
+    /// the layout, like `chunk(inSection:)`.
+    func isTitled(inSection section: Int) -> Bool {
+        guard style == .discover, !showsSkeleton else { return false }
+        return groupIndex(openedBy: section) != nil
+    }
+
+    /// Whether `section` is the last stretch of a group with another after
+    /// it — the section gap before the next title.
+    func endsGroup(inSection section: Int) -> Bool {
+        guard style == .discover, !showsSkeleton else { return false }
+        return groupIndex(openedBy: section + 1) != nil
+    }
+
+    /// The group whose first stretch is `section`.
+    private func groupIndex(openedBy section: Int) -> Int? {
+        groupFirstSections.firstIndex(of: section)
     }
 
     /// Whether `section` is a block of paired half-width cards. Asked by the
@@ -857,6 +918,17 @@ final class ForYouGridPage: UIView {
                 },
                 isPairs: { [headerHost] section in
                     headerHost.page?.isPairs(inSection: section) ?? false
+                },
+                isTitled: { [headerHost] section in
+                    headerHost.page?.isTitled(inSection: section) ?? false
+                },
+                endsGroup: { [headerHost] section in
+                    headerHost.page?.endsGroup(inSection: section) ?? false
+                },
+                // A titled group is a day of what the viewer looked at, not a
+                // corpus to browse: no chunk offers "View all" there.
+                showsViewAll: { [headerHost] in
+                    !(headerHost.page?.isGrouped ?? false)
                 }
             )
         }
@@ -1146,6 +1218,7 @@ final class ForYouGridPage: UIView {
             actionTitle: actionTitle, actionHandler: action
         )
         emptyState.isHidden = false
+        leaveGroups()
         apply([], skeleton: false)
         settleHostedStatus()
     }
@@ -2855,10 +2928,14 @@ final class ForYouGridPage: UIView {
             // order has the chunks' media pulled forward, and re-planning that
             // as if it were the ranking would lay out a different list under a
             // spinner that promised to change nothing.
+            // Titled groups are planned from their groups, which a refresh
+            // under the spinner does not change.
+            guard !(isGrouped && !posts.isEmpty) else { break }
             apply(style == .discover ? rawPosts : posts,
                   skeleton: !refreshControl.isRefreshing && posts.isEmpty)
         case .content(let posts):
             emptyState.isHidden = true
+            leaveGroups()
             apply(posts, skeleton: false)
         case .empty(let empty):
             showStatus(
@@ -2883,12 +2960,17 @@ final class ForYouGridPage: UIView {
     private func apply(_ incoming: [GalleryPost], skeleton: Bool) {
         // Consumed here whatever happens next: it describes THIS delivery, and
         // leaving it armed would force the next genuine page landing to reload.
-        let mustReload = mustReload
+        // Groups just left redraw whatever arrives: the same posts, untitled,
+        // are still a different list.
+        let leftGroups = leftGroups
+        self.leftGroups = false
+        let mustReload = mustReload || leftGroups
         self.mustReload = false
         // On Discover the corpus's COMPLETENESS is an input too: the last page
         // can land with nothing new in it and still decide the tail's chunk.
         let completenessMoved = style == .discover && plannedCorpusComplete != isCorpusComplete
-        guard rawPosts != incoming || showsSkeleton != skeleton || completenessMoved else { return }
+        guard rawPosts != incoming || showsSkeleton != skeleton || completenessMoved || leftGroups
+        else { return }
         // ⚠️ **SETTLE ANY PENDING RELOAD AGAINST THE OLD MODEL FIRST.** A batch
         // insert below takes its "before" counts from the collection view — and
         // a `reloadData` still pending (the slice layout's first-geometry
@@ -3067,6 +3149,79 @@ final class ForYouGridPage: UIView {
         reloadAll(dissolving: dissolving)
     }
 
+    /// Discover's titled groups (`.sections`): each group planned as a list
+    /// of its own — its chunks numbered on from the group before, so the
+    /// shapes vary down the page — and the lists drawn one after another,
+    /// each group's title over its first stretch.
+    ///
+    /// Always complete: a host that groups its posts holds all of them (the
+    /// History is on the device). So a change is a reload, never an insert —
+    /// except new counters on the same posts, written onto the cells.
+    func applyGroups(_ groups: [PostGridPageSection]) {
+        defer { lookahead.setNeedsPlan() }
+        guard style == .discover else { return apply(groups.flatMap(\.posts), skeleton: false) }
+        emptyState.isHidden = true
+        let shown = groups.filter { !$0.posts.isEmpty }
+        guard !shown.isEmpty else {
+            leaveGroups()
+            return apply([], skeleton: false)
+        }
+        var ordinal = 0
+        var planned: [DiscoverSegment] = []
+        var firsts: [Int] = []
+        for group in shown {
+            firsts.append(planned.count)
+            planned += chunkPlanner.segments(for: group.posts, isComplete: true, ordinal: &ordinal)
+        }
+        let titles = shown.map(\.title)
+        let sameShape = !showsSkeleton && titles == groupTitles && firsts == groupFirstSections
+            && MosaicChunkPlanner.change(from: segments, to: planned) == .identical
+        let postsBefore = posts
+        let dissolving = showsSkeleton && window != nil
+        // Settled against the old model first — `apply`'s rule.
+        collectionView.layoutIfNeeded()
+        rawPosts = shown.flatMap(\.posts)
+        showsSkeleton = false
+        plannedCorpusComplete = true
+        leftGroups = false
+        mustReload = false
+        groupTitles = titles
+        groupFirstSections = firsts
+        adoptSegments(planned)
+        if !posts.contains(where: { $0.id == heroHiddenPostID }) { heroHiddenPostID = nil }
+        if sameShape {
+            guard posts != postsBefore else { return }
+            let visible = collectionView.indexPathsForVisibleItems.filter {
+                posts[flatIndex(for: $0)] != postsBefore[flatIndex(for: $0)]
+            }
+            if !visible.isEmpty { collectionView.reconfigureItems(at: visible) }
+            return
+        }
+        collectionView.collectionViewLayout.invalidateLayout()
+        reloadAll(dissolving: dissolving)
+        DispatchQueue.main.async { [weak self] in self?.updatePinnedSection() }
+    }
+
+    /// Back to one untitled list: the next delivery is planned whole.
+    private func leaveGroups() {
+        guard isGrouped else { return }
+        groupTitles = []
+        groupFirstSections = []
+        leftGroups = true
+        updatePinnedSection()
+    }
+
+    func setPinLineInset(_ inset: CGFloat?) {
+        guard pinLineInset != inset else { return }
+        pinLineInset = inset
+        for case let header as SectionHeaderCapsuleView in collectionView.visibleSupplementaryViews(
+            ofKind: PostGridListLayout.headerElementKind
+        ) {
+            header.pinLineInset = inset
+        }
+        updatePinnedSection()
+    }
+
     /// The whole-table path every style ends on when a delivery is not an
     /// append.
     private func reloadAll(dissolving: Bool) {
@@ -3161,6 +3316,16 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
             withReuseIdentifier: Self.sectionHeaderReuseID,
             for: indexPath
         ) as! SectionHeaderCapsuleView
+        header.pinLineInset = pinLineInset
+        // A titled group's header: the title in the flow, which leaves as it
+        // reaches the bar — the host names the group there (#1344, the
+        // inbox's #1301).
+        if style == .discover, let group = groupIndex(openedBy: indexPath.section) {
+            header.hidesWhenPinned = true
+            header.setTitle(groupTitles[group])
+            header.onTap = { [weak self] in self?.scrollToSection(group) }
+            return header
+        }
         let section = sections.indices.contains(indexPath.section) ? sections[indexPath.section] : .earlier
         // "New 8": the header says how much is new, so the viewer knows the
         // size of the run before scrolling it — the number the For You header
@@ -3171,10 +3336,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         header.setTitle(section == .earlier ? earlierSectionTitle : section.title,
                         count: section == .new ? newRunLength : 0)
         // Named in the bar instead, the header leaves as it pins (#1378).
-        header.hidesWhenPinned = onPinnedSectionChange != nil
+        header.hidesWhenPinned = onPinnedSectionChanged != nil
         // Tapping a header means "show me this part" — the same gesture the
         // inbox's pills answer.
-        header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }
+        header.onTap = { [weak self] in self?.scrollToListSection(indexPath.section) }
         return header
     }
 
@@ -3184,10 +3349,10 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     ///
     /// A no-op for a list too short to scroll: `scrollToItem` cannot invent
     /// content, so a two-section list that already fits stays where it is.
-    private func scrollToSection(_ index: Int) {
-        // Its header hides once pinned: the row goes on the pin line, not
-        // under an empty header box.
-        if onPinnedSectionChange != nil {
+    private func scrollToListSection(_ index: Int) {
+        // Named in the bar, its header hides once pinned: the row goes on
+        // the pin line, not under an empty header box.
+        if onPinnedSectionChanged != nil {
             scrollFirstRowToPinLine(ofSection: index)
             return
         }

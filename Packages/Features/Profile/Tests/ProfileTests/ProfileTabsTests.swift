@@ -1,5 +1,8 @@
+import CoreModels
 import DesignSystem
 import CoreStorage
+import FeedInterface
+import Foundation
 import MediaCore
 import PostGrid
 import Testing
@@ -25,8 +28,8 @@ struct ProfileTabsTests {
     /// left the bar's source menu for the selector, as on anyone else's
     /// profile; Saved and Liked stay yours alone (#631).
     @Test func yourOwnProfileCarriesThePublicPagesThenSavedAndLiked() {
-        #expect(ProfileTab.ownTabs == [.format(.activity), .reposts, .tagged, .saved, .reactions])
-        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Reposts", "Tagged", "Saved", "Liked"])
+        #expect(ProfileTab.ownTabs == [.format(.activity), .reposts, .tagged, .saved, .history, .reactions])
+        #expect(ProfileTab.ownTabs.map(\.title) == ["Posts", "Reposts", "Tagged", "Saved", "History", "Liked"])
     }
 
     /// ⚠️ And nobody else's does. A saved pile has no owner but the device it
@@ -109,7 +112,7 @@ struct ProfileTabsTests {
     /// count used to be a constant, and a selector with more segments than
     /// the pager has pages indexes past the end on the last tab.
     @Test func thePagerBuildsOnePageForEachTab() {
-        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 5)
+        #expect(pager(ProfileTab.ownTabs).debugVerticalOffsets.count == 6)
         #expect(pager(ProfileTab.publicTabs).debugVerticalOffsets.count == 3)
     }
 
@@ -133,7 +136,8 @@ struct ProfileTabsTests {
         let pager = pager(ProfileTab.ownTabs)
         var settled: [ProfileTab] = []
         pager.onPageSettled = { settled.append($0) }
-        pager.debugScrollView.contentOffset = CGPoint(x: 4 * pager.bounds.width, y: 0)
+        let last = CGFloat(ProfileTab.ownTabs.count - 1)
+        pager.debugScrollView.contentOffset = CGPoint(x: last * pager.bounds.width, y: 0)
         pager.scrollViewDidEndDecelerating(pager.debugScrollView)
         #expect(settled == [.reactions])
     }
@@ -254,5 +258,89 @@ struct ProfileEmptyStateTests {
             ProfileTab.reactions.emptyState.subtitle
                 == "Posts you react to or like will show up here."
         )
+    }
+}
+
+/// History (#1344): laid out like For You, and the viewer's own profile only.
+@MainActor
+struct ProfileHistoryTabTests {
+    @Test func historyIsLaidOutLikeForYou() {
+        #expect(ProfileGalleryPagerView.style(for: .history) == .discover)
+        #expect(ProfileTab.history.title == "History")
+        #expect(!ProfileTab.history.pages)
+    }
+
+    @Test func historyIsTheOwnProfilesOnly() {
+        let store = ProfileGalleryStore()
+        store.history = .content([])
+        if case .content = store.snapshot(isOwnProfile: false).history {
+            Issue.record("someone else's profile showed the viewer's history")
+        }
+        if case .content = store.snapshot(isOwnProfile: true).history {} else {
+            Issue.record("the own profile lost its history")
+        }
+    }
+}
+
+/// History's days (#1344, the owner 2026-10-17): the posts under the time
+/// they were viewed, and the page titling them.
+@MainActor
+struct ProfileHistoryDaysTests {
+    /// Saturday 17 October 2026, noon, in a fixed calendar (weeks from Sunday).
+    private static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        calendar.locale = Locale(identifier: "en_US")
+        calendar.firstWeekday = 1
+        return calendar
+    }()
+    private static let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 17, hour: 12))!
+
+    private func daysAgo(_ days: Int) -> Date {
+        Self.calendar.date(byAdding: .day, value: -days, to: Self.now)!
+    }
+
+    private func title(_ date: Date?) -> String {
+        HistoryDayGroups.title(for: date, now: Self.now, calendar: Self.calendar)
+    }
+
+    @Test func eachViewGoesUnderItsTime() {
+        #expect(title(Self.now) == "Today")
+        #expect(title(daysAgo(1)) == "Yesterday")
+        #expect(title(daysAgo(3)) == "This Week")
+        #expect(title(daysAgo(9)) == "Last Week")
+        #expect(title(daysAgo(14)) == "This Month")
+        #expect(title(daysAgo(20)) == "Last Month")
+        #expect(title(daysAgo(80)) == "July")
+        #expect(title(daysAgo(400)) == "September 2025")
+        #expect(title(nil) == "Earlier")
+    }
+
+    @Test func groupsCountThePostsInOrder() {
+        let dates: [Date?] = [Self.now, Self.now, daysAgo(1), daysAgo(9), nil]
+        #expect(HistoryDayGroups.groups(for: dates, now: Self.now, calendar: Self.calendar) == [
+            HistoryGroup(title: "Today", count: 2),
+            HistoryGroup(title: "Yesterday", count: 1),
+            HistoryGroup(title: "Last Week", count: 1),
+            HistoryGroup(title: "Earlier", count: 1)
+        ])
+    }
+
+    private func post(_ id: String) -> GalleryPost {
+        GalleryPost(id: PostID(id), kind: .photo, isRepost: false, thumbnailURL: nil, caption: id, publishedAtMS: 0)
+    }
+
+    /// The pager hands History's page its groups; groups that do not cover
+    /// the posts exactly fall back to one list.
+    @Test func theHistoryPageIsTitledByDay() {
+        let posts = ["a", "b", "c"].map(post)
+        let groups = [HistoryGroup(title: "Today", count: 2), HistoryGroup(title: "Yesterday", count: 1)]
+        #expect(ProfileGalleryPagerView.pageState(.content(posts), for: .history, groups: groups) == .sections([
+            PostGridPageSection(title: "Today", posts: Array(posts[0..<2])),
+            PostGridPageSection(title: "Yesterday", posts: [posts[2]])
+        ]))
+        #expect(ProfileGalleryPagerView.pageState(
+            .content(posts), for: .history, groups: [HistoryGroup(title: "Today", count: 2)]
+        ) == .content(posts))
     }
 }

@@ -88,7 +88,22 @@ public final class SectionHeaderPillButton: UIButton {
     /// flow is untouched; only the stuck state moves, and the same dissolve
     /// that would have formed the capsule carries the title out.
     public var hidesWhenPinned = false {
-        didSet { applyConfiguration(for: presentation) }
+        didSet {
+            guard hidesWhenPinned != oldValue else { return }
+            applyConfiguration(for: presentation)
+        }
+    }
+
+    /// Where the pin line stands below the scroll view's offset, when its own
+    /// top inset is not the bar's foot — a page hosted under a header that
+    /// docks away (the profile's History, #1344) is inset by the whole
+    /// header, and its titles reach the bar far above that line. Nil: the
+    /// scroll view's `adjustedContentInset.top`.
+    public var pinLineInset: CGFloat? {
+        didSet {
+            guard pinLineInset != oldValue, let scrollView = enclosingScrollView() else { return }
+            updatePresentation(in: scrollView, animated: false)
+        }
     }
 
     /// The pill's distance from its host's leading edge — restated from the
@@ -309,7 +324,7 @@ public final class SectionHeaderPillButton: UIButton {
     /// top has nothing pinned; it just has a top.
     public func updatePresentation(in scrollView: UIScrollView, animated: Bool = true) {
         guard let host = superview else { return }
-        let pinLine = scrollView.contentOffset.y + scrollView.adjustedContentInset.top
+        let pinLine = scrollView.contentOffset.y + (pinLineInset ?? scrollView.adjustedContentInset.top)
         let top = host.convert(host.bounds, to: scrollView).minY
         let isAtTheLine = top - pinLine <= Metrics.morphDistance
         // The same grace the morph gets, spent here instead for the first

@@ -804,11 +804,23 @@ open class AppButton: UIButton {
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menuProvider() }
     }
 
+    private static let highlightPreviewSelector = #selector(
+        UIContextMenuInteractionDelegate.contextMenuInteraction(_:configuration:highlightPreviewForItemWithIdentifier:)
+    )
+    private static let dismissalPreviewSelector = #selector(
+        UIContextMenuInteractionDelegate.contextMenuInteraction(_:configuration:dismissalPreviewForItemWithIdentifier:)
+    )
+
     override open func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction, configuration: UIContextMenuConfiguration,
         highlightPreviewForItemWithIdentifier identifier: any NSCopying
     ) -> UITargetedPreview? {
         guard menuProvider != nil else {
+            // ⚠️ ONLY IF UIBUTTON ANSWERS IT: on iOS 27 it does not, and the
+            // super call trapped with an unrecognized selector the moment a
+            // native menu opened (the profile's "..." — #1344). Nil is
+            // UIKit's own preview.
+            guard UIButton.instancesRespond(to: Self.highlightPreviewSelector) else { return nil }
             return super.contextMenuInteraction(
                 interaction, configuration: configuration, highlightPreviewForItemWithIdentifier: identifier
             )
@@ -821,6 +833,8 @@ open class AppButton: UIButton {
         dismissalPreviewForItemWithIdentifier identifier: any NSCopying
     ) -> UITargetedPreview? {
         guard menuProvider != nil else {
+            // Same guard as the highlight preview's.
+            guard UIButton.instancesRespond(to: Self.dismissalPreviewSelector) else { return nil }
             return super.contextMenuInteraction(
                 interaction, configuration: configuration, dismissalPreviewForItemWithIdentifier: identifier
             )

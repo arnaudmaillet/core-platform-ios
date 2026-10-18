@@ -4373,6 +4373,18 @@ final class SnapFeedViewController: UIViewController {
         if let index { reconcileRestingInterface(activeIndex: index) }
     }
 
+    // MARK: - Viewing history (#1344)
+
+    /// Where every post the viewer opens or swipes onto is recorded — the
+    /// profile's History tab (#1344). Nil records nothing (tests, previews);
+    /// the app's feeds get `PostViewHistoryStore.shared` from the builder.
+    ///
+    /// ⚠️ ON ACTIVATION, NO DWELL (the owner, 2026-10-17: "tous les posts
+    /// consultés/ouverts, comme Instagram ou TikTok"). A 2 s dwell missed
+    /// the posts swiped through, and every TEXT post: one opens in the
+    /// comments layout, which resigned the page before the dwell ran out.
+    var viewHistory: PostViewHistoryStore?
+
     private func apply(_ transition: SnapLifecycleDispatcher.Transition) {
         if let resign = transition.resign {
             // Paging within the feed: the page stays alive and a swipe away, so
@@ -4457,6 +4469,7 @@ final class SnapFeedViewController: UIViewController {
             if orderedIDs.indices.contains(activate) {
                 let id = orderedIDs[activate]
                 viewModel.pageDidBecomeActive(id)
+                viewHistory?.record(id.rawValue)
                 // Text-only pages REST in the comments layout — the format
                 // itself is the trigger, no user gesture. The VISUAL
                 // interface was already pre-rendered on visibility (as the

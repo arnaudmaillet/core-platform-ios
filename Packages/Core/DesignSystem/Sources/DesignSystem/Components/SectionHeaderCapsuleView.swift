@@ -15,6 +15,12 @@ public final class SectionHeaderCapsuleView: UICollectionReusableView {
         set { pill.onTap = newValue }
     }
 
+    /// See `SectionHeaderPillButton.pinLineInset`.
+    public var pinLineInset: CGFloat? {
+        get { pill.pinLineInset }
+        set { pill.pinLineInset = newValue }
+    }
+
     private let pill = SectionHeaderPillButton()
 
     /// The pinned section is named elsewhere — a bar item (#1301, #1378):
