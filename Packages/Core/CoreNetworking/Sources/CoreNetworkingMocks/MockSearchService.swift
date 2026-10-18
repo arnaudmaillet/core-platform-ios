@@ -23,23 +23,40 @@ public final class MockSearchService: @unchecked Sendable {
     /// Whether a profile may appear in results — its owner's "Show Up in
     /// Search" (backend #726). Search and Suggest both honour it.
     private let isFindable: @Sendable (String) -> Bool
+    /// Viewer-aware (#447, backend #693): whether a profile hit is hidden
+    /// from the readers — a block either way, a hidden or suspended profile.
+    /// A private profile stays findable by its header, as on its own page.
+    private let hidesProfile: @Sendable (_ readers: [String], _ profileID: String) -> Bool
+    /// Whether a post hit may be shown to the readers: its author VISIBLE to
+    /// them (not a private author they don't follow, no block either way,
+    /// not hidden), and the post not taken down (backend #687/#688/#693).
+    private let mayShowPost: @Sendable (_ readers: [String], _ postID: String) -> Bool
+    /// Whether moderation took a post down (backend #688): the fleet's index
+    /// drops it (#687), so no hashtag counts it.
+    private let isTakenDown: @Sendable (String) -> Bool
 
     public init(
         dataset: MockSocialDataset,
         counters: MockCounterStore? = nil,
-        isFindable: @escaping @Sendable (String) -> Bool = { _ in true }
+        isFindable: @escaping @Sendable (String) -> Bool = { _ in true },
+        hidesProfile: @escaping @Sendable ([String], String) -> Bool = { _, _ in false },
+        mayShowPost: @escaping @Sendable ([String], String) -> Bool = { _, _ in true },
+        isTakenDown: @escaping @Sendable (String) -> Bool = { _ in false }
     ) {
         self.dataset = dataset
         self.counters = counters
         self.isFindable = isFindable
+        self.hidesProfile = hidesProfile
+        self.mayShowPost = mayShowPost
+        self.isTakenDown = isTakenDown
     }
 
     public func register(on bff: MockBFF) {
-        bff.register(path: "/search.v1.SearchService/Search") { [self] (request: Search_V1_SearchRequest) in
-            search(request)
+        bff.register(path: "/search.v1.SearchService/Search") { [self] (request: Search_V1_SearchRequest, headers: Headers) in
+            search(request, readers: MockEdgePolicy.readers(from: headers, in: dataset))
         }
-        bff.register(path: "/search.v1.SearchService/Suggest") { [self] (request: Search_V1_SuggestRequest) in
-            suggest(request)
+        bff.register(path: "/search.v1.SearchService/Suggest") { [self] (request: Search_V1_SuggestRequest, headers: Headers) in
+            suggest(request, readers: MockEdgePolicy.readers(from: headers, in: dataset))
         }
         bff.register(path: "/search.v1.SearchService/ListTrendingHashtags") { [self] (request: Search_V1_ListTrendingHashtagsRequest) in
             listTrendingHashtags(request)
@@ -56,7 +73,7 @@ public final class MockSearchService: @unchecked Sendable {
     ///
     /// Completions are handles rather than display names: the handle is what
     /// the index stores and what a viewer finishing a search means to type.
-    private func suggest(_ request: Search_V1_SuggestRequest) -> Result<Search_V1_SuggestResponse, ConnectError> {
+    private func suggest(_ request: Search_V1_SuggestRequest, readers: [String]) -> Result<Search_V1_SuggestResponse, ConnectError> {
         var response = Search_V1_SuggestResponse()
 
         let prefix = request.prefix.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -79,11 +96,15 @@ public final class MockSearchService: @unchecked Sendable {
         let wantsProfiles = request.entityTypes.isEmpty || request.entityTypes.contains(.profile)
         guard wantsProfiles else { return .success(response) }
 
+        // ⚠️ The parentheses matter: `isFindable` gates BOTH matches. It
+        // used to bind to the handle alone, so a display-name match skipped
+        // the owner's "Show Up in Search".
         let matches = dataset.authors.filter { author in
-            isFindable(author.profileID) && author.handle.lowercased().hasPrefix(prefix)
-                || author.displayName.lowercased()
-                    .split(separator: " ")
-                    .contains { $0.hasPrefix(prefix) }
+            isFindable(author.profileID) && !hidesProfile(readers, author.profileID)
+                && (author.handle.lowercased().hasPrefix(prefix)
+                    || author.displayName.lowercased()
+                        .split(separator: " ")
+                        .contains { $0.hasPrefix(prefix) })
         }
         let limit = request.limit > 0 ? Int(request.limit) : matches.count
         // Appended: a request for profiles AND tags keeps the tags above.
@@ -97,7 +118,7 @@ public final class MockSearchService: @unchecked Sendable {
         return .success(response)
     }
 
-    private func search(_ request: Search_V1_SearchRequest) -> Result<Search_V1_SearchResponse, ConnectError> {
+    private func search(_ request: Search_V1_SearchRequest, readers: [String]) -> Result<Search_V1_SearchResponse, ConnectError> {
         var response = Search_V1_SearchResponse()
 
         let query = request.query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -111,7 +132,7 @@ public final class MockSearchService: @unchecked Sendable {
         if wantsProfiles {
             let matches = sorted(
                 dataset.authors.filter {
-                    isFindable($0.profileID)
+                    isFindable($0.profileID) && !hidesProfile(readers, $0.profileID)
                         && ($0.handle.lowercased().contains(query) || $0.displayName.lowercased().contains(query))
                 },
                 by: request.sort
@@ -160,8 +181,9 @@ public final class MockSearchService: @unchecked Sendable {
             let isTag = query.hasPrefix("#") && !query.contains(" ")
             let allMatches = sortedPosts(
                 dataset.posts.filter { record in
-                    isTag ? Self.tags(in: record.caption).contains(String(query.dropFirst()))
+                    let found = isTag ? Self.tags(in: record.caption).contains(String(query.dropFirst()))
                         : record.caption.lowercased().contains(query)
+                    return found && mayShowPost(readers, record.postID)
                 },
                 by: request.sort
             )
@@ -348,7 +370,7 @@ public final class MockSearchService: @unchecked Sendable {
 
     private func tagCounts() -> [(tag: String, count: Int)] {
         var counts: [String: Int] = [:]
-        for post in dataset.posts {
+        for post in dataset.posts where !isTakenDown(post.postID) {
             for tag in Self.tags(in: post.caption) { counts[tag, default: 0] += 1 }
         }
         return counts.map { (tag: $0.key, count: $0.value) }

@@ -141,6 +141,26 @@ struct ViewerAwareProfileReadsTests {
         }
     }
 
+    /// The mock's seeded hidden and suspended profiles (#447) — opened by
+    /// id or by handle — read "This account isn't available".
+    @Test(arguments: MockSocialServices.hiddenProfiles.map(\.id))
+    func aSeededHiddenOrSuspendedProfileReadsUnavailable(id: String) async throws {
+        let backend = MockBackend()
+        let client = backend.makeRPCClient()
+        let repository = ProfileRepository(
+            profileClient: Profile_V1_ProfileServiceClient(client: client),
+            counterClient: Counter_V1_CounterServiceClient(client: client),
+            socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: client),
+            authSession: MemberSession()
+        )
+        let viewModel = ProfileViewModel(repository: repository, source: .profile(ProfileID(id)))
+        var phase: ProfileViewModel.Phase?
+        viewModel.onPhaseChange = { phase = $0 }
+        viewModel.viewDidLoad()
+        #expect(await settle { phase == ProfileViewModel.unavailable })
+        withExtendedLifetime(viewModel) {}
+    }
+
     // MARK: - Private profiles
 
     @Test func aPrivateProfileTheViewerDoesntFollowShowsLockedPages() async throws {

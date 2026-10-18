@@ -17,6 +17,9 @@ public struct MockBackend: Sendable {
     /// Held (not just registered) so tests can read back the cases the
     /// profile's Report action filed.
     public let moderationService: MockModerationService
+    /// Held so tests (and the app's DEBUG arguments) can reach its seams —
+    /// a takedown (#447), a back-dated deletion.
+    public let socialServices: MockSocialServices
     public let bff: MockBFF
 
     /// `mediaCatalog` defaults to `.synthetic` so tests and previews stay
@@ -133,11 +136,26 @@ public struct MockBackend: Sendable {
             default: return true
             }
         }).register(on: bff)
-        // A profile whose owner turned off "Show Up in Search" is left out (#412).
+        // A profile whose owner turned off "Show Up in Search" is left out (#412),
+        // and results are viewer-aware (#447, backend #693): no profile hidden
+        // from the reader, no post by an author they may not see (a private
+        // one they don't follow included — search follows the fleet here,
+        // unlike a member's GetPost; see `MockSocialServices.mayRead`) and
+        // none taken down. Hashtags stay; their counts leave taken-down
+        // posts out, as the fleet's index drops them (backend #687).
+        //
+        // Who is hidden from the readers — a block either way, a hidden or
+        // suspended profile — is one rule, search's and comments' alike.
+        let hiddenFromReaders: @Sendable ([String], String) -> Bool = { readers, profileID in
+            socialServices.isHidden(profileID) || !socialGraph.mayAccess(profileID, readers: readers, privacy: false)
+        }
         MockSearchService(
             dataset: dataset,
             counters: counterStore,
-            isFindable: { socialServices.isFindableInSearch($0) }
+            isFindable: { socialServices.isFindableInSearch($0) },
+            hidesProfile: hiddenFromReaders,
+            mayShowPost: { readers, postID in socialServices.mayReadPost(postID, readers: readers, privacy: true) },
+            isTakenDown: { socialServices.isTakenDown($0) }
         ).register(on: bff)
         // Supervision notices ride on `-mock-supervision` (#1106).
         MockNotificationService(dataset: dataset, supervisionSeed: MockSupervisionService.launchSeed).register(on: bff)
@@ -159,7 +177,15 @@ public struct MockBackend: Sendable {
             // three posts for their review (#416).
             seedsHeldComments: ProcessInfo.processInfo.arguments.contains("-mock-held-comments"),
             // Replies rank by their likes — wallet stakes on the comment (#637).
-            likeCount: { counterStore.likeCount(target: "comment:" + $0) }
+            likeCount: { counterStore.likeCount(target: "comment:" + $0) },
+            // Viewer-aware (#447, backend #692): a post's comments are read
+            // as the post is (a member's private-author divergence included,
+            // so a post that opens shows its comments), and a commenter
+            // hidden from the reader is dropped.
+            mayReadPost: { readers, postID in
+                socialServices.mayReadPost(postID, readers: readers, privacy: readers.isEmpty)
+            },
+            hidesAuthor: hiddenFromReaders
         ).register(on: bff)
         // A message to someone who takes none is refused (#397).
         MockChatService(dataset: dataset, mayMessage: { _, recipient in
@@ -192,6 +218,7 @@ public struct MockBackend: Sendable {
         self.blobStore = blobStore
         self.postStore = postStore
         self.moderationService = moderationService
+        self.socialServices = socialServices
         self.bff = bff
     }
 

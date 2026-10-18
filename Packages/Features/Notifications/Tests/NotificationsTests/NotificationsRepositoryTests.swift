@@ -116,6 +116,39 @@ struct NotificationsRepositoryTests {
         #expect(items.contains { $0.subjectPreview?.excerpt?.isEmpty == false })
     }
 
+    /// A post the server no longer shows the viewer (#447: taken down,
+    /// backend #688, or withheld) keeps its row — the thing happened — but
+    /// shows nothing of the post: `GetPost` answers not found, and a tap
+    /// opens a detail that reads "This post isn't available". The mock's
+    /// notifications are about the viewer's own posts, which their author
+    /// always reads, so `GetPost` is made to answer as it does for a post
+    /// taken down under someone else.
+    @Test func aSubjectTheServerNoLongerShowsKeepsItsRowWithoutAPreview() async throws {
+        let dataset = MockSocialDataset()
+        let bff = MockBFF()
+        MockSocialServices(dataset: dataset).register(on: bff)
+        MockNotificationService(dataset: dataset).register(on: bff)
+        let client = ConnectClientFactory.makeUnauthenticated(host: "https://mock.bff.local", httpClient: bff)
+        func repository() -> NotificationsRepository {
+            NotificationsRepository(
+                notificationClient: Notification_V1_NotificationServiceClient(client: client),
+                profileClient: Profile_V1_ProfileServiceClient(client: client),
+                postClient: Post_V1_PostServiceClient(client: client),
+                authSession: AuthenticatedSessionStub()
+            )
+        }
+        let before = try await repository().loadNotifications(limit: 50)
+        let previewed = try #require(before.first { $0.subjectPreview != nil })
+
+        bff.register(path: "/post.v1.PostService/GetPost") { (request: Post_V1_GetPostRequest) -> Result<Post_V1_PostView, ConnectError> in
+            .failure(ConnectError(code: .notFound, message: "PST-1001: post \(request.postID) not found"))
+        }
+        let after = try await repository().loadNotifications(limit: 50)
+        let row = try #require(after.first { $0.id == previewed.id })
+        #expect(row.postSubjectID == previewed.postSubjectID)
+        #expect(row.subjectPreview == nil)
+    }
+
     @Test func withoutAPostClientRowsSimplyHaveNoPreview() async throws {
         let items = try await makeRepository(withPosts: false).loadNotifications(limit: 50)
         #expect(!items.isEmpty)

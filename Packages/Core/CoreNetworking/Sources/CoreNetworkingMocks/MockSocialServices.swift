@@ -65,6 +65,12 @@ public final class MockSocialServices: @unchecked Sendable {
     /// Posts deleted this session, with when (backend #663: a tombstone,
     /// restorable for 30 days). Guarded by `lock`.
     private var deletedPosts: [String: Date] = [:]
+    /// Posts moderation removed (#447, backend #688); see `takeDown`.
+    private var takenDownPosts: Set<String> = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-mock-takedown"), index + 1 < arguments.count else { return [] }
+        return [arguments[index + 1]]
+    }()
     /// How long a deleted post can be restored.
     public static let restoreWindow: TimeInterval = 30 * 86_400
     /// `SetFeedSettings` writes, by profile (backend #731); absent is Less.
@@ -170,8 +176,8 @@ public final class MockSocialServices: @unchecked Sendable {
         bff.register(path: "/timeline.v1.TimelineService/GetFollowingFeed") { [self] (request: Timeline_V1_GetFollowingFeedRequest) in
             getFollowingFeed(request)
         }
-        bff.register(path: "/timeline.v1.TimelineService/GetDiscoveryFeed") { [self] (request: Timeline_V1_GetDiscoveryFeedRequest) in
-            getDiscoveryFeed(request)
+        bff.register(path: "/timeline.v1.TimelineService/GetDiscoveryFeed") { [self] (request: Timeline_V1_GetDiscoveryFeedRequest, headers: Headers) in
+            getDiscoveryFeed(request, readers: readers(from: headers))
         }
         bff.register(path: "/timeline.v1.TimelineService/ListInterests") { [self] (request: Timeline_V1_ListInterestsRequest) -> Result<Timeline_V1_InterestsResponse, ConnectError> in
             var response = Timeline_V1_InterestsResponse()
@@ -489,9 +495,12 @@ public final class MockSocialServices: @unchecked Sendable {
     /// then recency. The mock has no age-gated posts, so `content_level` is
     /// echoed and filters nothing (a guest always gets RESTRICTED).
     private func getDiscoveryFeed(
-        _ request: Timeline_V1_GetDiscoveryFeedRequest
+        _ request: Timeline_V1_GetDiscoveryFeedRequest, readers: [String]
     ) -> Result<Timeline_V1_GetDiscoveryFeedResponse, ConnectError> {
-        var pool = timelineFeed
+        // A taken-down post leaves the pool (#447, backend #688), for anyone
+        // but its author.
+        let removed = lock.withLock { takenDownPosts }
+        var pool = timelineFeed.filter { !removed.contains($0.postID) || readers.contains($0.authorID) }
         if request.ranking != .recent, let counters {
             let likes = Dictionary(pool.map { ($0.postID, counters.likeCount(for: $0.postID)) },
                                    uniquingKeysWith: { first, _ in first })
@@ -549,6 +558,9 @@ public final class MockSocialServices: @unchecked Sendable {
             return .failure(ConnectError(code: .permissionDenied, message: "feed belongs to another profile"))
         }
 
+        // ⚠️ A taken-down post STAYS in the following feed's ids, as the
+        // fleet's fan-out keeps it: `GetPost` refuses it, and the client's
+        // hydration drops it (#447).
         let feed = timelineFeed
         let start = Int(request.pageToken) ?? 0
         let limit = Int(min(max(request.limit, 1), pageSizeCap))
@@ -747,7 +759,51 @@ public final class MockSocialServices: @unchecked Sendable {
     /// unauthenticated calls too, which only tests and previews make (the
     /// app's edge refuses them).
     func readers(from headers: Headers) -> [String] {
-        MockEdgePolicy.caller(from: headers) == .guest ? [] : dataset.profileIDs(inAccount: MockAuthService.accountID)
+        MockEdgePolicy.readers(from: headers, in: dataset)
+    }
+
+    // MARK: - Hidden profiles and takedowns (#447)
+
+    /// Profiles no one but their owner reads (backend #689): one a moderator
+    /// hid, one on a suspended account. Seeded so the "This account isn't
+    /// available" answer is reachable in mock mode (`-open-unavailable-profile
+    /// hidden|suspended`); no account the demo signs in to owns them.
+    public static let hiddenProfiles: [(id: String, handle: String, displayName: String)] = [
+        (id: "prof-hidden", handle: "remy.hale", displayName: "Remy Hale"),
+        (id: "prof-suspended", handle: "jules.marlow", displayName: "Jules Marlow"),
+    ]
+
+    public func isHidden(_ profileID: String) -> Bool {
+        Self.hiddenProfiles.contains { $0.id == profileID }
+    }
+
+    /// Takes `postID` down, as moderation's `remove_content` does (backend
+    /// #688): its author still reads it, no one else does — not its page,
+    /// not its comments, not search. `-mock-takedown <postID>` takes one
+    /// down at launch.
+    public func takeDown(_ postID: String) {
+        lock.withLock { _ = takenDownPosts.insert(postID) }
+    }
+
+    public func isTakenDown(_ postID: String) -> Bool {
+        lock.withLock { takenDownPosts.contains(postID) }
+    }
+
+    /// Whether `readers` may read `postID` and what hangs off it (backend
+    /// #686/#688/#691, the rule `GetPost` and comment reads share): its
+    /// author always; anyone else only a published post, not deleted, not
+    /// taken down, by an author the audience gate lets through — with
+    /// `privacy` (a private author none of them follows hides it) or
+    /// without (blocks and hidden authors only; see `mayRead`).
+    public func mayReadPost(_ postID: String, readers: [String], privacy: Bool) -> Bool {
+        // A post this mock doesn't hold is not this rule's to refuse: `GetPost`
+        // answers not found for it already, and a comment fixture on a made-up
+        // id keeps its comments.
+        guard let owner = self.author(ofPost: postID) else { return true }
+        if readers.contains(owner) { return true }
+        let isDraft = postStore?.record(for: postID).map { !$0.published } ?? false
+        let isGone = lock.withLock { deletedPosts[postID] != nil || takenDownPosts.contains(postID) }
+        return !isDraft && !isGone && mayRead(owner, readers: readers, privacy: privacy)
     }
 
     /// Whether `readers` may see `author`'s posts: always their own, and
@@ -761,6 +817,7 @@ public final class MockSocialServices: @unchecked Sendable {
     /// rule.
     private func mayRead(_ author: String, readers: [String], privacy: Bool = true) -> Bool {
         if readers.contains(author) { return true }
+        if isHidden(author) { return false }
         guard let gate = lock.withLock({ audienceGate }) else { return true }
         return gate(readers, author, privacy)
     }
@@ -774,12 +831,8 @@ public final class MockSocialServices: @unchecked Sendable {
     private func getPost(_ request: Post_V1_GetPostRequest, readers: [String]) -> Result<Post_V1_PostView, ConnectError> {
         let notFound = ConnectError(code: .notFound, message: "PST-1001: post \(request.postID) not found")
         var result = windowlessPost(request)
-        if case .success(let view) = result, !readers.contains(view.profileID) {
-            let isDraft = postStore?.record(for: request.postID).map { !$0.published } ?? false
-            let isDeleted = lock.withLock { deletedPosts[request.postID] != nil }
-            if isDraft || isDeleted || !mayRead(view.profileID, readers: readers, privacy: readers.isEmpty) {
-                return .failure(notFound)
-            }
+        if case .success = result, !mayReadPost(request.postID, readers: readers, privacy: readers.isEmpty) {
+            return .failure(notFound)
         }
         if case .success(let view) = result, let start = windowStartMS(for: view.profileID), view.publishedAtMs < start {
             return .failure(notFound)
@@ -855,7 +908,9 @@ public final class MockSocialServices: @unchecked Sendable {
         let seeded = dataset.posts
             .filter { $0.authorProfileID == request.profileID }
             .map { (postID: $0.postID, mediaURL: $0.media?.url, createdAtMS: $0.publishedAtMS) }
-        let deleted = lock.withLock { Set(deletedPosts.keys) }
+        // A taken-down post is its author's alone (#447, backend #688).
+        let ownListing = readers.contains(request.profileID)
+        let deleted = lock.withLock { Set(deletedPosts.keys).union(ownListing ? [] : takenDownPosts) }
         // Visitors' listing stops at the author's window (backend #729).
         let windowStart = windowStartMS(for: request.profileID) ?? .min
         let all = (authored + seeded)
@@ -972,6 +1027,12 @@ public final class MockSocialServices: @unchecked Sendable {
     }
 
     private func getProfileByID(_ request: Profile_V1_GetProfileByIdRequest) -> Result<Profile_V1_ProfileView, ConnectError> {
+        // Hidden or suspended (#447, backend #689): not found to anyone but
+        // the owner, whom the demo never signs in as — the same answer as
+        // a profile that never existed.
+        if isHidden(request.profileID) {
+            return .failure(ConnectError(code: .notFound, message: "PRF-1001: profile \(request.profileID) not found"))
+        }
         // The viewer's own profile, so their authored posts hydrate. Identity
         // fields come from the mutable overlay so a save via UpdateProfile /
         // ChangeHandle is reflected on the next read.
@@ -1050,6 +1111,7 @@ public final class MockSocialServices: @unchecked Sendable {
         let profileID = handle == ownHandle.lowercased()
             ? MockPostStore.viewer.profileID
             : dataset.authors.first { $0.handle.lowercased() == handle }?.profileID
+                ?? Self.hiddenProfiles.first { $0.handle == handle }?.id
         guard let profileID else {
             return .failure(ConnectError(code: .notFound, message: "no profile @\(handle)"))
         }

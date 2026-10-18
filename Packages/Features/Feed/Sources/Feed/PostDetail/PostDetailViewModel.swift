@@ -595,7 +595,8 @@ public final class PostDetailViewModel {
         // screen used to open on a spinner and fetch it again. `peekPost` is
         // the same read the pin-opened feed seeds from: nil on a miss, never
         // a fetch. The fetch then confirms it, and re-renders only if the
-        // post changed underneath.
+        // post changed underneath. It goes past the warm cache (#447): a
+        // post taken down since it was cached must say so here, not open.
         var seeded: FeedEntry?
         if case .loading = phase, let cached = repository.peekPost(postID) {
             seeded = cached
@@ -604,7 +605,7 @@ public final class PostDetailViewModel {
         load = Task { [weak self] in
             guard let self else { return }
             do {
-                let entry = try await self.repository.loadPost(postID)
+                let entry = try await self.repository.revalidatePost(postID)
                 if entry != seeded { self.show(entry) }
             } catch is CancellationError {
                 // Superseded; leave the phase alone.
