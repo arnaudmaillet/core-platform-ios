@@ -98,7 +98,7 @@ final class ProfileHeaderView: UIView {
     /// Whether the banner shows on screen at all: in its window, faded in,
     /// and below the bar.
     var isBannerOnScreen: Bool {
-        guard let window = bannerView.window, bannerView.visibility > 0.05 else { return false }
+        guard !bannerView.isHidden, let window = bannerView.window, bannerView.visibility > 0.05 else { return false }
         let frame = bannerView.convert(bannerView.bounds, to: window)
         return frame.intersects(window.bounds) && frame.maxY > window.safeAreaInsets.top
     }
@@ -224,7 +224,7 @@ final class ProfileHeaderView: UIView {
         // The top corners concentric with the display's (the card's top is
         // the screen's), the bottom ones the post cards' below.
         let foot = UICornerRadius.fixed(PostGridListRowCell.cardCornerRadius)
-        bannerShadow.isHidden = !card
+        bannerShadow.isHidden = isBannerSuppressed || !card
         bannerShadow.cornerConfiguration = card
             ? .corners(
                 topLeftRadius: .containerConcentric(), topRightRadius: .containerConcentric(),
@@ -297,6 +297,23 @@ final class ProfileHeaderView: UIView {
         }
     }
 
+    /// A hidden header takes its banner and the banner's shadow along, as
+    /// `alpha` does (#1406: an unavailable profile is a plain page). They
+    /// live outside the header once moved (`moveBanner`), so hiding the
+    /// header used to leave them — with no picture to show, the card's
+    /// placeholder ramp read as a banner that failed to load. A picture
+    /// landing while hidden (`setBannerFormat`) does not bring them back.
+    override var isHidden: Bool {
+        didSet {
+            guard isHidden != oldValue else { return }
+            bannerView.isHidden = isBannerSuppressed || bannerFormat == .none
+            bannerShadow.isHidden = isBannerSuppressed || bannerFormat != .band
+            if isBannerSuppressed { setBannerVideoPlaying(false) }
+        }
+    }
+
+    private var isBannerSuppressed: Bool { isHidden }
+
     /// Moves the banner OUT of the header, into `container` below `sibling` —
     /// behind the screen's scrolling content, so that content can pass over
     /// a poster's lower part. It keeps resting on the header's top (its
@@ -328,7 +345,7 @@ final class ProfileHeaderView: UIView {
         let rowInset = format == .band ? Metrics.bandRowInset : 0
         topRow.isLayoutMarginsRelativeArrangement = true
         topRow.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: rowInset, bottom: 0, trailing: rowInset)
-        bannerView.isHidden = format == .none
+        bannerView.isHidden = isBannerSuppressed || format == .none
         activateBannerFoot()
         bannerView.setFormat(format)
         applyIdentityInk()

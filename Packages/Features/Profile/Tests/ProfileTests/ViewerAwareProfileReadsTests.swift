@@ -109,7 +109,7 @@ struct ViewerAwareProfileReadsTests {
         await profiles.goAway()
         let (viewModel, seen) = open(profiles)
         #expect(await settle { seen.phase == ProfileViewModel.unavailable })
-        #expect(seen.phase == .notFound(message: "This account isn\u{2019}t available", detail: nil))
+        #expect(seen.phase == .notFound(message: "This account isn\u{2019}t available", detail: "It may have been removed or hidden."))
         withExtendedLifetime(viewModel) {}
     }
 
