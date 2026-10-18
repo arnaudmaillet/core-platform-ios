@@ -1,5 +1,6 @@
 import CoreImage
 import CoreNavigation
+import CoreStorage
 import DesignSystem
 import EmoteKit
 import MapsInterface
@@ -96,12 +97,17 @@ public final class ShopStorefrontViewController: UIViewController {
 
     let access: any CountryAccess
     let stakePacks: (any StakePackSelling)?
+    /// The profile items (#944): the video banner. Nil: no Profile shelf.
+    let profileItems: (any ProfileItemSelling)?
     let atlas: CountryAtlas
 
     private let scroll = UIScrollView()
     private let column = UIStackView()
     private(set) var boostsShelf: ShopShelfView?
+    private(set) var profileShelf: ShopShelfView?
     private(set) var countriesShelf: ShopShelfView?
+    /// The profile items' cards, in the seller's order.
+    private(set) var itemCards: [ShopProfileItemCardView] = []
     /// The packs' cards, smallest first.
     private(set) var packCards: [ShopPackCardView] = []
     /// The first pack's card — the one the stake menu's door flashes.
@@ -114,12 +120,14 @@ public final class ShopStorefrontViewController: UIViewController {
     private(set) var playingCards: [ShopCountryCardView] = []
 
     init(
-        access: any CountryAccess, stakePacks: (any StakePackSelling)?, media: ShopMedia? = nil,
+        access: any CountryAccess, stakePacks: (any StakePackSelling)?,
+        profileItems: (any ProfileItemSelling)? = nil, media: ShopMedia? = nil,
         atlas: CountryAtlas = .shared
     ) {
         self.media = media
         self.access = access
         self.stakePacks = stakePacks
+        self.profileItems = profileItems
         self.atlas = atlas
         super.init(nibName: nil, bundle: nil)
         title = CountryShopEntry.title
@@ -165,7 +173,7 @@ public final class ShopStorefrontViewController: UIViewController {
             column.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
             column.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
         ])
-        for name in [Notification.Name.countryAccessDidChange, .stakePackDidChange] {
+        for name in [Notification.Name.countryAccessDidChange, .stakePackDidChange, ProfileItemStore.didChangeNotification] {
             NotificationCenter.default.addObserver(self, selector: #selector(stockChanged), name: name, object: nil)
         }
         registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (self: Self, _) in
@@ -228,9 +236,10 @@ public final class ShopStorefrontViewController: UIViewController {
     /// rebuild is cheaper to reason about than a diff. Each row keeps where
     /// it was scrolled to.
     func rebuild() {
-        let offsets = (boostsShelf?.rowOffset, countriesShelf?.rowOffset)
+        let offsets = (boostsShelf?.rowOffset, countriesShelf?.rowOffset, profileShelf?.rowOffset)
         column.arrangedSubviews.forEach { $0.removeFromSuperview() }
         boostsShelf = nil
+        profileShelf = nil
         countriesShelf = nil
         let width = view.bounds.width > 0 ? view.bounds.width : 402
         // Empty categories are not shown: no seller, no Boosts.
@@ -239,12 +248,18 @@ public final class ShopStorefrontViewController: UIViewController {
             column.addArrangedSubview(shelf)
             boostsShelf = shelf
         }
+        if let profileItems, !profileItems.items.isEmpty {
+            let shelf = profileShelf(profileItems, width: width)
+            column.addArrangedSubview(shelf)
+            profileShelf = shelf
+        }
         let countries = countriesShelf(width: width)
         column.addArrangedSubview(countries)
         countriesShelf = countries
-        if let boosts = boostsShelf { column.setCustomSpacing(Metrics.shelfGap, after: boosts) }
+        for shelf in [boostsShelf, profileShelf].compactMap({ $0 }) { column.setCustomSpacing(Metrics.shelfGap, after: shelf) }
         boostsShelf?.rowOffset = offsets.0 ?? 0
         countriesShelf?.rowOffset = offsets.1 ?? 0
+        profileShelf?.rowOffset = offsets.2 ?? 0
         // The new cards play again: a wallet change rebuilds the page under
         // a visible shelf (a no-op while off screen) — once it is laid out,
         // the visibility test reads frames.
@@ -301,6 +316,68 @@ public final class ShopStorefrontViewController: UIViewController {
             buy.subtitle = "\(offer.price - access.gems) more gems needed"
         }
         return UIMenu(title: "\(ShopPackCardView.shotsTitle(offer)) — \(ShopPackCardView.shotsDetail(offer))", children: [buy])
+    }
+
+    /// The profile items (#944): what each does, its price, or Owned. The
+    /// card raises its confirmation, as a pack's does.
+    private func profileShelf(_ seller: any ProfileItemSelling, width: CGFloat) -> ShopShelfView {
+        itemCards = seller.items.map { item in
+            let owned = seller.owns(item)
+            return ShopProfileItemCardView(
+                item: item, owned: owned, affordable: access.gems >= item.gemPrice,
+                menu: itemMenu(item, owned: owned)
+            )
+        }
+        let itemWidth = RowEdgeSnap.itemWidth(
+            forWidth: width, perWidth: Metrics.packsPerWidth, margin: Metrics.margin, gap: Metrics.gap
+        )
+        return ShopShelfView(
+            heading: SectionTitleView.Content(title: "Profile"),
+            items: itemCards.map { ($0, itemWidth) }, vertical: shelvesAreVertical
+        )
+    }
+
+    /// The item's one-line confirmation: never one tap. Owned, it says where
+    /// it is used instead.
+    func itemMenu(_ item: ProfileItem, owned: Bool) -> UIMenu {
+        if owned {
+            let used = UIAction(title: "Owned", image: UIImage(systemName: "checkmark.circle")) { _ in }
+            used.attributes = .disabled
+            used.subtitle = item.whereToUse
+            return UIMenu(title: item.shopTitle, children: [used])
+        }
+        let buy = UIAction(title: "Buy for \(item.gemPrice) gems", image: GemSymbol.glyphImage()) { [weak self] _ in
+            guard let self else { return }
+            MemberGates.perform(.shop, from: self) { [weak self] in self?.buyItem(item) }
+        }
+        if access.purchasesRestricted {
+            buy.attributes = .disabled
+            buy.subtitle = PurchaseRestriction.message
+        } else if access.gems < item.gemPrice {
+            buy.attributes = .disabled
+            buy.subtitle = "\(item.gemPrice - access.gems) more gems needed"
+        }
+        return UIMenu(title: "\(item.shopTitle) — yours for good", children: [buy])
+    }
+
+    /// Buys `item`. Internal for tests — the menu cannot be raised in one.
+    @discardableResult
+    func buyItem(_ item: ProfileItem) -> ProfileItemPurchase? {
+        guard let profileItems, !access.purchasesRestricted else { return nil }
+        let outcome = profileItems.buy(item)
+        switch outcome {
+        case .bought:
+            HapticNotification().notificationOccurred(.success)
+            Feedback.success("\(item.shopTitle) unlocked", from: self)
+        case .alreadyOwned:
+            break
+        case .insufficientGems(let needed, let have):
+            let missing = max(needed - have, 1)
+            Feedback.failure(missing == 1 ? "1 more gem needed" : "\(missing) more gems needed", from: self)
+        case .unavailable:
+            Feedback.failure(PurchaseRestriction.message, from: self)
+        }
+        return outcome
     }
 
     private func countriesShelf(width: CGFloat) -> ShopShelfView {
@@ -1351,4 +1428,86 @@ final class ShopShelfRowScrollView: UIScrollView {
         if velocity.x > 0 { return contentOffset.x > start + 0.5 }
         return contentOffset.x < end - 0.5
     }
+}
+
+/// A profile item (#944), as a portrait card like a pack's: its symbol,
+/// its name, what it does, and at the foot its price — or Owned.
+final class ShopProfileItemCardView: ShopCardView {
+    let item: ProfileItem
+    let owned: Bool
+    let priceBubble = UIView()
+
+    init(item: ProfileItem, owned: Bool, affordable: Bool, menu: UIMenu) {
+        self.item = item
+        self.owned = owned
+        super.init(menu: menu)
+
+        let symbol = UIImageView(image: UIImage(systemName: item.shopSymbol))
+        symbol.preferredSymbolConfiguration = .init(textStyle: .title1, scale: .large)
+        symbol.tintColor = .label
+        symbol.contentMode = .left
+        symbol.setContentHuggingPriority(.required, for: .vertical)
+        let title = UILabel()
+        title.text = item.shopTitle
+        title.font = .appFont(forTextStyle: .headline)
+        title.adjustsFontForContentSizeCategory = true
+        title.numberOfLines = 2
+        let detail = UILabel()
+        detail.text = item.shopDetail
+        detail.font = .appFont(forTextStyle: .footnote)
+        detail.adjustsFontForContentSizeCategory = true
+        detail.textColor = .secondaryLabel
+        detail.numberOfLines = 3
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+        let stack = UIStackView(arrangedSubviews: [symbol, title, detail, spacer])
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = Spacing.xs
+        stack.setCustomSpacing(Spacing.sm, after: symbol)
+        stack.isUserInteractionEnabled = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        let foot: UIView
+        if owned {
+            let label = UILabel()
+            label.text = "Owned"
+            label.font = .appFont(forTextStyle: .subheadline)
+            label.adjustsFontForContentSizeCategory = true
+            label.textColor = .secondaryLabel
+            foot = label
+            priceBubble.backgroundColor = .quaternarySystemFill
+        } else {
+            foot = ShopPriceLabel(price: item.gemPrice, inReach: affordable)
+            priceBubble.backgroundColor = affordable ? GemSymbol.tint.withAlphaComponent(0.16) : .quaternarySystemFill
+        }
+        priceBubble.layer.cornerRadius = ShopPackCardView.bubbleRadius
+        priceBubble.layer.cornerCurve = .continuous
+        priceBubble.isUserInteractionEnabled = false
+        foot.translatesAutoresizingMaskIntoConstraints = false
+        priceBubble.addSubview(foot)
+        priceBubble.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(priceBubble)
+
+        let inset = Spacing.md
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: inset),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
+            priceBubble.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: Spacing.sm),
+            priceBubble.leadingAnchor.constraint(equalTo: leadingAnchor, constant: ShopPackCardView.bubbleInset),
+            priceBubble.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -ShopPackCardView.bubbleInset),
+            priceBubble.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -ShopPackCardView.bubbleInset),
+            priceBubble.heightAnchor.constraint(greaterThanOrEqualToConstant: 34),
+            foot.centerXAnchor.constraint(equalTo: priceBubble.centerXAnchor),
+            foot.centerYAnchor.constraint(equalTo: priceBubble.centerYAnchor),
+            foot.topAnchor.constraint(greaterThanOrEqualTo: priceBubble.topAnchor, constant: 6),
+        ])
+        accessibilityLabel = "\(item.shopTitle). \(item.shopDetail)"
+        accessibilityValue = owned ? "Owned" : "\(item.gemPrice) gems"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
