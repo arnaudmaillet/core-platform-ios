@@ -189,6 +189,16 @@ public enum Palette {
     /// Text on `secondaryContainer`.
     public static let onSecondaryContainer = dynamic(light: 0x6852C6, dark: 0xA78BFA)
 
+    // MARK: - The loader (#1329)
+
+    /// The branded loader's four pieces, one solid tone each, from the pink to
+    /// the violet clockwise from the top-left: `tint` → `secondary` (dark)
+    /// with two even steps between. The same in both appearances — the mark
+    /// is a logo, not text (owner, 2026-10-17). Read through `AppLoaderView`.
+    public static let loaderTones: [UIColor] = [
+        rgb(0xF37AB4), rgb(0xA78BFA), rgb(0xC08BE6), rgb(0xD98AD0),
+    ]
+
     // MARK: - Economy
 
     /// The saved star (#1128): gold, the 收藏 convention — ONE gold, the
