@@ -84,7 +84,8 @@ enum SupervisionCopy {
 
     static func acceptExplanation(teen: Bool) -> String {
         teen
-            ? "Enter the code your parent or guardian shared. Once linked, they'll see your daily time in the app and can set limits on your account. You'll always see who supervises you, and you can end it at any time."
+            // What linking shares is the card below, said once (#1116).
+            ? "Enter the code your parent or guardian shared. You'll always see who supervises you in Family and Teens."
             : "Enter the code your teen shared. Once linked, you'll see their daily time in the app and can set limits on their account. They'll see that you supervise them, and either of you can end it."
     }
 
