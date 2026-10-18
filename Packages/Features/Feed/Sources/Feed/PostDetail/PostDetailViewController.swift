@@ -320,6 +320,8 @@ final class PostDetailViewController: UIViewController {
         else { return }
         let refunded = sessionBoostAmount
         sessionBoostAmount = 0
+        // Taken back: the toast closing must not send it.
+        _ = stakeBurst.next()
         HapticImpact(style: .light).impactOccurred()
         composeBar.setBoostTotal(result.targetTotal, animated: true)
         composeBar.playBoostRefund(amount: refunded)
@@ -328,16 +330,17 @@ final class PostDetailViewController: UIViewController {
     }
 
     /// Leaving the post commits its likes now, rather than 10 s after the
-    /// last tap (#676).
+    /// last tap (#676) — unless its stake toast is still up: the toast
+    /// follows the screen on top, its Undo live, and sends the burst when
+    /// it ends (#1375, the owner 2026-10-18).
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if let postID = viewModel.postID { wallet?.commitStakes(on: postID.rawValue) }
-        // Leaving for good closes the undo window, and the toast's Undo with
-        // it (#957): the tally it would take back dies with this screen.
-        if isMovingFromParent || isBeingDismissed || navigationController?.isBeingDismissed == true {
-            StakeMenu.closeUndoToast(stakeToast)
-        }
+        let toastIsUp = stakeToast.map { !$0.isDismissing } ?? false
+        if !toastIsUp, let postID = viewModel.postID { wallet?.commitStakes(on: postID.rawValue) }
     }
+
+    /// Numbers this screen's stake toasts (`StakeMenu.Burst`).
+    private let stakeBurst = StakeMenu.Burst()
 
     /// Rows re-measure on a genuine WIDTH change — rotation, iPad size
     /// classes. Nothing here touches the empty page's HEIGHT: that is
@@ -890,11 +893,28 @@ final class PostDetailViewController: UIViewController {
                     // its number face, then the "+N" float rises off it.
                     self.composeBar.setBoostTotal(targetTotal, animated: true)
                     self.composeBar.playBoostConfirmation(amount: spent)
-                    // The burst so far, with Undo for all of it (#957).
+                    // The burst so far, with Undo for all of it (#957) — until
+                    // the toast ends, wherever it has followed to (#1375).
+                    let burst = self.stakeBurst
+                    let generation = burst.next()
+                    let amount = self.sessionBoostAmount
+                    let key = postID.rawValue
                     self.stakeToast = StakeMenu.undoToast(
-                        staked: self.sessionBoostAmount, on: postID.rawValue, from: self,
-                        above: self.composeBar.inputRowView
-                    ) { [weak self] in self?.undoSessionBoost() }
+                        staked: amount, on: key, from: self,
+                        above: self.composeBar.inputRowView,
+                        commit: { [weak self] in
+                            guard burst.isCurrent(generation) else { return }
+                            wallet.commitStakes(on: key)
+                            self?.sessionBoostAmount = 0
+                        },
+                        undo: { [weak self] in
+                            if let self {
+                                self.undoSessionBoost()
+                            } else {
+                                _ = wallet.undoBoost(targetID: key, amount: amount)
+                            }
+                        }
+                    )
                 case .insufficientBalance, .targetCapReached, .noShotsLeft, .shotDoesNotFit:
                     HapticNotification().notificationOccurred(.error)
                     self.composeBar.playBoostDenied()

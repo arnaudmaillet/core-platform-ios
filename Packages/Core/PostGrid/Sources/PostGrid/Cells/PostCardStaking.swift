@@ -183,12 +183,14 @@ public final class PostCardStaking {
         wallet.boostTotal(forTarget: postID.rawValue)
     }
 
-    /// Closes the undo window — the surface left the screen.
+    /// The surface left the screen. A burst whose toast is still up stays
+    /// undoable — the toast follows the screen on top and commits the burst
+    /// when it ends (#1375, the owner 2026-10-18); every other tap of the
+    /// session is committed now (#676).
     public func endSession() {
-        // Moving on commits the session's taps now (#676).
-        for postID in session.keys { wallet.commitStakes(on: postID) }
-        session.removeAll()
-        closeStakeToast()
+        let live = stakeToast.flatMap { $0.isDismissing ? nil : stakeToastKey }
+        for postID in session.keys where postID != live { wallet.commitStakes(on: postID) }
+        session = session.filter { $0.key == live }
     }
 
     // MARK: - Spending
@@ -239,6 +241,9 @@ public final class PostCardStaking {
         guard let amount = session[key], amount > 0,
               let result = wallet.undoBoost(targetID: key, amount: amount) else { return }
         session[key] = nil
+        // The burst is taken back: its toast closing must not send it.
+        _ = bursts[key]?.next()
+        bursts[key] = nil
         if stakeToastKey == key { closeStakeToast() }
         HapticImpact(style: .light).impactOccurred()
         if let cell, isBound(cell, to: key) {
@@ -253,8 +258,42 @@ public final class PostCardStaking {
     private func showStakeToast(on key: String, from cell: UIView) {
         guard let screen = Self.screen(of: cell), let amount = session[key] else { return }
         stakeToastKey = key
-        stakeToast = StakeMenu.undoToast(staked: amount, on: key, from: screen) { [weak self] in
-            self?.undo(on: key, cell: self?.boundRow(for: key))
+        let burst = bursts[key] ?? StakeMenu.Burst()
+        bursts[key] = burst
+        let generation = burst.next()
+        let wallet = wallet
+        stakeToast = StakeMenu.undoToast(
+            staked: amount, on: key, from: screen,
+            // The toast ending without an undo sends the burst — even once
+            // the surface that staked is gone. An in-place update (the next
+            // tap) is not an end.
+            commit: { [weak self] in
+                guard burst.isCurrent(generation) else { return }
+                wallet.commitStakes(on: key)
+                self?.burstCommitted(on: key)
+            },
+            undo: { [weak self] in
+                if let self {
+                    self.undo(on: key, cell: self.boundRow(for: key))
+                } else {
+                    // The surface is gone; the toast is not: take the burst
+                    // back from the wallet itself.
+                    _ = wallet.undoBoost(targetID: key, amount: amount)
+                }
+            }
+        )
+    }
+
+    /// One `Burst` per post: numbers its toasts.
+    private var bursts: [String: StakeMenu.Burst] = [:]
+
+    /// The burst's toast ended and sent it: no longer undoable.
+    private func burstCommitted(on key: String) {
+        session[key] = nil
+        bursts[key] = nil
+        if stakeToastKey == key {
+            stakeToast = nil
+            stakeToastKey = nil
         }
     }
 

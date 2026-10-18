@@ -29,6 +29,13 @@ import UIKit
 /// popped) — the bar keeps a popped item's views, so the toasts themselves
 /// never leave it.
 ///
+/// ## A screen's own items never push them out
+///
+/// A screen that sets its trailing items while toasts are up (a badge
+/// re-fitted, a mode change) takes the toasts' views out of the bar; each
+/// says so (`onBarDetached`), and they are placed again over the screen's
+/// new items — which are then the ones that come back (#1375).
+///
 /// ## The toasts' width comes first
 ///
 /// When the toasts would have to collapse or cut their text, the screen's
@@ -205,10 +212,18 @@ final class NavigationBarToasts {
     }
 
     /// A push or a pop may have happened: once it has ended, the toasts go
-    /// to the screen then on top (`place` waits for the transition).
+    /// to the screen then on top (`place` waits for the transition). Or the
+    /// screen set its own trailing items over the toasts (#1375): they are
+    /// handed straight back, and the screen's new items are the ones put
+    /// back when the last toast leaves.
     private func lookAgain() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.navigation?.topViewController !== self.screen else { return }
+            guard let self else { return }
+            let moved = self.navigation?.topViewController !== self.screen
+            let overwritten = !self.handedItems.isEmpty
+                && !(self.navigationItem?.rightBarButtonItems ?? []).elementsEqual(self.handedItems, by: ===)
+            guard moved || overwritten else { return }
+            if overwritten, !moved { self.trace("trailing items replaced by the screen: placed again") }
             self.place()
         }
     }

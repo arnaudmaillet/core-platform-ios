@@ -176,6 +176,41 @@ struct NavigationBarToastsTests {
         toast.dismiss(animated: false)
     }
 
+    /// A screen that sets its own trailing items while a toast is up does
+    /// not push the toast out: the toast is placed again, and the screen's
+    /// NEW items come back when it leaves (#1375).
+    ///
+    /// Async like the pop test: the re-placing waits a main-queue turn.
+    @Test func aScreensOwnItemsNeverPushALiveToastOut() async throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let screen = Screen()
+        let navigation = UINavigationController(rootViewController: screen)
+        window.rootViewController = navigation
+        window.isHidden = false
+        window.layoutIfNeeded()
+        defer {
+            window.rootViewController = nil
+            window.isHidden = true
+        }
+        let toast = Feedback.info("Post deleted", from: screen)
+        window.layoutIfNeeded()
+        #expect(toasts(in: screen).first === toast)
+
+        let fresh = [UIBarButtonItem(systemItem: .add)]
+        screen.navigationItem.setRightBarButtonItems(fresh, animated: false)
+        window.layoutIfNeeded()
+        for _ in 0..<60 where toasts(in: screen).first !== toast {
+            try await Task.sleep(for: .milliseconds(5))
+            window.layoutIfNeeded()
+        }
+        #expect(toasts(in: screen).first === toast, "placed again over the screen's write")
+        #expect(!toast.isDismissing)
+
+        toast.dismiss(animated: false)
+        let back = try #require(screen.navigationItem.rightBarButtonItems)
+        #expect(back.elementsEqual(fresh, by: ===), "the screen's new items come back")
+    }
+
     /// No visible bar: the overlay draws it, and the items are untouched.
     @Test func noBarMeansTheOverlay() {
         hosting(barHidden: true) { screen in

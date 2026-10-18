@@ -363,8 +363,9 @@ public final class ToastView: UIView {
     /// How far the capsule slides on its way in: zero under Reduce Motion
     /// (tests, here and in the packages that show toasts).
     public var entranceTravel: CGFloat { abs(offConstant - restConstant) }
-    /// Whether it is on its way out (tests).
-    var isDismissing: Bool { isLeaving }
+    /// Whether it is on its way out — what a stake surface reads to know its
+    /// undo window is still open (#1375), and tests.
+    public var isDismissing: Bool { isLeaving }
 
     // MARK: - Presenting
 
