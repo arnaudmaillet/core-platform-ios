@@ -24,8 +24,8 @@ import UIKit
 ///
 /// "New" over what the viewer has not seen, "Recent" over the rest — the
 /// Messages inbox's split, with its headers: a large title in the flow that
-/// pins under the bar as a Liquid Glass capsule (`SectionHeaderPillButton`,
-/// tap to scroll to the section). "New" carries its count — secondary text
+/// leaves as it reaches the bar, the section then named IN the bar after the
+/// back chevron (#1378, the inbox's #1301; tap to scroll to the section). "New" carries its count — secondary text
 /// after the title, `New 8` (`SectionTitleView`) — the number the For You
 /// header this list was pushed from carries, and the same one by
 /// construction: both are the size of the set the view model hands over
@@ -55,8 +55,8 @@ import UIKit
 /// No tab bar (`hidesBottomBarWhenPushed`) and no title: `[‹] ——
 /// [points][search]`, the header every screen For You pushes wears
 /// (`PushedScreenHeader`; #323's large titles were taken back on 2026-09-30).
-/// The section capsules pin right under that bar, because they pin to the
-/// collection view's adjusted inset, which is that bar.
+/// The pinned section is a leading item of that bar, `[‹][New · 3]`
+/// (`applyPinnedSection`), never a capsule under it.
 ///
 /// # Holding still under a post
 ///
@@ -167,7 +167,71 @@ final class ForYouPostListViewController: UIViewController {
         page.onNearEnd = { [weak self] in self?.onNearEnd?() }
         page.onRefresh = { [weak self] in self?.onRefresh?() }
         page.onAuthorTapped = { [weak self] post in self?.onAuthorTapped?(post) }
+        // The pinned section in the bar, after the back chevron (#1378).
+        navigationItem.leftItemsSupplementBackButton = true
+        page.onPinnedSectionChange = { [weak self] section in self?.applyPinnedSection(section) }
     }
+
+    // MARK: - The pinned section (#1378)
+
+    /// The section the list has scrolled into, named after the back chevron
+    /// — the Messages inbox's item (#1301), one look (`SectionBarItem`):
+    /// `[‹][New · 3] … [points][search]`, nothing back at the top, and no
+    /// capsule pinned under the bar (the headers leave as they pin).
+    ///
+    /// ⚠️ ONLY THE LEADING GROUP: toasts own the trailing one while they show
+    /// (`NavigationBarToasts`, #1066), and when they need room they keep the
+    /// first leading item only — this one, after the chevron.
+    private var sectionItem: UIBarButtonItem?
+
+    private func applyPinnedSection(_ section: ForYouGridPage.PinnedSection?) {
+        sectionItem = section.map { section in
+            SectionBarItem.make(
+                title: section.title, count: section.count, countNoun: "new", scope: "postList.\(kind.rawValue)"
+            ) { [weak self] in self?.page.scrollToPinnedSection() }
+        }
+        scheduleSectionPlacement()
+    }
+
+    /// Puts the leading group where the state says, ONCE, on the next turn:
+    /// a scroll can publish twice in one turn, and a second
+    /// `setLeftBarButtonItems` cuts the first one's animation short.
+    private func scheduleSectionPlacement() {
+        guard view.window != nil else {
+            navigationItem.leftBarButtonItems = sectionItem.map { [$0] } ?? []
+            return
+        }
+        guard !sectionPlacementScheduled else { return }
+        sectionPlacementScheduled = true
+        DispatchQueue.main.async { [weak self] in self?.placeSectionAfterTransition() }
+    }
+
+    /// ⚠️ NOT DURING A PUSH OR A POP (#756): items set mid-transition land
+    /// with it, unanimated, at its end. A placement due then waits for the
+    /// end, then animates.
+    private func placeSectionAfterTransition() {
+        if let coordinator = transitionCoordinator,
+           coordinator.animate(alongsideTransition: nil, completion: { [weak self] _ in
+               DispatchQueue.main.async { self?.placeSectionAfterTransition() }
+           }) {
+            return
+        }
+        sectionPlacementScheduled = false
+        navigationItem.setLeftBarButtonItems(sectionItem.map { [$0] } ?? [], animated: true)
+    }
+
+    private var sectionPlacementScheduled = false
+
+    #if DEBUG
+    /// The bar's section item while it is shown — what a test reads.
+    var debugSectionItem: UIBarButtonItem? {
+        guard let sectionItem, navigationItem.leftBarButtonItems?.contains(where: { $0 === sectionItem }) == true
+        else { return nil }
+        return sectionItem
+    }
+
+    var debugPage: ForYouGridPage { page }
+    #endif
 
     // MARK: - Content, from the host
 

@@ -211,6 +211,95 @@ final class ForYouGridPage: UIView {
     /// the caller's: the place page's Popular list names its one run so.
     var earlierSectionTitle = "Recent"
 
+    /// The section a list has scrolled into, named somewhere else — the
+    /// pushed lists name it in their bar, after the back chevron (#1378), as
+    /// the Messages inbox does (#1301).
+    struct PinnedSection: Equatable {
+        let title: String
+        /// "New · 3": the new run's count; zero for none.
+        let count: Int
+        let index: Int
+    }
+
+    /// Set, the list's section headers LEAVE as they pin instead of forming
+    /// their capsule (`SectionHeaderCapsuleView.hidesWhenPinned`), and the
+    /// pinned one is told here — once per change, nil back at the top.
+    var onPinnedSectionChange: ((PinnedSection?) -> Void)? {
+        didSet {
+            guard style == .list, !showsSkeleton else { return }
+            collectionView.reloadData()
+            schedulePinnedSectionCheck()
+        }
+    }
+
+    /// The section last told to `onPinnedSectionChange`.
+    private(set) var pinnedSection: PinnedSection?
+    private var pinnedSectionCheckScheduled = false
+
+    /// Re-reads which section is pinned on the next turn — after the layout
+    /// has moved the pinned header there (a header's own rule waits one turn
+    /// for the same reason, `SectionHeaderPillButton`), and once however many
+    /// times a turn asks.
+    private func schedulePinnedSectionCheck() {
+        guard onPinnedSectionChange != nil, !pinnedSectionCheckScheduled else { return }
+        pinnedSectionCheckScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            pinnedSectionCheckScheduled = false
+            updatePinnedSection()
+        }
+    }
+
+    /// The headers' own rule asked once for the list
+    /// (`SectionHeaderPillButton.pinnedSection`), on their frames as laid out
+    /// now: a pinned header sits on the pin line, a later one below it.
+    func updatePinnedSection() {
+        guard let onPinnedSectionChange else { return }
+        var next: PinnedSection?
+        if style == .list, !showsSkeleton, !posts.isEmpty {
+            let pinLine = collectionView.contentOffset.y + collectionView.adjustedContentInset.top
+            let current = sections
+            let tops: [CGFloat] = current.indices.map { index in
+                guard hasHeader(inSection: index), index < collectionView.numberOfSections,
+                      let header = collectionView.layoutAttributesForSupplementaryElement(
+                          ofKind: PostGridListLayout.headerElementKind, at: IndexPath(item: 0, section: index)
+                      ) else { return .greatestFiniteMagnitude }
+                return header.frame.minY
+            }
+            next = SectionHeaderPillButton.pinnedSection(sectionTops: tops, pinLine: pinLine).map { index in
+                PinnedSection(
+                    title: current[index] == .earlier ? earlierSectionTitle : current[index].title,
+                    count: current[index] == .new ? newRunLength : 0,
+                    index: index
+                )
+            }
+        }
+        guard next != pinnedSection else { return }
+        pinnedSection = next
+        onPinnedSectionChange(next)
+    }
+
+    /// The pinned section's first row on the pin line — what tapping its name
+    /// in the bar means. By hand, not `scrollToItem(.top)`: that keeps the
+    /// header's box in front of the row, and the header is hidden while it
+    /// is pinned (the inbox's `scrollFirstRow` explains the empty band).
+    func scrollToPinnedSection(animated: Bool = true) {
+        guard let index = pinnedSection?.index else { return }
+        scrollFirstRowToPinLine(ofSection: index, animated: animated)
+    }
+
+    private func scrollFirstRowToPinLine(ofSection index: Int, animated: Bool = true) {
+        guard collectionView.numberOfSections > index, collectionView.numberOfItems(inSection: index) > 0 else { return }
+        collectionView.layoutIfNeeded()
+        guard let row = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: index)) else { return }
+        let inset = collectionView.adjustedContentInset
+        let furthest = collectionView.contentSize.height + inset.bottom - collectionView.bounds.height
+        let target = min(row.frame.minY - inset.top, furthest)
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: max(-inset.top, target)), animated: animated
+        )
+    }
+
     var titlesEverySection = false {
         didSet {
             guard titlesEverySection != oldValue, style == .list, !showsSkeleton else { return }
@@ -2753,6 +2842,8 @@ final class ForYouGridPage: UIView {
     }
 
     func render(_ state: ForYouViewModel.PageState) {
+        // The sections or the new run's count may have moved under the bar.
+        defer { schedulePinnedSectionCheck() }
         switch state {
         case .loading:
             emptyState.isHidden = true
@@ -3079,6 +3170,8 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
         // `Spacing.sectionTitle` over the first row, as every title does.
         header.setTitle(section == .earlier ? earlierSectionTitle : section.title,
                         count: section == .new ? newRunLength : 0)
+        // Named in the bar instead, the header leaves as it pins (#1378).
+        header.hidesWhenPinned = onPinnedSectionChange != nil
         // Tapping a header means "show me this part" — the same gesture the
         // inbox's pills answer.
         header.onTap = { [weak self] in self?.scrollToSection(indexPath.section) }
@@ -3092,6 +3185,12 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
     /// A no-op for a list too short to scroll: `scrollToItem` cannot invent
     /// content, so a two-section list that already fits stays where it is.
     private func scrollToSection(_ index: Int) {
+        // Its header hides once pinned: the row goes on the pin line, not
+        // under an empty header box.
+        if onPinnedSectionChange != nil {
+            scrollFirstRowToPinLine(ofSection: index)
+            return
+        }
         guard collectionView.numberOfSections > index,
               collectionView.numberOfItems(inSection: index) > 0
         else { return }
@@ -3341,6 +3440,7 @@ extension ForYouGridPage: UICollectionViewDataSource, UICollectionViewDelegate {
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         positionPagingFooter()
+        schedulePinnedSectionCheck()
         if hostedTopInset != nil {
             // Content can land without a layout pass reaching the host —
             // re-derive the travel room here (value-guarded, so this is a
