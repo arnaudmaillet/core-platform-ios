@@ -174,15 +174,16 @@ struct PostShelfSectionTests {
         #expect(opened == 0, "a short pull opened View all")
         let card = try #require(row.visibleCells.lazy.compactMap { $0 as? ShelfViewAllCell }.first)
         #expect(!card.debugPull.armed)
-        #expect(card.symbolName == "chevron.right")
+        #expect(!card.debugRing.isArmed)
+        #expect(abs(card.debugRing.debugRingStrokeEnd - (PostShelfSection.endPullThreshold - 10) / PostShelfSection.endPullThreshold) < 0.01,
+                "the ring did not follow the pull")
         #expect(abs(card.debugPull.width - (ShelfViewAllCell.width + PostShelfSection.endPullThreshold - 10)) < 0.5,
                 "the card did not stretch with the pull")
 
         await release(pulledBy: PostShelfSection.endPullThreshold + 10)
         #expect(card.debugPull.armed, "past the threshold the chevron did not arm")
-        #expect(card.symbolName == ShelfViewAllCell.armedSymbol, "the armed card is not the ringed chevron")
-        #expect(card.symbolPointSize > ShelfViewAllCell.restingPointSize, "the ringed chevron is not bigger")
-        #expect(card.debugChevronTint == .secondaryLabel, "the ringed chevron left the chevron's grey")
+        #expect(card.debugRing.isArmed, "past the threshold the ring did not flood")
+        #expect(card.debugRing.debugRingStrokeEnd == 1, "the ring is not full at the threshold")
         #expect(opened == 1, "a release past the threshold did not open View all")
     }
 

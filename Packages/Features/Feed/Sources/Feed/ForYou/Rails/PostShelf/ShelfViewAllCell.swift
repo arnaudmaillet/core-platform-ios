@@ -8,9 +8,10 @@ import UIKit
 ///
 /// The chevron points RIGHT because it pushes a screen, as the title's does.
 /// And the row PULLED past its end opens it too (`setPull`, the owner
-/// 2026-10-17): the card stretches with the finger, its chevron turns into
-/// `chevron.right.circle` past the threshold (SF Symbols' replace), and a
-/// release there pushes "View all".
+/// 2026-10-17): the card stretches with the finger, a ring draws itself
+/// around the chevron as the pull grows and floods past the threshold — the
+/// Messages pull-to-search's meter (`PullRingGlyphView`, the owner
+/// 2026-10-18) — and a release there pushes "View all".
 /// As tall as the row and rounded like its cards, so it reads as the row's
 /// last card rather than as a control floating after it.
 final class ShelfViewAllCell: UICollectionViewCell {
@@ -21,7 +22,16 @@ final class ShelfViewAllCell: UICollectionViewCell {
     static let width: CGFloat = 40
 
     private let ground = UIView()
-    private let chevron = UIImageView()
+    /// The chevron, and the ring the pull draws around it.
+    private let chevron = PullRingGlyphView(
+        image: UIImage(
+            systemName: "chevron.right",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+        ),
+        diameter: ShelfViewAllCell.ringDiameter
+    )
+    /// The ring's diameter: inside the resting card's 40 pt.
+    static let ringDiameter: CGFloat = 34
     /// How far the row is pulled past its end, the card stretching with it.
     private var pull: CGFloat = 0
     private var isArmed = false
@@ -38,64 +48,33 @@ final class ShelfViewAllCell: UICollectionViewCell {
         ground.layer.cornerCurve = .continuous
         contentView.addSubview(ground)
 
-        chevron.tintColor = .secondaryLabel
-        chevron.contentMode = .center
         ground.addSubview(chevron)
-        applySymbol()
         isAccessibilityElement = true
         accessibilityLabel = Self.title
         accessibilityTraits = .button
     }
 
     /// The row pulled `distance` past its end: the card stretches to cover it
-    /// with the finger; `armed` — past the threshold, where a release opens
-    /// "View all" — turns the chevron into `chevron.right.circle` through
-    /// SF Symbols' replace transition (the owner, 2026-10-17).
+    /// with the finger, and the ring around the chevron fills with the pull —
+    /// full at the threshold. `armed` — past it, where a release opens "View
+    /// all" — floods the ring (`PullRingGlyphView`).
     func setPull(_ distance: CGFloat, armed: Bool) {
         let distance = max(0, distance)
         guard distance != pull || armed != isArmed else { return }
         pull = distance
+        chevron.setProgress(distance / PostShelfSection.endPullThreshold)
         if armed != isArmed {
             isArmed = armed
-            applySymbol(animated: window != nil)
+            chevron.setArmed(armed, animated: window != nil)
         }
         setNeedsLayout()
         layoutIfNeeded()
     }
 
-    /// The armed symbol: the chevron, ringed.
-    static let armedSymbol = "chevron.right.circle"
-    /// The chevron's size at rest, and the ringed one's: bigger and bolder,
-    /// in the same grey (#1353, the owner 2026-10-17).
-    static let restingPointSize: CGFloat = 17
-    static let armedPointSize: CGFloat = 28
-
-    /// The symbol drawn now, and at what size.
-    private(set) var symbolName = "chevron.right"
-    private(set) var symbolPointSize = ShelfViewAllCell.restingPointSize
-
-    private func applySymbol(animated: Bool = false) {
-        symbolName = isArmed ? Self.armedSymbol : "chevron.right"
-        symbolPointSize = isArmed ? Self.armedPointSize : Self.restingPointSize
-        guard let image = UIImage(
-            systemName: symbolName,
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: symbolPointSize, weight: .semibold)
-        ) else { return }
-        // The symbol's own replace, as the app's other glyph swaps do
-        // (`PersonPill`, `PointsHeartView`); a plain swap off screen.
-        if animated {
-            chevron.setSymbolImage(image, contentTransition: .replace)
-        } else {
-            chevron.image = image
-        }
-        // One grey in both states: the ring is the change, not the ink.
-        chevron.tintColor = .secondaryLabel
-    }
-
     override func layoutSubviews() {
         super.layoutSubviews()
         ground.frame = CGRect(x: 0, y: 0, width: bounds.width + pull, height: bounds.height)
-        chevron.sizeToFit()
+        chevron.bounds = CGRect(x: 0, y: 0, width: Self.ringDiameter, height: Self.ringDiameter)
         chevron.center = CGPoint(x: ground.bounds.midX, y: ground.bounds.midY)
     }
 
@@ -107,7 +86,7 @@ final class ShelfViewAllCell: UICollectionViewCell {
     #if DEBUG
     /// What a test reads.
     var debugPull: (width: CGFloat, armed: Bool) { (ground.frame.width, isArmed) }
-    var debugChevronTint: UIColor? { chevron.tintColor }
+    var debugRing: PullRingGlyphView { chevron }
     #endif
 
     @available(*, unavailable)
