@@ -460,13 +460,39 @@ public final class WalletStore: @unchecked Sendable {
     public init(
         defaults: UserDefaults = .standard,
         now: @escaping @Sendable () -> Date = { Date() },
-        scope: StorageScope = .shared
+        scope: StorageScope = .shared,
+        /// The QA launch arguments (DEBUG only) — the process's own; a test
+        /// hands its own.
+        launchArguments: [String] = ProcessInfo.processInfo.arguments
     ) {
         self.defaults = defaults
         self.now = now
         self.scope = scope
+        self.launchArguments = launchArguments
+        applyLaunchArguments()
+        seedIfNeeded()
+        // A member arriving gets their own wallet, seeded the first time.
+        scopeObserver = NotificationCenter.default.addObserver(
+            forName: StorageScope.didChangeNotification, object: scope, queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            applyLaunchArguments()
+            seedIfNeeded()
+            if let targets = lock.withLock({ demoStakeTargets }) { seedDemoStakesIfNeeded(targetIDs: targets) }
+            postDidChange()
+        }
+    }
+
+    /// The QA launch arguments (DEBUG), applied to the wallet of the scope's
+    /// owner — at init, and again when the scope moves to another owner
+    /// (#1388): the app's one store starts unscoped, and a signed-in member
+    /// reads keys of their own that an init-time pass never wrote. Once per
+    /// owner per launch, so a later scope change resets no one twice.
+    private func applyLaunchArguments() {
         #if DEBUG
-        let arguments = ProcessInfo.processInfo.arguments
+        let owner = k("wallet.launchArguments")
+        guard lock.withLock({ launchArgumentsApplied.insert(owner).inserted }) else { return }
+        let arguments = launchArguments
         // `-wallet-reset`: deterministic QA — a scripted launch always starts
         // from the seeded first-run wallet.
         if arguments.contains("-wallet-reset") {
@@ -514,17 +540,14 @@ public final class WalletStore: @unchecked Sendable {
             defaults.set(max(0, shots), forKey: k(Key.stakeShots))
         }
         #endif
-        seedIfNeeded()
-        // A member arriving gets their own wallet, seeded the first time.
-        scopeObserver = NotificationCenter.default.addObserver(
-            forName: StorageScope.didChangeNotification, object: scope, queue: nil
-        ) { [weak self] _ in
-            guard let self else { return }
-            seedIfNeeded()
-            if let targets = lock.withLock({ demoStakeTargets }) { seedDemoStakesIfNeeded(targetIDs: targets) }
-            postDidChange()
-        }
     }
+
+    private let launchArguments: [String]
+
+    #if DEBUG
+    /// The owners `applyLaunchArguments` has served this launch.
+    private var launchArgumentsApplied: Set<String> = []
+    #endif
 
     /// The first-run wallet, once per account (and once for an unscoped
     /// store): the starting balance and gems, and dates for undated boosts.
