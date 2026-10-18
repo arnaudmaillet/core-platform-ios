@@ -29,10 +29,12 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     /// drawn wherever that projection isn't live. Views are not shown — the
     /// header counts likes since 2026-09-30, as every gallery tile does.
     public let likesText: String?
-    /// The immersive banner's media. profile.v1 has no dedicated cover asset
-    /// yet, so this mirrors the avatar image until the contract grows one —
-    /// swap the source here, and the header needs no change.
+    /// The immersive banner's still: the profile's own banner (`banner_url`
+    /// or its media's poster), else its avatar — what every profile without
+    /// one has always shown.
     public let bannerImageURL: URL?
+    /// The banner's muted loop over that still (#944), nil for a still banner.
+    public let bannerVideoURL: URL?
     /// Compact link under the bio, Instagram-style: scheme and "www." stripped
     /// ("ada.dev/notes"). Nil when the profile has no website.
     public let websiteText: String?
@@ -51,7 +53,8 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         followerText = Self.format(profile.followerCount)
         followingText = Self.format(profile.followingCount)
         likesText = Self.format(profile.reactionCount)
-        bannerImageURL = profile.avatarURL
+        bannerImageURL = profile.bannerURL ?? profile.avatarURL
+        bannerVideoURL = profile.bannerVideoURL
         websiteText = Self.websiteDisplay(profile.websiteURL)
         websiteURL = profile.websiteURL
     }

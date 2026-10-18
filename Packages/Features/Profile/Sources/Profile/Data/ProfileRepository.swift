@@ -148,6 +148,12 @@ public struct UserProfile: Equatable, Sendable {
     public let displayName: String
     public let bio: String
     public let avatarURL: URL?
+    /// The banner's still (`banner_url`, or the banner media's poster), nil
+    /// for a profile that set none — whose banner is its avatar.
+    public let bannerURL: URL?
+    /// The banner's muted loop (#944): the banner media's `MANIFEST`
+    /// rendition, nil for a still banner. A gem-shop item, owned server-side.
+    public let bannerVideoURL: URL?
     public let websiteURL: URL?
     /// The profile's ordered custom links (`custom_links`). Editable through the
     /// same `UpdateProfile` RPC as bio/name/website.
@@ -175,6 +181,8 @@ public struct UserProfile: Equatable, Sendable {
         displayName: String,
         bio: String,
         avatarURL: URL?,
+        bannerURL: URL? = nil,
+        bannerVideoURL: URL? = nil,
         websiteURL: URL?,
         customLinks: [ProfileLink] = [],
         isVerified: Bool,
@@ -192,6 +200,8 @@ public struct UserProfile: Equatable, Sendable {
         self.displayName = displayName
         self.bio = bio
         self.avatarURL = avatarURL
+        self.bannerURL = bannerURL
+        self.bannerVideoURL = bannerVideoURL
         self.websiteURL = websiteURL
         self.customLinks = customLinks
         self.isVerified = isVerified
@@ -844,6 +854,12 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
         return (.exact(view.targetFollowersCount), .exact(view.targetFollowingCount))
     }
 
+    /// The banner's still: `banner_url`, else the banner media's poster.
+    static func bannerStill(of view: Profile_V1_ProfileView) -> URL? {
+        if !view.bannerURL.isEmpty, let url = URL(string: view.bannerURL) { return url }
+        return view.banner.renditions.first { $0.kind == .mediaRenditionKindPoster }.flatMap { URL(string: $0.url) }
+    }
+
     private static func makeProfile(
         from view: Profile_V1_ProfileView,
         counts: SocialCounts
@@ -854,6 +870,9 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
             displayName: view.displayName,
             bio: view.bio,
             avatarURL: URL(string: view.avatarURL),
+            bannerURL: Self.bannerStill(of: view),
+            bannerVideoURL: view.banner.renditions.first { $0.kind == .mediaRenditionKindManifest }
+                .flatMap { URL(string: $0.url) },
             websiteURL: URL(string: view.websiteURL),
             customLinks: view.customLinks.map { ProfileLink(label: $0.label, url: $0.url) },
             isVerified: view.verified,
