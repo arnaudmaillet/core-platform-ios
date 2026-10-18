@@ -791,6 +791,22 @@ public final class HeroBannerPictureView: UIView {
     /// stands on (`groundPixels`); the ramp draws it.
     public var pageTone: UIColor = Surface.page
 
+    /// A light black over the whole picture, its stretch included — the
+    /// place page's (#1372, the owner 2026-10-18: "slightly darkened"), zero
+    /// for none. Uniform black commutes with a blur, so a plain layer over
+    /// the baked picture IS picture → dim → blur; a plain layer so
+    /// `layer.render(in:)` (`HeroInk.debugContrast`) sees it, and the type's
+    /// ground (`groundPixels`) is read through it.
+    public var dim: CGFloat = 0 {
+        didSet {
+            guard dim != oldValue else { return }
+            setNeedsLayout()
+            if baked != nil { onLevelsChanged?() }
+        }
+    }
+
+    private let dimLayer = CALayer()
+
     /// The ground behind `rect` (this view's coordinates at rest — a stretch
     /// changes nothing under the type) — the blurred
     /// picture with the page's tone over it as the ramp lays it, with the
@@ -854,7 +870,7 @@ public final class HeroBannerPictureView: UIView {
                 let index = (row * width + column) * 4
                 let picture = SIMD3(
                     Float(bytes[index]) / 255, Float(bytes[index + 1]) / 255, Float(bytes[index + 2]) / 255
-                )
+                ) * (1 - Float(dim))
                 pixels.append(picture + (page - picture) * alpha)
             }
         }
@@ -874,6 +890,10 @@ public final class HeroBannerPictureView: UIView {
         blur.isHidden = true
         blur.layer.contentsGravity = .resize
         stage.addSubview(blur)
+        // Over the stage, the stretch included: the dim (`dim`).
+        dimLayer.backgroundColor = UIColor.black.cgColor
+        dimLayer.isHidden = true
+        layer.addSublayer(dimLayer)
         // The page's tone is part of the ground (`groundPixels`): a flip of
         // the appearance is a new ground, to be read again like a new bake.
         registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: HeroBannerPictureView, _) in
@@ -904,6 +924,9 @@ public final class HeroBannerPictureView: UIView {
         place(sharp, at: rest)
         bakeIfNeeded(for: rest.size)
         composeBlur()
+        dimLayer.frame = bounds
+        dimLayer.opacity = Float(dim)
+        dimLayer.isHidden = dim <= 0
         #if DEBUG
         layoutMaterialComparison()
         traceLayout()
@@ -1214,6 +1237,8 @@ public final class HeroBannerPictureView: UIView {
     /// Where the sharp picture covers, in this view's current space — the
     /// stretch's zoom included.
     public var debugPictureCover: CGRect { sharp.convert(sharp.bounds, to: self) }
+    /// Where the dim lies, zero when there is none (`dim`).
+    public var debugDimFrame: CGRect { dimLayer.isHidden ? .zero : dimLayer.frame }
     /// The levels showing, and where each one fades in, in this view's
     /// space at rest — clamped to the view, as a mask's stops were.
     public var debugVisibleLevels: [(start: CGFloat, full: CGFloat)] {
