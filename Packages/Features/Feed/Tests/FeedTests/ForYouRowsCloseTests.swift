@@ -67,7 +67,7 @@ struct ForYouRowsCloseTests {
         ) is RowCardCloseLanding)
     }
 
-    /// The window opens onto the post itself — no avatar drawn over it — and
+    /// The window opens from the face — the page riding in over it — and
     /// closes onto the avatar's own picture, the sharper one once it has
     /// loaded (#1356): never a render of the cell, whose initials fill showed
     /// as a light rim.
@@ -84,7 +84,10 @@ struct ForYouRowsCloseTests {
             largerFace: { deliver = $0 }
         ))
         let reveal = try #require(origin.textReveal)
-        #expect(reveal.makePresentStandIn() == nil, "the avatar was drawn over the opening post")
+        // The face opens the window as well, under the page: the page rides
+        // whole and fades in over it, rather than keyholing through the face.
+        let opening = try #require(reveal.makePresentStandIn() as? UIImageView, "the window opened with no face")
+        #expect(opening.layer.cornerRadius == fixture.lead.friends.storyFaceCornerRadius)
 
         let hand = try #require(deliver)
         hand(sharp)
