@@ -162,7 +162,16 @@ final class ForYouStoryCell: UICollectionViewCell {
         isDiscConcealed = false
     }
 
-    func configure(with story: ForYouViewModel.FriendStory, imagePipeline: ImagePipeline) {
+    /// The face's animation (#1358): For You's Friends faces play once on
+    /// their first display there (`animationScope`, the row's).
+    private lazy var animation = AnimatedAvatarPlayer.attach(to: picture)
+
+    func configure(
+        with story: ForYouViewModel.FriendStory, imagePipeline: ImagePipeline,
+        animationScope: AnimatedAvatarScope? = nil
+    ) {
+        if let animationScope { animation.trigger = .firstAppearance(animationScope) }
+        animation.setAvatar(story.avatarURL)
         shownAuthor = story.authorID
         nameLabel.text = story.name.split(separator: " ").first.map(String.init) ?? story.name
         nameLabel.font = .scaledFont(forTextStyle: .caption1, weight: story.hasUnseen ? .semibold : .regular)
@@ -205,7 +214,11 @@ final class ForYouStoryCell: UICollectionViewCell {
     /// The avatar's own picture while one is shown — what a flight carries
     /// for this face (#1356): the photograph alone, never a render of the
     /// cell, whose initials fill bled into the clip's edge as a light rim.
-    var shownPicture: UIImage? { picture.isHidden ? nil : picture.image }
+    var shownPicture: UIImage? {
+        guard !picture.isHidden else { return nil }
+        // An animated face rests on its sheet's last frame, over the photo.
+        return animation.still ?? picture.image
+    }
 
     /// The face's rect — the disc without its ring — in `space`, AT REST:
     /// with no transform between the face and `row` counted.

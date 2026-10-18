@@ -115,6 +115,7 @@ public final class AvatarView: UIView {
     public func setPicture(_ url: URL?, pipeline: ImagePipeline?) {
         if let url, url == load.url, load.isLoading || ladder.rung == .content { return }
         if url == nil, load.url == nil, ladder.rung == .placeholder, picture.image == nil { return }
+        animation.setAvatar(url)
         let token = ladder.begin(item: url)
         self.token = token
         picture.image = nil
@@ -148,12 +149,25 @@ public final class AvatarView: UIView {
         setPicture(nil, pipeline: nil)
     }
 
-    /// The picture on show, nil while the initials are.
+    /// An animated avatar's player over the picture (#1358): the sheet's
+    /// last frame at rest, played once by the rule (`AnimatedAvatarPlayer`).
+    /// A still avatar shows nothing of it.
+    public private(set) lazy var animation = AnimatedAvatarPlayer.attach(to: picture)
+
+    /// When this avatar plays: on scrolling into view (the default), or on
+    /// its first display on a screen where it is large and alone.
+    public var animationTrigger: AnimatedAvatarPlayer.Trigger {
+        get { animation.trigger }
+        set { animation.trigger = newValue }
+    }
+
+    /// The picture on show, nil while the initials are — an animated
+    /// avatar's still (its last frame) over the photograph.
     public var shownPicture: UIImage? {
         switch ladder.rung {
-        case .content: picture.image
-        case .preview: standIn.image
-        default: nil
+        case .content: return animation.still ?? picture.image
+        case .preview: return standIn.image
+        default: return nil
         }
     }
 

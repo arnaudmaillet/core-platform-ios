@@ -111,6 +111,10 @@ final class SnapAuthorIdentityView: UIView {
 
     init() {
         super.init(frame: .zero)
+        // The post screen's author: an animated avatar plays once when
+        // paging brings the next author in; the first one opened rests
+        // (#1358).
+        pill.avatar.animationTrigger = .change
         // The bar is transparent over arbitrary media; shadows keep the
         // identity legible without a background (`setOverMedia`).
         pill.setOverMedia(true)

@@ -675,6 +675,9 @@ final class ProfileHeaderView: UIView {
         self.imagePipeline = imagePipeline
         bannerView = ProfileBannerView(imagePipeline: imagePipeline)
         super.init(frame: .zero)
+        // Large and alone on its screen: an animated avatar plays once on the
+        // profile's first display, scroll or not (#1358).
+        avatar.animationTrigger = .firstAppearance(AnimatedAvatarScope())
         configureSubviews()
         // The picture decides the shape, whenever it lands.
         bannerView.onImageResolved = { [weak self] image in
