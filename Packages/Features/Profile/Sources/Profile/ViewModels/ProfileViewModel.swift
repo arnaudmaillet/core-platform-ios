@@ -1814,8 +1814,12 @@ public final class ProfileViewModel {
     nonisolated static let restrictedTitle = "This Account Is Private"
     nonisolated static let restrictedMessage = "Follow this account to see their posts."
 
-    /// What a profile the server no longer shows says (#447).
-    static let unavailable = Phase.notFound(message: "This account isn\u{2019}t available", detail: nil)
+    /// What a profile the server no longer shows says (#447) — and nothing
+    /// about which of hidden, suspended or deleted it is, so nothing about
+    /// the person (#1406).
+    static let unavailable = Phase.notFound(message: unavailableTitle, detail: unavailableDetail)
+    nonisolated static let unavailableTitle = "This account isn\u{2019}t available"
+    nonisolated static let unavailableDetail = "It may have been removed or hidden."
 
     /// What a reference that names no one says.
     static func notFound(_ reference: ProfileReference) -> Phase {

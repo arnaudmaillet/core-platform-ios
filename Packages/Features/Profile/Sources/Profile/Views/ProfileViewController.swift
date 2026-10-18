@@ -1747,7 +1747,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     /// The leading group: the bell, then the day History has scrolled into.
     private var leadingItems: [UIBarButtonItem] {
-        [leadingAccessoryItem, sectionItem].compactMap { $0 }
+        // No day to name over a page for no one (#1406): its gallery is gone.
+        [leadingAccessoryItem, viewModel.namesNoOne ? nil : sectionItem].compactMap { $0 }
     }
 
     /// The day the page in front has scrolled into, as last published.
@@ -2087,6 +2088,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Relationship action for other users; the gear for own profile (where
         // `action` is nil).
         var items: [UIBarButtonItem] = []
+        // A page for no one (#800, #1406) acts on no one: no bell, no
+        // relationship, no balance. A pushed one keeps only its back button;
+        // the viewer's own tab root keeps the gear and the switcher, its only
+        // way to settings and to another profile.
+        let namesNoOne = viewModel.namesNoOne
         if let settingsItem { items.append(settingsItem) }
         // The switcher, on the own profile only — see the note above for why it
         // is not in the leading group.
@@ -2099,8 +2105,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // NOT FOLLOWED (the owner, 2026-10-15): no bell; once the tray has
         // scrolled away the corner is the bar's pink Follow, the pill
         // inboard of it — `[coins][pill][Follow]`, and `[coins]` at rest.
-        let relationship = barRelationshipItems(for: followButtonState)
-        if showsMuteBell {
+        let relationship = namesNoOne ? (pill: nil, follow: nil) : barRelationshipItems(for: followButtonState)
+        if namesNoOne {
+            // Nothing to mute, follow or spend on.
+        } else if showsMuteBell {
             muteBellItem.isEnabled = isMuteBellEnabled
             items.append(muteBellItem)
         } else if let follow = relationship.follow {
@@ -2118,7 +2126,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // inboard — the Explore header's arrangement ([coins] [search]). On a
         // pushed profile, which has neither the gear nor the switcher, the
         // balance is the whole trailing run.
-        if let trailingAccessoryItem {
+        if let trailingAccessoryItem, !namesNoOne {
             if showsMuteBell || relationship.pill != nil || relationship.follow != nil {
                 items.append(muteBellSpacer)
             }
@@ -2129,6 +2137,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // what used to tear the capsule down and rebuild it mid-transition.
         // Nothing changed, so nothing is said.
         guard items != appliedBarItems else { return }
+        // ⚠️ Items leaving a page for no one wait for rest: one removed
+        // mid-push pops unanimated at its end (#756) — whichever call got
+        // here first (a late relationship, the shell re-sending its balance).
+        if namesNoOne, transitionCoordinator != nil {
+            applyNavigationStateAtRest()
+            return
+        }
         appliedBarItems = items
         #if DEBUG
         // Dev convenience: `-profile-navbar-audit` prints every *actual* bar
@@ -2890,6 +2905,12 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             // an error (#800). The header goes too — with no profile its
             // verified badge, counter labels and Message button showed
             // through around the block, a page for no one.
+            //
+            // ⚠️ A PLAIN PAGE (#1406, the owner 2026-10-18): the banner card
+            // goes with the header, in this same pass (`ProfileHeaderView.
+            // isHidden`) — a revisit that opened on the cached profile must
+            // not show it a frame longer — and the bar keeps only the back
+            // button.
             pullIndicator.endRefreshing()
             galleryPager.isHidden = true
             skeletonViewportFill?.isActive = false
@@ -2899,8 +2920,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 symbolName: "person.crop.circle.badge.questionmark", title: message, subtitle: detail
             )
             statusView.isHidden = false
-            // The bell worn since frame 0 has no one to mute.
-            if isShowingMuteBell { applyNavigationStateAtRest() }
+            // The bell worn since frame 0, the shell's balance and a day's
+            // name have no one to act on: the bar recomposes once no
+            // transition runs (an item leaving mid-push pops unanimated). It
+            // says nothing when nothing changed.
+            applyNavigationStateAtRest()
         }
     }
 }
