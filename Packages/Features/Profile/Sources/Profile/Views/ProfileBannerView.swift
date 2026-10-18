@@ -152,7 +152,7 @@ final class ProfileBannerView: UIView {
     static let playbackScope = "profile.banner"
 
     #if DEBUG
-    var debugVideoView: UIView { video }
+    var debugVideoView: VideoRenderView { video }
     #endif
 
     func setImageURL(_ url: URL?) {

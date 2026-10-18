@@ -48,6 +48,11 @@ struct MockVideoBannerTests {
         let loop = try #require(banner.banner.renditions.first { $0.kind == .mediaRenditionKindManifest })
         #expect(loop.url.contains(clip))
         #expect(!banner.bannerURL.isEmpty, "the poster is the still")
+        // A URL the app's image pipeline resolves to the clip's own frame,
+        // never a `file://` it would paint as a flat colour (#1399).
+        #expect(banner.bannerURL.hasPrefix("mock://"), "the still is \(banner.bannerURL)")
+        let still = try #require(banner.banner.renditions.first { $0.kind == .mediaRenditionKindPoster })
+        #expect(still.url == banner.bannerURL)
 
         #expect(await setBanner(client, asset: "") == nil)
         #expect(try await viewer(client).banner.renditions.isEmpty)
