@@ -777,6 +777,7 @@ final class AppContainer {
             },
             countries: countryAccess,
             stakePacks: stakePacks,
+            profileItems: profileItems,
             shopMedia: ShopMedia(images: imagePipeline, videos: videoPlayback),
             welcome: welcomeGiftFace
         ).wrappedInSheet()
@@ -790,7 +791,7 @@ final class AppContainer {
     func makeStakeShopScreen() -> UIViewController? {
         guard let countryAccess, let stakePacks else { return nil }
         return CountryShopViewController.storefront(
-            access: countryAccess, stakePacks: stakePacks, focus: .boosts,
+            access: countryAccess, stakePacks: stakePacks, profileItems: profileItems, focus: .boosts,
             media: ShopMedia(images: imagePipeline, videos: videoPlayback)
         )
     }
@@ -1148,6 +1149,7 @@ final class AppContainer {
         previewCatalog: Self.previewsUnavailable ? Self.unavailableIconCatalog : Self.mapPreviewCatalog,
         countryAccess: countryAccess,
         stakePacks: stakePacks,
+        profileItems: profileItems,
         // A guest has no people: no favourites dock, no Friends / Following.
         isMember: { [unowned self] in self.memberGate.isMember },
         locator: currentCountry,

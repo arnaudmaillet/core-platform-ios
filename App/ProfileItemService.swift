@@ -1,5 +1,6 @@
 import CoreStorage
 import Foundation
+import Maps
 import Profile
 
 /// The gem-shop items a profile wears (#944, #947) — the shell's answer to
@@ -14,7 +15,7 @@ import Profile
 /// Mock mode only until the backend carries ownership
 /// (core-platform-backend#915, under #892).
 @MainActor
-final class ProfileItemService: ProfileItemAccess {
+final class ProfileItemService: ProfileItemAccess, ProfileItemSelling {
     private let accountID: String
     private let wallet: WalletStore
     private let store: ProfileItemStore
@@ -31,6 +32,9 @@ final class ProfileItemService: ProfileItemAccess {
     }
 
     var gems: Int { wallet.snapshot().gems }
+
+    /// The Shop's Profile shelf: every item there is.
+    var items: [ProfileItem] { ProfileItem.allCases }
 
     func owns(_ item: ProfileItem) -> Bool {
         isMember() && store.owns(item, accountID: accountID)

@@ -15,6 +15,16 @@ public enum ProfileItem: String, CaseIterable, Sendable {
     }
 }
 
+/// How buying a profile item went — the one answer the Shop and Edit
+/// Profile both read.
+public enum ProfileItemPurchase: Equatable, Sendable {
+    case bought(remainingGems: Int)
+    case alreadyOwned
+    case insufficientGems(needed: Int, have: Int)
+    /// Not for this account: a guest, or a teen's purchases (#401).
+    case unavailable
+}
+
 /// The profile items an ACCOUNT owns — not a profile's, as with countries
 /// (`CountryUnlockStore`).
 ///

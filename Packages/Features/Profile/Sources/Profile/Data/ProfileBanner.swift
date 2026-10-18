@@ -13,14 +13,6 @@ public protocol ProfileItemAccess: AnyObject {
     func buy(_ item: ProfileItem) -> ProfileItemPurchase
 }
 
-public enum ProfileItemPurchase: Equatable, Sendable {
-    case bought(remainingGems: Int)
-    case alreadyOwned
-    case insufficientGems(needed: Int, have: Int)
-    /// Not for this account: a guest, or a teen's purchases (#401).
-    case unavailable
-}
-
 /// Edit Profile → Video banner (#944): the viewer's banner from the loop of
 /// one of their own video posts, or none.
 public protocol ProfileBannerManaging: Sendable {
