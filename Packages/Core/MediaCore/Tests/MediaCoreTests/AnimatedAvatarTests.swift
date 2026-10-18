@@ -31,6 +31,20 @@ struct AnimatedAvatarTests {
     private static let face = URL(string: "https://example.com/animated.jpg")!
     private static let still = URL(string: "https://example.com/still.jpg")!
 
+    /// Waits for `condition` on a LOOK budget, never a wall-clock deadline:
+    /// a starved CI runner took over 100 s for this suite, and a deadline
+    /// can run out after a few looks while the main queue waits (the
+    /// repo's rule for these waits). Returns at once when already true;
+    /// false is the timeout, asserted at the wait site.
+    @discardableResult
+    private func eventually(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<6_000 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
     private func makeRegistry() -> AnimatedAvatars {
         let registry = AnimatedAvatars(registry: nil)
         registry.resolver = OneFace(animated: Self.face)
@@ -63,10 +77,12 @@ struct AnimatedAvatarTests {
         let host = UIView(frame: CGRect(x: 20, y: 100, width: side, height: side))
         let player = AnimatedAvatarPlayer.attach(to: host)
         player.registry = registry
+        // Its own count of plays: other tests' players hold no slot of it.
+        player.concurrency = AnimatedAvatarPlayer.Concurrency()
         player.trigger = trigger
         player.setAvatar(url)
-        for _ in 0..<50 where player.debugSheet == nil && url == Self.face {
-            try? await Task.sleep(for: .milliseconds(10))
+        if url == Self.face {
+            #expect(await eventually { player.debugSheet != nil }, "the sheet never arrived")
         }
         window.addSubview(host)
         return player
@@ -133,10 +149,7 @@ struct AnimatedAvatarTests {
         let player = await hosted(Self.still, trigger: .change, registry: registry, in: window)
         #expect(!player.isPlaying)
         player.setAvatar(Self.face)
-        for _ in 0..<50 where !player.isPlaying {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(player.isPlaying, "the next author did not play")
+        #expect(await eventually { player.isPlaying }, "the next author did not play")
 
         let first = await hosted(Self.face, trigger: .change, registry: registry, in: window)
         #expect(!first.isPlaying, "a pill's first avatar played")
@@ -150,12 +163,10 @@ struct AnimatedAvatarTests {
         let host = UIView(frame: CGRect(x: 20, y: 100, width: 88, height: 88))
         let player = AnimatedAvatarPlayer.attach(to: host)
         player.registry = makeRegistry()
+        player.concurrency = AnimatedAvatarPlayer.Concurrency()
         player.trigger = .firstAppearance(AnimatedAvatarScope())
         window.addSubview(host)
         player.setAvatar(Self.face)
-        for _ in 0..<50 where !player.isPlaying {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        #expect(player.isPlaying, "an avatar that arrived on a screen already up never played")
+        #expect(await eventually { player.isPlaying }, "an avatar that arrived on a screen already up never played")
     }
 }

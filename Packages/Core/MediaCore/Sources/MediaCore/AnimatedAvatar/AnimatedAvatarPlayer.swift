@@ -48,9 +48,20 @@ public final class AnimatedAvatarPlayer: UIView {
     /// Playing at once, app-wide — measured headroom (#1358's bench).
     public static let maxConcurrent = 4
 
+    /// How many play at once: the app's one, or a test's own — shared, it
+    /// let a parallel test's players hold every slot, and a play refused
+    /// for room is not asked again.
+    @MainActor
+    final class Concurrency {
+        fileprivate var playing = 0
+        static let app = Concurrency()
+    }
+
     public var trigger: Trigger = .scrollAppearance
     /// Where sheets come from — the app's, or a test's own.
     var registry = AnimatedAvatars.shared
+    /// Who counts the plays — the app's, or a test's own.
+    var concurrency = Concurrency.app
 
     /// The player over `host` (an avatar's picture view), added the first
     /// time.
@@ -220,9 +231,9 @@ public final class AnimatedAvatarPlayer: UIView {
         guard let sheet, !isPlaying,
               min(bounds.width, bounds.height) >= Self.minimumDiameter,
               !MotionPreference.stillsDecoration,
-              Self.playing < Self.maxConcurrent
+              concurrency.playing < Self.maxConcurrent
         else { return }
-        Self.playing += 1
+        concurrency.playing += 1
         isPlaying = true
         // The sheets play on a shared clock: shift so frame 0 is the one now.
         sheetView.setArt(.sheet(sheet), phase: 0)
@@ -242,12 +253,10 @@ public final class AnimatedAvatarPlayer: UIView {
         playToken += 1
         guard isPlaying else { return }
         isPlaying = false
-        Self.playing = max(0, Self.playing - 1)
+        concurrency.playing = max(0, concurrency.playing - 1)
         sheetView.isHidden = true
         sheetView.setArt(nil)
     }
-
-    private static var playing = 0
 
     /// The still on show — the sheet's last frame — or nil for a still avatar.
     public var still: UIImage? { sheet == nil ? nil : stillView.image }
@@ -256,6 +265,6 @@ public final class AnimatedAvatarPlayer: UIView {
     /// What a test reads.
     var debugSheet: AnimatedIconSheet? { sheet }
     var debugStill: UIImage? { stillView.image }
-    static var debugPlayingCount: Int { playing }
+    static var debugPlayingCount: Int { Concurrency.app.playing }
     #endif
 }
