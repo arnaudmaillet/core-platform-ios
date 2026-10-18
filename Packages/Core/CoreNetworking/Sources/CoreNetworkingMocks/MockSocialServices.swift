@@ -1007,23 +1007,33 @@ public final class MockSocialServices: @unchecked Sendable {
     public static let clipAssetPrefix = "mock-clip-asset:"
 
     static func applyVideoBanner(clipID id: String, to view: inout Profile_V1_ProfileView) {
-        guard let clip = MockClipCatalog.shared.clip(id: id),
-              let poster = MockClipCatalog.shared.posterFileURL(clipID: id) else { return }
+        guard let clip = MockClipCatalog.shared.clip(id: id) else { return }
+        let loop = "mock://video/\(clip.id)?w=\(clip.width)&h=\(clip.height)"
+        // ⚠️ THE STILL IS THE CLIP'S OWN FRAME, served the way a video post's
+        // poster is (#1399): its baked sheet's frame, else its first frame.
+        // It was the bundled poster's `file://` URL, which the image pipeline
+        // never fetches — anything but http(s) goes to the placeholder
+        // fetcher, which paints a flat colour: the empty card under the loop.
+        let poster = if let baked = MockMediaFixtures.bakedClip(for: loop) {
+            "\(MockMediaFixtures.previewPosterScheme)\(baked)"
+        } else {
+            MockMediaFixtures.frameZeroURL(for: loop)
+        }
         var manifest = Media_V1_DeliveredRendition()
         manifest.kind = .mediaRenditionKindManifest
-        manifest.url = "mock://video/\(clip.id)?w=\(clip.width)&h=\(clip.height)"
+        manifest.url = loop
         manifest.width = UInt32(clip.width)
         manifest.height = UInt32(clip.height)
         var still = Media_V1_DeliveredRendition()
         still.kind = .mediaRenditionKindPoster
-        still.url = poster.absoluteString
+        still.url = poster
         still.width = UInt32(clip.width)
         still.height = UInt32(clip.height)
         var media = Media_V1_DeliveredMedia()
         media.state = .mediaAssetStateReady
         media.renditions = [manifest, still]
         view.banner = media
-        view.bannerURL = poster.absoluteString
+        view.bannerURL = poster
     }
 
     private func getProfileByID(_ request: Profile_V1_GetProfileByIdRequest) -> Result<Profile_V1_ProfileView, ConnectError> {

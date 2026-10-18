@@ -564,6 +564,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         isShownOnScreen = true
+        isLeavingScreen = false
         Task { [weak self] in await self?.viewModel.refreshShareToken() }
         // ⚠️ **AS EARLY AS THE TRANSITION ALLOWS, AND `viewDidAppear` IS NOT
         // EARLY.** Measured on a tab switch, headless: `viewWillAppear` at
@@ -675,7 +676,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Stops as this screen is covered — including by the post it just
         // opened, whose own player is what should be heard.
         galleryPager.setAutoplayActive(false)
-        headerView.setBannerVideoPlaying(false)
+        // ⚠️ NOT THE BANNER (#1399): it is muted, and stopping it here took
+        // the loop off the card for the whole dismissal — the profile slid
+        // away on an empty banner. It plays on while the screen leaves, and
+        // stops once it has gone (`viewDidDisappear`).
+        isLeavingScreen = true
     }
 
     /// The post has finished covering this screen, so the tapped tile can be
@@ -685,6 +690,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // Not `viewWillDisappear`: that fires as the transition begins, while
         // the grid is still visible behind an expanding hero card.
         galleryPager.applyPendingReveal()
+        isLeavingScreen = false
+        updateBannerVideo()
         // What the cards staked while the screen was up is final now.
         staking?.endSession()
     }
@@ -2714,15 +2721,29 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         }
     }
 
-    /// The video banner (#944) plays while this screen is on show, the
-    /// banner on screen and decorative motion allowed — the poster under
-    /// Reduce Motion, Power Saving and idle calm (#580), and as soon as the
-    /// banner has scrolled away.
+    /// Between `viewWillDisappear` and `viewDidDisappear`: the screen is
+    /// leaving and the banner's loop plays on through it (#1399). A
+    /// cancelled interactive pop never reaches `viewDidDisappear`;
+    /// `viewWillAppear` clears it.
+    private var isLeavingScreen = false
+
     private func updateBannerVideo() {
-        let plays = isShownOnScreen && view.window != nil && headerView.isBannerOnScreen
-            && !MotionPreference.stillsDecoration
-        headerView.setBannerVideoPlaying(plays)
+        headerView.setBannerVideoPlaying(bannerVideoShouldPlay)
     }
+
+    /// The video banner (#944) plays while this screen is on show or
+    /// leaving, the banner on screen and decorative motion allowed — the
+    /// poster under Reduce Motion, Power Saving and idle calm (#580), and as
+    /// soon as the banner has scrolled away.
+    private var bannerVideoShouldPlay: Bool {
+        (isShownOnScreen || isLeavingScreen) && view.window != nil && headerView.isBannerOnScreen
+            && !MotionPreference.stillsDecoration
+    }
+
+    #if DEBUG
+    /// Whether the banner's loop is wanted now (#1399) — what a test reads.
+    var debugBannerVideoShouldPlay: Bool { bannerVideoShouldPlay }
+    #endif
 
     @objc private func decorativeMotionDidChange() {
         updateBannerVideo()

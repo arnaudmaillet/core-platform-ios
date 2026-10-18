@@ -588,6 +588,8 @@ final class ProfileHeaderView: UIView {
     private(set) var debugInkReadCount = 0
     var debugBlurComposeCount: Int { bannerView.debugBlurComposeCount }
     var debugBlurBakeCount: Int { bannerView.debugBlurBakeCount }
+    /// The banner's loop surface, to ask the pool about it (#1399).
+    var debugBannerVideoView: VideoRenderView { bannerView.debugVideoView }
     /// Where the banner's sharp picture and its ramp are drawn, in the
     /// header's space.
     var debugBannerPictureCover: CGRect { bannerView.convert(bannerView.debugPictureCover, to: self) }
