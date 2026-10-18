@@ -13,7 +13,10 @@ struct LoadingLadderTests {
         private var pending: [(at: TimeInterval, work: @MainActor () -> Void)] = []
 
         var clock: LoadingLadder.Clock {
-            LoadingLadder.Clock(now: { [unowned self] in now }, after: { [unowned self] delay, work in
+            // Weak: a ladder can outlive the clock's owner; an unowned read
+            // past it would trap the whole test process.
+            LoadingLadder.Clock(now: { [weak self] in self?.now ?? 0 }, after: { [weak self] delay, work in
+                guard let self else { return }
                 pending.append((now + delay, work))
             })
         }
