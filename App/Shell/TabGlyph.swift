@@ -37,6 +37,17 @@ extension TabGlyph {
         return Self.template(glyph, inBoxOf: box)
     }
 
+    /// What VoiceOver hears while the tab has something unread (#1196): the
+    /// bar draws no count since #1191, and the badge is an image — without
+    /// this an unread tab sounded the same as a read one. Nil: never unread.
+    var unreadAccessibilityValue: String? {
+        switch self {
+        case .explore: nil
+        case .forYou: "New posts"
+        case .messages: "New messages"
+        }
+    }
+
     /// `glyph` drawn into `box`'s size, its leading edge and baseline on the
     /// box's — the bottom-left corner — as a template.
     @MainActor
