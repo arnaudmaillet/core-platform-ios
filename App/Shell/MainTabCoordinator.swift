@@ -484,7 +484,8 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
     /// the FILL as its selected image — the bar's own lens reveals the fill
     /// wherever it passes, as WhatsApp's does, and draws the selection's
     /// transition itself. Each with its badge variant when the tab has
-    /// something unread (the bar draws no count). Run on an unread or
+    /// something unread (the bar draws no count), and the unread said to
+    /// VoiceOver as the tab's value (#1196). Run on an unread or
     /// appearance change only, never on a selection: the bar owns that.
     ///
     /// ⚠️ `selectedImage` IS SET BY NAME. `UITab.selectedImage` (iOS 26.1)
@@ -496,6 +497,8 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
             guard let glyphTab = coordinator as? any GlyphTab else { continue }
             let tab = glyphTab.tab
             tab.image = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread)
+            // The badge said aloud (#1196): an image tells VoiceOver nothing.
+            tab.accessibilityValue = glyphTab.hasUnread ? glyphTab.glyph.unreadAccessibilityValue : nil
             if tab.responds(to: NSSelectorFromString("setSelectedImage:")) {
                 tab.setValue(glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread), forKey: "selectedImage")
             }
