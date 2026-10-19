@@ -431,7 +431,9 @@ final class WalletClaimViewController: UIViewController {
             }
             header.configure(title: "Active stakes", detail: detail)
         case .settled:
-            let earned = stakes.reduce(0) { $0 + $1.gems }
+            // The sum of the gem amounts the rows SHOW (#1395): none while
+            // their outcomes are bones (`verdictsPending`).
+            let earned = verdictsPending ? 0 : stakes.reduce(0) { $0 + $1.gems }
             // The server's settlement credits no gems yet (shadow mode,
             // #903): a total of none is not shown as "+0".
             guard earned > 0 else {
@@ -725,8 +727,16 @@ final class WalletClaimViewController: UIViewController {
         guard let stake = stakesByID[id] else { return }
         cell.configure(
             stake: stake, post: entries[PostID(id)], phase: postPhase(for: id),
-            pressable: isPressable(stakeID: id), now: Date(), imagePipeline: imagePipeline, animated: animated
+            pressable: isPressable(stakeID: id), now: Date(), imagePipeline: imagePipeline, animated: animated,
+            verdictPending: verdictsPending
         )
+    }
+
+    /// Whether the settled stakes' outcomes are still the device's guess, the
+    /// server's verdicts on their way (#1395): their rows show a bone, and
+    /// the Settled header no total, until the listing lands.
+    private var verdictsPending: Bool {
+        guestGift == nil && wallet.awaitsServerStakes
     }
 
     /// Whether a tap on `id`'s row does anything: open its post, or try
@@ -818,7 +828,7 @@ final class WalletClaimViewController: UIViewController {
         if pendingClaimKey != nil {
             title = AttributedString("Claiming…")
         } else if snapshot.claimAvailable {
-            title = AttributedString("Claim \(snapshot.claimAmount) points")
+            title = AttributedString("Claim \(snapshot.claimAmount) likes")
         } else if snapshot.claimedToday >= snapshot.dailyClaimCap, let next = snapshot.nextClaimAt {
             title = AttributedString("Daily cap reached — resets in \(Self.countdownString(to: next))")
         } else if let next = snapshot.nextClaimAt {

@@ -36,7 +36,7 @@ final class WalletSheetUITests: XCTestCase {
         list.swipeUp()
         list.swipeUp()
         let compact = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label MATCHES '^[0-9]+ points, [0-9]+ gems$'"))
+            .matching(NSPredicate(format: "label MATCHES '^[0-9]+ (points|likes), [0-9]+ gems$'"))
         XCTAssertEqual(compact.count, 0, "compact counters appeared on scroll")
 
         // Shop → the Shop's own screen (2026-10-13: pushed, not a sheet):

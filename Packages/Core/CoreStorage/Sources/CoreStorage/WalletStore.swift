@@ -719,6 +719,22 @@ public final class WalletStore: @unchecked Sendable {
     /// The member's stakes as the server last listed them (#903), with the
     /// account they belong to. Memory only: the sheet asks again on opening.
     private var _serverStakes: (owner: StorageScope.Owner, stakes: [WalletStake])?
+    /// The account whose last stake listing failed: its rows stay the
+    /// device's, outcomes included, rather than waiting for nothing.
+    private var _serverStakesFailedOwner: StorageScope.Owner?
+
+    /// Whether the settled stakes' outcomes are still to come from the
+    /// server (#1395): a server attached, a member, and no listing read for
+    /// them yet, nor failed. Until then a settled stake's OUTCOME is the
+    /// device's guess. The server's verdict replaces it once listed (shadow
+    /// mode: "Rewarded" where the device said "+1"), so the sheet shows the
+    /// outcome as a bone meanwhile rather than a number that will flip.
+    public var awaitsServerStakes: Bool {
+        lock.withLock {
+            guard _server != nil, case .member = scope.owner else { return false }
+            return _serverStakes?.owner != scope.owner && _serverStakesFailedOwner != scope.owner
+        }
+    }
 
     /// A page of the member's wallet history (#400); throws without a server
     /// or for a guest, who has no wallet to list.
@@ -735,10 +751,21 @@ public final class WalletStore: @unchecked Sendable {
     public func refreshStakesFromServer() async -> Bool {
         guard let server, case .member = scope.owner else { return false }
         let owner = scope.owner
-        guard let listed = try? await server.myStakes() else { return false }
+        guard let listed = try? await server.myStakes() else {
+            // Offline or refused: the device's outcomes stand, and the sheet
+            // draws them rather than bones that never resolve.
+            let failed: Bool = lock.withLock {
+                guard scope.owner == owner, _serverStakes?.owner != owner else { return false }
+                _serverStakesFailedOwner = owner
+                return true
+            }
+            if failed { postDidChange() }
+            return false
+        }
         let stored: Bool = lock.withLock {
             guard scope.owner == owner else { return false }
             _serverStakes = (owner, listed)
+            _serverStakesFailedOwner = nil
             return true
         }
         if stored { postDidChange() }

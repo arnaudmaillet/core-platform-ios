@@ -203,7 +203,7 @@ struct CardStakeTests {
         #expect(state.canShoot == false)
         let shot = try #require(cell.stakeMenu?()?.children.first as? UIAction)
         #expect(shot.attributes.contains(.disabled))
-        #expect(shot.subtitle == "Only 50 points more fit on this post")
+        #expect(shot.subtitle == "Only 50 likes more fit on this post")
     }
 
     /// Without a pack, the card's "×100" row is the Shop's door: enabled

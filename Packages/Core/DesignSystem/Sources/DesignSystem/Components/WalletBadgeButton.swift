@@ -200,8 +200,8 @@ public final class WalletBadgeButton: UIButton {
         }
 
         accessibilityLabel = claimAvailable
-            ? "Wallet, \(balance) points, reward available"
-            : "Wallet, \(balance) points"
+            ? "Wallet, \(balance) likes, reward available"
+            : "Wallet, \(balance) likes"
         setPulsing(claimAvailable)
 
         // The ring: full and still when a claim waits; charging toward the

@@ -1086,7 +1086,7 @@ final class NewPostViewController: UIViewController {
         case .aiDisclosure:
             ("Disclose as AI-generated", "Tell viewers this post was made with AI.", settings.disclosesAI)
         case .points:
-            ("Show points", "Anyone can see how many points this post has.", settings.showsPoints)
+            ("Show likes", "Anyone can see how many likes this post has.", settings.showsPoints)
         case .reposts:
             ("Show reposts", "Anyone can see how often it has been reposted.", settings.showsReposts)
         case .bookmarks:

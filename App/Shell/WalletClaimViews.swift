@@ -178,7 +178,7 @@ final class WalletBalanceTile: UIView {
 final class WalletSummaryView: UIView {
     let pointsTile = WalletBalanceTile(
         icon: { PointsSymbol.coinImage(traits: $0) },
-        name: "Points", note: "To stake on posts"
+        name: "Likes", note: "To stake on posts"
     )
     let gemsTile = WalletBalanceTile(
         icon: { _ in GemSymbol.glyphImage(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)) },
@@ -378,9 +378,14 @@ final class WalletSummaryCell: UICollectionViewCell {
 
 /// One stake: the post it was placed on, and where it stands.
 ///
-/// ACTIVE — the points committed and how long until it settles.
+/// The POST leads (#1395): the viewer staked on a post, not on a person, so
+/// the title is its opening words and the author is the line under them.
+///
+/// ACTIVE — the likes committed and how long until it settles.
 /// SETTLED — what it earned in gems, or "No reward" (a normal outcome: the
-/// charter pays demonstrated value, not attention), and how long ago.
+/// charter pays demonstrated value, not attention), and how long ago. Gem
+/// violet only beside a gem amount: the server's "Rewarded" (shadow mode, no
+/// gems credited) is in the secondary ink.
 ///
 /// A card, and a pressable one: it opens the post in the feed, flying from
 /// its thumbnail (media) or revealing from the card (text) — see
@@ -398,6 +403,8 @@ final class WalletStakeCell: UICollectionViewCell {
     private let subtitleLabel = UILabel()
     private let resultLabel = UILabel()
     private let detailLabel = UILabel()
+    /// Over the outcome while the server's verdict is on its way (#1395).
+    private let resultBone = SkeletonBoneView()
     /// The thumbnail and the two lines: what the bones stand in for.
     private let postContent = UIStackView()
     private let bones = UIView()
@@ -477,6 +484,15 @@ final class WalletStakeCell: UICollectionViewCell {
             row.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.sm),
         ])
         buildBones()
+        resultBone.translatesAutoresizingMaskIntoConstraints = false
+        resultBone.isHidden = true
+        contentView.addSubview(resultBone)
+        NSLayoutConstraint.activate([
+            resultBone.trailingAnchor.constraint(equalTo: resultLabel.trailingAnchor),
+            resultBone.centerYAnchor.constraint(equalTo: resultLabel.centerYAnchor),
+            resultBone.widthAnchor.constraint(equalTo: resultLabel.widthAnchor),
+            resultBone.heightAnchor.constraint(equalTo: resultLabel.heightAnchor, multiplier: 0.6),
+        ])
         isAccessibilityElement = true
     }
 
@@ -542,19 +558,19 @@ final class WalletStakeCell: UICollectionViewCell {
     /// apply, which swallows the animation anyway. `pressable` is whether a
     /// tap does anything (opens the post, or retries a failed one): the card
     /// gives under the finger only then.
+    /// `verdictPending`: the server's verdict on a settled stake is still to
+    /// come (`WalletStore.awaitsServerStakes`), so its outcome is a bone.
     func configure(
         stake: WalletStake, post: GalleryPost?, phase: WalletStakePostLoads.State,
-        pressable: Bool, now: Date, imagePipeline: ImagePipeline?, animated: Bool
+        pressable: Bool, now: Date, imagePipeline: ImagePipeline?, animated: Bool,
+        verdictPending: Bool = false
     ) {
         for recognizer in pressRecognizers { recognizer.isEnabled = pressable }
-        // The post: who wrote it, and its opening words (a photograph with no
-        // caption says what it is instead).
+        // The post: its opening words (a photograph with no caption says what
+        // it is instead), then who wrote it.
         if let post {
-            titleLabel.text = post.authorName ?? "Post"
-            let caption = post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
-            subtitleLabel.text = caption.isEmpty
-                ? (post.kind == .text ? "Post" : "Photo or video")
-                : caption.replacingOccurrences(of: "\n", with: " ")
+            titleLabel.text = Self.title(of: post)
+            subtitleLabel.text = post.authorName ?? " "
         } else {
             titleLabel.text = "Post"
             // Under the bones while loading: a line of text holds the row's
@@ -562,11 +578,12 @@ final class WalletStakeCell: UICollectionViewCell {
             subtitleLabel.text = phase == .failed ? "Couldn't load this post" : " "
         }
         applyThumbnail(post: post, failed: phase == .failed, imagePipeline: imagePipeline)
-        applyStatus(stake: stake, now: now)
+        applyStatus(stake: stake, now: now, verdictPending: verdictPending)
         applyPhase(phase, animated: animated)
         accessibilityLabel = phase == .loading
             ? "Loading post"
-            : [titleLabel.text, subtitleLabel.text].compactMap { $0 }.joined(separator: ", ")
+            : [titleLabel.text, subtitleLabel.text].compactMap { $0 }
+                .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.joined(separator: ", ")
     }
 
     /// Bones while the post is out; the post once it is in — cross-faded
@@ -590,43 +607,85 @@ final class WalletStakeCell: UICollectionViewCell {
         }
     }
 
+    /// The row's title: the post's opening words, on one line; a post with
+    /// no caption says what it is.
+    static func title(of post: GalleryPost) -> String {
+        let caption = post.caption.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !caption.isEmpty else { return post.kind == .text ? "Post" : "Photo or video" }
+        return caption.replacingOccurrences(of: "\n", with: " ")
+    }
+
     /// The part that moves with the clock — rewritten every second for an
     /// active stake, without reconfiguring the rest.
-    func applyStatus(stake: WalletStake, now: Date) {
+    func applyStatus(stake: WalletStake, now: Date, verdictPending: Bool = false) {
         let resultFont = UIFont.scaledMonospacedDigitSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
+        let wordFont = UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline)
+        let detailFont = detailLabel.font ?? .scaledMonospacedDigitSystemFont(ofSize: 12, relativeTo: .caption1)
+        let ago = walletAgoText(since: stake.settlesAt, now: now)
+        let staked = StakeMenu.points(stake.amount) + " staked"
         let result = NSMutableAttributedString()
+        // "10 ♥ staked · 2d ago": the amount in the sheet's one order, its
+        // glyph after it (`walletAmount`).
+        func detail(_ tail: String) -> NSAttributedString {
+            let line = NSMutableAttributedString(attributedString: walletAmount(
+                "\(stake.amount)", glyph: PointsSymbol.glyphImage(), font: detailFont, color: .secondaryLabel
+            ))
+            line.append(NSAttributedString(string: tail, attributes: [
+                .font: detailFont, .foregroundColor: UIColor.secondaryLabel,
+            ]))
+            return line
+        }
+        func words(_ text: String) -> NSAttributedString {
+            NSAttributedString(string: text, attributes: [.font: wordFont, .foregroundColor: UIColor.secondaryLabel])
+        }
+        // What VoiceOver reads after the post: the amount with its unit, then
+        // the outcome.
+        let spoken: [String]
+        // ⚠️ A SETTLED OUTCOME THE SERVER HAS NOT GIVEN YET IS A BONE
+        // (#1395): the device's "+1" turned into the server's "Rewarded"
+        // under the viewer's eyes, once the listing landed.
+        let pending = verdictPending && stake.isSettled
+        resultBone.isHidden = !pending
         switch stake.outcome {
+        case _ where pending:
+            // The widest verdict's room under the bone, in no ink: a label's
+            // alpha is not trusted on the sheet's glass.
+            result.append(NSAttributedString(string: "Rewarded", attributes: [
+                .font: wordFont, .foregroundColor: UIColor.clear,
+            ]))
+            detailLabel.attributedText = detail(" staked · \(ago)")
+            spoken = [staked, ago, "result loading"]
         case nil:
             result.append(walletAmount("\(stake.amount)", glyph: PointsSymbol.glyphImage(), font: resultFont))
-            detailLabel.text = "Settles in \(walletRemainingText(until: stake.settlesAt, now: now))"
+            let remaining = walletRemainingText(until: stake.settlesAt, now: now)
+            detailLabel.attributedText = NSAttributedString(string: "Settles in \(remaining)", attributes: [
+                .font: detailFont, .foregroundColor: UIColor.secondaryLabel,
+            ])
+            spoken = [staked, "settles in \(remaining)"]
         case .gems(let earned):
             result.append(walletAmount(
                 "+\(earned)", glyph: GemSymbol.glyphImage(), font: resultFont, color: GemSymbol.tint
             ))
-            detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
+            detailLabel.attributedText = detail(" staked · \(ago)")
+            spoken = [staked, ago, earned == 1 ? "earned 1 gem" : "earned \(earned) gems"]
         case .noReward, .notRewarded:
-            result.append(NSAttributedString(string: "No reward", attributes: [
-                .font: UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline),
-                .foregroundColor: UIColor.secondaryLabel,
-            ]))
-            detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
+            result.append(words("No reward"))
+            detailLabel.attributedText = detail(" staked · \(ago)")
+            spoken = [staked, ago, "no reward"]
         // The server's verdicts (#903): the outcome alone, never gems the
-        // balance does not hold while settlement runs in shadow mode.
+        // balance does not hold while settlement runs in shadow mode — and
+        // so not in gem violet either, which promises gems.
         case .rewarded:
-            result.append(NSAttributedString(string: "Rewarded", attributes: [
-                .font: resultFont,
-                .foregroundColor: GemSymbol.tint,
-            ]))
-            detailLabel.text = "\(stake.amount) staked · \(walletAgoText(since: stake.settlesAt, now: now))"
+            result.append(words("Rewarded"))
+            detailLabel.attributedText = detail(" staked · \(ago)")
+            spoken = [staked, ago, "rewarded"]
         case .pending:
-            result.append(NSAttributedString(string: "Result tomorrow", attributes: [
-                .font: UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline),
-                .foregroundColor: UIColor.secondaryLabel,
-            ]))
-            detailLabel.text = "\(stake.amount) staked · settled \(walletAgoText(since: stake.settlesAt, now: now))"
+            result.append(words("Result tomorrow"))
+            detailLabel.attributedText = detail(" staked · settled \(ago)")
+            spoken = [staked, "settled \(ago)", "result tomorrow"]
         }
         resultLabel.attributedText = result
-        accessibilityValue = [resultLabel.text, detailLabel.text].compactMap { $0 }.joined(separator: ", ")
+        accessibilityValue = spoken.joined(separator: ", ")
     }
 
     private func applyThumbnail(post: GalleryPost?, failed: Bool, imagePipeline: ImagePipeline?) {
@@ -709,7 +768,7 @@ final class WalletEmptyStakesCell: UICollectionViewCell {
         title.adjustsFontForContentSizeCategory = true
         let body = UILabel()
         let hours = Int(WalletStore.Policy.settlementDelay / 3600)
-        body.text = "Stake points on a post you believe in. Each stake settles \(hours) hours later — and may earn gems."
+        body.text = "Stake likes on a post you believe in. Each stake settles \(hours) hours later — and may earn gems."
         body.font = .scaledSystemFont(ofSize: 13, relativeTo: .footnote)
         body.adjustsFontForContentSizeCategory = true
         body.textColor = .secondaryLabel
