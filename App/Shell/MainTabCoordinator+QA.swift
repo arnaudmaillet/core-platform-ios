@@ -113,6 +113,19 @@ extension MainTabCoordinator {
                     Feedback.success("Posted", from: top, at: .top, id: "demo-post")
                 }
             }
+            // `-toast-demo long` (#1449): a failure whose message the bar
+            // cuts, with Retry — a tap on its body opens the whole message.
+            // Fired again every 5 s for 20 s: a toast lasts 4 s.
+            for shot in 0..<4 where mode == "long" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(shot) * 5) { [weak self] in
+                    guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
+                        .topViewController else { return }
+                    Feedback.failure(
+                        "Couldn't ask to follow @ava.moreau: the server did not answer in time",
+                        from: top, action: ToastView.Action("Retry") { print("[toast-demo] retried") }
+                    )
+                }
+            }
             // `-toast-demo navbar` (#1058): an
             // undo, an info, a warning a beat apart — the bar shows 1, 2 then
             // 3 — then a failure with Retry, which preempts the info.
@@ -131,7 +144,7 @@ extension MainTabCoordinator {
                     }
                 }
             }
-            for round in 0..<14 where !["kinds", "undo", "stack", "navbar"].contains(mode) {
+            for round in 0..<14 where !["kinds", "undo", "stack", "navbar", "long"].contains(mode) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 + Double(round) * 1.5) { [weak self] in
                     self?.debugToastDemo(pops: mode == "pop")
                 }
