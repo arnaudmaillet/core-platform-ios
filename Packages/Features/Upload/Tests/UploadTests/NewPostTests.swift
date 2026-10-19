@@ -853,7 +853,7 @@ struct NewPostTests {
         // position IS the behaviour; the old "Hide …" wording defaulted OFF and
         // meant the opposite of what the row said.
         #expect(settings.comments == .enabled)
-        #expect(settings.showsPoints)
+        #expect(settings.showsLikes)
         #expect(settings.showsReposts)
         #expect(settings.showsBookmarks)
         #expect(settings.allowsDownloads)

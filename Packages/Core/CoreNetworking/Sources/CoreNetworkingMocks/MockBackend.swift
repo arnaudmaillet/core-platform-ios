@@ -100,7 +100,7 @@ public struct MockBackend: Sendable {
         // The wallet is the server's (#1098): it opens at the charter's 250
         // points and keeps across launches, as the fleet's does.
         let wallet = MockWalletService(
-            store: counterStore, dataset: dataset, startingPoints: 250, persistence: .standard,
+            store: counterStore, dataset: dataset, startingLikes: 250, persistence: .standard,
             // Stakes the wallet opens with, so the sheet's lists show
             // something on a fresh install (#903).
             demoPositions: dataset.posts.prefix(8).map(\.postID),

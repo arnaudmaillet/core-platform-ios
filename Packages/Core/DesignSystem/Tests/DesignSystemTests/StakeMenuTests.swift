@@ -118,8 +118,8 @@ struct StakeMenuTests {
     }
 
     @Test func pointsAreCountedInEnglish() {
-        #expect(StakeMenu.points(1) == "1 like")
-        #expect(StakeMenu.points(100) == "100 likes")
+        #expect(StakeMenu.likes(1) == "1 like")
+        #expect(StakeMenu.likes(100) == "100 likes")
         #expect(StakeMenu.shotName(100) == "×100")
     }
 }

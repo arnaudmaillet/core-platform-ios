@@ -24,7 +24,7 @@ The app's colours come from its icon (#1120): **tangerine** is primary and **vio
 | `secondary` | gems, secondary emphasis | `#6852C6` | `#A78BFA` | `#5C44B7` / `#B59EFF` |
 | `secondaryContainer` / `onSecondaryContainer` | gem grounds and badges | `#EFEEFF` / `#6852C6` | `#211944` / `#A78BFA` | — |
 | `saveGold` | the saved star (#1128) | `#A07800` | `#FFC53D` (also over media) | — |
-| `pointsGradient` | the Points heart (#1128) | `#C76300` → orange → pink | yellow → orange → pink | — |
+| `likesGradient` | the Likes heart (#1128) | `#C76300` → orange → pink | yellow → orange → pink | — |
 | `brandGradient` | brand moments | `#B959DD` → `#FF8D28` | same | — |
 
 Status colours stay the system's:

@@ -2,7 +2,7 @@ import Foundation
 
 /// The ×100 cartridge pack as the Shop sells it, at one instant.
 ///
-/// A pack of SHOTS: each stakes `pointsPerShot` of the viewer's OWN points in
+/// A pack of SHOTS: each stakes `likesPerShot` of the viewer's OWN points in
 /// one tap, where a plain stake commits the default amount. Gems buy the
 /// convenience, never points (charter V5.3 §34: B never becomes A).
 public struct StakePackOffer: Equatable, Sendable, Identifiable {
@@ -11,16 +11,16 @@ public struct StakePackOffer: Equatable, Sendable, Identifiable {
     /// Shots in a fresh pack.
     public let shotsPerPack: Int
     /// Points one shot stakes.
-    public let pointsPerShot: Int
+    public let likesPerShot: Int
     /// What a pack costs, in gems.
     public let price: Int
     /// Shots left in THIS pack: 0 unless it is the one loaded.
     public let shotsLeft: Int
 
-    public init(id: String = "shots_3", shotsPerPack: Int, pointsPerShot: Int, price: Int, shotsLeft: Int) {
+    public init(id: String = "shots_3", shotsPerPack: Int, likesPerShot: Int, price: Int, shotsLeft: Int) {
         self.id = id
         self.shotsPerPack = shotsPerPack
-        self.pointsPerShot = pointsPerShot
+        self.likesPerShot = likesPerShot
         self.price = price
         self.shotsLeft = shotsLeft
     }

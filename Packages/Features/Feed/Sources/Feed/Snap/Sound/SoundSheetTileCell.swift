@@ -51,11 +51,11 @@ final class SoundSheetTileCell: UICollectionViewCell {
     private let captionLabel = UILabel()
     /// The count over a picture — the galleries' brick's, see the type's note.
     private let pictureLikes = PostMetricLabel(
-        symbol: PointsSymbol.glyph, font: PostGridFlightCard.metaFont, color: .white, shadowed: true
+        symbol: LikesSymbol.glyph, font: PostGridFlightCard.metaFont, color: .white, shadowed: true
     )
     /// The count on words: the tile's ink, no shadow.
     private let wordsLikes = PostMetricLabel(
-        symbol: PointsSymbol.glyph, font: PostGridFlightCard.metaFont, color: .secondaryLabel
+        symbol: LikesSymbol.glyph, font: PostGridFlightCard.metaFont, color: .secondaryLabel
     )
     private let badges: UIStackView
     /// The marks' foot — moved by `footLift` when they cannot share the line.
@@ -323,7 +323,7 @@ final class SoundSheetTileCell: UICollectionViewCell {
         // The count the card draws, measured only: the marks stand where the
         // tile's do (`footLift`), decided at the tile's size.
         let likes = PostMetricLabel(
-            symbol: PointsSymbol.glyph, font: PostGridFlightCard.metaFont, color: .white, shadowed: true
+            symbol: LikesSymbol.glyph, font: PostGridFlightCard.metaFont, color: .white, shadowed: true
         )
         likes.set(tile.likeCount)
         let lift = footLift(width: size.width, badges: badges, likes: likes)

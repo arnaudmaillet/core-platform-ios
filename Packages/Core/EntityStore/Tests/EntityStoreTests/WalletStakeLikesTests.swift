@@ -35,8 +35,8 @@ struct WalletStakeLikesTests {
             heard.append(fixture.entities.post(id)?.likeCount)
         }
 
-        _ = fixture.wallet.stake(.points(2), on: "p1")
-        _ = fixture.wallet.stake(.points(1), on: "p1")
+        _ = fixture.wallet.stake(.likes(2), on: "p1")
+        _ = fixture.wallet.stake(.likes(1), on: "p1")
         _ = fixture.wallet.undoBoost(targetID: "p1", amount: 3)
 
         #expect(heard == [42, 43, 40])
@@ -47,7 +47,7 @@ struct WalletStakeLikesTests {
     /// count with the balance.
     @Test func aRefundAfterACommitMovesTheCountBack() {
         let fixture = Fixture()
-        _ = fixture.wallet.stake(.points(5), on: "p1")
+        _ = fixture.wallet.stake(.likes(5), on: "p1")
         fixture.wallet.settleCommittedStake(targetID: "p1", asked: 5, spent: 2)
         #expect(fixture.entities.post(PostID("p1"))?.likeCount == 42)
         withExtendedLifetime(fixture.bridge) {}
@@ -58,7 +58,7 @@ struct WalletStakeLikesTests {
     @Test func aViewerChangeIsNotAStake() {
         let fixture = Fixture()
         fixture.scope.owner = .member(account: "acc-2", profile: nil)
-        _ = fixture.wallet.stake(.points(4), on: "p1")
+        _ = fixture.wallet.stake(.likes(4), on: "p1")
         fixture.scope.owner = .member(account: "acc-1", profile: "prof-1")
         #expect(fixture.entities.post(PostID("p1"))?.likeCount == 44, "only acc-2's own stake moved the count")
         withExtendedLifetime(fixture.bridge) {}

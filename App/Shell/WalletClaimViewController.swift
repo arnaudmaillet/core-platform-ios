@@ -406,7 +406,7 @@ final class WalletClaimViewController: UIViewController {
             let staked = stakes.filter { !$0.isSettled }.reduce(0) { $0 + $1.amount }
             let detail = NSMutableAttributedString()
             if staked > 0 {
-                detail.append(walletAmount("\(staked)", glyph: PointsSymbol.glyphImage(), font: font, color: .secondaryLabel))
+                detail.append(walletAmount("\(staked)", glyph: LikesSymbol.glyphImage(), font: font, color: .secondaryLabel))
                 detail.append(NSAttributedString(string: " at stake", attributes: [.font: font]))
             }
             header.configure(title: "Active stakes", detail: detail)
@@ -781,7 +781,7 @@ final class WalletClaimViewController: UIViewController {
             title = AttributedString("Daily cap reached — resets in \(Self.countdownString(to: next))")
         } else if let next = snapshot.nextClaimAt {
             title = AttributedString("Next claim in \(Self.countdownString(to: next))")
-        } else if let cap = snapshot.pointsCap, snapshot.balance >= cap {
+        } else if let cap = snapshot.likesCap, snapshot.balance >= cap {
             // The points cap (#901): no wait opens it, only spending does.
             title = AttributedString("Your likes are full — stake some to claim again")
         } else {
@@ -822,7 +822,7 @@ final class WalletClaimViewController: UIViewController {
                 // Explicit refresh, not the observer's: its queue hop is UIKit's
                 // business, and the pop below must scale the NEW number.
                 refresh()
-                summaryCell?.summary.pointsTile.pop()
+                summaryCell?.summary.likesTile.pop()
             case .tooEarly, .dailyCapReached, .balanceFull:
                 pendingClaimKey = nil
                 HapticNotification().notificationOccurred(.warning)

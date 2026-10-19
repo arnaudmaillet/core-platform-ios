@@ -783,7 +783,7 @@ a length bound the client can enforce before sending.
 ## 22. `CreatePost` carries no post-level policy, and no AI disclosure
 
 **What the client wants.** The "New post" screen offers, per post: whether
-comments are enabled / hidden / disabled; whether the points, reposts and
+comments are enabled / hidden / disabled; whether the likes, reposts and
 bookmark counts are visible or hidden; whether the post may be downloaded; and
 whether it is disclosed as AI-generated.
 

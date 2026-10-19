@@ -142,7 +142,7 @@ final class PostGridFlightCard: UIView {
     /// count this card lands on, and must draw it in the same type.
     static let metaFont = UIFont.scaledFont(forTextStyle: .caption2, weight: .semibold)
     private let likes = PostMetricLabel(
-        symbol: PointsSymbol.glyph, font: metaFont, color: .white, shadowed: true
+        symbol: LikesSymbol.glyph, font: metaFont, color: .white, shadowed: true
     )
 
     /// Whether the card's own picture IS the post — every tile and row. False
@@ -287,7 +287,7 @@ final class PostGridFlightCard: UIView {
         // furniture for another in the frame the card was removed.
         guard style.showsCounters else { return }
         likes.set(post.reactionCount)
-        if viewerStake > 0 { likes.setGlyph(systemName: PointsSymbol.glyph, color: PointsSymbol.tint) }
+        if viewerStake > 0 { likes.setGlyph(systemName: LikesSymbol.glyph, color: LikesSymbol.tint) }
         likes.constrain(in: restingChromeView) { parent in
             likes.trailingAnchor.constraint(equalTo: parent.trailingAnchor, constant: -8)
             likes.bottomAnchor.constraint(equalTo: parent.bottomAnchor, constant: -7)

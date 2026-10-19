@@ -573,17 +573,17 @@ public actor FeedRepository: FeedProviding {
 
 extension FeedRepository: EngagementProviding {
     public func like(_ postID: PostID) async throws {
-        try await stakeOnePoint(on: .post(postID.rawValue), write: "like")
+        try await stakeOneLike(on: .post(postID.rawValue), write: "like")
     }
 
     /// One sealed point on `target`, committed now rather than through the
     /// outbox: the screen rolls back what does not land.
-    private func stakeOnePoint(on target: LikeOutbox.Target, write: String) async throws {
+    private func stakeOneLike(on target: LikeOutbox.Target, write: String) async throws {
         let profileID = try await resolveViewerProfileID(forWrite: write)
         guard let likeStaking else { throw FeedError.transport(message: "no like path") }
         let now = Date()
         let batch = LikeOutbox.Batch(
-            target: target, points: 1, usesStakeShot: false,
+            target: target, likes: 1, usesStakeShot: false,
             idempotencyKey: UUID().uuidString.replacingOccurrences(of: "-", with: ""),
             firstTapAt: now, lastTapAt: now, isSealed: true,
             accountID: nil, profileID: profileID.rawValue
@@ -624,7 +624,7 @@ extension FeedRepository: EngagementProviding {
 
 extension FeedRepository: CommentLiking {
     public func likeComment(_ commentID: String) async throws {
-        try await stakeOnePoint(on: .comment(commentID), write: "likeComment")
+        try await stakeOneLike(on: .comment(commentID), write: "likeComment")
     }
 
     public func commentLikes(for commentIDs: [String]) async throws -> [String: CommentLikes] {

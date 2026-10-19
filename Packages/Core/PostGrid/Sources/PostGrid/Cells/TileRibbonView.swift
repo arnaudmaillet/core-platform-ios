@@ -12,7 +12,7 @@ public final class TileRibbonView: UIView {
 
     override public init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = PointsSymbol.tint
+        backgroundColor = LikesSymbol.tint
         layer.cornerRadius = 8
         layer.cornerCurve = .continuous
         isUserInteractionEnabled = false

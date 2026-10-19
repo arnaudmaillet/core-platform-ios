@@ -51,7 +51,7 @@ struct CompactCardLikeTests {
         #expect(cell.debugIsStaked == false)
         #expect(wallet.balance == before)
 
-        _ = wallet.stake(.points(1), on: "tile-1")
+        _ = wallet.stake(.likes(1), on: "tile-1")
         let other = tile()
         staking.bindReadout(other, to: Self.post.id)
         #expect(other.debugIsStaked)
@@ -61,7 +61,7 @@ struct CompactCardLikeTests {
     /// Recycled, the tile forgets the last post's stake.
     @Test func aRecycledTileForgetsTheStake() {
         let wallet = WalletStore(defaults: Self.defaults())
-        _ = wallet.stake(.points(1), on: "tile-1")
+        _ = wallet.stake(.likes(1), on: "tile-1")
         let staking = PostCardStaking(wallet: wallet)
         let cell = tile()
         staking.bindReadout(cell, to: Self.post.id)

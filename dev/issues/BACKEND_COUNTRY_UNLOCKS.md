@@ -27,7 +27,7 @@ Every other country is shaded and carries a badge at its centre with its
   | 31+ | 15 gems |
   | home country | 0 |
 
-- **Only gems buy a country.** Points (the claimable currency spent on
+- **Only gems buy a country.** Likes (the claimable currency spent on
   stakes) never do.
 
 Today all of this is client-side:

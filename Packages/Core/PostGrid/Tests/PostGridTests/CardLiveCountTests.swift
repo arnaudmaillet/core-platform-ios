@@ -94,7 +94,7 @@ struct CardLiveCountTests {
         let card = row(Self.post("p1", likes: 40))
         staking.bind(card, to: PostID("p1"))
 
-        _ = wallet.stake(.points(2), on: "p1")
+        _ = wallet.stake(.likes(2), on: "p1")
         #expect(card.debugReactionCount == 42)
         _ = wallet.undoBoost(targetID: "p1", amount: 2)
         #expect(card.debugReactionCount == 40)
@@ -145,7 +145,7 @@ struct CardLiveCountTests {
         // A like from the feed, then a stake from a card elsewhere.
         entities.addLikes(1, to: PostID("p1"))
         #expect(bare.debugCounterText == "41")
-        _ = wallet.stake(.points(2), on: "p1")
+        _ = wallet.stake(.likes(2), on: "p1")
         // The wallet's change is delivered on the main queue.
         try await Task.sleep(for: .milliseconds(50))
 
@@ -168,7 +168,7 @@ struct CardLiveCountTests {
         staking.bindReadout(control, to: PostID("p1"))
         staking.bindCount(cell, to: PostID("p1"))
 
-        _ = wallet.stake(.points(2), on: "p1")
+        _ = wallet.stake(.likes(2), on: "p1")
         try await Task.sleep(for: .milliseconds(50))
 
         #expect(control.debugIsStaked)

@@ -42,7 +42,7 @@ struct WalletLikeStakingTests {
 
     private func batch(account: String? = MockAuthService.accountID) -> LikeOutbox.Batch {
         LikeOutbox.Batch(
-            target: .post("p1"), points: 1, usesStakeShot: false, idempotencyKey: "key-0001",
+            target: .post("p1"), likes: 1, usesStakeShot: false, idempotencyKey: "key-0001",
             firstTapAt: Date(), lastTapAt: Date(), isSealed: true, accountID: account, profileID: "profile-1"
         )
     }

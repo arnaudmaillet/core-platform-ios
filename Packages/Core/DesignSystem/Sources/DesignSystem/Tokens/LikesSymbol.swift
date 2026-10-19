@@ -7,7 +7,7 @@ import UIKit
 /// the star was spelled out at every surface that drew one — the wallet badge,
 /// the claim screen, the comment bar's boost and the rail's — so this is the
 /// one name they all read. NOT the Save star (#1128), which is not a point.
-public enum PointsSymbol {
+public enum LikesSymbol {
     /// The glyph on a boost control and beside an amount.
     public static let glyph = AppSymbol.liked.rawValue
     /// The coin: the wallet's balance badge and the claim screen.
@@ -18,7 +18,7 @@ public enum PointsSymbol {
     /// The heart's fill for an appearance — the pink, solid (#1178; it was
     /// #1124's yellow → orange → pink, then a solid red).
     public static func gradient(for traits: UITraitCollection) -> [UIColor] {
-        Palette.pointsGradient(for: traits)
+        Palette.likesGradient(for: traits)
     }
     /// The coin as drawn: a white heart on a pink disc — a token that reads at
     /// badge size, where a pink heart alone on the bar's glass would not.

@@ -89,7 +89,7 @@ public final class WalletBadgeButton: UIButton {
 
         // The points token: a pink HEART coin (points are likes), deliberately
         // not a currency glyph — a dollar sign promises money the
-        // product doesn't hold. BAKED (`PointsSymbol.coinImage`): the bar's
+        // product doesn't hold. BAKED (`LikesSymbol.coinImage`): the bar's
         // glass dropped a palette symbol's pink and drew the disc red.
         // Re-baked per appearance; only the count changes otherwise.
         bakeCoin()
@@ -129,7 +129,7 @@ public final class WalletBadgeButton: UIButton {
         ringLayer.fillColor = nil
         ringLayer.lineWidth = Metrics.ringWidth
         ringLayer.lineCap = .round
-        ringLayer.strokeColor = PointsSymbol.tint.cgColor
+        ringLayer.strokeColor = LikesSymbol.tint.cgColor
         ringLayer.strokeEnd = 0
         ringLayer.isHidden = true
         layer.addSublayer(ringLayer)
@@ -156,7 +156,7 @@ public final class WalletBadgeButton: UIButton {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     private func bakeCoin() {
-        coinView.image = PointsSymbol.coinImage(
+        coinView.image = LikesSymbol.coinImage(
             UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold), traits: traitCollection
         )
     }
@@ -326,7 +326,7 @@ public final class WalletBadgeButton: UIButton {
               coinView.layer.animation(forKey: Self.pulseKey) == nil else { return }
         // The glow says "something is waiting" on its own: it is what stays
         // under Reduce Motion and Power Saving.
-        coinView.layer.shadowColor = PointsSymbol.tint.cgColor
+        coinView.layer.shadowColor = LikesSymbol.tint.cgColor
         coinView.layer.shadowOpacity = 0.8
         coinView.layer.shadowRadius = 6
         coinView.layer.shadowOffset = .zero

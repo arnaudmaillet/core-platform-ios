@@ -1122,7 +1122,7 @@ final class ShopCountryCardView: ShopCardView {
             line.append(NSAttributedString(attachment: NSTextAttachment(image: trophy)))
         }
         line.append(NSAttributedString(string: " \(rank)  ·  ", attributes: [.font: font, .foregroundColor: ink]))
-        if let heart = PointsSymbol.glyphImage(symbol) {
+        if let heart = LikesSymbol.glyphImage(symbol) {
             line.append(NSAttributedString(attachment: NSTextAttachment(image: heart)))
         }
         line.append(NSAttributedString(string: " \(likes)", attributes: [.font: font, .foregroundColor: ink]))
@@ -1247,7 +1247,7 @@ final class ShopPackCardView: ShopCardView {
     }
 
     static func shotsDetail(_ offer: StakePackOffer) -> String {
-        "\(StakeMenu.points(offer.pointsPerShot)) a shot"
+        "\(StakeMenu.likes(offer.likesPerShot)) a shot"
     }
 
     /// How far the price bubble sits in from the card's edges, and its radius:
@@ -1261,10 +1261,10 @@ final class ShopPackCardView: ShopCardView {
     /// "100 ♥ a shot", the heart in the points' red.
     static func shotLine(_ offer: StakePackOffer, font: UIFont) -> NSAttributedString {
         let line = NSMutableAttributedString(
-            string: "\(offer.pointsPerShot.formatted()) ",
+            string: "\(offer.likesPerShot.formatted()) ",
             attributes: [.font: font, .foregroundColor: UIColor.label]
         )
-        let heart = NSTextAttachment(image: PointsSymbol.glyphImage(.init(font: font, scale: .small)) ?? UIImage())
+        let heart = NSTextAttachment(image: LikesSymbol.glyphImage(.init(font: font, scale: .small)) ?? UIImage())
         line.append(NSAttributedString(attachment: heart))
         line.append(NSAttributedString(string: " a shot", attributes: [.font: font, .foregroundColor: UIColor.secondaryLabel]))
         return line
@@ -1285,7 +1285,7 @@ final class ShopPackCardView: ShopCardView {
             active.text = CountryShopViewController.activeText(offer)
             active.font = .appFont(forTextStyle: .subheadline)
             active.adjustsFontForContentSizeCategory = true
-            active.textColor = PointsSymbol.tint
+            active.textColor = LikesSymbol.tint
             active.numberOfLines = 2
             active.textAlignment = .center
             footLabel = active
@@ -1320,7 +1320,7 @@ final class ShopPackCardView: ShopCardView {
         priceBubble.layer.cornerCurve = .continuous
         priceBubble.isUserInteractionEnabled = false
         if offer.isActive {
-            priceBubble.backgroundColor = PointsSymbol.tint.withAlphaComponent(0.14)
+            priceBubble.backgroundColor = LikesSymbol.tint.withAlphaComponent(0.14)
         } else if affordable && !otherLoaded {
             priceBubble.backgroundColor = GemSymbol.tint.withAlphaComponent(0.16)
         } else {
@@ -1360,11 +1360,11 @@ final class ShopPackCardView: ShopCardView {
         if offer.isActive {
             badgeLabel.text = "LOADED"
             badgeLabel.textColor = .white
-            chip.backgroundColor = PointsSymbol.tint
+            chip.backgroundColor = LikesSymbol.tint
         } else if bestValue {
             badgeLabel.text = "BEST VALUE"
             badgeLabel.textColor = .white
-            chip.backgroundColor = PointsSymbol.tint
+            chip.backgroundColor = LikesSymbol.tint
         } else {
             chip.isHidden = true
         }

@@ -44,7 +44,7 @@ The good news is that the iOS side is well placed:
 | Transport | Authenticated client works without a token (passes through) | `AuthInterceptor.swift:23-26` |
 | For You | Reads `GetFollowingFeed`; Discover and Following are two orderings of the same corpus | `ForYou/ForYouDiscovery.swift:16-22`, `dev/BACKEND_GAPS.md` §14 |
 | Mock BFF | Routes never check the bearer token, and the viewer is a fixed dataset id, so mock mode cannot reveal gating bugs | `MockBackend.swift:72-77` |
-| Local stores | Device-wide UserDefaults keys. Only `CountryUnlockStore` is keyed by account (and hard-wired to the mock account). `WalletStore` seeds free points on first init. | §6.6 |
+| Local stores | Device-wide UserDefaults keys. Only `CountryUnlockStore` is keyed by account (and hard-wired to the mock account). `WalletStore` seeds free likes on first init. | §6.6 |
 | Push, analytics, deep links | None. One install id exists: `device.identifier` in UserDefaults, sent as `DeviceContext.device_id` at login | `AppContainer.swift:981-991` |
 
 ### Backend (`arnaudmaillet/core-platform-backend`, develop @ `0e79ba79`)

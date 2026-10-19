@@ -7,7 +7,7 @@ import UIKit
 /// out a like's red. The coin is baked, so it is a bitmap, and every pixel of
 /// its disc is the pink.
 @MainActor
-struct PointsCoinTests {
+struct LikesCoinTests {
     @Test(arguments: [UIUserInterfaceStyle.light, .dark])
     func theBadgesCoinIsAWhiteHeartOnThePinkDisc(_ style: UIUserInterfaceStyle) throws {
         let badge = WalletBadgeButton()

@@ -89,7 +89,7 @@ struct DeleteAccountTests {
     }
 
     @Test func theChecklistNamesWhatWillBeLost() async {
-        let checklist = DeletionChecklist(profileHandles: ["you", "you.work"], points: 1_250, gems: 3)
+        let checklist = DeletionChecklist(profileHandles: ["you", "you.work"], likes: 1_250, gems: 3)
         let model = DeleteAccountViewModel(lifecycle: StubLifecycle(), checklist: { checklist }, now: { Self.today })
         await model.load()
         #expect(model.checklist == checklist)
@@ -124,7 +124,7 @@ struct DeleteAccountTests {
     /// once, with the named consequences, not once with the general wording
     /// and again with the names.
     @Test func theChecklistAndThePhaseArriveTogether() async {
-        let checklist = DeletionChecklist(profileHandles: ["you"], points: 10, gems: nil)
+        let checklist = DeletionChecklist(profileHandles: ["you"], likes: 10, gems: nil)
         let model = DeleteAccountViewModel(lifecycle: StubLifecycle(), checklist: { checklist }, now: { Self.today })
         var changes: [(DeleteAccountViewModel.Phase, DeletionChecklist?)] = []
         model.onChange = { changes.append((model.phase, model.checklist)) }
@@ -139,9 +139,9 @@ struct DeleteAccountTests {
         #expect(DeleteAccountViewController.profilesLine([]) == "Every profile on this account")
         #expect(DeleteAccountViewController.profilesLine(["a1", "b2", "c3", "d4", "e5"])
             == "All 5 profiles on this account: @a1, @b2, @c3 and 2 more")
-        #expect(DeleteAccountViewController.walletLine(points: 0, gems: 1) == "Your 1 gem. They can't be refunded or moved to another account")
-        #expect(DeleteAccountViewController.walletLine(points: 0, gems: 0) == "Likes and gems in your wallet")
-        #expect(DeleteAccountViewController.walletLine(points: nil, gems: nil) == "Likes and gems in your wallet")
+        #expect(DeleteAccountViewController.walletLine(likes: 0, gems: 1) == "Your 1 gem. They can't be refunded or moved to another account")
+        #expect(DeleteAccountViewController.walletLine(likes: 0, gems: 0) == "Likes and gems in your wallet")
+        #expect(DeleteAccountViewController.walletLine(likes: nil, gems: nil) == "Likes and gems in your wallet")
     }
 
     @Test func requestingSendsOnceAndReturnsThePermanentDate() async throws {

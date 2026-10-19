@@ -215,7 +215,7 @@ public enum Palette {
     /// 3:1 a meaningful glyph needs, and it keeps yellow and gold for the
     /// saved star alone. Drawn by the custom heart (#1128), as a mask over a
     /// gradient layer: SF Symbols do not draw a three-stop gradient.
-    public static func pointsGradient(for traits: UITraitCollection) -> [UIColor] {
+    public static func likesGradient(for traits: UITraitCollection) -> [UIColor] {
         // ⚠️ SOLID: the pink (#1178, the owner 2026-10-15, after a pink →
         // violet pass). Two equal stops, so the heart's mask and layer — built
         // for a gradient — are untouched.

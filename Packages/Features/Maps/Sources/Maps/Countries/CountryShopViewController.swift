@@ -747,7 +747,7 @@ final class CountryShopRowCell: UICollectionViewListCell {
     private let flagView = UIImageView()
     let nameLabel = UILabel()
     private let rankLabel = UILabel()
-    let heartView = UIImageView(image: PointsSymbol.glyphImage(.init(pointSize: 10, weight: .bold)))
+    let heartView = UIImageView(image: LikesSymbol.glyphImage(.init(pointSize: 10, weight: .bold)))
     private let statsLabel = UILabel()
 
     override init(frame: CGRect) {
@@ -762,7 +762,7 @@ final class CountryShopRowCell: UICollectionViewListCell {
             label.font = detailFont
             label.textColor = .secondaryLabel
         }
-        heartView.tintColor = PointsSymbol.tint
+        heartView.tintColor = LikesSymbol.tint
         heartView.setContentHuggingPriority(.required, for: .horizontal)
         rankLabel.setContentHuggingPriority(.required, for: .horizontal)
 
@@ -869,23 +869,23 @@ final class StakePackRowCell: UICollectionViewListCell {
 
     /// "×100 cartridges".
     static func title(_ offer: StakePackOffer) -> String {
-        "\(StakeMenu.shotName(offer.pointsPerShot)) cartridges"
+        "\(StakeMenu.shotName(offer.likesPerShot)) cartridges"
     }
 
     /// "10 shots · 10 points a tap" — the pack's whole promise.
     static func detail(_ offer: StakePackOffer) -> String {
-        "\(offer.shotsPerPack) shots · \(StakeMenu.points(offer.pointsPerShot)) a tap"
+        "\(offer.shotsPerPack) shots · \(StakeMenu.likes(offer.likesPerShot)) a tap"
     }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         // The points' red disc with a white bolt — the shot is a STAKE of
-        // points, so it wears their colour (`PointsSymbol`), not the gems'.
+        // points, so it wears their colour (`LikesSymbol`), not the gems'.
         badge.image = UIImage(systemName: StakeMenu.shotGlyph)?
             .applyingSymbolConfiguration(.init(pointSize: 15, weight: .bold))?
             .withTintColor(.white, renderingMode: .alwaysOriginal)
         badge.contentMode = .center
-        badge.backgroundColor = PointsSymbol.tint
+        badge.backgroundColor = LikesSymbol.tint
         badge.layer.cornerRadius = 17
         badge.layer.cornerCurve = .circular
         titleLabel.font = .appFont(forTextStyle: .body)

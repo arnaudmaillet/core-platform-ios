@@ -2,7 +2,7 @@ import Foundation
 import Testing
 
 /// ⚠️ A REPO-WIDE GUARD (#1124), like `ScaledFontTests` for fonts: a screen's
-/// hue comes from the brand palette (`Palette`, `PointsSymbol`, `GemSymbol`,
+/// hue comes from the brand palette (`Palette`, `LikesSymbol`, `GemSymbol`,
 /// `Warning`), never from a raw literal or a system hue picked on the spot.
 ///
 /// It scans every source file under `App/` and `Packages/` (tests excluded)

@@ -72,7 +72,7 @@ struct ForYouCardLikesTests {
     /// Stakes on `postID` straight through the wallet — the way the feed's
     /// rail does, never through a card.
     private func stake(on postID: PostID, in wallet: WalletStore) {
-        guard case .boosted = wallet.stake(.points(1), on: postID.rawValue) else {
+        guard case .boosted = wallet.stake(.likes(1), on: postID.rawValue) else {
             Issue.record("the wallet refused the stake")
             return
         }

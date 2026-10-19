@@ -1,7 +1,7 @@
 import UIKit
 
 /// The glyph for SAVING — the star, and its one gold (#1190). The save
-/// star's single contract, as `PointsSymbol` is the heart's: every saved
+/// star's single contract, as `LikesSymbol` is the heart's: every saved
 /// star in the app is drawn from here, so a surface cannot pick a gold of its
 /// own (the sound sheet's was another, the owner, 2026-10-15).
 /// `SymbolContractTests` scans the sources for a gold or a filled star

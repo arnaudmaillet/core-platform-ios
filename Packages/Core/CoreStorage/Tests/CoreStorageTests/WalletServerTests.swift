@@ -38,10 +38,24 @@ private actor FakeWalletServer: WalletServer {
     }
 }
 
-private func serverState(points: Int, available: Bool = true, next: Date? = nil, amount: Int = 25) -> WalletServerState {
+/// ⚠️ The last wallet kept before the rename (#1397) is read back whole:
+/// its keys are still "points" and "pointsCap".
+@Test func aServerWalletKeptBeforeTheRenameIsReadBack() throws {
+    let kept = """
+    {"points":120,"claimAvailable":true,"claimAmount":25,"claimedToday":50,"dailyClaimCap":200,\
+    "streakDays":3,"pointsCap":2000}
+    """
+    let state = try JSONDecoder().decode(WalletServerState.self, from: Data(kept.utf8))
+    #expect(state.likes == 120)
+    #expect(state.likesCap == 2_000)
+    let written = try #require(String(data: JSONEncoder().encode(state), encoding: .utf8))
+    #expect(written.contains("\"points\":120") && written.contains("\"pointsCap\":2000"), "the stored keys changed")
+}
+
+private func serverState(likes: Int, available: Bool = true, next: Date? = nil, amount: Int = 25) -> WalletServerState {
     WalletServerState(
-        points: points, claimAvailable: available, nextClaimAt: next, claimAmount: amount,
-        claimedToday: 50, dailyClaimCap: 200, streakDays: 3, pointsCap: 2_000
+        likes: likes, claimAvailable: available, nextClaimAt: next, claimAmount: amount,
+        claimedToday: 50, dailyClaimCap: 200, streakDays: 3, likesCap: 2_000
     )
 }
 
@@ -62,7 +76,7 @@ struct WalletServerTests {
     /// The balance, the claim and its clock are the server's once read.
     @Test func theServersWalletIsWhatTheStoreShows() async {
         let next = Date().addingTimeInterval(1_200)
-        let fixture = Fixture(serverState(points: 640, available: false, next: next))
+        let fixture = Fixture(serverState(likes: 640, available: false, next: next))
 
         #expect(await fixture.store.refreshFromServer())
 
@@ -72,18 +86,18 @@ struct WalletServerTests {
         #expect(snapshot.nextClaimAt == next)
         #expect(snapshot.streakDays == 3)
         #expect(snapshot.claimedToday == 50)
-        #expect(snapshot.pointsCap == 2_000)
+        #expect(snapshot.likesCap == 2_000)
     }
 
     /// Likes this device took off but has not sent are not in the server's
     /// points yet: they stay off.
     @Test func likesNotSentYetStayOffTheServersPoints() async {
-        let fixture = Fixture(serverState(points: 300))
+        let fixture = Fixture(serverState(likes: 300))
         let outbox = LikeOutbox(defaults: fixture.defaults, scope: fixture.scope)
         fixture.store.likeOutbox = outbox
         await fixture.store.refreshFromServer()
 
-        fixture.store.stake(.points(4), on: "post-1")
+        fixture.store.stake(.likes(4), on: "post-1")
         #expect(fixture.store.balance == 296)
 
         await fixture.store.refreshFromServer()
@@ -93,9 +107,9 @@ struct WalletServerTests {
     /// A claim goes to the server with the tap's key, and its answer — the
     /// outcome and the wallet — is applied.
     @Test func aClaimIsTheServersAnswer() async {
-        let fixture = Fixture(serverState(points: 100))
+        let fixture = Fixture(serverState(likes: 100))
         await fixture.store.refreshFromServer()
-        await fixture.server.setClaimAnswer(.claimed(awarded: 30), then: serverState(points: 130, available: false, next: Date().addingTimeInterval(3_600)))
+        await fixture.server.setClaimAnswer(.claimed(awarded: 30), then: serverState(likes: 130, available: false, next: Date().addingTimeInterval(3_600)))
 
         let outcome = await fixture.store.claim(idempotencyKey: "tapkey-0001")
 
@@ -109,8 +123,8 @@ struct WalletServerTests {
 
     /// At the points cap: the outcome says so, and there is no countdown.
     @Test func aFullWalletHasNoCountdown() async {
-        let fixture = Fixture(serverState(points: 100))
-        await fixture.server.setClaimAnswer(.balanceFull, then: serverState(points: 2_000, available: false, next: nil, amount: 0))
+        let fixture = Fixture(serverState(likes: 100))
+        await fixture.server.setClaimAnswer(.balanceFull, then: serverState(likes: 2_000, available: false, next: nil, amount: 0))
 
         #expect(await fixture.store.claim(idempotencyKey: "tapkey-0002") == .balanceFull)
         #expect(fixture.store.snapshot().nextClaimAt == nil)
@@ -120,7 +134,7 @@ struct WalletServerTests {
     /// Offline: nothing changes, and the outcome says the server was not
     /// reached.
     @Test func anUnreachableServerChangesNothing() async {
-        let fixture = Fixture(serverState(points: 100))
+        let fixture = Fixture(serverState(likes: 100))
         await fixture.store.refreshFromServer()
         await fixture.server.setFails(true)
 
@@ -133,7 +147,7 @@ struct WalletServerTests {
     @Test func aGuestNeverAsks() async {
         let defaults = UserDefaults(suiteName: "wallet-server-\(UUID().uuidString)")!
         let store = WalletStore(defaults: defaults, scope: StorageScope(owner: .guest))
-        let server = FakeWalletServer(serverState(points: 999))
+        let server = FakeWalletServer(serverState(likes: 999))
         store.server = server
 
         #expect(!(await store.refreshFromServer()))
@@ -144,8 +158,8 @@ struct WalletServerTests {
 
     /// A wallet read as one account never lands in another's.
     @Test func aReadNeverLandsInAnotherAccount() {
-        let fixture = Fixture(serverState(points: 100))
-        let applied = fixture.store.apply(serverState(points: 777), readAs: .member(account: "acct-2", profile: nil))
+        let fixture = Fixture(serverState(likes: 100))
+        let applied = fixture.store.apply(serverState(likes: 777), readAs: .member(account: "acct-2", profile: nil))
         #expect(!applied)
         #expect(fixture.store.balance != 777)
     }
@@ -153,7 +167,7 @@ struct WalletServerTests {
     /// With the wallet the server's, the welcome gift is the server's to
     /// credit (#1008): settling it credits nothing on the device.
     @Test func theWelcomeGiftIsNotCreditedOnTheDevice() async {
-        let fixture = Fixture(serverState(points: 100))
+        let fixture = Fixture(serverState(likes: 100))
         await fixture.store.refreshFromServer()
         let gift = WelcomeGift(defaults: fixture.defaults)
         gift.open()
@@ -167,7 +181,7 @@ struct WalletServerTests {
     /// The sheet's stakes are the server's list (#903), with the device's
     /// taps the server has not been sent yet as active ones on top.
     @Test func theStakesAreTheServersListWithTheUnsentOnTop() async {
-        let fixture = Fixture(serverState(points: 300))
+        let fixture = Fixture(serverState(likes: 300))
         let outbox = LikeOutbox(defaults: fixture.defaults, scope: fixture.scope)
         fixture.store.likeOutbox = outbox
         await fixture.store.refreshFromServer()
@@ -177,7 +191,7 @@ struct WalletServerTests {
         ])
         #expect(await fixture.store.refreshStakesFromServer())
 
-        fixture.store.stake(.points(2), on: "post-new")
+        fixture.store.stake(.likes(2), on: "post-new")
 
         let stakes = fixture.store.stakes()
         #expect(stakes.map(\.targetID) == ["post-new", "post-old"])
@@ -189,7 +203,7 @@ struct WalletServerTests {
     /// device's guess (#1395): the sheet waits for the verdicts. Listed,
     /// nothing is awaited any more.
     @Test func theVerdictsAreAwaitedUntilTheServerListsTheStakes() async {
-        let fixture = Fixture(serverState(points: 300))
+        let fixture = Fixture(serverState(likes: 300))
         #expect(fixture.store.awaitsServerStakes, "a member with a server waits for its listing")
         #expect(await fixture.store.refreshStakesFromServer())
         #expect(!fixture.store.awaitsServerStakes)
@@ -198,7 +212,7 @@ struct WalletServerTests {
     /// A listing that fails leaves the device's outcomes standing: the sheet
     /// draws them rather than bones that never resolve.
     @Test func aFailedListingAwaitsNothing() async {
-        let fixture = Fixture(serverState(points: 300))
+        let fixture = Fixture(serverState(likes: 300))
         await fixture.server.setFails(true)
         #expect(await !fixture.store.refreshStakesFromServer())
         #expect(!fixture.store.awaitsServerStakes)
@@ -214,7 +228,7 @@ struct WalletServerTests {
         let member = WalletStore(defaults: defaults, scope: StorageScope(owner: .member(account: "a", profile: nil)))
         #expect(!member.awaitsServerStakes)
         let guest = WalletStore(defaults: defaults, scope: StorageScope(owner: .guest))
-        guest.server = FakeWalletServer(serverState(points: 1))
+        guest.server = FakeWalletServer(serverState(likes: 1))
         #expect(!guest.awaitsServerStakes)
     }
 
@@ -222,7 +236,7 @@ struct WalletServerTests {
     @Test func aGuestHasNoHistory() async {
         let defaults = UserDefaults(suiteName: "wallet-server-\(UUID().uuidString)")!
         let store = WalletStore(defaults: defaults, scope: StorageScope(owner: .guest))
-        store.server = FakeWalletServer(serverState(points: 1))
+        store.server = FakeWalletServer(serverState(likes: 1))
         await #expect(throws: WalletHistoryUnavailable.self) {
             _ = try await store.transactions(currency: nil, after: nil)
         }

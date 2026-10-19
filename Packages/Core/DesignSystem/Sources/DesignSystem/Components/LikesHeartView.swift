@@ -2,7 +2,7 @@ import UIKit
 
 /// THE POINTS HEART (#1128, #1124 decision 7): the app's own heart glyph
 /// (`AppSymbol.like` / `.liked`) drawn in the yellow → orange → pink
-/// gradient (`Palette.pointsGradient`) once liked, and in the row's ink at
+/// gradient (`Palette.likesGradient`) once liked, and in the row's ink at
 /// rest.
 ///
 /// ⚠️ A three-stop gradient is not something SF Symbols draw: their gradient
@@ -12,11 +12,11 @@ import UIKit
 /// (`bounce()`, `setLiked(_:animated:)`), on the mask itself.
 ///
 /// ```
-///   PointsHeartView
+///   LikesHeartView
 ///   └─ fill (UIView, its layer a CAGradientLayer — the colour)
 ///        mask: glyph (UIImageView, the heart symbol — the shape)
 /// ```
-public final class PointsHeartView: UIView {
+public final class LikesHeartView: UIView {
     /// The heart's shape: what the mask draws, and what animates.
     public let glyph = UIImageView()
     private let fill = GradientFill()
@@ -43,7 +43,7 @@ public final class PointsHeartView: UIView {
         applyGlyph(animated: false)
         applyColours()
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) {
-            (view: PointsHeartView, _: UITraitCollection) in
+            (view: LikesHeartView, _: UITraitCollection) in
             view.applyColours()
         }
     }
@@ -100,7 +100,7 @@ public final class PointsHeartView: UIView {
 
     private func applyColours() {
         if isLiked {
-            fill.colours = Palette.pointsGradient(for: traitCollection)
+            fill.colours = Palette.likesGradient(for: traitCollection)
         } else {
             let resolved = ink.resolvedColor(with: traitCollection)
             fill.colours = [resolved, resolved]
@@ -130,22 +130,22 @@ private final class GradientFill: UIView {
 }
 
 /// The gradient heart laid over a plain `UIButton`'s glyph (#1128) — for a
-/// button that is not an `AppButton` (which has `drawsPointsHeart`): the
+/// button that is not an `AppButton` (which has `drawsLikesHeart`): the
 /// Snap like pill, the comment composer's. The button keeps laying out its
 /// glyph, drawn clear (`clearGlyph`), and the heart sits exactly on it.
 ///
 /// The host calls `update(on:liked:)` when the state changes and
 /// `layout(on:)` from a layout pass.
 @MainActor
-public final class PointsHeartOverlay {
-    public private(set) var heart: PointsHeartView?
+public final class LikesHeartOverlay {
+    public private(set) var heart: LikesHeartView?
 
     public init() {}
 
     /// The filled heart as the button lays it out but does not draw: the
     /// gradient heart draws it.
     public static func clearGlyph(_ configuration: UIImage.SymbolConfiguration) -> UIImage? {
-        PointsSymbol.glyphImage(configuration)?.withTintColor(.clear, renderingMode: .alwaysOriginal)
+        LikesSymbol.glyphImage(configuration)?.withTintColor(.clear, renderingMode: .alwaysOriginal)
     }
 
     /// Shows the gradient heart over `button`'s glyph while `liked`.
@@ -156,7 +156,7 @@ public final class PointsHeartOverlay {
             return
         }
         let view = heart ?? {
-            let view = PointsHeartView(configuration: configuration)
+            let view = LikesHeartView(configuration: configuration)
             button.addSubview(view)
             heart = view
             return view

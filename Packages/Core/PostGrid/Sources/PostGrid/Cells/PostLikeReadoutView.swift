@@ -39,7 +39,7 @@ extension PostGridListRowCell: PostCardLikeReadout {}
 /// - `.card`: on a card's own fill (a text post). The closing line's outline
 ///   heart in the line's one ink (`PostCardPillView.ink`).
 ///
-/// Staked, both draw the points' red heart (`PointsSymbol`).
+/// Staked, both draw the points' red heart (`LikesSymbol`).
 public final class PostLikeReadoutView: UIView, PostCardLikeReadout {
     public enum Ground: Sendable {
         case media
@@ -56,7 +56,7 @@ public final class PostLikeReadoutView: UIView, PostCardLikeReadout {
     public init(ground: Ground, font: UIFont) {
         self.ground = ground
         metric = PostMetricLabel(
-            symbol: ground == .media ? PointsSymbol.glyph : PostGridListRowCell.ActionSymbol.like,
+            symbol: ground == .media ? LikesSymbol.glyph : PostGridListRowCell.ActionSymbol.like,
             font: font,
             color: ground == .media ? .white : PostCardPillView.ink,
             shadowed: ground == .media
@@ -111,9 +111,9 @@ public final class PostLikeReadoutView: UIView, PostCardLikeReadout {
         let staked = viewerStake > 0
         metric.setGlyph(
             systemName: staked
-                ? PointsSymbol.glyph
-                : (ground == .media ? PointsSymbol.glyph : PostGridListRowCell.ActionSymbol.like),
-            color: staked ? PointsSymbol.tint : (ground == .media ? .white : PostCardPillView.ink)
+                ? LikesSymbol.glyph
+                : (ground == .media ? LikesSymbol.glyph : PostGridListRowCell.ActionSymbol.like),
+            color: staked ? LikesSymbol.tint : (ground == .media ? .white : PostCardPillView.ink)
         )
     }
 

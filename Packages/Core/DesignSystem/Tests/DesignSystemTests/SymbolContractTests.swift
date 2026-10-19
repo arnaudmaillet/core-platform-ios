@@ -3,7 +3,7 @@ import Testing
 import UIKit
 @testable import DesignSystem
 
-/// ⚠️ ONE CONTRACT PER GLYPH (#1190): the heart is `PointsSymbol`'s, the save
+/// ⚠️ ONE CONTRACT PER GLYPH (#1190): the heart is `LikesSymbol`'s, the save
 /// star `SaveStar`'s — every surface draws them from there, so none can pick
 /// a colour of its own (the sound sheet's star had another gold). A
 /// REPO-WIDE scan, like `RawHueGuardTests`: CI runs it in DesignSystem's lane
@@ -21,11 +21,11 @@ struct SymbolContractTests {
     }
 
     /// The files that own the glyphs and their colours.
-    static let owners: Set<String> = ["Palette.swift", "PointsSymbol.swift", "SaveStar.swift", "AppSymbol.swift"]
+    static let owners: Set<String> = ["Palette.swift", "LikesSymbol.swift", "SaveStar.swift", "AppSymbol.swift"]
     /// A heart or star colour picked by hand, or a filled glyph named outside
     /// its contract. The DEBUG button gallery shows the raw cases.
     static let patterns = ["Palette.saveGold", "saveGoldOnMedia", "AppSymbol.saved", "AppSymbol.liked", "\"core.star.fill\"", "\"core.heart.fill\""]
-    static let allowed: Set<String> = ["AppButtonGalleryViewController.swift", "PointsHeartView.swift", "AppButton.swift"]
+    static let allowed: Set<String> = ["AppButtonGalleryViewController.swift", "LikesHeartView.swift", "AppButton.swift"]
 
     @Test func everyHeartAndStarComesFromItsContract() throws {
         var found: [String] = []
@@ -42,7 +42,7 @@ struct SymbolContractTests {
                 for pattern in Self.patterns where text.contains(pattern) { found.append("\(name): \(pattern)") }
             }
         }
-        #expect(found.isEmpty, "read the heart from PointsSymbol and the star from SaveStar: \(found)")
+        #expect(found.isEmpty, "read the heart from LikesSymbol and the star from SaveStar: \(found)")
     }
 
     /// The star's one gold, the full-screen post's (#1188), in both
@@ -62,10 +62,10 @@ struct SymbolContractTests {
     /// A toast's heart is the Points pink, its star the save gold (#1190);
     /// a failure keeps its red, any other glyph the style's ink.
     @Test func aToastGlyphKeepsItsOwnColour() {
-        #expect(ToastView.glyphTint(symbol: PointsSymbol.glyph, style: .confirmation) == PointsSymbol.tint)
+        #expect(ToastView.glyphTint(symbol: LikesSymbol.glyph, style: .confirmation) == LikesSymbol.tint)
         #expect(ToastView.glyphTint(symbol: SaveStar.glyph, style: .confirmation) == SaveStar.tint)
         #expect(ToastView.glyphTint(symbol: "bell.fill", style: .confirmation) == .label)
-        #expect(ToastView.glyphTint(symbol: PointsSymbol.glyph, style: .failure) == .systemRed)
+        #expect(ToastView.glyphTint(symbol: LikesSymbol.glyph, style: .failure) == .systemRed)
     }
 
     /// The selector's badges can wear a gradient (#1190).

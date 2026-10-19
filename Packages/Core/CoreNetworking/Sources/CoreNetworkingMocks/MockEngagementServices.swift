@@ -54,11 +54,11 @@ public final class MockCounterStore: @unchecked Sendable {
         }
     }
 
-    // MARK: Likes are points (#676)
+    // MARK: Likes, the currency a like stakes (#676)
 
     /// Points per target ("post:<id>" / "comment:<id>") per account.
     private var stakes: [String: [String: Int64]] = [:]
-    /// A comment's like count: the sum of its points (comments have no seed).
+    /// A comment's like count: the sum of its likes (comments have no seed).
     private var commentLikes: [String: Int64] = [:]
     /// The posts each account first staked on, newest last (#411).
     private var likedPostsInOrder: [String: [String]] = [:]
@@ -69,32 +69,32 @@ public final class MockCounterStore: @unchecked Sendable {
         lock.withLock { (likedPostsInOrder[account] ?? []).reversed() }
     }
 
-    /// The account's points on the target.
+    /// The account's likes on the target.
     public func myLikes(account: String, target: String) -> Int64 {
         lock.withLock { stakes[target]?[account] ?? 0 }
     }
 
-    /// The target's count: a post's seeded likes plus every point staked,
-    /// a comment's points.
+    /// The target's count: a post's seeded likes plus every like staked,
+    /// a comment's likes.
     public func likeCount(target: String) -> Int64 {
         if target.hasPrefix("post:") { return likeCount(for: String(target.dropFirst(5))) }
         return lock.withLock { commentLikes[String(target.dropFirst(8))] ?? 0 }
     }
 
-    /// Puts `points` of the account on the target: its total and the
+    /// Puts `likes` of the account on the target: its total and the
     /// target's count both move.
     @discardableResult
-    public func stake(_ points: Int64, account: String, target: String) -> Int64 {
+    public func stake(_ likes: Int64, account: String, target: String) -> Int64 {
         lock.withLock {
-            let mine = (stakes[target]?[account] ?? 0) + points
+            let mine = (stakes[target]?[account] ?? 0) + likes
             stakes[target, default: [:]][account] = mine
             if target.hasPrefix("post:") {
                 let id = String(target.dropFirst(5))
-                if mine == points, points > 0 { likedPostsInOrder[account, default: []].append(id) }
-                likeCounts[id] = (likeCounts[id] ?? 0) + points
+                if mine == likes, likes > 0 { likedPostsInOrder[account, default: []].append(id) }
+                likeCounts[id] = (likeCounts[id] ?? 0) + likes
             } else {
                 let id = String(target.dropFirst(8))
-                commentLikes[id] = (commentLikes[id] ?? 0) + points
+                commentLikes[id] = (commentLikes[id] ?? 0) + likes
             }
             return mine
         }
@@ -274,19 +274,19 @@ public final class MockEngagementService: @unchecked Sendable {
 /// `next_claim_at` — only spending opens it again. Refusals come back
 /// in-band with the whole wallet. A replayed key answers the first answer.
 ///
-/// `startingPoints` is what a wallet opens with: the app's mock opens at the
+/// `startingLikes` is what a wallet opens with: the app's mock opens at the
 /// charter's 250; package tests keep a generous balance so a stake rule, not
 /// the balance, is what they meet. `persistence` keeps the wallets across
 /// launches, as the server does.
 public final class MockWalletService: @unchecked Sendable {
-    public static let generousStartingPoints: Int64 = 100_000
+    public static let generousStartingLikes: Int64 = 100_000
     static let perTargetCap: Int64 = 250
     static let hourlyCap: Int64 = 1_000
-    static let pointsPerShot: Int64 = 100
+    static let likesPerShot: Int64 = 100
     static let claimInterval: TimeInterval = 3_600
     static let baseClaim: Double = 25
     static let dailyClaimCap: Int64 = 200
-    public static let pointsCap: Int64 = 2_000
+    public static let likesCap: Int64 = 2_000
     static let starterGems: Int64 = 100
     static let stakePackPrice: Int64 = 50
     static let stakePackShots: Int32 = 3
@@ -294,10 +294,10 @@ public final class MockWalletService: @unchecked Sendable {
 
     /// One account's wallet, as the server keeps it.
     struct Account: Codable, Equatable {
-        var points: Int64
+        var likes: Int64
         var gems: Int64
-        var pointsEarned: Int64 = 0
-        var pointsSpent: Int64 = 0
+        var likesEarned: Int64 = 0
+        var likesSpent: Int64 = 0
         var stakeShots: Int32 = 0
         var claimedToday: Int64 = 0
         /// The UTC day `claimedToday` counts ("yyyy-MM-dd").
@@ -310,11 +310,22 @@ public final class MockWalletService: @unchecked Sendable {
         /// The wallet's history, oldest first (#400). Optional, as above.
         var ledger: [LedgerEntry]?
 
+        /// The mock's wallets are kept under `mock.wallet.accounts` with
+        /// their "points" keys (#1397): renamed, every kept wallet would
+        /// reset once.
+        enum CodingKeys: String, CodingKey {
+            case likes = "points"
+            case gems
+            case likesEarned = "pointsEarned"
+            case likesSpent = "pointsSpent"
+            case stakeShots, claimedToday, claimDay, streakDays, lastClaimAt, positions, ledger
+        }
+
         /// Records one movement, with the balance right after.
-        mutating func record(_ kind: Wallet_V1_TransactionKind, points delta: Int64, at moment: Date, ref: String = "") {
+        mutating func record(_ kind: Wallet_V1_TransactionKind, likes delta: Int64, at moment: Date, ref: String = "") {
             var entries = ledger ?? []
             entries.append(LedgerEntry(
-                id: "tx-\(entries.count + 1)", gems: false, delta: delta, balanceAfter: points,
+                id: "tx-\(entries.count + 1)", gems: false, delta: delta, balanceAfter: likes,
                 kind: kind.rawValue, at: moment, ref: ref
             ))
             ledger = entries
@@ -335,9 +346,15 @@ public final class MockWalletService: @unchecked Sendable {
     /// One target's stakes, all batches together.
     struct Position: Codable, Equatable {
         var target: String
-        var points: Int64
+        var likes: Int64
         var firstAt: Date
         var lastAt: Date
+
+        enum CodingKeys: String, CodingKey {
+            case target
+            case likes = "points"
+            case firstAt, lastAt
+        }
     }
 
     /// Positions settle a day after their first stake (backend #886).
@@ -346,7 +363,7 @@ public final class MockWalletService: @unchecked Sendable {
     private let store: MockCounterStore
     private let dataset: MockSocialDataset
     private let now: @Sendable () -> Date
-    private let startingPoints: Int64
+    private let startingLikes: Int64
     private let persistence: UserDefaults?
     /// Posts a new wallet opens with stakes on, some settled — so the
     /// sheet's lists are not empty on a fresh install (the app's mock).
@@ -369,7 +386,7 @@ public final class MockWalletService: @unchecked Sendable {
     public init(
         store: MockCounterStore,
         dataset: MockSocialDataset,
-        startingPoints: Int64 = MockWalletService.generousStartingPoints,
+        startingLikes: Int64 = MockWalletService.generousStartingLikes,
         persistence: UserDefaults? = nil,
         demoPositions: [String] = [],
         now: @escaping @Sendable () -> Date = { Date() },
@@ -379,7 +396,7 @@ public final class MockWalletService: @unchecked Sendable {
         self.demoPositions = demoPositions
         self.store = store
         self.dataset = dataset
-        self.startingPoints = startingPoints
+        self.startingLikes = startingLikes
         self.persistence = persistence
         self.now = now
         // `-wallet-reset` (the app's QA hook) opens every wallet afresh.
@@ -428,9 +445,9 @@ public final class MockWalletService: @unchecked Sendable {
             && key.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }
     }
 
-    /// The account's points, as the server holds them (tests).
-    public func points(of account: String) -> Int64 {
-        lock.withLock { accountLocked(account).points }
+    /// The account's likes, as the server holds them (tests).
+    public func likes(of account: String) -> Int64 {
+        lock.withLock { accountLocked(account).likes }
     }
 
     /// The welcome gift (backend #934, #1008, #943): a flat 50, credited
@@ -444,12 +461,12 @@ public final class MockWalletService: @unchecked Sendable {
             guard accounts[key] == nil else { return 0 }
             let amount: Int64 = 50
             var wallet = accountLocked(account)
-            wallet.points += amount
-            wallet.pointsEarned += amount
-            wallet.record(.welcomeGift, points: amount, at: now())
+            wallet.likes += amount
+            wallet.likesEarned += amount
+            wallet.record(.welcomeGift, likes: amount, at: now())
             accounts[account] = wallet
             // The device's mark, kept with the wallets so it survives too.
-            accounts[key] = Account(points: 0, gems: 0)
+            accounts[key] = Account(likes: 0, gems: 0)
             return amount
         }
     }
@@ -458,14 +475,14 @@ public final class MockWalletService: @unchecked Sendable {
 
     private func accountLocked(_ id: String) -> Account {
         if let account = accounts[id] { return account }
-        var opened = Account(points: startingPoints, gems: Self.starterGems)
+        var opened = Account(likes: startingLikes, gems: Self.starterGems)
         // The wallet opens with its starter gems — and, in the mock, its
         // starting points — as the first rows of its history.
         let openedAt = now().addingTimeInterval(-7 * 86_400)
         opened.ledger = [
             LedgerEntry(id: "tx-0", gems: true, delta: Self.starterGems, balanceAfter: Self.starterGems,
                         kind: Wallet_V1_TransactionKind.starterGift.rawValue, at: openedAt, ref: ""),
-            LedgerEntry(id: "tx-00", gems: false, delta: startingPoints, balanceAfter: startingPoints,
+            LedgerEntry(id: "tx-00", gems: false, delta: startingLikes, balanceAfter: startingLikes,
                         kind: Wallet_V1_TransactionKind.starterGift.rawValue, at: openedAt, ref: ""),
         ]
         // Demo stakes placed before the wallet "opened", seven hours apart:
@@ -474,7 +491,7 @@ public final class MockWalletService: @unchecked Sendable {
         let moment = now()
         opened.positions = demoPositions.enumerated().map { index, post in
             let first = moment.addingTimeInterval(-Double(index) * 7 * 3_600 - 1_800)
-            return Position(target: "post:" + post, points: Int64(1 + index * 7 % 40), firstAt: first, lastAt: first)
+            return Position(target: "post:" + post, likes: Int64(1 + index * 7 % 40), firstAt: first, lastAt: first)
         }
         return opened
     }
@@ -503,7 +520,7 @@ public final class MockWalletService: @unchecked Sendable {
 
     private func claimStateLocked(_ account: Account, at moment: Date) -> ClaimState {
         let claimedToday = account.claimDay == Self.day(moment) ? account.claimedToday : 0
-        if account.points >= Self.pointsCap { return .full }
+        if account.likes >= Self.likesCap { return .full }
         if claimedToday >= Self.dailyClaimCap {
             return .dailyCap(Self.utc.date(byAdding: .day, value: 1, to: Self.utc.startOfDay(for: moment))!)
         }
@@ -514,7 +531,7 @@ public final class MockWalletService: @unchecked Sendable {
         let isNewDay = account.lastClaimAt.map { Self.day($0) != Self.day(moment) } ?? true
         let streak = isNewDay ? continuing + 1 : max(continuing, 1)
         let multiplier = min(2, 1 + 0.1 * Double(streak - 1))
-        let amount = min(Int64((Self.baseClaim * multiplier).rounded()), Self.dailyClaimCap - claimedToday, Self.pointsCap - account.points)
+        let amount = min(Int64((Self.baseClaim * multiplier).rounded()), Self.dailyClaimCap - claimedToday, Self.likesCap - account.likes)
         return .available(amount: amount)
     }
 
@@ -522,19 +539,19 @@ public final class MockWalletService: @unchecked Sendable {
         let account = accountLocked(id)
         var wallet = Wallet_V1_Wallet()
         wallet.accountID = id
-        wallet.points = account.points
+        wallet.points = account.likes
         wallet.gems = account.gems
-        wallet.pointsEarned = account.pointsEarned
-        wallet.pointsSpent = account.pointsSpent
+        wallet.pointsEarned = account.likesEarned
+        wallet.pointsSpent = account.likesSpent
         wallet.stakeShots = account.stakeShots
         wallet.claimedToday = Int32(account.claimDay == Self.day(moment) ? account.claimedToday : 0)
         wallet.dailyClaimCap = Int32(Self.dailyClaimCap)
         wallet.streakDays = Self.streak(account, at: moment)
         if let last = account.lastClaimAt { wallet.lastClaimAt = Google_Protobuf_Timestamp(date: last) }
-        wallet.pointsCap = Self.pointsCap
+        wallet.pointsCap = Self.likesCap
         wallet.stakePackPrice = Self.stakePackPrice
         wallet.stakePackShots = Self.stakePackShots
-        wallet.pointsPerShot = Int32(Self.pointsPerShot)
+        wallet.pointsPerShot = Int32(Self.likesPerShot)
         switch claimStateLocked(account, at: moment) {
         case .available(let amount):
             wallet.claimAvailable = true
@@ -609,7 +626,7 @@ public final class MockWalletService: @unchecked Sendable {
             } else {
                 stake.commentID = String(position.target.dropFirst(8))
             }
-            stake.points = position.points
+            stake.points = position.likes
             stake.firstAt = Google_Protobuf_Timestamp(date: position.firstAt)
             stake.lastAt = Google_Protobuf_Timestamp(date: position.lastAt)
             let settlesAt = position.firstAt.addingTimeInterval(Self.settlementDelay)
@@ -654,9 +671,9 @@ public final class MockWalletService: @unchecked Sendable {
                 account.claimedToday = (account.claimDay == today ? account.claimedToday : 0) + amount
                 account.claimDay = today
                 account.lastClaimAt = moment
-                account.points += amount
-                account.pointsEarned += amount
-                account.record(.claim, points: amount, at: moment)
+                account.likes += amount
+                account.likesEarned += amount
+                account.record(.claim, likes: amount, at: moment)
                 accounts[request.accountID] = account
                 response.outcome = .claimed
                 response.awarded = Int32(amount)
@@ -730,32 +747,32 @@ public final class MockWalletService: @unchecked Sendable {
         }
         if !stakeable { return answer(.targetNotStakeable) }
         var wallet = accountLocked(account)
-        let balance = wallet.points
+        let balance = wallet.likes
         let recent = (hourLedger[account] ?? []).filter { moment.timeIntervalSince($0.0) < 3600 }
         let hourRoom = Self.hourlyCap - recent.reduce(0) { $0 + $1.1 }
         let room = Self.perTargetCap - mine
         let spend: Int64
         if request.useStakeShot {
             guard room > 0 else { return answer(.targetCapReached) }
-            guard room >= Self.pointsPerShot else { return answer(.shotDoesNotFit) }
-            guard balance >= Self.pointsPerShot else { return answer(.insufficientBalance) }
-            guard hourRoom >= Self.pointsPerShot else { return answer(.rateLimited) }
-            spend = Self.pointsPerShot
+            guard room >= Self.likesPerShot else { return answer(.shotDoesNotFit) }
+            guard balance >= Self.likesPerShot else { return answer(.insufficientBalance) }
+            guard hourRoom >= Self.likesPerShot else { return answer(.rateLimited) }
+            spend = Self.likesPerShot
         } else {
             guard room > 0 else { return answer(.targetCapReached) }
             guard balance > 0 else { return answer(.insufficientBalance) }
             guard hourRoom > 0 else { return answer(.rateLimited) }
             spend = min(Int64(request.points), room, balance, hourRoom)
         }
-        wallet.points -= spend
-        wallet.pointsSpent += spend
-        wallet.record(.stake, points: -spend, at: moment, ref: target)
+        wallet.likes -= spend
+        wallet.likesSpent += spend
+        wallet.record(.stake, likes: -spend, at: moment, ref: target)
         var positions = wallet.positions ?? []
         if let index = positions.firstIndex(where: { $0.target == target }) {
-            positions[index].points += spend
+            positions[index].likes += spend
             positions[index].lastAt = moment
         } else {
-            positions.append(Position(target: target, points: spend, firstAt: moment, lastAt: moment))
+            positions.append(Position(target: target, likes: spend, firstAt: moment, lastAt: moment))
         }
         wallet.positions = positions
         accounts[account] = wallet

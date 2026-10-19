@@ -9,7 +9,7 @@ The app's two-currency economy, as specified by the charter:
 
 | Charter | In the app | Glyph |
 |---|---|---|
-| **A** — curation capacity, spent when staking | **Points** (today's likes / boosts) | `PointsSymbol` — a heart, red; the coin is a white heart on a red disc |
+| **A** — curation capacity, spent when staking | **Likes** (the currency a like stakes; "points" until #1397) | `LikesSymbol` — a heart, red; the coin is a white heart on a red disc |
 | **B** — earned-only reward, settled later | **Gems** | a diamond (`diamond.fill`) |
 | *Mise / miser* | **Stake / to stake** ("Active stakes", "Settled") | — |
 

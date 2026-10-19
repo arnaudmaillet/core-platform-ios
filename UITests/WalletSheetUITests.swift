@@ -11,7 +11,7 @@ final class WalletSheetUITests: XCTestCase {
 
     override func setUp() { continueAfterFailure = false }
 
-    func testThePointsSheetBarOpensTheShopScreen() {
+    func testTheLikesSheetBarOpensTheShopScreen() {
         let app = XCUIApplication()
         app.launchArguments = ["-mock-auto-login", "-open-wallet"]
         app.launch()

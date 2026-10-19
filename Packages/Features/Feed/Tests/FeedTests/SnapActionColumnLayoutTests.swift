@@ -723,7 +723,7 @@ struct SnapActionColumnLayoutTests {
     /// none until a chip has gone under the header; one item per day, each
     /// under its own identifier (the morph); held to the width the run leaves
     /// it, so it is what truncates first.
-    @Test func theThreadsDayRidesTheBarLeftOfThePoints() throws {
+    @Test func theThreadsDayRidesTheBarLeftOfTheLikes() throws {
         let controller = SnapFeedViewController(
             viewModel: FeedViewModel(repository: ColumnSilentProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),

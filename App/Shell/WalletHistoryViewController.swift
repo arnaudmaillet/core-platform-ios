@@ -15,12 +15,12 @@ import UIKit
 @MainActor
 final class WalletHistoryViewController: UIViewController {
     enum Filter: Int, CaseIterable {
-        case all, points, gems
+        case all, likes, gems
 
         var title: String {
             switch self {
             case .all: "All"
-            case .points: "Likes"
+            case .likes: "Likes"
             case .gems: GemSymbol.name
             }
         }
@@ -28,7 +28,7 @@ final class WalletHistoryViewController: UIViewController {
         var currency: WalletTransaction.Currency? {
             switch self {
             case .all: nil
-            case .points: .points
+            case .likes: .likes
             case .gems: .gems
             }
         }
@@ -253,7 +253,7 @@ final class WalletHistoryViewController: UIViewController {
         let text = NSMutableAttributedString(string: "\(sign)\(abs(transaction.delta).formatted()) ", attributes: [
             .font: font, .foregroundColor: color,
         ])
-        let glyph = transaction.currency == .gems ? GemSymbol.glyphImage() : PointsSymbol.glyphImage()
+        let glyph = transaction.currency == .gems ? GemSymbol.glyphImage() : LikesSymbol.glyphImage()
         if let glyph {
             let attachment = NSTextAttachment(image: glyph)
             text.append(NSAttributedString(attachment: attachment))

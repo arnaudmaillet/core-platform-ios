@@ -112,16 +112,16 @@ struct PlainCardActionsTests {
     /// A staked heart is the Points heart: the button's OWN filled glyph in
     /// the Points pink, no overlay laid on it (#1186) — the line's ink is the
     /// heart at rest, not a heart the viewer has filled.
-    @Test func aStakedHeartIsThePointsHeart() throws {
+    @Test func aStakedHeartIsTheLikesHeart() throws {
         let cell = row()
         let likes = try #require(actions(in: cell).last)
         cell.setViewerStake(10)
         #expect(likes.isSelected)
-        #expect(likes.pointsHeart == nil, "a heart laid over the button: it doubled the like (#1186)")
-        #expect(likes.selectedTint == PointsSymbol.tint)
-        #expect(likes.configuration?.imageColorTransformer?(.black) == PointsSymbol.tint, "the staked heart is not the Points pink")
+        #expect(likes.likesHeart == nil, "a heart laid over the button: it doubled the like (#1186)")
+        #expect(likes.selectedTint == LikesSymbol.tint)
+        #expect(likes.configuration?.imageColorTransformer?(.black) == LikesSymbol.tint, "the staked heart is not the Points pink")
         #expect(likes.configuration?.baseForegroundColor == .secondaryLabel, "the count stays the line's ink")
-        #expect(likes.content.symbol == PointsSymbol.glyph)
+        #expect(likes.content.symbol == LikesSymbol.glyph)
         cell.setViewerStake(0)
         #expect(likes.configuration?.baseForegroundColor == .secondaryLabel)
         #expect(likes.content.symbol == PostGridListRowCell.ActionSymbol.like)
@@ -299,7 +299,7 @@ struct PlainCardActionsTests {
     /// ⚠️ A STAKED heart flies home as the Points heart — filmed without this
     /// (when it was red): the stand-in's heart at rest, the row's colour, the
     /// colour changing in the landing frame.
-    @Test func aStakedHeartFliesHomeAsThePointsHeart() throws {
+    @Test func aStakedHeartFliesHomeAsTheLikesHeart() throws {
         func heart(_ view: UIView) throws -> AppButton {
             try #require(walk(view, AppButton.self)
                 .filter { !$0.isHidden && $0.superviewChainIsVisible }
@@ -313,8 +313,8 @@ struct PlainCardActionsTests {
             actions: .init(repost: true, bookmark: true, saved: false, stake: 10)
         )
         let card = try #require(view.subviews.first as? PostGridListRowCell)
-        #expect(try heart(card).pointsHeart == nil, "a heart laid over the flying card's: it doubled the like (#1186)")
-        #expect(try heart(card).configuration?.imageColorTransformer?(.black) == PointsSymbol.tint, "the flying card's heart is not the Points pink")
+        #expect(try heart(card).likesHeart == nil, "a heart laid over the flying card's: it doubled the like (#1186)")
+        #expect(try heart(card).configuration?.imageColorTransformer?(.black) == LikesSymbol.tint, "the flying card's heart is not the Points pink")
         #expect(try heart(card).isSelected == heart(wired.contentView).isSelected)
 
         // And a staking row with no count yet keeps its heart on both.

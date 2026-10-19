@@ -327,7 +327,7 @@ extension UIView {
 public class PostCardPillView: PostMetaPillView {
     /// The ink of every action on a card: `.secondaryLabel`, for the glyphs
     /// and for the counts beside them. A staked heart is the one exception,
-    /// and it is the points' red (`PointsSymbol.tint`), not a darker grey.
+    /// and it is the points' red (`LikesSymbol.tint`), not a darker grey.
     ///
     /// ⚠️ THERE WERE TWO RANKS (30 September – 1 October 2026): comments and
     /// likes in `.label`, glyph and count alike, repost and save in
