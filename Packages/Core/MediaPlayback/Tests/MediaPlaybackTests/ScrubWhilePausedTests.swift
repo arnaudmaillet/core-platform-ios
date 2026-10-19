@@ -103,9 +103,21 @@ struct ScrubWhilePausedTests {
         // Not a wait for something to happen: a stretch of playback, read back
         // against the time it actually took (below), however long that was.
         try await Task.sleep(for: .milliseconds(300))
-        let readFrom = ContinuousClock.now - resumed
-        let head = try #require(controller.playhead(in: surface))
-        let readBy = ContinuousClock.now - resumed
+        var reading = try read(controller, surface, since: resumed)
+        // ⚠️ NEVER BETWEEN THE ITEM'S END AND THE LOOP'S RESTART (#1405). The
+        // loop is `actionAtItemEnd = .none` and a seek to zero on the end
+        // notification, run on the main queue: until that seek runs, the item
+        // holds at its end. On a starved runner the hold lasted ~0.6 s, and CI
+        // read 3.0 s of a 3.0 s clip where 0.61 s was due. A reading at the end
+        // is the restart still pending, not a place on the loop, so it is read
+        // again once the loop has restarted, each look timed on its own. A
+        // loop that never restarts still fails: it holds there through every
+        // look, and that is far off the loop.
+        for _ in 0..<600 where reading.head.fraction >= Self.heldAtTheEnd {
+            try await Task.sleep(for: .milliseconds(10))
+            reading = try read(controller, surface, since: resumed)
+        }
+        let (head, readFrom, readBy) = reading
 
         // ⚠️ AGAINST THE TIME THE TEST ACTUALLY SPENT, not `fraction > 0.6`
         // (#599): a starved "300 ms" ran ~2.4 s on CI and wrapped the 3 s loop
@@ -116,6 +128,20 @@ struct ScrubWhilePausedTests {
             head.fraction * duration, start: scrubbed * duration,
             elapsed: Self.seconds(readFrom)...Self.seconds(readBy), period: duration, slack: 0.25
         ), "resuming dragged the clip back to where the scrub started: \(head) after \(readFrom)…\(readBy)")
+    }
+
+    /// A playhead this close to 1 is the item held at its end, waiting for
+    /// the loop's seek to zero: closer than half a frame of the 30 fps fixture.
+    private static let heldAtTheEnd = 0.995
+
+    /// The playhead, and when it was read: after `from` and before `by`, both
+    /// counted from `start`.
+    private func read(
+        _ controller: VideoPlaybackController, _ surface: VideoRenderView, since start: ContinuousClock.Instant
+    ) throws -> (head: (fraction: Double, seconds: Double), from: Duration, by: Duration) {
+        let from = ContinuousClock.now - start
+        let head = try #require(controller.playhead(in: surface))
+        return (head, from, ContinuousClock.now - start)
     }
 
     /// The witness: with no seek in between, the anchor still does its job. A
