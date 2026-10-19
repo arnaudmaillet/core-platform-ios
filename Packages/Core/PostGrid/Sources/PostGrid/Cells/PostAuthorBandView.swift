@@ -196,7 +196,16 @@ public final class PostAuthorBandView: UIView {
 
     private let avatar = MonogramAvatarView(diameter: PostAuthorBandView.avatarDiameter)
     private let avatarImage = AvatarImageView()
-    private lazy var animation = AnimatedAvatarPlayer.attach(to: avatarImage)
+    /// An animated avatar's still is its picture (#1424), drawn as soon as
+    /// it is known.
+    private lazy var animation: AnimatedAvatarPlayer = {
+        let player = AnimatedAvatarPlayer.attach(to: avatarImage)
+        player.onStill = { [weak self] still in
+            self?.avatarImage.image = still
+            self?.avatarImage.isHidden = false
+        }
+        return player
+    }()
     private let nameLabel = UILabel()
     private let handleLabel = UILabel()
     private let menuButton = PostActionPillView.makeGlyphControl(systemName: "ellipsis", label: "More actions")
@@ -359,13 +368,13 @@ public final class PostAuthorBandView: UIView {
         renderHandleLine()
         avatar.setMonogram(model.monogram)
         // A post card's author is large enough to play an animated avatar,
-        // on scrolling into view (#1358).
+        // when the rounds pick it (#1358, #1424).
         animation.setAvatar(showsIdentity ? model.avatarURL : nil)
 
         guard showsIdentity, let url = model.avatarURL, let imagePipeline else { return }
         // Decoded at the avatar's bucket, not at 1200 px (#894).
         if let cached = imagePipeline.cachedImage(for: url, size: .avatar) {
-            avatarImage.image = cached
+            avatarImage.image = animation.still ?? cached
             avatarImage.isHidden = false
             return
         }
@@ -376,7 +385,7 @@ public final class PostAuthorBandView: UIView {
             guard let image = try? await imagePipeline.image(for: url, size: .avatar),
                   !Task.isCancelled, let self
             else { return }
-            self.avatarImage.image = image
+            self.avatarImage.image = self.animation.still ?? image
             self.avatarImage.isHidden = false
         }
     }

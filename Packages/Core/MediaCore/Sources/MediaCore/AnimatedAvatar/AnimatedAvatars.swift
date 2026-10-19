@@ -94,33 +94,65 @@ public final class AnimatedAvatars {
     /// centre-cropped to a square and drawn at `cellPX`, four to a row — the
     /// geometry the backend is asked to bake (core-platform-backend#945).
     /// What the mock resolver makes its sheets with.
+    ///
+    /// ⚠️ BAKED AS A SEAMLESS LOOP THAT ENDS ON `face` (#1424,
+    /// core-platform-backend#948): the last frame IS the face — the still
+    /// every animated avatar rests on — and the clip cross-fades out of it
+    /// over the first `blendFrames` and back into it over the last ones. So
+    /// rest → frame 0 … last → rest has no cut, and the avatar's photo and
+    /// its still are one picture. Without a face, the tail fades into the
+    /// clip's first frame instead.
     public nonisolated static func bakeSquareSheet(
-        from source: AnimatedIconSheet, cellPX: Int = 128
+        from source: AnimatedIconSheet, cellPX: Int = 128, endingOn face: UIImage? = nil, blendFrames: Int = 6
     ) -> AnimatedIconSheet? {
         guard let image = source.sheet.cgImage else { return nil }
         let columns = 4
-        let rows = Int(ceil(Double(source.frameCount) / Double(columns)))
+        let count = source.frameCount
+        let rows = Int(ceil(Double(count) / Double(columns)))
         let size = CGSize(width: columns * cellPX, height: rows * cellPX)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
         let width = CGFloat(image.width)
         let height = CGFloat(image.height)
+        let cells: [CGImage?] = source.frameRects.map { unit in
+            let frame = CGRect(x: unit.minX * width, y: unit.minY * height,
+                               width: unit.width * width, height: unit.height * height)
+            let side = min(frame.width, frame.height)
+            return image.cropping(to: CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side).integral)
+        }
+        let anchor: UIImage? = face.flatMap(squareCrop) ?? cells.first.flatMap { $0 }.map { UIImage(cgImage: $0) }
+        let blend = max(0, min(blendFrames, (count - 1) / 2))
         let baked = UIGraphicsImageRenderer(size: size, format: format).image { _ in
-            for (index, unit) in source.frameRects.enumerated() {
-                let frame = CGRect(x: unit.minX * width, y: unit.minY * height,
-                                   width: unit.width * width, height: unit.height * height)
-                let side = min(frame.width, frame.height)
-                let square = CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side)
-                guard let cell = image.cropping(to: square.integral) else { continue }
+            for (index, cell) in cells.enumerated() {
                 let target = CGRect(x: (index % columns) * cellPX, y: (index / columns) * cellPX,
                                     width: cellPX, height: cellPX)
-                UIImage(cgImage: cell).draw(in: target)
+                if let cell { UIImage(cgImage: cell).draw(in: target) }
+                let weight = anchorWeight(index: index, count: count, blend: blend)
+                if weight > 0, let anchor { anchor.draw(in: target, blendMode: .normal, alpha: weight) }
             }
         }
         return AnimatedIconSheet(
-            sheet: baked, frameCount: source.frameCount, columns: columns, frameDuration: source.frameDuration
+            sheet: baked, frameCount: count, columns: columns, frameDuration: source.frameDuration
         )
+    }
+
+    /// How much of the face frame `index` shows: all of it on the last frame,
+    /// fading out over the head and back in over the tail, none between.
+    nonisolated static func anchorWeight(index: Int, count: Int, blend: Int) -> CGFloat {
+        guard count > 1 else { return 1 }
+        let fromEnd = count - 1 - index
+        if fromEnd <= blend { return 1 - CGFloat(fromEnd) / CGFloat(blend + 1) }
+        if index < blend { return 1 - CGFloat(index + 1) / CGFloat(blend + 1) }
+        return 0
+    }
+
+    /// The centre square of `image`, as an avatar is cut.
+    private nonisolated static func squareCrop(_ image: UIImage) -> UIImage? {
+        guard let cg = image.cgImage else { return nil }
+        let side = min(cg.width, cg.height)
+        let rect = CGRect(x: (cg.width - side) / 2, y: (cg.height - side) / 2, width: side, height: side)
+        return cg.cropping(to: rect).map { UIImage(cgImage: $0) }
     }
 
 }

@@ -164,14 +164,18 @@ final class ForYouStoryCell: UICollectionViewCell {
 
     /// The face's animation (#1358): For You's Friends faces play once on
     /// their first display there (`animationScope`, the row's).
-    private lazy var animation = AnimatedAvatarPlayer.attach(to: picture)
+    private lazy var animation: AnimatedAvatarPlayer = {
+        let player = AnimatedAvatarPlayer.attach(to: picture)
+        // An animated face's still is its picture (#1424).
+        player.onStill = { [weak self] still in self?.showPicture(still) }
+        return player
+    }()
 
     func configure(
         with story: ForYouViewModel.FriendStory, imagePipeline: ImagePipeline,
         animationScope: AnimatedAvatarScope? = nil
     ) {
         if let animationScope { animation.trigger = .firstAppearance(animationScope) }
-        animation.setAvatar(story.avatarURL)
         shownAuthor = story.authorID
         nameLabel.text = story.name.split(separator: " ").first.map(String.init) ?? story.name
         nameLabel.font = .scaledFont(forTextStyle: .caption1, weight: story.hasUnseen ? .semibold : .regular)
@@ -184,16 +188,18 @@ final class ForYouStoryCell: UICollectionViewCell {
         picture.image = nil
         picture.isHidden = true
         monogram.isCovered = false
+        // After the reset: a sheet already resolved draws its still now.
+        animation.setAvatar(story.avatarURL)
         guard let url = story.avatarURL else { return }
         if let cached = imagePipeline.cachedImage(for: url, size: .px256) {
-            showPicture(cached)
+            showPicture(animation.still ?? cached)
             return
         }
         let author = story.authorID
         pictureTask = Task { [weak self] in
             guard let image = try? await imagePipeline.image(for: url, size: .px256), !Task.isCancelled,
                   let self, shownAuthor == author else { return }
-            showPicture(image)
+            showPicture(animation.still ?? image)
         }
     }
 

@@ -115,18 +115,22 @@ public final class AvatarView: UIView {
     public func setPicture(_ url: URL?, pipeline: ImagePipeline?) {
         if let url, url == load.url, load.isLoading || ladder.rung == .content { return }
         if url == nil, load.url == nil, ladder.rung == .placeholder, picture.image == nil { return }
-        animation.setAvatar(url)
         let token = ladder.begin(item: url)
         self.token = token
         picture.image = nil
         standIn.image = nil
         monogram.isCovered = false
         ladder.show(.placeholder, token: token, warm: true)
+        // After the new item has begun: a sheet already resolved hands its
+        // still over now, as the picture (`adoptStill`).
+        animation.setAvatar(url)
         var warm = false
         load.load(url, using: pipeline) { [weak self] image, transition in
             guard let self, ladder.isCurrent(token) else { return }
             warm = transition == .none
-            picture.image = image
+            // An animated avatar's picture is its still, never the photo
+            // under it (#1424).
+            picture.image = animation.still ?? image
             ladder.show(.content, token: token, warm: warm)
             if !warm { onSettledAfterLoad?() }
         } failed: { [weak self] in
@@ -135,7 +139,7 @@ public final class AvatarView: UIView {
             if url != nil { onSettledAfterLoad?() }
         }
         // Missed at its size: a smaller decode already at hand stands in.
-        if !warm, load.isLoading, let url, let standInSize,
+        if !warm, load.isLoading, animation.still == nil, let url, let standInSize,
            let face = pipeline?.cachedImage(for: url, size: standInSize) {
             standIn.image = face
             ladder.show(.preview, token: token, warm: true)
@@ -152,17 +156,34 @@ public final class AvatarView: UIView {
     /// An animated avatar's player over the picture (#1358): the sheet's
     /// last frame at rest, played once by the rule (`AnimatedAvatarPlayer`).
     /// A still avatar shows nothing of it.
-    public private(set) lazy var animation = AnimatedAvatarPlayer.attach(to: picture)
+    public private(set) lazy var animation: AnimatedAvatarPlayer = {
+        let player = AnimatedAvatarPlayer.attach(to: picture)
+        player.onStill = { [weak self] still in self?.adoptStill(still) }
+        return player
+    }()
 
-    /// When this avatar plays: on scrolling into view (the default), or on
-    /// its first display on a screen where it is large and alone.
+    /// ⚠️ AN ANIMATED AVATAR'S PICTURE IS ITS STILL (#1424): its sheet's last
+    /// frame, drawn as THE picture the moment it is known — at once for a
+    /// sheet already resolved, before the photo, at any size, playing or not.
+    /// Laid over a different photo, every hand-over between the two was a cut
+    /// (the owner's recording, 2026-10-19: three pictures around one play).
+    private func adoptStill(_ still: UIImage) {
+        guard let token, ladder.isCurrent(token) else { return }
+        picture.image = still
+        ladder.show(.content, token: token, warm: true)
+        monogram.isCovered = true
+    }
+
+    /// When this avatar plays: when the rounds pick it (the default), on its
+    /// first display on a screen where it is large and alone, or when its
+    /// person changes.
     public var animationTrigger: AnimatedAvatarPlayer.Trigger {
         get { animation.trigger }
         set { animation.trigger = newValue }
     }
 
     /// The picture on show, nil while the initials are — an animated
-    /// avatar's still (its last frame) over the photograph.
+    /// avatar's still (its last frame), which is its picture.
     public var shownPicture: UIImage? {
         switch ladder.rung {
         case .content: return animation.still ?? picture.image

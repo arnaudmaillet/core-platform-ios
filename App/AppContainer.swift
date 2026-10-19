@@ -1190,7 +1190,7 @@ final class AppContainer {
     @MainActor
     func installAnimatedAvatars() {
         guard environment == .mock, !Self.previewsUnavailable else { return }
-        AnimatedAvatars.shared.resolver = MockAnimatedAvatarResolver(catalog: Self.mapPreviewCatalog)
+        AnimatedAvatars.shared.resolver = MockAnimatedAvatarResolver(catalog: Self.mapPreviewCatalog, faces: imagePipeline)
     }
 
     /// Baked from real clips by `Tools/IconBaker` — 24 frames at a 172px cell,
@@ -1864,9 +1864,13 @@ extension SessionManager: @retroactive SessionReauthenticating {
 }
 
 /// The mock's animated avatars (#1358): a stable half of the faces, each the
-/// square sheet cut from one clip preview — the same face, the same clip.
+/// square sheet cut from one clip preview — the same face, the same clip —
+/// baked as a loop out of the face's own photo and back into it (#1424): the
+/// sheet's last frame, the still, IS the photo, as the backend's will be
+/// (core-platform-backend#948).
 private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked Sendable {
     let catalog: AnimatedIconCatalog
+    let faces: ImagePipeline
 
     func sheet(for avatarURL: URL) async -> AnimatedIconSheet? {
         let key = Self.stableHash(avatarURL.absoluteString)
@@ -1875,8 +1879,9 @@ private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked S
         guard !clips.isEmpty,
               case .sheet(let source)? = try? await catalog.art(for: clips[Int(key / 2) % clips.count])
         else { return nil }
+        let face = try? await faces.image(for: avatarURL, size: .px256)
         return await Task.detached(priority: .utility) {
-            AnimatedAvatars.bakeSquareSheet(from: source)
+            AnimatedAvatars.bakeSquareSheet(from: source, endingOn: face)
         }.value
     }
 
