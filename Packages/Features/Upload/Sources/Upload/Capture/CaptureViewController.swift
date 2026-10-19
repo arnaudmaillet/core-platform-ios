@@ -1451,9 +1451,10 @@ final class CaptureViewController: UIViewController {
             items.append(close)
             if let nextItem { items.append(nextItem) }
         }
-        let current = navigationItem.rightBarButtonItems ?? []
+        // The screen's own items, never a bar toast's (#1420).
+        let current = ownTrailingBarItems
         guard current.map(\.identifier) != items.map(\.identifier) else { return }
-        navigationItem.setRightBarButtonItems(items.isEmpty ? nil : items, animated: animated)
+        setOwnTrailingBarItems(items.isEmpty ? nil : items, animated: animated)
     }
 
     /// Dims the shape's icon while the take has a clip — see `optionChosen`.

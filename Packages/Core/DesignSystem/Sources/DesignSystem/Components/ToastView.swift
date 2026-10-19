@@ -1097,6 +1097,12 @@ public final class ToastView: UIView {
         }
     }
 
+    #if DEBUG
+    /// A tap on the toast's action — its Undo — through the same path, for
+    /// tests outside this package (#1420).
+    public func debugTapAction() { runAction() }
+    #endif
+
     private func runAction() {
         guard let action, !isLeaving else { return }
         if undoable != nil {

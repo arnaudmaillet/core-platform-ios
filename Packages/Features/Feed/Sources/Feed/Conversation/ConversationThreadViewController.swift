@@ -650,7 +650,11 @@ final class ConversationThreadViewController: UIViewController {
     /// The bell takes the corner, right of the points badge (#719): `[0]` is
     /// the trailing edge, and a fixed space keeps the two bubbles apart.
     private func placeMuteItem(replacing old: UIBarButtonItem? = nil, animated: Bool = false) {
-        let current = navigationItem.rightBarButtonItems ?? []
+        // ⚠️ THE SCREEN'S OWN ITEMS, NOT THE BAR'S (#1420): while a bar toast
+        // is up (the mute's own "Notifications muted ↺"), the bar holds the
+        // toast's item. Edited from there, the list kept it: the toast stayed
+        // in the bar for good after its Undo, and the bar spilled into •••.
+        let current = ownTrailingBarItems
         var items = current.filter {
             $0 !== muteItem && $0 !== muteSpacer && $0 !== old && $0 !== daySpacer && !Self.isDayItem($0)
         }
@@ -671,7 +675,7 @@ final class ConversationThreadViewController: UIViewController {
         // already running (#756).
         guard items.count != current.count || zip(items, current).contains(where: { $0 !== $1 }) else { return }
         if animated { debugAnimatedBarPlacements += 1 }
-        navigationItem.setRightBarButtonItems(items, animated: animated)
+        setOwnTrailingBarItems(items, animated: animated)
     }
 
     /// How many animated placements the bar took. Tests.
