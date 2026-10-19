@@ -33,16 +33,11 @@ final class WalletBadgeInstaller: NSObject {
     /// change is the same slot, not a new one.
     static let itemIdentifier = "shell.wallet-balance"
 
-    /// What a GUEST's badge shows instead of the wallet: the welcome gift,
-    /// locked until they sign up (guest mode decision 11). The gate says who
-    /// is looking; the gift says how much is waiting.
-    struct WelcomeGiftFace {
-        let gift: WelcomeGift
-        let gate: any MemberGating
-    }
-
+    // A MEMBER'S ONLY (#1146, the owner 2026-10-14): a guest has no badge
+    // anywhere, so no host builds one for a guest — the hosts ask
+    // (`ExploreTabCoordinator.installBarItems`, `ForYouTabCoordinator.start`,
+    // `AppContainer`'s `attachBalance`).
     private let wallet: WalletStore
-    private let welcome: WelcomeGiftFace?
     private let badge = WalletBadgeButton()
     /// The presenting screen, for the sheet.
     private weak var presenter: UIViewController?
@@ -52,8 +47,8 @@ final class WalletBadgeInstaller: NSObject {
     /// install and again whenever the count's width changes.
     private let apply: (UIBarButtonItem) -> Void
 
-    /// Wakes the badge when the hourly claim unlocks — or, on a guest's
-    /// badge, when the gift next grows. One-shot, re-armed from every refresh.
+    /// Wakes the badge when the hourly claim unlocks. One-shot, re-armed from
+    /// every refresh.
     private var claimUnlockTimer: Timer?
 
     /// - Parameter apply: hands the host a bar item to install. Called
@@ -64,12 +59,10 @@ final class WalletBadgeInstaller: NSObject {
     init(
         wallet: WalletStore,
         presenter: UIViewController?,
-        welcome: WelcomeGiftFace?,
         makeSheet: @escaping () -> UIViewController,
         apply: @escaping (UIBarButtonItem) -> Void
     ) {
         self.wallet = wallet
-        self.welcome = welcome
         self.presenter = presenter
         self.makeSheet = makeSheet
         self.apply = apply
@@ -95,17 +88,6 @@ final class WalletBadgeInstaller: NSObject {
             self, selector: #selector(walletDidChange),
             name: WalletStore.didChangeNotification, object: wallet
         )
-        // A guest's face follows the gift (it opens, it settles) and the
-        // viewer (a sign-out after the gift settled changes no store).
-        if let welcome {
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(walletDidChange),
-                name: WelcomeGift.didChangeNotification, object: welcome.gift
-            )
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(walletDidChange), name: .viewerDidChange, object: nil
-            )
-        }
         apply(makeItem())
         refresh()
     }
@@ -120,12 +102,11 @@ final class WalletBadgeInstaller: NSObject {
     static func attach(
         to host: UIViewController,
         wallet: WalletStore,
-        welcome: WelcomeGiftFace?,
         makeSheet: @escaping () -> UIViewController
     ) {
         guard host is any HeaderAccessoryHosting else { return }
         let installer = WalletBadgeInstaller(
-            wallet: wallet, presenter: host, welcome: welcome, makeSheet: makeSheet
+            wallet: wallet, presenter: host, makeSheet: makeSheet
         ) { [weak host] item in
             (host as? any HeaderAccessoryHosting)?.setTrailingAccessoryItem(item)
         }
@@ -172,13 +153,6 @@ final class WalletBadgeInstaller: NSObject {
     private func refresh() {
         claimUnlockTimer?.invalidate()
         claimUnlockTimer = nil
-        if let welcome, !welcome.gate.isMember {
-            // 0 once this device's gift is spent: a guest still sees what an
-            // account would hold, never a wallet that isn't theirs.
-            badge.update(guestGift: welcome.gift.lockedAmount ?? 0)
-            if let growsAt = welcome.gift.nextGrowthAt { wake(at: growsAt) }
-            return
-        }
         let snapshot = wallet.snapshot()
         badge.update(
             balance: snapshot.balance,

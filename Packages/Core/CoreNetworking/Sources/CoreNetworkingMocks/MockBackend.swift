@@ -113,14 +113,12 @@ public struct MockBackend: Sendable {
         )
         wallet.register(on: bff)
         // A guest signing up is credited the welcome gift by the wallet
-        // (#1008), from the device's first launch — the app's own record of
-        // it (`WelcomeGift`'s key), standing in for the server's device row.
-        auth.onGuestUpgraded = { [wallet] account, device, guestSince in
-            let opened = UserDefaults.standard.double(forKey: "welcomeGift.openedAt")
+        // (#1008): a flat 50, once per device (#1146). The upgrade itself is
+        // the "a guest was here" — no date is needed for the amount.
+        auth.onGuestUpgraded = { [wallet] account, device, _ in
             wallet.creditWelcomeGift(
                 account: account,
-                device: device.deviceID.isEmpty ? "this-device" : device.deviceID,
-                firstLaunch: opened > 0 ? Date(timeIntervalSince1970: opened) : guestSince
+                device: device.deviceID.isEmpty ? "this-device" : device.deviceID
             )
         }
         MockCounterService(store: counterStore).register(on: bff)

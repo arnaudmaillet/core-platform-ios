@@ -109,13 +109,12 @@ struct MockWalletClaimTests {
         #expect(await client.claimReward(request: request, headers: [:]).error?.code == .invalidArgument)
     }
 
-    /// The welcome gift: once per device, from its first launch.
+    /// The welcome gift: a flat 50, once per device (#1146).
     @Test func theWelcomeGiftIsCreditedOncePerDevice() async throws {
         let (client, service) = make()
-        let twoDaysAgo = clock.now.addingTimeInterval(-2 * 86_400 - 60)
-        #expect(service.creditWelcomeGift(account: account, device: "dev-1", firstLaunch: twoDaysAgo) == 100)
-        #expect(service.creditWelcomeGift(account: account, device: "dev-1", firstLaunch: twoDaysAgo) == 0)
-        #expect(try await wallet(client).points == 350)
+        #expect(service.creditWelcomeGift(account: account, device: "dev-1") == 50)
+        #expect(service.creditWelcomeGift(account: account, device: "dev-1") == 0)
+        #expect(try await wallet(client).points == 300)
     }
 
     /// ListMyStakes (#903): a stake opens a position; a day later it is
