@@ -391,7 +391,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         // could be empty for the length of the animation and nobody saw it —
         // which is why this was only ever noticed on the plain push below.
         (destination as? SnapFeedViewController)
-            .map { $0.seedProjection(GalleryPostProjection.seedModels(from: origin.stream)) }
+            .map { $0.seedProjection(SnapFeedViewController.keepingOpeningKind(GalleryPostProjection.seedModels(from: origin.stream))) }
         // The collection's page the source is showing, and the source
         // following the post's carousel back — the same pair For You's own
         // list hands its feed (`ForYouViewController.openFeed`).
@@ -1331,8 +1331,11 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     ) -> UIViewController {
         let feed = makeSnapFeed(
             viewModel: FeedViewModel(
+                // One kind per feed (#1421): the opening post's, through the
+                // window and every continuation page.
                 repository: FixedPostsFeedProvider(
-                    base: repository, ids: postIDs, continuation: continuation, isCompleteSet: isCompleteSet
+                    base: repository, ids: postIDs, continuation: continuation, isCompleteSet: isCompleteSet,
+                    keepsToOpeningKind: true
                 ),
                 engagementProvider: engagementProvider,
                 commentsProvider: commentsProvider,
@@ -1362,9 +1365,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             if maySeed, cached.count == postIDs.count, !cached.isEmpty {
                 // ALL answered — the normal pin case, since pins prewarm on
                 // viewport settle.
-                snapFeed.seedProjection(
+                snapFeed.seedProjection(SnapFeedViewController.keepingOpeningKind(
                     FeedDisplayModelBuilder().build(cached, relativeTo: Date())
-                )
+                ))
             } else {
                 // A partial synchronous seed would TRUNCATE the corpus (a
                 // second seed is ignored by contract), so a cold or
@@ -1384,9 +1387,9 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                         entries.append(entry)
                     }
                     guard !entries.isEmpty else { return }
-                    snapFeed?.seedProjection(
+                    snapFeed?.seedProjection(SnapFeedViewController.keepingOpeningKind(
                         FeedDisplayModelBuilder().build(entries, relativeTo: Date())
-                    )
+                    ))
                 }
             }
         }
