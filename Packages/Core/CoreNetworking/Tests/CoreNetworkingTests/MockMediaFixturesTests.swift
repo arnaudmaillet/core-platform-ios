@@ -260,9 +260,13 @@ struct MockMediaFixturesTests {
                 #expect(real.authors[index].avatarURL.isEmpty)
                 continue
             }
-            let avatar = try? #require(URL(string: synthetic.authors[index].avatarURL))
+            // An animated author has no photo (#1444): its picture — the
+            // bundled photograph — is its banner, and its avatar the sheet.
+            let picture = MockSocialDataset.hasSheetAvatar(index: index)
+                ? synthetic.authors[index].bannerURL : synthetic.authors[index].avatarURL
+            let avatar = try? #require(URL(string: picture))
             #expect(avatar.flatMap { MockPhotoCatalog.shared.fileURL(forPhoto: $0) } != nil,
-                    "author \(index) wears \(synthetic.authors[index].avatarURL), not a bundled photo")
+                    "author \(index) wears \(picture), not a bundled photo")
             #expect(real.authors[index].avatarURL
                 == MockMediaFixtures.imageURL(index: index, width: shape.0, height: shape.1))
         }

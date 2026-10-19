@@ -188,7 +188,9 @@ final class ForYouStoryCell: UICollectionViewCell {
         picture.image = nil
         picture.isHidden = true
         monogram.isCovered = false
-        // After the reset: a sheet already resolved draws its still now.
+        // After the reset: a sheet already resolved draws its still now, at
+        // the rung the face is decoded at (#1444).
+        animation.rung = AnimatedAvatars.Rung(bucket: .px256)
         animation.setAvatar(story.avatarURL)
         guard let url = story.avatarURL else { return }
         if let cached = imagePipeline.cachedImage(for: url, size: .px256) {

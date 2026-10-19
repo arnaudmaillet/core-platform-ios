@@ -178,6 +178,9 @@ public final class ImagePipeline: Sendable {
     }
 
     private let fetcher: any ImageFetching
+    /// Where a sheet avatar's still comes from (#1444): never the fetcher —
+    /// an animated avatar has no photo.
+    private let sheetAvatars: AnimatedAvatars?
     private let maxPixelSize: Int
     private let memory: MemoryCache<ImageKey, UIImage>
     private let smallMemory: MemoryCache<ImageKey, UIImage>
@@ -212,9 +215,11 @@ public final class ImagePipeline: Sendable {
         disk: ImageDiskLocation? = nil,
         coordinator: CacheCoordinator? = nil,
         clock: any CacheClock = SystemCacheClock(),
-        negativeLifetime: TimeInterval = ImagePipeline.defaultNegativeLifetime
+        negativeLifetime: TimeInterval = ImagePipeline.defaultNegativeLifetime,
+        sheetAvatars: AnimatedAvatars? = .shared
     ) {
         self.fetcher = fetcher
+        self.sheetAvatars = sheetAvatars
         self.maxPixelSize = maxPixelSize
         self.coordinator = coordinator
         self.clock = clock
@@ -314,7 +319,18 @@ public final class ImagePipeline: Sendable {
     ///
     /// Cancelling the calling task drops its interest; the fill is cancelled
     /// only when nobody else (another caller, a prefetch) still wants it.
+    ///
+    /// ⚠️ A SHEET AVATAR'S URL IS NEVER FETCHED (#1444): an animated avatar
+    /// has no photo. It is answered with its sheet's last frame at the rung
+    /// `size` asks for, once the sheet is fully decoded — and fails when
+    /// there is no sheet, so the avatar keeps its initials.
     public func image(for url: URL, size: ImageBucket = .full, priority: CacheFillPriority = .visible) async throws -> UIImage {
+        if AnimatedAvatars.isSheet(url) {
+            guard let still = await sheetAvatars?.still(for: url, rung: AnimatedAvatars.Rung(bucket: size)) else {
+                throw URLError(.resourceUnavailable)
+            }
+            return still
+        }
         let key = ImageKey(url: url, bucket: size)
         if let cached = cachedImage(key) {
             if priority == .visible { recordArrival(key, .ready) }
@@ -341,6 +357,9 @@ public final class ImagePipeline: Sendable {
     /// configuration paths that must not suspend. Served by `size` or any
     /// larger bucket already decoded; never touches the disk.
     public func cachedImage(for url: URL, size: ImageBucket = .full) -> UIImage? {
+        if AnimatedAvatars.isSheet(url) {
+            return sheetAvatars?.cachedStill(for: url, rung: AnimatedAvatars.Rung(bucket: size))
+        }
         let key = ImageKey(url: url, bucket: size)
         let image = cachedImage(key)
         // A hit is an arrival found ready; a miss is not one yet: the caller
@@ -374,7 +393,9 @@ public final class ImagePipeline: Sendable {
     ///   owner gets an inactive interest.
     @discardableResult
     public func prefetch(_ url: URL, size: ImageBucket = .full, window: ImagePrefetchWindow, owner: CacheOwner) -> CacheFillInterest? {
-        guard prefetchPolicy.level > .off else { return nil }
+        // A sheet avatar resolves its sheet when shown; there are no bytes
+        // of a photo to bring ahead (#1444).
+        guard prefetchPolicy.level > .off, !AnimatedAvatars.isSheet(url) else { return nil }
         let key = ImageKey(url: url, bucket: size)
         if isDecoded(key) { return nil }
         switch window {

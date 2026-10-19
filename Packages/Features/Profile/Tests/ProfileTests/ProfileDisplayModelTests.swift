@@ -27,6 +27,17 @@ struct ProfileDisplayModelTests {
         )
     }
 
+    /// The banner is its own media (#1444, the owner's 2026-10-19 call): a
+    /// photo avatar still stands in for a missing banner, an animated one —
+    /// which has no photo — never does.
+    @Test func theBannerFallsBackOnAPhotoAvatarOnly() {
+        let photo = URL(string: "https://cdn.example/ada.jpg")!
+        #expect(ProfileDisplayModel(profile: profile(avatarURL: photo)).bannerImageURL == photo)
+        let sheet = URL(string: "mock://avatar-sheet/4#avatar-sheet")!
+        #expect(ProfileDisplayModel(profile: profile(avatarURL: sheet)).bannerImageURL == nil,
+                "a sheet avatar became the banner")
+    }
+
     @Test func prefixesHandleWithSigil() {
         let model = ProfileDisplayModel(profile: profile(handle: "ada"))
         #expect(model.handle == "@ada")

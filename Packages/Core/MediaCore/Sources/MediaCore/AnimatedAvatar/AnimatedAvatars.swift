@@ -1,36 +1,77 @@
 import CacheKit
 import UIKit
 
-/// Where an avatar's animation comes from: the sheet baked for the avatar at
-/// `avatarURL`, or nil for a still avatar (#1358). The mock answers today;
-/// the backend's sheet rendition (core-platform-backend#945) answers once it
-/// ships.
+/// Where an animated avatar's sheet comes from: the sheet baked for the
+/// sheet avatar at `avatarURL`, at `rung`, or nil when there is none (#1358,
+/// #1444). The mock answers today; the backend's sheet rendition
+/// (core-platform-backend#945, #948) answers once it ships.
 public protocol AnimatedAvatarResolving: Sendable {
-    func sheet(for avatarURL: URL) async -> AnimatedIconSheet?
+    func sheet(for avatarURL: URL, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet?
 }
 
-/// The app's animated avatars (#1358): which avatar has a sheet, the sheets
-/// themselves (decoded once, kept by bytes), and each sheet's still — its
-/// LAST frame, the picture every animated avatar rests on (the owner,
-/// 2026-10-18).
+/// The app's animated avatars (#1358, #1444): the sheets themselves (decoded
+/// once, kept by bytes) and each sheet's still — its LAST frame, the picture
+/// every animated avatar rests on (the owner, 2026-10-18).
 ///
-/// Resolution is asynchronous and cached: the first ask for a URL starts it,
-/// and `onResolved` tells the views waiting on that URL.
+/// ⚠️ **AN ANIMATED AVATAR HAS NO PHOTO** (the owner, 2026-10-19, #1444):
+/// its only media is its sprite sheet. Its URL says so (`isSheet`: the
+/// `#avatar-sheet` fragment), so nothing ever fetches it as a photo — the
+/// image pipeline answers it with the sheet's last frame (`cachedStill`,
+/// `still`), at the rung the drawn size asks for, once the sheet is fully
+/// decoded, and the avatar shows its initials until then.
+///
+/// Resolution is asynchronous and cached: the first ask for a sheet starts
+/// it, and every view waiting on it is told.
 @MainActor
 public final class AnimatedAvatars {
-    public static let shared = AnimatedAvatars()
+    /// Nonisolated: the image pipeline, which serves a sheet avatar's still,
+    /// takes it from any thread.
+    public nonisolated static let shared = AnimatedAvatars()
+
+    /// The fragment that marks a sheet avatar's URL. Mirrored by the mock
+    /// (`MockSocialDataset.sheetAvatarFragment`); the app checks the two agree.
+    public nonisolated static let sheetFragment = "avatar-sheet"
+
+    /// Whether `url` is a sheet avatar's — never a photo.
+    public nonisolated static func isSheet(_ url: URL?) -> Bool {
+        url?.fragment == sheetFragment
+    }
+
+    /// A sheet's cell size (core-platform-backend#948: 128 and 256 px).
+    public enum Rung: Int, Sendable, CaseIterable {
+        case px128 = 128
+        case px256 = 256
+
+        /// The smallest rung that covers `pixels` on a side, else the
+        /// largest: the profile header's ~300 px avatar takes 256, slightly
+        /// upscaled at @3x (accepted, 2026-10-19).
+        public init(pixels: CGFloat) {
+            self = Self.allCases.first { CGFloat($0.rawValue) >= pixels } ?? .px256
+        }
+
+        /// The rung for a picture decoded at `bucket`.
+        public init(bucket: ImageBucket) {
+            self.init(pixels: CGFloat(bucket.pixels ?? Rung.px256.rawValue))
+        }
+    }
+
+    struct Key: Hashable, Sendable {
+        let url: URL
+        let rung: Rung
+    }
 
     /// Set once at launch by the app. Nil: no avatar animates.
     public var resolver: (any AnimatedAvatarResolving)?
 
-    /// The decoded sheets and their stills, by avatar — on CacheKit, budgeted
-    /// by bytes like the map's previews (`AnimatedIconCatalog`). 1.5 MB a
-    /// face at the 128 px rung; the budget holds about twenty.
-    private let arts: MemoryCache<URL, Art>
-    /// Avatars known to have no sheet.
-    private var stills: Set<URL> = []
-    private var inflight: [URL: Task<Void, Never>] = [:]
-    private var waiting: [URL: [(AnimatedIconSheet?) -> Void]] = [:]
+    /// The decoded sheets and their stills, by avatar and rung — on
+    /// CacheKit, budgeted by bytes like the map's previews
+    /// (`AnimatedIconCatalog`). 1.5 MB a face at the 128 px rung. Read from
+    /// any thread (`cachedStill`): the cache is its own lock.
+    private nonisolated let arts: MemoryCache<Key, Art>
+    /// Sheets known to be missing.
+    private var missing: Set<Key> = []
+    private var inflight: [Key: Task<Void, Never>] = [:]
+    private var waiting: [Key: [(AnimatedIconSheet?) -> Void]] = [:]
 
     /// A face's sheet and its still, cut once.
     struct Art: Sendable {
@@ -38,43 +79,56 @@ public final class AnimatedAvatars {
         let still: UIImage?
     }
 
-    init(registry: UIAssetCaches? = .shared) {
+    nonisolated init(registry: UIAssetCaches? = .shared) {
         arts = UIAssetCaches.memoryCache(
             "UIAssets.avatarSheets", budget: .fixed(bytes: 32 * CacheBytes.mebibyte), priorityClass: .standard
         )
         registry?.adopt(arts)
     }
 
-    /// The sheet for `url` if it is known now; nil if it is a still or not
-    /// resolved yet.
-    public func cachedSheet(for url: URL) -> AnimatedIconSheet? {
-        arts.value(for: url)?.sheet
+    /// The sheet for `url` at `rung` if it is known now.
+    public func cachedSheet(for url: URL, rung: Rung) -> AnimatedIconSheet? {
+        arts.value(for: Key(url: url, rung: rung))?.sheet
     }
 
     /// The still an animated avatar rests on — its sheet's last frame — if
-    /// `url` is known to be animated.
-    public func still(for url: URL) -> UIImage? {
-        arts.value(for: url)?.still
+    /// the sheet is decoded. From any thread: what the image pipeline serves
+    /// a sheet avatar's URL from.
+    public nonisolated func cachedStill(for url: URL, rung: Rung) -> UIImage? {
+        arts.value(for: Key(url: url, rung: rung))?.still
     }
 
-    /// Resolves `url`'s sheet, calling `completion` on the main actor with it
-    /// (or nil for a still) — at once when it is already known.
-    public func sheet(for url: URL, completion: @escaping (AnimatedIconSheet?) -> Void) {
-        if let known = cachedSheet(for: url) { return completion(known) }
-        if stills.contains(url) { return completion(nil) }
-        guard let resolver else { return completion(nil) }
-        waiting[url, default: []].append(completion)
-        guard inflight[url] == nil else { return }
-        inflight[url] = Task { [weak self] in
-            let sheet = await resolver.sheet(for: url)
-            guard let self else { return }
-            inflight[url] = nil
-            if let sheet {
-                _ = arts.insert(Art(sheet: sheet, still: Self.lastFrame(of: sheet)), for: url, cost: sheet.byteCost)
-            } else {
-                stills.insert(url)
+    /// The still, once the sheet is resolved and decoded; nil when there is
+    /// no sheet. Never a photo: a sheet avatar has none.
+    public nonisolated func still(for url: URL, rung: Rung) async -> UIImage? {
+        if let known = cachedStill(for: url, rung: rung) { return known }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            Task { @MainActor in
+                self.sheet(for: url, rung: rung) { _ in continuation.resume() }
             }
-            let callbacks = waiting.removeValue(forKey: url) ?? []
+        }
+        return cachedStill(for: url, rung: rung)
+    }
+
+    /// Resolves `url`'s sheet at `rung`, calling `completion` on the main
+    /// actor with it (or nil) — at once when it is already known.
+    public func sheet(for url: URL, rung: Rung, completion: @escaping (AnimatedIconSheet?) -> Void) {
+        let key = Key(url: url, rung: rung)
+        if let known = cachedSheet(for: url, rung: rung) { return completion(known) }
+        if missing.contains(key) { return completion(nil) }
+        guard let resolver, Self.isSheet(url) else { return completion(nil) }
+        waiting[key, default: []].append(completion)
+        guard inflight[key] == nil else { return }
+        inflight[key] = Task { [weak self] in
+            let sheet = await resolver.sheet(for: url, rung: rung)
+            guard let self else { return }
+            inflight[key] = nil
+            if let sheet {
+                _ = arts.insert(Art(sheet: sheet, still: Self.lastFrame(of: sheet)), for: key, cost: sheet.byteCost)
+            } else {
+                missing.insert(key)
+            }
+            let callbacks = waiting.removeValue(forKey: key) ?? []
             callbacks.forEach { $0(sheet) }
         }
     }

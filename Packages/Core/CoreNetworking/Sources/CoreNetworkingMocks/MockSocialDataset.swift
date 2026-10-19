@@ -27,7 +27,13 @@ public struct MockSocialDataset: Sendable {
         public let profileID: String
         public let handle: String
         public let displayName: String
+        /// A photo's URL, or — for an animated avatar — its sprite sheet's
+        /// (`sheetAvatarURL`): an animated avatar has no photo (#1444).
         public let avatarURL: String
+        /// The banner's still, apart from the avatar: an animated avatar's
+        /// author wears the photo its face was cut from (the owner,
+        /// 2026-10-19: a separate banner). Empty = the avatar's, as before.
+        public let bannerURL: String
         /// Empty = no bio, so the profile header's collapsed-bio path is covered.
         public let bio: String
         /// Empty = no website link row.
@@ -877,7 +883,10 @@ public struct MockSocialDataset: Sendable {
                 profileID: "prof-\(index)",
                 handle: name.0,
                 displayName: name.1,
-                avatarURL: avatarURL(index: index),
+                avatarURL: mediaCatalog == .synthetic && Self.hasSheetAvatar(index: index)
+                    ? Self.sheetAvatarURL(index: index) : avatarURL(index: index),
+                bannerURL: mediaCatalog == .synthetic && Self.hasSheetAvatar(index: index)
+                    ? avatarURL(index: index) : "",
                 bio: name.2,
                 websiteURL: name.3
             )
@@ -1116,6 +1125,34 @@ public struct MockSocialDataset: Sendable {
     /// so the viewer's own profile wears a band — the landscape run's first.
     public static var syntheticViewerAvatarURL: String {
         MockPhotoCatalog.shared.avatarPhoto(forOrdinal: 0, landscape: true)?.media.url ?? ""
+    }
+
+    // MARK: - Animated avatars (#1358, #1444)
+
+    /// The fragment that marks a sheet avatar's URL — `AnimatedAvatars
+    /// .sheetFragment` in MediaCore; the app checks the two agree.
+    public static let sheetAvatarFragment = "avatar-sheet"
+
+    /// Whether the author at `index` has an animated avatar: a stable half of
+    /// the faces, the half the mock animated before #1444 (FNV-1a of the
+    /// face's photo URL, even).
+    public static func hasSheetAvatar(index: Int) -> Bool {
+        let photo = syntheticAvatarURL(index: index)
+        guard avatarShape(index: index) != nil, !photo.isEmpty else { return false }
+        let key = photo.utf8.reduce(UInt64(14_695_981_039_346_656_037)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
+        return key % 2 == 0
+    }
+
+    /// The author's animated avatar: its sprite sheet, and NO photo (#1444).
+    /// The mock's resolver bakes the sheet from `index`'s clip and face.
+    public static func sheetAvatarURL(index: Int) -> String {
+        "mock://avatar-sheet/\(index)#\(sheetAvatarFragment)"
+    }
+
+    /// The author index a sheet avatar's URL names; nil for any other URL.
+    public static func sheetAvatarIndex(_ url: URL) -> Int? {
+        guard url.scheme == "mock", url.host == "avatar-sheet", url.fragment == sheetAvatarFragment else { return nil }
+        return Int(url.lastPathComponent)
     }
 
     public static func avatarShape(index: Int) -> (Int, Int)? {

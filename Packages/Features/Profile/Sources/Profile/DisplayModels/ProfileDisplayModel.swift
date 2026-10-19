@@ -1,6 +1,7 @@
 import CoreModels
 import DesignSystem
 import Foundation
+import MediaCore
 import PostGrid
 
 /// View-ready projection of a `UserProfile`: everything the header renders,
@@ -53,7 +54,10 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         followerText = Self.format(profile.followerCount)
         followingText = Self.format(profile.followingCount)
         likesText = Self.format(profile.reactionCount)
-        bannerImageURL = profile.bannerURL ?? profile.avatarURL
+        // The banner is its own media; it falls back on the avatar only when
+        // the avatar is a photo. An animated avatar has none (#1444, the
+        // owner's 2026-10-19 call: a separate banner).
+        bannerImageURL = profile.bannerURL ?? (AnimatedAvatars.isSheet(profile.avatarURL) ? nil : profile.avatarURL)
         bannerVideoURL = profile.bannerVideoURL
         websiteText = Self.websiteDisplay(profile.websiteURL)
         websiteURL = profile.websiteURL

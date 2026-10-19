@@ -1104,6 +1104,9 @@ public final class MockSocialServices: @unchecked Sendable {
         view.handle = author.handle
         view.displayName = author.displayName
         view.avatarURL = author.avatarURL
+        // An animated avatar has no photo: its author's banner is its own
+        // (#1444). A video banner still wins.
+        if !author.bannerURL.isEmpty { view.bannerURL = author.bannerURL }
         Self.applyVideoBanner(to: &view)
         view.bio = author.bio
         view.websiteURL = author.websiteURL
