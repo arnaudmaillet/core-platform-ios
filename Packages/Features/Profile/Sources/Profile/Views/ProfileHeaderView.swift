@@ -714,7 +714,8 @@ final class ProfileHeaderView: UIView {
         bannerView = ProfileBannerView(imagePipeline: imagePipeline)
         super.init(frame: .zero)
         // Large and alone on its screen: an animated avatar plays once on the
-        // profile's first display, scroll or not (#1358).
+        // profile's first display, scroll or not (#1358), a beat after it is
+        // shown (#1424).
         avatar.animationTrigger = .firstAppearance(AnimatedAvatarScope())
         configureSubviews()
         // The picture decides the shape, whenever it lands.
@@ -1187,6 +1188,10 @@ final class ProfileHeaderView: UIView {
 
     // MARK: - Layout
 
+    @objc private func avatarTapped() {
+        avatar.animation.replay()
+    }
+
     private func configureSubviews() {
         // Avatar: a filled circle with a monogram, overlaid by the image once
         // loaded. The ring keeps it defined while it floats over raw banner
@@ -1205,6 +1210,9 @@ final class ProfileHeaderView: UIView {
         avatar.onSettledAfterLoad = { [weak self] in self?.onPicturesSettled?() }
         avatar.translatesAutoresizingMaskIntoConstraints = false
         avatarView.addSubview(avatar)
+        // A tap replays an animated avatar, every time (#1424). A still one
+        // does nothing.
+        avatarView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(avatarTapped)))
         NSLayoutConstraint.activate([
             avatar.centerXAnchor.constraint(equalTo: avatarView.centerXAnchor),
             avatar.centerYAnchor.constraint(equalTo: avatarView.centerYAnchor),

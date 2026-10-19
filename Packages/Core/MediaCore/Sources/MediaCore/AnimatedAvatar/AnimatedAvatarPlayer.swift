@@ -1,28 +1,38 @@
 import DesignSystem
 import UIKit
 
-/// The screens where an avatar plays on its first display rather than on
-/// scrolling into view (`AnimatedAvatarPlayer.Trigger.firstAppearance`): one
-/// per screen, so an avatar plays once there however often its cell is
-/// reused.
+/// The screens where an avatar plays on its first display rather than in the
+/// rounds (`AnimatedAvatarPlayer.Trigger.firstAppearance`): one per screen, so
+/// an avatar plays once there however often its cell is reused.
 @MainActor
 public final class AnimatedAvatarScope {
     fileprivate var played: Set<URL> = []
     public init() {}
 }
 
-/// An animated avatar over its picture (#1358): the sheet's last frame at
-/// rest, the sheet played ONCE when the rule says so (the owner,
-/// 2026-10-18):
-/// - only an avatar that COMES ON SCREEN DURING A SCROLL plays — a screen's
-///   avatars already visible when it appears stay still (paging the
-///   vertical feed is a scroll);
-/// - or, on the two screens where an avatar is large and alone (the profile
-///   page, For You's Friends faces), on its FIRST DISPLAY there
-///   (`.firstAppearance`);
-/// - never under `minimumDiameter` (tile thumbnails, danmaku bubbles), never
-///   under Reduce Motion, Power Saving or idle calm, and never more than
-///   `maxConcurrent` at once.
+/// An animated avatar over its picture (#1358, #1424): the sheet's LAST frame
+/// at rest, and the sheet played ONCE, from frame 0 back to that last frame
+/// (a seamless loop, so neither end is a cut). When it plays (the owner,
+/// 2026-10-19):
+/// - most avatars (lists, cards, rows) are picked at random, a few at a
+///   time, staggered, while their screen rests (`AnimatedAvatarRounds`).
+///   Nothing plays because it appeared or scrolled;
+/// - on the two screens where an avatar is large and alone (the profile page,
+///   For You's Friends faces), on its FIRST DISPLAY there, after a short
+///   beat (`.firstAppearance`);
+/// - the post screen's author pill, when its person CHANGES (`.change`);
+/// - on the viewer's tap (`replay()`, the profile page's avatar).
+///
+/// Never under `minimumDiameter` (tile thumbnails, danmaku bubbles), never
+/// under Reduce Motion, Power Saving or idle calm (a tap ignores the last two),
+/// and never more than `maxConcurrent` at once.
+///
+/// ⚠️ ONE LAYER, AT REST AND PLAYING. The sheet's layer always shows a frame
+/// of the sheet: its model value is the last frame, and a play is a single,
+/// non-repeating keyframe animation from frame 0 to the last. However late
+/// the bookkeeping runs, Core Animation ends the play ON the last frame, on
+/// the sheet's own clock — frame 0 is never shown after it (#1424: a timer
+/// hid the sheet late, after the shared clock had wrapped).
 ///
 /// Laid inside the avatar's picture view, which clips it to the avatar's
 /// outline; a still avatar shows nothing of it. `attach(to:)` finds or adds
@@ -30,8 +40,8 @@ public final class AnimatedAvatarScope {
 @MainActor
 public final class AnimatedAvatarPlayer: UIView {
     public enum Trigger {
-        /// Plays when it scrolls into view.
-        case scrollAppearance
+        /// Picked at random by the rounds while its screen rests.
+        case rounds
         /// Plays on its first display within the scope's screen.
         case firstAppearance(AnimatedAvatarScope)
         /// Plays when the avatar it shows CHANGES while on screen — a fixed
@@ -53,15 +63,27 @@ public final class AnimatedAvatarPlayer: UIView {
     /// for room is not asked again.
     @MainActor
     final class Concurrency {
-        fileprivate var playing = 0
+        fileprivate(set) var playing = 0
         static let app = Concurrency()
     }
 
-    public var trigger: Trigger = .scrollAppearance
+    public var trigger: Trigger = .rounds {
+        didSet { updateMembership() }
+    }
     /// Where sheets come from — the app's, or a test's own.
     var registry = AnimatedAvatars.shared
     /// Who counts the plays — the app's, or a test's own.
     var concurrency = Concurrency.app
+    /// Who picks the plays — the app's, or a test's own.
+    var rounds = AnimatedAvatarRounds.app {
+        willSet { rounds.leave(self) }
+        didSet { updateMembership() }
+    }
+
+    /// Told when an animated avatar's still is known — its sheet's last
+    /// frame, which the avatar draws as ITS picture (#1424): one image, at
+    /// rest, playing or not.
+    public var onStill: ((UIImage) -> Void)?
 
     /// The player over `host` (an avatar's picture view), added the first
     /// time.
@@ -73,29 +95,29 @@ public final class AnimatedAvatarPlayer: UIView {
         return player
     }
 
-    private let stillView = UIImageView()
-    private let sheetView = AnimatedIconView()
-    private var url: URL?
+    private let sheetView = UIView()
+    private(set) var url: URL?
     private var sheet: AnimatedIconSheet?
-    /// An appearance that should have played came before the sheet did.
+    private var stillImage: UIImage?
+    /// A play asked for before the sheet came.
     private var owesPlay = false
     private var wasVisible = false
     private var observations: [NSKeyValueObservation] = []
     private var playToken = 0
+    private var firstDisplayWork: DispatchWorkItem?
     private(set) var isPlaying = false
+
+    private static let playKey = "avatar.play"
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
         isHidden = true
-        for view in [stillView, sheetView] as [UIView] {
-            view.frame = bounds
-            view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            addSubview(view)
-        }
-        stillView.contentMode = .scaleAspectFill
-        sheetView.contentGravity = .resizeAspectFill
-        sheetView.isHidden = true
+        sheetView.frame = bounds
+        sheetView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        sheetView.layer.contentsGravity = .resizeAspectFill
+        sheetView.isUserInteractionEnabled = false
+        addSubview(sheetView)
     }
 
     @available(*, unavailable)
@@ -108,9 +130,13 @@ public final class AnimatedAvatarPlayer: UIView {
         let replacesOne = self.url != nil
         self.url = url
         stop()
+        cancelFirstDisplay()
         sheet = nil
+        stillImage = nil
+        sheetView.layer.contents = nil
         owesPlay = false
         isHidden = true
+        updateMembership()
         guard let url else { return }
         if case .change = trigger, replacesOne, window != nil { owesPlay = true }
         registry.sheet(for: url) { [weak self] sheet in
@@ -121,12 +147,17 @@ public final class AnimatedAvatarPlayer: UIView {
 
     private func adopt(_ sheet: AnimatedIconSheet?) {
         self.sheet = sheet
-        guard let sheet else {
+        guard let sheet, let last = sheet.frameRects.last else {
             isHidden = true
+            updateMembership()
             return
         }
-        stillView.image = url.flatMap(registry.still(for:)) ?? AnimatedAvatars.lastFrame(of: sheet)
+        stillImage = url.flatMap(registry.still(for:)) ?? AnimatedAvatars.lastFrame(of: sheet)
+        sheetView.layer.contents = sheet.sheet.cgImage
+        sheetView.layer.contentsRect = last
         isHidden = false
+        updateMembership()
+        if let stillImage { onStill?(stillImage) }
         if owesPlay {
             owesPlay = false
             if isVisible { requestPlay() }
@@ -143,12 +174,18 @@ public final class AnimatedAvatarPlayer: UIView {
     public override func didMoveToWindow() {
         super.didMoveToWindow()
         observations = []
+        updateMembership()
         guard window != nil else {
             stop()
+            cancelFirstDisplay()
             wasVisible = false
             return
         }
-        // Every scroll view it rides in: a row in a list in a pager.
+        let visible = isVisible
+        wasVisible = visible
+        guard case .firstAppearance = trigger else { return }
+        // Every scroll view it rides in — a face in a row that scrolls
+        // sideways: its first display can come with a scroll.
         var ancestor = superview
         while let view = ancestor {
             if let scroll = view as? UIScrollView {
@@ -158,44 +195,57 @@ public final class AnimatedAvatarPlayer: UIView {
             }
             ancestor = view.superview
         }
-        let visible = isVisible
-        switch trigger {
-        case .change:
-            wasVisible = visible
-        case .firstAppearance:
-            wasVisible = visible
-            if visible { firstAppearance() }
-        case .scrollAppearance:
-            // Dequeued mid-scroll and already in view: it came on screen
-            // with the scroll. Present when the screen appeared: still.
-            wasVisible = visible
-            if visible, isScrolling { appeared() }
-        }
+        if visible { firstAppearance() }
     }
 
     private func scrolled() {
         let visible = isVisible
         defer { wasVisible = visible }
         guard visible, !wasVisible else { return }
-        switch trigger {
-        case .change: break
-        case .firstAppearance: firstAppearance()
-        case .scrollAppearance: if isScrolling { appeared() }
+        firstAppearance()
+    }
+
+    /// A member of the rounds while it can be picked at all: animated, in a
+    /// window, and theirs to play. Off screen, no timer runs for it.
+    private func updateMembership() {
+        if case .rounds = trigger, window != nil, sheet != nil {
+            rounds.join(self)
+        } else {
+            rounds.leave(self)
         }
     }
 
+    /// A beat after it is shown, not the instant it lands (the owner,
+    /// 2026-10-19). It counts as played once it PLAYS: shown for less than
+    /// the beat, it plays on its next display. Its sheet not here yet,
+    /// `adopt` asks again when it lands.
     private func firstAppearance() {
-        guard case .firstAppearance(let scope) = trigger, let url, !scope.played.contains(url) else { return }
-        scope.played.insert(url)
-        appeared()
+        guard case .firstAppearance(let scope) = trigger, let url, !scope.played.contains(url),
+              sheet != nil, firstDisplayWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.firstDisplayWork = nil
+                guard self.url == url, self.isVisible, !scope.played.contains(url) else { return }
+                scope.played.insert(url)
+                self.requestPlay()
+            }
+        }
+        firstDisplayWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + rounds.tuning.draw(rounds.tuning.firstDisplayDelay), execute: work)
     }
 
-    private func appeared() {
-        guard sheet != nil else {
-            owesPlay = true
-            return
-        }
-        requestPlay()
+    private func cancelFirstDisplay() {
+        firstDisplayWork?.cancel()
+        firstDisplayWork = nil
+    }
+
+    /// Whether the rounds may pick it now: animated, idle, big enough, on
+    /// screen, its screen resting (no scroll under it, nothing presented over
+    /// it, the scene in front).
+    var isRoundCandidate: Bool {
+        guard sheet != nil, !isPlaying, min(bounds.width, bounds.height) >= Self.minimumDiameter else { return false }
+        return isVisible && !isScrolling && !isCovered && isSceneActive
     }
 
     /// On screen: inside its window and inside every scroll view it rides in.
@@ -225,32 +275,79 @@ public final class AnimatedAvatarPlayer: UIView {
         return false
     }
 
+    /// Under a presentation that is not its own: a sheet, a full-screen modal.
+    private var isCovered: Bool {
+        guard var top = window?.rootViewController else { return false }
+        while let presented = top.presentedViewController, !presented.isBeingDismissed { top = presented }
+        guard top !== window?.rootViewController else { return false }
+        return !isDescendant(of: top.view)
+    }
+
+    /// The app in front: a backgrounded or inactive scene plays nothing. A
+    /// window with no scene (a test's) counts as in front.
+    private var isSceneActive: Bool {
+        guard let scene = window?.windowScene else { return true }
+        return scene.activationState == .foregroundActive
+    }
+
     // MARK: Playing
 
-    private func requestPlay() {
-        guard let sheet else { return refuse("no sheet") }
+    /// Plays it again, now — the viewer's own request (a tap on the profile
+    /// page's avatar). Power Saving and idle calm do not block it; Reduce
+    /// Motion does, and an avatar with no sheet does nothing.
+    public func replay() {
+        requestPlay(viewerAsked: true)
+    }
+
+    /// Picked by the rounds.
+    func playFromRound() {
+        requestPlay()
+    }
+
+    private func requestPlay(viewerAsked: Bool = false) {
+        guard let sheet, let last = sheet.frameRects.last else { return refuse("no sheet") }
         guard !isPlaying else { return refuse("already playing") }
         guard min(bounds.width, bounds.height) >= Self.minimumDiameter else {
             return refuse("under \(Self.minimumDiameter) pt: \(bounds.size)")
         }
-        guard !MotionPreference.stillsDecoration else {
-            return refuse("decoration stilled (reduce motion \(MotionPreference.reducesMotion), idle calm \(IdleCalm.isCalm))")
+        if viewerAsked {
+            guard !MotionPreference.reducesMotion else { return refuse("reduce motion") }
+        } else {
+            guard !MotionPreference.stillsDecoration else {
+                return refuse("decoration stilled (reduce motion \(MotionPreference.reducesMotion), idle calm \(IdleCalm.isCalm))")
+            }
+            guard concurrency.playing < Self.maxConcurrent else { return refuse("\(concurrency.playing) already playing") }
         }
-        guard concurrency.playing < Self.maxConcurrent else { return refuse("\(concurrency.playing) already playing") }
         concurrency.playing += 1
         isPlaying = true
         playCount += 1
-        // The sheets play on a shared clock: shift so frame 0 is the one now.
-        sheetView.setArt(.sheet(sheet), phase: 0)
-        let now = sheetView.displayedFrame ?? 0
-        sheetView.setArt(.sheet(sheet), phase: (sheet.frameCount - now) % sheet.frameCount)
-        sheetView.isHidden = false
         playToken += 1
         let token = playToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + sheet.loopDuration) { [weak self] in
-            guard let self, self.playToken == token else { return }
-            self.stop()
+        // Frame 0 now, each frame its own duration, the last one held: the
+        // model value IS the last frame, so the end of the animation is the
+        // rest, on the sheet's own clock.
+        let count = sheet.frameRects.count
+        let animation = CAKeyframeAnimation(keyPath: "contentsRect")
+        animation.calculationMode = .discrete
+        animation.values = sheet.frameRects.map { NSValue(cgRect: $0) }
+        animation.keyTimes = (0...count).map { NSNumber(value: Double($0) / Double(count)) }
+        animation.duration = sheet.loopDuration
+        let fps = Float(min(60, max(1, (1 / sheet.frameDuration).rounded())))
+        animation.preferredFrameRateRange = CAFrameRateRange(minimum: fps, maximum: fps, preferred: fps)
+        animation.delegate = PlayEnd(player: self, token: token)
+        sheetView.layer.contentsRect = last
+        sheetView.layer.add(animation, forKey: Self.playKey)
+        lastPlayAnimation = animation
+        // The slot comes back with the animation's end — and, should its
+        // delegate never be told (a test host, a stripped layer), a beat after.
+        DispatchQueue.main.asyncAfter(deadline: .now() + sheet.loopDuration + 0.25) { [weak self] in
+            self?.playEnded(token)
         }
+    }
+
+    fileprivate func playEnded(_ token: Int) {
+        guard token == playToken, isPlaying else { return }
+        release()
     }
 
     /// How many times it has started playing — what a test reads: a play
@@ -262,27 +359,52 @@ public final class AnimatedAvatarPlayer: UIView {
     /// failing test prints.
     private(set) var lastRefusal: String?
 
+    /// The last play's animation, for a test to read its shape.
+    private(set) var lastPlayAnimation: CAKeyframeAnimation?
+
     private func refuse(_ reason: String) {
         lastRefusal = reason
     }
 
-    /// Back to the still — the last frame, which is where the loop ended.
+    /// Back to the still — the last frame, the layer's model value.
     private func stop() {
         playToken += 1
+        sheetView.layer.removeAnimation(forKey: Self.playKey)
         guard isPlaying else { return }
+        release()
+    }
+
+    private func release() {
         isPlaying = false
         concurrency.playing = max(0, concurrency.playing - 1)
-        sheetView.isHidden = true
-        sheetView.setArt(nil)
     }
 
     /// The still on show — the sheet's last frame — or nil for a still avatar.
-    public var still: UIImage? { sheet == nil ? nil : stillView.image }
+    public var still: UIImage? { sheet == nil ? nil : stillImage }
 
     #if DEBUG
     /// What a test reads.
     var debugSheet: AnimatedIconSheet? { sheet }
-    var debugStill: UIImage? { stillView.image }
+    var debugStill: UIImage? { stillImage }
+    /// The frame the layer rests on (its model value).
+    var debugRestingRect: CGRect { sheetView.layer.contentsRect }
     static var debugPlayingCount: Int { Concurrency.app.playing }
     #endif
+}
+
+/// A play's end, told by Core Animation. Holds the player weakly: an
+/// animation keeps its delegate. Told on the main thread, and read only
+/// there.
+private final class PlayEnd: NSObject, CAAnimationDelegate, @unchecked Sendable {
+    weak var player: AnimatedAvatarPlayer?
+    let token: Int
+
+    init(player: AnimatedAvatarPlayer, token: Int) {
+        self.player = player
+        self.token = token
+    }
+
+    func animationDidStop(_ animation: CAAnimation, finished: Bool) {
+        MainActor.assumeIsolated { player?.playEnded(token) }
+    }
 }
