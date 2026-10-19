@@ -422,6 +422,14 @@ final class SnapFeedViewController: UIViewController {
     /// never aborted (the pager lock can only land once the page has
     /// settled — disabling it mid-drag would freeze the user's scroll).
     private var commentsEngagementIsResting = false
+    /// The side list (#1425, `-snap-side-list`): nil with the flag off.
+    private(set) var sideList: SnapSideListController?
+    /// Whether this screen installs the side list — the process's flag; a
+    /// test sets its own before the view loads.
+    var installsSideList = SnapSideList.isEnabled
+    /// The current posts the side list samples from (#1425). Nil: an empty
+    /// list.
+    public var sideListEntries: (@MainActor () async -> [FeedEntry])?
     /// The page whose comments panel is BUILT but not engaged (the settle
     /// seam's warm). Distinct from `commentsEngagedID`, which means on
     /// screen and interactive.
@@ -551,6 +559,11 @@ final class SnapFeedViewController: UIViewController {
         // builds the dismissal, ahead of the reveal geometry.
         view.backgroundColor = emptyGround
         configureCollectionView()
+        if installsSideList {
+            let sideList = SnapSideListController(host: self, imagePipeline: imagePipeline)
+            sideList.install(in: view)
+            self.sideList = sideList
+        }
         configureNavigationItem()
         configureToolbarItems()
         configureStatusLabel()
@@ -600,6 +613,7 @@ final class SnapFeedViewController: UIViewController {
     private var didStartLoading = false
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        sideList?.relayout()
         // The pills' widths are shares of the BARS' widths, and the bars are
         // not guaranteed to have one when the items are first built (nor when
         // a text page's resting engagement mounts from `willDisplay`) — a
@@ -4458,6 +4472,7 @@ final class SnapFeedViewController: UIViewController {
         // Cleaning up only when something changed means never cleaning up
         // after the change that went missing.
         if let index { reconcileRestingInterface(activeIndex: index) }
+        sideList?.activePostDidChange(activePostID)
     }
 
     // MARK: - Viewing history (#1344)
@@ -6898,8 +6913,69 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// A grab may begin from any page — but not mid-fling, where the user's
     /// intent is still vertical and freezing the pager would strand it
     /// between pages.
+    ///
+    /// Never while the side list is open or moving (#1425): a rightward drag
+    /// then closes the list, and the screen stays.
     public var isReadyForInteractiveDismissal: Bool {
-        !collectionView.isDecelerating
+        !collectionView.isDecelerating && !(sideList?.isEngaged ?? false)
+    }
+
+    // MARK: - Side list (#1425)
+
+    /// Whether a leftward drag born at `origin` (in this view) may open the
+    /// side list: nothing open over the page, nothing under the finger that
+    /// owns its own drags (the rail, an open panel), and a carousel with no
+    /// photo left to turn to — or a drag born in the trailing edge strip,
+    /// which opens it from any photo.
+    func sideListMayOpen(from origin: CGPoint) -> Bool {
+        guard !collectionView.isDecelerating, !isKeyboardOnScreen, !orderedIDs.isEmpty else { return false }
+        guard commentsEngagedID == nil || commentsEngagementIsResting else { return false }
+        let point = collectionView.convert(origin, from: view)
+        if let hit = collectionView.hitTest(point, with: nil) {
+            for current in sequence(first: hit, next: { $0.superview }) {
+                if current is SnapShortcutRailView || current is SnapRailBoostButton || current is CommentsInputBar {
+                    return false
+                }
+            }
+        }
+        if view.bounds.maxX - origin.x <= PagedScreenDismissalPolicy.edgeZone { return true }
+        return MediaCarouselTouchRouting.dragPassesThroughCarousel(
+            at: point, in: collectionView, towardsPageDelta: 1
+        )
+    }
+
+    /// The posts the list offers: current ones, of the feed's kind (#1421),
+    /// none already in the feed, in a random order.
+    func sideListCandidates() async -> [FeedEntry] {
+        let entries = await sideListEntries?() ?? []
+        let inFeed = Set(orderedIDs)
+        let kind: SnapFeedKindScope? = activePostID.flatMap { modelsByID[$0] }.map { $0.mediaURL == nil ? .text : .media }
+        var seen = Set<PostID>()
+        return entries.filter { entry in
+            guard !inFeed.contains(entry.post.id), seen.insert(entry.post.id).inserted else { return false }
+            return kind == nil || SnapFeedKindScope(entry) == kind
+        }.shuffled()
+    }
+
+    /// A post picked in the list: in the feed right after the one on show,
+    /// and the pager moves to it — paging back returns to the one it
+    /// replaced. Already in the feed: the pager moves to it.
+    func showSideListEntry(_ entry: FeedEntry) {
+        guard let anchor = activePostID else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await viewModel.insert(entry, after: anchor)
+            guard let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
+            collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
+        }
+    }
+
+    /// The list settled open or closed. Open, the pager pages BACK too — the
+    /// feed is forward-only because a downward drag is its dismissal, which
+    /// stands aside while the list is open.
+    func sideListDidSettle(open: Bool) {
+        (collectionView as? SnapFeedCollectionView)?.allowsBackwardPaging = open
+        sideList?.activePostDidChange(activePostID)
     }
 
     /// ⚠️ THE POST ON SCREEN RIGHT NOW, not the one that opened this screen.

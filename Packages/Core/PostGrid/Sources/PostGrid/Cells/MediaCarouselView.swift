@@ -244,6 +244,23 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
             && !hasTravel(towardsPageDelta: -1)
     }
 
+    /// Whether a LEFTWARD drag is given up too — opted into by a screen that
+    /// has something waiting for it (#1425: the snap feed's side list, behind
+    /// `-snap-side-list`). Off, the end-of-run rubber-band stays the answer
+    /// (see `yieldsRightwardDrag`).
+    public var yieldsLeftwardDrags = false
+
+    /// Whether a drag of `velocity`, born at `originX` in window space, is
+    /// left to the screen (#1425): only when `yieldsLeftwardDrags` is on, and
+    /// then for a leftward drag on the LAST page, or one born in the window's
+    /// trailing edge strip (the mirror of the leading strip the dismissal
+    /// owns) on any page.
+    func yieldsLeftwardDrag(velocity: CGPoint, originX: CGFloat, windowWidth: CGFloat) -> Bool {
+        guard yieldsLeftwardDrags, velocity.x < 0, abs(velocity.x) > abs(velocity.y) else { return false }
+        if windowWidth - originX <= PagedScreenDismissalPolicy.edgeZone { return true }
+        return !hasTravel(towardsPageDelta: 1)
+    }
+
     /// How a page frames its picture, given the picture's shape — nil, which
     /// is every `.card` carousel, fills every page exactly as carousels always
     /// have.
@@ -1276,6 +1293,15 @@ private final class EdgeYieldingScrollView: UIScrollView {
             // then is what the gesture means.
             if carousel?.yieldsRightwardDrag(velocity: pan.velocity(in: self)) == true {
                 return false
+            }
+            if let window, let carousel {
+                let originX = pan.location(in: window).x - pan.translation(in: window).x
+                if carousel.yieldsLeftwardDrag(
+                    velocity: pan.velocity(in: self), originX: originX - window.bounds.minX,
+                    windowWidth: window.bounds.width
+                ) {
+                    return false
+                }
             }
         }
         return super.gestureRecognizerShouldBegin(gestureRecognizer)

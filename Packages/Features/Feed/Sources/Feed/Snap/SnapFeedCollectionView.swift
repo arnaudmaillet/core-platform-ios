@@ -18,6 +18,9 @@ final class SnapFeedCollectionView: UICollectionView {
     /// the swipe-up close past a finished source (#628). Asked only for a
     /// predominantly-upward pan; nil (a feed with no such end) never yields.
     var yieldsUpwardTouch: ((CGPoint) -> Bool)?
+    /// Whether a downward drag pages BACK (#1425): only while the side list
+    /// is open, when the dismissal that owns the downward drag stands aside.
+    var allowsBackwardPaging = false
 
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         let location = gestureRecognizer.location(in: self)
@@ -31,7 +34,7 @@ final class SnapFeedCollectionView: UICollectionView {
         // and leaves the whole downward direction to the dismissal hero's pan
         // (which self-gates on the mirror of this test, so exactly one of the
         // two ever claims a drag).
-        if let pan = gestureRecognizer as? UIPanGestureRecognizer,
+        if !allowsBackwardPaging, let pan = gestureRecognizer as? UIPanGestureRecognizer,
            Self.declinesDownwardPagingTouch(velocity: pan.velocity(in: self)) {
             return false
         }
