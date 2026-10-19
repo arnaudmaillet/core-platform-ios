@@ -188,6 +188,44 @@ struct SnapCommentTickerViewTests {
         }
     }
 
+    /// ⚠️ THE GRAB IGNORES CORE ANIMATION'S MEDIA TIME (#1248). The scrub
+    /// test above went red twice in loaded Feed runs (2026-10-15/16), when a
+    /// grab froze each bubble where its `presentation()` was: on a starved
+    /// runner, a commit and some media time slipped in between `setActive`
+    /// and `beginScrub`, and the train moved out of the band the test reads.
+    /// Since #1310 an in-flight bubble is frozen at the rightmost of the
+    /// clock's position and the presentation's, never past where it departed.
+    /// With the clock pinned, that is where it departed, whatever the render
+    /// server did meanwhile. So a ticker committed, then left 0.2 s of media
+    /// time before its grab, freezes exactly where an untouched one does.
+    @Test func aGrabFreezesTheSameTrainWhateverTheMediaTime() {
+        hosting { window in
+            let untouched = makeTicker(in: window)
+            untouched.setActive(true)
+            untouched.beginScrub()
+            let expected = bubbleViews(untouched).map(\.layer.position.x).sorted()
+            untouched.removeFromSuperview()
+
+            let starved = makeTicker(in: window)
+            starved.setActive(true)
+            // What a starved runner did between the two calls: a commit (the
+            // presentation exists) and media time running on.
+            CATransaction.flush()
+            Thread.sleep(forTimeInterval: 0.2)
+            let presented = bubbleViews(starved).compactMap { $0.layer.presentation() }
+            starved.beginScrub()
+            let frozen = bubbleViews(starved).map(\.layer.position.x).sorted()
+
+            #expect(!expected.isEmpty)
+            #expect(frozen.count == expected.count)
+            #expect(zip(frozen, expected).allSatisfy { abs($0 - $1) < 0.01 },
+                    "the grab froze the train where the render server had moved it: \(frozen) vs \(expected)")
+            // The witness: the presentation really had run on, so the
+            // assertion above is not passing on a commit that never happened.
+            #expect(!presented.isEmpty, "guard: the flush gave the bubbles a presentation")
+        }
+    }
+
     /// A release near the drift hands back to CA: flights reattach and the
     /// train keeps flowing. Needs a real window — flights on layers outside
     /// a render tree "complete" immediately, which would recycle everything.
