@@ -135,15 +135,12 @@ public final class ProfileViewModel {
         /// follows its own corpus, apart from `isComplete`.
         public var repostsComplete = true
         public var taggedComplete = true
-        /// Whether the profile is private to the viewer (#447): its empty
-        /// pages are the lock, and a page that HAS posts (Tagged — other
-        /// people's) wears the lock as one line above them (#1422, option B).
-        public var isLockedToViewer = false
-
         /// Every page with nothing in it says the profile is private
-        /// instead (#447): the server withholds them from the viewer.
+        /// instead (#447): the server withholds them from the viewer. A page
+        /// that HAS posts (Tagged — other people's) shows them plainly: the
+        /// lock appears only when there is nothing to show (#1445, the
+        /// owner's 2026-10-19 call, replacing #1422's lock line).
         mutating func restrictEmptyPages() {
-            isLockedToViewer = true
             let locked = GalleryPageState.restricted(title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage)
             for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.tagged, \.history] {
                 if case .empty = self[keyPath: page] { self[keyPath: page] = locked }

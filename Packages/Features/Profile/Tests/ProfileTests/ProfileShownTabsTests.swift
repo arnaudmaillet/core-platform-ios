@@ -61,20 +61,19 @@ struct ProfileShownTabsTests {
         #expect(shown == [.format(.activity), .tagged])
     }
 
-    /// A private profile, not followed (option B): Posts is the lock, never a
-    /// tab; Tagged with posts is the only one, and leads with the lock line.
-    @Test func aPrivateProfileShowsTaggedUnderTheLockLine() {
+    /// A private profile, not followed: Posts is the lock, never a tab;
+    /// Tagged with posts is the only one, drawn plainly — no lock line, no
+    /// section title (#1445).
+    @Test func aPrivateProfileShowsTaggedAlonePlainly() {
         var locked = snapshot(tagged: .content([post("t")]))
         locked.restrictEmptyPages()
         #expect(ProfileViewController.shownTabs(all, in: locked, isOwnProfile: false) == [.tagged])
-        let page = ProfileGalleryPagerView.pageState(locked.tagged, for: .tagged, lockedToViewer: locked.isLockedToViewer)
-        guard case .sections(let sections) = page else {
-            Issue.record("Tagged did not lead with the lock line: \(page)")
+        let page = ProfileGalleryPagerView.pageState(locked.tagged, for: .tagged)
+        guard case .content(let posts) = page else {
+            Issue.record("Tagged is not plain content: \(page)")
             return
         }
-        #expect(sections.count == 1)
-        #expect(sections.first?.title == ProfileGalleryPagerView.lockLine)
-        #expect(sections.first?.posts.map(\.id.rawValue) == ["t"])
+        #expect(posts.map(\.id.rawValue) == ["t"])
     }
 
     /// A private profile with nothing visible: no tab; the screen shows the
