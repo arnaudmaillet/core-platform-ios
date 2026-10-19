@@ -23,7 +23,7 @@ full functionality.
 | 13 | Relationship lists: id-only edges, no mutuals RPC (privacy and `RemoveFollower` resolved by backend #720) | Followers/Following screen — hydration is N+1, Friends is intersected client-side | Medium |
 | 14 | No discovery / recommendation feed for the "For You" tab | For You is three client-side orderings of the following feed | Medium |
 | 15 | No lightweight-preview rendition, and `RadarPin` can't express video | Map pin live previews (**blocked**); gallery-grid autoplay at scale | **High** (map) |
-| 16 | No topic/category on a post | For You's `ContentContext` lens filters by caption keywords | Medium |
+| 16 | No topic/category on a post | ~~For You's content-context lens~~ — dropped with the feature (#1423) | — |
 | 17 | No per-conversation unread count | All-list avatar badges saturate at the fetched window | Medium |
 | 18 | No semantic geo clusters (city/country/region) | Map cluster gallery — mocked client-side in DEBUG | Medium |
 | 19 | `search.v1`: no date filter, no viewer scope, no engagement sorts | Search filter tray (7 of 12 segments disabled) | Medium |
@@ -584,6 +584,12 @@ own cost model rather than by that comparison.
 ---
 
 ## 16. No topic, category or classification on a post — `ContentContext` is a caption search
+
+> **Dropped (2026-10-19, #1423).** The owner removed For You's content contexts
+> entirely: For You always shows everything, and nothing on the client filters
+> by topic any more. The topic field below was only ever a proposal; this
+> section is kept as the record of why it was asked for. No backend work is
+> needed for it now.
 
 The For You surface has a **content context** lens in its navigation bar
 (Entertainment / Work / Focus / Gaming) which is meant to filter both tabs to

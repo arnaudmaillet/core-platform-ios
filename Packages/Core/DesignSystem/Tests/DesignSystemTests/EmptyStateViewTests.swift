@@ -60,10 +60,10 @@ struct EmptyStateViewTests {
 
     @Test func aSubtitleAndIconAppearWhenGiven() {
         let view = laidOut {
-            $0.configure(symbolName: "tray", title: "No media yet.", subtitle: "Showing Work only.")
+            $0.configure(symbolName: "tray", title: "No media yet.", subtitle: "Pull to refresh.")
         }
         let content = visibleContent(of: view)
-        #expect(content.labels == ["No media yet.", "Showing Work only."])
+        #expect(content.labels == ["No media yet.", "Pull to refresh."])
         #expect(content.hasIcon)
     }
 
@@ -130,7 +130,7 @@ struct EmptyStateViewTests {
     }
 
     @Test func voiceOverReadsTheWholeMessageAsOneStatement() {
-        let view = laidOut { $0.configure(title: "No activity yet", subtitle: "Showing Work only.") }
-        #expect(view.accessibilityLabel == "No activity yet. Showing Work only.")
+        let view = laidOut { $0.configure(title: "No activity yet", subtitle: "Pull to refresh.") }
+        #expect(view.accessibilityLabel == "No activity yet. Pull to refresh.")
     }
 }

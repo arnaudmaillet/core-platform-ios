@@ -13,7 +13,7 @@ import UIKit
 // The launch-argument automation (`installDebugHooks`, run from
 // `viewDidLoad`), the scripted grab cycles and the `debug*` accessors.
 // Private methods stay private: this file reaches them through thin `debug*`
-// wrappers in the main file (`debugOpenFeed`, `debugApplyContext`,
+// wrappers in the main file (`debugOpenFeed`,
 // `debugFloatingBarCover`). `auditPostMenu` and `logRowSource` stay in `ForYouViewController.swift`:
 // they read private menu and flight state that only they use. Stored DEBUG
 // properties stay with the type.
@@ -86,16 +86,6 @@ extension ForYouViewController {
         if let position = arguments.firstIndex(of: "-foryou-grab-cycles"),
            position + 1 < arguments.count, let count = Int(arguments[position + 1]) {
             Self.remainingGrabCycles = count
-        }
-        // `-foryou-context <entertainment|work|focus|gaming>` drives the lens.
-        // A `UIMenu` needs a real tap to open, so this is the only way to reach
-        // a non-default context from a script.
-        if let position = arguments.firstIndex(of: "-foryou-context"),
-           position + 1 < arguments.count,
-           let context = ContentContext(rawValue: arguments[position + 1]) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                self?.debugApplyContext(context)
-            }
         }
         // `-foryou-scroll-demo <steps>` walks the active page down the corpus,
         // pausing long enough at each stop for playback to settle. The only way

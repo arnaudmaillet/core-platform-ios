@@ -52,7 +52,7 @@ struct ForYouHeaderAccessoryTests {
     }
 
     /// With nothing injected the header is what it always was: one trailing
-    /// item, the lens menu.
+    /// item, search.
     @Test func theHeaderKeepsItsOwnItemWhenNothingIsInjected() {
         let screen = screen()
         screen.loadViewIfNeeded()
@@ -62,10 +62,10 @@ struct ForYouHeaderAccessoryTests {
 
     /// ⚠️ THE BADGE STANDS INBOARD OF THE SCREEN'S OWN ITEM.
     ///
-    /// `rightBarButtonItems[0]` is the one nearest the screen edge, so the
-    /// lens menu keeps the corner and the balance sits to its left — the
-    /// arrangement the Explore header already wears ([coin] [bell]).
-    @Test func theInjectedBadgeStandsInboardOfTheLensMenu() throws {
+    /// `rightBarButtonItems[0]` is the one nearest the screen edge, so search
+    /// keeps the corner and the balance sits to its left — the arrangement the
+    /// Explore header already wears ([coins] [search]).
+    @Test func theInjectedBadgeStandsInboardOfSearch() throws {
         let screen = screen()
         screen.loadViewIfNeeded()
         let badge = accessory()
@@ -74,7 +74,7 @@ struct ForYouHeaderAccessoryTests {
 
         let items = try #require(screen.navigationItem.rightBarButtonItems)
         #expect(items.count == 2)
-        #expect(items.last === badge, "the balance took the corner from the lens menu")
+        #expect(items.last === badge, "the balance took the corner from search")
     }
 
     /// ⚠️ AND IT SURVIVES THE SCREEN'S OWN WRITE.
@@ -123,11 +123,9 @@ struct ForYouHeaderAccessoryTests {
 
     // MARK: - The leading item (the shell's bell)
 
-    /// ⚠️ THE BELL TAKES THE LEADING CORNER, and the lens stands inboard of it.
-    ///
-    /// `leftBarButtonItems[0]` is the item nearest the LEADING screen edge, so
-    /// the header reads `[bell][lens] … [coins][search]`.
-    @Test func theInjectedBellLeadsAheadOfTheLens() throws {
+    /// ⚠️ THE BELL LEADS ALONE (#1423): the content-context item that stood
+    /// inboard of it is gone, so the header reads `[bell] … [coins][search]`.
+    @Test func theInjectedBellLeadsAlone() throws {
         let screen = screen()
         screen.loadViewIfNeeded()
         let bell = accessory()
@@ -135,8 +133,8 @@ struct ForYouHeaderAccessoryTests {
         screen.setLeadingAccessoryItem(bell)
 
         let items = try #require(screen.navigationItem.leftBarButtonItems)
-        #expect(items.count == 2)
-        #expect(items.first === bell, "the lens took the corner from the bell")
+        #expect(items.count == 1, "something stands beside the bell: \(items.map { $0.accessibilityLabel ?? "?" })")
+        #expect(items.first === bell)
     }
 
     /// Injected before the view loads — the order the shell actually uses —
@@ -152,15 +150,15 @@ struct ForYouHeaderAccessoryTests {
         #expect(items.first === bell, "the header's own write erased the bell")
     }
 
-    /// Clearing it leaves the lens alone in the leading group.
-    @Test func clearingTheBellLeavesTheLens() {
+    /// Clearing it leaves the leading group empty.
+    @Test func clearingTheBellLeavesTheLeadingGroupEmpty() {
         let screen = screen()
         screen.loadViewIfNeeded()
 
         screen.setLeadingAccessoryItem(accessory())
         screen.setLeadingAccessoryItem(nil)
 
-        #expect(screen.navigationItem.leftBarButtonItems?.count == 1)
+        #expect(screen.navigationItem.leftBarButtonItems?.isEmpty ?? true)
     }
 }
 

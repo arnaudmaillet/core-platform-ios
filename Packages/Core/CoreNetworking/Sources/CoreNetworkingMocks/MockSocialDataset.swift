@@ -86,11 +86,6 @@ public struct MockSocialDataset: Sendable {
     /// fixed future date stops being the future, and the badge would quietly
     /// die some morning with nothing to point at.
     ///
-    /// The captions are load-bearing. `ContentContext` is a caption keyword
-    /// search, so these decide the per-mode counts the menu shows — three that
-    /// read as Work, one as Focus, one as neither. `MockForYouArrivalTests`
-    /// pins those numbers so a caption edit cannot quietly change them.
-    ///
     /// Draws its media from the same catalogs as the main corpus. It once did
     /// NOT: these seeded synthesized `mock://` placeholders unconditionally,
     /// so the arrivals were the only posts still showing flat colours — and
@@ -317,12 +312,7 @@ public struct MockSocialDataset: Sendable {
         // and index 0 is a MEDIA arrival, because a card truncates whether or
         // not it carries a preview.
         //
-        // ⚠️ Both extensions stay inside `ContentContext.work`'s vocabulary and
-        // introduce no other context's. `MockForYouArrivalTests` pins three
-        // work, one focus, one neither, and the search is a plain substring
-        // match — so "notes", "quiet", "show", "watch", "play", "stream",
-        // "level" and their kin cannot appear here by accident. The focus
-        // arrival is index 3 and must keep its wording exactly.
+        // Arrival 4 is matched BY CAPTION below: it keeps its wording exactly.
         let captions = [
             """
             Standup moved to nine. The deadline holds. We cut the scope of the \
@@ -332,9 +322,8 @@ public struct MockSocialDataset: Sendable {
             """,
             // Arrivals 0, 1, 2, 5, 6 and 7 carry EMOTES — Unicode emoji and
             // house `:code:`s — so EmoteKit's animated caption shows in mock
-            // mode. Emoji add no words, and neither `lmao` nor `lol` is in any
-            // context lexicon. Arrivals 3 and 4 stay exactly as written: 3 is
-            // the focus arrival and 4 is matched BY CAPTION below.
+            // mode. Arrival 4 stays exactly as written: it is matched BY
+            // CAPTION below.
             "Refactor landed and the office survived it. 🎉 :lmao:",
             """
             Shipping the new build tonight. The changelog is longer than I \
@@ -358,9 +347,7 @@ public struct MockSocialDataset: Sendable {
             // one post and paging until the order happened to cooperate.
             //
             // These two sit at the head, so a cold launch opens on a text page
-            // and the very first page down is another. Vocabulary kept clear of
-            // every context lexicon — see the note above the captions — so the
-            // lens counts below do not move.
+            // and the very first page down is another.
             "Third coffee. Still deciding whether the rewrite was a good idea. ☕🤔",
             "Wrote four paragraphs, kept one. That is a normal ratio. :lol:"
         ]
@@ -914,9 +901,7 @@ public struct MockSocialDataset: Sendable {
             // keep the captions they always had. About half of the bank carries
             // emotes (Noto emoji from EmoteKit's bundled subset, and house
             // `:code:`s), two of them as a run, so animated text shows up on a
-            // normal scroll. ⚠️ Keep them clear of `ContentContext`'s keywords
-            // ("work", "play", "show", "notes"…): a caption is a substring
-            // search for the For You modes.
+            // normal scroll.
             "Sunday market haul 🍓🥑🍉",
             "Tried the new ramen place. Worth the queue. 🍜🔥",
             "😂😂😂😂😂😂 I can't believe that actually happened",
@@ -928,8 +913,7 @@ public struct MockSocialDataset: Sendable {
         ]
         // Hashtags (#524), by bank entry, so the hashtag screen has posts to
         // show offline — several tags, several posts each, in all three post
-        // kinds. ⚠️ The same rule as the captions above: a tag is caption
-        // text, so none may contain a `ContentContext` keyword.
+        // kinds.
         let captionTags: [Int: String] = [
             0: "#goldenhour", 5: "#travel", 7: "#travel #mountains",
             8: "#foodie", 9: "#foodie #ramen", 14: "#coldwater", 15: "#travel"

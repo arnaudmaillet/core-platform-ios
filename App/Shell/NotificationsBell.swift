@@ -42,9 +42,9 @@ final class NotificationsBell {
     /// A new bell for one header, already showing the current unread state.
     ///
     /// `sharesBackground = false`: iOS 26 draws ONE glass platter behind
-    /// adjacent bar items, and the bell's neighbour in the leading group (For
-    /// You's lens, the profile's source filter) is a different control, not a
-    /// second half of this one — each stands in its own bubble.
+    /// adjacent bar items, and the bell's neighbour in a leading group (the
+    /// profile's source filter) is a different control, not a second half of
+    /// this one — each stands in its own bubble.
     func makeItem() -> UIBarButtonItem {
         let item = UIBarButtonItem(
             image: Self.image(unread: isUnread),

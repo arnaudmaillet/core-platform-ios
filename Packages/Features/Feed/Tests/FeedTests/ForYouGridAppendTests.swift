@@ -73,8 +73,8 @@ struct ForYouGridAppendTests {
         #expect(ForYouGridPage.addedPosts(from: [], to: [post("a")]) == nil)
     }
 
-    /// ⚠️ **Widening a lens has the exact shape of an append and is not one.**
-    /// Every Work post is still present plus thirty more, so `addedPosts`
+    /// ⚠️ **A re-derived corpus can have the exact shape of an append and not
+    /// be one.** Every post still present plus thirty more, so `addedPosts`
     /// reports them — correctly, by its own rule, which is about MEMBERSHIP so
     /// that a Trending re-rank still counts as an addition. The newcomers
     /// belong all through the list rather than after it, and inserting them at
@@ -84,7 +84,7 @@ struct ForYouGridAppendTests {
     /// So the shape alone cannot decide it, and this test says so rather than
     /// pretending otherwise. The page is TOLD, by `onCorpusReset` — see
     /// `ForYouCorpusResetTests`.
-    @Test func aWidenedLensLooksExactlyLikeAnAppend() {
+    @Test func aRederivedCorpusCanLookExactlyLikeAnAppend() {
         let narrow = [post("w1"), post("w2")]
         let wide = [post("a"), post("w1"), post("b"), post("w2"), post("c")]
         #expect(ForYouGridPage.addedPosts(from: narrow, to: wide) != nil)
@@ -130,24 +130,7 @@ struct ForYouCorpusResetTests {
         )
     }
 
-    /// A lens change announces itself BEFORE the content it changes, so the
-    /// pages have already dropped their incremental path by the time the new
-    /// corpus arrives.
-    @Test func changingTheLensAnnouncesAResetFirst() async {
-        let model = makeModel()
-        var events: [String] = []
-        model.onCorpusReset = { events.append("reset") }
-        model.onSnapshotChange = { _ in events.append("snapshot") }
-        model.viewDidLoad()
-        await settleReset()
-        events.removeAll()
-
-        model.setContext(.work)
-        #expect(events.first == "reset")
-        #expect(events.contains("snapshot"))
-    }
-
-    /// Re-ordering re-derives the corpus too — same rule, same announcement.
+    /// Re-ordering re-derives the corpus: it announces itself.
     @Test func changingTheOrderingAnnouncesAReset() async {
         let model = makeModel()
         model.viewDidLoad()
@@ -169,18 +152,6 @@ struct ForYouCorpusResetTests {
         model.onCorpusReset = { resets += 1 }
         model.loadNextPageIfNeeded(.discover)
         await settleReset()
-        #expect(resets == 0)
-    }
-
-    /// Choosing the lens already selected changes nothing, so it announces
-    /// nothing — a reset would reload both pages for a tap that did nothing.
-    @Test func reselectingTheSameLensAnnouncesNothing() async {
-        let model = makeModel()
-        model.viewDidLoad()
-        await settleReset()
-        var resets = 0
-        model.onCorpusReset = { resets += 1 }
-        model.setContext(.all)
         #expect(resets == 0)
     }
 }

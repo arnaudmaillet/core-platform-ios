@@ -15,8 +15,8 @@ import PostGrid
 /// So the session freezes a copy: the persisted watermark's value as it stood
 /// when the corpus first landed, before the visit advanced it. That value does
 /// not move again until the app is relaunched. Everything the viewer can see —
-/// the tab badge, the counts in the mode menu, the split between New and Recent
-/// — is derived from this one instant, so those numbers agree by construction
+/// the tab badge, the rows' counts, the split between New and Recent — is
+/// derived from this one instant, so those numbers agree by construction
 /// rather than by being kept in step.
 ///
 /// The same shape, and the same reasoning, as `InboxTabWatermark` in Chat: a

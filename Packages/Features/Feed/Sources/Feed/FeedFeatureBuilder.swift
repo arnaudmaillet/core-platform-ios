@@ -80,6 +80,15 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// "Use this sound" — the shell opens its camera with it. Nil hides the
     /// button: an action that cannot act is not offered.
     private let useSound: (@MainActor (PostSound) -> Void)?
+    /// The keys For You's content contexts were stored under (#1423): the
+    /// feature is gone, and so is the stored choice — no device keeps a dead
+    /// value. A second launch finds nothing to remove.
+    static let retiredContextKeys = ["foryou.context.v2", "foryou.context"]
+
+    static func forgetRetiredForYouModes(in defaults: UserDefaults) {
+        for key in retiredContextKeys { defaults.removeObject(forKey: key) }
+    }
+
     public init(
         repository: any FeedProviding,
         engagementProvider: (any EngagementProviding)? = nil,
@@ -142,6 +151,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.videoPlayback = videoPlayback
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        Self.forgetRetiredForYouModes(in: .standard)
         self.showsBalance = showsBalance
         // Every grid's tiles follow the feed's playback policy — Autoplay,
         // the network, Power Saving — For You's and a profile's alike (#580).
@@ -302,7 +312,6 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
                 repository: ForYouRepository(
                     feed: repository, counterClient: counterClient, discovery: discovery, localCache: localCache
                 ),
-                contextStore: ContentContextStore(),
                 // The rows split the people the viewer follows into FRIENDS
                 // (mutual) and the rest: asked of the graph as pages land, and
                 // kept live by the app's follow channel. Discover (everyone)

@@ -5,15 +5,8 @@ import PostGrid
 import Testing
 @testable import Feed
 
-/// The mock's staged arrivals, and the per-mode counts their captions produce.
-///
-/// These numbers reach the screen — the tab badge, the pill beside each row of
-/// the context menu, the bottom bar item — so they are pinned here rather than
-/// left to whoever next edits a caption. `ContentContext` is a keyword search
-/// over captions (see its own note on why), which makes the wording of a
-/// fixture load-bearing in a way that is very easy to miss: adding the word
-/// "review" to the Focus arrival would silently move it into Work and change
-/// two badges.
+/// The mock's staged arrivals: what For You's unread badge counts on a cold
+/// launch, and where they sit in the timeline.
 @MainActor
 struct MockForYouArrivalTests {
     /// Rebuilt per test: the arrivals are stamped relative to the clock at
@@ -63,28 +56,6 @@ struct MockForYouArrivalTests {
         #expect(head.count == 2)
         #expect(head.allSatisfy { $0.kind == .text },
                 "the pair a cold launch opens on must both be text-only")
-    }
-
-    /// The unfiltered lens counts every one of them: the badge For You opens
-    /// with.
-    @Test func theUnfilteredLensCountsThemAll() {
-        #expect(ContentContext.all.filtering(arrivals()).count == arrivals().count)
-    }
-
-    @Test func workCountsThree() {
-        #expect(ContentContext.work.filtering(arrivals()).count == 3)
-    }
-
-    @Test func focusCountsOne() {
-        #expect(ContentContext.focus.filtering(arrivals()).count == 1)
-    }
-
-    /// Not every mode has news, and the menu says so with an empty slot rather
-    /// than a zero pill. A fixture that accidentally matched every lens would
-    /// make that case unreachable.
-    @Test func someLensesHaveNothingNew() {
-        #expect(ContentContext.gaming.filtering(arrivals()).isEmpty)
-        #expect(ContentContext.entertainment.filtering(arrivals()).isEmpty)
     }
 
     /// They lead the timeline, so the Following list's "New" section is its
