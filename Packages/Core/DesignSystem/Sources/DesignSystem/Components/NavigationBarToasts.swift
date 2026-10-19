@@ -49,6 +49,16 @@ import UIKit
 /// - a list found mixed anyway is taken for the screen's edit: its toast
 ///   items are dropped, and the rest is what comes back.
 ///
+/// ## A confirmed control's new look goes in under its toast (#1447)
+///
+/// A toast that confirms a bar control carries the control's new look
+/// (`Feedback`'s `revealing`). It is applied in the same turn the toast takes
+/// the trailing items' place, as the items that come back: the bar goes from
+/// the old look straight to the toast, and the new look shows when the toast
+/// leaves. The screen applies it the way it always sets its items —
+/// `setOwnTrailingBarItems` writes the items that come back, and a list set on
+/// the bar directly is taken as them.
+///
 /// ## The toasts' width comes first
 ///
 /// When the toasts would have to collapse or cut their text, the screen's
@@ -93,6 +103,12 @@ final class NavigationBarToasts {
     /// How far the full leading group reaches, measured while it showed.
     private var fullLeadingExtent: CGFloat?
     private var waitsForTransition = false
+    /// The new looks of the controls the toasts being placed confirm (#1447),
+    /// applied by the next `place`.
+    private var reveals: [@MainActor () -> Void] = []
+    /// While they are applied: the screen's own items are the ones that
+    /// come back, even before the first toast has taken the bar.
+    private var isRevealing = false
     /// In the holding screen's view: its leaving the window means a push or
     /// a pop.
     private var probe: ScreenProbe?
@@ -106,7 +122,10 @@ final class NavigationBarToasts {
 
     /// Shows `content` in `host`'s navigation bar, or returns nil when there
     /// is no visible bar to show it in (the overlay draws it then).
-    static func present(_ content: ToastView.Content, from host: UIViewController) -> ToastView? {
+    /// `revealing`: the confirmed control's new look, applied under the toast.
+    static func present(
+        _ content: ToastView.Content, from host: UIViewController, revealing: (@MainActor () -> Void)? = nil
+    ) -> ToastView? {
         guard isEnabled, let navigation = host.navigationController ?? (host as? UINavigationController),
               !navigation.isNavigationBarHidden, let screen = navigation.topViewController,
               screen.viewIfLoaded?.window != nil else { return nil }
@@ -115,6 +134,7 @@ final class NavigationBarToasts {
         let known = shown[ObjectIdentifier(navigation)].flatMap { $0.navigation === navigation ? $0 : nil }
         let toasts = known ?? NavigationBarToasts(navigation: navigation, screen: screen)
         shown[toasts.key] = toasts
+        if let revealing { toasts.reveals.append(revealing) }
         return toasts.show(content)
     }
 
@@ -177,6 +197,7 @@ final class NavigationBarToasts {
     private func place() {
         guard let navigation, screen != nil else {
             Self.shown[key] = nil
+            runReveals()
             return
         }
         // Mid-push or mid-pop: wait for the transition to end, then place
@@ -197,13 +218,27 @@ final class NavigationBarToasts {
         guard let screen, let navigationItem else { return }
         // A screen with no visible bar: nowhere to show them for now; they
         // keep their time, and come back on the next screen with a bar.
-        guard !navigation.isNavigationBarHidden else { return }
+        guard !navigation.isNavigationBarHidden else {
+            runReveals()
+            return
+        }
         let current = navigationItem.rightBarButtonItems ?? []
         // The screen set its own items since (or this is the first toast):
         // those are the ones to put back — never a toast's item it kept from
         // the bar while editing (#1420).
         if savedItems == nil || !current.elementsEqual(handedItems, by: ===) {
             savedItems = current.filter { !Self.isToastItem($0) }
+        }
+        // The confirmed controls' new looks, as the items that come back
+        // (#1447) — a list the screen set on the bar itself included.
+        if !reveals.isEmpty {
+            isRevealing = true
+            runReveals()
+            isRevealing = false
+            let revealed = navigationItem.rightBarButtonItems ?? []
+            if !revealed.elementsEqual(current, by: ===) {
+                savedItems = revealed.filter { !Self.isToastItem($0) }
+            }
         }
         let live = toasts.filter { !$0.isDismissing }
         guard !live.isEmpty else {
@@ -225,6 +260,12 @@ final class NavigationBarToasts {
         }
         navigationItem.setRightBarButtonItems(handedItems, animated: true)
         trace("placed \(live.count): widths \(widths.map { Int($0) })")
+    }
+
+    private func runReveals() {
+        let pending = reveals
+        reveals = []
+        pending.forEach { $0() }
     }
 
     /// A push or a pop may have happened: once it has ended, the toasts go
@@ -329,7 +370,7 @@ final class NavigationBarToasts {
 
     /// The toasts holding `screen`'s bar right now, if any.
     private static func holding(_ screen: UIViewController) -> NavigationBarToasts? {
-        shown.values.first { $0.screen === screen && !$0.handedItems.isEmpty }
+        shown.values.first { $0.screen === screen && (!$0.handedItems.isEmpty || $0.isRevealing) }
     }
 
     /// `screen`'s own trailing items while its bar shows toasts — the ones

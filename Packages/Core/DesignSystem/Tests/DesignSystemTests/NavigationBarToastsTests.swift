@@ -283,4 +283,126 @@ struct NavigationBarToastsTests {
             #expect(toasts(in: screen).isEmpty)
         }
     }
+
+    // MARK: - A confirmed control (#1447)
+
+    /// Records every list the bar was handed.
+    private final class RecordingItem: UINavigationItem {
+        var handed: [[UIBarButtonItem]] = []
+        override var rightBarButtonItems: [UIBarButtonItem]? {
+            get { super.rightBarButtonItems }
+            set {
+                handed.append(newValue ?? [])
+                super.rightBarButtonItems = newValue
+            }
+        }
+        override func setRightBarButtonItems(_ items: [UIBarButtonItem]?, animated: Bool) {
+            handed.append(items ?? [])
+            super.setRightBarButtonItems(items, animated: animated)
+        }
+    }
+
+    private final class RecordingScreen: UIViewController {
+        let recording = RecordingItem(title: "")
+        override var navigationItem: UINavigationItem { recording }
+    }
+
+    private func hostingRecording(_ body: (RecordingScreen) throws -> Void) rethrows {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let screen = RecordingScreen()
+        let navigation = UINavigationController(rootViewController: screen)
+        window.rootViewController = navigation
+        window.isHidden = false
+        window.layoutIfNeeded()
+        let (clock, _) = ToastClock.manual()
+        let previousClock = ToastClock.current
+        let previousHaptic = Feedback.playHaptic
+        ToastClock.current = clock
+        Feedback.playHaptic = { _ in }
+        defer {
+            ToastClock.current = previousClock
+            Feedback.playHaptic = previousHaptic
+            window.rootViewController = nil
+            window.isHidden = true
+            window.layoutIfNeeded()
+        }
+        try body(screen)
+    }
+
+    /// The bar goes from the old look straight to the toast, and the new
+    /// look comes back when it leaves: never handed before (bell → toast →
+    /// bell.slash).
+    @Test func aConfirmedControlsNewLookComesBackWithTheToastsLeaving() throws {
+        try hostingRecording { screen in
+            let bell = UIBarButtonItem(image: UIImage(systemName: "bell"))
+            screen.setOwnTrailingBarItems([bell], animated: false)
+            let mutedBell = UIBarButtonItem(image: UIImage(systemName: "bell.slash"))
+            screen.recording.handed = []
+            var revealed = false
+            let toast = Feedback.success("Notifications muted", from: screen, revealing: {
+                revealed = true
+                screen.setOwnTrailingBarItems([mutedBell], animated: true)
+            })
+            #expect(revealed)
+            #expect(screen.recording.handed.count == 1, "the bar was handed more than the toast: \(screen.recording.handed)")
+            #expect(screen.recording.handed.allSatisfy { $0.allSatisfy(NavigationBarToasts.isToastItem) },
+                    "the new look reached the bar before the toast")
+            #expect(screen.ownTrailingBarItems.elementsEqual([mutedBell], by: ===))
+
+            toast.dismiss(animated: false)
+            let back = try #require(screen.navigationItem.rightBarButtonItems)
+            #expect(back.elementsEqual([mutedBell], by: ===), "the new look did not come back")
+        }
+    }
+
+    /// A screen that sets its bar itself in the reveal: what it set is what
+    /// comes back.
+    @Test func aRevealSetOnTheBarItselfComesBack() throws {
+        try hostingRecording { screen in
+            screen.navigationItem.rightBarButtonItems = [UIBarButtonItem(systemItem: .add)]
+            let mutedBell = UIBarButtonItem(image: UIImage(systemName: "bell.slash"))
+            let toast = Feedback.success("Notifications muted", from: screen, revealing: {
+                screen.navigationItem.setRightBarButtonItems([mutedBell], animated: true)
+            })
+            #expect(toasts(in: screen) == [toast])
+            toast.dismiss(animated: false)
+            let back = try #require(screen.navigationItem.rightBarButtonItems)
+            #expect(back.elementsEqual([mutedBell], by: ===))
+        }
+    }
+
+    /// A toast already up: the reveal under the next one still waits for the
+    /// last to leave.
+    @Test func aRevealUnderToastsAlreadyUpWaitsForTheLast() throws {
+        try hostingRecording { screen in
+            let bell = UIBarButtonItem(image: UIImage(systemName: "bell"))
+            screen.setOwnTrailingBarItems([bell], animated: false)
+            let first = Feedback.info("Link copied", from: screen)
+            let mutedBell = UIBarButtonItem(image: UIImage(systemName: "bell.slash"))
+            screen.recording.handed = []
+            let undo = Feedback.undoable(
+                "Notifications muted", from: screen,
+                revealing: { screen.setOwnTrailingBarItems([mutedBell], animated: true) },
+                commit: {}, undo: {}
+            )
+            #expect(screen.recording.handed.allSatisfy { $0.allSatisfy(NavigationBarToasts.isToastItem) })
+            first.dismiss(animated: false)
+            #expect(!(screen.navigationItem.rightBarButtonItems ?? []).contains { $0 === mutedBell })
+            undo.dismiss(animated: false)
+            let back = try #require(screen.navigationItem.rightBarButtonItems)
+            #expect(back.elementsEqual([mutedBell], by: ===))
+        }
+    }
+
+    /// No bar: the control changes as its toast appears, not before.
+    @Test func overTheContentTheRevealComesWithTheToast() {
+        hosting(barHidden: true) { screen in
+            var revealedBeforeReturn = false
+            let toast = Feedback.success("Notifications muted", from: screen, revealing: {
+                revealedBeforeReturn = true
+            })
+            #expect(toast.chrome == .capsule)
+            #expect(revealedBeforeReturn)
+        }
+    }
 }
