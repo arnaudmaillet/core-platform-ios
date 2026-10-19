@@ -24,6 +24,13 @@ public enum MemberGates {
             .first
     }
 
+    /// Whether the viewer up `source`'s chain is a GUEST: a gate found, and
+    /// it says not a member. Off-screen, or outside the shell, this is false
+    /// (nothing is gated), as `perform` reads it.
+    public static func isGuest(_ source: UIResponder) -> Bool {
+        gate(from: source)?.isMember == false
+    }
+
     /// `requireMember` from `source`. With no gate up the chain the answer is
     /// yes: outside the shell (tests, previews) nothing is gated, and the write
     /// is still refused server-side for a guest.

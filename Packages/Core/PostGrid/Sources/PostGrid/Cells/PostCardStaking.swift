@@ -89,7 +89,9 @@ public final class PostCardStaking {
             stake(.points(amount), on: key, cell: cell)
         }
         cell.stakeMenu = { [weak self, weak cell] in
-            guard let self, let cell else { return nil }
+            // A guest gets no stake menu (#1146): no amounts, no way into the
+            // Shop. Their tap on the like still asks them to sign up.
+            guard let self, let cell, !MemberGates.isGuest(cell) else { return nil }
             return StakeMenu.menu(
                 for: menuState(for: key),
                 stake: { [weak self, weak cell] amount in

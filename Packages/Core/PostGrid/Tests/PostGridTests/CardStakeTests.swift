@@ -1,4 +1,5 @@
 import CoreModels
+import CoreNavigation
 import CoreStorage
 import DesignSystem
 import MediaCore
@@ -43,6 +44,30 @@ struct CardStakeTests {
     @Test func anUnwiredChipIsACounter() {
         let cell = row()
         #expect(cell.debugTapLikesChip() == false)
+    }
+
+    /// The shell's gate, up a card's chain.
+    private final class GateHolder: UIViewController, MemberGateProviding {
+        let memberGate: any MemberGating
+        init(member: Bool) {
+            memberGate = MemberGate(isMember: member)
+            super.init(nibName: nil, bundle: nil)
+        }
+        required init?(coder: NSCoder) { fatalError() }
+    }
+
+    /// A guest's card raises no stake menu (#1146): no amounts, no way into
+    /// the Shop. A member's still does.
+    @Test func aGuestsCardRaisesNoStakeMenu() throws {
+        let staking = PostCardStaking(wallet: WalletStore(defaults: Self.defaults()))
+        for member in [false, true] {
+            let holder = GateHolder(member: member)
+            let cell = row()
+            holder.view.addSubview(cell)
+            staking.bind(cell, to: PostID("post-1"))
+            let provider = try #require(cell.stakeMenu)
+            #expect((provider() != nil) == member, member ? "a member lost the stake menu" : "a guest got a stake menu")
+        }
     }
 
     /// Through the wallet: the balance pays, the surface can take it back.

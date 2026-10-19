@@ -323,7 +323,7 @@ final class CommentsInputBar: UIView {
     /// The emote panel and the inline `:query` strip for this field; its
     /// smiley sits at the field's trailing end, where iMessage keeps its own.
     private lazy var emotes = EmoteKeyboard(textView: textView)
-    private let boostButton = UIButton(configuration: .glass())
+    private let boostButton = StakeMenuButton(configuration: .glass())
     /// The boost's slot, on a post that does not exist yet: who will see it.
     /// See `visibilityMenu`.
     private let visibilityButton = UIButton(configuration: .glass())

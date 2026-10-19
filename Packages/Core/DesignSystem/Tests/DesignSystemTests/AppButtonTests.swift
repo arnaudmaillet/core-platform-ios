@@ -496,6 +496,15 @@ struct AppButtonTests {
         #expect(!button.isContextMenuInteractionEnabled)
     }
 
+    /// A provider that answers nil raises nothing — not a lifted preview
+    /// round an empty menu (a guest's like, #1146).
+    @Test func aProviderThatAnswersNilRaisesNothing() throws {
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))
+        button.menuProvider = { nil }
+        let interaction = try #require(button.contextMenuInteraction)
+        #expect(button.contextMenuInteraction(interaction, configurationForMenuAtLocation: .zero) == nil)
+    }
+
     /// A card's glyph is drawn at its own size, not the type's.
     @Test func aSymbolPointSizeOverridesTheTypes() throws {
         let button = AppButton(aspect: .bare, size: .inline, content: .symbol("heart"))

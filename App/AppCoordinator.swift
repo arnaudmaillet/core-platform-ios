@@ -392,17 +392,11 @@ final class AppCoordinator: Coordinator, SignUpPresenting {
     /// height.
     private static let signUpFallbackHeight: CGFloat = 540
 
-    /// The sheet's headline: the action's own, except where the welcome gift
-    /// is the point — a like or a claim names the likes waiting (report §3.2).
+    /// The sheet's headline: the action's own words. A guest is never told about the welcome gift
+    /// nor an amount of likes waiting (#1146, the owner 2026-10-14): the
+    /// server still credits it at sign-up, silently.
     private func signUpPrompt(for action: GatedAction?) -> String? {
-        if let waiting = container.welcomeGift.lockedAmount, waiting > 0 {
-            switch action {
-            case .like: return "Sign up to use your \(waiting) likes"
-            case .claim: return "Sign up to claim your \(waiting) likes"
-            default: break
-            }
-        }
-        return action?.signUpPrompt
+        action?.signUpPrompt
     }
 
     /// A login that resumed a self-deactivated account (#385, backend #650)

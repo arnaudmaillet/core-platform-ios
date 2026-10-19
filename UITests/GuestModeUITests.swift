@@ -157,9 +157,11 @@ final class GuestModeUITests: XCTestCase {
         )
         let before = like.value as? String
         like.tap()
-        // The welcome gift is named on a like (report §3.2).
-        let prompt = staticText(beginningWith: "Sign up to use your", in: app)
+        // The generic like prompt: a guest is never told about the welcome
+        // gift, nor an amount of likes (#1146, the owner 2026-10-14).
+        let prompt = staticText(beginningWith: "Sign up to like this post", in: app)
         XCTAssertTrue(prompt.waitForExistence(timeout: 8), "like did not ask the guest to sign up")
+        XCTAssertFalse(prompt.label.contains(where: \.isNumber), "the like prompt names an amount: \(prompt.label)")
         return (like, before, prompt)
     }
 

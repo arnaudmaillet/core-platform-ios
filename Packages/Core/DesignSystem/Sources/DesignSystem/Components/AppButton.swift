@@ -801,7 +801,10 @@ open class AppButton: UIButton {
         guard let menuProvider else {
             return super.contextMenuInteraction(interaction, configurationForMenuAtLocation: location)
         }
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menuProvider() }
+        // A provider that answers nil raises NOTHING: no lifted preview round
+        // an empty menu (a guest's like has no stake menu, #1146).
+        guard let menu = menuProvider() else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in menu }
     }
 
     private static let highlightPreviewSelector = #selector(

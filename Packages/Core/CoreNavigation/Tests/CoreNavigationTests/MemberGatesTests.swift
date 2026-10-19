@@ -38,6 +38,17 @@ struct MemberGatesTests {
         return button
     }
 
+    /// A guest is a gate that says "not a member"; a member, or no gate up
+    /// the chain (tests, previews), is not (#1146).
+    @Test func isGuestReadsTheGateUpTheChain() {
+        // Held here: a view does not keep its superview's controller alive.
+        let guest = GateHolder(gate: MemberGate(isMember: false))
+        let member = GateHolder(gate: MemberGate(isMember: true))
+        #expect(MemberGates.isGuest(control(in: guest)))
+        #expect(!MemberGates.isGuest(control(in: member)))
+        #expect(!MemberGates.isGuest(UIButton()))
+    }
+
     @Test func aMemberRunsTheActionInTheSameTurn() {
         let holder = GateHolder(gate: MemberGate(isMember: true))
         var ran = false
