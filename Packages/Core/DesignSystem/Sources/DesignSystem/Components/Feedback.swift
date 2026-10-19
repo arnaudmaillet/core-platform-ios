@@ -119,7 +119,7 @@ public enum Feedback {
     }
 
     /// The action did not happen: a failure-style toast and an error haptic.
-    /// It stays until closed, acted on or replaced (#954).
+    /// It leaves on the same timer as the other toasts (#1448).
     @discardableResult
     public static func failure(
         _ message: String,

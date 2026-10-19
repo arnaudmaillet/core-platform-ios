@@ -1775,8 +1775,8 @@ final class CaptureViewController: UIViewController {
     /// Says something over the camera — through the app's one toast (#955):
     /// at the top, clear of the shutter and the selector, with its own
     /// motion, Reduce Motion handling and announcement. A `failure` (a photo
-    /// or a clip that could not be made) stays until closed, and plays the
-    /// error haptic.
+    /// or a clip that could not be made) is drawn as one and plays the error
+    /// haptic.
     private func say(_ text: String, failure: Bool = false) {
         debugLastToast = text
         debugToasts.append(text)

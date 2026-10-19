@@ -321,7 +321,7 @@ struct CaptureFlowTests {
         try await settle { !screen.camera.isRecording }
         try #require(!screen.camera.isRecording)
         #expect(screen.camera.debugLastToast == "The clip could not be recorded")
-        // A failure (#955): it stays until closed.
+        // A failure (#955), with the error haptic.
         #expect(screen.camera.debugLastToastView?.style == .failure)
     }
 
