@@ -37,6 +37,16 @@ final class NativePopGestureEnabler: NSObject {
         // proxy relays everything but that veto and adds the same policy as
         // the edge's, plus the screen's own gate (`ContentPopGating`).
         if #available(iOS 26.0, *), let content = navigationController.interactiveContentPopGestureRecognizer {
+            // ⚠️ ONLY IN FRONT OF THE DELEGATE IT WAS BUILT FOR (#1328): when
+            // UIKit's delegate is missing, or no longer answers the veto, it
+            // stays in place and the back swipe is the edge's alone.
+            guard ContentPopDelegateProxy.canInterpose(on: content.delegate) else {
+                #if DEBUG
+                let found = content.delegate.map { String(describing: type(of: $0)) } ?? "nil"
+                print("[content-pop] UIKit's delegate (\(found)) does not answer the veto: left in place, back swipe from the edge only")
+                #endif
+                return
+            }
             let proxy = ContentPopDelegateProxy(system: content.delegate) { [weak self] recognizer in
                 self?.contentPopShouldBegin(recognizer) ?? false
             }
