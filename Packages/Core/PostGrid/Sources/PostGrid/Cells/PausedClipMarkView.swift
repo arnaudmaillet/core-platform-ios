@@ -42,7 +42,50 @@ public final class PausedClipMarkView: UIImageView {
         layer.shadowOpacity = 0.4
         layer.shadowRadius = 6
         layer.shadowOffset = .zero
+        #if DEBUG
+        if let variant = GlassPlayMark.variant { installGlass(variant) }
+        #endif
     }
+
+    #if DEBUG
+    /// The glass triangle prototype (#1369), behind `-glass-play-mark`.
+    private var glass: GlassPlayMarkHost?
+
+    /// The triangle in glass, at the glyph's own size and place: the glyph
+    /// and its shadow go, the glass draws instead.
+    private func installGlass(_ variant: GlassPlayMark.Variant) {
+        let size = image?.size ?? CGSize(width: 48, height: 56)
+        image = nil
+        layer.shadowOpacity = 0
+        let host = GlassPlayMarkHost(variant: variant, size: size)
+        host.view.frame = bounds
+        host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(host.view)
+        glass = host
+    }
+
+    /// The glass's own motion: materialised or not, scaled — never faded by
+    /// the view's alpha, which glass does not survive.
+    private func setGlassVisible(_ glass: GlassPlayMarkHost, _ visible: Bool, animated: Bool) {
+        guard animated, window != nil else {
+            isHidden = !visible
+            glass.setShown(visible, animated: false, reducesMotion: false) {}
+            return
+        }
+        let reduced = reducesMotion()
+        if visible {
+            isHidden = false
+            record(reduced ? .fadeIn : .bounceIn)
+        } else {
+            record(reduced ? .fadeOut : .scaleOut)
+        }
+        glass.setShown(visible, animated: true, reducesMotion: reduced) { [weak self] in
+            // An appear that took over keeps the mark.
+            guard let self, !visible, !wantsVisible else { return }
+            isHidden = true
+        }
+    }
+    #endif
 
     @available(*, unavailable)
     public required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -54,6 +97,12 @@ public final class PausedClipMarkView: UIImageView {
     public func setVisible(_ visible: Bool, animated: Bool = true) {
         guard wantsVisible != visible else { return }
         wantsVisible = visible
+        #if DEBUG
+        if let glass {
+            setGlassVisible(glass, visible, animated: animated)
+            return
+        }
+        #endif
         guard animated, window != nil else {
             layer.removeAllAnimations()
             isHidden = !visible

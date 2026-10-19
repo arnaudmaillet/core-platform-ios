@@ -29,7 +29,7 @@ struct ForYouListSectionBarItemTests {
 
     private func hosting(
         _ kind: ForYouPostListViewController.Kind, newCount: Int,
-        _ body: (ForYouPostListViewController, ForYouGridPage) async throws -> Void
+        _ body: @MainActor (ForYouPostListViewController, ForYouGridPage) async throws -> Void
     ) async rethrows {
         let list = ForYouPostListViewController(
             kind: kind, imagePipeline: ImagePipeline(fetcher: SilentFetcher()),
