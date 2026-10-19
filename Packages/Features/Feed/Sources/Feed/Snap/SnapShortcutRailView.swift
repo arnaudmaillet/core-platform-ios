@@ -658,7 +658,7 @@ final class SnapShortcutRailView: UIScrollView {
 /// creating a system material contacts the render server, a multi-second
 /// main-thread stall on headless CI simulators, where unit-tested views
 /// never join a window and must never pay it.
-final class SnapRailBoostButton: UIButton {
+final class SnapRailBoostButton: StakeMenuButton {
     /// Fired with what to spend — the tap's default amount, or a menu pick
     /// (the default again, or one ×100 shot).
     var onBoost: ((WalletStakeSpend) -> Void)?
