@@ -56,12 +56,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// bound to them (`NotificationsBell`) — a bar item lives in one bar, so the
     /// single item this used to be could only ever lead the map's.
     private lazy var notificationsBell: NotificationsBell = NotificationsBell { [weak self] in
-        guard let self else { return }
-        // A guest has no notifications: the bell invites them to sign up, and
-        // opens the drawer once they have.
-        MemberGates.perform(.notifications, from: tabBarController) { [weak self] in
-            self?.notificationsDrawer.open()
-        }
+        // A member's only: a guest has no bell (#1146), and the drawer's edge
+        // swipe is gated on its own (`NotificationsDrawer`).
+        self?.notificationsDrawer.open()
     }
     /// Notifications, as a drawer BEHIND the shell: the whole tab bar
     /// controller slides right to reveal it. See `NotificationsDrawer`.

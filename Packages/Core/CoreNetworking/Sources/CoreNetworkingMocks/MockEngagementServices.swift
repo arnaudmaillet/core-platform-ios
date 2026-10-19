@@ -433,16 +433,16 @@ public final class MockWalletService: @unchecked Sendable {
         lock.withLock { accountLocked(account).points }
     }
 
-    /// The welcome gift (backend #934, #1008): 50 + 25 × min(full days since
-    /// the device's first launch, 3), credited once per device — whoever
-    /// signs in on it — when a guest becomes a member. Returns the amount.
+    /// The welcome gift (backend #934, #1008, #943): a flat 50, credited
+    /// once per device — whoever signs in on it — when a guest becomes a
+    /// member (the owner, 2026-10-14, #1146: the daily growth is gone).
+    /// Returns the amount.
     @discardableResult
-    public func creditWelcomeGift(account: String, device: String, firstLaunch: Date) -> Int64 {
+    public func creditWelcomeGift(account: String, device: String) -> Int64 {
         lock.withLock {
             let key = "welcome:" + device
             guard accounts[key] == nil else { return 0 }
-            let days = max(0, Int(now().timeIntervalSince(firstLaunch) / 86_400))
-            let amount = Int64(50 + 25 * min(days, 3))
+            let amount: Int64 = 50
             var wallet = accountLocked(account)
             wallet.points += amount
             wallet.pointsEarned += amount

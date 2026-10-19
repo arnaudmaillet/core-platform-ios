@@ -157,7 +157,6 @@ final class ExploreTabCoordinator: TabCoordinator {
             walletBadge = WalletBadgeInstaller(
                 wallet: container.walletStore,
                 presenter: navigationController,
-                welcome: container.welcomeGiftFace,
                 makeSheet: { [unowned container] in container.makeWalletSheet() }
             ) { [weak self] item in
                 self?.walletItem = item

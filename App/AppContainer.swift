@@ -752,21 +752,20 @@ final class AppContainer {
         walletServerSync = sync
     }
 
-    /// The likes a guest is handed before they have an account, locked in
-    /// the balance badge until they sign up (guest mode decision 11). The app
-    /// coordinator opens it for a guest and settles it into `walletStore` for
-    /// a member.
+    /// The likes a guest's sign-up brings: a flat 50, once per device, never
+    /// named to the guest (#1146, the owner 2026-10-14). The app coordinator
+    /// opens it for a guest and settles it into `walletStore` for a member.
     private(set) lazy var welcomeGift = WelcomeGift()
-
-    /// What every balance badge shows a guest instead of the wallet.
-    var welcomeGiftFace: WalletBadgeInstaller.WelcomeGiftFace {
-        .init(gift: welcomeGift, gate: memberGate)
-    }
 
     /// The wallet sheet every balance badge presents: the store, plus the
     /// Feed feature's post lookup so each stake row shows its post.
+    ///
+    /// ⚠️ A MEMBER'S ONLY (#1146): a guest has no badge, no Shop and no
+    /// wallet, so no entry point may open it for one — a stray one would show
+    /// an empty member wallet.
     func makeWalletSheet() -> UIViewController {
-        WalletClaimViewController(
+        assert(memberGate.isMember, "the wallet sheet was asked for a guest (#1146)")
+        return WalletClaimViewController(
             wallet: walletStore,
             lookUpPosts: { [unowned self] ids in await self.feedFeature.galleryPosts(ids) },
             imagePipeline: imagePipeline,
@@ -778,8 +777,7 @@ final class AppContainer {
             countries: countryAccess,
             stakePacks: stakePacks,
             profileItems: profileItems,
-            shopMedia: ShopMedia(images: imagePipeline, videos: videoPlayback),
-            welcome: welcomeGiftFace
+            shopMedia: ShopMedia(images: imagePipeline, videos: videoPlayback)
         ).wrappedInSheet()
     }
 
@@ -1742,7 +1740,6 @@ final class AppContainer {
             WalletBadgeInstaller.attach(
                 to: screen,
                 wallet: self.walletStore,
-                welcome: self.welcomeGiftFace,
                 makeSheet: { [unowned self] in self.makeWalletSheet() }
             )
         },

@@ -15,12 +15,10 @@ public enum GatedAction: Sendable, Equatable {
     case saveSound
     case followingFeed
     case inbox
-    case notifications
     case ownProfile
     case followPlace
     case unlockCountry
     case shop
-    case claim
     /// Linking a parent's and a teen's accounts (#417): an invite link opened
     /// by a guest.
     case supervision
@@ -38,10 +36,8 @@ public enum GatedAction: Sendable, Equatable {
         case .useSound, .saveSound: "Sign up to use this sound"
         case .followingFeed: "Sign up to see posts from people you follow"
         case .inbox: "Sign up to message friends"
-        case .notifications: "Sign up to get notified"
         case .ownProfile: "Sign up to create your profile"
         case .followPlace, .unlockCountry, .shop: "Sign up to explore more places"
-        case .claim: "Sign up to claim your likes"
         case .supervision: "Sign up to link a family account"
         }
     }

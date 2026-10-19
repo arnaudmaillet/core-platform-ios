@@ -36,57 +36,39 @@ struct WelcomeGiftTests {
         WalletStore(defaults: defaults, now: { [clock] in clock.now })
     }
 
-    @Test func nothingIsLockedBeforeAGuestOpensIt() {
-        let gift = makeGift()
-        #expect(gift.lockedAmount == nil)
-        #expect(gift.nextGrowthAt == nil)
+    @Test func nothingIsOpenBeforeAGuestOpensIt() {
+        #expect(!makeGift().isOpen)
     }
 
-    @Test func aGuestStartsWithFiftyThenGainsTheClaimAmountForThreeDays() {
-        let gift = makeGift()
-        gift.open()
-        #expect(gift.lockedAmount == 50)
-        #expect(gift.nextGrowthAt == epoch.addingTimeInterval(day))
-
-        clock.advance(by: day - 1)
-        #expect(gift.lockedAmount == 50, "a day is 24 hours waited, not a midnight crossed")
-        clock.advance(by: 1)
-        #expect(gift.lockedAmount == 50 + WalletStore.Policy.baseClaimAmount)
-
-        clock.advance(by: 2 * day)
-        #expect(gift.lockedAmount == 125)
-        #expect(gift.nextGrowthAt == nil, "the pile stops after the third day")
-
-        clock.advance(by: 30 * day)
-        #expect(gift.lockedAmount == WelcomeGift.Policy.maximum, "and never expires")
-    }
-
-    @Test func reopeningKeepsTheFirstLaunchDate() {
-        let gift = makeGift()
-        gift.open()
-        clock.advance(by: 2 * day)
-        gift.open()
-        #expect(gift.lockedAmount == 100)
-        // A new process on the same device reads the same gift.
-        #expect(makeGift().lockedAmount == 100)
-    }
-
-    @Test func signingUpCreditsThePileOnce() {
+    /// A flat 50 at sign-up (#1146, the owner 2026-10-14): however long the
+    /// guest browsed, nothing grows.
+    @Test func signingUpCreditsAFlatFiftyOnceWhateverTheWait() {
         let gift = makeGift()
         let wallet = makeWallet()
         let before = wallet.balance
         gift.open()
-        clock.advance(by: day)
+        #expect(gift.isOpen)
+        clock.advance(by: 30 * day)
 
-        #expect(gift.settle(into: wallet) == 75)
-        #expect(wallet.balance == before + 75)
-        #expect(gift.lockedAmount == nil)
+        #expect(gift.settle(into: wallet) == WelcomeGift.Policy.firstLaunch)
+        #expect(WelcomeGift.Policy.firstLaunch == 50)
+        #expect(wallet.balance == before + 50)
+        #expect(!gift.isOpen)
 
         // A sign-out and a second sign-in on this device: nothing more.
         gift.open()
-        #expect(gift.lockedAmount == nil)
+        #expect(!gift.isOpen)
         #expect(gift.settle(into: wallet) == 0)
-        #expect(wallet.balance == before + 75)
+        #expect(wallet.balance == before + 50)
+    }
+
+    @Test func reopeningKeepsTheGiftOpenAcrossProcesses() {
+        let gift = makeGift()
+        gift.open()
+        clock.advance(by: 2 * day)
+        gift.open()
+        // A new process on the same device reads the same gift.
+        #expect(makeGift().isOpen)
     }
 
     @Test func aDeviceWhoseFirstViewerIsAMemberNeverOpensAGift() {
@@ -96,7 +78,7 @@ struct WelcomeGiftTests {
         #expect(gift.settle(into: wallet) == 0)
         #expect(wallet.balance == before)
         gift.open()
-        #expect(gift.lockedAmount == nil)
+        #expect(!gift.isOpen)
     }
 
     @Test func creditCountsAsEarnedAndLeavesTheClaimAlone() {
