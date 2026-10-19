@@ -303,7 +303,6 @@ struct ForYouViewModelUnreadTests {
         model.viewDidLoad()
         await settle()
         #expect(box.badge == 1)
-        model.setContext(.all)
         model.followingListOpened()
         #expect(box.badge == 1, "opening the list reads it for NEXT time, not this one")
     }
@@ -453,7 +452,7 @@ struct ForYouSessionWatermarkTests {
 // MARK: - Counts under a lens
 
 @MainActor
-struct ForYouContextCountTests {
+struct ForYouTabCountTests {
     private func makeModel(posts: [GalleryPost], store: ForYouUnreadStore) -> ForYouViewModel {
         ForYouViewModel(
             repository: StubProvider(first: ForYouPage(posts: posts, nextPageToken: nil)),
@@ -462,66 +461,22 @@ struct ForYouContextCountTests {
         )
     }
 
-    /// A "work" post and a "focus" post arrive after the baseline. Each lens
-    /// counts only what it admits, and the unfiltered lens counts both — the
-    /// numbers the context menu puts beside its rows.
-    @Test func eachLensCountsOnlyWhatItAdmits() async {
+    /// The For You tab's unread signal is the two rows' badges added up — the
+    /// numbers the headers show, by the same route (#1423: there is no lens
+    /// any more, and nothing is counted separately).
+    @Test func theTabCountIsTheRowsBadges() async {
         let store = makeStore()
         store.markSeen(.activity, in: [post("old", at: 1)])
-        let posts = [
-            GalleryPost(
-                id: PostID("w"), kind: .photo, isRepost: false, thumbnailURL: nil,
-                caption: "shipping the refactor at the office", publishedAtMS: 100, reactionCount: nil
-            ),
-            GalleryPost(
-                id: PostID("f"), kind: .photo, isRepost: false, thumbnailURL: nil,
-                // NOT "deep work" — that phrase is in Focus's keyword set AND
-                // contains Work's, so the post would land in both and the
-                // per-lens counts would stop being distinguishable. The lens is
-                // a caption search; overlapping fixtures test the overlap
-                // rather than the counting.
-                caption: "study session, quiet morning", publishedAtMS: 200, reactionCount: nil
-            )
-        ]
-        let model = makeModel(posts: posts, store: store)
-        var counts: [ContentContext: Int] = [:]
-        model.onContextCountsChange = { counts = $0 }
+        let model = makeModel(posts: [post("a", at: 100), post("b", at: 200)], store: store)
+        var latest: ForYouViewModel.Snapshot?
+        var count: Int?
+        model.onSnapshotChange = { latest = $0 }
+        model.onNewCountChange = { count = $0 }
         model.viewDidLoad()
         await settle()
-
-        #expect(counts[.all] == 2)
-        #expect(counts[.work] == 1)
-        #expect(counts[.focus] == 1)
-        #expect(counts[.gaming] == 0)
-    }
-
-    /// ⚠️ The baseline is an INSTANT, not a subject. Freezing it while a narrow
-    /// lens happened to be selected would date the whole session from that
-    /// lens's newest post, and every other lens would then under-count.
-    @Test func theBaselineDoesNotDependOnTheLensThatWasActiveWhenItFroze() async {
-        let store = makeStore()
-        store.markSeen(.activity, in: [post("old", at: 1)])
-        let posts = [
-            GalleryPost(
-                id: PostID("g"), kind: .photo, isRepost: false, thumbnailURL: nil,
-                caption: "boss level speedrun", publishedAtMS: 500, reactionCount: nil
-            ),
-            GalleryPost(
-                id: PostID("w"), kind: .photo, isRepost: false, thumbnailURL: nil,
-                caption: "office deadline", publishedAtMS: 100, reactionCount: nil
-            )
-        ]
-        let model = makeModel(posts: posts, store: store)
-        model.setContext(.gaming)
-        var counts: [ContentContext: Int] = [:]
-        model.onContextCountsChange = { counts = $0 }
-        model.viewDidLoad()
-        await settle()
-        // Both are still new. Had the baseline frozen at the newest GAMING post
-        // (500), the work post at 100 would have read as already seen.
-        #expect(counts[.work] == 1)
-        #expect(counts[.gaming] == 1)
-        #expect(counts[.all] == 2)
+        let rails = try? #require(latest?.rails)
+        #expect(count == 2)
+        #expect(count == (rails?.followingBadge ?? -1) + (rails?.friendsBadge ?? -1))
     }
 
     /// The badge and the section are published together and describe the same

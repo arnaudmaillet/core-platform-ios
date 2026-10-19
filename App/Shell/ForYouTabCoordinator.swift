@@ -81,19 +81,8 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
         }
     }
 
-    /// The lens menu this tab's root offers, for the shell to hang off a
-    /// long press on the bar item.
-    ///
-    /// Read through the stack ROOT rather than held, because the root is the
-    /// only thing that owns a lens — a thread or a post pushed on top of it
-    /// does not, and asking `topViewController` would hand back nothing the
-    /// moment the viewer navigated anywhere.
-    var modeMenu: UIMenu? {
-        (navigationController.viewControllers.first as? any ForYouModeMenuProviding)?.makeModeMenu()
-    }
-
-    /// The tab item follows the screen's content lens: its name, its glyph and
-    /// how much is waiting under it.
+    /// The tab item follows how much is waiting on the screen's rows — its
+    /// title is always "For You" (#1423).
     ///
     /// ⚠️ **The `UITab` is built lazily and its title/image are `var`s on the
     /// live object**, so this must not re-create it — `tabs` is assigned once
@@ -102,9 +91,8 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
     /// not asked for it yet, which is harmless: the provider closure only runs
     /// when the tab is selected.
     private func apply(_ presentation: ForYouTabPresentation) {
-        tab.title = presentation.title
-        // The owner's glyph whatever the mode (#1191), and no count: the
-        // badge variant says there is something new.
+        // The owner's glyph (#1191), and no count: the badge variant says
+        // there is something new.
         tab.badgeValue = nil
         let unread = presentation.badgeCount > 0
         if unread != hasUnread {

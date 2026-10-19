@@ -400,7 +400,7 @@ Gate where the action starts, at a handful of choke points rather than in every 
 | `PostBookmarkStore`, `SavedSoundStore`, `MapPlaceFollowStore`, `MapFavoritesStore` | Unused (gated) | Keyed by profile | Wiped |
 | `PostDraftStore` | Unused (gated) | Keyed by profile | Wiped |
 | Feed snapshot `feed-first-page` | Discovery snapshot | Re-keyed by viewer | Wiped |
-| `RecentSearchStore`, `EmoteRecents`, `GalleryPreferences`, `ContentContextStore`, `ForYouUnread` / `ForYouSeenPostsStore` | Device-local, kept | Kept | Kept (device preferences) |
+| `RecentSearchStore`, `EmoteRecents`, `GalleryPreferences`, ~~`ContentContextStore`~~ (removed, #1423), `ForYouUnread` / `ForYouSeenPostsStore` | Device-local, kept | Kept | Kept (device preferences) |
 | `RelationshipPrivacyStore` | Unused | Keyed by profile (until server-side, #403) | Wiped |
 | Not-interested list | Local, sent with guest signals | Attached to the account | Kept |
 

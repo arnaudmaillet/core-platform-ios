@@ -13,7 +13,7 @@ import UIKit
 /// rows, with a tap anywhere opening the full-screen feed.
 ///
 /// ```
-///   [bell][lens]                        [coins][search]
+///   [bell]                              [coins][search]
 ///     Friends 3 ›                                ← stories: a tap flies
 ///   ◉ ◉ ◉ ○ ○ ○                                            that friend's posts
 ///     Following 5 ›                              ← cards: a tap flies
@@ -40,18 +40,16 @@ import UIKit
 /// screen's machinery is keyed to. The close lands where the flight left: on
 /// the friend's face, on the card.
 ///
-/// **The bar reads `[bell][lens] … [coins][search]`.** The bell and the
-/// balance are the shell's (`HeaderAccessoryHosting`); the lens and search are
-/// this screen's. The lens glyph IS the current context — it does not offer an
-/// action, it reports what the surface is currently showing, and tapping it
-/// opens the menu to change that. Search opens through `AppRoute.search`.
+/// **The bar reads `[bell] … [coins][search]`.** The bell and the balance are
+/// the shell's (`HeaderAccessoryHosting`); search is this screen's, through
+/// `AppRoute.search`. The content contexts that stood beside the bell (a lens
+/// menu: For You / Entertainment / Work / Focus / Gaming) are gone (#1423, the
+/// owner 2026-10-19): For You always shows everything.
 ///
 /// ⚠️ **`DiscoverySource` (Trending / Recent) has no UI entry point any more.**
-/// It used to be the leading item; `+` took that slot. The ordering still
-/// applies — everything is served under `.trending` — but nothing on screen can
-/// change it. Either fold it into the context menu as a second section or
-/// retire it; leaving it reachable only from a debug argument is not a
-/// resting state.
+/// The ordering still applies — everything is served under `.trending` — but
+/// nothing on screen can change it; it is reachable from a debug argument
+/// only.
 ///
 /// This is a **tab root**, so the tab bar stays — it is how the viewer leaves.
 /// The screens it pushes hide it (`hidesBottomBarWhenPushed`) and wear
@@ -136,7 +134,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// Search. The trailing EDGE item — an action, so a plain glyph with a
     /// target and no menu.
     ///
-    /// It stands where the context glyph used to, because the bar's detached
+    /// It stands where a context glyph used to, because the bar's detached
     /// trailing item was taken — by a camera first, by the "+" menu (Camera,
     /// Upload Media, Text Post) since — and search had to land somewhere it is
     /// actually wanted. The header "+" that used to hold the leading corner is
@@ -158,24 +156,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// Reports how the app's own tab item should read — see
     /// `ForYouTabPresentation`.
     var onTabPresentationChange: ((ForYouTabPresentation) -> Void)?
-
-    /// Every lens's count, as of the last publish. Read by the context menu
-    /// when it opens and by the tab item when either half changes; held here
-    /// rather than asked for because a menu opening is not a moment to run a
-    /// derivation over the corpus.
-    private var contextCounts: [ContentContext: Int] = [:]
-
-    /// The content context: the trailing item, whose menu carries the lenses
-    /// and whose GLYPH is the active one.
-    ///
-    /// The glyph doing that job is what lets the menu stay plain — see
-    /// `makeContextMenu` for why there is no checkmark in it.
-    private lazy var contextItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(image: UIImage(systemName: viewModel.context.symbol))
-        item.accessibilityLabel = "Content context"
-        item.accessibilityValue = viewModel.context.title
-        return item
-    }()
 
     /// The flight in progress, held for its life (the stack holds its
     /// delegate weakly). Its close-out is the session's (`HeroPushSession`).
@@ -284,8 +264,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// ⚠️ `[0]` IS THE SCREEN EDGE. Search keeps the corner and the wallet
     /// badge sits to its left — the same arrangement the Explore header wears
-    /// ([coins] [search]). The lens menu is in the LEADING group, behind the
-    /// shell's bell, so the header reads `[bell][lens] … [coins][search]`.
+    /// ([coins] [search]). The shell's bell leads alone: `[bell] …
+    /// [coins][search]`.
     private func applyTrailingItems() {
         navigationItem.rightBarButtonItems = [searchItem, trailingAccessoryItem].compactMap { $0 }
     }
@@ -302,11 +282,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         applyLeadingItems()
     }
 
-    /// ⚠️ `[0]` IS THE SCREEN EDGE here too: the bell takes the corner and the
-    /// lens stands inboard of it, each in its own bubble (the bell opts out of
-    /// the shared background; see `NotificationsBell`).
+    /// The bell alone, in its own bubble (it opts out of the shared
+    /// background; see `NotificationsBell`).
     private func applyLeadingItems() {
-        navigationItem.leftBarButtonItems = [leadingAccessoryItem, contextItem].compactMap { $0 }
+        navigationItem.leftBarButtonItems = [leadingAccessoryItem].compactMap { $0 }
     }
 
     override func viewDidLoad() {
@@ -314,8 +293,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // The page the cards lie on, a step below them — see `Surface`.
         view.backgroundColor = Surface.page
         // ⚠️ **NO TITLE IN THE BAR.** "For You" was written here (the static
-        // word, never the live lens name, which at "Entertainment" would have
-        // collided with the items); it went with the map tab's on 2026-09-22 —
+        // word); it went with the map tab's on 2026-09-22 —
         // the two roots' headers carry their controls and nothing else, and the
         // tab bar already says the word.
         // `largeTitleDisplayMode` stays `.never`: the large-title content-area
@@ -333,12 +311,10 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // screen and the chevron bare for the next one.
         navigationItem.backButtonDisplayMode = .minimal
 
-        // The bar keeps the bell and the lens glyph leading and search + wallet
-        // trailing. The centre is empty and stays empty.
+        // The bar keeps the bell leading and search + wallet trailing. The
+        // centre is empty and stays empty.
         applyLeadingItems()
         applyTrailingItems()
-
-        contextItem.menu = makeContextMenu()
 
         page.pin(to: view)
         // The rows lead the list, as its header — see `GridLeadStack`.
@@ -468,13 +444,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         }
         // Discover's "View all": the whole mosaic, pushed.
         page.onViewAllTapped = { [weak self] in self?.pushDiscoverGallery() }
-        viewModel.onContextCountsChange = { [weak self] counts in
-            guard let self else { return }
-            contextCounts = counts
-            // The menu reads `contextCounts` when it opens, so it needs no
-            // telling — but the tab item is a fact about the app's chrome and
-            // has to be pushed.
-            publishTabPresentation()
+        // The tab item is a fact about the app's chrome: pushed, not asked.
+        viewModel.onNewCountChange = { [weak self] count in
+            self?.onTabPresentationChange?(ForYouTabPresentation(badgeCount: count))
         }
         viewModel.viewDidLoad()
 
@@ -536,97 +508,6 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     private func openAuthor(of post: GalleryPost) {
         guard let id = post.authorID else { return }
         router?.route(to: .profile(id, stub: post.authorIdentityStub))
-    }
-
-    /// The context menu: plain actions, **no `.singleSelection` and no
-    /// checkmark**.
-    ///
-    /// The selection is already on screen — the bar item's glyph IS the active
-    /// context, which is the whole reason it is a state item rather than an
-    /// action. A tick beside the matching row says the same thing a second
-    /// time, in a place you have to open a menu to read.
-    ///
-    /// Attached ONCE, and its contents are built fresh every time it opens.
-    ///
-    /// The rows now carry counts, which are live state — the thing this menu
-    /// deliberately had none of. Rather than re-assigning `contextItem.menu` on
-    /// every publish (a write per page load, to a menu nobody has open), the
-    /// children come from a `UIDeferredMenuElement.uncached`: UIKit asks for
-    /// them at the moment of presentation, so they are current by construction
-    /// and there is nothing to keep in step. `.uncached` specifically —
-    /// `.init(_:)` caches the first build, which is exactly the stale menu this
-    /// avoids.
-    func makeContextMenu() -> UIMenu {
-        UIMenu(children: [
-            UIDeferredMenuElement.uncached { [weak self] completion in
-                completion(self?.makeContextActions() ?? [])
-            }
-        ])
-    }
-
-    /// The rows the menu shows, built fresh on every presentation.
-    ///
-    /// Separate from `makeContextMenu` because a `UIDeferredMenuElement`'s
-    /// provider cannot be invoked from outside UIKit — so a test asserting what
-    /// the menu offers would have nothing to read but the deferred element
-    /// itself. This is the seam those tests use.
-    func makeContextActions() -> [UIAction] {
-        // Closure form, not a bare `map(makeContextAction)`: passing a
-        // MainActor-isolated method as a function value strips its isolation
-        // and Swift 6 rejects it.
-        ContentContext.allCases.map { makeContextAction($0) }
-    }
-
-    /// One row: `[count] [glyph] Mode`.
-    ///
-    /// ⚠️ The count used to be parenthesised into the title — "Work (3)" — which
-    /// put a number where a name goes and made the rows read as five sentences
-    /// rather than five choices. It is a badge, so it is drawn as one, in the
-    /// only slot a menu row has for it: see `ContextMenuRowIcon` for why the
-    /// pill and the glyph have to be a single image, and why every row reserves
-    /// the pill's width even at zero.
-    private func makeContextAction(_ context: ContentContext) -> UIAction {
-        UIAction(
-            title: context.title,
-            image: ContextMenuRowIcon.image(
-                count: contextCounts[context] ?? 0,
-                symbol: context.symbol,
-                traits: traitCollection
-            )
-        ) { [weak self] _ in
-            self?.applyContext(context)
-        }
-    }
-
-    /// Adopts a context everywhere it shows: the glyph, the VoiceOver value,
-    /// and the corpus both tabs are reading.
-    ///
-    /// Set HERE rather than in the menu action so that every path that changes
-    /// the context — a menu tap, a debug hook, a restore — moves all of them
-    /// together.
-    private func applyContext(_ context: ContentContext) {
-        viewModel.setContext(context)
-        contextItem.image = UIImage(systemName: context.symbol)
-        contextItem.accessibilityValue = context.title
-        publishTabPresentation()
-    }
-
-    /// Tells the shell how its own bar item should read.
-    ///
-    /// Sent from here rather than from the view model because it is a
-    /// PRESENTATION fact — a title, a glyph, a badge — and the view model
-    /// deals in contexts and counts. It also means the two callers that can
-    /// change it (a lens tap, a fresh set of counts) go through one place, so
-    /// the item can never carry one mode's name and another's number.
-    private func publishTabPresentation() {
-        let context = viewModel.context
-        onTabPresentationChange?(
-            ForYouTabPresentation(
-                title: context.title,
-                symbol: context.symbol,
-                badgeCount: contextCounts[context] ?? 0
-            )
-        )
     }
 
     /// Opens the full-screen feed on the tapped post, with the hero zoom.
@@ -2354,23 +2235,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
 
     /// `openFeed(at:)`, for the launch-argument hooks (+QA).
     func debugOpenFeed(at index: Int) { openFeed(at: index) }
-    /// `applyContext(_:)`, for `-foryou-context` (+QA).
-    func debugApplyContext(_ context: ContentContext) { applyContext(context) }
     /// How much of the page the floating bar covers, for the hooks' insets (+QA).
     var debugFloatingBarCover: CGFloat { floatingBarCover }
     #endif
-}
-
-// MARK: - The mode menu, offered elsewhere
-
-/// The app's tab bar offers this screen's lens menu under a long press. It is
-/// the SAME menu object the navigation bar's own item carries — same rows, same
-/// pills, same glyphs — so the two can never drift into disagreeing about what
-/// the modes are or how much is waiting under each.
-extension ForYouViewController: ForYouModeMenuProviding {
-    func makeModeMenu() -> UIMenu {
-        makeContextMenu()
-    }
 }
 
 // MARK: - Tab re-tap (#1309)

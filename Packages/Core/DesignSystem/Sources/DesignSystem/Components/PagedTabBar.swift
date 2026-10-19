@@ -2806,8 +2806,7 @@ private final class BadgeView: UIView {
     /// The badge's fill: notification red, whichever mark it is.
     ///
     /// **Red is what this app already calls "a number of things waiting".** The
-    /// bottom tab bar's badges are the system's own red, and the count pills in
-    /// For You's mode menu are drawn to match them. A tab capsule sitting a
+    /// bottom tab bar's badges are the system's own red. A tab capsule sitting a
     /// finger's width above that bar, saying the same kind of thing in a
     /// different colour, made the viewer resolve two palettes to learn one
     /// fact.

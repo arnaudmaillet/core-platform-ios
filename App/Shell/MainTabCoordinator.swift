@@ -119,32 +119,8 @@ final class MainTabCoordinator: NSObject, Coordinator {
         button.addAction(UIAction { [weak self] _ in self?.selectTab(.profile) }, for: .primaryActionTriggered)
         return button
     }()
-    /// The For You root. Held so its lens menu can be hung off a long press on
-    /// the bar item, the way the Profile tab's switcher is.
+    /// The For You root, rebuilt on a change of viewer.
     private var forYouTab: ForYouTabCoordinator?
-
-    /// An invisible button laid over the For You tab, carrying the lens menu.
-    ///
-    /// Everything `profileMenuOverlay` documents applies here unchanged — a
-    /// control rather than a `UIContextMenuInteraction` because the interaction
-    /// LIFTS its source and would float a scaled copy of the tab icon over
-    /// fixed chrome, `isContextMenuInteractionEnabled` on and
-    /// `showsMenuAsPrimaryAction` off so the gesture is a long press and a
-    /// plain tap still selects the tab.
-    ///
-    /// ⚠️ Its accessibility label is NOT fixed: this tab is renamed by whichever
-    /// lens is active ("For You", "Work", "Focus"), and VoiceOver reads this
-    /// overlay, not the tab under it — so the label is re-stated on every
-    /// alignment pass rather than set once here.
-    private lazy var forYouMenuOverlay: UIButton = {
-        let button = UIButton(type: .custom)
-        button.backgroundColor = .clear
-        button.isContextMenuInteractionEnabled = true
-        button.showsMenuAsPrimaryAction = false
-        button.accessibilityHint = "Double tap and hold to choose what to see"
-        button.addAction(UIAction { [weak self] _ in self?.selectTab(.forYou) }, for: .primaryActionTriggered)
-        return button
-    }()
 
     /// The bar's detached "+": a menu of ways to make a post, never a tab
     /// anyone stands on. See `CreateTabItem`.
@@ -624,31 +600,14 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
 // MARK: - Bar menus
 
 extension MainTabCoordinator {
-    /// Keeps every menu overlay exactly over its bar item: Profile's switcher,
-    /// For You's lens menu and the "+".
+    /// Keeps every menu overlay exactly over its bar item: Profile's switcher
+    /// and the "+".
     ///
     /// Runs on every layout pass, so it is cheap and idempotent: it re-adds
     /// nothing already added and writes the frame only when it moved.
     fileprivate func alignMenuOverlays() {
         align(profileMenuOverlay, over: profileTab?.tab)
-        alignForYouMenuOverlay()
         align(createItem.overlay, over: createItem.tab)
-    }
-
-    /// Keeps the lens-menu overlay over the For You tab, and installs the menu
-    /// the first time the root exists to supply one.
-    ///
-    /// ⚠️ The menu is attached HERE rather than at `start()`, because the tab's
-    /// root view controller is built when its stack is populated and the shell
-    /// assembles the bar before that has happened. Attaching once and only once
-    /// matters: the menu resolves its own rows at presentation, so re-fetching
-    /// it on every layout pass would buy nothing and cost a build per frame.
-    private func alignForYouMenuOverlay() {
-        // The tab is renamed by the active lens, so the label follows it rather
-        // than a constant.
-        forYouMenuOverlay.accessibilityLabel = forYouTab?.tab.title
-        if forYouMenuOverlay.menu == nil { forYouMenuOverlay.menu = forYouTab?.modeMenu }
-        align(forYouMenuOverlay, over: forYouTab?.tab)
     }
 
     /// Puts an overlay exactly over the bar's button for `tab`.

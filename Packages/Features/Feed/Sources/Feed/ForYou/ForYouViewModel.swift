@@ -137,26 +137,20 @@ public final class ForYouViewModel {
     /// A failure with NOTHING loaded is not this: it is the failed page, with
     /// its own retry, exactly as before.
     public var onRefreshFailed: (() -> Void)?
-    /// Every context's count, for the menu that offers them and the tab item.
-    ///
-    /// The menu names five modes, and the whole point of putting a number
-    /// beside each is that a viewer can see where the activity is WITHOUT
-    /// switching to find out. So this answers for all of them at once, against
-    /// the same session baseline the rows are counted against — the selected
-    /// mode's entry and the two headers are then the same numbers arriving by
-    /// the same route.
-    public var onContextCountsChange: (([ContentContext: Int]) -> Void)?
+    /// Everything waiting on the two rows — the For You tab's unread signal.
+    /// The sum of the two headers' numbers, as they read them (a forced
+    /// `-foryou-badges` count included), never derived separately (#1423).
+    public var onNewCountChange: ((Int) -> Void)?
     /// Fires immediately BEFORE a publish whose corpus was re-derived rather
-    /// than extended — a lens change, a re-ordering, a follow moving an author
-    /// between rows.
+    /// than extended — a re-ordering, a follow moving an author between rows.
     ///
     /// ⚠️ The pages cannot work this out for themselves, and trying to crashed
     /// the app. A page treats "same posts plus some new ones" as an append and
     /// expresses it as an insert, which is what keeps the mosaic from
-    /// reshuffling when Trending re-ranks a landing page. Widening the lens
-    /// produces exactly that shape — every Work post is still there, plus
-    /// thirty more — but it is NOT an append: the newcomers belong all through
-    /// the list, not after it. Inserted at the end they mis-order the timeline,
+    /// reshuffling when Trending re-ranks a landing page. A re-derivation can
+    /// produce exactly that shape — every post still there, plus thirty more —
+    /// but it is NOT an append: the newcomers belong all through the list, not
+    /// after it. Inserted at the end they mis-order the timeline,
     /// and when the sectioning moves in the same pass `performBatchUpdates`
     /// takes the whole app down with an inconsistency exception.
     ///
@@ -169,9 +163,6 @@ public final class ForYouViewModel {
     private let unreadStore: ForYouUnreadStore
     /// The friends' posts the viewer has OPENED — what clears a story's ring.
     private let seenStore: ForYouSeenPostsStore
-    /// Persists the context lens. Optional so a test can run without touching
-    /// the simulator's defaults.
-    private let contextStore: ContentContextStore?
 
     /// The key the session baseline is persisted under — FOLLOWING's, which
     /// is what the badged tab was called and what installed apps have stored.
@@ -212,9 +203,6 @@ public final class ForYouViewModel {
     nonisolated static let failureMessage = "Couldn't load these posts."
 
     public private(set) var source: DiscoverySource = .trending
-    /// The active lens. Restored from the store at init, so the surface opens
-    /// where the viewer left it.
-    public private(set) var context: ContentContext = .all
 
     /// Everything loaded so far, **in the order it is displayed**. nil = the
     /// first page is still in flight (pages report loading); a failure records
@@ -278,7 +266,6 @@ public final class ForYouViewModel {
         repository: any ForYouProviding,
         unreadStore: ForYouUnreadStore = ForYouUnreadStore(),
         seenStore: ForYouSeenPostsStore = ForYouSeenPostsStore(),
-        contextStore: ContentContextStore? = nil,
         followRelations: (any SocialGraphReading)? = nil,
         followEvents: FollowGraphEvents? = nil,
         entities: EntityStore? = nil
@@ -286,10 +273,8 @@ public final class ForYouViewModel {
         self.repository = repository
         self.unreadStore = unreadStore
         self.seenStore = seenStore
-        self.contextStore = contextStore
         self.followRelations = followRelations
         self.entities = entities
-        if let contextStore { context = contextStore.context }
         // Weak: the channel holds the handler, the handler must not hold this.
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.apply(change)
@@ -360,23 +345,6 @@ public final class ForYouViewModel {
         self.source = source
         // The one place the whole corpus legitimately reorders.
         corpus = corpus.map(source.ordering)
-        onCorpusReset?()
-        publish()
-    }
-
-    /// The lens the whole surface is read through. Local, like the ordering —
-    /// it narrows the corpus already in hand rather than asking for another.
-    ///
-    /// Every surface moves together — the list, both rows, both pushed lists
-    /// — because the context is a statement about the surface rather than
-    /// about one part of it.
-    public func setContext(_ context: ContentContext) {
-        guard self.context != context else { return }
-        self.context = context
-        contextStore?.context = context
-        // The counts are derived from the VISIBLE corpus, so they have to be
-        // republished with it. A lens change RE-DERIVES the corpus rather than
-        // extending it, and the pages have to be told before they see it.
         onCorpusReset?()
         publish()
     }
@@ -512,7 +480,7 @@ public final class ForYouViewModel {
     /// makes a FRIEND); Discover, which is everyone, does not move.
     ///
     /// A re-derivation when it changes anything the viewer can see, so the
-    /// pages are told first (`onCorpusReset`), exactly as a lens change tells
+    /// pages are told first (`onCorpusReset`), exactly as a re-ordering tells
     /// them.
     private func apply(_ change: FollowChange) {
         let previous = relation(of: change.profileID)
@@ -586,19 +554,19 @@ public final class ForYouViewModel {
 
     // MARK: - The corpora
 
-    /// DISCOVER's corpus: every loaded post, every author and kind, under the
-    /// lens — the widest corpus the app has. There is no discovery RPC
+    /// DISCOVER's corpus: every loaded post, every author and kind — the
+    /// widest corpus the app has. There is no discovery RPC
     /// (BACKEND_GAPS §14), and the timeline is the whole population this
     /// screen sees; followed and not.
     public var discoverPosts: [GalleryPost] {
-        context.filtering(hasDiscovery ? discovery ?? [] : corpus ?? [])
+        hasDiscovery ? discovery ?? [] : corpus ?? []
     }
 
-    /// The loaded posts of one circle, under the lens, in display order —
+    /// The loaded posts of one circle, in display order —
     /// from the FOLLOWING timeline, never from Discover's pool: a followed
     /// author's posts the discovery pool happened to rank are not the rows.
     private func posts(in circle: Circle) -> [GalleryPost] {
-        context.filtering(corpus ?? []).filter { self.circle(of: $0.authorID) == circle }
+        (corpus ?? []).filter { self.circle(of: $0.authorID) == circle }
     }
 
     /// FOLLOWING's posts: the people the viewer follows who are not friends.
@@ -621,11 +589,8 @@ public final class ForYouViewModel {
     /// FRIENDS' posts: mutual follows.
     public var friendPosts: [GalleryPost] { posts(in: .friend) }
 
-    /// Both rows' authors, before any lens — what the session baseline is
-    /// frozen against and the persisted cursor advanced over. Unfiltered on
-    /// purpose: a baseline is an instant, not a subject, and freezing it while
-    /// a narrow context happened to be selected would date the whole session
-    /// from whatever that context's newest post was.
+    /// Both rows' authors — what the session baseline is frozen against and
+    /// the persisted cursor advanced over.
     private var followedCorpus: [GalleryPost] {
         (corpus ?? []).filter {
             let circle = circle(of: $0.authorID)
@@ -859,13 +824,13 @@ public final class ForYouViewModel {
         }
     }
 
-    /// One post out of the whole loaded corpus, BEFORE any lens.
+    /// One post out of the whole loaded corpus.
     ///
     /// The dismissal's adoption is the caller: a post the viewer is closing has
     /// to be able to land in the list even when the page it is landing in no
-    /// longer holds it — a refresh re-derived the corpus, or the context lens
-    /// moved while the post was open. Deliberately unfiltered, because the
-    /// question is "does this post exist" and not "does this page show it".
+    /// longer holds it — a refresh re-derived the corpus while the post was
+    /// open. The question is "does this post exist", not "does this page show
+    /// it".
     public func post(for id: PostID) -> GalleryPost? {
         discovery?.first { $0.id == id } ?? corpus?.first { $0.id == id }
     }
@@ -881,19 +846,19 @@ public final class ForYouViewModel {
         applyMockNewActivityIfNeeded()
         var snapshot = Snapshot()
         snapshot.discover = state(
-            discoverPosts, empty: Self.discoverEmptyState(source: source, context: context)
+            discoverPosts, empty: Self.discoverEmptyState(source: source)
         )
         snapshot.media = state(
             GalleryFilter.Format.media.filtering(discoverPosts),
-            empty: Self.discoverEmptyState(source: source, context: context)
+            empty: Self.discoverEmptyState(source: source)
         )
         let following = followingPosts
         let friends = friendPosts
         snapshot.following = state(
-            following, empty: Self.emptyState(for: .following, context: context)
+            following, empty: Self.emptyState(for: .following)
         )
         snapshot.friends = state(
-            friends, empty: Self.emptyState(for: .friend, context: context)
+            friends, empty: Self.emptyState(for: .friend)
         )
         if corpus != nil {
             // The session baseline is frozen here, BEFORE the visit advances
@@ -926,11 +891,8 @@ public final class ForYouViewModel {
         }
         onSnapshotChange?(snapshot)
         if corpus != nil {
-            onContextCountsChange?(
-                ContentContext.allCases.reduce(into: [:]) { result, lens in
-                    result[lens] = newCount(in: lens)
-                }
-            )
+            // The tab's unread signal: the two headers' numbers, as they read.
+            onNewCountChange?(snapshot.rails.followingBadge + snapshot.rails.friendsBadge)
         }
         #if DEBUG
         debugLogCircles()
@@ -1040,19 +1002,6 @@ public final class ForYouViewModel {
         return watermark
     }
 
-    /// Everything waiting under a lens: Following's arrivals plus the friends'
-    /// unseen posts — what the mode menu and the tab item show. The sum of the
-    /// two headers' numbers under the active lens, never derived separately.
-    private func newCount(in lens: ContentContext) -> Int {
-        guard corpus != nil, let watermark = sessionWatermark(against: followedCorpus) else { return 0 }
-        let all = lens.filtering(corpus ?? [])
-        let following = all.filter { circle(of: $0.authorID) == .following && watermark.isNew($0) }
-        let friends = all.filter {
-            circle(of: $0.authorID) == .friend && watermark.isNew($0) && !seenStore.contains($0.id)
-        }
-        return following.count + friends.count
-    }
-
     #if DEBUG
     /// `-foryou-mock-new-activity [n]` (n defaults to 3): back-dates the
     /// baseline so the n newest posts of the people the viewer follows read as
@@ -1086,32 +1035,19 @@ public final class ForYouViewModel {
 
     /// Discover's empty list, in Discover's words — nothing to DISCOVER, not
     /// "no activity": the list is not anyone's activity.
-    nonisolated static func discoverEmptyState(
-        source: DiscoverySource,
-        context: ContentContext = .all
-    ) -> EmptyState {
+    nonisolated static func discoverEmptyState(source: DiscoverySource) -> EmptyState {
         let title = switch source {
         case .trending: "Nothing trending to discover yet."
         case .recent: "Nothing new to discover yet."
         }
-        guard !context.isUnfiltered else { return EmptyState(title: title) }
-        return EmptyState(
-            title: title,
-            subtitle: "Showing \(context.title) only. Change the context to see everything."
-        )
+        return EmptyState(title: title)
     }
 
     /// A pushed list's empty page, named so the blank page reads as an answer.
-    nonisolated static func emptyState(for circle: Circle, context: ContentContext = .all) -> EmptyState {
+    nonisolated static func emptyState(for circle: Circle) -> EmptyState {
         let title = circle == .friend
             ? "No posts from your friends yet."
             : "No posts from people you follow yet."
-        // A narrowed context is very often the REASON a page is empty, and a
-        // blank screen that does not say so reads as a broken feed.
-        guard !context.isUnfiltered else { return EmptyState(title: title) }
-        return EmptyState(
-            title: title,
-            subtitle: "Showing \(context.title) only. Change the context to see everything."
-        )
+        return EmptyState(title: title)
     }
 }
