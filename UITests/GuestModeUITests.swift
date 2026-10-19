@@ -12,6 +12,12 @@ final class GuestModeUITests: XCTestCase {
 
     override func setUp() { continueAfterFailure = false }
 
+    /// A post a guest may read: its author is public. A private author's
+    /// posts read as not found to a guest (viewer-aware reads, #447), and
+    /// the mock's post-0001 is by one (`MockSocialDataset
+    /// .isRelationshipsPrivate`: index % 9 < 4).
+    private static let publicPost = "post-0005"
+
     private func launch(_ arguments: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-guest", "-welcome-gift-reset"] + arguments
@@ -172,7 +178,7 @@ final class GuestModeUITests: XCTestCase {
     /// to the mock's demo address — and is still on that post, with the like
     /// landed.
     func testAGuestsLikeLandsAfterSigningInFromTheSheet() {
-        let app = launch(["-open-post", "post-0001"])
+        let app = launch(["-open-post", Self.publicPost])
         let (like, before, prompt) = likeAsGuest(in: app)
 
         continueWithEmail("demo@example.com", code: "123456", in: app)
@@ -185,7 +191,7 @@ final class GuestModeUITests: XCTestCase {
     /// username — and the like the guest started lands on the post they were
     /// reading (#444).
     func testAGuestSignsUpByCodeAndTheirLikeLands() {
-        let app = launch(["-open-post", "post-0001"])
+        let app = launch(["-open-post", Self.publicPost])
         let (like, before, prompt) = likeAsGuest(in: app)
 
         continueWithEmail("new.guest@example.com", code: "123456", in: app)
