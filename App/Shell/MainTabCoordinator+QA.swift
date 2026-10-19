@@ -115,8 +115,9 @@ extension MainTabCoordinator {
             }
             // `-toast-demo long` (#1449): a failure whose message the bar
             // cuts, with Retry — a tap on its body opens the whole message.
-            if mode == "long" {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            // Fired again every 5 s for 20 s: a toast lasts 4 s.
+            for shot in 0..<4 where mode == "long" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3 + Double(shot) * 5) { [weak self] in
                     guard let top = (self?.tabBarController.selectedViewController as? UINavigationController)?
                         .topViewController else { return }
                     Feedback.failure(

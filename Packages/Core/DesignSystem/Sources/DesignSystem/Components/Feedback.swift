@@ -353,6 +353,9 @@ public enum Feedback {
     /// a toast added inside a share sheet's remote UI is clipped, misplaced,
     /// or simply lost.
     ///
+    /// It stops under a toast's own full-message sheet too
+    /// (`isToastMessageSheet`, #1449).
+    ///
     /// A tab shell is never the host itself, for the same safe-area reason:
     /// a toast sourced from it (a sheet's presenter, after the sheet has gone
     /// — "Posted", #803) goes to its selected tab, which clears the tab bar.
@@ -361,7 +364,8 @@ public enum Feedback {
         var top = root
         while let presented = top.presentedViewController,
               !presented.isBeingDismissed,
-              !isSystemSurface(presented) {
+              !isSystemSurface(presented),
+              !isToastMessageSheet(presented) {
             top = presented
         }
         var ancestor: UIViewController? = source
@@ -391,6 +395,14 @@ public enum Feedback {
         ]
         if ordinary.contains(where: { $0 == controllerClass }) { return false }
         return Bundle(for: controllerClass).bundlePath.contains("/System/Library/")
+    }
+
+    /// A toast's own full-message sheet (#1449): never a toast's host. A toast
+    /// fired while it is up goes to the screen under it — in that screen's
+    /// bar, never in the sheet's, where it took the ✕'s place.
+    static func isToastMessageSheet(_ controller: UIViewController) -> Bool {
+        let root = (controller as? UINavigationController)?.viewControllers.first ?? controller
+        return root is ToastMessageSheet
     }
 
     private static func intoSelectedTab(_ host: UIViewController) -> UIViewController {

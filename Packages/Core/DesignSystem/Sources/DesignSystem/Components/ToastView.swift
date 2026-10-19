@@ -943,6 +943,8 @@ public final class ToastView: UIView {
                 }
             }
             self.countdown = countdown
+            // Updated in place under its open sheet: the new time waits too.
+            if fullMessageSheet != nil { countdown.hold(.sheet) }
         }
     }
 
@@ -1181,7 +1183,7 @@ public final class ToastView: UIView {
         sheet.onGone = { [weak self] in self?.countdown?.release(.sheet) }
         countdown?.hold(.sheet)
         fullMessageSheet = sheet
-        Self.presentFullMessage(sheet, presenter)
+        Self.presentFullMessage(sheet.wrappedInSheet(), presenter)
     }
 
     /// Where the sheet is presented from: the topmost screen of the app's

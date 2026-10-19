@@ -68,11 +68,21 @@ struct ToastFullMessageTests {
             try #require(toast.isMessageTruncated)
             toast.debugTap()
             #expect(runs == 0, "the body's tap ran the action")
-            let sheet = try #require(caught.first as? ToastMessageSheet, "no sheet")
+            let sheet = try #require((caught.first as? UINavigationController)?.viewControllers.first as? ToastMessageSheet, "no sheet")
             sheet.loadViewIfNeeded()
             #expect(sheet.messageLabel.text == Self.long)
             #expect(sheet.messageLabel.numberOfLines == 0)
             #expect(sheet.actionButton != nil, "the sheet does not offer the action")
+            // The owner's layout (2026-10-19): a ✕ in the bar, a large glyph,
+            // the action alone in the toolbar, in neutral glass.
+            #expect(sheet.navigationItem.rightBarButtonItem === sheet.closeItem, "no ✕ in the bar")
+            #expect(sheet.glyphView?.preferredSymbolConfiguration == UIImage.SymbolConfiguration(
+                pointSize: ToastMessageSheet.glyphPointSize, weight: .regular
+            ))
+            #expect(ToastMessageSheet.glyphPointSize >= 44, "the glyph is not large")
+            #expect(sheet.toolbarItems?.count == 1 && sheet.toolbarItems?.first?.customView === sheet.actionButton)
+            #expect(sheet.navigationController?.isToolbarHidden == false, "the action's toolbar is hidden")
+            #expect(sheet.actionButton?.configuration?.baseForegroundColor == .label, "the action is not neutral")
             #expect(toast.countdown?.holds.contains(.sheet) == true, "the toast's time ran under the sheet")
 
             sheet.debugAct()
@@ -91,10 +101,11 @@ struct ToastFullMessageTests {
         try hosting { container in
             let toast = barToast(Self.long, width: 180, in: container)
             toast.debugTap()
-            let sheet = try #require(caught.first as? ToastMessageSheet)
+            let sheet = try #require((caught.first as? UINavigationController)?.viewControllers.first as? ToastMessageSheet)
             sheet.loadViewIfNeeded()
             #expect(sheet.actionButton == nil, "an action offered for a toast that has none")
-            sheet.debugGone()
+            #expect(sheet.navigationController?.isToolbarHidden == true, "a toolbar with nothing in it")
+            sheet.debugClose()
             #expect(!toast.isDismissing)
             #expect(toast.countdown?.holds.isEmpty == true)
             #expect(toast.countdown?.isRunning == true, "the time did not resume")
@@ -149,6 +160,21 @@ struct ToastFullMessageTests {
             toast.debugTap()
             #expect(caught.count == 1)
         }
+    }
+
+    /// A toast fired while a full-message sheet is up never lands in the
+    /// sheet: its host is the screen under it (the ✕ stays the sheet's).
+    @Test func aToastNeverTakesItsSheetAsHost() {
+        let screen = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = screen
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let sheet = ToastMessageSheet(message: Self.long, glyph: nil, glyphTint: .label, actionTitle: nil)
+        let wrapped = sheet.wrappedInSheet()
+        #expect(Feedback.isToastMessageSheet(wrapped))
+        #expect(!Feedback.isToastMessageSheet(UINavigationController(rootViewController: UIViewController())))
+        #expect(Feedback.host(for: screen) === screen)
     }
 
     // MARK: - VoiceOver
