@@ -24,9 +24,16 @@ struct SnapUnavailablePostTests {
         let gone: Set<PostID>
         init(gone: Set<PostID>) { self.gone = gone }
 
+        /// The feed here is SEEDED (`seedProjection`), and its own first load
+        /// must not replace the seed. An empty page did, whenever it landed:
+        /// on a starved runner it landed during a wait, the pager emptied,
+        /// and the next page read found no cell (develop dd4d633f). A failed
+        /// load keeps what is on screen (`loadFirstPageFromNetwork`).
+        private struct SeededOnly: Error {}
+
         func cachedFirstPage() async -> [FeedEntry]? { nil }
-        func loadFirstPage() async throws -> FeedPage { FeedPage(entries: [], nextPageToken: nil, isCold: false) }
-        func loadPage(afterToken token: String) async throws -> FeedPage { FeedPage(entries: [], nextPageToken: nil, isCold: false) }
+        func loadFirstPage() async throws -> FeedPage { throw SeededOnly() }
+        func loadPage(afterToken token: String) async throws -> FeedPage { throw SeededOnly() }
         func loadPost(_ id: PostID) async throws -> FeedEntry {
             if gone.contains(id) { throw FeedError.notFound }
             return FeedEntry(
@@ -182,7 +189,6 @@ struct SnapUnavailablePostTests {
         try settle(feed, on: 0)
         mountPanel(feed, for: PostID("a"), panels: panels)
         #expect(await eventually { feed.unavailablePostIDs.contains(PostID("a")) })
-
         // Away, far enough for a's cell to be recycled.
         for index in 1...4 {
             try settle(feed, on: index)
