@@ -1,3 +1,4 @@
+import CoreModels
 import CoreNavigation
 import CoreStorage
 import DesignSystem
@@ -82,6 +83,9 @@ final class ExploreTabCoordinator: TabCoordinator {
     /// width-change reinstall, the sheet — lives in `WalletBadgeInstaller`,
     /// which the For You and Profile headers wear too.
     private var walletBadge: WalletBadgeInstaller?
+    /// The badge's latest item (`WalletBadgeInstaller` hands a fresh one when
+    /// the count's width changes); nil for a guest.
+    private var walletItem: UIBarButtonItem?
     /// The screen wearing the bar items, for the reinstall.
     private weak var mapViewController: UIViewController?
 
@@ -89,6 +93,7 @@ final class ExploreTabCoordinator: TabCoordinator {
     /// belong to the viewer, and this stack is not rebuilt for that.
     func viewerDidChange() {
         (mapViewController as? any MapViewerRefreshing)?.viewerDidChange()
+        installBarItems()
     }
 
     init(container: AppContainer, notificationsButtonItem: UIBarButtonItem) {
@@ -114,7 +119,6 @@ final class ExploreTabCoordinator: TabCoordinator {
         // ⚠️ THE BELL MOVED TO THE LEADING EDGE and the "+" is gone — the
         // compose screen it opened has been removed from the product. The
         // header now reads `[bell] … [coins][search]`.
-        mapViewController.navigationItem.leftBarButtonItem = notificationsButtonItem
         // ⚠️ NO TITLE IN THE BAR. "Maps" (the tab's name then; "Explore" now)
         // was written here for a while (the controller is navigation-agnostic,
         // so the coordinator was the one place to write it); it went with For
@@ -124,25 +128,7 @@ final class ExploreTabCoordinator: TabCoordinator {
         // same line on the other roots for the widths it protects.
         mapViewController.navigationItem.backButtonDisplayMode = .minimal
         navigationController.viewControllers = [mapViewController]
-
-        // The badge stands where the avatar used to — trailing group, inboard
-        // of the bell ([coin] [bell]).
-        walletBadge = WalletBadgeInstaller(
-            wallet: container.walletStore,
-            presenter: navigationController,
-            welcome: container.welcomeGiftFace,
-            makeSheet: { [unowned container] in container.makeWalletSheet() }
-        ) { [weak self] item in
-            guard let self else { return }
-            // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell
-            // used to hold, and the wallet badge stays inboard of it.
-            // `[0]` is the screen edge: [shop][points][search] reads
-            // right to left here.
-            let sellsCountries = (self.mapViewController as? any MapCountryShopHosting)?.sellsCountries ?? false
-            self.mapViewController?.navigationItem.rightBarButtonItems = sellsCountries
-                ? [self.searchButtonItem, item, self.shopButtonItem]
-                : [self.searchButtonItem, item]
-        }
+        installBarItems()
 
         #if DEBUG
         // `-open-wallet`: presents the wallet sheet ~1s after launch — the
@@ -159,5 +145,44 @@ final class ExploreTabCoordinator: TabCoordinator {
 
     private func presentWalletSheet() {
         walletBadge?.presentSheet()
+    }
+
+    /// The header for the viewer now: a member's `[bell] … [shop][likes]
+    /// [search]`, a guest's `… [search]` alone (#1146, the owner 2026-10-14:
+    /// no bell, no balance, no shop for a guest). Run at start and on every
+    /// sign-up and sign-out, so the items come and go without a relaunch.
+    private func installBarItems() {
+        let member = container.memberGate.isMember
+        if member, walletBadge == nil {
+            walletBadge = WalletBadgeInstaller(
+                wallet: container.walletStore,
+                presenter: navigationController,
+                welcome: container.welcomeGiftFace,
+                makeSheet: { [unowned container] in container.makeWalletSheet() }
+            ) { [weak self] item in
+                self?.walletItem = item
+                self?.applyBarItems()
+            }
+        } else if !member {
+            walletBadge = nil
+            walletItem = nil
+        }
+        applyBarItems()
+    }
+
+    private func applyBarItems() {
+        guard let navigationItem = mapViewController?.navigationItem else { return }
+        guard container.memberGate.isMember else {
+            navigationItem.leftBarButtonItem = nil
+            navigationItem.rightBarButtonItems = [searchButtonItem]
+            return
+        }
+        navigationItem.leftBarButtonItem = notificationsButtonItem
+        // ⚠️ `[0]` IS THE SCREEN EDGE: search takes the corner the bell used
+        // to hold, and the wallet badge stays inboard of it — [shop][likes]
+        // [search] reads right to left here.
+        let sellsCountries = (mapViewController as? any MapCountryShopHosting)?.sellsCountries ?? false
+        navigationItem.rightBarButtonItems = [searchButtonItem, walletItem, sellsCountries ? shopButtonItem : nil]
+            .compactMap { $0 }
     }
 }

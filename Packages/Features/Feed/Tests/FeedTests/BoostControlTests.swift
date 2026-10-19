@@ -522,7 +522,15 @@ struct BoostControlTests {
 
     // MARK: - Helpers
 
-    private static func walletFeed() -> (SnapFeedViewController, WalletStore) {
+    /// A guest's post wears no balance (#1146): the wallet still backs the
+    /// rail's like, but the bar has no badge.
+    @Test func aGuestsFeedHasNoBalanceBadge() {
+        let (feed, _) = Self.walletFeed(showsBalance: false)
+        let items = (feed.navigationItem.rightBarButtonItems ?? []) + (feed.navigationItem.leftBarButtonItems ?? [])
+        #expect(!items.contains { $0.customView is WalletBadgeButton }, "a guest's post shows the balance")
+    }
+
+    private static func walletFeed(showsBalance: Bool = true) -> (SnapFeedViewController, WalletStore) {
         let suite = "boost-control-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
@@ -530,7 +538,8 @@ struct BoostControlTests {
         let feed = SnapFeedViewController(
             viewModel: FeedViewModel(repository: InertFeedProvider()),
             imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
-            wallet: wallet
+            wallet: wallet,
+            showsBalance: showsBalance
         )
         feed.loadViewIfNeeded()
         return (feed, wallet)

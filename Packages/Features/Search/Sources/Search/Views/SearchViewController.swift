@@ -54,6 +54,9 @@ final class SearchViewController: UIViewController {
     private let postSurfaces: (any SearchPostSurfaceProviding)?
     /// Carried, not worn: the RESULTS screen this one builds wears the badge.
     private let wallet: WalletStore?
+    /// Whether the results header wears the balance: not for a guest
+    /// (#1146), asked as each results screen is made.
+    private let showsBalance: @MainActor () -> Bool
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     /// The field. In the TITLE SLOT, exactly as the inbox's and the
@@ -94,6 +97,7 @@ final class SearchViewController: UIViewController {
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        showsBalance: @escaping @MainActor () -> Bool = { true },
         mode: Mode = .origin
     ) {
         self.viewModel = viewModel
@@ -101,6 +105,7 @@ final class SearchViewController: UIViewController {
         self.postSurfaces = postSurfaces
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.showsBalance = showsBalance
         self.mode = mode
         super.init(nibName: nil, bundle: nil)
         // ⚠️ IN THE INITIALISER, not `viewDidLoad`. A navigation controller
@@ -576,7 +581,7 @@ final class SearchViewController: UIViewController {
             viewModel: viewModel,
             imagePipeline: imagePipeline,
             postSurfaces: postSurfaces,
-            wallet: wallet,
+            wallet: showsBalance() ? wallet : nil,
             makeWalletSheet: makeWalletSheet
         )
         // ⚠️ UNANIMATED BOTH WAYS ON THIS ONE PATH. The ordinary back button

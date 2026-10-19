@@ -25,6 +25,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     /// The shell owns the claim sheet (`WalletClaimViewController` lives in
     /// App/Shell), so it arrives as a closure rather than a type.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    /// Whether the results header wears the balance: not for a guest (#1146).
+    private let showsBalance: @MainActor () -> Bool
     /// The trending people on the device (#893), one for the app's lifetime:
     /// every search screen opens on the same stored list.
     private let localCache: SearchLocalCache?
@@ -45,6 +47,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         postSurfaces: (any SearchPostSurfaceProviding)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        showsBalance: @escaping @MainActor () -> Bool = { true },
         localStore: LocalStore? = nil,
         followEvents: FollowGraphEvents? = nil
     ) {
@@ -57,6 +60,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
         self.postSurfaces = postSurfaces
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.showsBalance = showsBalance
         self.localCache = localStore.map(SearchLocalCache.init(store:))
         self.followEvents = followEvents
     }
@@ -75,7 +79,8 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
             imagePipeline: imagePipeline,
             postSurfaces: postSurfaces,
             wallet: wallet,
-            makeWalletSheet: makeWalletSheet
+            makeWalletSheet: makeWalletSheet,
+            showsBalance: showsBalance
         )
     }
 
