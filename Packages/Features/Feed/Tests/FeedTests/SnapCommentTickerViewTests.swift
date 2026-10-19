@@ -60,6 +60,17 @@ struct SnapCommentTickerViewTests {
         return ticker
     }
 
+    /// Each bubble's model x and width, by its text and lane (its y): the
+    /// same comment can fly in two lanes.
+    private func positions(_ ticker: SnapCommentTickerView) -> [String: (x: CGFloat, width: CGFloat)] {
+        var byKey: [String: (x: CGFloat, width: CGFloat)] = [:]
+        for view in bubbleViews(ticker) {
+            let text = view.subviews.compactMap { ($0 as? UILabel)?.text }.first ?? ""
+            byKey["\(text)@\(Int(view.layer.position.y.rounded()))"] = (view.layer.position.x, view.bounds.width)
+        }
+        return byKey
+    }
+
     /// The in-flight bubble CONTAINERS — each a `[avatar][text]` view whose
     /// own layer the conveyor animates on `position.x` (identified by
     /// carrying the text label). The flight animation and the scrub position
@@ -198,28 +209,47 @@ struct SnapCommentTickerViewTests {
     /// With the clock pinned, that is where it departed, whatever the render
     /// server did meanwhile. So a ticker committed, then left 0.2 s of media
     /// time before its grab, freezes exactly where an untouched one does.
+    ///
+    /// ⚠️ A FLIGHT CAN REALLY END MEANWHILE. Once committed, the flights run
+    /// on real media time, and a bubble departing at the exit's edge has well
+    /// under a second to fly: on a runner stalled for minutes (459 s for this
+    /// test, 2026-10-19, #1429's Feed lane) it reached the exit, and its model
+    /// rests there by design. Such a bubble may be found at the exit — only
+    /// one whose whole flight fits in the time that really went by.
     @Test func aGrabFreezesTheSameTrainWhateverTheMediaTime() {
         hosting { window in
             let untouched = makeTicker(in: window)
             untouched.setActive(true)
             untouched.beginScrub()
-            let expected = bubbleViews(untouched).map(\.layer.position.x).sorted()
+            let expected = positions(untouched)
             untouched.removeFromSuperview()
 
             let starved = makeTicker(in: window)
             starved.setActive(true)
             // What a starved runner did between the two calls: a commit (the
             // presentation exists) and media time running on.
+            let committed = CACurrentMediaTime()
             CATransaction.flush()
             Thread.sleep(forTimeInterval: 0.2)
             let presented = bubbleViews(starved).compactMap { $0.layer.presentation() }
             starved.beginScrub()
-            let frozen = bubbleViews(starved).map(\.layer.position.x).sorted()
+            let elapsed = CGFloat(CACurrentMediaTime() - committed)
+            let frozen = positions(starved)
 
             #expect(!expected.isEmpty)
-            #expect(frozen.count == expected.count)
-            #expect(zip(frozen, expected).allSatisfy { abs($0 - $1) < 0.01 },
-                    "the grab froze the train where the render server had moved it: \(frozen) vs \(expected)")
+            #expect(expected.count == bubbleViews(untouched).count, "two bubbles share a key")
+            #expect(Set(frozen.keys) == Set(expected.keys), "not the same bubbles: \(frozen) vs \(expected)")
+            let fastest = SnapCommentTickerView.laneSpeeds.max() ?? 0
+            let wrong = frozen.filter { key, bubble in
+                guard let want = expected[key]?.x else { return false }
+                if abs(bubble.x - want) < 0.01 { return false }
+                // At the exit, legitimately: its whole flight fitted in the
+                // time that went by.
+                let exit = -bubble.width / 2
+                return !(abs(bubble.x - exit) < 0.01 && want - exit <= fastest * elapsed + 0.5)
+            }
+            #expect(wrong.isEmpty,
+                    "the grab froze the train where the render server had moved it: \(frozen) vs \(expected), \(elapsed) s")
             // The witness: the presentation really had run on, so the
             // assertion above is not passing on a commit that never happened.
             #expect(!presented.isEmpty, "guard: the flush gave the bubbles a presentation")
