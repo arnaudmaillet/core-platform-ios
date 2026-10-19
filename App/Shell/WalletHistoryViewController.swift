@@ -20,7 +20,7 @@ final class WalletHistoryViewController: UIViewController {
         var title: String {
             switch self {
             case .all: "All"
-            case .points: "Points"
+            case .points: "Likes"
             case .gems: GemSymbol.name
             }
         }
@@ -187,7 +187,7 @@ final class WalletHistoryViewController: UIViewController {
         ) { view, _, indexPath in
             var content = UIListContentConfiguration.footer()
             content.text = indexPath.section == 1
-                ? "Nothing in the app is sold for real money: points are claimed and staked, gems are earned."
+                ? "Nothing in the app is sold for real money: likes are claimed and staked, gems are earned."
                 : nil
             view.contentConfiguration = content
         }

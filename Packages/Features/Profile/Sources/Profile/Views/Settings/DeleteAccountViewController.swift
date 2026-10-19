@@ -52,10 +52,10 @@ final class DeleteAccountViewController: UIViewController {
 
     static func walletLine(points: Int?, gems: Int?) -> String {
         let parts = [
-            points.flatMap { $0 > 0 ? count($0, "point") : nil },
+            points.flatMap { $0 > 0 ? count($0, "like") : nil },
             gems.flatMap { $0 > 0 ? count($0, "gem") : nil },
         ].compactMap { $0 }
-        guard !parts.isEmpty else { return "Points and gems in your wallet" }
+        guard !parts.isEmpty else { return "Likes and gems in your wallet" }
         return "Your " + parts.joined(separator: " and ") + ". They can't be refunded or moved to another account"
     }
 

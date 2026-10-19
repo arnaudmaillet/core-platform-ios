@@ -163,7 +163,7 @@ final class WalletBadgeInstaller: NSObject {
         let item = UIBarButtonItem(customView: badge)
         item.sharesBackground = false
         item.identifier = Self.itemIdentifier
-        item.accessibilityLabel = "Points balance"
+        item.accessibilityLabel = "Likes balance"
         return item
     }
 

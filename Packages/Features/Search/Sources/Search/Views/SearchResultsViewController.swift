@@ -329,7 +329,7 @@ final class SearchResultsViewController: UIViewController {
 
     private func makeWalletItem() -> UIBarButtonItem {
         let item = UIBarButtonItem(customView: walletBadge)
-        item.accessibilityLabel = "Points balance"
+        item.accessibilityLabel = "Likes balance"
         return item
     }
 

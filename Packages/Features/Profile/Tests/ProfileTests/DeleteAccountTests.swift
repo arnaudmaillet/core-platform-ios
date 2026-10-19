@@ -95,12 +95,12 @@ struct DeleteAccountTests {
         #expect(model.checklist == checklist)
         let lines = DeleteAccountViewController.consequences(for: checklist)
         #expect(lines.first == "All 2 profiles on this account: @you, @you.work")
-        #expect(lines.last?.hasPrefix("Your \(1_250.formatted()) points and 3 gems.") == true, "grouped as the locale does")
+        #expect(lines.last?.hasPrefix("Your \(1_250.formatted()) likes and 3 gems.") == true, "grouped as the locale does")
         #expect(lines.last?.contains("can't be refunded") == true)
 
         #expect(DeleteAccountViewController.consequences(for: nil)
             == ["Every profile on this account", "Posts, comments and messages",
-                "Followers, following and saved posts", "Points and gems in your wallet"])
+                "Followers, following and saved posts", "Likes and gems in your wallet"])
     }
 
     /// The sections are the same before and after the account is read, so
@@ -140,8 +140,8 @@ struct DeleteAccountTests {
         #expect(DeleteAccountViewController.profilesLine(["a1", "b2", "c3", "d4", "e5"])
             == "All 5 profiles on this account: @a1, @b2, @c3 and 2 more")
         #expect(DeleteAccountViewController.walletLine(points: 0, gems: 1) == "Your 1 gem. They can't be refunded or moved to another account")
-        #expect(DeleteAccountViewController.walletLine(points: 0, gems: 0) == "Points and gems in your wallet")
-        #expect(DeleteAccountViewController.walletLine(points: nil, gems: nil) == "Points and gems in your wallet")
+        #expect(DeleteAccountViewController.walletLine(points: 0, gems: 0) == "Likes and gems in your wallet")
+        #expect(DeleteAccountViewController.walletLine(points: nil, gems: nil) == "Likes and gems in your wallet")
     }
 
     @Test func requestingSendsOnceAndReturnsThePermanentDate() async throws {

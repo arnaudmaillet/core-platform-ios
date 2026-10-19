@@ -427,7 +427,7 @@ public final class ShopStorefrontViewController: UIViewController {
     }
 
     /// Where gems come from — the Shop never sells them (charter §26, §34).
-    static let earnGemsText = "Gems are earned: stake points on posts, and win when they're rewarded."
+    static let earnGemsText = "Gems are earned: stake likes on posts, and win when they're rewarded."
 
     /// The Countries shelf: LOCKED countries only (unlocked ones are on the
     /// map and in See all) — the one the device is in first, then by rank,

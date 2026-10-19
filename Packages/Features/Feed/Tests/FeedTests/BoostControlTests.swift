@@ -76,7 +76,7 @@ struct BoostControlTests {
         button.setWalletContext(balance: 99, undoableAmount: 0, stakeShots: 2)
         let broke = try #require(button.currentMenuActions().first as? UIAction)
         #expect(broke.attributes.contains(.disabled))
-        #expect(broke.subtitle == "Not enough points")
+        #expect(broke.subtitle == "Not enough likes")
 
         button.setSpentTotal(200)
         button.setWalletContext(balance: 250, undoableAmount: 0, stakeShots: 2)
@@ -85,7 +85,7 @@ struct BoostControlTests {
             button.currentMenuActions().compactMap { $0 as? UIAction }.first { $0.title.hasPrefix("×100") }
         )
         #expect(full.attributes.contains(.disabled))
-        #expect(full.subtitle == "Only 50 points more fit on this post")
+        #expect(full.subtitle == "Only 50 likes more fit on this post")
     }
 
     /// A loaded pack: "×100 — N left", and picking it asks for a SHOT.
@@ -97,7 +97,7 @@ struct BoostControlTests {
 
         let shot = try #require(button.currentMenuActions().first as? UIAction)
         #expect(shot.title == "×100 — 2 left")
-        #expect(shot.subtitle == "100 points in one tap")
+        #expect(shot.subtitle == "100 likes in one tap")
         shot.performWithSender(nil, target: nil)
         #expect(received == [.shot])
     }
@@ -284,9 +284,9 @@ struct BoostControlTests {
         button.setLikeCount(1_203)
         #expect(button.accessibilityValue == "1.2K likes")
         button.setSpentTotal(3)
-        #expect(button.accessibilityValue == "1.2K likes, you staked 3 points")
+        #expect(button.accessibilityValue == "1.2K likes, you staked 3 likes")
         button.setLikeCount(nil)
-        #expect(button.accessibilityValue == "you staked 3 points", "a hidden count is not read")
+        #expect(button.accessibilityValue == "you staked 3 likes", "a hidden count is not read")
     }
 
     /// The snap feed's menu says what the viewer has staked, above zero only.
@@ -298,7 +298,7 @@ struct BoostControlTests {
 
         button.setSpentTotal(37)
         let first = try #require(button.currentMenuActions().first as? UIAction)
-        #expect(first.title == "You staked 37 points")
+        #expect(first.title == "You staked 37 likes")
         #expect(first.attributes.contains(.disabled), "a line that reads, not one that acts")
     }
 
@@ -407,9 +407,9 @@ struct BoostControlTests {
         #expect(bar.debugLikeBadgeText == "42")
         #expect(boost.configuration?.image != nil)
         #expect(boost.configuration?.title == "42", "the composer's pill does not carry its count")
-        #expect(boost.accessibilityValue == "42 likes, you staked 2 points")
+        #expect(boost.accessibilityValue == "42 likes, you staked 2 likes")
         let first = try #require(bar.currentBoostMenuActions().first as? UIAction)
-        #expect(first.title == "You staked 2 points")
+        #expect(first.title == "You staked 2 likes")
     }
 
     /// Off (post detail, everywhere but the snap panel): the receipt face as

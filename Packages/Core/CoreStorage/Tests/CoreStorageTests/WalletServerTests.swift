@@ -12,7 +12,10 @@ private actor FakeWalletServer: WalletServer {
     private(set) var claimKeys: [String] = []
     var listed: [WalletStake] = []
     func setListed(_ stakes: [WalletStake]) { listed = stakes }
-    func myStakes() async throws -> [WalletStake] { listed }
+    func myStakes() async throws -> [WalletStake] {
+        if fails { throw URLError(.notConnectedToInternet) }
+        return listed
+    }
 
     init(_ state: WalletServerState) { self.state = state }
 
@@ -180,6 +183,39 @@ struct WalletServerTests {
         #expect(stakes.map(\.targetID) == ["post-new", "post-old"])
         #expect(stakes.last?.outcome == .rewarded)
         #expect(stakes.first?.isSettled == false)
+    }
+
+    /// Until the server lists the stakes, a settled one's outcome is the
+    /// device's guess (#1395): the sheet waits for the verdicts. Listed,
+    /// nothing is awaited any more.
+    @Test func theVerdictsAreAwaitedUntilTheServerListsTheStakes() async {
+        let fixture = Fixture(serverState(points: 300))
+        #expect(fixture.store.awaitsServerStakes, "a member with a server waits for its listing")
+        #expect(await fixture.store.refreshStakesFromServer())
+        #expect(!fixture.store.awaitsServerStakes)
+    }
+
+    /// A listing that fails leaves the device's outcomes standing: the sheet
+    /// draws them rather than bones that never resolve.
+    @Test func aFailedListingAwaitsNothing() async {
+        let fixture = Fixture(serverState(points: 300))
+        await fixture.server.setFails(true)
+        #expect(await !fixture.store.refreshStakesFromServer())
+        #expect(!fixture.store.awaitsServerStakes)
+        // And a later listing that answers is the truth again.
+        await fixture.server.setFails(false)
+        #expect(await fixture.store.refreshStakesFromServer())
+        #expect(!fixture.store.awaitsServerStakes)
+    }
+
+    /// No server, or a guest: there is no listing to wait for.
+    @Test func withoutAServerOrForAGuestNothingIsAwaited() {
+        let defaults = UserDefaults(suiteName: "wallet-server-\(UUID().uuidString)")!
+        let member = WalletStore(defaults: defaults, scope: StorageScope(owner: .member(account: "a", profile: nil)))
+        #expect(!member.awaitsServerStakes)
+        let guest = WalletStore(defaults: defaults, scope: StorageScope(owner: .guest))
+        guest.server = FakeWalletServer(serverState(points: 1))
+        #expect(!guest.awaitsServerStakes)
     }
 
     /// A guest has no wallet history to read (#400).

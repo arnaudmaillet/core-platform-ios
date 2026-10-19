@@ -146,7 +146,7 @@ public enum StakeMenu {
                 ? "This post holds all it can take"
                 : "Only \(points(state.remaining)) more fit on this post"
         } else if state.balance < state.shotAmount {
-            action.subtitle = "Not enough points"
+            action.subtitle = "Not enough likes"
         } else {
             action.subtitle = "\(points(state.shotAmount)) in one tap"
         }
@@ -159,19 +159,21 @@ public enum StakeMenu {
         "Get \(shotName(shotAmount)) cartridges in the Shop"
     }
 
-    /// "You staked 37 points" — the viewer's total on the post (#668).
+    /// "You staked 37 likes" — the viewer's total on the post (#668).
     public nonisolated static func stakedLine(_ amount: Int) -> String {
         "You staked \(points(amount))"
     }
 
-    /// "1 point", "100 points".
+    /// "1 like", "100 likes" — currency A's amount, as people read it
+    /// (the owner, 2026-10-18: likes and gems; the code name stays `points`
+    /// until #1397).
     public nonisolated static func points(_ amount: Int) -> String {
-        amount == 1 ? "1 point" : "\(amount) points"
+        amount == 1 ? "1 like" : "\(amount) likes"
     }
 
     // MARK: - The undo toast (#957)
 
-    /// "Staked 15 points" — the burst so far on one post.
+    /// "Staked 15 likes" — the burst so far on one post.
     public nonisolated static func stakedToastMessage(_ amount: Int) -> String {
         "Staked \(points(amount))"
     }

@@ -273,7 +273,7 @@ struct CountryShopViewControllerTests {
 
         let row = try packRow(shop)
         #expect(row.titleLabel.text == "×100 cartridges")
-        #expect(row.detailLabel.text == "3 shots · 100 points a tap")
+        #expect(row.detailLabel.text == "3 shots · 100 likes a tap")
         #expect(row.accessibilityValue == "50 gems")
     }
 

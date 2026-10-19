@@ -1471,7 +1471,7 @@ final class CommentsInputBar: UIView {
             boostButton.configuration?.attributedTitle = nil
             boostButton.configuration?.image = PointsSymbol.glyphImage(Self.glyphConfiguration)
         }
-        boostButton.accessibilityValue = total > 0 ? "\(total) points spent" : nil
+        boostButton.accessibilityValue = total > 0 ? "\(total) likes staked" : nil
     }
 
     /// The number face's current value, so `setBoostTotal` is cheap to call

@@ -26,7 +26,7 @@ struct StakeMenuTests {
     /// the ×100 is there, DISABLED, and says where to get it.
     @Test func withoutAPackOnlyTheDefaultIsOffered() throws {
         let elements = StakeMenu.elements(for: state(), stake: { _ in }, shoot: {}, undo: nil)
-        #expect(titles(elements) == ["×100", "1 point"])
+        #expect(titles(elements) == ["×100", "1 like"])
         let shot = try #require(actions(elements).first)
         #expect(shot.attributes.contains(.disabled))
         #expect(shot.subtitle == "Get ×100 cartridges in the Shop")
@@ -40,7 +40,7 @@ struct StakeMenuTests {
         let elements = StakeMenu.elements(
             for: state(), stake: { _ in }, shoot: { shots += 1 }, undo: nil, openShop: { opened += 1 }
         )
-        #expect(titles(elements) == ["×100", "1 point"])
+        #expect(titles(elements) == ["×100", "1 like"])
         let row = try #require(actions(elements).first)
         #expect(row.attributes.contains(.disabled) == false)
         #expect(row.subtitle == "Get ×100 cartridges in the Shop")
@@ -69,10 +69,10 @@ struct StakeMenuTests {
             for: state(shots: 2), stake: { amounts.append($0) }, shoot: { shots += 1 }, undo: nil,
             openShop: { opened += 1 }
         )
-        #expect(titles(elements) == ["×100 — 2 left", "1 point"])
+        #expect(titles(elements) == ["×100 — 2 left", "1 like"])
         let shot = try #require(actions(elements).first)
         #expect(shot.attributes.contains(.disabled) == false)
-        #expect(shot.subtitle == "100 points in one tap")
+        #expect(shot.subtitle == "100 likes in one tap")
 
         shot.performWithSender(nil, target: nil)
         actions(elements)[1].performWithSender(nil, target: nil)
@@ -89,11 +89,11 @@ struct StakeMenuTests {
         #expect(state(balance: 100, staked: 150, shots: 3).canShoot)
 
         let broke = actions(StakeMenu.elements(for: state(balance: 99, shots: 3), stake: { _ in }, shoot: {}, undo: nil))
-        #expect(broke.first?.subtitle == "Not enough points")
+        #expect(broke.first?.subtitle == "Not enough likes")
         #expect(broke.first?.attributes.contains(.disabled) == true)
         // Two shots on one post leave 50 of the 250: a third does not fit.
         let twoIn = actions(StakeMenu.elements(for: state(staked: 200, shots: 1), stake: { _ in }, shoot: {}, undo: nil))
-        #expect(twoIn.first?.subtitle == "Only 50 points more fit on this post")
+        #expect(twoIn.first?.subtitle == "Only 50 likes more fit on this post")
         #expect(twoIn.first?.attributes.contains(.disabled) == true)
     }
 
@@ -118,8 +118,8 @@ struct StakeMenuTests {
     }
 
     @Test func pointsAreCountedInEnglish() {
-        #expect(StakeMenu.points(1) == "1 point")
-        #expect(StakeMenu.points(100) == "100 points")
+        #expect(StakeMenu.points(1) == "1 like")
+        #expect(StakeMenu.points(100) == "100 likes")
         #expect(StakeMenu.shotName(100) == "×100")
     }
 }
