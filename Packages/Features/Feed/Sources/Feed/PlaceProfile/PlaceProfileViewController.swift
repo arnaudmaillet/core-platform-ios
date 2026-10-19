@@ -172,6 +172,9 @@ final class PlaceProfileViewController: UIViewController {
     /// For You, the profile and the post screen.
     private let walletBadge = WalletBadgeButton()
     private let wallet: WalletStore?
+    /// Whether the bar wears the balance: not for a guest (#1146). The wallet
+    /// still backs the cards' likes.
+    private let showsBalance: Bool
     /// Vends the wallet/claim sheet the badge presents — shell-owned, because
     /// it is the same sheet every other badge opens and the five must never
     /// diverge. Nil leaves the badge display-only.
@@ -713,6 +716,7 @@ final class PlaceProfileViewController: UIViewController {
         following: ClusterGalleryFollowing? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        showsBalance: Bool = true,
         entities: EntityStore? = nil,
         loadPosts: @escaping () async throws -> [GalleryPost],
         loadMore: ((String?) async throws -> PlacePostsPage)? = nil,
@@ -738,6 +742,7 @@ final class PlaceProfileViewController: UIViewController {
         self.following = following
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.showsBalance = showsBalance
         self.loadPosts = loadPosts
         self.openPost = openPost
         self.anchorID = postIDs.first ?? PostID("")
@@ -1846,7 +1851,7 @@ final class PlaceProfileViewController: UIViewController {
     /// screen owns its own navigation item, and what the installer exists to
     /// share — the freshness rules — is two closures here.
     private func configureWalletBadge() {
-        guard let wallet else { return }
+        guard let wallet, showsBalance else { return }
         // A badge with no sheet behind it is a read-out, not a control.
         walletBadge.isUserInteractionEnabled = makeWalletSheet != nil
         walletBadge.addAction(

@@ -64,6 +64,76 @@ final class GuestModeUITests: XCTestCase {
         XCTAssertFalse(bar.buttons["Settings"].exists, "the guest's Settings tab outlived the sign-in")
     }
 
+    /// No bell, no balance and no Shop in a guest's bars (#1146, the owner
+    /// 2026-10-14) — Explore, For You and a post — and signing in brings them
+    /// back on Explore and For You without a relaunch.
+    func testAGuestSeesNoBellBalanceOrShopUntilTheySignIn() {
+        let app = launch(["-guest-sign-in-after", "40"])
+        let bar = app.tabBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
+        let search = app.navigationBars.buttons["Search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 15), "Explore's header has no search")
+        assertNoMemberItems(in: app, on: "Explore")
+
+        bar.buttons["For You"].firstMatch.tap()
+        let list = app.collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 15), "For You never showed a list")
+        assertNoMemberItems(in: app, on: "For You")
+
+        // A post, opened from For You: its bar has no balance either.
+        // The first tile of the discover mosaic, top left (the list's first
+        // CELL is its lead row, not a post).
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.25)).tap()
+        XCTAssertTrue(app.buttons["Like"].waitForExistence(timeout: 15), "the post never opened")
+        assertNoMemberItems(in: app, on: "a post")
+        app.navigationBars.buttons["Back"].firstMatch.tap()
+
+        // Signed in (`-guest-sign-in-after`): For You is rebuilt, Explore
+        // re-dressed, in place.
+        XCTAssertTrue(balance(in: app).waitForExistence(timeout: 60), "signing in did not bring For You's balance back")
+        XCTAssertTrue(app.navigationBars.buttons["Notifications"].exists, "signing in did not bring For You's bell back")
+        bar.buttons["Explore"].firstMatch.tap()
+        XCTAssertTrue(balance(in: app).waitForExistence(timeout: 10), "signing in did not bring Explore's balance back")
+        XCTAssertTrue(app.navigationBars.buttons["Notifications"].exists, "signing in did not bring Explore's bell back")
+    }
+
+    /// Signing out takes the bell, the balance and the Shop off Explore and
+    /// For You, in place (#1146).
+    func testSigningOutTakesTheMemberItemsAway() {
+        let app = launch(["-guest-sign-in-after", "10", "-guest-sign-out-after", "20"])
+        let bar = app.tabBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 25), "no tab bar")
+        XCTAssertTrue(balance(in: app).waitForExistence(timeout: 40), "the member's Explore never showed the balance")
+        XCTAssertTrue(balance(in: app).waitForNonExistence(timeout: 60), "signing out left Explore's balance")
+        assertNoMemberItems(in: app, on: "Explore after signing out")
+        bar.buttons["For You"].firstMatch.tap()
+        XCTAssertTrue(app.collectionViews.firstMatch.waitForExistence(timeout: 15), "For You never showed a list")
+        assertNoMemberItems(in: app, on: "For You after signing out")
+    }
+
+    /// A pushed profile: no balance for a guest (#1146).
+    func testAGuestsPushedProfileHasNoBalance() {
+        let app = launch(["-open-profile", "prof-1"])
+        let follow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == 'Follow'")).firstMatch
+        XCTAssertTrue(follow.waitForExistence(timeout: 25), "the profile never showed")
+        assertNoMemberItems(in: app, on: "a pushed profile")
+    }
+
+    /// The balance badge: its bar item reads "Likes balance" (a feature
+    /// screen's own badge may surface its button's "Wallet, N likes…").
+    private func balance(in app: XCUIApplication) -> XCUIElement {
+        app.navigationBars.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == 'Likes balance' OR label BEGINSWITH 'Wallet'")).firstMatch
+    }
+
+    private func assertNoMemberItems(in app: XCUIApplication, on screen: String, file: StaticString = #filePath, line: UInt = #line) {
+        let bars = app.navigationBars
+        XCTAssertFalse(balance(in: app).exists, "\(screen) shows a guest the balance", file: file, line: line)
+        XCTAssertFalse(bars.buttons["Notifications"].exists, "\(screen) shows a guest the bell", file: file, line: line)
+        XCTAssertFalse(bars.buttons["Shop"].exists, "\(screen) shows a guest the Shop", file: file, line: line)
+    }
+
     /// One tap on the guest's bubble opens the login sheet — no create menu.
     func testTheSignInBubbleOpensTheSheetInOneTap() {
         let app = launch([])

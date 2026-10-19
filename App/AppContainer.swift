@@ -928,6 +928,8 @@ final class AppContainer {
         // The SAME sheet the map's badge presents — one claim surface,
         // reachable from wherever the balance is showing.
         makeWalletSheet: { [unowned self] in self.makeWalletSheet() },
+        // No balance on any bar for a guest (#1146), asked per screen.
+        showsBalance: { [unowned self] in self.memberGate.isMember },
         // A post card's "..." raises moderation cases and unfollows through the
         // SAME two repositories the profile screen uses. Feed sees only the
         // `CoreModels` protocols; which class satisfies them is the composition
@@ -1567,6 +1569,7 @@ final class AppContainer {
         // a closure. Same wiring as the two pushed hosts in Feed.
         wallet: walletStore,
         makeWalletSheet: { [unowned self] in self.makeWalletSheet() },
+        showsBalance: { [unowned self] in self.memberGate.isMember },
         // The trending people, so a cold start opens Search on them (#893).
         localStore: localStore,
         // The person rows hear a follow made on any screen (#896).
@@ -1734,6 +1737,8 @@ final class AppContainer {
         // every root header's, on an installer that lives as long as the
         // screen it is attached to.
         attachBalance: { [unowned self] screen in
+            // No balance for a guest (#1146).
+            guard self.memberGate.isMember else { return }
             WalletBadgeInstaller.attach(
                 to: screen,
                 wallet: self.walletStore,

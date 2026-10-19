@@ -40,6 +40,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
     /// map's badge presents, and the two must never diverge). Nil leaves
     /// the feed's badge display-only, the pre-sheet behaviour.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
+    /// Whether the viewer is shown a balance at all — asked as each screen is
+    /// built. A guest is not (#1146, the owner 2026-10-14): no badge on any
+    /// bar. The wallet itself still backs the like controls, whose spend a
+    /// guest only reaches by signing up.
+    private let showsBalance: @MainActor () -> Bool
+    /// The wallet a screen's BADGE reads: none for a guest.
+    private var balanceWallet: WalletStore? { showsBalance() ? wallet : nil }
     /// Files moderation reports raised from a post card's "..." menu. Nil
     /// withholds the Report row.
     private let reporting: (any ContentReporting)?
@@ -85,6 +92,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         makeProfileSwitcher: (@MainActor () -> (any ProfileSwitcherPresenting)?)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        showsBalance: @escaping @MainActor () -> Bool = { true },
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
@@ -134,6 +142,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         self.videoPlayback = videoPlayback
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.showsBalance = showsBalance
         // Every grid's tiles follow the feed's playback policy — Autoplay,
         // the network, Power Saving — For You's and a profile's alike (#580).
         GridVideoPlaybackCoordinator.allowsAutoplay = { MediaPlaybackPolicy.autoplays }
@@ -341,6 +350,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // The sheet the balance opens on every screen For You pushes —
             // the shell's, the same one the root header's badge presents.
             makeWalletSheet: makeWalletSheet,
+            showsBalance: showsBalance,
             entities: entities
         )
         forYou.onTabPresentationChange = onTabPresentationChange
@@ -656,7 +666,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         surface.makeGallery = { [self] in
             DiscoverGalleryViewController(
                 imagePipeline: imagePipeline, videoPlayback: videoPlayback,
-                header: PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router),
+                header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 // The same binding as the results it was pushed from.
                 staking: staking,
                 openPost: { [self] presenter, origin, ids in
@@ -691,6 +701,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             // `WalletStore`'s change post is scoped to the instance.
             wallet: wallet,
             makeWalletSheet: makeWalletSheet,
+            showsBalance: showsBalance(),
             entities: entities,
             loadPosts: { [counterClient] in
                 // One hydration over the same provider shape the feed above
@@ -739,14 +750,14 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             ForYouPostListViewController(
                 kind: .popular, imagePipeline: imagePipeline, videoPlayback: videoPlayback,
                 staking: staking,
-                header: PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router),
+                header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 openPost: openHero
             )
         }
         gallery.makeGallery = { [self] in
             DiscoverGalleryViewController(
                 imagePipeline: imagePipeline, videoPlayback: videoPlayback,
-                header: PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router),
+                header: PushedScreenHeader(wallet: balanceWallet, makeWalletSheet: makeWalletSheet, router: router),
                 staking: staking,
                 openPost: openHero
             )
@@ -1429,6 +1440,7 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             makeRestingCommentsPanelContent: { postID in makePanel(postID, true) },
             wallet: wallet,
             makeWalletSheet: makeWalletSheet,
+            showsBalance: showsBalance(),
             // For the ⋯ menu's Report row, which withholds itself when there is
             // nobody to file with — the same rule the grid's card menu follows.
             reporting: reporting,
@@ -1521,7 +1533,8 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
             drafts: postDrafts ?? PostDraftStore(),
             imagePipeline: imagePipeline,
             router: router,
-            wallet: wallet,
+            // The composer's wallet is its badge alone: none for a guest.
+            wallet: balanceWallet,
             makeWalletSheet: makeWalletSheet,
             // A save made elsewhere while the page shows the post (#1067).
             entities: entities,

@@ -122,6 +122,9 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// shell's (`setTrailingAccessoryItem`); these reach the pushed ones, which
     /// the shell never sees.
     private let wallet: WalletStore?
+    /// Whether a pushed screen's header wears the balance: not for a guest
+    /// (#1146), asked as each header is made.
+    private let showsBalance: @MainActor () -> Bool
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
 
     // ⚠️ NO TAB BAR COLLAPSE. The bar used to minimize as the list scrolled —
@@ -213,10 +216,12 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         socialGraph: (any SocialGraphWriting)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        showsBalance: @escaping @MainActor () -> Bool = { true },
         entities: EntityStore? = nil
     ) {
         self.wallet = wallet
         self.makeWalletSheet = makeWalletSheet
+        self.showsBalance = showsBalance
         self.viewModel = viewModel
         self.makeSnapFeed = makeSnapFeed
         self.openPostHero = openPostHero
@@ -1200,7 +1205,7 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
     /// The `[‹] ———— [points][search]` header for a screen this one pushes —
     /// one per screen, since a badge is a view and lives in one bar.
     func makePushedHeader() -> PushedScreenHeader {
-        PushedScreenHeader(wallet: wallet, makeWalletSheet: makeWalletSheet, router: router)
+        PushedScreenHeader(wallet: showsBalance() ? wallet : nil, makeWalletSheet: makeWalletSheet, router: router)
     }
 
     private func openFeed(at index: Int, showingComments: Bool = false) {

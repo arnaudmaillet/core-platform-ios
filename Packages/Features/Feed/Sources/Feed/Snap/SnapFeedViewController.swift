@@ -133,6 +133,10 @@ final class SnapFeedViewController: UIViewController {
     /// instance that changed (see its doc). Nil (an unwired surface, or a
     /// unit-tested one) leaves the boost anchor visible but inert.
     private let wallet: WalletStore?
+    /// Whether the bar wears the balance: not for a guest (#1146). The wallet
+    /// still backs the rail's like, and its observer keeps the boost
+    /// controls true once a guest signs up here.
+    private let showsBalance: Bool
     /// Vends the wallet/claim sheet the header's balance badge presents —
     /// the SAME shell-owned sheet the map's badge opens, injected so the
     /// two entries can never diverge. Nil keeps the badge display-only.
@@ -484,6 +488,7 @@ final class SnapFeedViewController: UIViewController {
         makeRestingCommentsPanelContent: ((PostID) -> UIViewController)? = nil,
         wallet: WalletStore? = nil,
         makeWalletSheet: (@MainActor () -> UIViewController)? = nil,
+        showsBalance: Bool = true,
         reporting: (any ContentReporting)? = nil,
         socialGraph: (any SocialGraphWriting)? = nil,
         followRelations: (any SocialGraphReading)? = nil,
@@ -509,6 +514,7 @@ final class SnapFeedViewController: UIViewController {
         self.wallet = wallet
         self.boost = SnapBoostController(wallet: wallet)
         self.makeWalletSheet = makeWalletSheet
+        self.showsBalance = showsBalance
         self.reporting = reporting
         self.followStore = SnapAuthorFollowStore(writer: socialGraph, reader: followRelations, entities: entities)
         self.bookmarks = bookmarks
@@ -2068,7 +2074,7 @@ final class SnapFeedViewController: UIViewController {
                     for: .primaryActionTriggered
                 )
             }
-            walletBadgeItem = UIBarButtonItem(customView: walletBadge)
+            if showsBalance { walletBadgeItem = UIBarButtonItem(customView: walletBadge) }
             // A grown count needs a re-measured wrapper, and the wrapper
             // belongs to the ITEM: re-adding the same item hands the bar
             // the same wrapper with the same frozen size (measured in-sim).

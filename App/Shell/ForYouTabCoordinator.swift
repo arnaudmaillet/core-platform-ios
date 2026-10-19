@@ -1,3 +1,4 @@
+import CoreModels
 import CoreNavigation
 import FeedInterface
 import DesignSystem
@@ -58,6 +59,13 @@ final class ForYouTabCoordinator: TabCoordinator, GlyphTab {
         // The header reads `[bell][lens] … [coins][search]`: the bell leads,
         // ahead of the lens the screen composes itself, and — like the balance
         // — reaches it through the screen for the reason given just below.
+        // A guest gets neither the bell nor the balance (#1146, the owner
+        // 2026-10-14). This stack is rebuilt on every change of viewer
+        // (`MainTabCoordinator.viewerDidChange`), so a sign-up brings both.
+        guard container.memberGate.isMember else {
+            walletBadge = nil
+            return
+        }
         (forYou as? any HeaderAccessoryHosting)?
             .setLeadingAccessoryItem(notificationsBell.makeItem())
         // ⚠️ Installed through the SCREEN, not onto its `navigationItem`: For

@@ -487,6 +487,28 @@ struct PlaceProfileTests {
         #expect(star.image == SaveStar.image(saved: false))
     }
 
+    /// A guest's place page wears no balance (#1146): the QR code and the
+    /// star stay.
+    @Test func aGuestsPlacePageHasNoBalance() throws {
+        let profile = PlaceProfileViewController(
+            postIDs: [], placeName: "Paris • City Cluster",
+            identity: PlaceIdentity(
+                flag: nil, subtitle: "France",
+                shareURL: URL(string: "https://core-platform.click/place/city:paris")
+            ),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            videoPlayback: nil,
+            following: ClusterGalleryFollowing(isFollowing: { false }, toggle: { true }),
+            wallet: WalletStore(defaults: Self.makeWalletDefaults()),
+            showsBalance: false,
+            loadPosts: { [] }, openPost: { _, _, _ in }
+        )
+        laidOut(profile)
+        let items = profile.debugTrailingItems
+        #expect(!items.contains { $0.customView is WalletBadgeButton }, "a guest's place page shows the balance")
+        #expect(items.count == 2)
+    }
+
     /// ⚠️ THE TRAY IS GONE (#1304): its two controls are bar items, left of
     /// the balance — rightmost first: balance, QR code, star — each in its
     /// own bubble, each only with its seam.
