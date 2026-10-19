@@ -5924,6 +5924,17 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         viewModel.seed(models)
     }
 
+    /// `models` of the first one's kind — media (a picture, a video, a
+    /// carousel) or text: what a one-kind feed (#1421) is seeded with, as its
+    /// provider's pages are filtered, so a page the viewer reaches before the
+    /// fetch lands is never one the fetch then takes away. The home timeline
+    /// stays mixed and is not seeded through this.
+    static func keepingOpeningKind(_ models: [FeedItemDisplayModel]) -> [FeedItemDisplayModel] {
+        guard let opening = models.first else { return models }
+        let isMedia = opening.mediaURL != nil
+        return models.filter { ($0.mediaURL != nil) == isMedia }
+    }
+
     /// Opens one post's carousel on a page other than its first.
     ///
     /// A ONE-SHOT instruction rather than a stored preference, and the

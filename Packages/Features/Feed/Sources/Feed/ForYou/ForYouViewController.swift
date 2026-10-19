@@ -1250,7 +1250,8 @@ final class ForYouViewController: UIViewController, HeaderAccessoryHosting {
         // page configures at push time rather than when its own fetch returns.
         // Measured at ~0.69s of empty destination without it.
         if let seedable = feed as? SnapFeedViewController {
-            seedable.seedProjection(GalleryPostProjection.seedModels(from: window))
+            // One kind per feed (#1421), as its provider's pages are.
+            seedable.seedProjection(SnapFeedViewController.keepingOpeningKind(GalleryPostProjection.seedModels(from: window)))
             // A COLLECTION opens on the page the card was showing.
             //
             // The flight already carries the right photograph — the row's cover
