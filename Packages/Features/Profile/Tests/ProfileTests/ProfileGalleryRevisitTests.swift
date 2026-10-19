@@ -248,6 +248,47 @@ struct ProfileGalleryRevisitTests {
         #expect(await settle { cache.gallery(for: id) == nil })
     }
 
+    /// Following a private profile (its request accepted, heard on the
+    /// follow channel) reads its withheld pages again: the tabs come back as
+    /// they fill, without leaving the screen (#1422).
+    @Test func followingAPrivateProfileReadsItsPagesAgain() async throws {
+        let gallery = twoPages()
+        let events = FollowGraphEvents()
+        let viewModel = ProfileViewModel(
+            repository: RevisitProfiles(person(visibility: .private)), gallery: gallery,
+            source: .profile(id), cache: ProfileCache(), followEvents: events
+        )
+        viewModel.viewDidLoad()
+        try #require(await settle { await gallery.firstPageAsks >= 1 })
+        await settle()
+        let before = await gallery.firstPageAsks
+
+        events.publish(FollowChange(profileID: id, isFollowing: true))
+
+        #expect(await settle { await gallery.firstPageAsks > before }, "the withheld pages were not read again")
+    }
+
+    /// Unfollowing a private profile takes its posts away at once, without a
+    /// round trip: its pages lock again (#1422).
+    @Test func unfollowingAPrivateProfileLocksItsPagesAgain() async throws {
+        let events = FollowGraphEvents()
+        let viewModel = ProfileViewModel(
+            repository: RevisitProfiles(person(visibility: .private), relationship: .other(isFollowing: true, isBlocked: false)),
+            gallery: twoPages(), source: .profile(id), cache: ProfileCache(), followEvents: events
+        )
+        viewModel.viewDidLoad()
+        try #require(await settle { ids(viewModel.publishedGallery?.activity) == ["a", "b"] })
+
+        events.publish(FollowChange(profileID: id, isFollowing: false))
+
+        let locked = await settle {
+            if case .restricted? = viewModel.publishedGallery?.activity { return true }
+            return false
+        }
+        #expect(locked, "Posts still shows \(String(describing: viewModel.publishedGallery?.activity))")
+        #expect(viewModel.publishedGallery?.isLockedToViewer == true)
+    }
+
     /// A public profile shows everyone the same posts: a follow keeps them.
     @Test func aFollowOnAPublicProfileKeepsTheGallery() {
         let cache = cacheHolding(person(visibility: .public), .other(isFollowing: false, isBlocked: false))

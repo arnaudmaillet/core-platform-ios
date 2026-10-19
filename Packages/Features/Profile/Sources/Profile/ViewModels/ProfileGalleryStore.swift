@@ -145,6 +145,19 @@ final class ProfileGalleryStore {
         taggedHasLaterPages = false
     }
 
+    /// The viewer stopped following a private profile (#1422): its own posts
+    /// are withheld again, so its pages lock without a round trip. Tagged —
+    /// other people's posts — stays.
+    func withholdAuthored() {
+        authored = []
+        authoredFailed = false
+        authoredFailure = nil
+        authoredToken = nil
+        authoredHasLaterPages = false
+        reactions = .empty(message: "")
+        othersSaved = .empty(message: "")
+    }
+
     /// The viewer asks again (an approach to the end, a load): a failed round
     /// stops holding the grid back.
     func resumePaging() {

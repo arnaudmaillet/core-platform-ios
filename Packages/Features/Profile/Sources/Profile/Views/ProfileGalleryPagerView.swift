@@ -296,7 +296,8 @@ final class ProfileGalleryPagerView: UIView {
             allPages[index].setCorpusComplete(snapshot.isComplete(for: tab))
             allPages[index].show(Self.pageState(
                 snapshot.state(for: tab), for: tab,
-                groups: tab == .history ? snapshot.historyGroups : []
+                groups: tab == .history ? snapshot.historyGroups : [],
+                lockedToViewer: snapshot.isLockedToViewer
             ))
         }
     }
@@ -306,12 +307,20 @@ final class ProfileGalleryPagerView: UIView {
     ///
     /// `groups` title the posts in order (History's days, #1344) — dropped
     /// unless they cover the posts exactly.
+    ///
+    /// `lockedToViewer`: the profile is private to the viewer — a page with
+    /// posts (Tagged, other people's) leads with the lock as one compact line
+    /// above them (#1422, the owner's option B). The lock is never a tab of
+    /// its own.
     static func pageState(
-        _ state: ProfileViewModel.GalleryPageState, for tab: ProfileTab, groups: [HistoryGroup] = []
+        _ state: ProfileViewModel.GalleryPageState, for tab: ProfileTab, groups: [HistoryGroup] = [],
+        lockedToViewer: Bool = false
     ) -> PostGridPageState {
         switch state {
         case .loading:
             return .loading
+        case .content(let posts) where lockedToViewer && !posts.isEmpty:
+            return .sections([PostGridPageSection(title: Self.lockLine, posts: posts)])
         case .content(let posts):
             guard !groups.isEmpty, groups.reduce(0, { $0 + $1.count }) == posts.count else {
                 return .content(posts)
@@ -337,6 +346,9 @@ final class ProfileGalleryPagerView: UIView {
             ))
         }
     }
+
+    /// The lock, as the one line above a private profile's visible posts.
+    static let lockLine = "🔒 \(ProfileViewModel.restrictedTitle)"
 
     /// The page being read — what a post opened from the profile flies out
     /// of and lands back on.

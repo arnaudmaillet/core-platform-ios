@@ -2310,7 +2310,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             self.viewModel.refresh()
         }
         galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
-        galleryPager.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
+        // The lock line (#1422) is a page's lead, never a day to pin in the bar.
+        galleryPager.onPinnedSectionChanged = { [weak self] section in
+            self?.applyPinnedSection(section?.title == ProfileGalleryPagerView.lockLine ? nil : section)
+        }
         galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
         // The band's minimize rides whichever page is in front. The pager is
         // what knows, and it is what says so — see `onActiveScrollViewChanged`.
@@ -2528,16 +2531,23 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     }
 
     /// ⚠️ NO TAB FOR A SOURCE WITH NOTHING IN IT (#742, the owner's call
-    /// 2026-10-09). Posts always; Reposts, Tagged, Saved and Liked only once
-    /// they hold something — a source still loading waits, rather than
-    /// showing a tab that might leave. One tab left is no selector at all, in
-    /// the tab bar's accessory as in a pushed profile's toolbar.
+    /// 2026-10-09) — Posts included since #1422 (owner, 2026-10-19). A tab
+    /// shows once its source holds something; a source still loading waits,
+    /// rather than showing a tab that might leave. Two exceptions:
+    /// - the viewer's OWN Posts stays even empty: it is where the invitation
+    ///   to post belongs;
+    /// - with nothing shown at all, Posts is the one page — loading, "No
+    ///   Posts Yet", or the lock of a private profile — so the area under
+    ///   the header is never blank, which reads as still loading.
+    ///
+    /// A private profile (option B) thus shows Tagged alone when it has posts,
+    /// the lock as a line above them (`ProfileGalleryPagerView.lockLine`),
+    /// and the lock alone when it has none; following it brings the tabs back
+    /// as their sources fill. One tab left is no selector at all, in the tab
+    /// bar's accessory as in a pushed profile's toolbar.
     private func showTabs(for snapshot: ProfileViewModel.GallerySnapshot) {
-        let shown = allTabs.filter { tab in
-            guard tab != .format(.activity) else { return true }
-            if case .content(let posts) = snapshot.state(for: tab) { return !posts.isEmpty }
-            return false
-        }
+        var shown = Self.shownTabs(allTabs, in: snapshot, isOwnProfile: viewModel.isOwnProfile)
+        if shown.isEmpty { shown = [.format(.activity)] }
         guard shown != tabs else { return }
         let active = tabs.indices.contains(galleryPager.activePageIndex) ? tabs[galleryPager.activePageIndex] : nil
         tabs = shown
@@ -2569,6 +2579,19 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             }
         } else {
             removeSelectors()
+        }
+    }
+
+    /// The tabs `snapshot` gives something to show, in `all`'s order (#742,
+    /// #1422): those whose source holds posts, and the viewer's own Posts.
+    /// Empty when nothing has posts yet — `showTabs` then shows Posts alone.
+    static func shownTabs(
+        _ all: [ProfileTab], in snapshot: ProfileViewModel.GallerySnapshot, isOwnProfile: Bool
+    ) -> [ProfileTab] {
+        all.filter { tab in
+            if tab == .format(.activity), isOwnProfile { return true }
+            if case .content(let posts) = snapshot.state(for: tab) { return !posts.isEmpty }
+            return false
         }
     }
 

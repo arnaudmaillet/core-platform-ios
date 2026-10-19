@@ -135,10 +135,15 @@ public final class ProfileViewModel {
         /// follows its own corpus, apart from `isComplete`.
         public var repostsComplete = true
         public var taggedComplete = true
+        /// Whether the profile is private to the viewer (#447): its empty
+        /// pages are the lock, and a page that HAS posts (Tagged — other
+        /// people's) wears the lock as one line above them (#1422, option B).
+        public var isLockedToViewer = false
 
         /// Every page with nothing in it says the profile is private
         /// instead (#447): the server withholds them from the viewer.
         mutating func restrictEmptyPages() {
+            isLockedToViewer = true
             let locked = GalleryPageState.restricted(title: ProfileViewModel.restrictedTitle, message: ProfileViewModel.restrictedMessage)
             for page in [\GallerySnapshot.activity, \.media, \.saved, \.reactions, \.reposts, \.tagged, \.history] {
                 if case .empty = self[keyPath: page] { self[keyPath: page] = locked }
@@ -340,7 +345,31 @@ public final class ProfileViewModel {
     }
     private var isFollowing = false {
         // A private profile's pages lock and unlock with the follow (#447).
-        didSet { if isFollowing != oldValue { renderGallery() } }
+        didSet {
+            guard isFollowing != oldValue else { return }
+            let privateToOthers = profile?.visibility.isPrivate == true && !isOwnProfile
+            // Unfollowed: what the follow let in goes, and the tabs with it
+            // (#1422) — a read still on its way would bring it back.
+            if privateToOthers, !isFollowing {
+                galleryLoad?.cancel()
+                galleryLoad = nil
+                galleryMoreLoad?.cancel()
+                galleryMoreLoad = nil
+                engagementTabsLoad?.cancel()
+                engagementTabsLoad = nil
+                galleryStore.withholdAuthored()
+            }
+            renderGallery()
+            // Followed (a request accepted): the pages the server withheld are
+            // the viewer's now, so they are read again — and the tabs come back
+            // as they fill, without leaving the screen (#1422). A read already
+            // on its way was asked as a stranger: it starts again.
+            if privateToOthers, isFollowing, let profile {
+                galleryLoad?.cancel()
+                galleryLoad = nil
+                loadGallery(for: profile, reset: false)
+            }
+        }
     }
     /// Internal for tests: a follow, request or withdrawal still on its way.
     private(set) var followInFlight = false
