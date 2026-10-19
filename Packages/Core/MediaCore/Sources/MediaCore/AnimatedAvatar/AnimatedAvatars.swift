@@ -154,8 +154,13 @@ public final class AnimatedAvatars {
     /// every animated avatar rests on — and the clip cross-fades out of it
     /// over the first `blendFrames` and back into it over the last ones. So
     /// rest → frame 0 … last → rest has no cut, and the avatar's photo and
-    /// its still are one picture. Without a face, the tail fades into the
-    /// clip's first frame instead.
+    /// its still are one picture.
+    ///
+    /// Without a face (the mock's animated avatars, whose only media is
+    /// this sheet), the clip's OWN LAST FRAME is the rest: the head fades
+    /// out of it into the clip, and the clip ends on it (the owner,
+    /// 2026-10-20) — a play reads as the clip looping back to its end, not
+    /// as a restart from a still of its beginning.
     public nonisolated static func bakeSquareSheet(
         from source: AnimatedIconSheet, cellPX: Int = 128, endingOn face: UIImage? = nil, blendFrames: Int = 6
     ) -> AnimatedIconSheet? {
@@ -175,7 +180,7 @@ public final class AnimatedAvatars {
             let side = min(frame.width, frame.height)
             return image.cropping(to: CGRect(x: frame.midX - side / 2, y: frame.midY - side / 2, width: side, height: side).integral)
         }
-        let anchor: UIImage? = face.flatMap(squareCrop) ?? cells.first.flatMap { $0 }.map { UIImage(cgImage: $0) }
+        let anchor: UIImage? = face.flatMap(squareCrop) ?? cells.last.flatMap { $0 }.map { UIImage(cgImage: $0) }
         let blend = max(0, min(blendFrames, (count - 1) / 2))
         let baked = UIGraphicsImageRenderer(size: size, format: format).image { _ in
             for (index, cell) in cells.enumerated() {

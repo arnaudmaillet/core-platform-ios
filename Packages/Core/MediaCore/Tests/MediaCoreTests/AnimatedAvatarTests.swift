@@ -429,6 +429,21 @@ struct AnimatedAvatarTests {
         #expect(AnimatedAvatars.anchorWeight(index: 1, count: 4, blend: 1) == 0)
     }
 
+    /// Without a face, the clip's OWN last frame is the rest (the owner,
+    /// 2026-10-20): the sheet ends on it, and its first frame fades out of
+    /// it — a play loops back to the clip's end, never restarts from a
+    /// still of its beginning.
+    @Test func aSheetWithoutAFaceRestsOnTheClipsLastFrame() throws {
+        let baked = try #require(AnimatedAvatars.bakeSquareSheet(from: Self.sheet, cellPX: 8, blendFrames: 1))
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0
+        color(of: AnimatedAvatars.lastFrame(of: baked))?.getRed(&red, green: &green, blue: &blue, alpha: nil)
+        // The source's last cell is green, its first red.
+        #expect(green > 0.4 && red < 0.1 && blue < 0.1, "the rest is not the clip's last frame: \(red) \(green) \(blue)")
+        let first = try #require(baked.sheet.cgImage?.cropping(to: CGRect(x: 0, y: 0, width: 8, height: 8)))
+        color(of: UIImage(cgImage: first))?.getRed(&red, green: &green, blue: &blue, alpha: nil)
+        #expect(red > 0.3 && green > 0.15, "frame 0 does not fade out of the rest: \(red) \(green) \(blue)")
+    }
+
     // MARK: - #1444: the sheet is the only media
 
     /// Counts every photo the pipeline is asked to fetch.
