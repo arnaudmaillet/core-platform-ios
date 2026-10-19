@@ -84,6 +84,10 @@ public final class PlaceIdentityView: UIView {
     public let column = UIStackView()
     /// The arrangement this identity was built in.
     public let layout: Layout
+    /// The headline's rank column ("#3 🏆" over "World ranking", #1371);
+    /// nil in the profile's arrangement, which wears the bubble. Hidden
+    /// without a rank.
+    public private(set) var rankStat: PlaceStatView?
 
     public init(
         flag: UIImage?, name: String, subtitle: String?, counters: [Counter], rank: String?,
@@ -185,81 +189,65 @@ public final class PlaceIdentityView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    /// The headline: `[flag] 29.4K Likes` on one line, the flag as tall as
-    /// the figure's line, the title under it; the big rank centred on the
-    /// flag's bottom-trailing rim, the figure kept clear of it.
+    /// The headline (#1371): the unlock sheet's flag, and beside it the rank
+    /// column ("#3 🏆" over "World ranking") then the likes column ("29.4K"
+    /// over "Likes"), their bottoms on the flag's; the title under the flag.
     private func buildHeadline(counters: [Counter]) {
         statViews = counters.prefix(1).map {
             PlaceStatView(value: $0.value, caption: $0.caption, style: .headline)
         }
-        // ⚠️ A PLAIN VIEW, NOT A STACK. A stack's spacing is a required
-        // equality, and the figure must also clear the rank: a wide rank
-        // ("#126") made the two disagree and Auto Layout crushed the bubble
-        // to a sliver. Here the figure sits `md` after the flag by
-        // preference and moves right for the rank when it has to.
+        let rank = PlaceStatView(value: "", caption: Self.rankCaption, style: .rank)
+        rank.accessibilityIdentifier = "place.identity.rank"
+        rankStat = rank
+        // The columns, bottom-aligned: their words share a line on the
+        // flag's foot, whatever their figures' sizes.
+        let stats = UIStackView(arrangedSubviews: [rank] + statViews)
+        stats.axis = .horizontal
+        stats.alignment = .bottom
+        stats.spacing = Spacing.lg
         let line = UIView()
-        for view in [flagView] + statViews {
+        for view in [flagView, stats] as [UIView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             line.addSubview(view)
         }
         column.addArrangedSubview(line)
         column.addArrangedSubview(titleLabel)
         column.axis = .vertical
-        // Both rows span the width: the line is a plain view whose figure
-        // only bounds its trailing edge, and the title is composed for the
-        // width it is given.
         column.alignment = .fill
         column.spacing = Spacing.sm
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
-        rankBubble.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(rankBubble)
-        var constraints = [
+        // The unlock sheet's flag: its side, its Dynamic-Type ceiling, and
+        // at least the columns' height when large type outgrows it.
+        let side = flagView.heightAnchor.constraint(equalToConstant: Self.flagSide)
+        side.priority = .defaultHigh
+        let spans = flagView.heightAnchor.constraint(greaterThanOrEqualTo: stats.heightAnchor)
+        spans.priority = .init(999)
+        NSLayoutConstraint.activate([
             column.topAnchor.constraint(equalTo: topAnchor),
             column.leadingAnchor.constraint(equalTo: leadingAnchor),
             column.trailingAnchor.constraint(equalTo: trailingAnchor),
             column.bottomAnchor.constraint(equalTo: bottomAnchor),
-            // ⚠️ THE TITLE IS GIVEN THE WHOLE WIDTH. Left to its own size in a
-            // leading column it was cut for whatever width it had first
-            // ("Pa…"): the label composes its text for the width it is laid
-            // at, and nothing asked it to be wider.
+            // ⚠️ THE TITLE IS GIVEN THE WHOLE WIDTH. Left to its own size it
+            // was cut for whatever width it had first ("Pa…").
             titleLabel.widthAnchor.constraint(equalTo: column.widthAnchor),
-            flagView.widthAnchor.constraint(equalTo: flagView.heightAnchor),
-            // The rank across the flag's bottom-trailing rim, as a badge.
-            rankBubble.centerXAnchor.constraint(equalTo: flagView.trailingAnchor, constant: -4),
-            // Seated on the flag's foot rather than hanging below it: an
-            // overhang into the gap above the name squashed the bubble.
-            rankBubble.bottomAnchor.constraint(equalTo: flagView.bottomAnchor),
-            // The title stands clear of the rank's overhang.
-            titleLabel.topAnchor.constraint(greaterThanOrEqualTo: rankBubble.bottomAnchor, constant: Spacing.xs),
-        ]
-        constraints += [
             flagView.leadingAnchor.constraint(equalTo: line.leadingAnchor),
             flagView.topAnchor.constraint(equalTo: line.topAnchor),
             flagView.bottomAnchor.constraint(equalTo: line.bottomAnchor),
-        ]
-        if let stat = statViews.first {
-            let beside = stat.leadingAnchor.constraint(equalTo: flagView.trailingAnchor, constant: Spacing.md)
-            beside.priority = .defaultLow
-            constraints += [
-                // ONE LINE: the flag is the figure's line tall.
-                flagView.heightAnchor.constraint(equalTo: stat.valueLabel.heightAnchor),
-                stat.centerYAnchor.constraint(equalTo: flagView.centerYAnchor),
-                stat.topAnchor.constraint(greaterThanOrEqualTo: line.topAnchor),
-                stat.trailingAnchor.constraint(lessThanOrEqualTo: line.trailingAnchor),
-                stat.leadingAnchor.constraint(greaterThanOrEqualTo: flagView.trailingAnchor, constant: Spacing.md),
-                // The figure stands clear of the rank, however wide it is.
-                stat.leadingAnchor.constraint(greaterThanOrEqualTo: rankBubble.trailingAnchor, constant: Spacing.xs),
-                beside,
-            ]
-        } else {
-            constraints += [
-                flagView.heightAnchor.constraint(equalToConstant: 40),
-                flagView.trailingAnchor.constraint(lessThanOrEqualTo: line.trailingAnchor),
-            ]
-        }
-        NSLayoutConstraint.activate(constraints)
+            flagView.widthAnchor.constraint(equalTo: flagView.heightAnchor),
+            side,
+            flagView.heightAnchor.constraint(lessThanOrEqualToConstant: Self.flagMaxSide),
+            spans,
+            stats.leadingAnchor.constraint(equalTo: flagView.trailingAnchor, constant: Spacing.md),
+            stats.trailingAnchor.constraint(lessThanOrEqualTo: line.trailingAnchor),
+            // The columns' feet on the flag's.
+            stats.bottomAnchor.constraint(equalTo: flagView.bottomAnchor),
+        ])
+        setRank(rankBubble.text)
     }
+
+    /// The rank column's word (#1371).
+    public static let rankCaption = "World ranking"
 
     /// The round flag; nil draws a neutral disc.
     public func setFlag(_ image: UIImage?) {
@@ -267,10 +255,29 @@ public final class PlaceIdentityView: UIView {
         flagView.backgroundColor = image == nil ? .tertiarySystemFill : .clear
     }
 
-    /// "#19"; nil hides the bubble.
+    /// "#19"; nil hides the bubble — or, in the headline, the rank column.
     public func setRank(_ rank: String?) {
         rankBubble.text = rank
-        rankBubble.isHidden = rank == nil
+        guard let rankStat else {
+            rankBubble.isHidden = rank == nil
+            return
+        }
+        // The headline wears no bubble: its rank is a column (#1371).
+        rankBubble.isHidden = true
+        rankStat.setValue(rank ?? "")
+        rankStat.isHidden = rank == nil
+        rankStat.accessibilityValue = rank.map { "Rank \($0.dropFirst())" }
+    }
+
+    /// Every column that stands on a picture and wears its own ink, in order:
+    /// the rank's (when drawn), then the counters.
+    public var inkedStats: [PlaceStatView] {
+        (rankStat.map { $0.isHidden ? [] : [$0] } ?? []) + statViews
+    }
+
+    /// Each of `inkedStats`' own ink, in its order.
+    public func setStatInks(_ tones: [HeroInk.Tone?]) {
+        for (stat, tone) in zip(inkedStats, tones) { stat.setInk(tone) }
     }
 
     /// New figures for the counters, in order — the words stay.
@@ -435,12 +442,15 @@ public final class PlaceTitleLabel: UILabel {
 /// over the word that says what it counts, centred on each other, the column
 /// as wide as the wider of the two.
 public final class PlaceStatView: UIView {
-    /// The profile's column, or the headline's large figure with its word
-    /// after it on the same baseline (#1304).
-    enum Style { case column, headline }
+    /// The profile's column; the headline's likes, a large figure over its
+    /// word; or the headline's rank, the rank bubble's type and a trophy over
+    /// its word (#1371).
+    enum Style { case column, headline, rank }
 
     public let valueLabel = UILabel()
     public let captionLabel = UILabel()
+    /// The rank's trophy, after its figure; nil elsewhere.
+    public private(set) var symbolView: UIImageView?
 
     init(value: String, caption: String, style: Style = .column) {
         super.init(frame: .zero)
@@ -452,11 +462,21 @@ public final class PlaceStatView: UIView {
         case .headline:
             // Large: the place's number, the page's headline (#1304).
             valueLabel.font = .scaledSystemFont(ofSize: 34, weight: .bold, relativeTo: .largeTitle, maximumPointSize: 44)
-            captionLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20)
-            // The figure keeps its own line height: the flag follows it, never
-            // the other way round (a stretched label centres its glyphs and
-            // leaves the word beside it floating above them).
-            valueLabel.setContentHuggingPriority(.required, for: .vertical)
+            captionLabel.font = Self.headlineCaptionFont
+        case .rank:
+            // The rank bubble's type, with a trophy after it (#1371).
+            valueLabel.font = .scaledMonospacedDigitSystemFont(
+                ofSize: 20, weight: .heavy, relativeTo: .title3, maximumPointSize: 28
+            )
+            captionLabel.font = Self.headlineCaptionFont
+            let trophy = UIImageView(image: UIImage(
+                systemName: "trophy.fill",
+                withConfiguration: UIImage.SymbolConfiguration(font: valueLabel.font, scale: .small)
+            ))
+            trophy.contentMode = .center
+            trophy.setContentCompressionResistancePriority(.required, for: .horizontal)
+            trophy.isAccessibilityElement = false
+            symbolView = trophy
         }
         valueLabel.adjustsFontForContentSizeCategory = true
         valueLabel.textAlignment = .center
@@ -467,9 +487,30 @@ public final class PlaceStatView: UIView {
             label.setContentCompressionResistancePriority(.required, for: .vertical)
             label.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
-        let stack = UIStackView(arrangedSubviews: [valueLabel, captionLabel])
-        stack.axis = style == .column ? .vertical : .horizontal
-        stack.alignment = style == .column ? .center : .firstBaseline
+        if style != .column {
+            // At the largest type the two columns outgrow the room beside
+            // the flag: a word wraps ("World / ranking") before anything is
+            // cut. The figures never do.
+            captionLabel.numberOfLines = 2
+            captionLabel.textAlignment = .natural
+            captionLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        }
+        // The figure, and the rank's trophy after it.
+        let figure: UIView
+        if let symbolView {
+            let row = UIStackView(arrangedSubviews: [valueLabel, symbolView])
+            row.axis = .horizontal
+            row.alignment = .center
+            row.spacing = Spacing.xs
+            figure = row
+        } else {
+            figure = valueLabel
+        }
+        let stack = UIStackView(arrangedSubviews: [figure, captionLabel])
+        stack.axis = .vertical
+        // The headline's columns stand on the flag from its trailing side:
+        // their figures and words start at one edge.
+        stack.alignment = style == .column ? .center : .leading
         stack.spacing = Spacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
@@ -488,6 +529,11 @@ public final class PlaceStatView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    /// The headline's words: "Likes", "World ranking".
+    private static var headlineCaptionFont: UIFont {
+        .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 20)
+    }
+
     func setValue(_ value: String) {
         valueLabel.text = value
         accessibilityValue = value
@@ -502,6 +548,7 @@ public final class PlaceStatView: UIView {
     /// behind (`HeroInk`), with a soft shadow of the opposite tone.
     func setInk(_ tone: HeroInk.Tone?) {
         valueLabel.textColor = tone?.primary ?? .label
+        symbolView?.tintColor = tone?.primary ?? .label
         captionLabel.textColor = tone?.secondary ?? .secondaryLabel
         for label in [valueLabel, captionLabel] {
             HeroInk.applyShadow(to: label, tone: tone ?? .dark, onPicture: tone == nil ? 0 : 1)

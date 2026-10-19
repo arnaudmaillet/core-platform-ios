@@ -735,9 +735,12 @@ final class PlaceProfileViewController: UIViewController {
             // alone: the posts' count is gone (#1304).
             counters: [.init(value: "—", caption: "Likes")],
             rank: rank?.positionText,
-            // One line: the flag beside the big figure, the name under it.
+            // The sheet's flag, the rank and the likes beside it, the name
+            // under it (#1371).
             layout: .headline
         )
+        // One ink per column from the start: the rank's too.
+        counterTones = Array(repeating: HeroInk.defaultTone, count: identityView.inkedStats.count)
         self.imagePipeline = imagePipeline
         self.following = following
         self.wallet = wallet
@@ -1231,7 +1234,8 @@ final class PlaceProfileViewController: UIViewController {
     /// right behind it.
     private func applyHeroLegibility() {
         identityView.setTitleInk(nameTone)
-        identityView.setCounterInks(counterTones)
+        // The rank's column too (#1371): every column reads its own ground.
+        identityView.setStatInks(counterTones)
     }
 
     /// Reads the blurred picture behind the name and behind each counter and
@@ -1246,7 +1250,7 @@ final class PlaceProfileViewController: UIViewController {
         // rides the box's foot, and in the box's own space a pull-down (the
         // box stretching up) moved it down its ground and read the ground
         // again every two points of the pull.
-        let blocks = ([identityView.titleLabel] + identityView.statViews).map(restingFrame(of:))
+        let blocks = ([identityView.titleLabel] + identityView.inkedStats).map(restingFrame(of:))
         let moved = blocks.count != heroInkReadFor.count
             || zip(blocks, heroInkReadFor).contains { abs($0.minY - $1.minY) > 2 || abs($0.height - $1.height) > 2 }
         guard force || moved, let nameGround = bannerView.groundPixels(behind: blocks[0]) else { return }
@@ -1255,8 +1259,10 @@ final class PlaceProfileViewController: UIViewController {
         debugInkReadCount += 1
         #endif
         let name = HeroInk.tone(forGround: nameGround, current: nameTone)
-        let counters = zip(blocks.dropFirst(), counterTones).map { block, current in
-            bannerView.groundPixels(behind: block).map { HeroInk.tone(forGround: $0, current: current) } ?? current
+        // One tone per column — the rank's comes and goes with the rank.
+        let counters = blocks.dropFirst().enumerated().map { index, block in
+            let current = counterTones.indices.contains(index) ? counterTones[index] : HeroInk.defaultTone
+            return bannerView.groundPixels(behind: block).map { HeroInk.tone(forGround: $0, current: current) } ?? current
         }
         #if DEBUG
         HeroInk.debugTraceGround(nameGround, name: "place-name", picked: name)
@@ -2534,7 +2540,7 @@ extension PlaceProfileViewController {
     }
     /// The ink the title and each counter wear on the picture.
     var debugHeroInkTones: (name: HeroInk.Tone, likes: HeroInk.Tone) {
-        (nameTone, counterTones[0])
+        (nameTone, counterTones.last ?? HeroInk.defaultTone)
     }
     /// The identity row, for a test that reads it.
     var debugIdentity: PlaceIdentityView { identityView }
@@ -2600,7 +2606,11 @@ extension PlaceProfileViewController {
         return likes.convert(likes.bounds, to: view)
     }
     /// The rank's bubble as drawn — nil when it is not.
-    var debugRank: String? { identityView.rankBubble.isHidden ? nil : identityView.rankBubble.text }
+    /// The rank as drawn: the headline's rank column (#1371).
+    var debugRank: String? {
+        guard let rank = identityView.rankStat, !rank.isHidden else { return nil }
+        return rank.valueLabel.text
+    }
     /// The band's two numbers as rendered — the place's own totals, which are
     /// deliberately NOT the gallery's (see `render`).
     /// Which Activity row a dismissal from the MAP is currently aimed at. The

@@ -203,79 +203,102 @@ struct PlaceIdentityViewTests {
         #expect(identity.titleLabel.layer.shadowOpacity == 0)
     }
 
-    // MARK: - The headline (the place page, #1304)
+    // MARK: - The headline (the place page, #1371)
 
-    private func headline(rank: String? = "#3") -> PlaceIdentityView {
+    private func headline(rank: String? = "#3", likes: String = "29.4K", width: CGFloat = 370) -> PlaceIdentityView {
         let view = PlaceIdentityView(
             flag: nil, name: "Paris", subtitle: "France",
-            counters: [.init(value: "29.4K", caption: "Likes")], rank: rank, layout: .headline
+            counters: [.init(value: likes, caption: "Likes")], rank: rank, layout: .headline
         )
-        view.frame = CGRect(x: 0, y: 0, width: 370, height: 300)
+        view.frame = CGRect(x: 0, y: 0, width: width, height: 300)
         view.frame.size = view.systemLayoutSizeFitting(
-            CGSize(width: 370, height: 0),
+            CGSize(width: width, height: 0),
             withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel
         )
         view.layoutIfNeeded()
         return view
     }
 
-    /// ⚠️ ONE LINE: the flag is the large figure's line tall and stands
-    /// before it; the title is under that line.
-    @Test func theHeadlineIsTheFlagAndTheFigureOnOneLineWithTheNameUnder() throws {
+    /// The unlock sheet's flag: the same side as the profile arrangement's.
+    @Test func theHeadlinesFlagIsTheUnlockSheets() {
         let view = headline()
+        let sheet = layOut()
+        let flag = frame(of: view.flagView, in: view)
+        #expect(abs(flag.height - PlaceIdentityView.flagSide) < 0.5, "the flag is \(flag.height) pt")
+        #expect(abs(flag.width - flag.height) < 0.5)
+        #expect(abs(flag.height - frame(of: sheet.flagView, in: sheet).height) < 0.5, "not the sheet's flag")
+    }
+
+    /// Beside the flag: the rank column, then the likes column, each a figure
+    /// over its word, their feet on the flag's; the title under the flag.
+    @Test func theRankAndTheLikesStandBesideTheFlagOnItsFoot() throws {
+        let view = headline()
+        let rank = try #require(view.rankStat)
         let likes = try #require(view.statViews.first)
-        #expect(view.statViews.count == 1)
-        let flag = view.flagView.convert(view.flagView.bounds, to: view)
-        let figure = likes.valueLabel.convert(likes.valueLabel.bounds, to: view)
-        let title = view.titleLabel.convert(view.titleLabel.bounds, to: view)
-        #expect(abs(flag.height - figure.height) < 0.5, "the flag is not the figure's line tall")
-        #expect(abs(flag.midY - figure.midY) < 1, "the flag and the figure are not on one line")
-        #expect(flag.maxX < figure.minX, "the figure is not right of the flag")
-        #expect(likes.valueLabel.font.pointSize >= 34, "the figure is not large")
-        #expect(title.minY >= flag.maxY, "the name is not under the line")
-        // The name has the whole width: in a leading column it was once cut
-        // for the width it first got, "Pa…".
-        #expect(abs(title.width - view.bounds.width) < 0.5, "the name is not given the width")
+        let flag = frame(of: view.flagView, in: view)
+        let rankFrame = frame(of: rank, in: view), likesFrame = frame(of: likes, in: view)
+        #expect(!rank.isHidden)
+        #expect(rankFrame.minX > flag.maxX, "the rank is not beside the flag")
+        #expect(likesFrame.minX > rankFrame.maxX, "not rank then likes")
+        #expect(abs(rankFrame.maxY - flag.maxY) < 1, "the rank's foot is not on the flag's: \(rankFrame) \(flag)")
+        #expect(abs(likesFrame.maxY - flag.maxY) < 1, "the likes' foot is not on the flag's: \(likesFrame) \(flag)")
+        #expect(rank.valueLabel.text == "#3")
+        #expect(rank.captionLabel.text == "World ranking")
+        #expect(rank.symbolView != nil && rank.symbolView?.isHidden == false, "no trophy")
+        let figure = frame(of: rank.valueLabel, in: view), caption = frame(of: rank.captionLabel, in: view)
+        #expect(figure.maxY <= caption.minY + 0.5, "the rank's figure is not over its word")
+        let title = frame(of: view.titleLabel, in: view)
+        #expect(title.minY >= flag.maxY, "the title is not under the flag")
         #expect(view.titleLabel.text == "Paris  France", "the name is cut")
     }
 
-    /// The rank is MUCH bigger than the profile's, across the flag's rim, and
-    /// the figure stands clear of it.
-    @Test func theHeadlinesRankIsMuchBigger() throws {
+    /// No bubble on the page: the rank is a column, not a badge on the rim.
+    @Test func theHeadlineWearsNoRankBubble() {
         let view = headline()
-        let profile = PlaceIdentityView(
-            flag: nil, name: "Paris", subtitle: "France",
-            counters: [.init(value: "29.4K", caption: "Likes")], rank: "#3"
-        )
-        #expect(view.rankBubble.label.font.pointSize >= profile.rankBubble.label.font.pointSize * 1.5)
-        let rank = view.rankBubble.convert(view.rankBubble.bounds, to: view)
-        let flag = view.flagView.convert(view.flagView.bounds, to: view)
-        let figure = try #require(view.statViews.first).convert(view.statViews[0].bounds, to: view)
-        #expect(rank.intersects(flag), "the rank is not on the flag")
-        #expect(rank.maxX <= figure.minX, "the rank covers the figure")
+        #expect(view.rankBubble.isHidden)
+        #expect(view.rankBubble.window == nil && !view.rankBubble.isDescendant(of: view), "a bubble on the page")
+        // The sheet keeps its bubble.
+        #expect(!layOut().rankBubble.isHidden)
     }
 
-    /// A wide rank keeps its whole text: the figure moves right for it. A
-    /// stack's fixed spacing once crushed "#126" to a sliver on the device.
-    @Test func aWideRankIsNeverCrushed() throws {
-        let view = headline(rank: "#126")
-        let bubble = view.rankBubble
-        #expect(bubble.label.bounds.width >= bubble.label.intrinsicContentSize.width - 0.5, "the rank is cut")
-        #expect(bubble.label.bounds.height >= bubble.label.intrinsicContentSize.height - 0.5, "the rank is squashed")
-        let rank = bubble.convert(bubble.bounds, to: view)
-        let figure = try #require(view.statViews.first).convert(view.statViews[0].bounds, to: view)
-        #expect(rank.maxX <= figure.minX, "the rank covers the figure")
+    /// No rank: no rank column, and the likes take its place beside the flag.
+    @Test func withNoRankTheLikesStandBesideTheFlag() throws {
+        let view = headline(rank: nil)
+        #expect(view.rankStat?.isHidden == true)
+        let likes = frame(of: try #require(view.statViews.first), in: view)
+        let flag = frame(of: view.flagView, in: view)
+        #expect(abs(likes.minX - (flag.maxX + Spacing.md)) < 0.5, "the likes are not beside the flag")
+        #expect(view.inkedStats.count == 1, "a hidden rank still asks for ink")
     }
 
-    /// The word sits on the figure's baseline, not above it.
-    @Test func theWordSharesTheFiguresBaseline() throws {
+    /// Today's type: likes 34 pt bold over 15 pt semibold, the rank 20 pt heavy.
+    @Test func theTypeSizesAreUnchanged() throws {
         let view = headline()
-        let likes = try #require(view.statViews.first)
-        let value = likes.valueLabel, caption = likes.captionLabel
-        let valueBaseline = value.convert(CGPoint(x: 0, y: value.firstBaselineAnchorY), to: view).y
-        let captionBaseline = caption.convert(CGPoint(x: 0, y: caption.firstBaselineAnchorY), to: view).y
-        #expect(abs(valueBaseline - captionBaseline) < 1, "the word floats off the figure's baseline")
-        #expect(abs(value.bounds.height - value.intrinsicContentSize.height) < 0.5, "the figure's line is stretched")
+        let likes = try #require(view.statViews.first), rank = try #require(view.rankStat)
+        #expect(likes.valueLabel.font.pointSize == 34)
+        #expect(likes.captionLabel.font.pointSize == 15)
+        #expect(rank.captionLabel.font.pointSize == 15)
+        #expect(rank.valueLabel.font.pointSize == 20)
+    }
+
+    /// On the iPhone SE's column, a wide rank and figure keep their whole text.
+    @Test func nothingIsCutOnAnSE() throws {
+        let view = headline(rank: "#126", likes: "29.4K", width: 375 - 2 * 16)
+        let rank = try #require(view.rankStat), likes = try #require(view.statViews.first)
+        for label in [rank.valueLabel, rank.captionLabel, likes.valueLabel, likes.captionLabel] {
+            #expect(label.bounds.width >= label.intrinsicContentSize.width - 0.5, "\(label.text ?? "") is cut")
+        }
+        let line = frame(of: likes, in: view)
+        #expect(line.maxX <= view.bounds.width + 0.5, "the likes run off the column")
+    }
+
+    /// Each column wears its own ink, the rank's first.
+    @Test func everyColumnWearsItsOwnInk() throws {
+        let view = headline()
+        #expect(view.inkedStats.map(\.captionLabel.text) == ["World ranking", "Likes"])
+        view.setStatInks([.light, .dark])
+        #expect(try #require(view.rankStat).valueLabel.textColor == HeroInk.Tone.light.primary)
+        #expect(try #require(view.statViews.first).valueLabel.textColor == HeroInk.Tone.dark.primary)
     }
 }
 
