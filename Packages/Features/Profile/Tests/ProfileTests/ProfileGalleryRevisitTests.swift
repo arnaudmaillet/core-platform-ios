@@ -286,7 +286,6 @@ struct ProfileGalleryRevisitTests {
             return false
         }
         #expect(locked, "Posts still shows \(String(describing: viewModel.publishedGallery?.activity))")
-        #expect(viewModel.publishedGallery?.isLockedToViewer == true)
     }
 
     /// A public profile shows everyone the same posts: a follow keeps them.

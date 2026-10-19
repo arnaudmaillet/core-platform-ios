@@ -2310,10 +2310,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             self.viewModel.refresh()
         }
         galleryPager.onPullToRefresh = { [weak self] in self?.viewModel.refresh() }
-        // The lock line (#1422) is a page's lead, never a day to pin in the bar.
-        galleryPager.onPinnedSectionChanged = { [weak self] section in
-            self?.applyPinnedSection(section?.title == ProfileGalleryPagerView.lockLine ? nil : section)
-        }
+        galleryPager.onPinnedSectionChanged = { [weak self] section in self?.applyPinnedSection(section) }
         galleryPager.onNearEnd = { [weak self] in self?.viewModel.loadMoreGallery() }
         // The band's minimize rides whichever page is in front. The pager is
         // what knows, and it is what says so — see `onActiveScrollViewChanged`.
@@ -2540,10 +2537,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     ///   Posts Yet", or the lock of a private profile — so the area under
     ///   the header is never blank, which reads as still loading.
     ///
-    /// A private profile (option B) thus shows Tagged alone when it has posts,
-    /// the lock as a line above them (`ProfileGalleryPagerView.lockLine`),
-    /// and the lock alone when it has none; following it brings the tabs back
-    /// as their sources fill. One tab left is no selector at all, in the tab
+    /// A private profile the viewer does not follow thus shows Tagged alone
+    /// when it has posts, plainly — no lock line (#1445) — and the lock alone
+    /// when it has none; following it brings the tabs back as their sources
+    /// fill. One tab left is no selector at all, in the tab
     /// bar's accessory as in a pushed profile's toolbar.
     private func showTabs(for snapshot: ProfileViewModel.GallerySnapshot) {
         var shown = Self.shownTabs(allTabs, in: snapshot, isOwnProfile: viewModel.isOwnProfile)
