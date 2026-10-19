@@ -27,7 +27,8 @@ import UIKit
 /// ONE LINE (#1034): a glyph (the kind's, or the caller's), a short message
 /// — tail-truncated, two lines only at accessibility text sizes — and in the
 /// trailing slot ONE of: an action ("Retry", "View", Undo) or a close button,
-/// the close button whenever the toast does not leave on its own (a failure).
+/// the close button whenever the toast does not leave on its own and has no
+/// action (none since #1448: a failure leaves on the common timer).
 /// No second text line: one idea per toast, the references' rule (Polaris,
 /// Material's snackbar, Avaya); two levels made it too big (owner, #1034).
 ///
@@ -37,9 +38,11 @@ import UIKit
 ///
 /// ## Time (`duration(for:message:hasAction:assistiveTechnologyRunning:)`)
 ///
-/// - success, info, warning: `max(4 s, 2 s + 0.3 s × words)`;
-/// - failure: until closed, acted on or replaced — an error that fades on a
-///   timer gets missed (owner's decision, 2026-10-11);
+/// - success, info, warning, failure: `max(4 s, 2 s + 0.3 s × words)` — a
+///   failure on the same timer as the others (owner, 2026-10-19, #1448; it
+///   replaces #954's "until closed": a failure that never left outstayed
+///   the screen it was about);
+/// - loading and conditions: until updated in place by their `id`;
 /// - a toast with an action never leaves on its own while VoiceOver or Switch
 ///   Control runs (WCAG 2.2.1: timing adjustable).
 ///
@@ -662,8 +665,9 @@ public final class ToastView: UIView {
         for style: Style, message: String, hasAction: Bool,
         isUndoable: Bool = false, assistiveTechnologyRunning: Bool
     ) -> TimeInterval? {
-        // A loading toast waits for its outcome (an update by `id`).
-        if style == .failure || style == .loading { return nil }
+        // A loading toast waits for its outcome (an update by `id`). A
+        // failure leaves on the common timer (#1448).
+        if style == .loading { return nil }
         if hasAction, assistiveTechnologyRunning { return nil }
         if isUndoable { return undoDuration }
         let words = message.split(whereSeparator: \.isWhitespace).count

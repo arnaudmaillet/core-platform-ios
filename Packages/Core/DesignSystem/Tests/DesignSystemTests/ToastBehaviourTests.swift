@@ -67,9 +67,16 @@ struct ToastBehaviourTests {
         #expect(abs((duration ?? 0) - (2 + 0.3 * 10)) < 0.001)
     }
 
-    /// A failure stays until closed, acted on or replaced.
-    @Test func aFailureNeverLeavesOnItsOwn() {
-        #expect(ToastView.duration(for: .failure, message: "Couldn't copy", hasAction: false, assistiveTechnologyRunning: false) == nil)
+    /// A failure leaves on the common timer (#1448, replacing #954's "until
+    /// closed"); with an action, not while assistive technology runs.
+    @Test func aFailureLeavesOnTheCommonTimer() {
+        #expect(ToastView.duration(for: .failure, message: "Couldn't copy", hasAction: false, assistiveTechnologyRunning: false) == 4)
+        let long = "Couldn't ask to follow one two three four five six"
+        let duration = ToastView.duration(for: .failure, message: long, hasAction: false, assistiveTechnologyRunning: false)
+        #expect(abs((duration ?? 0) - (2 + 0.3 * 10)) < 0.001)
+        #expect(ToastView.duration(for: .failure, message: "Couldn't send", hasAction: true, assistiveTechnologyRunning: false) == 4)
+        #expect(ToastView.duration(for: .failure, message: "Couldn't send", hasAction: true, assistiveTechnologyRunning: true) == nil)
+        #expect(ToastView.duration(for: .loading, message: "Posting", hasAction: false, assistiveTechnologyRunning: false) == nil)
     }
 
     /// WCAG 2.2.1: with VoiceOver or Switch Control, an action does not time
@@ -138,15 +145,16 @@ struct ToastBehaviourTests {
 
     // MARK: - Close and action
 
-    /// A failure carries a close button, and no countdown.
-    @Test func aFailureHasACloseButton() throws {
+    /// A failure leaves on its own like the others (#1448): a countdown, no
+    /// close button.
+    @Test func aFailureLeavesOnItsOwnWithNoCloseButton() throws {
         try hosting { container, advance in
             let shown = toast("Couldn't copy", style: .failure, in: container)
-            #expect(shown.countdown == nil)
-            let close = try #require(shown.closeButton)
-            advance(60)
+            #expect(shown.countdown != nil)
+            #expect(shown.closeButton == nil)
+            advance(3.9)
             #expect(!shown.isDismissing)
-            close.sendActions(for: .primaryActionTriggered)
+            advance(0.2)
             #expect(shown.isDismissing)
         }
     }
