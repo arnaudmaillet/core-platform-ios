@@ -1193,7 +1193,7 @@ final class AppContainer {
         guard environment == .mock, !Self.previewsUnavailable else { return }
         // The mock and MediaCore must mark a sheet avatar's URL alike.
         assert(MockSocialDataset.sheetAvatarFragment == AnimatedAvatars.sheetFragment)
-        AnimatedAvatars.shared.resolver = MockAnimatedAvatarResolver(catalog: Self.mapPreviewCatalog, faces: imagePipeline)
+        AnimatedAvatars.shared.resolver = MockAnimatedAvatarResolver(catalog: Self.mapPreviewCatalog)
     }
 
     /// Baked from real clips by `Tools/IconBaker` — 24 frames at a 172px cell,
@@ -1871,23 +1871,24 @@ extension SessionManager: @retroactive SessionReauthenticating {
 /// The mock's animated avatars (#1358, #1444): the authors the dataset
 /// declares as sheet avatars (`MockSocialDataset.sheetAvatarURL`), which have
 /// NO photo. Each sheet is baked at the rung asked for from one clip preview,
-/// as a loop out of the author's face and back into it (#1424) — the face is
-/// the mock's own baking input, the way the server bakes from an upload
-/// (core-platform-backend#948); the app itself never fetches it as a photo.
+/// as a seamless loop of that clip's own frames, its tail fading back into
+/// its first frame (#1424).
+///
+/// ⚠️ NO FACE PHOTO BLENDED IN (the owner, 2026-10-20). The sheet used to
+/// fade in and out of a separate face photo, unrelated to the clip: on
+/// For You's Friends faces the photo and the clip showed together, two
+/// media in one avatar. An animated avatar's only media is its sheet.
 private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked Sendable {
     let catalog: AnimatedIconCatalog
-    let faces: ImagePipeline
 
     func sheet(for avatarURL: URL, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet? {
-        guard let index = MockSocialDataset.sheetAvatarIndex(avatarURL),
-              let faceURL = URL(string: MockSocialDataset.syntheticAvatarURL(index: index)) else { return nil }
+        guard let index = MockSocialDataset.sheetAvatarIndex(avatarURL) else { return nil }
         let clips = await MainActor.run { catalog.ids.filter { $0.hasSuffix("-0") } }
         guard !clips.isEmpty,
               case .sheet(let source)? = try? await catalog.art(for: clips[index % clips.count])
         else { return nil }
-        let face = try? await faces.image(for: faceURL, size: .px256)
         return await Task.detached(priority: .utility) {
-            AnimatedAvatars.bakeSquareSheet(from: source, cellPX: rung.rawValue, endingOn: face)
+            AnimatedAvatars.bakeSquareSheet(from: source, cellPX: rung.rawValue)
         }.value
     }
 }

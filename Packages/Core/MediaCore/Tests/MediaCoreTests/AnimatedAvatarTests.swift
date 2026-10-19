@@ -340,6 +340,27 @@ struct AnimatedAvatarTests {
         #expect(zip(order, order.dropFirst()).allSatisfy { $0 != $1 }, "an avatar played twice in a row: \(order)")
     }
 
+    /// A face that played on its first display joins the rounds, which can
+    /// pick it again (the owner, 2026-10-20: For You's Friends faces played
+    /// once and never again). A `.change` avatar plays only on a change.
+    @Test func aFirstAppearanceAvatarJoinsTheRounds() async {
+        let window = makeWindow()
+        defer { window.isHidden = true }
+        let registry = makeRegistry()
+        let rounds = makeRounds()
+        let face = await hosted(
+            Self.face, trigger: .firstAppearance(AnimatedAvatarScope()), registry: registry, rounds: rounds, in: window
+        )
+        #expect(rounds.isRunning, "a first-display face is not in the rounds")
+        #expect(await eventually { face.playCount == 1 && !face.isPlaying }, "the first display never played")
+        rounds.playRound()
+        #expect(face.playCount == 2, "the round did not pick the face again: \(face.lastRefusal ?? "-")")
+
+        let changing = makeRounds()
+        _ = await hosted(Self.face, at: CGPoint(x: 120, y: 100), trigger: .change, registry: registry, rounds: changing, in: window)
+        #expect(!changing.isRunning, "a .change avatar joined the rounds")
+    }
+
     /// The rounds' timer runs only while an animated avatar is in a window:
     /// none for a still one, and it stops when the screen goes.
     @Test func theRoundsRunOnlyWithAnAnimatedAvatarOnScreen() async {
@@ -406,6 +427,21 @@ struct AnimatedAvatarTests {
         #expect(AnimatedAvatars.anchorWeight(index: 2, count: 4, blend: 1) == 0.5)
         #expect(AnimatedAvatars.anchorWeight(index: 0, count: 4, blend: 1) == 0.5)
         #expect(AnimatedAvatars.anchorWeight(index: 1, count: 4, blend: 1) == 0)
+    }
+
+    /// Without a face, the clip's OWN last frame is the rest (the owner,
+    /// 2026-10-20): the sheet ends on it, and its first frame fades out of
+    /// it — a play loops back to the clip's end, never restarts from a
+    /// still of its beginning.
+    @Test func aSheetWithoutAFaceRestsOnTheClipsLastFrame() throws {
+        let baked = try #require(AnimatedAvatars.bakeSquareSheet(from: Self.sheet, cellPX: 8, blendFrames: 1))
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0
+        color(of: AnimatedAvatars.lastFrame(of: baked))?.getRed(&red, green: &green, blue: &blue, alpha: nil)
+        // The source's last cell is green, its first red.
+        #expect(green > 0.4 && red < 0.1 && blue < 0.1, "the rest is not the clip's last frame: \(red) \(green) \(blue)")
+        let first = try #require(baked.sheet.cgImage?.cropping(to: CGRect(x: 0, y: 0, width: 8, height: 8)))
+        color(of: UIImage(cgImage: first))?.getRed(&red, green: &green, blue: &blue, alpha: nil)
+        #expect(red > 0.3 && green > 0.15, "frame 0 does not fade out of the rest: \(red) \(green) \(blue)")
     }
 
     // MARK: - #1444: the sheet is the only media
