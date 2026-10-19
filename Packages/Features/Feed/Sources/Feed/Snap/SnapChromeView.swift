@@ -1305,6 +1305,14 @@ final class SnapChromeView: UIView {
         NSLayoutConstraint.activate(constraints)
     }
 
+    /// Shows or hides the column — the like (boost) pill and the sound
+    /// bubble — for a post the viewer may still act on (#1409). Its own
+    /// switch, not the flight's hold (`setColumnHeld`, an alpha): a post
+    /// that turned unavailable keeps it down whatever the flight does.
+    func setActionColumnShown(_ shown: Bool) {
+        columnLayer.isHidden = !shown
+    }
+
     /// Hides the column with the page while a flight covers it — the
     /// replica carries its own. Unlike the chrome's own hold, released into
     /// the engaged state too: the column belongs to both.

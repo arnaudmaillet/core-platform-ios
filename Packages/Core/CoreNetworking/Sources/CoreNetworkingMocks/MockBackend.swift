@@ -103,7 +103,13 @@ public struct MockBackend: Sendable {
             store: counterStore, dataset: dataset, startingPoints: 250, persistence: .standard,
             // Stakes the wallet opens with, so the sheet's lists show
             // something on a fresh install (#903).
-            demoPositions: dataset.posts.prefix(8).map(\.postID)
+            demoPositions: dataset.posts.prefix(8).map(\.postID),
+            // A post the account may not read takes no stake (#1409).
+            mayStakeOnPost: { account, postID in
+                socialServices.mayReadPost(
+                    postID, readers: dataset.profileIDs(inAccount: account), privacy: false
+                )
+            }
         )
         wallet.register(on: bff)
         // A guest signing up is credited the welcome gift by the wallet

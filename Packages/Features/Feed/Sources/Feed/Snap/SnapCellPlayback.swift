@@ -85,6 +85,13 @@ final class SnapCellPlayback: NSObject {
         traceViewerPlayback("hold", paused: isHeldPaused)
     }
 
+    /// Forgets every resume owed — a hold's, a sheet's: the post turned
+    /// unavailable (#1409), and nothing of it plays again.
+    func forgetOwedResumes() {
+        isHeldPaused = false
+        isSheetPaused = false
+    }
+
     /// The hold ended: resumes the clip if the hold is what stopped it.
     func endHold() {
         guard isHeldPaused, let pool, let view = surface() else { return }

@@ -1345,6 +1345,9 @@ final class PostDetailViewController: UIViewController {
         // Back, the band's material comes back with it: the entrance builds
         // one only for a band that is showing, and this one was not.
         if shown { setComposerEntranceState(offstage: composeBar.alpha == 0) }
+        // The host draws post actions of its own — the snap page's like,
+        // boost and sound column (#1409): it is told, once per screen.
+        if !shown, let postID = viewModel.postID { onPostUnavailable?(postID) }
     }
 
     /// The footer band shows in the engaged context (`setEngagedInsets`)
@@ -1513,6 +1516,11 @@ final class PostDetailViewController: UIViewController {
     func redrawRailSoundFace() {
         composeBar.redrawRailFace()
     }
+
+    /// The post turned out unavailable to the viewer (#447) — said once, as
+    /// this panel takes its own actions away (#1404). For a host that draws
+    /// post actions outside the panel: the snap page (#1409).
+    var onPostUnavailable: ((PostID) -> Void)?
 
     /// The snap feed's page draws the action column above this panel (#695):
     /// the composer only reserves its room.
