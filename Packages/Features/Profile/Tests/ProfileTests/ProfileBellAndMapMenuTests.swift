@@ -1,6 +1,8 @@
 import CoreModels
 import CoreNavigation
 import DesignSystem
+@testable import Feed
+import FeedInterface
 import Foundation
 import MapsInterface
 import MediaCore
@@ -45,6 +47,7 @@ struct ProfileBellAndMapMenuTests {
         let coins = UIBarButtonItem(customView: UIView())
         coins.accessibilityLabel = "Balance"
         screen.setTrailingAccessoryItem(coins)
+        screen.makePersonBarItem = { PersonBarItems.make() }
         screen.loadViewIfNeeded()
         return (screen, viewModel, repository)
     }
@@ -294,38 +297,78 @@ struct ProfileBellAndMapMenuTests {
     }
 }
 
-// MARK: - The bar's relationship (the owner, 2026-10-15)
+// MARK: - The bar's identity (#1451)
 
 /// Once the header's action tray has scrolled out of sight, the bar carries
-/// the relationship, inboard of the balance: a pink Follow while the viewer
-/// does not follow, the profile's identity pill once they do. Never while
+/// the profile's identity: the post page's person pill, its relation a badge
+/// on the face whose "+" follows — never a Follow item. Left to right
+/// `[pill][balance]`, and `[pill][balance][bell]` once followed. Never while
 /// the tray shows, never on the viewer's own profile.
 extension ProfileBellAndMapMenuTests {
-    @Test func aStrangersProfileWearsAPinkFollowOnceTheTrayHasGone() async throws {
+    private func pill(_ screen: ProfileViewController) throws -> any PersonBarItem {
+        try #require(screen.debugBarIdentityPill, "no pill was built")
+    }
+
+    @Test func aStrangersProfileWearsThePillWithAPlusAndNoFollowItem() async throws {
         let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
         try #require(await settle { screen.followButtonState == .follow })
-        #expect(screen.debugBarRelationshipItem == nil, "the tray still shows Follow")
+        #expect(screen.debugBarRelationshipItem == nil, "the pill showed with the tray on screen")
 
         screen.debugSetTrayScrolledAway(true)
-        let follow = try #require(screen.debugBarRelationshipItem)
-        #expect(follow === screen.debugBarFollowItem)
-        #expect(follow.title == "Follow")
-        #expect(follow.style == .prominent)
-        #expect(follow.tintColor == Palette.prominentGlassTint, "the Follow is not pink")
+        let item = try #require(screen.debugBarRelationshipItem)
+        #expect(item.customView === (try pill(screen)).view)
+        #expect(try pill(screen).followBadge == .follow, "no + on a profile not followed")
         let items = try #require(screen.navigationItem.rightBarButtonItems)
-        // On screen [coins][pill][Follow] (the owner, 2026-10-15): the
-        // Follow in the bell's corner, the pill inboard of it.
-        #expect(items.count == 5)
-        #expect(items[0] === follow, "the Follow is not in the corner")
-        #expect(items[2].customView === screen.debugBarIdentityPill, "no pill beside the Follow")
-        #expect(items[4].accessibilityLabel == "Balance", "the balance is not the inboard end")
+        #expect(!items.contains { $0.title == "Follow" }, "a Follow item in the bar")
+        // On screen [pill][coins]: `[0]` is the corner.
+        #expect(items.count == 3)
+        #expect(items[0].accessibilityLabel == "Balance", "the balance is not in the corner")
+        #expect(items[2] === item, "the pill is not outboard of the balance")
+        #expect(items[1].customView == nil && items[1].title == nil, "no space keeps each its own bubble")
         #expect(screen.debugMuteBellItem == nil)
-        for space in [items[1], items[3]] {
-            #expect(space.customView == nil && space.title == nil, "no space keeps each its own bubble")
-        }
 
         screen.debugSetTrayScrolledAway(false)
-        #expect(screen.debugBarRelationshipItem == nil, "the Follow stayed with the tray back")
+        #expect(screen.debugBarRelationshipItem == nil, "the pill stayed with the tray back")
+    }
+
+    /// Followed: `[pill][coins][bell]`, the bell keeping the corner.
+    @Test func aFollowedProfileReadsPillBalanceBell() async throws {
+        let (screen, viewModel, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .following && viewModel.canModerate })
+        try #require(await settle { screen.debugMuteBellItem != nil })
+        screen.debugSetTrayScrolledAway(true)
+        let item = try #require(screen.debugBarRelationshipItem)
+        let items = try #require(screen.navigationItem.rightBarButtonItems)
+        #expect(items.count == 5)
+        #expect(items[0] === screen.debugMuteBellItem, "the bell lost the corner")
+        #expect(items[2].accessibilityLabel == "Balance")
+        #expect(items[4] === item, "the pill is not the outboard end")
+        #expect(try pill(screen).followBadge == .following)
+        let shown = (try pill(screen).view as? SnapAuthorIdentityView)?.debugShownLines ?? []
+        #expect(shown.contains("Lena Fischer") && shown.contains("@lena"), "\(shown)")
+        let budget = (try pill(screen).view as? SnapAuthorIdentityView)?.widthCap ?? 0
+        #expect(budget > 0 && budget < screen.view.bounds.width, "the pill is not capped by the bar's room")
+    }
+
+    /// The badge is the post page's, from the relation.
+    @Test func theBadgeFollowsTheRelation() {
+        #expect(ProfileViewController.barBadge(for: .follow, mutual: false) == .follow)
+        #expect(ProfileViewController.barBadge(for: .requested, mutual: false) == .pending)
+        #expect(ProfileViewController.barBadge(for: .following, mutual: false) == .following)
+        #expect(ProfileViewController.barBadge(for: .following, mutual: true) == .friends)
+        #expect(ProfileViewController.barBadge(for: .unavailable, mutual: false) == nil)
+        #expect(ProfileViewController.barBadge(for: .hidden, mutual: false) == nil)
+    }
+
+    /// The "+" follows, through the tray's own path: the badge turns.
+    @Test func thePlusFollows() async throws {
+        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: false, isBlocked: false))
+        try #require(await settle { screen.followButtonState == .follow })
+        screen.debugSetTrayScrolledAway(true)
+        let shown = try pill(screen)
+        shown.onFollowTapped?(subject.id)
+        try #require(await settle { screen.followButtonState == .following }, "the + did not follow")
+        #expect(shown.followBadge == .following, "the badge did not turn")
     }
 
     /// ⚠️ AT REST THE TRAY IS ON SCREEN: a push placed the header before it
@@ -338,25 +381,6 @@ extension ProfileBellAndMapMenuTests {
         #expect(screen.debugBarRelationshipItem == nil, "the pill showed at rest")
         screen.debugApplyHeaderOffset(-40)
         #expect(screen.debugBarRelationshipItem == nil, "the pill showed on a pull")
-    }
-
-    @Test func aFollowedProfileWearsItsIdentityPill() async throws {
-        let (screen, _, _) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
-        try #require(await settle { screen.followButtonState == .following })
-        screen.debugSetTrayScrolledAway(true)
-        let item = try #require(screen.debugBarRelationshipItem)
-        #expect(item.customView === screen.debugBarIdentityPill)
-        #expect(screen.debugBarIdentityPill.name == "Lena Fischer")
-        #expect(screen.debugBarIdentityPill.handle == "@lena")
-        // The bars' one identity look, the post's author pill's too.
-        #expect(screen.debugBarIdentityPill.debugNameFont.pointSize == BarIdentityStyle.nameFont.pointSize)
-        #expect(screen.debugBarIdentityPill.debugHandleFont.pointSize == BarIdentityStyle.handleFont.pointSize)
-        // The profile's pill carries no relation badge (#1277).
-        #expect(screen.debugBarIdentityPill.debugGeometry.badge == nil)
-        // And no ring either: the ring goes with the badge (the owner, 2026-10-16).
-        #expect(screen.debugBarIdentityPill.ringRelation == .none)
-        let budget = screen.debugBarIdentityPill.widthCap
-        #expect(budget > 0 && budget < screen.view.bounds.width, "the pill is not capped by the bar's room")
     }
 
     @Test func theOwnProfileWearsNothing() async throws {

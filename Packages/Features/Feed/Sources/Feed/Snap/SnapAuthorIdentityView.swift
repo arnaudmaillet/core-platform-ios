@@ -1,6 +1,7 @@
 import MediaCore
 import CoreModels
 import DesignSystem
+import FeedInterface
 import UIKit
 
 /// The author identity (avatar + name/meta) hosted as a bar item's custom
@@ -487,3 +488,18 @@ extension SnapAuthorIdentityView {
     }
 }
 #endif
+
+/// The pill other features wear through `PersonBarItem` (#1451).
+extension SnapAuthorIdentityView: PersonBarItem {
+    var view: UIView { self }
+    var onPersonTapped: ((ProfileID) -> Void)? {
+        get { onAuthorTapped }
+        set { onAuthorTapped = newValue }
+    }
+}
+
+/// Builds the person pill for another feature's bar (#1451), through the
+/// composition root.
+public enum PersonBarItems {
+    @MainActor public static func make() -> any PersonBarItem { SnapAuthorIdentityView() }
+}

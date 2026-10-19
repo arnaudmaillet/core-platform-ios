@@ -1486,6 +1486,8 @@ final class AppContainer {
         builder.makePostGridPage = { [unowned self] style, savesPosts in
             feedFeature.makePostGridPage(style: style, savesPosts: savesPosts)
         }
+        // The profile's bar wears the post page's person pill (#1451).
+        builder.makePersonBarItem = { PersonBarItems.make() }
         // Pinning a profile onto the map's people rail, from the profile
         // screen. The SAME service the map itself writes through, so the rail
         // and the button cannot hold different opinions about who is pinned.
