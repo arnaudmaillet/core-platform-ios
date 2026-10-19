@@ -42,7 +42,9 @@ public final class AnimatedAvatarPlayer: UIView {
     public enum Trigger {
         /// Picked at random by the rounds while its screen rests.
         case rounds
-        /// Plays on its first display within the scope's screen.
+        /// Plays on its first display within the scope's screen, then, like
+        /// `.rounds`, whenever the rounds pick it (the owner, 2026-10-20: a
+        /// face that played once and never again read as broken).
         case firstAppearance(AnimatedAvatarScope)
         /// Plays when the avatar it shows CHANGES while on screen — a fixed
         /// piece of chrome whose person moves with a scroll: the post
@@ -219,9 +221,10 @@ public final class AnimatedAvatarPlayer: UIView {
     }
 
     /// A member of the rounds while it can be picked at all: animated, in a
-    /// window, and theirs to play. Off screen, no timer runs for it.
+    /// window, and theirs to play — `.rounds` and `.firstAppearance` alike;
+    /// `.change` plays only on a change. Off screen, no timer runs for it.
     private func updateMembership() {
-        if case .rounds = trigger, window != nil, sheet != nil {
+        if joinsRounds, window != nil, sheet != nil {
             rounds.join(self)
         } else {
             rounds.leave(self)
@@ -246,6 +249,12 @@ public final class AnimatedAvatarPlayer: UIView {
         }
         firstDisplayWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + rounds.tuning.draw(rounds.tuning.firstDisplayDelay), execute: work)
+    }
+
+    /// Whether the rounds may pick it: everything but `.change`.
+    private var joinsRounds: Bool {
+        if case .change = trigger { return false }
+        return true
     }
 
     private func cancelFirstDisplay() {
