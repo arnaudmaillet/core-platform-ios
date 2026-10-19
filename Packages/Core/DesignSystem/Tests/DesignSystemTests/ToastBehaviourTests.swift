@@ -79,6 +79,27 @@ struct ToastBehaviourTests {
         #expect(ToastView.duration(for: .loading, message: "Posting", hasAction: false, assistiveTechnologyRunning: false) == nil)
     }
 
+    /// A `.long` toast stays at least `longDuration` (#1459); the rest of the
+    /// rule is unchanged — a longer message can still ask for more, and
+    /// assistive technology still holds a toast with an action.
+    @Test func aLongToastStaysLonger() {
+        func duration(_ message: String, action: Bool = false, length: ToastView.Length) -> TimeInterval? {
+            ToastView.Content(
+                message: message, symbol: nil, style: .failure,
+                action: action ? ToastView.Action("Retry") {} : nil, undoable: nil, id: nil, length: length
+            ).duration
+        }
+        #expect(ToastView.longDuration == 10)
+        #expect(duration("Couldn't publish your post", length: .standard) == 4)
+        #expect(duration("Couldn't publish your post", length: .long) == 10)
+        let words = Array(repeating: "word", count: 30).joined(separator: " ")
+        #expect(abs((duration(words, length: .long) ?? 0) - (2 + 0.3 * 30)) < 0.001, "a longer message lost its time")
+        let previous = ToastView.isAssistiveTechnologyRunning
+        ToastView.isAssistiveTechnologyRunning = { true }
+        defer { ToastView.isAssistiveTechnologyRunning = previous }
+        #expect(duration("Couldn't publish your post", action: true, length: .long) == nil)
+    }
+
     /// WCAG 2.2.1: with VoiceOver or Switch Control, an action does not time
     /// out.
     @Test func anActionWaitsForAssistiveTechnology() {
