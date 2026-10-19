@@ -13,8 +13,10 @@ public struct SuggestionDisplayModel: Equatable, Sendable, Identifiable {
     public let monogram: String
     public let avatarURL: URL?
     public let isFollowing: Bool
+    /// A request on its way or pending: the row reads Requested (#1454).
+    public let isRequested: Bool
 
-    public init(account: SuggestedAccount, isFollowing: Bool) {
+    public init(account: SuggestedAccount, isFollowing: Bool, isRequested: Bool = false) {
         id = account.id
         displayName = account.displayName
         handleText = account.handle.isEmpty ? "" : "@\(account.handle)"
@@ -22,6 +24,7 @@ public struct SuggestionDisplayModel: Equatable, Sendable, Identifiable {
         monogram = MonogramAvatarView.monogram(name: account.displayName, handle: account.handle)
         avatarURL = account.avatarURL
         self.isFollowing = isFollowing
+        self.isRequested = isRequested
     }
 
     static func reasonText(_ reason: SuggestedAccount.Reason) -> String {

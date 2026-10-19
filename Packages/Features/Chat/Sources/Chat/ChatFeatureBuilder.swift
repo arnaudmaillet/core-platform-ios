@@ -265,6 +265,6 @@ public struct ChatFeatureBuilder: ChatFeatureBuilding {
 /// surface renders its empty state rather than the feature failing to build.
 private struct EmptySuggestionsRepository: SuggestionsProviding {
     func suggestions(limit: Int) async throws -> [SuggestedAccount] { [] }
-    func follow(_ profileID: ProfileID) async throws {}
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome { .following }
     func unfollow(_ profileID: ProfileID) async throws {}
 }

@@ -37,7 +37,7 @@ final class SuggestionCell: UITableViewCell {
     /// Who the row shows and whether it said Following: the same person
     /// flipping cross-fades the button, a new person (a reused cell) does not.
     private var shownID: ProfileID?
-    private var shownIsFollowing: Bool?
+    private var shownState: FollowState?
 
     private var imagePipeline: ImagePipeline?
 
@@ -56,7 +56,7 @@ final class SuggestionCell: UITableViewCell {
         // A reconfigure keeps the cell without coming through here, so only
         // a real reuse forgets who the row showed.
         shownID = nil
-        shownIsFollowing = nil
+        shownState = nil
         avatarView.reset()
     }
 
@@ -70,19 +70,38 @@ final class SuggestionCell: UITableViewCell {
         // missing line takes its gap with it.
         handleLabel.isHidden = model.handleText.isEmpty
         reasonLabel.isHidden = model.reasonText.isEmpty
-        let flips = shownID == model.id && shownIsFollowing != nil && shownIsFollowing != model.isFollowing
-        applyFollowState(model.isFollowing, name: model.displayName, animated: flips)
+        let state = FollowState(model)
+        let flips = shownID == model.id && shownState != nil && shownState != state
+        applyFollowState(state, name: model.displayName, animated: flips)
         shownID = model.id
-        shownIsFollowing = model.isFollowing
+        shownState = state
         dismissButton.accessibilityLabel = "Remove suggestion \(model.displayName)"
         loadAvatar(model.avatarURL)
     }
 
+    /// What the row's button says (#1454: a private profile is asked).
+    enum FollowState: Equatable {
+        case follow, following, requested
+
+        init(_ model: SuggestionDisplayModel) {
+            self = model.isRequested ? .requested : model.isFollowing ? .following : .follow
+        }
+    }
+
     /// Prominent while it invites, selected (quiet) once it states a fact —
     /// the same two looks as the relationship lists' rows.
-    private func applyFollowState(_ isFollowing: Bool, name: String, animated: Bool) {
-        followButton.setContent(.title(isFollowing ? "Following" : "Follow"), selected: isFollowing, animated: animated)
-        followButton.accessibilityLabel = isFollowing ? "Unfollow \(name)" : "Follow \(name)"
+    private func applyFollowState(_ state: FollowState, name: String, animated: Bool) {
+        let title = switch state {
+        case .follow: "Follow"
+        case .following: "Following"
+        case .requested: "Requested"
+        }
+        followButton.setContent(.title(title), selected: state != .follow, animated: animated)
+        followButton.accessibilityLabel = switch state {
+        case .follow: "Follow \(name)"
+        case .following: "Unfollow \(name)"
+        case .requested: "Withdraw your request to follow \(name)"
+        }
     }
 
     /// The follow button. Internal for tests.

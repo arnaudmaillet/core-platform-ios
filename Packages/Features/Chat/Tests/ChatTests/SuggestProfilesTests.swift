@@ -197,7 +197,7 @@ private actor PagedSuggestions: SuggestionsProviding {
         return pages[key] ?? otherwise(key)
     }
 
-    func follow(_ profileID: ProfileID) async throws {}
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome { .following }
     func unfollow(_ profileID: ProfileID) async throws {}
 }
 

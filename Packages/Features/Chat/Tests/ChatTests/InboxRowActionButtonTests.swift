@@ -48,9 +48,10 @@ private actor OneSuggestion: SuggestionsProviding {
     func suggestions(limit: Int) async throws -> [SuggestedAccount] {
         [SuggestedAccount(id: ProfileID("s1"), handle: "s1", displayName: "Name s1", avatarURL: nil, reason: .followsYou)]
     }
-    func follow(_ profileID: ProfileID) async throws {
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
         if refuses { throw Refused() }
         followed.append(profileID)
+        return .following
     }
     func unfollow(_ profileID: ProfileID) async throws {
         if refuses { throw Refused() }

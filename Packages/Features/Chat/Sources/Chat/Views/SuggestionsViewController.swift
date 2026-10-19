@@ -266,12 +266,13 @@ extension SuggestionsViewController: UITableViewDelegate {
         ) { [weak self] _ in
             guard let self else { return nil }
             let isFollowing = self.viewModel.isFollowing(id)
+            let isRequested = self.viewModel.isRequested(id)
             let message = UIAction(title: "Message", image: UIImage(systemName: "bubble.left")) {
                 [weak self] _ in self?.viewModel.message(id)
             }
             let follow = UIAction(
-                title: isFollowing ? "Unfollow" : "Follow",
-                image: UIImage(systemName: isFollowing ? "person.badge.minus" : "person.badge.plus")
+                title: isRequested ? "Withdraw Request" : isFollowing ? "Unfollow" : "Follow",
+                image: UIImage(systemName: isRequested || isFollowing ? "person.badge.minus" : "person.badge.plus")
             ) { [weak self] _ in self?.viewModel.toggleFollow(id) }
             let hide = UIAction(
                 title: "Not interested",

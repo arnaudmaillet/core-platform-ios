@@ -57,7 +57,7 @@ private actor FlakySuggestions: SuggestionsProviding {
         guard answers else { throw Offline() }
         return [SuggestedAccount(id: ProfileID("s1"), handle: "s1", displayName: "Name s1", avatarURL: nil, reason: .followsYou)]
     }
-    func follow(_ profileID: ProfileID) async throws {}
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome { .following }
     func unfollow(_ profileID: ProfileID) async throws {}
 }
 

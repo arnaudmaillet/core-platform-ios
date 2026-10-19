@@ -120,4 +120,19 @@ struct SuggestionCellLayoutTests {
             #expect(abs(dismiss.midY - long.bounds.midY) <= 0.5)
         }
     }
+
+    /// A private profile asked reads Requested, on the quiet ground, and
+    /// says what a tap does (#1454).
+    @Test func aRequestReadsRequested() {
+        let cell = SuggestionCell(style: .default, reuseIdentifier: nil)
+        let account = SuggestedAccount(
+            id: ProfileID("s1"), handle: "ava", displayName: "Ava", avatarURL: nil, reason: .suggestedForYou, isPrivate: true
+        )
+        cell.configure(with: SuggestionDisplayModel(account: account, isFollowing: false, isRequested: true), imagePipeline: nil)
+        #expect(cell.debugFollowButton.content.title == "Requested")
+        #expect(cell.debugFollowButton.isSelected, "Requested stands on the invitation's ground")
+        #expect(cell.debugFollowButton.accessibilityLabel == "Withdraw your request to follow Ava")
+        cell.configure(with: SuggestionDisplayModel(account: account, isFollowing: false), imagePipeline: nil)
+        #expect(cell.debugFollowButton.content.title == "Follow")
+    }
 }
