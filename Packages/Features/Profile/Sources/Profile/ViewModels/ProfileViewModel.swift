@@ -4,6 +4,7 @@ import CoreNetworking
 import CoreStorage
 import Foundation
 import MapsInterface
+import OSLog
 import PostGrid
 import ProfileInterface
 import ShareSheet
@@ -472,6 +473,26 @@ public final class ProfileViewModel {
         followSubscription = followEvents?.subscribeOnMain { [weak self] change in
             self?.followGraphDidChange(change)
         }
+        requestSubscription = followEvents?.subscribeToRequestsOnMain { [weak self] change in
+            self?.followRequestDidChange(change)
+        }
+    }
+
+    private var requestSubscription: FollowGraphSubscription?
+    /// Follow, request and withdraw failures, with the server's code (#1450).
+    private static let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "profile")
+
+    /// A request made or withdrawn ANYWHERE — a list row, a suggestion — for
+    /// this profile (#1450): its button reads "Requested" when the viewer
+    /// comes back to it, so its next tap is no refused duplicate. Its own
+    /// request in flight answers for itself.
+    private func followRequestDidChange(_ change: FollowRequestChange) {
+        guard let profile, change.profileID == profile.id, !followInFlight, !isFollowing else { return }
+        if change.isPending, followButton == .follow {
+            showRequested(true)
+        } else if !change.isPending, followButton == .requested {
+            showRequested(false)
+        }
     }
 
     /// Keeps the Follow button agreeing with a follow accepted ANYWHERE —
@@ -864,6 +885,7 @@ public final class ProfileViewModel {
             do {
                 try await self.repository.setFollowing(target, for: profile.id)
             } catch {
+                Self.logger.error("\(target ? "follow" : "unfollow") \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 // Roll back to the pre-tap state — and say so (#802): a button
                 // that flips back on its own reads as a glitch.
                 if let current = self.profile {
@@ -895,6 +917,9 @@ public final class ProfileViewModel {
                     break
                 }
             } catch {
+                // What the server said (#1450): a device run that failed
+                // could not tell which code came back.
+                Self.logger.error("follow \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 if asks {
                     self.showRequested(false)
                 } else if let current = self.profile {
@@ -916,6 +941,7 @@ public final class ProfileViewModel {
             do {
                 try await requests.cancelFollowRequest(to: profile.id)
             } catch {
+                Self.logger.error("withdraw \(profile.id.rawValue, privacy: .public) failed: \(String(describing: error), privacy: .public)")
                 self.showRequested(true)
                 self.onActionResult?(.followFailed(message: Self.followFailureMessage(
                     handle: self.handle, change: .withdraw

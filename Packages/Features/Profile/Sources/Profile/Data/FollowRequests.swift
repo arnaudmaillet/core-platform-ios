@@ -50,8 +50,18 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
         request.actorID = viewer.rawValue
         request.targetID = profileID.rawValue
         let response = await socialGraphClient.follow(request: request, headers: [:])
+        // ⚠️ A REQUEST ALREADY PENDING IS AN ANSWER, NOT A FAILURE (#1450):
+        // `ALREADY_EXISTS` / SGR-1005 means the ask is there — "Requested",
+        // as the lists have said since #726. It read "Couldn't ask to follow".
+        if response.error?.code == .alreadyExists {
+            followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: true, viewerID: viewer))
+            return .requested
+        }
         try Self.ensureAccepted(response)
-        if response.message?.requested == true { return .requested }
+        if response.message?.requested == true {
+            followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: true, viewerID: viewer))
+            return .requested
+        }
         followEvents?.publish(FollowChange(profileID: profileID, isFollowing: true, viewerID: viewer))
         return .following
     }
@@ -64,8 +74,9 @@ extension ProfileRepository: FollowRequestSending, FollowRequestsManaging {
         let response = await socialGraphClient.cancelFollowRequest(request: request, headers: [:])
         // SGR-1006: nothing pending any more (answered meanwhile): the
         // withdrawal's goal is met either way.
-        if let error = response.error, (error.message ?? "").contains("SGR-1006") { return }
-        try Self.ensureAccepted(response)
+        let nothingPending = (response.error?.message ?? "").contains("SGR-1006")
+        if !nothingPending { try Self.ensureAccepted(response) }
+        followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: false, viewerID: viewer))
     }
 
     public func pendingFollowRequestCount() async throws -> Int {

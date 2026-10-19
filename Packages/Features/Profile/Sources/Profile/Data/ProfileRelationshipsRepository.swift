@@ -502,6 +502,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
             switch error.code {
             case .alreadyExists:
                 if generation == viewerGeneration { requestedIDs.insert(profileID.rawValue) }
+                followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: true, viewerID: viewerID))
                 return .requested
             case .permissionDenied, .failedPrecondition:
                 if generation == viewerGeneration { unfollowableIDs.insert(profileID.rawValue) }
@@ -512,6 +513,8 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         }
         if response.message?.requested == true {
             if generation == viewerGeneration { requestedIDs.insert(profileID.rawValue) }
+            // Heard by the profile under this list (#1450).
+            followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: true, viewerID: viewerID))
             return .requested
         }
         guard response.message?.success == true else {
@@ -534,6 +537,7 @@ public actor ProfileRelationshipsRepository: ProfileRelationshipsProviding, Foll
         request.targetID = profileID.rawValue
         try Self.ensureAccepted(await socialGraphClient.cancelFollowRequest(request: request, headers: [:]))
         requestedIDs.remove(profileID.rawValue)
+        followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: false, viewerID: viewerID))
     }
 
     public func setFollowing(_ following: Bool, for profileID: ProfileID) async throws {

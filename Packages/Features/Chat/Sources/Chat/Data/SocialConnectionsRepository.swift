@@ -201,6 +201,13 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         request.actorID = viewerID.rawValue
         request.targetID = profileID.rawValue
         let response = await socialGraphClient.follow(request: request, headers: [:])
+        // A private profile is ASKED, and an ask already pending is that
+        // ask (SGR-1005): announced as a request, not a follow, so the
+        // profile under this screen reads "Requested" (#1450).
+        if response.error?.code == .alreadyExists || response.message?.requested == true {
+            followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: true, viewerID: viewerID))
+            return
+        }
         if case .failure(let error) = response.result {
             throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }

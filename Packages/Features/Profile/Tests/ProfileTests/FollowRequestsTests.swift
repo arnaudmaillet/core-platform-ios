@@ -25,7 +25,7 @@ struct FollowRequestsTests {
         let dataset: MockSocialDataset
     }
 
-    private func makeFixture(seedsRequests: Bool = false) -> Fixture {
+    private func makeFixture(seedsRequests: Bool = false, followEvents: FollowGraphEvents? = nil) -> Fixture {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
         let social = MockSocialServices(dataset: dataset)
@@ -41,7 +41,8 @@ struct FollowRequestsTests {
             profileClient: Profile_V1_ProfileServiceClient(client: client),
             counterClient: Counter_V1_CounterServiceClient(client: client),
             socialGraphClient: SocialGraph_V1_SocialGraphServiceClient(client: client),
-            authSession: Session()
+            authSession: Session(),
+            followEvents: followEvents
         )
         return Fixture(repository: repository, dataset: dataset)
     }
@@ -131,6 +132,56 @@ struct FollowRequestsTests {
         #expect(buttons.last == .follow)
         try #require(await settle { !viewModel.followInFlight }, "the withdrawal never came back")
         #expect(try await fixture.repository.relationship(for: target) == .other(isFollowing: false, isMutual: false, isBlocked: false))
+    }
+
+    /// ⚠️ #1450: a request already pending is "Requested", not a failure.
+    /// The mock answers the second ask SGR-1005, as the graph does.
+    @Test func askingAgainWithARequestPendingIsRequested() async throws {
+        let fixture = makeFixture()
+        let target = privateStranger(in: fixture.dataset)
+        #expect(try await fixture.repository.follow(target) == .requested)
+        #expect(try await fixture.repository.follow(target) == .requested, "a pending request read as a failure")
+    }
+
+    /// The profile's button reads "Follow" while a request is already pending
+    /// (asked from elsewhere, unheard): its tap ends on "Requested", with no
+    /// failure toast (#1450).
+    @Test func theProfileTapOnAPendingRequestEndsOnRequested() async throws {
+        let fixture = makeFixture()
+        let target = privateStranger(in: fixture.dataset)
+        let viewModel = ProfileViewModel(repository: fixture.repository, source: .profile(target))
+        var buttons: [ProfileViewModel.FollowButton] = []
+        var failed = false
+        viewModel.onFollowButtonChange = { buttons.append($0) }
+        viewModel.onActionResult = { if case .followFailed = $0 { failed = true } }
+        viewModel.viewDidLoad()
+        try #require(await settle { buttons.last == .follow && viewModel.profile != nil }, "the profile never loaded")
+        // Asked from somewhere this profile did not hear.
+        #expect(try await fixture.repository.follow(target) == .requested)
+
+        viewModel.toggleFollow()
+        try #require(await settle { !viewModel.followInFlight }, "the request never came back")
+        #expect(buttons.last == .requested, "the duplicate ask did not end on Requested: \(buttons)")
+        #expect(!failed, "a pending request showed a failure toast")
+    }
+
+    /// A request made from a list row or a suggestion turns the profile
+    /// underneath to "Requested", and a withdrawal back to "Follow" (#1450).
+    @Test func aRequestMadeElsewhereReachesTheProfileUnderneath() async throws {
+        let events = FollowGraphEvents()
+        let fixture = makeFixture(followEvents: events)
+        let target = privateStranger(in: fixture.dataset)
+        let viewModel = ProfileViewModel(repository: fixture.repository, source: .profile(target), followEvents: events)
+        var buttons: [ProfileViewModel.FollowButton] = []
+        viewModel.onFollowButtonChange = { buttons.append($0) }
+        viewModel.viewDidLoad()
+        try #require(await settle { buttons.last == .follow && viewModel.profile != nil }, "the profile never loaded")
+
+        #expect(try await fixture.repository.follow(target) == .requested)
+        #expect(await settle { buttons.last == .requested }, "the profile underneath still reads Follow: \(buttons)")
+
+        try await fixture.repository.cancelFollowRequest(to: target)
+        #expect(await settle { buttons.last == .follow }, "the withdrawal did not reach the profile: \(buttons)")
     }
 
     // MARK: - The owner
