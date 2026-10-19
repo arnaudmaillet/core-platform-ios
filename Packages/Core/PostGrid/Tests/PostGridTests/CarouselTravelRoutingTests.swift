@@ -118,6 +118,36 @@ struct CarouselTravelTests {
         #expect(view.yieldsRightwardDrag(velocity: CGPoint(x: -820, y: 0)) == false)
     }
 
+    /// ⚠️ …UNLESS A SCREEN OPTS IN (#1425): the snap feed's side list waits
+    /// for a leftward drag, so its carousels give one up — on the last photo,
+    /// or born in the trailing edge strip on any photo. Off by default.
+    @Test func aLeftwardDragIsGivenUpOnlyToAScreenThatOptsIn() {
+        let view = MediaCarouselView(style: .page, frame: CGRect(x: 0, y: 0, width: 402, height: 600))
+        view.configure(
+            with: (0..<3).map { GalleryPost.MediaPage(thumbnailURL: URL(string: "mock://t/\($0)")) },
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher())
+        )
+        view.layoutIfNeeded()
+        let leftward = CGPoint(x: -820, y: 0)
+        let middle: CGFloat = 200, edge: CGFloat = 390, width: CGFloat = 402
+
+        view.setPage(2, animated: false)
+        #expect(!view.yieldsLeftwardDrag(velocity: leftward, originX: middle, windowWidth: width),
+                "a carousel that did not opt in gave up a leftward drag")
+
+        view.yieldsLeftwardDrags = true
+        #expect(view.yieldsLeftwardDrag(velocity: leftward, originX: middle, windowWidth: width),
+                "the last photo kept a leftward drag")
+        #expect(!view.yieldsLeftwardDrag(velocity: CGPoint(x: 820, y: 0), originX: middle, windowWidth: width))
+        #expect(!view.yieldsLeftwardDrag(velocity: CGPoint(x: -120, y: 900), originX: middle, windowWidth: width))
+
+        view.setPage(0, animated: false)
+        #expect(!view.yieldsLeftwardDrag(velocity: leftward, originX: middle, windowWidth: width),
+                "a photo with one after it gave up its turn")
+        #expect(view.yieldsLeftwardDrag(velocity: leftward, originX: edge, windowWidth: width),
+                "a drag born at the trailing edge did not open the list")
+    }
+
     /// ⚠️ PREDOMINANTLY HORIZONTAL, which is the mirror of the dismissal's own
     /// begin gate — so exactly one of the two claims any given drag. Without it
     /// a downward drag with any rightward drift would be refused here as well,

@@ -647,6 +647,22 @@ public final class FeedViewModel {
         })
     }
 
+    /// Puts `entry` right after `anchor` (#1425: a post picked in the side
+    /// list): the screen moves to it, and paging back returns to `anchor`.
+    /// False when it is already in the feed (or deleted): nothing changes.
+    @discardableResult
+    public func insert(_ entry: FeedEntry, after anchor: PostID) async -> Bool {
+        guard let models = await build([entry]), let model = models.first else { return false }
+        guard !items.contains(where: { $0.id == model.id }), !entities.isDeleted(model.id) else { return false }
+        let index = items.firstIndex { $0.id == anchor }.map { $0 + 1 } ?? items.count
+        items.insert(model, at: index)
+        seedEngagement(from: [entry])
+        subscribeToCounters(for: [model.id])
+        phase = .content
+        emit()
+        return true
+    }
+
     /// Optimistic insert of a locally-composed post at the top of the feed.
     private func prepend(_ entry: FeedEntry) async {
         guard let models = await build([entry]), let model = models.first else { return }
