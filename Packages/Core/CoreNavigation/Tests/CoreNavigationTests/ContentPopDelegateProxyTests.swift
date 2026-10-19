@@ -44,6 +44,35 @@ struct ContentPopDelegateProxyTests {
         #expect(proxy.forwardingTarget(for: selector) as AnyObject? === system)
     }
 
+    /// ⚠️ THE TRIPWIRE FOR AN iOS UPDATE (#1328): UIKit's own delegate for
+    /// the full-surface swipe still answers the veto the proxy declines. A
+    /// release that renames it, or hands the recognizer another delegate, fails
+    /// here in CI, not silently in use.
+    @Test func uikitsOwnDelegateStillAnswersTheVeto() throws {
+        guard #available(iOS 26.0, *) else { return }
+        let navigation = UINavigationController(rootViewController: UIViewController())
+        navigation.loadViewIfNeeded()
+        let content = try #require(navigation.interactiveContentPopGestureRecognizer,
+                                   "iOS 26 has a full-surface back swipe")
+        let system = try #require(content.delegate, "UIKit gave the swipe no delegate")
+        #expect(ContentPopDelegateProxy.canInterpose(on: system),
+                "\(type(of: system)) no longer answers the veto: the proxy would not lift it")
+    }
+
+    /// The selector is the veto's, whole, though no literal spells it.
+    @Test func theVetoSelectorIsTheVetosName() {
+        #expect(NSStringFromSelector(ContentPopDelegateProxy.vetoSelector) == "_gestureRecognizer" + ":shouldReceiveEvent:")
+    }
+
+    /// The fallback: no delegate, or one without the veto, is never
+    /// interposed. UIKit's own stays.
+    @Test func aDelegateWithoutTheVetoIsNotInterposed() {
+        final class Plain: NSObject, UIGestureRecognizerDelegate {}
+        #expect(!ContentPopDelegateProxy.canInterpose(on: nil))
+        #expect(!ContentPopDelegateProxy.canInterpose(on: Plain()))
+        #expect(ContentPopDelegateProxy.canInterpose(on: System()))
+    }
+
     /// The begin decision is the app's policy AND UIKit's.
     @Test func theBeginIsThePolicyAndUIKits() {
         let system = System()

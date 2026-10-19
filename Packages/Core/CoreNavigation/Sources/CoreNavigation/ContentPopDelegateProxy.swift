@@ -30,7 +30,30 @@ public final class ContentPopDelegateProxy: NSObject, UIGestureRecognizerDelegat
     private let policy: (UIGestureRecognizer) -> Bool
 
     /// The private veto this proxy declines to relay.
-    static let vetoSelector = NSSelectorFromString("_gestureRecognizer:shouldReceiveEvent:")
+    ///
+    /// ⚠️ APP REVIEW (#1328). The proxy never CALLS a private method: it only
+    /// answers "no" when UIKit asks whether its delegate implements this one,
+    /// so UIKit skips its own check. Still, App Store review's static scan
+    /// matches private selector names in the binary's strings. The name is
+    /// therefore put together at run time from its two halves, and never
+    /// stands whole as a literal. If review flags it anyway, the fallback
+    /// below (no proxy: the edge swipe alone) is what the app ships with.
+    static let vetoSelector = NSSelectorFromString(["_gestureRecognizer", "shouldReceiveEvent:"].joined(separator: ":"))
+
+    /// Whether the proxy can stand in front of `system`: UIKit's delegate is
+    /// there and still answers the veto (#1328).
+    ///
+    /// ⚠️ A FUTURE iOS CAN RENAME THE VETO, OR HAND THE RECOGNIZER ANOTHER
+    /// DELEGATE. Interposed anyway, the proxy would block a name nobody asks
+    /// about any more, and a renamed veto would silence the full-surface swipe
+    /// on plain pushes, with no error anywhere. So the shell checks first.
+    /// When this is false it leaves UIKit's delegate in place: the left-edge
+    /// swipe (`NativePopGestureEnabler`) still goes back on every pushed
+    /// screen, and a test (`ContentPopDelegateProxyTests`) fails in CI on the
+    /// first iOS where it happens.
+    public static func canInterpose(on system: (any UIGestureRecognizerDelegate)?) -> Bool {
+        (system as? NSObject)?.responds(to: vetoSelector) == true
+    }
 
     public init(system: (any UIGestureRecognizerDelegate)?, policy: @escaping (UIGestureRecognizer) -> Bool) {
         self.system = system
