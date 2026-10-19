@@ -226,6 +226,34 @@ struct ConversationThreadSendAndMuteTests {
         #expect(abs(until.timeIntervalSinceNow - 3_600) < 5)
     }
 
+    /// ⚠️ UNDO ON THE MUTE'S BAR TOAST (#1420): the bell flips back while the
+    /// toast still holds the bar. The thread used to rebuild its items from
+    /// the bar's list, kept the toast's item, and the toast stayed for good
+    /// beside the bell — the bar spilling into •••. Undone, the bar holds
+    /// exactly the items it had, the toast gone.
+    @Test func undoingTheMuteBringsBackExactlyTheBarsItems() async throws {
+        let (screen, driver, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))
+        defer { window.isHidden = true }
+        let before = (screen.navigationItem.rightBarButtonItems ?? []).map(\.identifier)
+        screen.debugTapBell()
+        driver.answerMute(true)
+        let toast = try #require(Self.firstToast(in: screen.view), "no toast confirmed the mute")
+        // Its Undo, through the toast's own action path.
+        toast.debugTapAction()
+        driver.answerMute(true)
+        let isToast: (UIBarButtonItem) -> Bool = { $0.customView is ToastView }
+        // The toast's leave is animated: looked at until it has gone, on a
+        // look budget.
+        for _ in 0..<400 where (screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast) {
+            try await Task.sleep(for: .milliseconds(5))
+            window.layoutIfNeeded()
+        }
+        let after = screen.navigationItem.rightBarButtonItems ?? []
+        #expect(!after.contains(where: isToast), "the undone toast stayed in the bar")
+        #expect(after.map(\.identifier) == before, "the bar did not get back the items it had: \(after.map(\.identifier))")
+        #expect(bell(screen)?.image == UIImage(systemName: "bell"), "Undo did not turn the notifications back on")
+    }
+
     /// A message's Copy says so (#803): the pasteboard is off-screen.
     @Test func copyingAMessageShowsACopiedToast() throws {
         let (screen, _, window) = makeScreen(phase: .content([Self.message("m1", mine: false, minutes: 1)]))

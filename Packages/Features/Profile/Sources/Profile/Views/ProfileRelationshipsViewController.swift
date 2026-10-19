@@ -233,17 +233,17 @@ final class ProfileRelationshipsViewController: UIViewController {
     private func applySearchAvailability() {
         guard !isRestricted else {
             if isSearching { dismissSearch() }
-            navigationItem.rightBarButtonItems =
-                restingRightItems.filter { $0 !== searchItem }
+            setOwnTrailingBarItems(restingRightItems.filter { $0 !== searchItem }, animated: false)
             return
         }
         guard !isSearching else { return }
-        var items = navigationItem.rightBarButtonItems ?? []
+        // The screen's own items, never a bar toast's (#1420).
+        var items = ownTrailingBarItems
         if !items.contains(where: { $0 === searchItem }) {
             items.insert(searchItem, at: 0)
         }
         restingRightItems = items
-        navigationItem.rightBarButtonItems = items
+        setOwnTrailingBarItems(items, animated: false)
     }
 
     /// Morphs this header into the field, exactly as the inbox does.
@@ -332,7 +332,7 @@ final class ProfileRelationshipsViewController: UIViewController {
             // is not in this bar to be swapped out.
             self.navigationItem.titleView = nil
             self.navigationItem.title = self.viewModel.title
-            self.navigationItem.rightBarButtonItems = self.restingRightItems
+            self.setOwnTrailingBarItems(self.restingRightItems, animated: false)
         }
         if ownsAppTabBar { tabBarController?.setTabBarHidden(false, animated: true) }
     }

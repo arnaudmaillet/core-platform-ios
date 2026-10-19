@@ -36,6 +36,19 @@ import UIKit
 /// says so (`onBarDetached`), and they are placed again over the screen's
 /// new items — which are then the ones that come back (#1375).
 ///
+/// ## A screen that EDITS its items never adopts a toast (#1420)
+///
+/// A screen that builds its new trailing list from the bar's current one
+/// (`rightBarButtonItems`, then add or drop its own) while toasts are up
+/// would keep the toasts' items in it — and the bar then holds toast and
+/// screen items mixed: a dead toast left behind once it goes, and a trailing
+/// group too wide for the bar, swept into `•••`. Two guards:
+/// - screens edit through `ownTrailingBarItems` / `setOwnTrailingBarItems`,
+///   which read and write the items that come BACK while toasts are up, and
+///   leave the bar to the toasts;
+/// - a list found mixed anyway is taken for the screen's edit: its toast
+///   items are dropped, and the rest is what comes back.
+///
 /// ## The toasts' width comes first
 ///
 /// When the toasts would have to collapse or cut their text, the screen's
@@ -187,8 +200,11 @@ final class NavigationBarToasts {
         guard !navigation.isNavigationBarHidden else { return }
         let current = navigationItem.rightBarButtonItems ?? []
         // The screen set its own items since (or this is the first toast):
-        // those are the ones to put back.
-        if savedItems == nil || !current.elementsEqual(handedItems, by: ===) { savedItems = current }
+        // those are the ones to put back — never a toast's item it kept from
+        // the bar while editing (#1420).
+        if savedItems == nil || !current.elementsEqual(handedItems, by: ===) {
+            savedItems = current.filter { !Self.isToastItem($0) }
+        }
         let live = toasts.filter { !$0.isDismissing }
         guard !live.isEmpty else {
             handBack(animated: true)
@@ -248,11 +264,17 @@ final class NavigationBarToasts {
         self.probe = probe
     }
 
-    /// The screen's own items back, if they are still ours to replace.
+    /// The screen's own items back, if they are still ours to replace — or,
+    /// when the screen edited the toasts' list into its own (#1420), that
+    /// list without the toasts' items.
     private func handBack(animated: Bool) {
         guard let navigationItem else { return }
-        if let savedItems, (navigationItem.rightBarButtonItems ?? []).elementsEqual(handedItems, by: ===) {
+        let current = navigationItem.rightBarButtonItems ?? []
+        if let savedItems, current.elementsEqual(handedItems, by: ===) {
             navigationItem.setRightBarButtonItems(savedItems, animated: animated)
+        } else if current.contains(where: Self.isToastItem) {
+            navigationItem.setRightBarButtonItems(current.filter { !Self.isToastItem($0) }, animated: animated)
+            trace("handed back a list the screen had edited: toast items dropped")
         }
         restoreLeadingItems()
         savedItems = nil
@@ -298,6 +320,32 @@ final class NavigationBarToasts {
         }
         savedLeadingItems = nil
         handedLeadingItems = []
+    }
+
+    /// Whether `item` is one of the toasts' own.
+    static func isToastItem(_ item: UIBarButtonItem) -> Bool { item.customView is ToastView }
+
+    // MARK: - The screen's own items while toasts are up (#1420)
+
+    /// The toasts holding `screen`'s bar right now, if any.
+    private static func holding(_ screen: UIViewController) -> NavigationBarToasts? {
+        shown.values.first { $0.screen === screen && !$0.handedItems.isEmpty }
+    }
+
+    /// `screen`'s own trailing items while its bar shows toasts — the ones
+    /// that come back — or nil when it shows none.
+    static func ownTrailingItems(of screen: UIViewController) -> [UIBarButtonItem]? {
+        holding(screen)?.savedItems
+    }
+
+    /// Makes `items` the ones that come back when the last toast leaves, if
+    /// `screen`'s bar shows toasts now. Returns whether it did: false, and
+    /// the screen sets its bar itself.
+    static func setOwnTrailingItems(_ items: [UIBarButtonItem], of screen: UIViewController) -> Bool {
+        guard let toasts = holding(screen) else { return false }
+        toasts.savedItems = items.filter { !isToastItem($0) }
+        toasts.trace("the screen's own items changed under the toasts: \(items.count)")
+        return true
     }
 
     static func spacing(_ count: Int) -> CGFloat {
@@ -394,5 +442,26 @@ private final class ScreenProbe: UIView {
     override func didMoveToWindow() {
         super.didMoveToWindow()
         if window == nil, superview != nil { onLeave?() }
+    }
+}
+
+/// A screen's own trailing items, whether or not bar toasts are up (#1420).
+///
+/// While toasts hold the bar, `navigationItem.rightBarButtonItems` holds
+/// THEIR items: a screen that edited that list would adopt them. These two
+/// read and write the screen's own list instead — what shows when no toast
+/// is up, and what comes back when the last one leaves.
+public extension UIViewController {
+    /// The screen's own trailing items: the bar's, or, while toasts are up,
+    /// the ones that come back.
+    var ownTrailingBarItems: [UIBarButtonItem] {
+        NavigationBarToasts.ownTrailingItems(of: self) ?? navigationItem.rightBarButtonItems ?? []
+    }
+
+    /// Sets the screen's own trailing items: on the bar, or, while toasts
+    /// are up, as the ones that come back — the bar stays the toasts'.
+    func setOwnTrailingBarItems(_ items: [UIBarButtonItem]?, animated: Bool) {
+        guard !NavigationBarToasts.setOwnTrailingItems(items ?? [], of: self) else { return }
+        navigationItem.setRightBarButtonItems(items, animated: animated)
     }
 }

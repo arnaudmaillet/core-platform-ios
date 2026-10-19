@@ -211,6 +211,57 @@ struct NavigationBarToastsTests {
         #expect(back.elementsEqual(fresh, by: ===), "the screen's new items come back")
     }
 
+    /// ⚠️ A screen that EDITS the bar's list while a toast is up (#1420) —
+    /// builds its new list from `rightBarButtonItems`, which holds the
+    /// toast's item — keeps that item in. Once the toast goes, nothing of it
+    /// is left in the bar: the screen's edit comes back, the toast's item
+    /// dropped.
+    @Test func aScreenThatEditsTheBarsListNeverLeavesAToastBehind() throws {
+        try hosting { screen in
+            let toast = Feedback.info("Notifications muted", from: screen)
+            let bell = UIBarButtonItem(systemItem: .add)
+            let edited = [bell] + (screen.navigationItem.rightBarButtonItems ?? [])
+            #expect(edited.contains(where: NavigationBarToasts.isToastItem), "guard: the edit kept the toast's item")
+            screen.navigationItem.setRightBarButtonItems(edited, animated: false)
+
+            toast.dismiss(animated: false)
+            let back = screen.navigationItem.rightBarButtonItems ?? []
+            #expect(!back.contains(where: NavigationBarToasts.isToastItem), "a dead toast stayed in the bar")
+            #expect(back.elementsEqual([bell], by: ===), "the screen's edit did not come back")
+        }
+    }
+
+    /// Through its OWN items (#1420), a screen edits what comes back and
+    /// leaves the bar to the toasts: never a mixed trailing group, so never
+    /// one too wide for the bar.
+    @Test func aScreenEditingItsOwnItemsLeavesTheBarToTheToasts() throws {
+        try hosting { screen in
+            let own = screen.navigationItem.rightBarButtonItems ?? []
+            let toast = Feedback.info("Notifications muted", from: screen)
+            #expect(screen.ownTrailingBarItems.elementsEqual(own, by: ===), "the toasts hid the screen's own items")
+
+            let bell = UIBarButtonItem(systemItem: .add)
+            screen.setOwnTrailingBarItems([bell] + screen.ownTrailingBarItems, animated: false)
+            let shown = screen.navigationItem.rightBarButtonItems ?? []
+            #expect(shown.count == 1 && shown.allSatisfy(NavigationBarToasts.isToastItem),
+                    "the screen's items joined the toast in the bar")
+
+            toast.dismiss(animated: false)
+            let back = try #require(screen.navigationItem.rightBarButtonItems)
+            #expect(back.elementsEqual([bell] + own, by: ===), "the screen's new items did not come back")
+        }
+    }
+
+    /// No toast up: the screen's own items are the bar's, set straight.
+    @Test func withNoToastTheOwnItemsAreTheBars() {
+        hosting { screen in
+            let bell = UIBarButtonItem(systemItem: .add)
+            screen.setOwnTrailingBarItems([bell], animated: false)
+            #expect((screen.navigationItem.rightBarButtonItems ?? []).elementsEqual([bell], by: ===))
+            #expect(screen.ownTrailingBarItems.elementsEqual([bell], by: ===))
+        }
+    }
+
     /// No visible bar: the overlay draws it, and the items are untouched.
     @Test func noBarMeansTheOverlay() {
         hosting(barHidden: true) { screen in
