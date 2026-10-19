@@ -17,6 +17,12 @@ import UIKit
 ///
 /// The ring and the track show only while there is a pull: at rest the
 /// glyph is alone, as it always was.
+///
+/// **A flood beyond the disc** (`floodBeyond(_:)`, #1368): the Messages
+/// inbox's capsule is inverted whole when armed — its words too — so a host
+/// hands the glyph its region and its inverted content (`floodContent`), and
+/// the one flood fills both, from the glyph out. One implementation for both
+/// pulls.
 public final class PullRingGlyphView: UIView {
     /// The ring's diameter and stroke.
     public let diameter: CGFloat
@@ -28,6 +34,29 @@ public final class PullRingGlyphView: UIView {
 
     public private(set) var progress: CGFloat = 0
     public private(set) var isArmed = false
+    /// Whether arming pops the disc. A host that pops itself (the inbox's
+    /// capsule) turns it off.
+    public var popsOnArm = true
+    /// Whether the ring's track shows for as long as the glyph does — a host
+    /// that fades the whole thing in with the pull — rather than only once
+    /// there is a pull (the shelves).
+    public var ringShownAtRest = false {
+        didSet { applyRingVisibility() }
+    }
+
+    /// The region the armed ink floods past the disc, nil for the disc alone
+    /// (`floodBeyond(_:)`).
+    public private(set) weak var floodRegion: UIView?
+    /// The inverted region, laid in `floodRegion` under the glyph: the host
+    /// puts its inverted content in it (the inbox's "Release to search").
+    public let floodContent = UIView()
+    private let floodBloom = UIView()
+    /// How far the flood reaches from the glyph's centre; nil, the region's
+    /// far corner. A region that grows while it floods (the capsule re-fits
+    /// to its longer words) gives the reach of its widest self.
+    public var floodReach: CGFloat? {
+        didSet { setNeedsLayout() }
+    }
 
     private let disc = UIView()
     private let ringTrack = CAShapeLayer()
@@ -44,8 +73,9 @@ public final class PullRingGlyphView: UIView {
         self.diameter = diameter
         super.init(frame: CGRect(x: 0, y: 0, width: diameter, height: diameter))
         isUserInteractionEnabled = false
-        disc.layer.cornerRadius = diameter / 2
-        disc.clipsToBounds = true
+        // ⚠️ NOT CLIPPED: the ring's stroke reaches the disc's very edge, and
+        // a round clip there shaved its outer edge (#1368, measured against
+        // the inbox's meter). The flood is round by its own mask.
         addSubview(disc)
         for track in [ringTrack, ring] {
             track.fillColor = nil
@@ -67,6 +97,11 @@ public final class PullRingGlyphView: UIView {
         armedContent.mask = bloom
         armedContent.isHidden = true
         disc.addSubview(armedContent)
+        floodBloom.backgroundColor = .black
+        floodBloom.transform = Self.collapsedBloom
+        floodContent.mask = floodBloom
+        floodContent.isHidden = true
+        floodContent.isUserInteractionEnabled = false
         applyColors()
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) {
             (self: Self, _: UITraitCollection) in
@@ -87,10 +122,14 @@ public final class PullRingGlyphView: UIView {
         restingGlyph.frame = disc.bounds
         armedContent.frame = disc.bounds
         armedGlyph.frame = armedContent.bounds
-        // The flood: a circle from the glyph's centre, as wide as the disc.
-        bloom.bounds = disc.bounds
+        // The flood: a circle from the glyph's centre, as wide as the disc —
+        // or, flooding a region too, as wide as the REGION's flood, so the
+        // two circles are one at every frame and the glyph inverts exactly
+        // when the wavefront crosses it (#1368).
+        let reach = floodRegion == nil ? side / 2 : regionReach
+        bloom.bounds = CGRect(x: 0, y: 0, width: reach * 2, height: reach * 2)
         bloom.center = CGPoint(x: side / 2, y: side / 2)
-        bloom.layer.cornerRadius = side / 2
+        bloom.layer.cornerRadius = reach
         // The meter tracks the finger, not trailing it by a quarter second.
         CATransaction.begin()
         CATransaction.setDisableActions(true)
@@ -102,6 +141,51 @@ public final class PullRingGlyphView: UIView {
         ringTrack.path = path
         ring.path = path
         CATransaction.commit()
+        layoutFlood()
+    }
+
+    // MARK: - A flood beyond the disc (#1368)
+
+    /// Floods `region` too when armed: `floodContent` — the region inverted,
+    /// with whatever the host puts in it — is laid in `region` under the
+    /// glyph and revealed through a circle from the glyph's centre, on the
+    /// disc's own curves. `region` must contain the glyph.
+    public func floodBeyond(_ region: UIView) {
+        guard let branch = sequence(first: self as UIView, next: { $0.superview }).first(where: { $0.superview === region })
+        else { return assertionFailure("the flood's region must contain the glyph") }
+        floodRegion = region
+        floodContent.removeFromSuperview()
+        region.insertSubview(floodContent, belowSubview: branch)
+        floodContent.isHidden = !isArmed
+        floodBloom.transform = isArmed ? .identity : Self.collapsedBloom
+        setNeedsLayout()
+        layoutFlood()
+    }
+
+    /// Lays the region's flood where the glyph is: called by the glyph's own
+    /// layout, and by a host that moves the glyph or resizes the region.
+    public func layoutFlood() {
+        guard let region = floodRegion else { return }
+        floodContent.frame = region.bounds
+        let centre = convert(CGPoint(x: bounds.midX, y: bounds.midY), to: region)
+        let reach = regionReach
+        floodBloom.bounds = CGRect(x: 0, y: 0, width: reach * 2, height: reach * 2)
+        floodBloom.center = centre
+        floodBloom.layer.cornerRadius = reach
+    }
+
+    /// How far the region's flood reaches from the glyph's centre.
+    private var regionReach: CGFloat {
+        if let floodReach { return floodReach }
+        guard let region = floodRegion else { return diameter / 2 }
+        let centre = convert(CGPoint(x: bounds.midX, y: bounds.midY), to: region)
+        return Self.farthestCorner(from: centre, in: region.bounds) + 1
+    }
+
+    static func farthestCorner(from point: CGPoint, in rect: CGRect) -> CGFloat {
+        [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+         CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)]
+            .map { hypot($0.x - point.x, $0.y - point.y) }.max() ?? 0
     }
 
     private func applyColors() {
@@ -113,6 +197,7 @@ public final class PullRingGlyphView: UIView {
         ring.strokeColor = UIColor.label.resolvedColor(with: traitCollection).cgColor
         armedContent.backgroundColor = .label
         armedGlyph.tintColor = .systemBackground
+        floodContent.backgroundColor = .label
     }
 
     /// The pull, 0 at rest and 1 at the threshold: the ring's stroke, and the
@@ -124,7 +209,14 @@ public final class PullRingGlyphView: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         ring.strokeEnd = progress
-        let shown: Float = progress > 0 ? Float(min(1, progress * 4)) : 0
+        applyRingVisibility()
+        CATransaction.commit()
+    }
+
+    private func applyRingVisibility() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        let shown: Float = ringShownAtRest ? 1 : progress > 0 ? Float(min(1, progress * 4)) : 0
         ringTrack.opacity = shown
         ring.opacity = shown
         CATransaction.commit()
@@ -136,10 +228,15 @@ public final class PullRingGlyphView: UIView {
         guard armed != isArmed else { return }
         isArmed = armed
         guard animated, window != nil else {
+            // The state the motion would have ended on: under Reduce Motion
+            // the flood fades and stays open, otherwise it drains.
+            let fades = reducesMotion()
             UIView.performWithoutAnimation {
-                armedContent.alpha = 1
-                bloom.transform = armed ? .identity : Self.collapsedBloom
-                armedContent.isHidden = !armed
+                for (content, mask) in floods {
+                    content.alpha = armed || !fades ? 1 : 0
+                    mask.transform = armed || fades ? .identity : Self.collapsedBloom
+                    content.isHidden = !armed
+                }
                 disc.transform = .identity
             }
             return
@@ -147,25 +244,32 @@ public final class PullRingGlyphView: UIView {
         if reducesMotion() { crossfade(armed: armed) } else { flood(armed: armed) }
     }
 
+    /// The inverted layers and their masks: the disc's, and the region's
+    /// when there is one.
+    private var floods: [(content: UIView, mask: UIView)] {
+        [(armedContent, bloom)] + (floodRegion == nil ? [] : [(floodContent, floodBloom)])
+    }
+
     private func flood(armed: Bool) {
         // Coming from a Reduce Motion crossfade, the inverted layer may be
         // faded out with the flood already open: close it first, unseen.
-        if armedContent.alpha < 1 {
+        for (content, mask) in floods where content.alpha < 1 {
             UIView.performWithoutAnimation {
-                bloom.transform = Self.collapsedBloom
-                armedContent.alpha = 1
+                mask.transform = Self.collapsedBloom
+                content.alpha = 1
             }
         }
         let options: UIView.AnimationOptions = [.beginFromCurrentState, .allowUserInteraction]
         // ⚠️ The closed flood is still a speck that DRAWS: hidden whenever it
         // is fully drained (the inbox's finding).
-        armedContent.isHidden = false
+        for (content, _) in floods { content.isHidden = false }
         if armed {
             UIView.animate(
                 springDuration: 0.45, bounce: 0.15, initialSpringVelocity: 0, delay: 0, options: options
             ) {
-                self.bloom.transform = .identity
+                for (_, mask) in self.floods { mask.transform = .identity }
             }
+            guard popsOnArm else { return }
             // The pop, in time with the haptic. Only on arming.
             UIView.animate(withDuration: 0.1, delay: 0, options: options.union(.curveEaseOut)) {
                 self.disc.transform = CGAffineTransform(scaleX: 1.12, y: 1.12)
@@ -178,9 +282,10 @@ public final class PullRingGlyphView: UIView {
             }
         } else {
             UIView.animate(withDuration: 0.22, delay: 0, options: options.union(.curveEaseIn)) {
-                self.bloom.transform = Self.collapsedBloom
+                for (_, mask) in self.floods { mask.transform = Self.collapsedBloom }
             } completion: { _ in
-                if !self.isArmed { self.armedContent.isHidden = true }
+                guard !self.isArmed else { return }
+                for (content, _) in self.floods { content.isHidden = true }
             }
         }
     }
@@ -188,16 +293,19 @@ public final class PullRingGlyphView: UIView {
     /// Reduce Motion: the inverted disc fades in or out in place.
     private func crossfade(armed: Bool) {
         UIView.performWithoutAnimation {
-            bloom.transform = .identity
-            if armed {
-                armedContent.alpha = 0
-                armedContent.isHidden = false
+            for (content, mask) in floods {
+                // An open flood keeps its alpha: only a closed one starts
+                // from nothing.
+                if armed, content.isHidden || mask.transform != .identity { content.alpha = 0 }
+                mask.transform = .identity
+                if armed { content.isHidden = false }
             }
         }
         UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .curveEaseInOut]) {
-            self.armedContent.alpha = armed ? 1 : 0
+            for (content, _) in self.floods { content.alpha = armed ? 1 : 0 }
         } completion: { _ in
-            if !self.isArmed { self.armedContent.isHidden = true }
+            guard !self.isArmed else { return }
+            for (content, _) in self.floods { content.isHidden = true }
         }
     }
 
@@ -206,5 +314,13 @@ public final class PullRingGlyphView: UIView {
     public var debugRingStrokeEnd: CGFloat { ring.strokeEnd }
     public var debugRingShown: Bool { ring.opacity > 0 }
     public var debugFloodShown: Bool { !armedContent.isHidden }
+    /// The region's flood: its mask's model scale, ~0 closed and 1 open.
+    public var debugRegionFloodScale: CGFloat { floodBloom.transform.a }
+    /// The region's inverted layer's model alpha, 0 when hidden.
+    public var debugRegionFloodAlpha: CGFloat { floodContent.isHidden ? 0 : floodContent.alpha }
+    /// The two floods' radii at full scale: one circle when there is a region.
+    public var debugFloodRadii: (disc: CGFloat, region: CGFloat) { (bloom.bounds.width / 2, floodBloom.bounds.width / 2) }
+    /// The disc's model scale — what the pop changes.
+    public var debugDiscScale: CGFloat { disc.transform.a }
     #endif
 }

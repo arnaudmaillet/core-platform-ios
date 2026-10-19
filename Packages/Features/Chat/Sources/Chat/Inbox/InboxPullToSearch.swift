@@ -272,11 +272,7 @@ final class PullToSearchIndicatorView: UIView {
     private static let trailingPadding: CGFloat = 14
     /// The ring around the magnifier — the progress meter.
     private static let ringDiameter: CGFloat = 24
-    private static let ringWidth: CGFloat = 2
     private static let spacing: CGFloat = 6
-    /// The flood's resting scale: a dot inside the glyph. Not zero — a
-    /// singular transform cannot be animated out of.
-    private static let collapsedBloom = CGAffineTransform(scaleX: 0.001, y: 0.001)
 
     /// Read on every change, so a Reduce Motion toggled mid-session is
     /// honoured on the next pull. Injected by the tests.
@@ -290,20 +286,23 @@ final class PullToSearchIndicatorView: UIView {
 
     // Resting ink: grey on the capsule's translucent fill.
     private let restingContent = UIView()
-    private let ringTrack = CAShapeLayer()
-    private let ring = CAShapeLayer()
-    private let restingGlyph = UIImageView()
     private let pullText = UIView()
     private let pullLabel = UILabel()
 
-    // Armed ink: the inverted capsule, revealed through `bloom`.
-    private let armedContent = UIView()
-    private let bloom = UIView()
-    private let armedGlyph = UIImageView()
+    /// The magnifier, its ring and the flood (#1368): the shelves' glyph
+    /// (`PullRingGlyphView`), its flood reaching across the whole capsule.
+    /// One meter and one flood for both pulls.
+    private let glyph: PullRingGlyphView
+
+    // Armed ink: the inverted words, inside the glyph's flood of the capsule.
     private let releaseText = UIView()
     private let releaseLabel = UILabel()
 
     override init(frame: CGRect) {
+        glyph = PullRingGlyphView(
+            image: UIImage(systemName: "magnifyingglass", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .bold)),
+            diameter: Self.ringDiameter
+        )
         super.init(frame: frame)
         isUserInteractionEnabled = false
         // Not an accessibility element: the gesture has a button twin (the
@@ -318,11 +317,6 @@ final class PullToSearchIndicatorView: UIView {
         capsule.backgroundColor = .secondarySystemFill
         addSubview(capsule)
 
-        let glyphConfiguration = UIImage.SymbolConfiguration(pointSize: 11, weight: .bold)
-        for glyph in [restingGlyph, armedGlyph] {
-            glyph.image = UIImage(systemName: "magnifyingglass", withConfiguration: glyphConfiguration)
-            glyph.contentMode = .center
-        }
         for label in [pullLabel, releaseLabel] {
             label.font = .appFont(forTextStyle: .subheadline)
             label.adjustsFontForContentSizeCategory = true
@@ -330,27 +324,20 @@ final class PullToSearchIndicatorView: UIView {
         pullLabel.text = Self.pullTitle
         releaseLabel.text = Self.releaseTitle
 
-        for track in [ringTrack, ring] {
-            track.fillColor = nil
-            track.lineWidth = Self.ringWidth
-            track.lineCap = .round
-            restingContent.layer.addSublayer(track)
-        }
-        ring.strokeEnd = 0
-        restingContent.addSubview(restingGlyph)
         pullText.addSubview(pullLabel)
         restingContent.addSubview(pullText)
         capsule.addSubview(restingContent)
 
-        armedContent.addSubview(armedGlyph)
+        // The capsule pops itself, and its ring's track shows whenever the
+        // capsule does — the capsule fades in with the pull.
+        glyph.popsOnArm = false
+        glyph.ringShownAtRest = true
+        glyph.reducesMotion = { [weak self] in self?.reducesMotion() ?? false }
+        capsule.addSubview(glyph)
+        glyph.floodBeyond(capsule)
         releaseText.addSubview(releaseLabel)
-        armedContent.addSubview(releaseText)
-        bloom.backgroundColor = .black
-        bloom.transform = Self.collapsedBloom
-        armedContent.mask = bloom
+        glyph.floodContent.addSubview(releaseText)
         releaseText.alpha = 0
-        armedContent.isHidden = true
-        capsule.addSubview(armedContent)
 
         applyColors()
         registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) {
@@ -395,11 +382,8 @@ final class PullToSearchIndicatorView: UIView {
         layoutCapsule()
 
         let center = ringCenter
-        let glyphFrame = CGRect(
-            x: center.x - Self.ringDiameter / 2, y: 0, width: Self.ringDiameter, height: Self.height
-        )
-        restingGlyph.frame = glyphFrame
-        armedGlyph.frame = glyphFrame
+        glyph.bounds = CGRect(x: 0, y: 0, width: Self.ringDiameter, height: Self.ringDiameter)
+        glyph.center = center
 
         let textX = Self.leadingPadding + Self.ringDiameter + Self.spacing
         for (container, label) in [(pullText, pullLabel), (releaseText, releaseLabel)] {
@@ -407,24 +391,10 @@ final class PullToSearchIndicatorView: UIView {
             label.frame = container.bounds
         }
 
-        // The flood is a circle centred on the glyph, big enough to reach the
-        // far corner of the WIDEST capsule when unscaled.
-        let reach = hypot(capsuleWidth(armed: true) - center.x, Self.height / 2) + 1
-        bloom.bounds = CGRect(x: 0, y: 0, width: reach * 2, height: reach * 2)
-        bloom.center = center
-        bloom.layer.cornerRadius = reach
-
-        // Sublayers of a view's layer animate implicitly; the meter must
-        // track the finger, not trail it by a quarter second.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        let radius = (Self.ringDiameter - Self.ringWidth) / 2
-        let path = UIBezierPath(
-            arcCenter: center, radius: radius, startAngle: -.pi / 2, endAngle: 3 * .pi / 2, clockwise: true
-        ).cgPath
-        ringTrack.path = path
-        ring.path = path
-        CATransaction.commit()
+        // The flood reaches the far corner of the WIDEST capsule: it opens
+        // while the capsule re-fits to the longer words.
+        glyph.floodReach = hypot(capsuleWidth(armed: true) - center.x, Self.height / 2) + 1
+        glyph.layoutFlood()
     }
 
     /// The capsule's width for the current state, centred in the view; the
@@ -434,23 +404,13 @@ final class PullToSearchIndicatorView: UIView {
         capsule.bounds = CGRect(x: 0, y: 0, width: width, height: Self.height)
         capsule.center = CGPoint(x: bounds.midX, y: bounds.midY)
         restingContent.frame = capsule.bounds
-        armedContent.frame = capsule.bounds
+        glyph.floodContent.frame = capsule.bounds
     }
 
     private func applyColors() {
-        let restingInk = UIColor.secondaryLabel
-        restingGlyph.tintColor = restingInk
-        pullLabel.textColor = restingInk
-        // Layer colours do not follow the appearance on their own.
-        ringTrack.strokeColor = UIColor.tertiaryLabel.resolvedColor(with: traitCollection).cgColor
-        // The meter is drawn in the ink the armed capsule is FILLED with, so
-        // the full ring and the flood that grows out of it read as one thing.
-        ring.strokeColor = UIColor.label.resolvedColor(with: traitCollection).cgColor
-        // `.label` on `.systemBackground` when armed: the header's own ink
-        // (every bar glyph is tinted `.label`), inverted — legible in light
-        // and dark alike, and nothing like the resting fill.
-        armedContent.backgroundColor = .label
-        armedGlyph.tintColor = .systemBackground
+        // The glyph's ring, flood and inverted ink are its own (`.label`
+        // filled, `.systemBackground` on it): the words wear the same.
+        pullLabel.textColor = .secondaryLabel
         releaseLabel.textColor = .systemBackground
     }
 
@@ -474,60 +434,39 @@ final class PullToSearchIndicatorView: UIView {
 
         // The meter runs over the part of the pull where the capsule shows:
         // empty as it appears, full exactly at the line.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        ring.strokeEnd = min(max((distance - Self.deadZone) / (threshold - Self.deadZone), 0), 1)
-        CATransaction.commit()
+        glyph.setProgress((distance - Self.deadZone) / (threshold - Self.deadZone))
     }
 
     /// Arms or disarms the capsule — animated, and reversible at any point
-    /// of the animation (every block starts from what is on screen).
+    /// of the animation (every block starts from what is on screen). The
+    /// flood is the glyph's (#1368); the words, the re-fit and the pop are
+    /// the capsule's.
     func setArmed(_ armed: Bool) {
         guard armed != isArmed else { return }
         isArmed = armed
+        glyph.setArmed(armed)
         if reducesMotion() {
             crossfade(armed: armed)
         } else {
-            flood(armed: armed)
+            refit(armed: armed)
         }
     }
 
-    /// The full motion: the ink floods out of the glyph (or drains back into
-    /// it), the words crossfade under it, the capsule re-fits and pops.
-    private func flood(armed: Bool) {
-        // Coming from a Reduce Motion crossfade, the inverted layer may be
-        // faded out with the flood already open: close the flood first,
-        // unseen, so the growth starts from the glyph.
-        if armedContent.alpha < 1 {
-            UIView.performWithoutAnimation {
-                bloom.transform = Self.collapsedBloom
-                armedContent.alpha = 1
-            }
-        }
+    /// The full motion around the flood: the words crossfade under it, the
+    /// capsule re-fits on the flood's own curve and pops.
+    private func refit(armed: Bool) {
         let options: UIView.AnimationOptions = [.beginFromCurrentState, .allowUserInteraction]
-        // ⚠️ The closed flood is still a circle a fraction of a point wide,
-        // and it DRAWS: a dark speck in the middle of the magnifier. The
-        // inverted layer is hidden whenever the flood is fully drained.
-        armedContent.isHidden = false
         if armed {
-            // In on a spring with a little bounce: the arrival is an event.
             UIView.animate(
                 springDuration: 0.45, bounce: 0.15, initialSpringVelocity: 0, delay: 0, options: options
             ) {
-                self.bloom.transform = .identity
                 self.layoutCapsule()
             }
         } else {
-            // Out on an accelerating curve, not a spring: a retreat that
-            // wobbled would read as indecision, and a spring's long tail left
-            // a shrinking black disk sitting on the glyph for a dozen frames
-            // (seen in a 30 fps recording). Ease-in lands, and is gone.
+            // Out on an accelerating curve, as the flood drains: a retreat
+            // that wobbled would read as indecision.
             UIView.animate(withDuration: 0.22, delay: 0, options: options.union(.curveEaseIn)) {
-                self.bloom.transform = Self.collapsedBloom
                 self.layoutCapsule()
-            } completion: { _ in
-                // Only if nothing re-armed it while it drained.
-                if !self.isArmed { self.armedContent.isHidden = true }
             }
         }
         // The words swap quickly — the new ones must be readable while the
@@ -554,20 +493,12 @@ final class PullToSearchIndicatorView: UIView {
         }
     }
 
-    /// Reduce Motion: the inverted capsule fades in or out in place; nothing
-    /// grows, bounces or pops. The width still has to change — the longer
-    /// words need it — so it eases, briefly.
+    /// Reduce Motion: the glyph fades its inverted capsule in or out in
+    /// place; nothing grows, bounces or pops. The width still has to change
+    /// — the longer words need it — so it eases, briefly.
     private func crossfade(armed: Bool) {
-        armedContent.isHidden = false
-        if bloom.transform != .identity {
-            UIView.performWithoutAnimation {
-                if armed { armedContent.alpha = 0 }
-                bloom.transform = .identity
-            }
-        }
         UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
             self.capsule.transform = .identity
-            self.armedContent.alpha = armed ? 1 : 0
             self.pullText.alpha = armed ? 0 : 1
             self.releaseText.alpha = armed ? 1 : 0
             self.layoutCapsule()
@@ -578,11 +509,11 @@ final class PullToSearchIndicatorView: UIView {
     /// The words the capsule is showing — the armed ones once armed.
     var debugLabelText: String? { isArmed ? releaseLabel.text : pullLabel.text }
     /// How full the meter is (model value), 0…1.
-    var debugRingProgress: CGFloat { ring.strokeEnd }
+    var debugRingProgress: CGFloat { glyph.debugRingStrokeEnd }
     /// The flood's model scale: ~0 closed, 1 covering the capsule.
-    var debugBloomScale: CGFloat { bloom.transform.a }
+    var debugBloomScale: CGFloat { glyph.debugRegionFloodScale }
     /// The inverted layer's model alpha — what Reduce Motion fades.
-    var debugArmedAlpha: CGFloat { armedContent.isHidden ? 0 : armedContent.alpha }
+    var debugArmedAlpha: CGFloat { glyph.debugRegionFloodAlpha }
     /// The capsule's model width.
     var debugCapsuleWidth: CGFloat { capsule.bounds.width }
     /// The capsule's width in either state, for the tests' comparisons.
