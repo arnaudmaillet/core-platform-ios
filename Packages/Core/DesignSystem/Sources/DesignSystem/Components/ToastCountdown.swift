@@ -19,6 +19,8 @@ final class ToastCountdown {
         case sceneInactive
         /// Its stack is spread out: the viewer is reading it.
         case spread
+        /// Its whole message is up in a sheet (#1449).
+        case sheet
     }
 
     /// What is left, in seconds.

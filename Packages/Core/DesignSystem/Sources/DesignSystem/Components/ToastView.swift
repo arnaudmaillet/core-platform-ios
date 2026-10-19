@@ -58,12 +58,18 @@ import UIKit
 /// toast's own edge dismisses it — down for a bottom toast, up for a top one,
 /// and sideways toward its side for a leading or trailing one — on distance
 /// or velocity; any other way it rubber-bands and springs back. A tap runs
-/// the action, if there is one.
+/// the action, if there is one — unless the message is cut (#1449): then a
+/// tap on the toast's body opens its whole message in a bottom sheet
+/// (`ToastMessageSheet`), and the action runs from its own trailing control
+/// or from the sheet. Cut is measured at the label's width now, not by the
+/// message's length: the same words can fit as the front toast and be cut
+/// in a crowded bar. A collapsed toast's first tap still brings it forward.
 ///
 /// ## VoiceOver
 ///
 /// The bubble is one element: its label is the text, the action is a custom
-/// action, and the escape gesture dismisses it. It is announced (queued, a
+/// action ("Show Full Message" too, while the text is cut), and the escape
+/// gesture dismisses it. It is announced (queued, a
 /// turn later), with high priority for a failure; it never takes focus.
 ///
 /// ## Why the animation looks the way it does
@@ -1097,12 +1103,19 @@ public final class ToastView: UIView {
     }
 
     /// A tap: on a stack still collapsed, it spreads the stack out (unless
-    /// it lands on the front toast's action); on a toast with an action, it
-    /// runs it; on a spread stack otherwise, it collapses it.
+    /// it lands on the front toast's action); on a toast whose message is
+    /// cut, it opens the whole message (#1449); on a toast with an action,
+    /// it runs it; on a spread stack otherwise, it collapses it.
     @objc private func tapped() {
         if chrome == .barItem {
             guard !isLeaving else { return }
-            if isCollapsedInBar { onBarTap?(self) } else if action != nil { runAction() }
+            if isCollapsedInBar {
+                onBarTap?(self)
+            } else if isMessageTruncated {
+                showFullMessage()
+            } else if action != nil {
+                runAction()
+            }
             return
         }
         guard !isLeaving, let container = superview else { return }
@@ -1110,6 +1123,8 @@ public final class ToastView: UIView {
         let spread = Self.isSpread(at: position, in: container)
         if isCollapsedBehind || (count > 1 && !spread && action == nil) {
             Self.setSpread(true, at: position, in: container)
+        } else if isMessageTruncated {
+            showFullMessage()
         } else if action != nil {
             runAction()
         } else if spread {
@@ -1124,7 +1139,76 @@ public final class ToastView: UIView {
     /// The toast leaving now, as its time running out does (an undo
     /// commits), for tests outside this package (#1447).
     public func debugDismiss() { dismiss(animated: false) }
+    /// A tap on the toast's body. Tests.
+    func debugTap() { tapped() }
     #endif
+
+    // MARK: - The whole message (#1449)
+
+    /// Whether the message is cut at the label's width now: it would need
+    /// more lines than the label draws. A label hidden (a collapsed bar
+    /// toast) or not laid out yet is not cut.
+    var isMessageTruncated: Bool {
+        guard let title = textLabels.first, !title.isHidden, title.bounds.width > 0,
+              title.text?.isEmpty == false else { return false }
+        let bounds = CGRect(x: 0, y: 0, width: title.bounds.width, height: .greatestFiniteMagnitude)
+        let whole = title.textRect(forBounds: bounds, limitedToNumberOfLines: 0).height
+        let drawn = title.textRect(forBounds: bounds, limitedToNumberOfLines: title.numberOfLines).height
+        return whole > drawn + 0.5
+    }
+
+    /// The sheet showing this toast's whole message, while it is up.
+    private(set) weak var fullMessageSheet: ToastMessageSheet?
+
+    /// Presents the sheet. Swappable: a package test host never completes
+    /// a modal presentation (`test-host-modal-never-completes`).
+    static var presentFullMessage: @MainActor (_ sheet: UIViewController, _ presenter: UIViewController) -> Void = {
+        sheet, presenter in presenter.present(sheet, animated: true)
+    }
+
+    /// Opens the whole message in a bottom sheet: the toast waits while it
+    /// is up; its action, chosen there, runs once it has gone.
+    private func showFullMessage() {
+        guard fullMessageSheet == nil, let presenter = fullMessagePresenter() else { return }
+        let glyph = content.symbol.flatMap { UIImage.symbol(named: $0) }
+        let sheet = ToastMessageSheet(
+            message: content.message,
+            glyph: content.style == .loading ? nil : glyph,
+            glyphTint: content.symbol.map { Self.glyphTint(symbol: $0, style: content.style) } ?? content.style.glyphTint,
+            actionTitle: isLeaving ? nil : action?.title
+        )
+        sheet.onAction = { [weak self] in self?.runAction() }
+        sheet.onGone = { [weak self] in self?.countdown?.release(.sheet) }
+        countdown?.hold(.sheet)
+        fullMessageSheet = sheet
+        Self.presentFullMessage(sheet, presenter)
+    }
+
+    /// Where the sheet is presented from: the topmost screen of the app's
+    /// window — the scene's key one, never the toasts' own overlay.
+    private func fullMessagePresenter() -> UIViewController? {
+        let appWindow = window?.windowScene?.windows.first(where: \.isKeyWindow) ?? window
+        var top = appWindow?.rootViewController
+        while let presented = top?.presentedViewController, !presented.isBeingDismissed {
+            top = presented
+        }
+        return top
+    }
+
+    /// "Show Full Message" while the text is cut, ahead of the toast's own.
+    public override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+        get {
+            guard isMessageTruncated else { return ownAccessibilityActions }
+            let show = UIAccessibilityCustomAction(name: "Show Full Message") { [weak self] _ in
+                self?.showFullMessage()
+                return true
+            }
+            return [show] + ownAccessibilityActions
+        }
+        set { ownAccessibilityActions = newValue ?? [] }
+    }
+
+    private var ownAccessibilityActions: [UIAccessibilityCustomAction] = []
 
     private func runAction() {
         guard let action, !isLeaving else { return }
