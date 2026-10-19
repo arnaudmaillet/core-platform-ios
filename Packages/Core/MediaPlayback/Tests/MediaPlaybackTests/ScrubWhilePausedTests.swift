@@ -98,12 +98,29 @@ struct ScrubWhilePausedTests {
         let scrubbed = try #require(controller.playhead(in: surface)).fraction
         #expect(abs(scrubbed - 0.75) < 0.12, "guard: the scrub landed before we resumed")
 
-        let resumed = ContinuousClock.now
         controller.setPaused(false, in: surface)
+        // ⚠️ THE CLOCK STARTS WHEN THE PLAYER PLAYS, NOT AT THE CALL (#1405,
+        // develop d485a18c): on a starved runner the rate took ~1.9 s to land
+        // after `setPaused(false)`, and the head, still on the scrubbed
+        // frame, read as 1.9 s behind. The start is bracketed by the last
+        // look that saw it stopped and the first that saw it playing, so a
+        // late look widens the window rather than skewing it.
+        var stopped = ContinuousClock.now
+        var playing: ContinuousClock.Instant?
+        for _ in 0..<6_000 {
+            let look = ContinuousClock.now
+            if controller.isPlayingForReal(in: surface) {
+                playing = look
+                break
+            }
+            stopped = look
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let resumed = try #require(playing, "the player never played after the resume")
         // Not a wait for something to happen: a stretch of playback, read back
         // against the time it actually took (below), however long that was.
         try await Task.sleep(for: .milliseconds(300))
-        var reading = try read(controller, surface, since: resumed)
+        var reading = try read(controller, surface, playingSince: stopped...resumed)
         // ⚠️ NEVER BETWEEN THE ITEM'S END AND THE LOOP'S RESTART (#1405). The
         // loop is `actionAtItemEnd = .none` and a seek to zero on the end
         // notification, run on the main queue: until that seek runs, the item
@@ -115,7 +132,7 @@ struct ScrubWhilePausedTests {
         // look, and that is far off the loop.
         for _ in 0..<600 where reading.head.fraction >= Self.heldAtTheEnd {
             try await Task.sleep(for: .milliseconds(10))
-            reading = try read(controller, surface, since: resumed)
+            reading = try read(controller, surface, playingSince: stopped...resumed)
         }
         let (head, readFrom, readBy) = reading
 
@@ -134,14 +151,17 @@ struct ScrubWhilePausedTests {
     /// the loop's seek to zero: closer than half a frame of the 30 fps fixture.
     private static let heldAtTheEnd = 0.995
 
-    /// The playhead, and when it was read: after `from` and before `by`, both
-    /// counted from `start`.
+    /// The playhead, and how long the player had been playing when it was
+    /// read: at least from its latest possible start (`start.upperBound`) to
+    /// just before the read, at most from its earliest (`start.lowerBound`) to
+    /// just after.
     private func read(
-        _ controller: VideoPlaybackController, _ surface: VideoRenderView, since start: ContinuousClock.Instant
+        _ controller: VideoPlaybackController, _ surface: VideoRenderView,
+        playingSince start: ClosedRange<ContinuousClock.Instant>
     ) throws -> (head: (fraction: Double, seconds: Double), from: Duration, by: Duration) {
-        let from = ContinuousClock.now - start
+        let before = ContinuousClock.now
         let head = try #require(controller.playhead(in: surface))
-        return (head, from, ContinuousClock.now - start)
+        return (head, before - start.upperBound, ContinuousClock.now - start.lowerBound)
     }
 
     /// The witness: with no seek in between, the anchor still does its job. A
