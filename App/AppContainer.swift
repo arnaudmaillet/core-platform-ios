@@ -1183,13 +1183,16 @@ final class AppContainer {
     private static let unavailableIconCatalog: AnimatedIconCatalog? = nil
     #endif
 
-    /// Animated avatars (#1358): which avatar has a sprite sheet. The mock
-    /// gives about half of its faces one, cut from the map's baked clip
-    /// previews in the geometry the backend is asked to bake
-    /// (core-platform-backend#945). Off the mock, none until that ships.
+    /// Animated avatars (#1358, #1444): the sheets of the authors the mock
+    /// declares animated (about half), baked from the map's clip previews in
+    /// the geometry the backend is asked to bake (core-platform-backend#945,
+    /// #948). An animated avatar has no photo. Off the mock, none until the
+    /// sheet rendition ships.
     @MainActor
     func installAnimatedAvatars() {
         guard environment == .mock, !Self.previewsUnavailable else { return }
+        // The mock and MediaCore must mark a sheet avatar's URL alike.
+        assert(MockSocialDataset.sheetAvatarFragment == AnimatedAvatars.sheetFragment)
         AnimatedAvatars.shared.resolver = MockAnimatedAvatarResolver(catalog: Self.mapPreviewCatalog, faces: imagePipeline)
     }
 
@@ -1863,30 +1866,26 @@ extension SessionManager: @retroactive SessionReauthenticating {
     }
 }
 
-/// The mock's animated avatars (#1358): a stable half of the faces, each the
-/// square sheet cut from one clip preview — the same face, the same clip —
-/// baked as a loop out of the face's own photo and back into it (#1424): the
-/// sheet's last frame, the still, IS the photo, as the backend's will be
-/// (core-platform-backend#948).
+/// The mock's animated avatars (#1358, #1444): the authors the dataset
+/// declares as sheet avatars (`MockSocialDataset.sheetAvatarURL`), which have
+/// NO photo. Each sheet is baked at the rung asked for from one clip preview,
+/// as a loop out of the author's face and back into it (#1424) — the face is
+/// the mock's own baking input, the way the server bakes from an upload
+/// (core-platform-backend#948); the app itself never fetches it as a photo.
 private struct MockAnimatedAvatarResolver: AnimatedAvatarResolving, @unchecked Sendable {
     let catalog: AnimatedIconCatalog
     let faces: ImagePipeline
 
-    func sheet(for avatarURL: URL) async -> AnimatedIconSheet? {
-        let key = Self.stableHash(avatarURL.absoluteString)
-        guard key % 2 == 0 else { return nil }
+    func sheet(for avatarURL: URL, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet? {
+        guard let index = MockSocialDataset.sheetAvatarIndex(avatarURL),
+              let faceURL = URL(string: MockSocialDataset.syntheticAvatarURL(index: index)) else { return nil }
         let clips = await MainActor.run { catalog.ids.filter { $0.hasSuffix("-0") } }
         guard !clips.isEmpty,
-              case .sheet(let source)? = try? await catalog.art(for: clips[Int(key / 2) % clips.count])
+              case .sheet(let source)? = try? await catalog.art(for: clips[index % clips.count])
         else { return nil }
-        let face = try? await faces.image(for: avatarURL, size: .px256)
+        let face = try? await faces.image(for: faceURL, size: .px256)
         return await Task.detached(priority: .utility) {
-            AnimatedAvatars.bakeSquareSheet(from: source, endingOn: face)
+            AnimatedAvatars.bakeSquareSheet(from: source, cellPX: rung.rawValue, endingOn: face)
         }.value
-    }
-
-    /// FNV-1a: the same half every launch, unlike `hashValue`.
-    private static func stableHash(_ text: String) -> UInt64 {
-        text.utf8.reduce(14_695_981_039_346_656_037) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }
     }
 }

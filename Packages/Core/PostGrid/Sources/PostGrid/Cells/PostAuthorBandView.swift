@@ -369,6 +369,7 @@ public final class PostAuthorBandView: UIView {
         avatar.setMonogram(model.monogram)
         // A post card's author is large enough to play an animated avatar,
         // when the rounds pick it (#1358, #1424).
+        animation.rung = AnimatedAvatars.Rung(bucket: .avatar)
         animation.setAvatar(showsIdentity ? model.avatarURL : nil)
 
         guard showsIdentity, let url = model.avatarURL, let imagePipeline else { return }

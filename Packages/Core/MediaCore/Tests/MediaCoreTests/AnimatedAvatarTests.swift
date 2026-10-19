@@ -1,3 +1,4 @@
+import CacheKit
 import DesignSystem
 import Testing
 import UIKit
@@ -23,16 +24,17 @@ struct AnimatedAvatarTests {
 
     private struct OneFace: AnimatedAvatarResolving {
         let animated: URL
-        func sheet(for avatarURL: URL) async -> AnimatedIconSheet? {
+        func sheet(for avatarURL: URL, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet? {
             avatarURL == animated || avatarURL == AnimatedAvatarTests.otherFace ? AnimatedAvatarTests.sheet : nil
         }
     }
 
-    private static let face = URL(string: "https://example.com/animated.jpg")!
+    /// A sheet avatar: the fragment says so, and there is no photo (#1444).
+    nonisolated private static let face = URL(string: "https://example.com/animated.sheet#avatar-sheet")!
     private static let still = URL(string: "https://example.com/still.jpg")!
     /// A second animated face: the rounds count plays by avatar, so two
     /// players of one face are one person.
-    nonisolated fileprivate static let otherFace = URL(string: "https://example.com/animated-2.jpg")!
+    nonisolated fileprivate static let otherFace = URL(string: "https://example.com/animated-2.sheet#avatar-sheet")!
 
     /// Waits for `condition` on a LOOK budget, never a wall-clock deadline:
     /// a starved CI runner took over 100 s for this suite, and a deadline
@@ -404,5 +406,100 @@ struct AnimatedAvatarTests {
         #expect(AnimatedAvatars.anchorWeight(index: 2, count: 4, blend: 1) == 0.5)
         #expect(AnimatedAvatars.anchorWeight(index: 0, count: 4, blend: 1) == 0.5)
         #expect(AnimatedAvatars.anchorWeight(index: 1, count: 4, blend: 1) == 0)
+    }
+
+    // MARK: - #1444: the sheet is the only media
+
+    /// Counts every photo the pipeline is asked to fetch.
+    private final class CountingFetcher: ImageFetching, @unchecked Sendable {
+        private let lock = NSLock()
+        private var urls: [URL] = []
+        var fetched: [URL] { lock.withLock { urls } }
+        func fetchImageData(for url: URL) async throws -> Data {
+            lock.withLock { urls.append(url) }
+            return UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).pngData { context in
+                UIColor.red.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+            }
+        }
+    }
+
+    /// Holds the sheet back until the test lets it go, and records the rungs
+    /// it is asked for.
+    private actor GatedFace: AnimatedAvatarResolving {
+        private var gate: CheckedContinuation<Void, Never>?
+        private var open = false
+        private(set) var rungs: [AnimatedAvatars.Rung] = []
+        func sheet(for avatarURL: URL, rung: AnimatedAvatars.Rung) async -> AnimatedIconSheet? {
+            rungs.append(rung)
+            if !open { await withCheckedContinuation { gate = $0 } }
+            return AnimatedAvatarTests.sheet
+        }
+        func release() {
+            open = true
+            gate?.resume()
+            gate = nil
+        }
+    }
+
+    @Test func aSheetIsAtLeastAsWideAsTheDrawnAvatar() {
+        #expect(AnimatedAvatars.Rung(pixels: 40 * 3) == .px128, "a 40 pt avatar at @3x")
+        #expect(AnimatedAvatars.Rung(pixels: 96 * 3) == .px256, "the profile header at @3x")
+        #expect(AnimatedAvatars.Rung(pixels: 2_000) == .px256, "past the largest rung, the largest")
+        #expect(AnimatedAvatars.Rung(bucket: .avatar) == .px128)
+        #expect(AnimatedAvatars.Rung(bucket: .px512) == .px256)
+        #expect(AnimatedAvatars.isSheet(Self.face) && !AnimatedAvatars.isSheet(Self.still))
+    }
+
+    /// An animated avatar never asks for a photo, and shows its initials until
+    /// its sheet is decoded — then the sheet's last frame, at the rung its
+    /// picture is decoded at.
+    @Test func aSheetAvatarNeverFetchesAPhotoAndWaitsForItsSheet() async throws {
+        let window = makeWindow()
+        defer { window.isHidden = true }
+        let resolver = GatedFace()
+        let registry = AnimatedAvatars(registry: nil)
+        registry.resolver = resolver
+        let fetcher = CountingFetcher()
+        let pipeline = ImagePipeline(fetcher: fetcher, sheetAvatars: registry)
+        let avatar = AvatarView(diameter: 96, size: .px512)
+        avatar.frame = CGRect(x: 20, y: 100, width: 96, height: 96)
+        avatar.animation.registry = registry
+        avatar.animation.rounds = makeRounds()
+        window.addSubview(avatar)
+
+        avatar.setPicture(Self.face, pipeline: pipeline)
+        var asked = false
+        for _ in 0..<6_000 where !asked {
+            asked = !(await resolver.rungs).isEmpty
+            if !asked { try? await Task.sleep(for: .milliseconds(10)) }
+        }
+        #expect(asked, "the sheet was never asked for")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(avatar.picture.image == nil && avatar.standIn.image == nil, "a picture before the sheet")
+        #expect(avatar.shownPicture == nil, "something other than the initials before the sheet")
+
+        await resolver.release()
+        #expect(await eventually { avatar.picture.image != nil }, "the sheet's still never became the picture")
+        #expect(avatar.picture.image === registry.cachedStill(for: Self.face, rung: .px256))
+        #expect(Set(await resolver.rungs) == [.px256], "the 512 px picture did not take the 256 px sheet")
+        #expect(fetcher.fetched.isEmpty, "an animated avatar fetched a photo: \(fetcher.fetched)")
+    }
+
+    /// The pipeline answers a sheet avatar's URL with the sheet's last frame,
+    /// never brings a photo ahead, and fails when there is no sheet.
+    @Test func thePipelineServesASheetAvatarItsStill() async throws {
+        let registry = makeRegistry()
+        let fetcher = CountingFetcher()
+        let pipeline = ImagePipeline(fetcher: fetcher, sheetAvatars: registry)
+        #expect(pipeline.cachedImage(for: Self.face, size: .avatar) == nil)
+        #expect(pipeline.prefetch(Self.face, size: .avatar, window: .display, owner: CacheOwner("test")) == nil)
+
+        let still = try await pipeline.image(for: Self.face, size: .avatar)
+        #expect(still === registry.cachedStill(for: Self.face, rung: .px128))
+        #expect(pipeline.cachedImage(for: Self.face, size: .avatar) === still)
+        let none = URL(string: "https://example.com/none.sheet#avatar-sheet")!
+        await #expect(throws: (any Error).self) { try await pipeline.image(for: none, size: .avatar) }
+        #expect(fetcher.fetched.isEmpty, "a sheet avatar reached the fetcher: \(fetcher.fetched)")
     }
 }

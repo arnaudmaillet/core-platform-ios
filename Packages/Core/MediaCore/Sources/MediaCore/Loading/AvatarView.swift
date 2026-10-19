@@ -122,7 +122,10 @@ public final class AvatarView: UIView {
         monogram.isCovered = false
         ladder.show(.placeholder, token: token, warm: true)
         // After the new item has begun: a sheet already resolved hands its
-        // still over now, as the picture (`adoptStill`).
+        // still over now, as the picture (`adoptStill`). At the rung the
+        // picture is decoded at: the profile header's 512 px picture takes
+        // the 256 px sheet (#1444).
+        animation.rung = AnimatedAvatars.Rung(bucket: load.size)
         animation.setAvatar(url)
         var warm = false
         load.load(url, using: pipeline) { [weak self] image, transition in
@@ -139,7 +142,10 @@ public final class AvatarView: UIView {
             if url != nil { onSettledAfterLoad?() }
         }
         // Missed at its size: a smaller decode already at hand stands in.
-        if !warm, load.isLoading, animation.still == nil, let url, let standInSize,
+        // Never for a sheet avatar (#1444): its one picture is its sheet's
+        // last frame, shown once the sheet is decoded — no stand-in to hand
+        // over from.
+        if !warm, load.isLoading, animation.still == nil, let url, !AnimatedAvatars.isSheet(url), let standInSize,
            let face = pipeline?.cachedImage(for: url, size: standInSize) {
             standIn.image = face
             ladder.show(.preview, token: token, warm: true)
