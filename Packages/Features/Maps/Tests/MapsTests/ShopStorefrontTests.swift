@@ -45,7 +45,7 @@ struct ShopStorefrontTests {
         var offers: [StakePackOffer] {
             Self.tiers.map { tier in
                 StakePackOffer(
-                    id: tier.id, shotsPerPack: tier.shots, pointsPerShot: 100, price: tier.price,
+                    id: tier.id, shotsPerPack: tier.shots, likesPerShot: 100, price: tier.price,
                     shotsLeft: loaded?.id == tier.id ? loaded?.shotsLeft ?? 0 : 0
                 )
             }

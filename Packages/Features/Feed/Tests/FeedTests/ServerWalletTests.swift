@@ -25,7 +25,7 @@ struct ServerWalletTests {
     @Test func theStoreShowsAndClaimsTheServersWallet() async {
         let dataset = MockSocialDataset()
         let bff = MockBFF()
-        let service = MockWalletService(store: MockCounterStore(dataset: dataset), dataset: dataset, startingPoints: 250)
+        let service = MockWalletService(store: MockCounterStore(dataset: dataset), dataset: dataset, startingLikes: 250)
         service.register(on: bff)
         let client = ConnectClientFactory.makeAuthenticated(
             host: "https://mock.bff.local", tokenProvider: WalletMemberToken(), httpClient: bff
@@ -44,7 +44,7 @@ struct ServerWalletTests {
         #expect(await store.claim(idempotencyKey: "tap-key-0001") == .claimed(awarded: 25))
         #expect(store.balance == 275)
         #expect(await store.claim(idempotencyKey: "tap-key-0002") != .claimed(awarded: 25))
-        #expect(service.points(of: MockAuthService.accountID) == 275)
+        #expect(service.likes(of: MockAuthService.accountID) == 275)
     }
 
     /// A settled stake is the server's verdict alone: no gems in shadow

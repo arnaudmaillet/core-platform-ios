@@ -140,6 +140,6 @@ struct KindBadgeHueTests {
         for kind in kinds {
             #expect(KindBadgeView.style(for: kind).1 == KindBadgeView.neutral, "\(kind)")
         }
-        #expect(KindBadgeView.style(for: .reaction).1 == PointsSymbol.tint)
+        #expect(KindBadgeView.style(for: .reaction).1 == LikesSymbol.tint)
     }
 }

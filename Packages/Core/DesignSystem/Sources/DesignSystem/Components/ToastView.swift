@@ -95,7 +95,7 @@ public final class ToastView: UIView {
     static func glyphTint(symbol: String, style: Style) -> UIColor {
         guard style == .confirmation else { return style.glyphTint }
         switch symbol {
-        case PointsSymbol.glyph: return PointsSymbol.tint
+        case LikesSymbol.glyph: return LikesSymbol.tint
         case SaveStar.glyph: return SaveStar.tint
         default: return style.glyphTint
         }

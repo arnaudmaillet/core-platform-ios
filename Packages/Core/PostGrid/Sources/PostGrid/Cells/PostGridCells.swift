@@ -1636,7 +1636,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The stake landed: "+N" rises off the chip in the points' red and the
     /// heart pops — the rail's confirmation, on a card.
     public func playStakeConfirmation(amount: Int) {
-        floatReceipt("+\(amount)", color: PointsSymbol.tint, rising: true)
+        floatReceipt("+\(amount)", color: LikesSymbol.tint, rising: true)
         StakeReceipt.pop(likesAction.imageView ?? likesAction)
     }
 
@@ -1687,7 +1687,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
         // touch is the card's, and opens the post.
         likesAction.isUserInteractionEnabled = stakes
         likesAction.holdFreezesScrolling = stakes
-        likesAction.accessibilityLabel = stakes ? "Like, stakes \(StakeMenu.points(stakeTapAmount))" : "Likes"
+        likesAction.accessibilityLabel = stakes ? "Like, stakes \(StakeMenu.likes(stakeTapAmount))" : "Likes"
         applyReactionCount(animated: false)
         // A count-less post's heart may have just appeared at the line's end,
         // and the end hangs by what is there.
@@ -1713,7 +1713,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     private func applyReactionCount(animated: Bool) {
         let staked = viewerStake > 0
         let content = AppButton.Content(
-            symbol: staked ? PointsSymbol.glyph : ActionSymbol.like,
+            symbol: staked ? LikesSymbol.glyph : ActionSymbol.like,
             count: baseReactionCount.map { Int(clamping: $0) }
         )
         let animates = animated && actionsAnimate && likesAction.window != nil && !likesAction.isHidden
@@ -1856,10 +1856,10 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// The app's one button since #934 (`PostCardAction`).
     private let likesAction: AppButton = {
         // Staked, the button's own filled heart in the Points pink — no
-        // `PointsHeartView` laid over it (#1186): that overlay showed the like
+        // `LikesHeartView` laid over it (#1186): that overlay showed the like
         // twice and left a mark during the hero flight home, and the hearts
         // are solid since #1178.
-        PostCardAction.make(symbol: ActionSymbol.like, label: "Likes", selectedTint: PointsSymbol.tint)
+        PostCardAction.make(symbol: ActionSymbol.like, label: "Likes", selectedTint: LikesSymbol.tint)
     }()
     private let commentsAction = PostCardAction.make(symbol: ActionSymbol.comments, label: "Comments")
     /// Whether the likes keep their heart with no count: a staking card's
@@ -2668,7 +2668,7 @@ public final class PostGridTileCell: UICollectionViewCell {
     /// (`PostGridFlightCard`), in every gallery: For You's chunks and mosaic,
     /// a profile's Media, a place's grid.
     private let likes = PostMetricLabel(
-        symbol: PointsSymbol.glyph, font: metaFont, color: .white, shadowed: true
+        symbol: LikesSymbol.glyph, font: metaFont, color: .white, shadowed: true
     )
     /// The cover and the live surface over it (#1088): the cover's arrival
     /// on the loading ladder — a reconfigure cancelling the load in flight
@@ -2918,7 +2918,7 @@ public final class PostGridTileCell: UICollectionViewCell {
         guard staked != viewerStaked else { return }
         viewerStaked = staked
         likes.setGlyph(
-            systemName: PointsSymbol.glyph, color: staked ? PointsSymbol.tint : .white
+            systemName: LikesSymbol.glyph, color: staked ? LikesSymbol.tint : .white
         )
     }
 

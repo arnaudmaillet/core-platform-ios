@@ -1416,7 +1416,7 @@ final class PostDetailViewController: UIViewController {
         // Liked, the button's own filled Points heart (#1128; no overlay
         // since #1186).
         let glyph = UIImage.SymbolConfiguration(textStyle: .body)
-        config?.image = state.isLiked ? PointsSymbol.likeImage(staked: true, glyph) : AppSymbol.like.image()
+        config?.image = state.isLiked ? LikesSymbol.likeImage(staked: true, glyph) : AppSymbol.like.image()
         config?.baseForegroundColor = .secondaryLabel
         likeButton.configuration = config
         // The caption row carries the same number in its closing line, and it

@@ -21,7 +21,7 @@ private final class ScriptedStaking: LikeStaking, @unchecked Sendable {
         let next: Result<LikeStakeAnswer, Error> = lock.withLock {
             batches.append(batch)
             if let foreignAccount, batch.accountID == foreignAccount { return .failure(LikeStakeNotNow()) }
-            return script.isEmpty ? .success(LikeStakeAnswer(outcome: .staked, spent: batch.points, myTotal: batch.points)) : script.removeFirst()
+            return script.isEmpty ? .success(LikeStakeAnswer(outcome: .staked, spent: batch.likes, myTotal: batch.likes)) : script.removeFirst()
         }
         return try next.get()
     }
@@ -68,11 +68,11 @@ struct LikeOutboxSenderTests {
 
     @Test func aSealedBatchIsCommittedOnceAndLeaves() async {
         let (sender, wallet, outbox, staking) = make()
-        wallet.stake(.points(1), on: "p1")
-        wallet.stake(.points(1), on: "p1")
+        wallet.stake(.likes(1), on: "p1")
+        wallet.stake(.likes(1), on: "p1")
         wallet.commitStakes(on: "p1")
         await sender.flush()
-        #expect(staking.sent.map(\.points) == [2])
+        #expect(staking.sent.map(\.likes) == [2])
         #expect(staking.sent.first?.target == .post("p1"))
         #expect(outbox.batches.isEmpty)
         #expect(wallet.boostTotal(forTarget: "p1") == 2)
@@ -81,10 +81,10 @@ struct LikeOutboxSenderTests {
     /// An open batch waits for its 10 s.
     @Test func anOpenBatchIsNotCommittedEarly() async {
         let (sender, wallet, outbox, staking) = make()
-        wallet.stake(.points(1), on: "p1")
+        wallet.stake(.likes(1), on: "p1")
         await sender.flush()
         #expect(staking.sent.isEmpty)
-        #expect(outbox.pendingPoints(on: .post("p1")) == 1)
+        #expect(outbox.pendingLikes(on: .post("p1")) == 1)
     }
 
     /// A lost connection keeps the batch, and the retry carries the SAME
@@ -92,7 +92,7 @@ struct LikeOutboxSenderTests {
     @Test func aFailedCommitIsRetriedWithTheSameKey() async {
         let (sender, wallet, outbox, staking) = make()
         staking.then(.failure(Offline()))
-        wallet.stake(.points(1), on: "p1")
+        wallet.stake(.likes(1), on: "p1")
         wallet.commitStakes(on: "p1")
         await sender.flush()
         #expect(outbox.batches.count == 1, "a failed commit dropped the likes")
@@ -108,9 +108,9 @@ struct LikeOutboxSenderTests {
         let (sender, wallet, outbox, staking) = make()
         let start = wallet.balance
         staking.then(.failure(LikeStakeRejected(reason: "post gone")))
-        wallet.stake(.points(2), on: "p1")
+        wallet.stake(.likes(2), on: "p1")
         wallet.commitStakes(on: "p1")
-        wallet.stake(.points(1), on: "p2")
+        wallet.stake(.likes(1), on: "p2")
         wallet.commitStakes(on: "p2")
 
         await sender.flush()
@@ -127,9 +127,9 @@ struct LikeOutboxSenderTests {
     @Test func aBatchThatCannotGoAsThisViewerStaysQueuedAndHoldsNothing() async {
         let (sender, wallet, outbox, staking) = make()
         staking.then(.failure(LikeStakeNotNow()))
-        wallet.stake(.points(2), on: "p1")
+        wallet.stake(.likes(2), on: "p1")
         wallet.commitStakes(on: "p1")
-        wallet.stake(.points(1), on: "p2")
+        wallet.stake(.likes(1), on: "p2")
         wallet.commitStakes(on: "p2")
 
         await sender.flush()
@@ -144,7 +144,7 @@ struct LikeOutboxSenderTests {
         let (sender, wallet, _, staking) = make()
         let start = wallet.balance
         staking.then(.success(LikeStakeAnswer(outcome: .staked, spent: 2, myTotal: 250)))
-        wallet.stake(.points(5), on: "p1")
+        wallet.stake(.likes(5), on: "p1")
         wallet.commitStakes(on: "p1")
         await sender.flush()
         #expect(wallet.balance == start - 2)
@@ -156,7 +156,7 @@ struct LikeOutboxSenderTests {
         let (sender, wallet, outbox, staking) = make()
         let start = wallet.balance
         staking.then(.success(LikeStakeAnswer(outcome: .ownContent, spent: 0, myTotal: 0)))
-        wallet.stake(.points(3), on: "p1")
+        wallet.stake(.likes(3), on: "p1")
         wallet.commitStakes(on: "p1")
         await sender.flush()
         #expect(wallet.balance == start)
@@ -174,7 +174,7 @@ struct LikeOutboxSenderTests {
         sender.connectivity = monitor
         sender.start()
         staking.then(.failure(Offline()))
-        wallet.stake(.points(1), on: "p1")
+        wallet.stake(.likes(1), on: "p1")
         wallet.commitStakes(on: "p1")
         #expect(await eventually { sender.failures == 1 }, "the sealed batch never failed")
         #expect(outbox.batches.count == 1, "a failed commit dropped the likes")
@@ -204,7 +204,7 @@ struct LikeOutboxSenderTests {
         let foreign = LikeOutbox(
             defaults: defaults, scope: StorageScope(owner: .member(account: "acct-2", profile: "prof-2"))
         )
-        foreign.recordShot(on: .post("p0"), points: 100)
+        foreign.recordShot(on: .post("p0"), likes: 100)
         let staking = ScriptedStaking()
         staking.parkBatches(of: "acct-2")
         let sender = LikeOutboxSender(outbox: outbox, wallet: wallet, staking: staking, retryDelays: [3600])
@@ -214,7 +214,7 @@ struct LikeOutboxSenderTests {
 
         // A tap that landed 9 s ago: due in about a second on the real clock.
         clock.setOffset(-9)
-        wallet.stake(.points(1), on: "p1")
+        wallet.stake(.likes(1), on: "p1")
         clock.setOffset(0)
 
         #expect(

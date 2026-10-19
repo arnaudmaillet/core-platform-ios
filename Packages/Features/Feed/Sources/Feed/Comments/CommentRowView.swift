@@ -421,7 +421,7 @@ final class CommentRowView: UIView {
     func setLiked(_ liked: Bool, count: Int) {
         var config = likeButton.configuration
         let glyph = UIImage.SymbolConfiguration(pointSize: 12, weight: .semibold)
-        config?.image = PointsSymbol.likeImage(staked: liked, glyph)
+        config?.image = LikesSymbol.likeImage(staked: liked, glyph)
         config?.baseForegroundColor = .secondaryLabel
         if count > 0 {
             var title = AttributedString(SnapSubtitleView.countText(count))

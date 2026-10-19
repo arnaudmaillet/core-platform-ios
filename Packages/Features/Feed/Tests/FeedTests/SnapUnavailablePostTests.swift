@@ -175,7 +175,7 @@ struct SnapUnavailablePostTests {
         #expect(feed.debugToolbarPostActions.allSatisfy { !$0.isEnabled }, "save, repost or ⋯ still live")
         // A like tapped now spends nothing.
         let before = wallet.balance
-        feed.debugTapBoost(on: PostID("a"), spend: .points(1))
+        feed.debugTapBoost(on: PostID("a"), spend: .likes(1))
         #expect(wallet.balance == before)
         #expect(wallet.boostTotal(forTarget: "a") == 0)
         withExtendedLifetime(feed) {}
@@ -237,7 +237,7 @@ struct SnapUnavailablePostTests {
         try settle(feed, on: 0)
         let start = wallet.balance
 
-        feed.debugStake(.points(5), on: PostID("a"))
+        feed.debugStake(.likes(5), on: PostID("a"))
         #expect(wallet.balance == start - 5, "staked")
         #expect(wallet.boostTotal(forTarget: "a") == 5)
 
@@ -275,8 +275,8 @@ struct SnapUnavailablePostTests {
         let sender = LikeOutboxSender(outbox: outbox, wallet: wallet, staking: staking, retryDelays: [3600])
         let start = wallet.balance
 
-        wallet.stake(.points(3), on: gone)
-        wallet.stake(.points(2), on: kept)
+        wallet.stake(.likes(3), on: gone)
+        wallet.stake(.likes(2), on: kept)
         wallet.commitStakes(on: gone)
         wallet.commitStakes(on: kept)
         await sender.flush()

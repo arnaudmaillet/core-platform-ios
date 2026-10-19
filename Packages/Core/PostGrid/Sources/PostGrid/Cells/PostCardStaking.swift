@@ -86,7 +86,7 @@ public final class PostCardStaking {
         cell.stakeTapAmount = WalletStore.Policy.defaultStakeAmount
         cell.onStake = { [weak self, weak cell] amount in
             guard let self, let cell else { return }
-            stake(.points(amount), on: key, cell: cell)
+            stake(.likes(amount), on: key, cell: cell)
         }
         cell.stakeMenu = { [weak self, weak cell] in
             // A guest gets no stake menu (#1146): no amounts, no way into the
@@ -96,7 +96,7 @@ public final class PostCardStaking {
                 for: menuState(for: key),
                 stake: { [weak self, weak cell] amount in
                     guard let self, let cell else { return }
-                    stake(.points(amount), on: key, cell: cell)
+                    stake(.likes(amount), on: key, cell: cell)
                 },
                 shoot: { [weak self, weak cell] in
                     guard let self, let cell else { return }
@@ -207,12 +207,12 @@ public final class PostCardStaking {
             perTargetCap: WalletStore.Policy.perTargetBoostCap,
             tapAmount: WalletStore.Policy.defaultStakeAmount,
             shotsLeft: wallet.stakeShots,
-            shotAmount: WalletStore.Policy.StakePack.pointsPerShot
+            shotAmount: WalletStore.Policy.StakePack.likesPerShot
         )
     }
 
     func stake(_ spend: WalletStakeSpend, on key: String, cell: PostGridListRowCell) {
-        if case .points(let amount) = spend, amount <= 0 { return }
+        if case .likes(let amount) = spend, amount <= 0 { return }
         // A guest signs up first; the stake then lands on the cell that asked,
         // if it still shows this post.
         MemberGates.perform(.like, from: cell) { [weak self, weak cell] in

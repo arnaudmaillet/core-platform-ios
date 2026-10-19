@@ -32,8 +32,8 @@ public final class LikeOutbox: @unchecked Sendable {
     /// One batch: a run of taps on one target, or one shot.
     public struct Batch: Codable, Equatable, Sendable {
         public let target: Target
-        /// Points asked (1 per tap). Ignored by the server for a shot.
-        public var points: Int
+        /// Likes asked (1 per tap). Ignored by the server for a shot.
+        public var likes: Int
         public let usesStakeShot: Bool
         /// 8–64 of `[A-Za-z0-9_-]`, one per batch, kept across retries.
         public let idempotencyKey: String
@@ -46,12 +46,22 @@ public final class LikeOutbox: @unchecked Sendable {
         public let accountID: String?
         public let profileID: String?
 
+        /// ⚠️ THE STORED KEYS ARE TODAY'S (#1397): batches are kept as JSON
+        /// and read back with `try?`, so a renamed key would drop every
+        /// unsent like on the update. The currency is called likes now; its
+        /// key stays "points".
+        enum CodingKeys: String, CodingKey {
+            case target
+            case likes = "points"
+            case usesStakeShot, idempotencyKey, firstTapAt, lastTapAt, isSealed, accountID, profileID
+        }
+
         public init(
-            target: Target, points: Int, usesStakeShot: Bool, idempotencyKey: String,
+            target: Target, likes: Int, usesStakeShot: Bool, idempotencyKey: String,
             firstTapAt: Date, lastTapAt: Date, isSealed: Bool, accountID: String?, profileID: String?
         ) {
             self.target = target
-            self.points = points
+            self.likes = likes
             self.usesStakeShot = usesStakeShot
             self.idempotencyKey = idempotencyKey
             self.firstTapAt = firstTapAt
@@ -88,48 +98,48 @@ public final class LikeOutbox: @unchecked Sendable {
 
     // MARK: - Taps
 
-    /// Adds `points` taps to the target's open batch, opening one if needed.
-    public func record(points: Int, on target: Target) {
-        guard points > 0 else { return }
+    /// Adds `likes` taps to the target's open batch, opening one if needed.
+    public func record(likes: Int, on target: Target) {
+        guard likes > 0 else { return }
         let moment = now()
         mutate { batches in
             if let index = batches.lastIndex(where: { $0.target == target && !$0.isSealed && !$0.usesStakeShot }) {
-                batches[index].points += points
+                batches[index].likes += likes
                 batches[index].lastTapAt = moment
             } else {
-                batches.append(makeBatch(target: target, points: points, shot: false, at: moment))
+                batches.append(makeBatch(target: target, likes: likes, shot: false, at: moment))
             }
         }
     }
 
     /// One ×100 shot on the target: a batch of its own, committed at once.
-    public func recordShot(on target: Target, points: Int) {
+    public func recordShot(on target: Target, likes: Int) {
         mutate { batches in
-            var batch = makeBatch(target: target, points: points, shot: true, at: now())
+            var batch = makeBatch(target: target, likes: likes, shot: true, at: now())
             batch.isSealed = true
             batches.append(batch)
         }
     }
 
-    /// Takes back up to `points` taps not yet committed on the target — the
+    /// Takes back up to `likes` taps not yet committed on the target — the
     /// only undo there is: a committed like is final. Returns how many were
     /// taken back.
     @discardableResult
-    public func cancel(points: Int, on target: Target) -> Int {
+    public func cancel(likes: Int, on target: Target) -> Int {
         var taken = 0
         mutate { batches in
             guard let index = batches.lastIndex(where: { $0.target == target && !$0.isSealed && !$0.usesStakeShot })
             else { return }
-            taken = min(points, batches[index].points)
-            batches[index].points -= taken
-            if batches[index].points == 0 { batches.remove(at: index) }
+            taken = min(likes, batches[index].likes)
+            batches[index].likes -= taken
+            if batches[index].likes == 0 { batches.remove(at: index) }
         }
         return taken
     }
 
     /// The taps on the target not yet committed (what an undo can take back).
-    public func pendingPoints(on target: Target) -> Int {
-        load().filter { $0.target == target && !$0.isSealed && !$0.usesStakeShot }.reduce(0) { $0 + $1.points }
+    public func pendingLikes(on target: Target) -> Int {
+        load().filter { $0.target == target && !$0.isSealed && !$0.usesStakeShot }.reduce(0) { $0 + $1.likes }
     }
 
     // MARK: - Committing
@@ -183,7 +193,7 @@ public final class LikeOutbox: @unchecked Sendable {
 
     // MARK: - Storage
 
-    private func makeBatch(target: Target, points: Int, shot: Bool, at moment: Date) -> Batch {
+    private func makeBatch(target: Target, likes: Int, shot: Bool, at moment: Date) -> Batch {
         let owner = scope.owner
         var account: String?
         var profile: String?
@@ -192,7 +202,7 @@ public final class LikeOutbox: @unchecked Sendable {
             profile = p
         }
         return Batch(
-            target: target, points: points, usesStakeShot: shot,
+            target: target, likes: likes, usesStakeShot: shot,
             idempotencyKey: Self.newKey(), firstTapAt: moment, lastTapAt: moment,
             isSealed: false, accountID: account, profileID: profile
         )

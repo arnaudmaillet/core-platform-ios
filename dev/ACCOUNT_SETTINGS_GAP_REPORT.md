@@ -208,7 +208,7 @@ Priority: **P0** = launch blocker (legal, store review or basic trust), **P1** =
 | Teen mode: private, no DMs from strangers, no location, daily limit, curfew, no purchases | Instagram Teen Accounts, Douyin | P0 (13+ decided) | Blocked on date of birth and quiet hours (#401 → core-platform-backend#652, #654) |
 | Parental supervision | TikTok, Instagram, Snapchat | P2 | Blocked (#417 → core-platform-backend#670) |
 
-### 9. Wallet and purchases (points and gems)
+### 9. Wallet and purchases (likes and gems)
 
 | Option | Benchmark | Priority | Status / contract |
 | --- | --- | --- | --- |

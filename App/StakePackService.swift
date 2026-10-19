@@ -38,7 +38,7 @@ final class StakePackService: StakePackSelling {
         return WalletStore.Policy.StakePack.tiers.map { tier in
             StakePackOffer(
                 id: tier.id, shotsPerPack: tier.shots,
-                pointsPerShot: WalletStore.Policy.StakePack.pointsPerShot,
+                likesPerShot: WalletStore.Policy.StakePack.likesPerShot,
                 price: tier.price, shotsLeft: tier.id == loaded ? shotsLeft : 0
             )
         }

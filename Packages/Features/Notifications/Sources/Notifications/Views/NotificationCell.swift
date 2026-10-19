@@ -308,7 +308,7 @@ final class KindBadgeView: UIView {
     /// (#1128).
     static func style(for action: NotificationItem.Action) -> (String, UIColor) {
         switch action {
-        case .reaction: (PointsSymbol.glyph, PointsSymbol.tint)
+        case .reaction: (LikesSymbol.glyph, LikesSymbol.tint)
         case .comment: (PostActionSymbol.commentsFilled, neutral)
         case .reply: ("arrowshape.turn.up.left.fill", neutral)
         case .mention: ("at", neutral)

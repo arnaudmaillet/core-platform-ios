@@ -5,7 +5,7 @@ import UIKit
 /// The Points heart (#1128): the gradient once liked, the ink at rest, and
 /// the heart's shape is what paints.
 @MainActor
-struct PointsHeartViewTests {
+struct LikesHeartViewTests {
     /// The view's pixels at 1×, RGBA premultiplied-last, rows top-down.
     private struct Bitmap {
         let width: Int
@@ -39,19 +39,19 @@ struct PointsHeartViewTests {
 
     /// Liked: the pink, solid (#1178). At rest: the content's ink.
     @Test func likedDrawsThePinkAndRestTheInk() {
-        let heart = PointsHeartView()
+        let heart = LikesHeartView()
         heart.ink = .black
         #expect(heart.drawnColours.count == 2)
         #expect(Set(heart.drawnColours.map { $0.cgColor.components ?? [] }).count == 1, "at rest: one ink")
         heart.setLiked(true, animated: false)
         #expect(heart.drawnColours.count == 2)
-        #expect(heart.drawnColours == Palette.pointsGradient(for: heart.traitCollection))
+        #expect(heart.drawnColours == Palette.likesGradient(for: heart.traitCollection))
     }
 
     /// The SHAPE paints: the heart's middle carries the colour, a corner of
     /// its square nothing at all.
     @Test func theHeartIsTheMask() {
-        let heart = PointsHeartView(configuration: AppSymbol.fixed(30, weight: .semibold))
+        let heart = LikesHeartView(configuration: AppSymbol.fixed(30, weight: .semibold))
         heart.setLiked(true, animated: false)
         let image = render(heart)
         let middle = image.pixel(20, 22)
@@ -62,13 +62,13 @@ struct PointsHeartViewTests {
     }
 
     @Test func itSizesToItsGlyph() {
-        let heart = PointsHeartView(configuration: AppSymbol.fixed(15, weight: .semibold))
+        let heart = LikesHeartView(configuration: AppSymbol.fixed(15, weight: .semibold))
         let size = heart.intrinsicContentSize
         #expect(size == AppSymbol.like.image(AppSymbol.fixed(15, weight: .semibold))?.size)
     }
 
     @Test func likingTwiceChangesNothing() {
-        let heart = PointsHeartView()
+        let heart = LikesHeartView()
         heart.setLiked(true, animated: false)
         let colours = heart.drawnColours
         heart.setLiked(true, animated: true)
@@ -79,23 +79,23 @@ struct PointsHeartViewTests {
 /// The button's side (#1128): selected, the gradient heart stands for the
 /// glyph; at rest there is none.
 @MainActor
-struct AppButtonPointsHeartTests {
+struct AppButtonLikesHeartTests {
     @Test func aSelectedLikeDrawsTheGradientHeart() {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(PointsSymbol.glyph))
-        button.drawsPointsHeart = true
-        #expect(button.pointsHeart == nil, "at rest the glyph is the button's own")
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(LikesSymbol.glyph))
+        button.drawsLikesHeart = true
+        #expect(button.likesHeart == nil, "at rest the glyph is the button's own")
         button.setSelected(true, animated: false)
-        #expect(button.pointsHeart?.isLiked == true)
+        #expect(button.likesHeart?.isLiked == true)
         button.frame = CGRect(x: 0, y: 0, width: 60, height: 30)
         button.layoutIfNeeded()
-        #expect(button.pointsHeart?.frame.isEmpty == false)
+        #expect(button.likesHeart?.frame.isEmpty == false)
         button.setSelected(false, animated: false)
-        #expect(button.pointsHeart == nil)
+        #expect(button.likesHeart == nil)
     }
 
     @Test func offByDefault() {
-        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(PointsSymbol.glyph))
+        let button = AppButton(aspect: .bare, size: .inline, content: .symbol(LikesSymbol.glyph))
         button.setSelected(true, animated: false)
-        #expect(button.pointsHeart == nil)
+        #expect(button.likesHeart == nil)
     }
 }

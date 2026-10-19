@@ -63,7 +63,7 @@ final class WalletServerSync {
         wake?.invalidate()
         wake = nil
         let snapshot = wallet.snapshot()
-        guard snapshot.pointsCap != nil, !snapshot.claimAvailable, let next = snapshot.nextClaimAt else { return }
+        guard snapshot.likesCap != nil, !snapshot.claimAvailable, let next = snapshot.nextClaimAt else { return }
         let delay = max(1, next.timeIntervalSinceNow + 1)
         wake = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }

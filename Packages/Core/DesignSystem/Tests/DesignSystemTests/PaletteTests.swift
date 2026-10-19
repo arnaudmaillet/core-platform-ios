@@ -124,15 +124,15 @@ struct PaletteTests {
     /// The heart is the pink, solid (#1178) — two equal stops, so the
     /// gradient layer still draws — the light pink in both appearances since
     /// #1190; under Increased Contrast it reads at 3:1 on the page.
-    @Test func thePointsHeartIsThePink() {
-        #expect(PointsSymbol.gradient(for: Self.light).map { Self.hex($0, Self.light) } == [0xF37AB4, 0xF37AB4])
-        #expect(PointsSymbol.gradient(for: Self.dark).map { Self.hex($0, Self.dark) } == [0xF37AB4, 0xF37AB4])
+    @Test func theLikesHeartIsThePink() {
+        #expect(LikesSymbol.gradient(for: Self.light).map { Self.hex($0, Self.light) } == [0xF37AB4, 0xF37AB4])
+        #expect(LikesSymbol.gradient(for: Self.dark).map { Self.hex($0, Self.dark) } == [0xF37AB4, 0xF37AB4])
         for traits in [Self.traits(.light, high: true), Self.dark] {
-            for stop in PointsSymbol.gradient(for: traits) {
+            for stop in LikesSymbol.gradient(for: traits) {
                 #expect(Self.contrast(stop, on: .systemBackground, traits) >= 3)
             }
         }
-        #expect(PointsSymbol.tint === Palette.tint)
+        #expect(LikesSymbol.tint === Palette.tint)
     }
 
     /// Links and tokens in text (#1174): a greyed violet (#1176) — blue over

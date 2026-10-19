@@ -690,7 +690,7 @@ final class SnapRailBoostButton: StakeMenuButton {
         super.init(frame: .zero)
         applyFace()
         addAction(
-            UIAction { [weak self] _ in self?.onBoost?(.points(WalletStore.Policy.defaultStakeAmount)) },
+            UIAction { [weak self] _ in self?.onBoost?(.likes(WalletStore.Policy.defaultStakeAmount)) },
             for: .primaryActionTriggered
         )
         // DEFERRED and uncached: the menu is built at present time from the
@@ -743,9 +743,9 @@ final class SnapRailBoostButton: StakeMenuButton {
                 perTargetCap: WalletStore.Policy.perTargetBoostCap,
                 tapAmount: WalletStore.Policy.defaultStakeAmount,
                 shotsLeft: stakeShots,
-                shotAmount: WalletStore.Policy.StakePack.pointsPerShot
+                shotAmount: WalletStore.Policy.StakePack.likesPerShot
             ),
-            stake: { [weak self] amount in self?.onBoost?(.points(amount)) },
+            stake: { [weak self] amount in self?.onBoost?(.likes(amount)) },
             shoot: { [weak self] in self?.onBoost?(.shot) },
             undo: { [weak self] in self?.onUndo?() },
             // The empty pack's row opens the Shop, found up this button's
@@ -807,7 +807,7 @@ final class SnapRailBoostButton: StakeMenuButton {
         if let likeCount {
             parts.append(likeCount == 1 ? "1 like" : "\(likeCount.formattedCompact()) likes")
         }
-        if staked > 0 { parts.append("you staked \(StakeMenu.points(staked))") }
+        if staked > 0 { parts.append("you staked \(StakeMenu.likes(staked))") }
         return parts.isEmpty ? nil : parts.joined(separator: ", ")
     }
 

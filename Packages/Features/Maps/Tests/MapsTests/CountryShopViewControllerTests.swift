@@ -240,7 +240,7 @@ struct CountryShopViewControllerTests {
         init(access: FakeAccess) { self.access = access }
 
         var offer: StakePackOffer {
-            StakePackOffer(shotsPerPack: 3, pointsPerShot: 100, price: 50, shotsLeft: shotsLeft)
+            StakePackOffer(shotsPerPack: 3, likesPerShot: 100, price: 50, shotsLeft: shotsLeft)
         }
 
         func buyPack() -> StakePackPurchase {

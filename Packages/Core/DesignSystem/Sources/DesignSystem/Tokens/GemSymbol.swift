@@ -2,7 +2,7 @@ import UIKit
 
 /// The glyph for GEMS — the charter's currency B, earned-only: what a stake
 /// that turned out to carry information pays, after its deferred settlement
-/// (`dev/economy/`). `PointsSymbol`'s counterpart, so the two currencies are
+/// (`dev/economy/`). `LikesSymbol`'s counterpart, so the two currencies are
 /// told apart at a glance: a red heart you commit, a violet diamond you earn.
 public enum GemSymbol {
     public static let glyph = AppSymbol.gemFilled.rawValue

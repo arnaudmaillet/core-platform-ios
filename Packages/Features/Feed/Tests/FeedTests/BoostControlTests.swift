@@ -20,7 +20,7 @@ struct BoostControlTests {
     /// reads it from the one constant.
     @Test func theDefaultStakeIsOnePoint() {
         #expect(WalletStore.Policy.defaultStakeAmount == 1)
-        #expect(WalletStore.Policy.StakePack.pointsPerShot == 100)
+        #expect(WalletStore.Policy.StakePack.likesPerShot == 100)
     }
 
     // MARK: - Rail anchor
@@ -32,7 +32,7 @@ struct BoostControlTests {
 
         button.sendActions(for: .primaryActionTriggered)
 
-        #expect(received == [.points(WalletStore.Policy.defaultStakeAmount)])
+        #expect(received == [.likes(WalletStore.Policy.defaultStakeAmount)])
     }
 
     /// No pack, no Shop above: the menu offers the default amount and a
@@ -43,7 +43,7 @@ struct BoostControlTests {
         let button = SnapRailBoostButton()
         button.setWalletContext(balance: 200, undoableAmount: 0)
         let actions = button.currentMenuActions().compactMap { $0 as? UIAction }
-        #expect(actions.map(\.title) == ["×100", StakeMenu.points(WalletStore.Policy.defaultStakeAmount)])
+        #expect(actions.map(\.title) == ["×100", StakeMenu.likes(WalletStore.Policy.defaultStakeAmount)])
         #expect(actions[0].subtitle == "Get ×100 cartridges in the Shop")
         #expect(actions[0].attributes.contains(.disabled))
         #expect(actions[1].attributes.contains(.disabled) == false)
@@ -218,7 +218,7 @@ struct BoostControlTests {
         )
         boost.sendActions(for: .primaryActionTriggered)
 
-        #expect(received == [.points(WalletStore.Policy.defaultStakeAmount)])
+        #expect(received == [.likes(WalletStore.Policy.defaultStakeAmount)])
     }
 
     @Test func composerBoostCarriesTheTrendingGlyphAndAMenu() throws {
@@ -246,8 +246,8 @@ struct BoostControlTests {
     /// staked nothing, the Points heart once they have — the button's OWN
     /// image, no overlay laid on the glass (#1182) — never a number in its
     /// place (#680).
-    @Test func railHeartIsAnInkOutlineAtRestThePointsHeartOnceStakedNeverANumber() {
-        let white = Self.drawn(PointsSymbol.likeImage(staked: false, Self.railGlyph))
+    @Test func railHeartIsAnInkOutlineAtRestTheLikesHeartOnceStakedNeverANumber() {
+        let white = Self.drawn(LikesSymbol.likeImage(staked: false, Self.railGlyph))
 
         let button = SnapRailBoostButton()
         #expect(Self.drawn(button.configuration?.image) == white)
@@ -257,10 +257,10 @@ struct BoostControlTests {
         #expect(button.configuration?.attributedTitle == nil)
 
         button.setSpentTotal(60)
-        #expect(Self.drawn(button.configuration?.image) == Self.drawn(PointsSymbol.likeImage(staked: true, Self.railGlyph)),
+        #expect(Self.drawn(button.configuration?.image) == Self.drawn(LikesSymbol.likeImage(staked: true, Self.railGlyph)),
                 "the staked heart is the button's own filled glyph")
         #expect(button.configuration?.image?.renderingMode == .alwaysOriginal, "the staked heart carries its own colour")
-        #expect(!button.subviews.contains { $0 is PointsHeartView }, "a heart laid over the glass")
+        #expect(!button.subviews.contains { $0 is LikesHeartView }, "a heart laid over the glass")
         #expect(button.configuration?.attributedTitle == nil, "the spend came back as a number")
 
         button.setSpentTotal(0)

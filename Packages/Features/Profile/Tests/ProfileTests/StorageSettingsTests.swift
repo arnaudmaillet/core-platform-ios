@@ -135,7 +135,7 @@ final class StorageSettingsTests {
         defer { drafts.delete(draft.id) }
         let outbox = LikeOutbox(defaults: defaults)
         let target = LikeOutbox.Target.post("p1")
-        outbox.record(points: 3, on: target)
+        outbox.record(likes: 3, on: target)
         let playback = MediaPlaybackPreferencesStore(defaults: defaults)
         playback.update { $0.autoplay = .never }
         let clip = root.appending(path: "clip.mp4")
@@ -149,7 +149,7 @@ final class StorageSettingsTests {
 
         #expect(model.report?.total == 0)
         #expect(PostDraftStore(name: draftsName).draft(draft.id)?.text == "half a post")
-        #expect(outbox.pendingPoints(on: target) == 3)
+        #expect(outbox.pendingLikes(on: target) == 3)
         #expect(playback.preferences.autoplay == .never)
         withExtendedLifetime(caches) {}
     }

@@ -95,15 +95,15 @@ public enum StakeMenu {
             // A row that reads, not one that acts: disabled.
             actions.append(UIAction(
                 title: stakedLine(state.stakedOnTarget),
-                image: UIImage.symbol(named: PointsSymbol.glyph),
+                image: UIImage.symbol(named: LikesSymbol.glyph),
                 attributes: .disabled
             ) { _ in })
         }
         actions.append(shotAction(for: state, shoot: shoot, openShop: openShop))
 
         let tap = UIAction(
-            title: points(state.tapAmount),
-            image: UIImage.symbol(named: PointsSymbol.glyph)
+            title: likes(state.tapAmount),
+            image: UIImage.symbol(named: LikesSymbol.glyph)
         ) { _ in stake(state.tapAmount) }
         if !state.canTap { tap.attributes = .disabled }
         actions.append(tap)
@@ -144,11 +144,11 @@ public enum StakeMenu {
         if state.remaining < state.shotAmount {
             action.subtitle = state.remaining == 0
                 ? "This post holds all it can take"
-                : "Only \(points(state.remaining)) more fit on this post"
+                : "Only \(likes(state.remaining)) more fit on this post"
         } else if state.balance < state.shotAmount {
             action.subtitle = "Not enough likes"
         } else {
-            action.subtitle = "\(points(state.shotAmount)) in one tap"
+            action.subtitle = "\(likes(state.shotAmount)) in one tap"
         }
         if !state.canShoot { action.attributes = .disabled }
         return action
@@ -161,13 +161,12 @@ public enum StakeMenu {
 
     /// "You staked 37 likes" — the viewer's total on the post (#668).
     public nonisolated static func stakedLine(_ amount: Int) -> String {
-        "You staked \(points(amount))"
+        "You staked \(likes(amount))"
     }
 
     /// "1 like", "100 likes" — currency A's amount, as people read it
-    /// (the owner, 2026-10-18: likes and gems; the code name stays `points`
-    /// until #1397).
-    public nonisolated static func points(_ amount: Int) -> String {
+    /// (the owner, 2026-10-18: likes and gems).
+    public nonisolated static func likes(_ amount: Int) -> String {
         amount == 1 ? "1 like" : "\(amount) likes"
     }
 
@@ -175,7 +174,7 @@ public enum StakeMenu {
 
     /// "Staked 15 likes" — the burst so far on one post.
     public nonisolated static func stakedToastMessage(_ amount: Int) -> String {
-        "Staked \(points(amount))"
+        "Staked \(likes(amount))"
     }
 
     /// One burst's toasts (#1375): every tap updates the burst's toast in
@@ -219,7 +218,7 @@ public enum StakeMenu {
         undo: @escaping @MainActor () -> Void
     ) -> ToastView {
         Feedback.undoable(
-            stakedToastMessage(amount), symbol: PointsSymbol.glyph, from: source, above: floor,
+            stakedToastMessage(amount), symbol: LikesSymbol.glyph, from: source, above: floor,
             // Per surface too: each keeps its own tally, and a burst on the
             // same post from another surface is its own toast (the one undo
             // slot settles the other).

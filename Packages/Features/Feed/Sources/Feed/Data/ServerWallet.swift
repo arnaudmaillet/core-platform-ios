@@ -102,7 +102,7 @@ public actor ServerWallet: WalletServer {
         var request = Wallet_V1_ListWalletTransactionsRequest()
         request.accountID = try await account()
         request.currency = switch currency {
-        case .points?: .points
+        case .likes?: .points
         case .gems?: .gems
         case nil: .unspecified
         }
@@ -129,7 +129,7 @@ public actor ServerWallet: WalletServer {
         }
         return WalletTransaction(
             id: wire.transactionID,
-            currency: wire.currency == .gems ? .gems : .points,
+            currency: wire.currency == .gems ? .gems : .likes,
             delta: Int(clamping: wire.delta),
             balanceAfter: Int(clamping: wire.balanceAfter),
             kind: kind,
@@ -146,14 +146,14 @@ public actor ServerWallet: WalletServer {
     /// The wire's wallet, as the store keeps it.
     static func state(_ wallet: Wallet_V1_Wallet) -> WalletServerState {
         WalletServerState(
-            points: Int(clamping: wallet.points),
+            likes: Int(clamping: wallet.points),
             claimAvailable: wallet.claimAvailable,
             nextClaimAt: wallet.hasNextClaimAt ? wallet.nextClaimAt.date : nil,
             claimAmount: Int(wallet.claimAmount),
             claimedToday: Int(wallet.claimedToday),
             dailyClaimCap: Int(wallet.dailyClaimCap),
             streakDays: Int(wallet.streakDays),
-            pointsCap: Int(clamping: wallet.pointsCap)
+            likesCap: Int(clamping: wallet.pointsCap)
         )
     }
 }

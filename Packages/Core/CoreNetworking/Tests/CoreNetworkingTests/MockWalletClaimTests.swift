@@ -27,12 +27,12 @@ struct MockWalletClaimTests {
     private let account = MockAuthService.accountID
 
     private func make(
-        startingPoints: Int64 = 250, demoPositions: [String] = []
+        startingLikes: Int64 = 250, demoPositions: [String] = []
     ) -> (Wallet_V1_WalletServiceClient, MockWalletService) {
         let bff = MockBFF()
         let clock = clock
         let service = MockWalletService(
-            store: MockCounterStore(dataset: dataset), dataset: dataset, startingPoints: startingPoints,
+            store: MockCounterStore(dataset: dataset), dataset: dataset, startingLikes: startingLikes,
             demoPositions: demoPositions, now: { clock.now }
         )
         service.register(on: bff)
@@ -62,7 +62,7 @@ struct MockWalletClaimTests {
         #expect(opened.claimAvailable)
         #expect(opened.claimAmount == 25)
         #expect(!opened.hasNextClaimAt)
-        #expect(opened.pointsCap == MockWalletService.pointsCap)
+        #expect(opened.pointsCap == MockWalletService.likesCap)
     }
 
     /// A claim pays, then the next one waits an hour — in-band, with the
@@ -94,7 +94,7 @@ struct MockWalletClaimTests {
     /// At the points cap: BALANCE_FULL, and no countdown — only spending
     /// opens it again.
     @Test func aFullWalletAnswersBalanceFull() async throws {
-        let (client, _) = make(startingPoints: MockWalletService.pointsCap)
+        let (client, _) = make(startingLikes: MockWalletService.likesCap)
         let answer = try await claim(client, key: "claim-key-0005")
         #expect(answer.outcome == .balanceFull)
         #expect(!answer.wallet.claimAvailable)

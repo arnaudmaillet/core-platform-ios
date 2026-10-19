@@ -134,7 +134,7 @@ enum SnapActionColumn {
     /// two faces it wears (outline at rest, filled once staked), which the
     /// app's own symbols (#1128) do not draw at exactly one height.
     @MainActor static var heartHeight: CGFloat {
-        let faces = [PointsSymbol.outlineGlyph, PointsSymbol.glyph].compactMap {
+        let faces = [LikesSymbol.outlineGlyph, LikesSymbol.glyph].compactMap {
             UIImage.symbol(named: $0, configuration: heartConfiguration)?.size.height
         }
         return faces.max() ?? 15
@@ -165,10 +165,10 @@ enum SnapActionColumn {
         var config = base
         // ⚠️ THE HEART IS THE BUTTON'S OWN IMAGE in both faces (#1182): the
         // filled one carries its own colour (`.alwaysOriginal`). It used to be
-        // a `PointsHeartView` laid over the glass — it read as pasted on, and
+        // a `LikesHeartView` laid over the glass — it read as pasted on, and
         // smaller than the outline (the owner, on a device). The hearts are
         // solid since #1178, so no gradient needs the overlay.
-        config.image = PointsSymbol.likeImage(staked: staked, heartConfiguration)
+        config.image = LikesSymbol.likeImage(staked: staked, heartConfiguration)
         config.baseForegroundColor = ink
         config.cornerStyle = .capsule
         guard let count else {

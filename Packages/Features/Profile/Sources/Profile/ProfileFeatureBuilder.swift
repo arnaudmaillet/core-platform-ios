@@ -561,7 +561,7 @@ public struct ProfileFeatureBuilder: ProfileFeatureBuilding {
             let profiles = try? await switching?.accountProfiles()
             return DeletionChecklist(
                 profileHandles: profiles?.map(\.handle),
-                points: wallet?.balance,
+                likes: wallet?.balance,
                 gems: wallet?.snapshot().gems
             )
         }

@@ -80,7 +80,7 @@ final class WalletBalanceTile: UIView {
     private let noteLabel = UILabel()
 
     /// `icon` draws the token for an appearance: a baked coin is re-baked
-    /// when the appearance changes (`PointsSymbol.coinImage`).
+    /// when the appearance changes (`LikesSymbol.coinImage`).
     init(icon: @escaping (UITraitCollection) -> UIImage?, name: String, note: String) {
         super.init(frame: .zero)
         iconView.image = icon(traitCollection)
@@ -176,8 +176,8 @@ final class WalletBalanceTile: UIView {
 /// Bare, on the page: nothing here can be pressed, so nothing here wears a
 /// card. The balances get the height — they are what the sheet is for.
 final class WalletSummaryView: UIView {
-    let pointsTile = WalletBalanceTile(
-        icon: { PointsSymbol.coinImage(traits: $0) },
+    let likesTile = WalletBalanceTile(
+        icon: { LikesSymbol.coinImage(traits: $0) },
         name: "Likes", note: "To stake on posts"
     )
     let gemsTile = WalletBalanceTile(
@@ -198,7 +198,7 @@ final class WalletSummaryView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         let balancesDivider = Self.hairline()
-        let balances = UIStackView(arrangedSubviews: [pointsTile, balancesDivider, gemsTile])
+        let balances = UIStackView(arrangedSubviews: [likesTile, balancesDivider, gemsTile])
         balances.alignment = .center
         balances.spacing = Spacing.sm
 
@@ -234,7 +234,7 @@ final class WalletSummaryView: UIView {
         earnedValue.textColor = .label
         progressTrack.backgroundColor = .tertiarySystemFill
         progressTrack.layer.cornerRadius = 2
-        progressFill.backgroundColor = PointsSymbol.tint
+        progressFill.backgroundColor = LikesSymbol.tint
         progressFill.layer.cornerRadius = 2
         progressFill.translatesAutoresizingMaskIntoConstraints = false
         progressTrack.addSubview(progressFill)
@@ -262,7 +262,7 @@ final class WalletSummaryView: UIView {
             column.trailingAnchor.constraint(equalTo: trailingAnchor),
             column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm),
             // The two balances share the width evenly, the hairline between.
-            gemsTile.widthAnchor.constraint(equalTo: pointsTile.widthAnchor),
+            gemsTile.widthAnchor.constraint(equalTo: likesTile.widthAnchor),
             balancesDivider.heightAnchor.constraint(equalTo: balances.heightAnchor, multiplier: 0.7),
             rule.heightAnchor.constraint(equalToConstant: 0.5),
             streakDisc.widthAnchor.constraint(equalToConstant: 32),
@@ -293,17 +293,17 @@ final class WalletSummaryView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(with snapshot: WalletSnapshot) {
-        pointsTile.setValue(snapshot.balance)
+        likesTile.setValue(snapshot.balance)
         // The server's points cap (#901): how far the claim can fill the
         // balance, and — at it — that only spending opens the claim again.
-        if let cap = snapshot.pointsCap {
+        if let cap = snapshot.likesCap {
             if snapshot.balance >= cap {
-                pointsTile.setWarningNote("Full — stake to claim again")
+                likesTile.setWarningNote("Full — stake to claim again")
             } else {
-                pointsTile.setNote("Up to \(cap.formatted())")
+                likesTile.setNote("Up to \(cap.formatted())")
             }
         } else {
-            pointsTile.setNote("To stake on posts")
+            likesTile.setNote("To stake on posts")
         }
         gemsTile.setValue(snapshot.gems)
 
@@ -603,13 +603,13 @@ final class WalletStakeCell: UICollectionViewCell {
         let wordFont = UIFont.scaledSystemFont(ofSize: 15, weight: .medium, relativeTo: .subheadline)
         let detailFont = detailLabel.font ?? .scaledMonospacedDigitSystemFont(ofSize: 12, relativeTo: .caption1)
         let ago = walletAgoText(since: stake.settlesAt, now: now)
-        let staked = StakeMenu.points(stake.amount) + " staked"
+        let staked = StakeMenu.likes(stake.amount) + " staked"
         let result = NSMutableAttributedString()
         // "10 ♥ staked · 2d ago": the amount in the sheet's one order, its
         // glyph after it (`walletAmount`).
         func detail(_ tail: String) -> NSAttributedString {
             let line = NSMutableAttributedString(attributedString: walletAmount(
-                "\(stake.amount)", glyph: PointsSymbol.glyphImage(), font: detailFont, color: .secondaryLabel
+                "\(stake.amount)", glyph: LikesSymbol.glyphImage(), font: detailFont, color: .secondaryLabel
             ))
             line.append(NSAttributedString(string: tail, attributes: [
                 .font: detailFont, .foregroundColor: UIColor.secondaryLabel,
@@ -637,7 +637,7 @@ final class WalletStakeCell: UICollectionViewCell {
             detailLabel.attributedText = detail(" staked · \(ago)")
             spoken = [staked, ago, "result loading"]
         case nil:
-            result.append(walletAmount("\(stake.amount)", glyph: PointsSymbol.glyphImage(), font: resultFont))
+            result.append(walletAmount("\(stake.amount)", glyph: LikesSymbol.glyphImage(), font: resultFont))
             let remaining = walletRemainingText(until: stake.settlesAt, now: now)
             detailLabel.attributedText = NSAttributedString(string: "Settles in \(remaining)", attributes: [
                 .font: detailFont, .foregroundColor: UIColor.secondaryLabel,

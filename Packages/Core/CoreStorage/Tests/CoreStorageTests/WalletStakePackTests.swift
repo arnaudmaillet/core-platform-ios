@@ -20,13 +20,13 @@ struct WalletStakePackTests {
     /// 50 gems, which the seeded gems buy twice and the seeded points fire
     /// twice.
     @Test func thePackIsThreeShotsOfAHundredForFiftyGems() {
-        #expect(Pack.pointsPerShot == 100)
+        #expect(Pack.likesPerShot == 100)
         #expect(Pack.shots == 3)
         #expect(Pack.price == 50)
         #expect(WalletStore.Policy.seededGems >= 2 * Pack.price)
-        #expect(WalletStore.Policy.seededBalance / Pack.pointsPerShot == 2)
+        #expect(WalletStore.Policy.seededBalance / Pack.likesPerShot == 2)
         // A post holds two shots, never a third.
-        #expect(WalletStore.Policy.perTargetBoostCap / Pack.pointsPerShot == 2)
+        #expect(WalletStore.Policy.perTargetBoostCap / Pack.likesPerShot == 2)
     }
 
     @Test func aFreshWalletHasNoPack() {
@@ -51,7 +51,7 @@ struct WalletStakePackTests {
         // Points for every shot of two packs: the seeded 250 fire only two.
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
-        defaults.set(2 * Pack.shots * Pack.pointsPerShot, forKey: "wallet.balance")
+        defaults.set(2 * Pack.shots * Pack.likesPerShot, forKey: "wallet.balance")
         let store = WalletStore(defaults: defaults)
         store.buyStakePack()
         for _ in 0..<(Pack.shots - 1) {
@@ -82,7 +82,7 @@ struct WalletStakePackTests {
         #expect(store.snapshot().gems == Pack.price - 1)
     }
 
-    /// One shot: `pointsPerShot` points on the target, one shot off the pack.
+    /// One shot: `likesPerShot` likes on the target, one shot off the pack.
     @Test func aShotStakesItsPointsAndUsesOneShot() {
         let store = WalletStore(defaults: Self.defaults())
         store.buyStakePack()
@@ -91,21 +91,21 @@ struct WalletStakePackTests {
         let outcome = store.stake(.shot, on: "post-1")
 
         #expect(outcome == .boosted(
-            newBalance: balance - Pack.pointsPerShot, targetTotal: Pack.pointsPerShot, spent: Pack.pointsPerShot
+            newBalance: balance - Pack.likesPerShot, targetTotal: Pack.likesPerShot, spent: Pack.likesPerShot
         ))
         #expect(store.stakeShots == Pack.shots - 1)
-        #expect(store.boostTotal(forTarget: "post-1") == Pack.pointsPerShot)
+        #expect(store.boostTotal(forTarget: "post-1") == Pack.likesPerShot)
     }
 
-    /// Short of points: the stake is refused AND the shot is kept.
+    /// Short of likes: the stake is refused AND the shot is kept.
     @Test func aRefusedShotIsNotConsumed() {
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
-        defaults.set(Pack.pointsPerShot - 1, forKey: "wallet.balance")
+        defaults.set(Pack.likesPerShot - 1, forKey: "wallet.balance")
         let store = WalletStore(defaults: defaults)
         store.buyStakePack()
 
-        #expect(store.stake(.shot, on: "post-1") == .insufficientBalance(balance: Pack.pointsPerShot - 1))
+        #expect(store.stake(.shot, on: "post-1") == .insufficientBalance(balance: Pack.likesPerShot - 1))
         #expect(store.stakeShots == Pack.shots)
         #expect(store.boostTotal(forTarget: "post-1") == 0)
     }
@@ -140,15 +140,15 @@ struct WalletStakePackTests {
         #expect(store.boostTotal(forTarget: "post-1") == 200)
 
         // One point short of a whole shot is still short.
-        store.boost(targetID: "post-2", amount: WalletStore.Policy.perTargetBoostCap - Pack.pointsPerShot + 1)
-        #expect(store.stake(.shot, on: "post-2") == .shotDoesNotFit(room: Pack.pointsPerShot - 1))
+        store.boost(targetID: "post-2", amount: WalletStore.Policy.perTargetBoostCap - Pack.likesPerShot + 1)
+        #expect(store.stake(.shot, on: "post-2") == .shotDoesNotFit(room: Pack.likesPerShot - 1))
         #expect(store.stakeShots == Pack.shots - 2)
 
         // Exactly a shot's room: it lands, whole.
-        store.boost(targetID: "post-3", amount: WalletStore.Policy.perTargetBoostCap - Pack.pointsPerShot)
+        store.boost(targetID: "post-3", amount: WalletStore.Policy.perTargetBoostCap - Pack.likesPerShot)
         let landed = store.stake(.shot, on: "post-3")
         #expect(landed == .boosted(
-            newBalance: store.balance, targetTotal: WalletStore.Policy.perTargetBoostCap, spent: Pack.pointsPerShot
+            newBalance: store.balance, targetTotal: WalletStore.Policy.perTargetBoostCap, spent: Pack.likesPerShot
         ))
         #expect(store.stakeShots == Pack.shots - 3)
     }
@@ -157,12 +157,12 @@ struct WalletStakePackTests {
     @Test func aShotIsJudgedOnRoomBeforeBalance() {
         let defaults = Self.defaults()
         defaults.set(true, forKey: "wallet.seeded")
-        defaults.set(WalletStore.Policy.perTargetBoostCap - Pack.pointsPerShot + 1 + 10, forKey: "wallet.balance")
+        defaults.set(WalletStore.Policy.perTargetBoostCap - Pack.likesPerShot + 1 + 10, forKey: "wallet.balance")
         let store = WalletStore(defaults: defaults)
         store.buyStakePack()
-        store.boost(targetID: "post-1", amount: WalletStore.Policy.perTargetBoostCap - Pack.pointsPerShot + 1)
+        store.boost(targetID: "post-1", amount: WalletStore.Policy.perTargetBoostCap - Pack.likesPerShot + 1)
         // 10 points left, room for 99: the room is what refuses it.
-        #expect(store.stake(.shot, on: "post-1") == .shotDoesNotFit(room: Pack.pointsPerShot - 1))
+        #expect(store.stake(.shot, on: "post-1") == .shotDoesNotFit(room: Pack.likesPerShot - 1))
     }
 
     @Test func aShotWithoutAPackChangesNothing() {
@@ -177,7 +177,7 @@ struct WalletStakePackTests {
     @Test func aPlainStakeLeavesThePackAlone() {
         let store = WalletStore(defaults: Self.defaults())
         store.buyStakePack()
-        store.stake(.points(WalletStore.Policy.defaultStakeAmount), on: "post-1")
+        store.stake(.likes(WalletStore.Policy.defaultStakeAmount), on: "post-1")
         #expect(store.stakeShots == Pack.shots)
     }
 

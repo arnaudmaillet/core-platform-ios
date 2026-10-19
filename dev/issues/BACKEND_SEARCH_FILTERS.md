@@ -8,7 +8,7 @@ which the contract already carries.
 The iOS client has one global search screen, reached from the Explore and For You
 headers. The product asks it for a filter tray with three dimensions:
 
-1. **Order** — trending, publication date, most liked (points), most commented
+1. **Order** — trending, publication date, most liked (likes), most commented
 2. **Publication window** — last 24h, last week, last six months, all
 3. **Perimeter** — all, already seen, not seen, followed
 
@@ -37,7 +37,7 @@ viewer state**.
 |---|---|---|
 | Trending | `sort = POPULARITY` | Approximate. Popularity is a refreshed signal, not "trending now" — no time window, no velocity |
 | Publication date (order) | `sort = RECENCY` | **Works** |
-| Most liked / points | — | No like sort exists. POPULARITY is coarse and must not be labelled as a like count |
+| Most liked / likes | — | No like sort exists. POPULARITY is coarse and must not be labelled as a like count |
 | Most commented | — | Nothing in `search.v1`. Comment counts live in `counter.v1`, one batched read away — but only for hits that are POSTS, and only for the page the client holds |
 | Last 24h / week / six months | — | No date field on `SearchRequest`. Not client-derivable for people: `ProfileHit` has no timestamp. Derivable for posts *within one page* via `PostHit.created_at`, which filters the page rather than the query — a different and wrong answer |
 | Perimeter: all | default | Works by omission |

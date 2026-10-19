@@ -185,7 +185,7 @@ struct CardStakeTests {
         ))
         let loaded = staking.menuState(for: "post-1")
         #expect(loaded.shotsLeft == WalletStore.Policy.StakePack.shots)
-        #expect(loaded.shotAmount == WalletStore.Policy.StakePack.pointsPerShot)
+        #expect(loaded.shotAmount == WalletStore.Policy.StakePack.likesPerShot)
         #expect(loaded.canShoot)
     }
 
@@ -201,7 +201,7 @@ struct CardStakeTests {
 
         staking.stake(.shot, on: "post-1", cell: cell)
 
-        let shot = WalletStore.Policy.StakePack.pointsPerShot
+        let shot = WalletStore.Policy.StakePack.likesPerShot
         #expect(wallet.balance == before - shot)
         #expect(wallet.boostTotal(forTarget: "post-1") == shot)
         #expect(wallet.stakeShots == WalletStore.Policy.StakePack.shots - 1)

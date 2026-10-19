@@ -84,7 +84,7 @@ final class NewPostViewController: UIViewController {
         case caption
         case aiDisclosure
         case comments
-        case points
+        case likes
         case reposts
         case bookmarks
         case downloads
@@ -125,7 +125,7 @@ final class NewPostViewController: UIViewController {
         // is hidden, yet every switch sits dark. Stated positively, the resting
         // position IS the behaviour, and a viewer skimming the section sees the
         // post's actual state rather than a list of things not done.
-        var showsPoints = true
+        var showsLikes = true
         var showsReposts = true
         var showsBookmarks = true
         var allowsDownloads = true
@@ -624,7 +624,7 @@ final class NewPostViewController: UIViewController {
             case .title: view.dequeueConfiguredReusableCell(using: title, for: indexPath, item: row)
             case .caption: view.dequeueConfiguredReusableCell(using: caption, for: indexPath, item: row)
             case .comments: view.dequeueConfiguredReusableCell(using: comments, for: indexPath, item: row)
-            case .aiDisclosure, .points, .reposts, .bookmarks, .downloads, .saveToPhotos:
+            case .aiDisclosure, .likes, .reposts, .bookmarks, .downloads, .saveToPhotos:
                 view.dequeueConfiguredReusableCell(using: toggle, for: indexPath, item: row)
             }
         }
@@ -712,7 +712,7 @@ final class NewPostViewController: UIViewController {
         snapshot.appendSections(Section.allCases)
         snapshot.appendItems([.media, .cover], toSection: .media)
         snapshot.appendItems([.title, .caption], toSection: .text)
-        snapshot.appendItems([.comments, .points, .reposts, .bookmarks], toSection: .engagement)
+        snapshot.appendItems([.comments, .likes, .reposts, .bookmarks], toSection: .engagement)
         snapshot.appendItems([.downloads], toSection: .sharing)
         snapshot.appendItems([.aiDisclosure], toSection: .disclosure)
         snapshot.appendItems([.saveToPhotos], toSection: .device)
@@ -1085,8 +1085,8 @@ final class NewPostViewController: UIViewController {
         switch row {
         case .aiDisclosure:
             ("Disclose as AI-generated", "Tell viewers this post was made with AI.", settings.disclosesAI)
-        case .points:
-            ("Show likes", "Anyone can see how many likes this post has.", settings.showsPoints)
+        case .likes:
+            ("Show likes", "Anyone can see how many likes this post has.", settings.showsLikes)
         case .reposts:
             ("Show reposts", "Anyone can see how often it has been reposted.", settings.showsReposts)
         case .bookmarks:
@@ -1110,7 +1110,7 @@ final class NewPostViewController: UIViewController {
     private func setToggle(_ isOn: Bool, for row: Row) {
         switch row {
         case .aiDisclosure: settings.disclosesAI = isOn
-        case .points: settings.showsPoints = isOn
+        case .likes: settings.showsLikes = isOn
         case .reposts: settings.showsReposts = isOn
         case .bookmarks: settings.showsBookmarks = isOn
         case .downloads: settings.allowsDownloads = isOn

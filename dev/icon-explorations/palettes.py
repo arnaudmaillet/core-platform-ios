@@ -13,7 +13,7 @@ PALETTES = [
     ("Solar",    "orange + blue, warm and energetic", "#FF6A1A", "#D9430B", "#2E7BFF", "#1A0E07", "#FFF6EF", None),
     ("Midnight", "deep navy + mint, a dark icon that glows", "#151838", "#0A0C22", "#3DF5A6", "#07081A", "#F4F5FA", "#3DF5A6"),
 ]
-POINTS, GEMS = "#FF3B30", "#00C0E8"  # PointsSymbol.tint (.systemRed) and GemSymbol.tint (.systemCyan), for clash checking
+POINTS, GEMS = "#FF3B30", "#00C0E8"  # LikesSymbol.tint (.systemRed) and GemSymbol.tint (.systemCyan), for clash checking
 
 def srgb(hex_):
     r, g, b = (int(hex_[i:i + 2], 16) / 255 for i in (1, 3, 5))

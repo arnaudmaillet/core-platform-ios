@@ -34,7 +34,7 @@ struct SnapBoostControllerTests {
     @Test func anOptimisticStakeDebitsAtOnceAndOpensTheTally() {
         let (boost, wallet, _) = Self.member()
         let before = wallet.balance
-        let verdict = boost.stake(.points(1), on: first)
+        let verdict = boost.stake(.likes(1), on: first)
         #expect(verdict == .boosted(targetTotal: 1, spent: 1))
         #expect(wallet.balance == before - 1, "the debit lands before any feedback")
         #expect(boost.sessionID == first)
@@ -44,16 +44,16 @@ struct SnapBoostControllerTests {
 
     @Test func stakesOnTheSamePostGrowTheTally() {
         let (boost, _, _) = Self.member()
-        _ = boost.stake(.points(1), on: first)
-        let verdict = boost.stake(.points(4), on: first)
+        _ = boost.stake(.likes(1), on: first)
+        let verdict = boost.stake(.likes(4), on: first)
         #expect(verdict == .boosted(targetTotal: 5, spent: 4))
         #expect(boost.undoable(on: first) == 5)
     }
 
     @Test func aStakeOnAnotherPostRestartsTheTallyOnIt() {
         let (boost, _, _) = Self.member()
-        _ = boost.stake(.points(3), on: first)
-        _ = boost.stake(.points(2), on: second)
+        _ = boost.stake(.likes(3), on: first)
+        _ = boost.stake(.likes(2), on: second)
         #expect(boost.sessionID == second)
         #expect(boost.undoable(on: second) == 2)
         #expect(boost.undoable(on: first) == 0)
@@ -62,8 +62,8 @@ struct SnapBoostControllerTests {
     @Test func aNearCapStakeIsClampedAndTheTallyHoldsWhatWasSpent() {
         let (boost, _, _) = Self.member()
         let cap = WalletStore.Policy.perTargetBoostCap
-        _ = boost.stake(.points(cap - 5), on: first)
-        let verdict = boost.stake(.points(10), on: first)
+        _ = boost.stake(.likes(cap - 5), on: first)
+        let verdict = boost.stake(.likes(10), on: first)
         #expect(verdict == .boosted(targetTotal: cap, spent: 5), "the clamp, not the request")
         #expect(boost.undoable(on: first) == cap)
     }
@@ -71,9 +71,9 @@ struct SnapBoostControllerTests {
     @Test func theLimitReachedIsARefusalThatLeavesTheTally() {
         let (boost, wallet, _) = Self.member()
         let cap = WalletStore.Policy.perTargetBoostCap
-        _ = boost.stake(.points(cap), on: first)
+        _ = boost.stake(.likes(cap), on: first)
         let balance = wallet.balance
-        let verdict = boost.stake(.points(1), on: first)
+        let verdict = boost.stake(.likes(1), on: first)
         #expect(verdict == .refused(.targetCapReached(targetTotal: cap)))
         #expect(wallet.balance == balance, "a refusal moves nothing")
         #expect(boost.undoable(on: first) == cap)
@@ -82,9 +82,9 @@ struct SnapBoostControllerTests {
     @Test func anEmptyBalanceIsRefusedWithItsReason() {
         let (boost, wallet, _) = Self.member()
         // The seeded balance fits on one post exactly: spend it there.
-        _ = boost.stake(.points(wallet.balance), on: first)
+        _ = boost.stake(.likes(wallet.balance), on: first)
         #expect(wallet.balance == 0)
-        let verdict = boost.stake(.points(1), on: second)
+        let verdict = boost.stake(.likes(1), on: second)
         #expect(verdict == .refused(.insufficientBalance(balance: 0)))
         #expect(boost.sessionID == first, "a refused spend does not move the tally")
     }
@@ -97,7 +97,7 @@ struct SnapBoostControllerTests {
 
     @Test func withoutAWalletASpendIsDropped() {
         let boost = SnapBoostController(wallet: nil)
-        #expect(boost.stake(.points(1), on: first) == nil)
+        #expect(boost.stake(.likes(1), on: first) == nil)
         #expect(boost.undo(on: first) == nil)
         #expect(boost.anchorContext(for: first) == nil)
         #expect(boost.boostTotal(on: first) == nil)
@@ -110,8 +110,8 @@ struct SnapBoostControllerTests {
     @Test func undoGivesTheWholeSessionSpendBack() {
         let (boost, wallet, _) = Self.member()
         let before = wallet.balance
-        _ = boost.stake(.points(2), on: first)
-        _ = boost.stake(.points(3), on: first)
+        _ = boost.stake(.likes(2), on: first)
+        _ = boost.stake(.likes(3), on: first)
         let refund = boost.undo(on: first)
         #expect(refund == Refund(refunded: 5, targetTotal: 0, newBalance: before))
         #expect(wallet.balance == before)
@@ -121,7 +121,7 @@ struct SnapBoostControllerTests {
 
     @Test func undoOnAPostTheTallyDoesNotNameDoesNothing() {
         let (boost, wallet, _) = Self.member()
-        _ = boost.stake(.points(2), on: first)
+        _ = boost.stake(.likes(2), on: first)
         let balance = wallet.balance
         #expect(boost.undo(on: second) == nil)
         #expect(wallet.balance == balance)
@@ -132,7 +132,7 @@ struct SnapBoostControllerTests {
 
     @Test func thePageResigningFinalizesItsTallyAndCommitsItsTaps() {
         let (boost, wallet, outbox) = Self.member()
-        _ = boost.stake(.points(2), on: first)
+        _ = boost.stake(.likes(2), on: first)
         #expect(outbox.batches.map(\.isSealed) == [false])
         boost.pageResigned(first)
         #expect(boost.sessionID == nil)
@@ -144,7 +144,7 @@ struct SnapBoostControllerTests {
 
     @Test func anotherPageResigningLeavesTheTally() {
         let (boost, _, outbox) = Self.member()
-        _ = boost.stake(.points(2), on: first)
+        _ = boost.stake(.likes(2), on: first)
         boost.pageResigned(second)
         #expect(boost.undoable(on: first) == 2)
         #expect(outbox.batches.map(\.isSealed) == [false])
@@ -152,7 +152,7 @@ struct SnapBoostControllerTests {
 
     @Test func leavingTheScreenFinalizesTheTally() {
         let (boost, _, outbox) = Self.member()
-        _ = boost.stake(.points(1), on: first)
+        _ = boost.stake(.likes(1), on: first)
         boost.finalize()
         #expect(boost.sessionID == nil)
         #expect(outbox.batches.map(\.isSealed) == [true])
@@ -164,7 +164,7 @@ struct SnapBoostControllerTests {
     @Test func leavingWithTheToastUpLeavesItsTapsToTheToast() {
         let (boost, wallet, outbox) = Self.member()
         let before = wallet.balance
-        _ = boost.stake(.points(2), on: first)
+        _ = boost.stake(.likes(2), on: first)
         boost.toastHolds = first
         boost.finalize()
         #expect(boost.sessionID == nil)
@@ -179,7 +179,7 @@ struct SnapBoostControllerTests {
 
     @Test func theAnchorContextIsTheWalletsAnswerAndTheTally() {
         let (boost, wallet, _) = Self.member()
-        _ = boost.stake(.points(3), on: first)
+        _ = boost.stake(.likes(3), on: first)
         #expect(boost.anchorContext(for: first) == AnchorContext(
             balance: wallet.stakeableBalance, undoable: 3, stakeShots: 0
         ))

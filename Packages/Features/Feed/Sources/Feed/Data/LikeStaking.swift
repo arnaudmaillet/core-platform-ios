@@ -102,7 +102,7 @@ public actor WalletLikeStaking: LikeStaking {
         if batch.usesStakeShot {
             request.useStakeShot = true
         } else {
-            request.points = Int32(clamping: batch.points)
+            request.points = Int32(clamping: batch.likes)
         }
         request.idempotencyKey = batch.idempotencyKey
         request.firstTapAt = Google_Protobuf_Timestamp(date: batch.firstTapAt)
@@ -298,6 +298,6 @@ public final class LikeOutboxSender {
     private func settle(_ batch: LikeOutbox.Batch, with answer: LikeStakeAnswer) {
         guard case .post(let postID) = batch.target else { return }
         let spent = answer.outcome == .staked ? answer.spent : 0
-        wallet.settleCommittedStake(targetID: postID, asked: batch.points, spent: spent)
+        wallet.settleCommittedStake(targetID: postID, asked: batch.likes, spent: spent)
     }
 }

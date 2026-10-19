@@ -1149,7 +1149,7 @@ final class SnapFeedViewController: UIViewController {
                 }
                 let cell = self.collectionView.visibleCells
                     .compactMap { $0 as? SnapFeedCell }.first
-                let spend: WalletStakeSpend = arguments.contains("-wallet-demo-shot") ? .shot : .points(amount)
+                let spend: WalletStakeSpend = arguments.contains("-wallet-demo-shot") ? .shot : .likes(amount)
                 self.performBoost(on: self.orderedIDs[index], spend: spend, feedbackCell: cell)
             }
         }

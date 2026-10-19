@@ -515,11 +515,11 @@ final class CommentsInputBar: UIView {
         // spends the default denomination, long-press opens the amount menu
         // (the rail anchor's exact contract — one post, two surfaces, one
         // behavior).
-        boostButton.configuration?.image = PointsSymbol.glyphImage(Self.glyphConfiguration)
+        boostButton.configuration?.image = LikesSymbol.glyphImage(Self.glyphConfiguration)
         boostButton.configuration?.cornerStyle = .capsule
         boostButton.accessibilityLabel = "Boost post"
         boostButton.addAction(
-            UIAction { [weak self] _ in self?.onBoost?(.points(WalletStore.Policy.defaultStakeAmount)) },
+            UIAction { [weak self] _ in self?.onBoost?(.likes(WalletStore.Policy.defaultStakeAmount)) },
             for: .primaryActionTriggered
         )
         // DEFERRED and uncached, like the rail anchor's: built at present
@@ -1459,7 +1459,7 @@ final class CommentsInputBar: UIView {
             // Fixed size (#482): the count replaces the glyph inside the
             // 36 pt circle, which holds one or the other at any text size.
             title.font = .monospacedDigitSystemFont(ofSize: 13, weight: .bold)
-            title.foregroundColor = PointsSymbol.tint
+            title.foregroundColor = LikesSymbol.tint
             boostButton.configuration?.attributedTitle = title
             boostButton.configuration?.image = nil
             // `.glass()`'s default content insets leave a 38pt circle ~10pt
@@ -1469,7 +1469,7 @@ final class CommentsInputBar: UIView {
             boostButton.configuration?.contentInsets = .zero
         } else {
             boostButton.configuration?.attributedTitle = nil
-            boostButton.configuration?.image = PointsSymbol.glyphImage(Self.glyphConfiguration)
+            boostButton.configuration?.image = LikesSymbol.glyphImage(Self.glyphConfiguration)
         }
         boostButton.accessibilityValue = total > 0 ? "\(total) likes staked" : nil
     }
@@ -1520,9 +1520,9 @@ final class CommentsInputBar: UIView {
                 perTargetCap: WalletStore.Policy.perTargetBoostCap,
                 tapAmount: WalletStore.Policy.defaultStakeAmount,
                 shotsLeft: boostStakeShots,
-                shotAmount: WalletStore.Policy.StakePack.pointsPerShot
+                shotAmount: WalletStore.Policy.StakePack.likesPerShot
             ),
-            stake: { [weak self] amount in self?.onBoost?(.points(amount)) },
+            stake: { [weak self] amount in self?.onBoost?(.likes(amount)) },
             shoot: { [weak self] in self?.onBoost?(.shot) },
             undo: { [weak self] in self?.onBoostUndo?() },
             // The empty pack's row opens the Shop, found up the bar's
@@ -1580,7 +1580,7 @@ final class CommentsInputBar: UIView {
         label.font = .scaledMonospacedDigitSystemFont(
             ofSize: 17, weight: .heavy, relativeTo: .headline, maximumPointSize: 24
         )
-        label.textColor = PointsSymbol.tint
+        label.textColor = LikesSymbol.tint
         label.layer.shadowColor = UIColor.black.cgColor
         label.layer.shadowOpacity = 0.5
         label.layer.shadowRadius = 3

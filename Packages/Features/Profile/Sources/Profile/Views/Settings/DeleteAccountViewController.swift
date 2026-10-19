@@ -37,7 +37,7 @@ final class DeleteAccountViewController: UIViewController {
             profilesLine(checklist?.profileHandles),
             "Posts, comments and messages",
             "Followers, following and saved posts",
-            walletLine(points: checklist?.points, gems: checklist?.gems),
+            walletLine(likes: checklist?.likes, gems: checklist?.gems),
         ]
     }
 
@@ -50,9 +50,9 @@ final class DeleteAccountViewController: UIViewController {
         return "All \(named.count) profiles on this account: \(shown)\(more)"
     }
 
-    static func walletLine(points: Int?, gems: Int?) -> String {
+    static func walletLine(likes: Int?, gems: Int?) -> String {
         let parts = [
-            points.flatMap { $0 > 0 ? count($0, "like") : nil },
+            likes.flatMap { $0 > 0 ? count($0, "like") : nil },
             gems.flatMap { $0 > 0 ? count($0, "gem") : nil },
         ].compactMap { $0 }
         guard !parts.isEmpty else { return "Likes and gems in your wallet" }

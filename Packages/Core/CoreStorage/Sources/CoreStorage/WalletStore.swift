@@ -4,7 +4,7 @@ import Foundation
 /// at a single instant so two labels on one screen can never disagree about
 /// what time it is.
 public struct WalletSnapshot: Equatable, Sendable {
-    /// Spendable points, never negative.
+    /// Spendable likes, never negative.
     public let balance: Int
     /// Whether tapping Claim right now would pay out.
     public let claimAvailable: Bool
@@ -13,7 +13,7 @@ public struct WalletSnapshot: Equatable, Sendable {
     public let nextClaimAt: Date?
     /// What the NEXT claim pays (streak multiplier and daily cap applied).
     public let claimAmount: Int
-    /// Points earned via claims in the current UTC day.
+    /// Likes earned via claims in the current UTC day.
     public let claimedToday: Int
     /// The day's earning ceiling — policy, surfaced so the UI never hardcodes it.
     public let dailyClaimCap: Int
@@ -28,37 +28,46 @@ public struct WalletSnapshot: Equatable, Sendable {
     public let stakeShots: Int
     /// The balance a claim never takes past — the server's (`Wallet.points_cap`,
     /// #1098); nil while the wallet is the local mock's.
-    public var pointsCap: Int? = nil
+    public var likesCap: Int? = nil
 }
 
 /// The viewer's wallet as the server holds it (wallet.v1 `GetWallet`, and the
-/// `Wallet` every `ClaimReward` answers with, #1098): the points and the
+/// `Wallet` every `ClaimReward` answers with, #1098): the likes and the
 /// hourly claim. The server is the clock — availability and the countdown
 /// are its answer, never decided on the device.
 public struct WalletServerState: Codable, Equatable, Sendable {
-    public var points: Int
+    public var likes: Int
     public var claimAvailable: Bool
     /// When the next claim opens; nil while available, and nil at the
-    /// points cap, where no wait opens it — only spending does.
+    /// likes cap, where no wait opens it — only spending does.
     public var nextClaimAt: Date?
     public var claimAmount: Int
     public var claimedToday: Int
     public var dailyClaimCap: Int
     public var streakDays: Int
-    public var pointsCap: Int
+    public var likesCap: Int
+
+    /// ⚠️ THE STORED KEYS ARE TODAY'S (#1397): the last wallet the server
+    /// sent is kept as JSON and read with `try?`; a renamed key would drop
+    /// it on the update.
+    enum CodingKeys: String, CodingKey {
+        case likes = "points"
+        case claimAvailable, nextClaimAt, claimAmount, claimedToday, dailyClaimCap, streakDays
+        case likesCap = "pointsCap"
+    }
 
     public init(
-        points: Int, claimAvailable: Bool, nextClaimAt: Date?, claimAmount: Int,
-        claimedToday: Int, dailyClaimCap: Int, streakDays: Int, pointsCap: Int
+        likes: Int, claimAvailable: Bool, nextClaimAt: Date?, claimAmount: Int,
+        claimedToday: Int, dailyClaimCap: Int, streakDays: Int, likesCap: Int
     ) {
-        self.points = points
+        self.likes = likes
         self.claimAvailable = claimAvailable
         self.nextClaimAt = nextClaimAt
         self.claimAmount = claimAmount
         self.claimedToday = claimedToday
         self.dailyClaimCap = dailyClaimCap
         self.streakDays = streakDays
-        self.pointsCap = pointsCap
+        self.likesCap = likesCap
     }
 }
 
@@ -90,7 +99,7 @@ public extension WalletServer {
 
 /// One movement of the wallet (#400): a claim, a stake, a gift…
 public struct WalletTransaction: Equatable, Sendable, Identifiable, Hashable {
-    public enum Currency: Equatable, Sendable, Hashable { case points, gems }
+    public enum Currency: Equatable, Sendable, Hashable { case likes, gems }
     public enum Kind: Equatable, Sendable, Hashable {
         case claim, starterGift, stakePack, countryUnlock, stake, welcomeGift
         /// A kind this build does not know — shown plainly, never hidden.
@@ -131,7 +140,7 @@ public struct WalletTransactionPage: Equatable, Sendable {
     }
 }
 
-/// A stake of points (the charter's currency A) on a post or comment, and
+/// A stake of likes (the charter's currency A) on a post or comment, and
 /// what it came to.
 ///
 /// ⚠️ **SETTLEMENT IS DEFERRED, BY DESIGN** (charter V5.3 §33): a stake is
@@ -157,7 +166,7 @@ public struct WalletStake: Equatable, Sendable, Identifiable {
 
     /// The post (or comment) staked on.
     public let targetID: String
-    /// Points committed, all stakes on this target together.
+    /// Likes committed, all stakes on this target together.
     public let amount: Int
     /// When the first of them was placed.
     public let stakedAt: Date
@@ -205,8 +214,8 @@ public enum WalletClaimOutcome: Equatable, Sendable {
     case claimed(awarded: Int)
     case tooEarly(nextClaimAt: Date)
     case dailyCapReached
-    /// The balance is at the points cap (#901): nothing was credited, and
-    /// only spending points opens the claim again.
+    /// The balance is at the likes cap (#901): nothing was credited, and
+    /// only spending likes opens the claim again.
     case balanceFull
     /// The server could not be asked (offline, or it failed): nothing
     /// changed, and the same key goes again with the retry.
@@ -219,14 +228,14 @@ public enum WalletGemSpend: Equatable, Sendable {
     case insufficient(gems: Int)
 }
 
-/// What one stake asks the wallet for: a plain amount of points (a tap's
+/// What one stake asks the wallet for: a plain amount of likes (a tap's
 /// default), or one SHOT of the ×100 cartridge pack — `Policy.StakePack.
-/// pointsPerShot` points in one gesture, and one shot off the pack.
+/// likesPerShot` likes in one gesture, and one shot off the pack.
 ///
-/// Either way the points are the viewer's own: a shot is a CONVENIENCE bought
-/// with gems (one tap instead of a hundred), never points (charter V5.3 §34, B ─X→ A).
+/// Either way the likes are the viewer's own: a shot is a CONVENIENCE bought
+/// with gems (one tap instead of a hundred), never likes (charter V5.3 §34, B ─X→ A).
 public enum WalletStakeSpend: Equatable, Sendable {
-    case points(Int)
+    case likes(Int)
     case shot
 }
 
@@ -254,9 +263,9 @@ public enum WalletBoostOutcome: Equatable, Sendable {
     /// A shot was asked for with no pack loaded; nothing changed.
     case noShotsLeft
     /// A shot was asked for on a post with room for only `room` more of the
-    /// viewer's points — fewer than a shot's whole amount. A shot is never
-    /// clamped (it always means `Policy.StakePack.pointsPerShot`), so it is
-    /// refused and kept; nothing changed. The menu's "Only N points more fit
+    /// viewer's likes — fewer than a shot's whole amount. A shot is never
+    /// clamped (it always means `Policy.StakePack.likesPerShot`), so it is
+    /// refused and kept; nothing changed. The menu's "Only N likes more fit
     /// on this post".
     case shotDoesNotFit(room: Int)
 }
@@ -298,34 +307,34 @@ public final class WalletStore: @unchecked Sendable {
         /// rail's stake button, on the comments composer's, on a card's like
         /// chip, and the long-press menu's only plain amount. The ONE place
         /// the default lives (1 point, the user's call on 2026-10-02 — it was
-        /// 10, with a Max / 100 menu, until staking several points in one
+        /// 10, with a Max / 100 menu, until staking several likes in one
         /// gesture became the cartridge pack's job — `StakePack`).
         public static let defaultStakeAmount = 1
         /// The ×100 cartridge pack, the shop's boost: a pack of SHOTS, each
-        /// staking `pointsPerShot` of the viewer's OWN points in one tap.
+        /// staking `likesPerShot` of the viewer's OWN likes in one tap.
         /// Bought with gems; shots never expire; packs don't stack (a new one
         /// only once the current one is empty). The ONE place its numbers
         /// live: the menus, the shop and the tests all read them here.
         ///
         /// The price, against the mock economy's gem earn rate (the rationale
         /// the ×10 pack was priced on, 2026-10-02): a settled stake earns gems
-        /// about 55% of the time, 15–49% of the points staked
-        /// (`mockOutcome`) — roughly 18 gems back per 100 points staked, so
+        /// about 55% of the time, 15–49% of the likes staked
+        /// (`mockOutcome`) — roughly 18 gems back per 100 likes staked, so
         /// about 18 per shot. Priced near what its own stakes earn back, ten
         /// ×100 shots would cost ~180 gems: more than the seeded 100, and
         /// six times a mid-tier country. So the pack is SMALLER, not dearer
-        /// per point: 3 shots move 300 points (~53 gems back) for 50 gems —
+        /// per point: 3 shots move 300 likes (~53 gems back) for 50 gems —
         /// an average curator about breaks even, a good one comes out ahead,
         /// it costs what a top-10 country costs (`CountryStanding.price`:
         /// 15 / 30 / 50), and `seededGems` (100) buys two. Three shots also
-        /// fit the points a viewer actually holds: the seeded 250 fires two,
+        /// fit the likes a viewer actually holds: the seeded 250 fires two,
         /// a day's claims (`dailyClaimCap`, 200) the third. A post holds two
         /// shots at most (`perTargetBoostCap`, 250).
         public enum StakePack {
             /// Shots in one pack.
             public static let shots = 3
-            /// Points ONE shot stakes — named for its number ("×100").
-            public static let pointsPerShot = 100
+            /// Likes ONE shot stakes — named for its number ("×100").
+            public static let likesPerShot = 100
             /// What a pack costs, in gems.
             public static let price = 50
 
@@ -353,7 +362,7 @@ public final class WalletStore: @unchecked Sendable {
             /// The pack wallet.v1 sells today, and the one an older call buys.
             public static var standard: Tier { tiers[0] }
         }
-        /// The most of THIS viewer's points one post (or comment) can hold
+        /// The most of THIS viewer's likes one post (or comment) can hold
         /// — spends past it are clamped to the remainder, and a full target
         /// refuses outright.
         public static let perTargetBoostCap = 250
@@ -373,7 +382,7 @@ public final class WalletStore: @unchecked Sendable {
 
         /// A stake's settled outcome, MOCK: stable per target and amount, so
         /// the same stake always settles the same way. About 55% earn gems —
-        /// between 15% and 49% of the points staked, at least 1 — and the rest
+        /// between 15% and 49% of the likes staked, at least 1 — and the rest
         /// earn nothing, which the charter insists is a normal outcome.
         public static func mockOutcome(targetID: String, amount: Int) -> WalletStake.Outcome {
             // FNV-1a: `hashValue` is seeded per process and would re-roll the
@@ -611,7 +620,7 @@ public final class WalletStore: @unchecked Sendable {
         }
     }
 
-    /// Total points ever boosted into one post or comment, this device.
+    /// Total likes ever boosted into one post or comment, this device.
     public func boostTotal(forTarget targetID: String) -> Int {
         lock.withLock { boostTotalsLocked()[targetID] ?? 0 }
     }
@@ -638,7 +647,7 @@ public final class WalletStore: @unchecked Sendable {
     /// Mock mode's demo ledger: stakes on real posts of the mock corpus, some
     /// still active and some settled, so the wallet's stake list has something
     /// to show on a fresh install. Once per install; the balance is untouched
-    /// (these points were "spent" before the install began).
+    /// (these likes were "spent" before the install began).
     ///
     /// ⚠️ The composition root calls it in MOCK mode only, with ids it knows
     /// exist: stakes on posts no backend can resolve would be rows about
@@ -703,10 +712,10 @@ public final class WalletStore: @unchecked Sendable {
         guard case .member(let account, _) = owner else { return false }
         let pending = (likeOutbox?.batches ?? [])
             .filter { ($0.accountID ?? account) == account }
-            .reduce(0) { $0 + $1.points }
+            .reduce(0) { $0 + $1.likes }
         let applied: Bool = lock.withLock {
             guard scope.owner == owner else { return false }
-            defaults.set(max(0, state.points - pending), forKey: k(Key.balance))
+            defaults.set(max(0, state.likes - pending), forKey: k(Key.balance))
             if let data = try? JSONEncoder().encode(state) {
                 defaults.set(data, forKey: k(Key.serverState))
             }
@@ -829,23 +838,23 @@ public final class WalletStore: @unchecked Sendable {
     /// no refunds.
     @discardableResult
     public func boost(targetID: String, amount: Int) -> WalletBoostOutcome {
-        stake(.points(amount), on: targetID)
+        stake(.likes(amount), on: targetID)
     }
 
     /// One stake gesture: a plain amount, or one shot of the ×100 cartridge
-    /// pack. A shot stakes EXACTLY `Policy.StakePack.pointsPerShot` of the
-    /// viewer's own points, or nothing: where a plain amount is clamped to
+    /// pack. A shot stakes EXACTLY `Policy.StakePack.likesPerShot` of the
+    /// viewer's own likes, or nothing: where a plain amount is clamped to
     /// the cap's remainder, a shot that would not fit whole is refused
     /// (`shotDoesNotFit`, or `targetCapReached` on a full post) — the same
     /// verdicts, in the same order, as the menu (`StakeMenu.State.canShoot`):
     /// room first, then the balance. The shot is consumed ONLY when the stake
-    /// lands; a refused one keeps it. Atomic: the points and the shot move
+    /// lands; a refused one keeps it. Atomic: the likes and the shot move
     /// under one lock, or neither does.
     @discardableResult
     public func stake(_ spend: WalletStakeSpend, on targetID: String) -> WalletBoostOutcome {
         let outcome: WalletBoostOutcome = lock.withLock {
             switch spend {
-            case .points(let amount):
+            case .likes(let amount):
                 precondition(amount > 0, "a boost spends something")
                 return boostLocked(targetID: targetID, amount: amount)
             case .shot:
@@ -854,8 +863,8 @@ public final class WalletStore: @unchecked Sendable {
                 let held = boostTotalsLocked()[targetID] ?? 0
                 let room = Policy.perTargetBoostCap - held
                 guard room > 0 else { return .targetCapReached(targetTotal: held) }
-                guard room >= Policy.StakePack.pointsPerShot else { return .shotDoesNotFit(room: room) }
-                let outcome = boostLocked(targetID: targetID, amount: Policy.StakePack.pointsPerShot)
+                guard room >= Policy.StakePack.likesPerShot else { return .shotDoesNotFit(room: room) }
+                let outcome = boostLocked(targetID: targetID, amount: Policy.StakePack.likesPerShot)
                 if case .boosted = outcome {
                     defaults.set(shots - 1, forKey: k(Key.stakeShots))
                 }
@@ -865,8 +874,8 @@ public final class WalletStore: @unchecked Sendable {
         if case .boosted(_, _, let spent) = outcome {
             if case .member = scope.owner, let likeOutbox {
                 switch spend {
-                case .points: likeOutbox.record(points: spent, on: .post(targetID))
-                case .shot: likeOutbox.recordShot(on: .post(targetID), points: spent)
+                case .likes: likeOutbox.record(likes: spent, on: .post(targetID))
+                case .shot: likeOutbox.recordShot(on: .post(targetID), likes: spent)
                 }
             }
             postDidChange()
@@ -928,7 +937,7 @@ public final class WalletStore: @unchecked Sendable {
         let targetTotal = held + spend
         totals[targetID] = targetTotal
         defaults.set(totals, forKey: k(Key.boostTotals))
-        // The stake's clock starts with its FIRST points; adding to it
+        // The stake's clock starts with its FIRST likes; adding to it
         // does not restart it.
         var dates = defaults.dictionary(forKey: k(Key.stakedAt)) as? [String: Double] ?? [:]
         if dates[targetID] == nil {
@@ -943,7 +952,7 @@ public final class WalletStore: @unchecked Sendable {
     /// (`BACKEND_VIRTUAL_CURRENCY.md` §3), and the UI enforces the actual
     /// rule — undo exists only while the boosted post is still the active
     /// page. The store just does the arithmetic it is asked to, clamped so
-    /// a stale caller can never mint points: the refund never exceeds what
+    /// a stale caller can never mint likes: the refund never exceeds what
     /// this target actually holds.
     ///
     /// Returns the post-refund balance and target total, or nil when the
@@ -953,7 +962,7 @@ public final class WalletStore: @unchecked Sendable {
         var amount = amount
         // With an outbox, only taps not yet committed come back (#676).
         if let likeOutbox, case .member = scope.owner {
-            amount = likeOutbox.cancel(points: amount, on: .post(targetID))
+            amount = likeOutbox.cancel(likes: amount, on: .post(targetID))
             guard amount > 0 else { return nil }
         }
         let result = refund(targetID: targetID, amount: amount)
@@ -1004,7 +1013,7 @@ public final class WalletStore: @unchecked Sendable {
                 streakDays: server.streakDays,
                 gems: gemsLocked(at: moment),
                 stakeShots: defaults.integer(forKey: k(Key.stakeShots)),
-                pointsCap: server.pointsCap
+                likesCap: server.likesCap
             )
         }
         let today = dayKey(for: moment)

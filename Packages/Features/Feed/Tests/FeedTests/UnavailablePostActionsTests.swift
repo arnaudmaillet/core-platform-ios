@@ -237,7 +237,7 @@ struct UnavailablePostActionsTests {
         screen.loadViewIfNeeded()
         #expect(await settle { readsUnavailable(screen) })
 
-        screen.debugBoost(.points(5))
+        screen.debugBoost(.likes(5))
         #expect(wallet.balance == before)
         #expect(wallet.boostTotal(forTarget: "post-1") == 0)
         withExtendedLifetime(viewModel) {}

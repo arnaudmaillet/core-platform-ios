@@ -7,7 +7,7 @@ import Foundation
 struct DeletionChecklist: Equatable, Sendable {
     /// Every profile on the account, by handle (without `@`).
     var profileHandles: [String]?
-    var points: Int?
+    var likes: Int?
     var gems: Int?
 }
 
