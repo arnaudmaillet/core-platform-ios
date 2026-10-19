@@ -45,6 +45,8 @@ public final class SuggestionsViewModel {
     /// Rows that came from pages after the first: what a refresh keeps.
     private var laterPageIDs: Set<ProfileID> = []
     private var following: Set<ProfileID> = []
+    /// Private profiles asked (#1454): the row reads Requested.
+    private var requested: Set<ProfileID> = []
     private var dismissed: Set<ProfileID> = []
     /// Readable, because a surface's view can be built after the first phase
     /// landed (the inbox no longer loads every surface up front) and must
@@ -260,29 +262,58 @@ public final class SuggestionsViewModel {
     /// whichever flip came last — and a failed one rolled back silently. A tap
     /// while that profile's change is on its way is ignored, and a refusal
     /// rolls back AND says so through `onFollowFailure`.
+    ///
+    /// ⚠️ A PRIVATE PROFILE IS ASKED, NOT FOLLOWED (#1454): its row reads
+    /// Requested — at once when the suggestion says it is private, else once
+    /// the server answers that it asked (a request already pending too) —
+    /// and a tap on Requested withdraws it, as the profile's button does.
     public func toggleFollow(_ id: ProfileID) {
         guard !followsInFlight.contains(id) else { return }
         followsInFlight.insert(id)
-        let wasFollowing = following.contains(id)
-        following.formSymmetricDifference([id])
+        let account = accounts.first { $0.id == id }
+        let before = (following: following.contains(id), requested: requested.contains(id))
+        if before.requested {
+            requested.remove(id)
+        } else if before.following {
+            following.remove(id)
+        } else if account?.isPrivate == true {
+            requested.insert(id)
+        } else {
+            following.insert(id)
+        }
         emit()
-        let handle = accounts.first { $0.id == id }?.handle
+        let handle = account?.handle
         Task { [weak self] in
             guard let self else { return }
             do {
-                if wasFollowing {
+                if before.requested {
+                    try await self.repository.cancelFollowRequest(id)
+                } else if before.following {
                     try await self.repository.unfollow(id)
                 } else {
-                    try await self.repository.follow(id)
+                    let outcome = try await self.repository.follow(id)
+                    // What the server did, whatever the row guessed.
+                    self.following.remove(id)
+                    self.requested.remove(id)
+                    if outcome == .requested { self.requested.insert(id) } else { self.following.insert(id) }
+                    self.emit()
                 }
             } catch {
-                self.following.formSymmetricDifference([id])
+                self.following.remove(id)
+                self.requested.remove(id)
+                if before.following { self.following.insert(id) }
+                if before.requested { self.requested.insert(id) }
                 self.emit()
-                self.onFollowFailure?(Self.followFailureMessage(handle: handle, unfollow: wasFollowing))
+                self.onFollowFailure?(before.requested
+                    ? Self.withdrawFailureMessage
+                    : Self.followFailureMessage(handle: handle, unfollow: before.following))
             }
             self.followsInFlight.remove(id)
         }
     }
+
+    /// A refused withdrawal, already put back on the row (#1454).
+    nonisolated static let withdrawFailureMessage = "Couldn't withdraw your request"
 
     /// A refused follow or unfollow, already rolled back on the row: the
     /// words for a failure toast (#802).
@@ -314,6 +345,8 @@ public final class SuggestionsViewModel {
     }
 
     public func isFollowing(_ id: ProfileID) -> Bool { following.contains(id) }
+    /// Whether the row reads Requested (#1454).
+    public func isRequested(_ id: ProfileID) -> Bool { requested.contains(id) }
 
     /// ⚠️ **NO ROW SHOWN IS NOT "EMPTY" WHILE THE TOKEN SAYS MORE.** A first
     /// load past its empty pages, or a list the viewer dismissed row by row,
@@ -335,7 +368,9 @@ public final class SuggestionsViewModel {
             return
         }
         phase = .content(visible.map {
-            SuggestionDisplayModel(account: $0, isFollowing: following.contains($0.id))
+            SuggestionDisplayModel(
+                account: $0, isFollowing: following.contains($0.id), isRequested: requested.contains($0.id)
+            )
         })
     }
 }

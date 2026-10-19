@@ -21,19 +21,23 @@ public struct SuggestedAccount: Equatable, Sendable, Identifiable {
     public let displayName: String
     public let avatarURL: URL?
     public let reason: Reason
+    /// A private profile: a follow from the row ASKS (#1454).
+    public let isPrivate: Bool
 
     public init(
         id: ProfileID,
         handle: String,
         displayName: String,
         avatarURL: URL?,
-        reason: Reason
+        reason: Reason,
+        isPrivate: Bool = false
     ) {
         self.id = id
         self.handle = handle
         self.displayName = displayName
         self.avatarURL = avatarURL
         self.reason = reason
+        self.isPrivate = isPrivate
     }
 }
 
@@ -61,11 +65,19 @@ public protocol SuggestionsProviding: Sendable {
     /// A page of at most `limit` suggestions: the first when `pageToken` is
     /// nil, otherwise the one that token starts (#644).
     func suggestions(limit: Int, after pageToken: String?) async throws -> SuggestionsPage
-    func follow(_ profileID: ProfileID) async throws
+    /// Follows, or — a private profile — asks to (#1454): which one the
+    /// server answered.
+    @discardableResult
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome
     func unfollow(_ profileID: ProfileID) async throws
+    /// Withdraws a request still pending (#1454).
+    func cancelFollowRequest(_ profileID: ProfileID) async throws
 }
 
 extension SuggestionsProviding {
+    /// Sources that never ask (stubs): nothing to withdraw.
+    public func cancelFollowRequest(_ profileID: ProfileID) async throws {}
+
     /// Providers that don't page: the first page is everything.
     public func suggestions(limit: Int, after pageToken: String?) async throws -> SuggestionsPage {
         guard pageToken == nil else { return SuggestionsPage(accounts: [], nextPageToken: nil) }
@@ -195,7 +207,8 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         return SuggestionsPage(accounts: accounts, nextPageToken: body.nextPageToken.isEmpty ? nil : body.nextPageToken)
     }
 
-    public func follow(_ profileID: ProfileID) async throws {
+    @discardableResult
+    public func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
         let viewerID = try await viewer.viewerProfileID()
         var request = SocialGraph_V1_FollowRequest()
         request.actorID = viewerID.rawValue
@@ -206,12 +219,27 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
         // profile under this screen reads "Requested" (#1450).
         if response.error?.code == .alreadyExists || response.message?.requested == true {
             followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: true, viewerID: viewerID))
-            return
+            return .requested
         }
         if case .failure(let error) = response.result {
             throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
         }
         followEvents?.publish(FollowChange(profileID: profileID, isFollowing: true, viewerID: viewerID))
+        return .following
+    }
+
+    /// Withdraws the viewer's pending request (#1454). Nothing pending any
+    /// more (SGR-1006, answered meanwhile) meets the withdrawal's goal.
+    public func cancelFollowRequest(_ profileID: ProfileID) async throws {
+        let viewerID = try await viewer.viewerProfileID()
+        var request = SocialGraph_V1_CancelFollowRequestRequest()
+        request.actorID = viewerID.rawValue
+        request.targetID = profileID.rawValue
+        let response = await socialGraphClient.cancelFollowRequest(request: request, headers: [:])
+        if case .failure(let error) = response.result, !(error.message ?? "").contains("SGR-1006") {
+            throw SuggestionsError.transport(message: error.message ?? "code \(error.code)", failure: NetworkFailure(error))
+        }
+        followEvents?.publish(FollowRequestChange(profileID: profileID, isPending: false, viewerID: viewerID))
     }
 
     public func unfollow(_ profileID: ProfileID) async throws {
@@ -310,7 +338,8 @@ public actor SocialConnectionsRepository: SuggestionsProviding, PeerAvatarProvid
             handle: view.handle,
             displayName: view.displayName.isEmpty ? view.handle : view.displayName,
             avatarURL: URL(string: view.avatarURL),
-            reason: reason
+            reason: reason,
+            isPrivate: view.visibility == .private
         )
     }
 }

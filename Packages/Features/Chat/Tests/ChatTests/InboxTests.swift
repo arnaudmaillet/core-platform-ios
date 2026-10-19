@@ -195,18 +195,27 @@ private final class SpyRouter: Router {
 private actor StubSuggestions: SuggestionsProviding {
     var accounts: [SuggestedAccount]
     var shouldFailFollow = false
+    /// The server asks rather than follows (a private profile, #1454).
+    var asks = false
     private(set) var followed: [ProfileID] = []
     private(set) var unfollowed: [ProfileID] = []
+    private(set) var withdrawn: [ProfileID] = []
 
-    init(accounts: [SuggestedAccount] = [], shouldFailFollow: Bool = false) {
+    init(accounts: [SuggestedAccount] = [], shouldFailFollow: Bool = false, asks: Bool = false) {
         self.accounts = accounts
         self.shouldFailFollow = shouldFailFollow
+        self.asks = asks
     }
 
     func suggestions(limit: Int) async throws -> [SuggestedAccount] { accounts }
-    func follow(_ profileID: ProfileID) async throws {
+    func follow(_ profileID: ProfileID) async throws -> FollowOutcome {
         if shouldFailFollow { throw StubError() }
         followed.append(profileID)
+        return asks ? .requested : .following
+    }
+    func cancelFollowRequest(_ profileID: ProfileID) async throws {
+        if shouldFailFollow { throw StubError() }
+        withdrawn.append(profileID)
     }
     func unfollow(_ profileID: ProfileID) async throws {
         if shouldFailFollow { throw StubError() }
@@ -214,13 +223,16 @@ private actor StubSuggestions: SuggestionsProviding {
     }
 }
 
-private func account(_ id: String, reason: SuggestedAccount.Reason = .followsYou) -> SuggestedAccount {
+private func account(
+    _ id: String, reason: SuggestedAccount.Reason = .followsYou, isPrivate: Bool = false
+) -> SuggestedAccount {
     SuggestedAccount(
         id: ProfileID(id),
         handle: id,
         displayName: "Name \(id)",
         avatarURL: nil,
-        reason: reason
+        reason: reason,
+        isPrivate: isPrivate
     )
 }
 
@@ -1242,6 +1254,59 @@ struct SuggestionsViewModelTests {
         await settle()
         #expect(await repository.followed == [ProfileID("p1")])
         #expect(await repository.unfollowed.isEmpty, "the second tap reached the server")
+    }
+
+    /// ⚠️ A PRIVATE PROFILE IS ASKED (#1454): its row reads Requested from
+    /// the tap — never Following — and stays so once the server asked.
+    @Test func aPrivateSuggestionReadsRequestedNotFollowing() async {
+        let repository = StubSuggestions(accounts: [account("p1", isPrivate: true)], asks: true)
+        let viewModel = SuggestionsViewModel(repository: repository)
+        var phases: [SuggestionsViewModel.Phase] = []
+        viewModel.onPhaseChange = { phases.append($0) }
+        viewModel.loadIfNeeded()
+        await settle()
+
+        viewModel.toggleFollow(ProfileID("p1"))
+        guard case .content(let rows) = phases.last else {
+            Issue.record("expected content")
+            return
+        }
+        #expect(rows[0].isRequested && !rows[0].isFollowing, "the tap read Following on a private profile")
+
+        await settle()
+        #expect(await repository.followed == [ProfileID("p1")])
+        #expect(viewModel.isRequested(ProfileID("p1")) && !viewModel.isFollowing(ProfileID("p1")))
+    }
+
+    /// The server's answer wins over the row's guess: a profile the
+    /// suggestion did not mark private, but the server asked for (or a
+    /// request already pending, SGR-1005), ends on Requested.
+    @Test func aRequestTheServerAnsweredEndsOnRequested() async {
+        let repository = StubSuggestions(accounts: [account("p1")], asks: true)
+        let viewModel = SuggestionsViewModel(repository: repository)
+        viewModel.loadIfNeeded()
+        await settle()
+
+        viewModel.toggleFollow(ProfileID("p1"))
+        await settle()
+        #expect(viewModel.isRequested(ProfileID("p1")), "an ask read as a follow")
+        #expect(!viewModel.isFollowing(ProfileID("p1")))
+    }
+
+    /// A tap on Requested withdraws it, as the profile's button does.
+    @Test func aTapOnRequestedWithdrawsTheRequest() async {
+        let repository = StubSuggestions(accounts: [account("p1", isPrivate: true)], asks: true)
+        let viewModel = SuggestionsViewModel(repository: repository)
+        viewModel.loadIfNeeded()
+        await settle()
+        viewModel.toggleFollow(ProfileID("p1"))
+        await settle()
+
+        viewModel.toggleFollow(ProfileID("p1"))
+        #expect(!viewModel.isRequested(ProfileID("p1")), "the withdrawal waited on the network")
+        await settle()
+        #expect(await repository.withdrawn == [ProfileID("p1")])
+        #expect(!viewModel.isRequested(ProfileID("p1")) && !viewModel.isFollowing(ProfileID("p1")))
     }
 
     /// A refused follow rolls back AND says so (#802), naming the account.
