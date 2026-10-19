@@ -1698,6 +1698,8 @@ struct NewPostTests {
 
         let toast = Self.shownToast(on: feed)
         #expect(toast?.style == .failure, "no failure toast over the author's tab")
+        // The only trace of the lost post: it stays longer (#1459).
+        #expect((toast?.duration ?? 0) >= ToastView.longDuration, "the lost post's toast left on the common timer")
         #expect(!tabs.view.subviews.contains { $0 is ToastView }, "the toast went under the tab bar")
     }
 

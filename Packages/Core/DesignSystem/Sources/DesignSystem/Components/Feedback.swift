@@ -119,7 +119,9 @@ public enum Feedback {
     }
 
     /// The action did not happen: a failure-style toast and an error haptic.
-    /// It leaves on the same timer as the other toasts (#1448).
+    /// It leaves on the same timer as the other toasts (#1448) — or, with
+    /// `length: .long`, after `ToastView.longDuration` at least: for the rare
+    /// failure that is the only trace of something lost (#1459).
     @discardableResult
     public static func failure(
         _ message: String,
@@ -128,9 +130,10 @@ public enum Feedback {
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom,
         action: ToastView.Action? = nil,
-        id: String? = nil
+        id: String? = nil,
+        length: ToastView.Length = .standard
     ) -> ToastView {
-        show(.failure, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
+        show(.failure, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id, length: length)
     }
 
     /// It happened, with a catch: a warning-style toast and a warning haptic.
@@ -258,7 +261,8 @@ public enum Feedback {
         id: String? = nil,
         isCondition: Bool = false,
         playsHaptic: Bool = true,
-        revealing: (@MainActor () -> Void)? = nil
+        revealing: (@MainActor () -> Void)? = nil,
+        length: ToastView.Length = .standard
     ) -> ToastView {
         let host = host(for: source)
         // In the top bar, as its trailing items, when the screen shows one
@@ -266,7 +270,7 @@ public enum Feedback {
         if NavigationBarToasts.isEnabled, let toast = NavigationBarToasts.present(
             ToastView.Content(
                 message: message, symbol: symbol, style: kind.style, action: action,
-                undoable: undoable, id: id, isCondition: isCondition
+                undoable: undoable, id: id, isCondition: isCondition, length: length
             ),
             from: host,
             revealing: revealing
@@ -280,7 +284,7 @@ public enum Feedback {
             // The scene's overlay (#954): the toast outlives the screen.
             toast = overlay.present(
                 message, symbol: symbol, style: kind.style, action: action, undoable: undoable,
-                id: id, isCondition: isCondition, position: position,
+                id: id, isCondition: isCondition, length: length, position: position,
                 from: host, above: floor,
                 keyboardTopY: keyboardTopY(of: host, in: window),
                 interfaceStyle: pinnedStyle(of: host)
@@ -289,7 +293,7 @@ public enum Feedback {
             // No scene to draw over (a package test host): in the screen.
             toast = ToastView.present(
                 message, symbol: symbol, style: kind.style, action: action, undoable: undoable,
-                id: id, isCondition: isCondition, position: position, in: host.view,
+                id: id, isCondition: isCondition, length: length, position: position, in: host.view,
                 edge: position.isTop ? nil : floor?.topAnchor
             )
         }

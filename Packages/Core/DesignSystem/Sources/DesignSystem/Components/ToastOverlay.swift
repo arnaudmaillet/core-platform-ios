@@ -135,6 +135,7 @@ final class ToastOverlay {
         undoable: ToastView.Undoable? = nil,
         id: String? = nil,
         isCondition: Bool = false,
+        length: ToastView.Length = .standard,
         position: ToastPosition,
         from host: UIViewController?,
         above floor: UIView?,
@@ -156,7 +157,7 @@ final class ToastOverlay {
         window.layoutIfNeeded()
         let toast = ToastView.present(
             message, symbol: symbol, style: style, action: action, undoable: undoable,
-            id: id, isCondition: isCondition, position: position, in: container,
+            id: id, isCondition: isCondition, length: length, position: position, in: container,
             edge: position.isTop ? container.topAnchor : container.bottomAnchor
         )
         toast.onRemoved = { [weak self] in self?.hideIfEmpty() }

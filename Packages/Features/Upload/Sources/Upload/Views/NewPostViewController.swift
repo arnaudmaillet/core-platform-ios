@@ -1453,7 +1453,8 @@ final class NewPostViewController: UIViewController {
     /// (`saveDraftItem` is inert, `PostDraftStore` holds text only), so what
     /// can be done is to SAY it, where the author now is.
     static func reportPublishFailure(on presenter: UIViewController) {
-        Feedback.failure(publishFailedMessage, from: presenter)
+        // The only trace of the lost post: it stays longer (#1459).
+        Feedback.failure(publishFailedMessage, from: presenter, length: .long)
     }
 
     /// "Posted", with the success haptic, over the screen the sheet was

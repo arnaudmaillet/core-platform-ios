@@ -43,6 +43,9 @@ import UIKit
 ///   replaces #954's "until closed": a failure that never left outstayed
 ///   the screen it was about);
 /// - loading and conditions: until updated in place by their `id`;
+/// - a `.long` toast (`Length`): at least `longDuration` — for the rare one
+///   that is the only trace of something lost ("Couldn't publish your
+///   post", #1459);
 /// - a toast with an action never leaves on its own while VoiceOver or Switch
 ///   Control runs (WCAG 2.2.1: timing adjustable).
 ///
@@ -235,7 +238,7 @@ public final class ToastView: UIView {
 
         init(
             message: String, symbol: String?, style: Style, action: Action?,
-            undoable: Undoable?, id: String?, isCondition: Bool = false
+            undoable: Undoable?, id: String?, isCondition: Bool = false, length: Length = .standard
         ) {
             self.isCondition = isCondition
             self.message = message
@@ -250,6 +253,7 @@ public final class ToastView: UIView {
                 isUndoable: undoable != nil, assistiveTechnologyRunning: ToastView.isAssistiveTechnologyRunning()
             )
             key = id ?? "\(style)|\(message)"
+            if length == .long, let timed = duration { duration = max(timed, ToastView.longDuration) }
             if isCondition { duration = nil }
         }
     }
@@ -416,13 +420,14 @@ public final class ToastView: UIView {
         undoable: Undoable? = nil,
         id: String? = nil,
         isCondition: Bool = false,
+        length: Length = .standard,
         position: ToastPosition,
         in container: UIView,
         edge: NSLayoutYAxisAnchor? = nil
     ) -> ToastView {
         let content = Content(
             message: message, symbol: symbol, style: style, action: action,
-            undoable: undoable, id: id, isCondition: isCondition
+            undoable: undoable, id: id, isCondition: isCondition, length: length
         )
         let existing = stack(at: position, in: container).last { $0.content.key == content.key }
         // One undo slot: a second undoable action commits the first at once
@@ -676,6 +681,17 @@ public final class ToastView: UIView {
 
     /// How long an undoable toast waits before it commits.
     public static let undoDuration: TimeInterval = 8
+
+    /// How long a toast stays (#1459): the common rule, or longer.
+    public enum Length: Sendable {
+        case standard
+        /// At least `longDuration`: the only trace of something lost.
+        case long
+    }
+
+    /// The least a `.long` toast stays: past the undo window, the longest
+    /// timed toast in the app.
+    public static let longDuration: TimeInterval = 10
 
     /// VoiceOver or Switch Control. Swappable for tests.
     static var isAssistiveTechnologyRunning: () -> Bool = {
