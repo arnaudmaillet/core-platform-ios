@@ -16,6 +16,24 @@ public struct FollowChange: Equatable, Sendable {
     }
 }
 
+/// A follow REQUEST the graph accepted, or one withdrawn (#1450): the viewer
+/// asked to follow a private profile (pending), or took the ask back. Its own
+/// channel beside `FollowChange`: a request is not a follow, and every reader
+/// of the follow set would take "not following" for an unfollow.
+public struct FollowRequestChange: Equatable, Sendable {
+    public let profileID: ProfileID
+    /// Pending after this change; false once withdrawn.
+    public let isPending: Bool
+    /// The profile that asked, as `FollowChange.viewerID`.
+    public let viewerID: ProfileID?
+
+    public init(profileID: ProfileID, isPending: Bool, viewerID: ProfileID? = nil) {
+        self.profileID = profileID
+        self.isPending = isPending
+        self.viewerID = viewerID
+    }
+}
+
 /// Where the viewer's follow edges are announced once they change, so every
 /// surface holding an answer about one person can keep it.
 ///
@@ -45,6 +63,7 @@ public struct FollowChange: Equatable, Sendable {
 public final class FollowGraphEvents: @unchecked Sendable {
     private let lock = NSLock()
     private var handlers: [UUID: @Sendable (FollowChange) -> Void] = [:]
+    private var requestHandlers: [UUID: @Sendable (FollowRequestChange) -> Void] = [:]
     private let currentViewer: (@Sendable () -> ProfileID?)?
 
     /// - Parameter currentViewer: the active profile, asked on every delivery
@@ -81,6 +100,40 @@ public final class FollowGraphEvents: @unchecked Sendable {
             guard let self else { return }
             _ = self.lock.withLock { self.handlers.removeValue(forKey: id) }
         }
+    }
+
+    // MARK: Requests (#1450)
+
+    /// Announces an ACCEPTED request, or a withdrawal: the profile showing
+    /// "Follow" under the screen the viewer asked from turns to "Requested".
+    public func publish(_ change: FollowRequestChange) {
+        guard isForCurrentViewer(change.viewerID) else { return }
+        let current = lock.withLock { Array(requestHandlers.values) }
+        for handler in current { handler(change) }
+    }
+
+    /// Hears every request change on the MAIN actor, in publication order.
+    public func subscribeToRequestsOnMain(
+        _ handler: @escaping @MainActor @Sendable (FollowRequestChange) -> Void
+    ) -> FollowGraphSubscription {
+        let id = UUID()
+        lock.withLock {
+            requestHandlers[id] = { [weak self] change in
+                DispatchQueue.main.async {
+                    guard self?.isForCurrentViewer(change.viewerID) ?? true else { return }
+                    MainActor.assumeIsolated { handler(change) }
+                }
+            }
+        }
+        return FollowGraphSubscription { [weak self] in
+            guard let self else { return }
+            _ = self.lock.withLock { self.requestHandlers.removeValue(forKey: id) }
+        }
+    }
+
+    private func isForCurrentViewer(_ viewer: ProfileID?) -> Bool {
+        guard let viewer, let current = currentViewer?() else { return true }
+        return viewer == current
     }
 
     /// Hears every change on the MAIN actor, in publication order — for a view
