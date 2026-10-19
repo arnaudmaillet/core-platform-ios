@@ -96,8 +96,12 @@ final class ConversationThreadViewController: UIViewController {
     private var muteItem = UIBarButtonItem()
     /// Keeps the bell and the badge two bubbles.
     private let muteSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
-    /// What the bell shows; nil hides it.
+    /// The conversation's mute; nil hides the bell.
     private var muted: Bool?
+    /// While the viewer's own mute or unmute is on its way (#1447): the bell
+    /// keeps its old look, and a second tap does nothing. Its toast reveals
+    /// the new one (`Feedback`'s "A confirmed control").
+    private var holdsBell = false
 
     private var phase: ConversationThreadPhase = .loading
     private var messagesByID: [String: ConversationThreadMessage] = [:]
@@ -740,22 +744,31 @@ final class ConversationThreadViewController: UIViewController {
     /// Mutes or unmutes through the driver, and says so (#729): the same
     /// bottom toast as "You're signed in".
     ///
-    /// ⚠️ SAID ONCE THE SERVER HAS ANSWERED (#802), never on the tap. The bell
-    /// flips at once; the toast waits for the write, and a refusal — which
-    /// puts the bell back — gets a failure toast instead of a confirmation
-    /// of something that did not happen.
+    /// ⚠️ SAID ONCE THE SERVER HAS ANSWERED (#802), never on the tap. The
+    /// toast waits for the write, and a refusal gets a failure toast instead
+    /// of a confirmation of something that did not happen.
+    ///
+    /// ⚠️ THE BELL CHANGES UNDER ITS TOAST (#1447), never on the tap. The
+    /// toast takes the bell's place in the bar, so a bell flipped on the tap
+    /// read bell → bell.slash → toast → bell.slash. It holds its old look
+    /// while the write is on its way, and the toast reveals the new one: bell
+    /// → toast → bell.slash. A refusal never moved it.
     ///
     /// A mute is said with Undo (#957): optimistic + compensating — Undo
     /// turns the notifications back on, and a refused unmute is said.
     private func setMuted(_ mute: Bool, until: Date?, toast: String? = nil) {
+        guard !holdsBell else { return }
+        holdsBell = true
         driver.setMuted(mute, until: until) { [weak self] confirmed in
             guard let self else { return }
+            let reveal: @MainActor () -> Void = { [weak self] in self?.releaseBell() }
             if confirmed, mute {
                 Feedback.undoable(
                     toast ?? "Notifications muted",
                     symbol: "bell.slash.fill",
                     from: self,
                     above: composeBar.inputRowView,
+                    revealing: reveal,
                     commit: {},
                     undo: { [weak self] in self?.undoMute() }
                 )
@@ -765,9 +778,12 @@ final class ConversationThreadViewController: UIViewController {
                     symbol: mute ? "bell.slash.fill" : "bell.fill",
                     from: self,
                     // Over the composer, which rests where the toast would.
-                    above: composeBar.inputRowView
+                    above: composeBar.inputRowView,
+                    revealing: reveal
                 )
             } else {
+                // Already rolled back: the bell shows what it showed.
+                releaseBell()
                 Feedback.failure(
                     mute ? "Couldn't mute notifications" : "Couldn't turn notifications on",
                     from: self,
@@ -799,11 +815,27 @@ final class ConversationThreadViewController: UIViewController {
             return
         }
         guard was != muted else { return }
+        // A first appearance lands; a change morphs, glass to glass — unless
+        // the viewer's own change is on its way, which its toast reveals.
+        guard was == nil || !holdsBell else { return }
+        showBell(animated: was != nil)
+        if was == nil { fitTrailingRun() }
+    }
+
+    /// The bell for the conversation's mute now, if it shows another.
+    private func showBell(animated: Bool) {
+        guard let muted, muteItem.identifier != (muted ? Self.mutedBellID : Self.bellID) else { return }
         let old = muteItem
         muteItem = makeMuteItem(muted: muted)
-        // A first appearance lands; a change morphs, glass to glass.
-        placeMuteItem(replacing: old, animated: was != nil)
-        if was == nil { fitTrailingRun() }
+        placeMuteItem(replacing: old, animated: animated)
+    }
+
+    /// The viewer's change has been answered: the bell follows the mute
+    /// again — under its toast when confirmed (#1447).
+    private func releaseBell() {
+        guard holdsBell else { return }
+        holdsBell = false
+        showBell(animated: true)
     }
 
     #if DEBUG

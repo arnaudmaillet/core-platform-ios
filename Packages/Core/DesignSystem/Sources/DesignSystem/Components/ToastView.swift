@@ -1101,6 +1101,9 @@ public final class ToastView: UIView {
     /// A tap on the toast's action — its Undo — through the same path, for
     /// tests outside this package (#1420).
     public func debugTapAction() { runAction() }
+    /// The toast leaving now, as its time running out does (an undo
+    /// commits), for tests outside this package (#1447).
+    public func debugDismiss() { dismiss(animated: false) }
     #endif
 
     private func runAction() {

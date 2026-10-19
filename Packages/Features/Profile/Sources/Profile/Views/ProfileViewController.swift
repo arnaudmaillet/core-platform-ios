@@ -162,14 +162,14 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     private var switcherItem: UIBarButtonItem?
     /// The mute bell, on someone else's profile (#689): the scoped Mute menu
     /// that used to sit in the see-more menu. `bell`, or `bell.slash` once
-    /// anything is muted. Built once and kept: the trailing run is compared
-    /// by reference (`appliedBarItems`), so a fresh item would be a rebuild.
-    private lazy var muteBellItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(image: UIImage(systemName: "bell"), menu: makeMuteMenu())
-        item.tintColor = .label
-        item.accessibilityLabel = "Notifications"
-        return item
-    }()
+    /// anything is muted. Kept: the trailing run is compared by reference
+    /// (`appliedBarItems`), so a fresh item is a rebuild — made only when the
+    /// viewer's own change is revealed under its toast (#1447).
+    private lazy var muteBellItem = makeMuteBellItem()
+    /// While the viewer's own mute change is on its way (#1447), the scopes
+    /// the bell still shows: its toast reveals the new look; a refusal or an
+    /// Undo, back to these, releases it as it is.
+    private var bellHeldAt: MuteScopes?
     /// Keeps the bell and the shell's balance two bubbles: iOS 26 groups
     /// adjacent bar items into one platter (the feed's note on
     /// `setEngagedChrome`). Kept for the same by-reference reason.
@@ -456,7 +456,13 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 self?.noteLandingMilestone()
             }
         }
-        viewModel.onMuteScopesChange = { [weak self] _ in self?.refreshMuteBell() }
+        viewModel.onMuteScopesChange = { [weak self] scopes in
+            guard let self else { return }
+            // Back to what the held bell shows (refused, undone): nothing to
+            // reveal any more.
+            if bellHeldAt == scopes { bellHeldAt = nil }
+            refreshMuteBell()
+        }
         headerView.onFollowTapped = { [weak self] in
             guard let self else { return }
             MemberGates.perform(.follow(handle: viewModel.profile?.handle), from: self) { [weak self] in
@@ -491,6 +497,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             guard let self else { return }
             Feedback.undoable(
                 action.message, symbol: action.symbol, from: self,
+                revealing: { [weak self] in self?.revealMuteBell() },
                 commit: action.commit, undo: action.undo
             )
         }
@@ -1385,16 +1392,52 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// The scoped Mute menu for the current scopes (`ProfileMenuBuilder`).
     private func muteMenuElements() -> [UIMenuElement] {
         ProfileMenuBuilder.muteMenuElements(viewModel.muteScopes) { [weak self] scope in
-            self?.viewModel.toggleMute(scope)
+            self?.toggleMuteHoldingBell(scope)
         }
     }
 
+    /// The menu's mute: the bell keeps its look until the change's toast
+    /// takes its place, and comes back changed when it leaves (#1447) —
+    /// whether the toast comes on the tap (Undo) or once the server answered.
+    private func toggleMuteHoldingBell(_ scope: MuteScope) {
+        let before = viewModel.muteScopes
+        bellHeldAt = before
+        viewModel.toggleMute(scope)
+        // Nothing changed (a change already on its way): nothing held.
+        if viewModel.muteScopes == before { bellHeldAt = nil }
+    }
+
+    private func makeMuteBellItem() -> UIBarButtonItem {
+        let item = UIBarButtonItem(image: UIImage(systemName: "bell"), menu: makeMuteMenu())
+        item.tintColor = .label
+        item.accessibilityLabel = "Notifications"
+        return item
+    }
+
     /// The glyph and the spoken value follow the scopes; the item stays the
-    /// same object, so the bar is not rebuilt.
+    /// same object, so the bar is not rebuilt. Not while the viewer's own
+    /// change is held (#1447).
     private func refreshMuteBell() {
+        guard bellHeldAt == nil else { return }
+        applyMuteLook(to: muteBellItem)
+    }
+
+    private func applyMuteLook(to item: UIBarButtonItem) {
         let scopes = viewModel.muteScopes
-        muteBellItem.image = UIImage(systemName: scopes.isEmpty ? "bell" : "bell.slash")
-        muteBellItem.accessibilityValue = scopes.isEmpty ? "Nothing muted" : "Muted: " + scopes.summary
+        item.image = UIImage(systemName: scopes.isEmpty ? "bell" : "bell.slash")
+        item.accessibilityValue = scopes.isEmpty ? "Nothing muted" : "Muted: " + scopes.summary
+    }
+
+    /// The held bell's new look, under its toast (#1447): a FRESH item, so
+    /// the one the toast is replacing leaves the bar as it was, and the new
+    /// one is among the items that come back.
+    private func revealMuteBell() {
+        guard bellHeldAt != nil else { return }
+        bellHeldAt = nil
+        let item = makeMuteBellItem()
+        applyMuteLook(to: item)
+        muteBellItem = item
+        updateActionBarItem(followButtonState, animated: view.window != nil)
     }
 
     #if DEBUG
@@ -1415,8 +1458,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     var debugBarIdentityPill: PersonPill { barIdentityPill }
     /// The bell, if the bar shows it.
     var debugMuteBellItem: UIBarButtonItem? {
-        navigationItem.rightBarButtonItems?.first { $0 === muteBellItem }
+        ownTrailingBarItems.first { $0 === muteBellItem }
     }
+    /// What picking the bell menu's `scope` does. Tests.
+    func debugToggleMute(_ scope: MuteScope) { toggleMuteHoldingBell(scope) }
     func debugMuteMenuElements() -> [UIMenuElement] { muteMenuElements() }
     func debugMoreMenuElements() -> [UIMenuElement] { moreMenuElements() }
     /// The map pin's rows, for `-profile-map-pin-audit` (+QA).
@@ -1633,7 +1678,8 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
             Feedback.success(
                 ProfileViewModel.muteMessage(handle: handle, scopes: scopes),
                 symbol: scopes.isEmpty ? "speaker.wave.2.fill" : "speaker.slash.fill",
-                from: self
+                from: self,
+                revealing: { [weak self] in self?.revealMuteBell() }
             )
         case .restrictChanged(let handle, let restricted):
             Feedback.success(
@@ -1985,7 +2031,7 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
 
     /// Whether the bar wears the bell right now.
     private var isShowingMuteBell: Bool {
-        navigationItem.rightBarButtonItems?.contains { $0 === muteBellItem } == true
+        ownTrailingBarItems.contains { $0 === muteBellItem }
     }
 
     /// Recomposes the bar once no transition runs, without animation — for an
@@ -2176,11 +2222,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
                 + "state=\(followButtonState) \(phase)")
         }
         #endif
-        if animated {
-            navigationItem.setRightBarButtonItems(items, animated: true)
-        } else {
-            navigationItem.rightBarButtonItems = items
-        }
+        // The screen's own items: under bar toasts, the ones that come back
+        // (#1420, #1447).
+        setOwnTrailingBarItems(items, animated: animated)
     }
 
     /// The bar's relationship item, or nil: none until the tray has scrolled

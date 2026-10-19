@@ -19,6 +19,22 @@ import UIKit
 /// Wording (the toast's own rule): short, past tense for a result, no
 /// trailing period — "Copied", "Report sent", "Couldn't follow @ava".
 ///
+/// ## A confirmed control: old look → toast → new look (#1447)
+///
+/// A toast in the top bar takes the screen's trailing items' place — the very
+/// control (a bell, a Follow) whose change it confirms. Had the control
+/// flipped on the tap, the viewer would see its new look, then the toast over
+/// it, then the new look again: the answer twice, in the wrong order. So a
+/// screen that confirms a BAR control keeps the control's old look while its
+/// write is on its way, and hands the new look to the toast (`revealing`):
+/// - in the bar, it is applied under the toast, in the same turn the toast
+///   takes the control's place, so it shows when the toast leaves;
+/// - in the overlay (no bar), it is applied as the toast appears;
+/// - a refusal gets `failure`, with no `revealing`: the control never moved.
+///
+/// Controls in the content (follow capsules, rows) stay beside their toast
+/// and keep changing at once.
+///
 /// ⚠️ NEVER CALL `ToastView.present` DIRECTLY. `FeedbackTests` scans the
 /// sources and fails if anything but this file does: a presenter honoured by
 /// nineteen call sites and bypassed by the twentieth is back to guessing.
@@ -83,6 +99,8 @@ public enum Feedback {
     ///   - position: one of six places (#954); the bottom centre by default.
     ///   - action: one trailing action ("Retry", "View"); the toast leaves
     ///     once it has run.
+    ///   - revealing: the new look of the control this toast confirms (#1447)
+    ///     — see "A confirmed control" above.
     @discardableResult
     public static func success(
         _ message: String,
@@ -91,9 +109,13 @@ public enum Feedback {
         above floor: UIView? = nil,
         at position: ToastPosition = .bottom,
         action: ToastView.Action? = nil,
-        id: String? = nil
+        id: String? = nil,
+        revealing: (@MainActor () -> Void)? = nil
     ) -> ToastView {
-        show(.success, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id)
+        show(
+            .success, message, symbol: symbol, from: source, above: floor, at: position, action: action, id: id,
+            revealing: revealing
+        )
     }
 
     /// The action did not happen: a failure-style toast and an error haptic.
@@ -130,8 +152,11 @@ public enum Feedback {
     /// haptic. Exactly one of `commit` and `undo` runs, once — see
     /// `ToastView.Undoable` for when it commits.
     ///
-    /// - Parameter playsHaptic: false where the action already played its
-    ///   own (a stake's impact, on every tap of a burst).
+    /// - Parameters:
+    ///   - playsHaptic: false where the action already played its own (a
+    ///     stake's impact, on every tap of a burst).
+    ///   - revealing: the new look of the control this toast confirms (#1447)
+    ///     — see "A confirmed control" above.
     @discardableResult
     public static func undoable(
         _ message: String,
@@ -141,13 +166,14 @@ public enum Feedback {
         at position: ToastPosition = .bottom,
         id: String? = nil,
         playsHaptic: Bool = true,
+        revealing: (@MainActor () -> Void)? = nil,
         commit: @escaping @MainActor () -> Void,
         undo: @escaping @MainActor () -> Void
     ) -> ToastView {
         show(
             .success, message, symbol: symbol, from: source, above: floor, at: position,
             action: nil, undoable: ToastView.Undoable(commit: commit, undo: undo), id: id,
-            playsHaptic: playsHaptic
+            playsHaptic: playsHaptic, revealing: revealing
         )
     }
 
@@ -231,17 +257,19 @@ public enum Feedback {
         undoable: ToastView.Undoable? = nil,
         id: String? = nil,
         isCondition: Bool = false,
-        playsHaptic: Bool = true
+        playsHaptic: Bool = true,
+        revealing: (@MainActor () -> Void)? = nil
     ) -> ToastView {
         let host = host(for: source)
-        // EXPERIMENT (#1058, `-toast-in-navbar`): in the top bar, as its
-        // trailing items, when the screen shows one.
+        // In the top bar, as its trailing items, when the screen shows one
+        // (#1058). The control's new look goes in under the toast.
         if NavigationBarToasts.isEnabled, let toast = NavigationBarToasts.present(
             ToastView.Content(
                 message: message, symbol: symbol, style: kind.style, action: action,
                 undoable: undoable, id: id, isCondition: isCondition
             ),
-            from: host
+            from: host,
+            revealing: revealing
         ) {
             if playsHaptic, let haptic = kind.haptic { playHaptic(haptic) }
             return toast
@@ -265,6 +293,8 @@ public enum Feedback {
                 edge: position.isTop ? nil : floor?.topAnchor
             )
         }
+        // Over the content, the control changes as its toast appears.
+        revealing?()
         if playsHaptic, let haptic = kind.haptic { playHaptic(haptic) }
         return toast
     }

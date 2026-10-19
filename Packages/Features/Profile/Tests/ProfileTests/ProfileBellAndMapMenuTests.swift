@@ -154,6 +154,43 @@ struct ProfileBellAndMapMenuTests {
         #expect((screen.debugMuteMenuElements().first as? UIMenu)?.title == "Mute")
     }
 
+    /// ⚠️ OLD LOOK → TOAST → NEW LOOK (#1447). The mute's toast takes the
+    /// bell's place in the bar: the bell on the bar keeps its glyph — never
+    /// `bell.slash` before the toast — and the bell that comes back when it
+    /// leaves wears the new one. Muting more (Undo, on the tap) and
+    /// unmuting (once the server answered) alike.
+    @Test func theBellChangesUnderItsToastNeverBefore() async throws {
+        let (screen, viewModel, repository) = makeScreen(relationship: .other(isFollowing: true, isBlocked: false))
+        let navigation = UINavigationController(rootViewController: screen)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = navigation
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let bell = try #require(
+            await settle { screen.debugMuteBellItem != nil && viewModel.canModerate } ? screen.debugMuteBellItem : nil
+        )
+        let isToast: (UIBarButtonItem) -> Bool = { $0.customView is ToastView }
+
+        screen.debugToggleMute(.posts)
+        #expect(bell.image == UIImage(systemName: "bell"), "the bell on the bar flipped with its toast")
+        #expect((screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast), "no toast took the bar")
+        let muted = try #require(screen.debugMuteBellItem, "no bell comes back")
+        #expect(muted !== bell)
+        #expect(muted.image == UIImage(systemName: "bell.slash"))
+
+        // Let the Undo run out: the mute is sent.
+        let undo = try #require((screen.navigationItem.rightBarButtonItems ?? []).compactMap { $0.customView as? ToastView }.first)
+        undo.debugDismiss()
+        try #require(await settle { repository.lastScopes == MuteScopes(posts: true) })
+        try #require(await settle { !(screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast) })
+
+        screen.debugToggleMute(.posts)
+        #expect(screen.debugMuteBellItem?.image == UIImage(systemName: "bell.slash"), "bell showed before the toast")
+        try #require(await settle { (screen.navigationItem.rightBarButtonItems ?? []).contains(where: isToast) })
+        #expect(muted.image == UIImage(systemName: "bell.slash"), "the bell on the bar flipped with its toast")
+        #expect(screen.debugMuteBellItem?.image == UIImage(systemName: "bell"))
+    }
+
     /// Not followed: NO bell (the owner, 2026-10-15 — nothing of theirs to
     /// mute yet; the corner goes to the bar's Follow), and see-more has no
     /// Map submenu.
