@@ -80,6 +80,9 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// screen only describes where the post is (see `SnapFeedHeroOrigin`).
     /// Nil leaves every tap on the plain route, which still opens the feed.
     var feedHero: (([PostID], UIViewController, SnapFeedHeroOrigin) -> Void)?
+    /// Builds the bar's identity pill — the post page's (#1451). Nil: no
+    /// identity in the bar.
+    var makePersonBarItem: (@MainActor () -> any PersonBarItem)?
     /// The gallery cards' stakes — see `PostCardStaking`.
     var staking: PostCardStaking? {
         didSet { galleryPager.staking = staking }
@@ -190,27 +193,22 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     /// `applyNavigationState`.
     private var trailingAccessoryItem: UIBarButtonItem?
     /// Whether the header's action tray has scrolled under the bar: the bar
-    /// then carries the relationship, left of the wallet (the owner,
-    /// 2026-10-15) — a pink Follow while the viewer does not follow, the
-    /// profile's identity pill once they do. Never on the viewer's own
-    /// profile.
+    /// then carries the profile's identity pill, outboard of the balance
+    /// (#1451). Never on the viewer's own profile.
     private(set) var isTrayScrolledAway = false
-    /// The bar's Follow, pink: the tray's prominent capsule, carried up.
-    private lazy var barFollowItem: UIBarButtonItem = {
-        let item = UIBarButtonItem(title: "Follow", style: .prominent, target: self, action: #selector(barFollowTapped))
-        item.tintColor = Palette.prominentGlassTint
-        return item
-    }()
-    /// The profile's identity, once followed — the app's one person pill
-    /// (#1277), with no badge: the relation is the Follow item beside it.
-    /// A tap brings the profile's page back to its top, where the tray is.
-    private lazy var barIdentityPill: PersonPill = {
-        let pill = PersonPill(carriesBadge: false)
-        pill.accessibilityHint = "Scrolls back to the top of the profile."
-        pill.onTap = { [weak self] in self?.galleryPager.scrollActivePageToProfileTop() }
+    /// The profile's identity: the post page's pill (#1451, replacing #1224's
+    /// Follow item and #1277's badge-less pill), with the relation as the
+    /// badge on its face — "+" follows, as the tray's Follow does. A tap
+    /// elsewhere on it brings the page back to its top, where the tray is.
+    private lazy var barIdentityPill: (any PersonBarItem)? = {
+        guard let pill = makePersonBarItem?() else { return nil }
+        pill.setOverMedia(false)
+        pill.view.accessibilityHint = "Scrolls back to the top of the profile."
+        pill.onPersonTapped = { [weak self] _ in self?.galleryPager.scrollActivePageToProfileTop() }
+        pill.onFollowTapped = { [weak self] _ in self?.headerView.onFollowTapped?() }
         return pill
     }()
-    private lazy var barIdentityItem = UIBarButtonItem(customView: barIdentityPill)
+    private lazy var barIdentityItem: UIBarButtonItem? = barIdentityPill.map { UIBarButtonItem(customView: $0.view) }
     private let relationshipSpacer = UIBarButtonItem.fixedSpace(Spacing.sm)
     /// The relationship capsule: Follow / Following.
     ///
@@ -1449,13 +1447,11 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         isTrayScrolledAway = away
         updateActionBarItem(followButtonState)
     }
-    /// The bar's relationship item, if it shows one: the pink Follow or the
-    /// identity pill.
+    /// The bar's identity pill, if it shows one.
     var debugBarRelationshipItem: UIBarButtonItem? {
-        navigationItem.rightBarButtonItems?.first { $0 === barFollowItem || $0 === barIdentityItem }
+        ownTrailingBarItems.first { $0 === barIdentityItem }
     }
-    var debugBarFollowItem: UIBarButtonItem { barFollowItem }
-    var debugBarIdentityPill: PersonPill { barIdentityPill }
+    var debugBarIdentityPill: (any PersonBarItem)? { barIdentityPill }
     /// The bell, if the bar shows it.
     var debugMuteBellItem: UIBarButtonItem? {
         ownTrailingBarItems.first { $0 === muteBellItem }
@@ -2142,40 +2138,33 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         // The switcher, on the own profile only — see the note above for why it
         // is not in the leading group.
         if let switcherItem { items.append(switcherItem) }
-        // The mute bell (#689), someone else's profile only: `[0]` is the
-        // corner, as the gear is on your own. On screen, someone else's
-        // profile reads `[coins][relationship][bell]` (the owner,
-        // 2026-10-15), the relationship only once the tray has scrolled away.
-        //
-        // NOT FOLLOWED (the owner, 2026-10-15): no bell; once the tray has
-        // scrolled away the corner is the bar's pink Follow, the pill
-        // inboard of it — `[coins][pill][Follow]`, and `[coins]` at rest.
-        let relationship = namesNoOne ? (pill: nil, follow: nil) : barRelationshipItems(for: followButtonState)
+        // The mute bell (#689), someone else's followed profile only: `[0]`
+        // is the corner, as the gear is on your own. On screen, someone
+        // else's profile reads `[pill][coins][bell]` once followed and
+        // `[pill][coins]` before (#1451), the pill only once the tray has
+        // scrolled away — never a Follow item: following from the bar is the
+        // pill's "+".
+        let pill = namesNoOne ? nil : barIdentityItem(for: followButtonState)
         if namesNoOne {
             // Nothing to mute, follow or spend on.
         } else if showsMuteBell {
             muteBellItem.isEnabled = isMuteBellEnabled
             items.append(muteBellItem)
-        } else if let follow = relationship.follow {
-            items.append(follow)
         }
-        // The pill, between the corner and the balance: it takes the bar's
-        // free width. Fixed spaces keep it its own bubble — adjacent items
-        // share one glass capsule, and the pill and the bell came out as one.
-        if let pill = relationship.pill {
+        // The shell's accessory next: the gear keeps the corner and the
+        // balance sits inboard — the Explore header's arrangement ([coins]
+        // [search]). On a pushed profile, which has neither the gear nor the
+        // switcher, the balance is the corner. Fixed spaces keep each its own
+        // bubble — adjacent items share one glass capsule.
+        if let trailingAccessoryItem, !namesNoOne {
+            if showsMuteBell { items.append(muteBellSpacer) }
+            items.append(trailingAccessoryItem)
+        }
+        // The identity pill outboard of the balance (#1451): it takes the
+        // bar's free width.
+        if let pill {
             if !items.isEmpty { items.append(relationshipSpacer) }
             items.append(pill)
-        }
-        // The shell's accessory LAST, which puts it furthest from the screen
-        // edge: `[0]` is the corner, so the gear keeps it and the balance sits
-        // inboard — the Explore header's arrangement ([coins] [search]). On a
-        // pushed profile, which has neither the gear nor the switcher, the
-        // balance is the whole trailing run.
-        if let trailingAccessoryItem, !namesNoOne {
-            if showsMuteBell || relationship.pill != nil || relationship.follow != nil {
-                items.append(muteBellSpacer)
-            }
-            items.append(trailingAccessoryItem)
         }
         // The load-bearing guard. A pop's `viewWillAppear` resolves to exactly
         // the item set already on the bar, and handing that same set back is
@@ -2227,55 +2216,50 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
         setOwnTrailingBarItems(items, animated: animated)
     }
 
-    /// The bar's relationship item, or nil: none until the tray has scrolled
-    /// away, none on the viewer's own profile.
-    private func barRelationshipItems(
-        for state: ProfileViewModel.FollowButton
-    ) -> (pill: UIBarButtonItem?, follow: UIBarButtonItem?) {
+    /// The bar's identity pill, or nil: none until the tray has scrolled
+    /// away, none on the viewer's own profile. Its badge says the relation
+    /// (#1451).
+    private func barIdentityItem(for state: ProfileViewModel.FollowButton) -> UIBarButtonItem? {
         guard isTrayScrolledAway, !viewModel.isOwnProfile, !identityStubIsSelf,
-              makeEditViewController == nil else { return (nil, nil) }
-        let follow = state == .follow ? barFollowItem : nil
+              makeEditViewController == nil else { return nil }
+        guard let badge = Self.barBadge(for: state, mutual: viewModel.isMutualFollow),
+              let profile = viewModel.profile, let barIdentityPill, let barIdentityItem else { return nil }
+        barIdentityPill.setPerson(
+            id: profile.id, name: profile.displayName, meta: "@\(profile.handle)",
+            avatarURL: profile.avatarURL, pipeline: imagePipeline
+        )
+        barIdentityPill.setFollowBadge(badge, animated: barIdentityPill.view.window != nil)
+        // Never narrower than its face.
+        barIdentityPill.setWidthBudget(max(PersonPill.wrapperHeight, floor(barIdentityWidthBudget())))
+        return barIdentityItem
+    }
+
+    /// The badge for the relation (#1451) — the post page's states: "+"
+    /// while not followed, pending while asked, following, friends when
+    /// mutual. Nil: no pill (a profile the viewer cannot follow).
+    static func barBadge(for state: ProfileViewModel.FollowButton, mutual: Bool) -> PersonPill.Badge? {
         switch state {
-        case .follow, .following, .requested:
-            guard let profile = viewModel.profile else { return (nil, follow) }
-            barIdentityPill.setName(profile.displayName, handle: "@\(profile.handle)")
-            barIdentityPill.avatar.setMonogram(
-                MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
-            )
-            barIdentityPill.avatar.setPicture(profile.avatarURL, pipeline: imagePipeline)
-            // Never narrower than its face's wrapper.
-            let budget = barIdentityWidthBudget(withFollow: follow != nil)
-            if barIdentityPill.setWidthBudget(max(PersonPill.wrapperHeight, floor(budget))) {
-                barIdentityPill.setNeedsLayout()
-            }
-            return (barIdentityItem, follow)
-        default:
-            return (nil, nil)
+        case .follow: .follow
+        case .requested: .pending
+        case .following: mutual ? .friends : .following
+        default: nil
         }
     }
 
     /// The bar's width less the back button and the other trailing items,
     /// with the bar's margins and gaps between them.
-    private func barIdentityWidthBudget(withFollow: Bool) -> CGFloat {
+    private func barIdentityWidthBudget() -> CGFloat {
         let barWidth = navigationController?.navigationBar.bounds.width ?? view.bounds.width
         var others: CGFloat = Self.barControlSide // the back button
         if let accessory = trailingAccessoryItem?.customView {
             others += accessory.intrinsicContentSize.width
         }
         if showsMuteBell { others += Self.barControlSide }
-        // The bar's Follow in the corner: its title's width and the capsule's
-        // padding.
-        if withFollow { others += Self.barFollowWidth }
         let gaps = Spacing.md * 4 + Spacing.lg * 2
         return barWidth - others - gaps
     }
 
     private static let barControlSide: CGFloat = 44
-    private static let barFollowWidth: CGFloat = 92
-
-    @objc private func barFollowTapped() {
-        headerView.onFollowTapped?()
-    }
 
     /// Whether the header's action tray is out of sight: under the
     /// navigation bar, by the header's coming position (`travelled` — the

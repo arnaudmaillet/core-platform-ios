@@ -10,12 +10,14 @@ let package = Package(
     dependencies: [
         .package(path: "../../Kit/CoreModels"),
         .package(path: "../../Core/PostGrid"),
+        // `PersonBarItem` speaks `PersonPill.Badge` and `ImagePipeline` (#1451).
+        .package(path: "../../Core/MediaCore"),
         .package(path: "../../Core/CoreNavigation")
     ],
     targets: [
         .target(
             name: "FeedInterface",
-            dependencies: ["CoreModels", "PostGrid", "CoreNavigation"]
+            dependencies: ["CoreModels", "PostGrid", "CoreNavigation", "MediaCore"]
         )
     ]
 )

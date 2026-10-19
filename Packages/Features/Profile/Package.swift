@@ -78,6 +78,8 @@ let package = Package(
             dependencies: [
                 "Profile",
                 "Feed",
+                // `PersonBarItem`, the bar pill's contract (#1451).
+                "FeedInterface",
                 // `ProfileReference` / `ProfileLookup`, for the handle and
                 // share-token lookup suite (#800).
                 "ProfileInterface",

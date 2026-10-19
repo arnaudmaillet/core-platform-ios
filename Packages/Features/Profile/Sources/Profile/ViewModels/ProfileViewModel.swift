@@ -322,6 +322,9 @@ public final class ProfileViewModel {
     /// Whether they follow back. Only a mutual may be kept on the Friends
     /// rail, so only a mutual is offered the choice.
     private var isMutual = false
+    /// Whether the viewer and the profile follow each other: the bar's
+    /// badge reads friends then (#1451).
+    var isMutualFollow: Bool { isMutual }
     /// Supersedes an in-flight read when the subject changes, so a slow answer
     /// about the previous profile cannot land on this one.
     private var mapPinReadTask: Task<Void, Never>?
