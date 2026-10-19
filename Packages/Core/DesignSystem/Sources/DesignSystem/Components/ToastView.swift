@@ -1150,14 +1150,35 @@ public final class ToastView: UIView {
     /// Whether the message is cut at the label's width now: it would need
     /// more lines than the label draws. A label hidden (a collapsed bar
     /// toast) or not laid out yet is not cut.
+    ///
+    /// ⚠️ MEASURED FROM THE TEXT, NOT FROM `UILabel.textRect` — which on iOS
+    /// 26 never reported the cut (CI, #1449) — and against the width the
+    /// label SHOWS inside the toast, which a label laid out wider than its
+    /// capsule and clipped by it would overstate.
     var isMessageTruncated: Bool {
-        guard let title = textLabels.first, !title.isHidden, title.bounds.width > 0,
-              title.text?.isEmpty == false else { return false }
-        let bounds = CGRect(x: 0, y: 0, width: title.bounds.width, height: .greatestFiniteMagnitude)
-        let whole = title.textRect(forBounds: bounds, limitedToNumberOfLines: 0).height
-        let drawn = title.textRect(forBounds: bounds, limitedToNumberOfLines: title.numberOfLines).height
-        return whole > drawn + 0.5
+        guard let title = textLabels.first, !title.isHidden, let text = title.text, !text.isEmpty,
+              let font = title.font else { return false }
+        let width = messageWidth(of: title)
+        guard width > 0 else { return false }
+        let needed = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin], attributes: [.font: font], context: nil
+        )
+        let lines = title.numberOfLines == 0 ? Int.max : title.numberOfLines
+        let lineCount = Int((ceil(needed.height) / font.lineHeight).rounded())
+        return lineCount > lines
     }
+
+    /// The width the message has: the label's, as far as the toast shows it.
+    private func messageWidth(of title: UILabel) -> CGFloat {
+        let shown = title.convert(title.bounds, to: self).intersection(bounds)
+        return shown.isNull ? 0 : min(title.bounds.width, shown.width)
+    }
+
+    #if DEBUG
+    /// The message's measured width. Tests (#1449: what CI saw).
+    var debugMessageWidth: CGFloat { textLabels.first.map(messageWidth(of:)) ?? -1 }
+    #endif
 
     /// The sheet showing this toast's whole message, while it is up.
     private(set) weak var fullMessageSheet: ToastMessageSheet?

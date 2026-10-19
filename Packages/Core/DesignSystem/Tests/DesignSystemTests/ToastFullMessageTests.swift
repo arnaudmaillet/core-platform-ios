@@ -49,7 +49,7 @@ struct ToastFullMessageTests {
         let wide = barToast("Couldn't follow @ava", width: 360, in: container)
         let narrow = barToast("Couldn't follow @ava", width: 110, in: container)
         #expect(!wide.isMessageTruncated, "a message that fits read as cut")
-        #expect(narrow.isMessageTruncated, "a cut message read as whole")
+        #expect(narrow.isMessageTruncated, "a cut message read as whole: width \(narrow.debugMessageWidth) in \(narrow.bounds)")
     }
 
     // MARK: - The tap
@@ -65,7 +65,7 @@ struct ToastFullMessageTests {
         try hosting { container in
             var runs = 0
             let toast = barToast(Self.long, action: ToastView.Action("Retry") { runs += 1 }, width: 180, in: container)
-            try #require(toast.isMessageTruncated)
+            try #require(toast.isMessageTruncated, "width \(toast.debugMessageWidth) in \(toast.bounds)")
             toast.debugTap()
             #expect(runs == 0, "the body's tap ran the action")
             let sheet = try #require((caught.first as? UINavigationController)?.viewControllers.first as? ToastMessageSheet, "no sheet")
@@ -100,6 +100,7 @@ struct ToastFullMessageTests {
         defer { ToastView.presentFullMessage = previous }
         try hosting { container in
             let toast = barToast(Self.long, width: 180, in: container)
+            try #require(toast.isMessageTruncated, "width \(toast.debugMessageWidth) in \(toast.bounds)")
             toast.debugTap()
             let sheet = try #require((caught.first as? UINavigationController)?.viewControllers.first as? ToastMessageSheet)
             sheet.loadViewIfNeeded()
@@ -156,7 +157,7 @@ struct ToastFullMessageTests {
             let message = Array(repeating: Self.long, count: 3).joined(separator: " ")
             let toast = ToastView.present(message, symbol: nil, style: .failure, action: nil, position: .bottom, in: container)
             container.layoutIfNeeded()
-            try #require(toast.isMessageTruncated, "a three-sentence toast fits on one line")
+            try #require(toast.isMessageTruncated, "a three-sentence toast fits on one line: width \(toast.debugMessageWidth) in \(toast.bounds)")
             toast.debugTap()
             #expect(caught.count == 1)
         }
@@ -185,7 +186,7 @@ struct ToastFullMessageTests {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 402, height: 100))
         let cut = barToast(Self.long, width: 180, in: container)
         let whole = barToast("Copied", width: 300, in: container)
-        #expect(cut.accessibilityCustomActions?.first?.name == "Show Full Message")
+        #expect(cut.accessibilityCustomActions?.first?.name == "Show Full Message", "width \(cut.debugMessageWidth) in \(cut.bounds)")
         #expect(cut.accessibilityCustomActions?.contains { $0.name == "Dismiss" } == true)
         #expect(whole.accessibilityCustomActions?.contains { $0.name == "Show Full Message" } == false)
     }
