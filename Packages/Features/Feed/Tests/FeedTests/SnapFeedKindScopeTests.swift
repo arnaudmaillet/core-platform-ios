@@ -14,7 +14,7 @@ private final class KindHydrating: FeedProviding, @unchecked Sendable {
     func loadFirstPage() async throws -> FeedPage { FeedPage(entries: [], nextPageToken: nil, isCold: false) }
     func loadPage(afterToken token: String) async throws -> FeedPage { FeedPage(entries: [], nextPageToken: nil, isCold: false) }
     func loadPost(_ id: PostID) async throws -> FeedEntry {
-        if id.rawValue.hasPrefix("x") { throw FeedError.transport(message: "gone") }
+        if id.rawValue.hasPrefix("x") { throw FeedError.notFound }
         let media = id.rawValue.hasPrefix("m")
             ? [MediaAttachment(url: URL(string: "https://cdn.example/\(id.rawValue).mp4"), thumbnailURL: nil,
                                mimeType: "video/mp4", pixelWidth: 720, pixelHeight: 1280)]

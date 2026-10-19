@@ -119,7 +119,14 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
 
     func loadFirstPage() async throws -> FeedPage {
         lastServed = ids.last
-        var entries = await hydrate(ids)
+        // ⚠️ A WINDOW IT COULD NOT READ IS NOT AN EMPTY ONE (#1435). The
+        // feed REPLACES its seeded pages with this answer, so a post dropped
+        // for a timeout or an offline blip left the screen under the viewer —
+        // all of them, offline. Unread, the load fails instead: the feed keeps
+        // what it shows and asks again later.
+        let window = await resolve(ids)
+        if let failure = window.unread { throw failure }
+        var entries = window.entries
         var ended = false
         if keepsToOpeningKind {
             // The opening post is the window's first, and always its own kind.
@@ -191,31 +198,67 @@ actor FixedPostsFeedProvider: FeedProviding, RepointableFeedProviding {
             }
             after = last
             lastServed = last
-            found += kept(await hydrate(next))
+            // Not on screen yet: a post that could not be read is skipped
+            // here, as before.
+            found += kept(await resolve(next).entries)
             if found.count >= wanting { break }
         }
         return (found, false)
     }
 
-    /// Hydrates concurrently, preserving the given order. A post that fails
-    /// to hydrate (deleted, expired) is dropped rather than failing the whole
-    /// set — one missing pin must not blank the feed.
-    private func hydrate(_ ids: [PostID]) async -> [FeedEntry] {
-        let base = base
-        let hydrated = await withTaskGroup(of: (Int, FeedEntry)?.self) { group in
-            for (index, id) in ids.enumerated() {
-                group.addTask {
-                    guard let entry = try? await base.loadPost(id) else { return nil }
-                    return (index, entry)
+    /// One post's read: its entry, gone (the server says no one sees it),
+    /// or failed for any other reason (offline, a timeout, a server fault).
+    enum Hydration: Sendable {
+        case loaded(FeedEntry)
+        case gone
+        case failed(any Error)
+    }
+
+    /// The window's posts in the given order (#1435):
+    /// - a post the server says is GONE leaves — one missing pin must not
+    ///   blank the feed, and its page shows it unavailable (#1403);
+    /// - a post that failed for any OTHER reason is the copy the device
+    ///   holds, when it holds one;
+    /// - otherwise it is `unread`, with the first such failure — the window
+    ///   could not be read, which is not the same as having no such post.
+    func resolve(_ ids: [PostID]) async -> (entries: [FeedEntry], unread: (any Error)?) {
+        var entries: [FeedEntry] = []
+        var unread: (any Error)?
+        for (id, read) in await hydrate(ids) {
+            switch read {
+            case .loaded(let entry): entries.append(entry)
+            case .gone: continue
+            case .failed(let error):
+                if let held = base.peekPost(id) {
+                    entries.append(held)
+                } else if unread == nil {
+                    unread = error
                 }
             }
-            var collected: [(Int, FeedEntry)] = []
-            for await result in group {
-                if let result { collected.append(result) }
+        }
+        return (entries, unread)
+    }
+
+    /// Hydrates concurrently, preserving the given order.
+    private func hydrate(_ ids: [PostID]) async -> [(PostID, Hydration)] {
+        let base = base
+        let hydrated = await withTaskGroup(of: (Int, Hydration).self) { group in
+            for (index, id) in ids.enumerated() {
+                group.addTask {
+                    do {
+                        return (index, .loaded(try await base.loadPost(id)))
+                    } catch FeedError.notFound {
+                        return (index, .gone)
+                    } catch {
+                        return (index, .failed(error))
+                    }
+                }
             }
+            var collected: [(Int, Hydration)] = []
+            for await result in group { collected.append(result) }
             return collected
         }
-        return hydrated.sorted { $0.0 < $1.0 }.map(\.1)
+        return hydrated.sorted { $0.0 < $1.0 }.map { (ids[$0.0], $0.1) }
     }
 
     func loadPost(_ id: PostID) async throws -> FeedEntry {
