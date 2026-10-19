@@ -298,6 +298,11 @@ public protocol FeedFeatureBuilding: ConversationThreadScreenBuilding, TextPostS
         mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
         markerClose: ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController
+
+    /// A place's page opened ALONE — a shared place link (#985): no map and
+    /// no feed under it, no pins handed in. Its posts come page by page from
+    /// `identity.query`; a plain push, closed by the back swipe.
+    func makePlacePage(title: String, identity: PlaceIdentity) -> UIViewController
 }
 
 /// Where a place stands among places of its kind — "#3 City Rank" — shown as

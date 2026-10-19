@@ -61,6 +61,8 @@ let package = Package(
             dependencies: [
                 "Maps",
                 "MapsInterface",
+                // `AppRoute` / `PlaceLink`: a place's share link opens it (#985).
+                "CoreNavigation",
                 "DesignSystem",
                 "CoreModels",
                 "CoreNetworking",

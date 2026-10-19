@@ -40,6 +40,40 @@ struct DeepLinkTests {
         #expect(route("https://core-platform.click/s/") == nil)
     }
 
+    /// A place's share link (#985): a country by its code, a city by its
+    /// point and name — what the server lists posts by.
+    @Test func aPlaceLink() {
+        #expect(route("https://core-platform.click/place/country/FR") == .place(.country(code: "FR")))
+        #expect(route("https://core-platform.click/place/country/fr") == .place(.country(code: "FR")))
+        #expect(
+            route("https://core-platform.click/place/city/48.8566,2.3522?name=Paris&country=fr")
+                == .place(.city(latitude: 48.8566, longitude: 2.3522, name: "Paris", countryCode: "FR"))
+        )
+        #expect(
+            route("https://core-platform.click/place/city/-33.8688,151.2093?name=Sydney")
+                == .place(.city(latitude: -33.8688, longitude: 151.2093, name: "Sydney", countryCode: nil))
+        )
+        #expect(route("wynn:/place/country/JP") == .place(.country(code: "JP")))
+        #expect(route("https://core-platform.click/place/country/FRA") == nil, "not alpha-2")
+        #expect(route("https://core-platform.click/place/city/48.8566,2.3522") == nil, "a city needs its name")
+        #expect(route("https://core-platform.click/place/city/95,2?name=X") == nil, "latitude out of range")
+        #expect(route("https://core-platform.click/place/planet/earth") == nil)
+    }
+
+    /// What a place shares is what opens it again.
+    @Test func aPlaceLinkRoundTrips() throws {
+        let places: [PlaceLink] = [
+            .country(code: "FR"),
+            .city(latitude: 48.8566, longitude: 2.3522, name: "Saint-Étienne & co", countryCode: "FR"),
+            .city(latitude: -33.8688, longitude: 151.2093, name: "Sydney", countryCode: nil),
+        ]
+        for place in places {
+            let url = try #require(place.url)
+            #expect(url.host() == AppRoute.webHost)
+            #expect(AppRoute(deepLink: url) == .place(place), "\(url)")
+        }
+    }
+
     @Test func theAppsOwnScheme() {
         #expect(route("wynn://@kenji.dev") == .profileHandle("kenji.dev"))
         #expect(route("wynn:/@kenji.dev") == .profileHandle("kenji.dev"))
@@ -49,7 +83,8 @@ struct DeepLinkTests {
 
     @Test func whatTheAppDoesNotKnow() {
         #expect(route("https://example.com/@kenji.dev") == nil, "another host")
-        #expect(route("https://core-platform.click/place/city:paris") == nil, "no place route yet")
+        // The mock's own place identity is not a link (#985).
+        #expect(route("https://core-platform.click/place/city:paris") == nil)
         #expect(route("https://core-platform.click/@k") == nil, "too short for a handle")
         #expect(route("https://core-platform.click/@kenji dev") == nil)
         #expect(route("https://core-platform.click/tag/1") == nil, "a tag needs a letter")

@@ -1105,6 +1105,15 @@ final class ForYouGridPage: UIView {
     /// active one.
     var onVerticalScroll: ((CGFloat) -> Void)?
 
+    /// Puts the list back at its top unless the viewer is moving it — a
+    /// page whose first posts landed after it was laid out (a place opened
+    /// from a link, #985) opened scrolled past its header.
+    func restAtTop() {
+        guard !collectionView.isTracking, !collectionView.isDragging, !collectionView.isDecelerating else { return }
+        collectionView.layoutIfNeeded()
+        collectionView.contentOffset.y = -collectionView.adjustedContentInset.top
+    }
+
     /// Where this page is scrolled to, measured from the top of its CONTENT
     /// rather than from its own origin: hosted pages rest at `-inset`, and
     /// reporting travel keeps every caller out of that arithmetic.
