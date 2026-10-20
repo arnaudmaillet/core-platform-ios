@@ -765,19 +765,32 @@ final class AppContainer {
     /// an empty member wallet.
     func makeWalletSheet() -> UIViewController {
         assert(memberGate.isMember, "the wallet sheet was asked for a guest (#1146)")
-        return WalletClaimViewController(
+        let shopMedia = ShopMedia(images: imagePipeline, videos: videoPlayback)
+        // Structure B (#1476): the Claim sheet, and the hub its Wallet row
+        // pushes in the same sheet.
+        return WalletClaimSheetViewController(
             wallet: walletStore,
-            lookUpPosts: { [unowned self] ids in await self.feedFeature.galleryPosts(ids) },
-            imagePipeline: imagePipeline,
-            // A stake row opens its post the way a For You or Profile card
-            // does — the same flight, owned by Feed.
-            openFeedHero: { [unowned self] ids, presenter, origin in
-                self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-            },
             countries: countryAccess,
             stakePacks: stakePacks,
             profileItems: profileItems,
-            shopMedia: ShopMedia(images: imagePipeline, videos: videoPlayback)
+            shopMedia: shopMedia,
+            makeHub: { [unowned self] claimer in
+                WalletHubViewController(
+                    wallet: self.walletStore,
+                    claimer: claimer,
+                    lookUpPosts: { [unowned self] ids in await self.feedFeature.galleryPosts(ids) },
+                    imagePipeline: self.imagePipeline,
+                    // A stake row opens its post the way a For You or Profile
+                    // card does — the same flight, owned by Feed.
+                    openFeedHero: { [unowned self] ids, presenter, origin in
+                        self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+                    },
+                    countries: self.countryAccess,
+                    stakePacks: self.stakePacks,
+                    profileItems: self.profileItems,
+                    shopMedia: shopMedia
+                )
+            }
         ).wrappedInSheet()
     }
 

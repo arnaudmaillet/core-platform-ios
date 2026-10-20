@@ -45,7 +45,7 @@ struct RawHueGuardTests {
         "RecentlyDeletedViewController.swift": "a swipe action's ground under its white label",
         // Not the brand's meaning, and not decided yet.
         "MediaPickerViewController.swift": "an album's count badge: information, not an action",
-        "WalletClaimViews.swift": "the streak's flame: fire, not a warning",
+        "WalletClaimSheetViewController.swift": "the streak's flame: fire, not a warning",
     ]
 
     static let patterns = [

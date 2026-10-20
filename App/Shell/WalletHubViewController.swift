@@ -10,58 +10,33 @@ import MediaCore
 import PostGrid
 import UIKit
 
-/// The wallet sheet behind the balance badges (map, feed, profile): the two
-/// currencies, the claim streak and today's earnings, the viewer's stakes, and
-/// the Claim button.
+/// The Wallet hub (#1476, structure B, the owner 2026-10-18): pushed from
+/// the Claim sheet's Wallet row (`WalletClaimSheetViewController`), in the
+/// same sheet, which grows to its large detent for it.
 ///
 /// # The economy it shows (`dev/economy/`, charter V5.3)
-///   • **Points** (currency A, the red heart) — curation capacity: claimed
-///     here, spent by STAKING on posts;
+///   • **Likes** (currency A, the heart) — curation capacity: claimed, spent
+///     by STAKING on posts;
 ///   • **Gems** (currency B, the diamond) — earned-only: what a stake pays
 ///     once it SETTLES, if it turned out to carry information. Settlement is
 ///     deferred by design, so a stake is ACTIVE for a while before it has an
 ///     outcome.
 ///
 /// # Anatomy, top to bottom
-///   • the BAR — `[storefront Shop] ······ [✕]`: the Shop (what the gems buy,
-///     presented as a sheet OVER this one, so closing it comes back here) and
-///     the close button, plain bar items the system draws in glass;
-///   • the SUMMARY — Points and Gems side by side in big type, then the
-///     streak and today's earnings, bare on the page (`WalletSummaryView`);
-///   • ACTIVE STAKES — each post, the points on it, and how long until it
+///   • the HEADER (`WalletHubHeaderView`) — one big likes balance, four round
+///     actions (Claim, Stake, Shop, Activity), and the Gems card;
+///   • ACTIVE STAKES — each post, the likes on it, and how long until it
 ///     settles;
-///   • SETTLED — each post and what it earned in gems, or "No reward";
-///   • the CLAIM button, pinned to the sheet's bottom whatever is scrolled,
-///     with the list dissolving under it.
+///   • SETTLED — each post and what it earned in gems, or "No reward".
 ///
-/// # Small, then large — a native sheet
-/// The sheet opens SMALL: the summary and the first two stakes at most — the
-/// glance-and-claim surface. Scrolling the list up grows it to LARGE (the
-/// sheet's own `prefersScrollingExpandsWhenScrolledToEdge`), and a drag down
-/// from large comes back to SMALL before it closes (26 September 2026 — the
-/// earlier "forget small once large" rule was reversed the same day). Its
-/// ground is the SYSTEM's: glass while small, opaque once large, exactly as a
-/// native sheet (the profile's QR sheet) behaves — so the view is clear and
-/// paints nothing of its own. The summary scrolls away with the list and
-/// nothing replaces it: the compact balances that used to fade in under the
-/// grabber went when the bar took that band (2026-10-01).
-///
-/// # The edges
-/// The list passes under the bar and the Claim button through the system's
-/// own SOFT scroll-edge effect — a blur that ramps in strength rather than a
-/// material faded by a mask. The hand-built material blurs this replaced read
-/// as two frosted slabs: "beaucoup trop opaque, on n'aperçoit pas la
-/// collection view".
-///
-/// # Presented in its own navigation stack
-/// The bar is a navigation bar, so the sheet is this screen as the root of a
-/// navigation controller (`wrappedInSheet()`), and the sheet's configuration
-/// lives on THAT controller's presentation — the one presented.
+/// Its ground is the SYSTEM's large sheet (opaque), so the view is clear and
+/// paints nothing of its own; the list passes under the bar through the
+/// system's soft scroll-edge effect.
 ///
 /// Everything derives from one `WalletSnapshot` and one `stakes()` reading per
 /// refresh; the only per-second work is the claim countdown and the active
 /// stakes' "settles in" lines.
-final class WalletClaimViewController: UIViewController {
+final class WalletHubViewController: UIViewController {
     /// Resolves stake targets to their posts — the Feed feature's, handed in
     /// by the composition root (`AppContainer.makeWalletSheet`).
     typealias PostLookup = @MainActor ([PostID]) async -> [PostID: GalleryPost]
@@ -83,9 +58,9 @@ final class WalletClaimViewController: UIViewController {
     private let stakePacks: (any StakePackSelling)?
     private let profileItems: (any ProfileItemSelling)?
 
-    private nonisolated enum Section: Hashable { case summary, active, settled }
+    private nonisolated enum Section: Hashable { case header, active, settled }
     private nonisolated enum Item: Hashable {
-        case summary
+        case header
         case stake(String)
         case noActiveStakes
         case postsFailed
@@ -93,11 +68,9 @@ final class WalletClaimViewController: UIViewController {
 
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
-    private weak var summaryCell: WalletSummaryCell?
-    private let claimButton = UIButton(configuration: .prominentGlass())
-    /// The Claim button's container, registered with the list's BOTTOM scroll
-    /// edge so the system's soft edge effect grows to sit behind it.
-    private let claimBar = UIView()
+    private weak var headerCell: WalletHubHeaderCell?
+    /// The claim — the Claim sheet's own, so a claim on its way shows on both.
+    private let claimer: WalletClaimer
 
     private var snapshot: WalletSnapshot
     private var stakes: [WalletStake] = []
@@ -110,33 +83,19 @@ final class WalletClaimViewController: UIViewController {
     private var countdownTimer: Timer?
     private let walletObservers = WalletObserverTokenBag()
 
-    /// The SMALL detent's height, measured from the laid-out list — a stored
-    /// number, because a detent resolver must read nothing that could load a
-    /// view.
-    private var smallDetentHeight: CGFloat = 460
-    private static let smallDetent = UISheetPresentationController.Detent.Identifier("wallet.small")
-    /// How many stake rows the small detent shows under the summary.
-    private static let smallDetentRows = 2
-
-    private var buttonLeading: NSLayoutConstraint?
-    private var buttonTrailing: NSLayoutConstraint?
-    private var buttonBottom: NSLayoutConstraint?
-    private var buttonMargin: CGFloat = WalletSheetMetrics.sideMargin
-    private var appliedSheetRadius: CGFloat = 0
-
-    /// Room under the bar before the summary starts.
+    /// Room under the bar before the header starts.
     private static let topInset: CGFloat = Spacing.sm
 
-    /// Stable identifiers for the bar items: a reused identifier is how
-    /// iOS 26 matches an item across a reinstall.
-    static let shopItemIdentifier = "wallet.shop"
-    static let closeItemIdentifier = "wallet.close"
+    /// Stable identifiers: a reused bar item identifier is how iOS 26 matches
+    /// an item across a reinstall.
+    static let closeItemIdentifier = "wallet.hub.close"
 
     /// The Shop's posters and preview loops (#1075).
     private let shopMedia: ShopMedia?
 
     init(
         wallet: WalletStore,
+        claimer: WalletClaimer,
         lookUpPosts: PostLookup? = nil,
         imagePipeline: ImagePipeline? = nil,
         openFeedHero: OpenFeedHero? = nil,
@@ -146,6 +105,7 @@ final class WalletClaimViewController: UIViewController {
         shopMedia: ShopMedia? = nil
     ) {
         self.shopMedia = shopMedia
+        self.claimer = claimer
         self.openFeedHero = openFeedHero
         self.countries = countries
         self.stakePacks = stakePacks
@@ -159,37 +119,6 @@ final class WalletClaimViewController: UIViewController {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    /// The sheet as it is presented: this screen as the root of a navigation
-    /// controller that shows its bar (the Shop and close items), set up as a
-    /// page sheet with the small and large detents.
-    ///
-    /// ⚠️ The sheet's configuration lives on the NAVIGATION controller's
-    /// presentation — the one presented — and every read of it below goes
-    /// through `sheet`.
-    func wrappedInSheet() -> UINavigationController {
-        let navigation = UINavigationController(rootViewController: self)
-        navigation.modalPresentationStyle = .pageSheet
-        if let sheet = navigation.sheetPresentationController {
-            sheet.detents = [
-                .custom(identifier: Self.smallDetent) { [weak self] _ in self?.smallDetentHeight ?? 460 },
-                .large(),
-            ]
-            // ⚠️ OPENS SMALL; a scroll up grows it (see the type's note).
-            sheet.selectedDetentIdentifier = Self.smallDetent
-            sheet.prefersGrabberVisible = true
-            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
-            // ⚠️ NO `preferredCornerRadius`: UIKit's own. A radius set here and
-            // then corrected to the device's on the first layout visibly
-            // popped from one to the other as the sheet rose.
-        }
-        return navigation
-    }
-
-    /// The presented sheet — the navigation controller's.
-    private var sheet: UISheetPresentationController? {
-        navigationController?.sheetPresentationController
-    }
 
     // MARK: - Lifecycle
 
@@ -218,13 +147,18 @@ final class WalletClaimViewController: UIViewController {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh() }
             },
+            NotificationCenter.default.addObserver(
+                forName: WalletClaimer.didChangeNotification, object: claimer, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            },
+            NotificationCenter.default.addObserver(
+                forName: WalletClaimer.didClaimNotification, object: claimer, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.headerCell?.header.popBalance() }
+            },
         ]
         refresh()
-
-        // Measured NOW, before the sheet asks its first detent: a guess here
-        // would present at the guess and then jump to the answer.
-        view.layoutIfNeeded()
-        updateSmallDetent()
 
         #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
@@ -233,24 +167,6 @@ final class WalletClaimViewController: UIViewController {
         let landed: @MainActor () -> Bool = { [weak self] in
             guard let self else { return true }
             return view.window != nil && transitionCoordinator == nil
-        }
-        // `-wallet-demo-claim`: fires the Claim button once the sheet is up —
-        // the real claim path minus the finger. Pair with `-open-wallet
-        // -wallet-claim-ready`.
-        if arguments.contains("-wallet-demo-claim") {
-            QAWait.until("-wallet-demo-claim", landed) { [weak self] in self?.claimTapped() }
-        }
-        // `-wallet-sheet-large`: grows the sheet to LARGE, the state a scroll
-        // up reaches, so it can be screenshotted.
-        if arguments.contains("-wallet-sheet-large") {
-            QAWait.until("-wallet-sheet-large", landed) { [weak self] in
-                guard let sheet = self?.sheet else { return }
-                sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
-            }
-        }
-        // `-wallet-open-shop`: the Shop item's own path, once the sheet is up.
-        if arguments.contains("-wallet-open-shop") {
-            QAWait.until("-wallet-open-shop", landed) { [weak self] in self?.openShop() }
         }
         // `-wallet-open-stake <n>`: opens the n-th stake row's post (0-based,
         // list order) once its post has loaded — the row's own tap path.
@@ -273,7 +189,7 @@ final class WalletClaimViewController: UIViewController {
             }
         }
         // `-wallet-sheet-scroll <pt>`: scrolls the list, so the rows under
-        // the bar can be screenshotted. Pair with `-wallet-sheet-large`.
+        // the bar can be screenshotted.
         if let index = arguments.firstIndex(of: "-wallet-sheet-scroll"), index + 1 < arguments.count,
            let offset = Double(arguments[index + 1]) {
             QAWait.until("-wallet-sheet-scroll", landed) { [weak self] in
@@ -297,17 +213,11 @@ final class WalletClaimViewController: UIViewController {
         countdownTimer = nil
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        applyButtonMargins()
-        updateSmallDetent()
-    }
-
     // MARK: - Layout
 
     private func buildCollection() {
         let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
-            let section = self?.dataSource?.sectionIdentifier(for: index) ?? .summary
+            let section = self?.dataSource?.sectionIdentifier(for: index) ?? .header
             let traits = environment.traitCollection
             // Every section is followed by a titled one but the last: it
             // leaves the app's one section gap under it (`Spacing.section` to
@@ -324,12 +234,12 @@ final class WalletClaimViewController: UIViewController {
             layoutSection.interGroupSpacing = Spacing.sm
             let margin = WalletSheetMetrics.sideMargin
             layoutSection.contentInsets = NSDirectionalEdgeInsets(
-                top: section == .summary ? 0 : SectionTitleView.gapBelow(traits: traits),
+                top: section == .header ? 0 : SectionTitleView.gapBelow(traits: traits),
                 leading: margin,
                 bottom: isLast ? 0 : SectionTitleView.gapAbove(traits: traits),
                 trailing: margin
             )
-            if section != .summary {
+            if section != .header {
                 let header = NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: NSCollectionLayoutSize(
                         widthDimension: .fractionalWidth(1),
@@ -352,15 +262,13 @@ final class WalletClaimViewController: UIViewController {
             collectionView.topAnchor.constraint(equalTo: view.topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            // To the sheet's foot: the list passes UNDER the Claim button's
-            // blur rather than ending above it.
             collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        let summaryRegistration = UICollectionView.CellRegistration<WalletSummaryCell, Item> { [weak self] cell, _, _ in
+        let headerRegistration = UICollectionView.CellRegistration<WalletHubHeaderCell, Item> { [weak self] cell, _, _ in
             guard let self else { return }
-            configureSummary(cell.summary)
-            summaryCell = cell
+            configureHeader(cell.header)
+            headerCell = cell
         }
         let stakeRegistration = UICollectionView.CellRegistration<WalletStakeCell, Item> { [weak self] cell, _, item in
             guard let self, case .stake(let id) = item else { return }
@@ -376,8 +284,8 @@ final class WalletClaimViewController: UIViewController {
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
-            case .summary:
-                collectionView.dequeueConfiguredReusableCell(using: summaryRegistration, for: indexPath, item: item)
+            case .header:
+                collectionView.dequeueConfiguredReusableCell(using: headerRegistration, for: indexPath, item: item)
             case .stake:
                 collectionView.dequeueConfiguredReusableCell(using: stakeRegistration, for: indexPath, item: item)
             case .noActiveStakes:
@@ -386,21 +294,21 @@ final class WalletClaimViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(using: failedRegistration, for: indexPath, item: item)
             }
         }
-        let headerRegistration = UICollectionView.SupplementaryRegistration<WalletSectionHeader>(
+        let sectionHeaderRegistration = UICollectionView.SupplementaryRegistration<WalletSectionHeader>(
             elementKind: WalletSectionHeader.kind
         ) { [weak self] header, _, indexPath in
             guard let self, let section = dataSource.sectionIdentifier(for: indexPath.section) else { return }
             configure(header, for: section)
         }
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
-            collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
+            collectionView.dequeueConfiguredReusableSupplementary(using: sectionHeaderRegistration, for: indexPath)
         }
     }
 
     private func configure(_ header: WalletSectionHeader, for section: Section) {
         let font = UIFont.scaledMonospacedDigitSystemFont(ofSize: 13, weight: .medium, relativeTo: .footnote, maximumPointSize: 16)
         switch section {
-        case .summary:
+        case .header:
             break
         case .active:
             let staked = stakes.filter { !$0.isSettled }.reduce(0) { $0 + $1.amount }
@@ -428,135 +336,19 @@ final class WalletClaimViewController: UIViewController {
         }
     }
 
-    /// The soft edges, and the Claim button above the list — its container
-    /// registered with the list's bottom scroll edge, so the system draws the
-    /// soft edge effect behind it (`UIScrollEdgeElementContainerInteraction`).
-    /// The top edge is the navigation bar's: the system draws the effect
-    /// under the bar it tracks.
+    /// The soft edge under the bar: the system draws the effect under the
+    /// bar it tracks.
     private func buildChrome() {
         collectionView.topEdgeEffect.style = .soft
-        collectionView.bottomEdgeEffect.style = .soft
         // Named, not searched for: the bar's edge effect reads THIS list.
         setContentScrollView(collectionView, for: .top)
-
-        claimBar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(claimBar)
-        let bottomEdge = UIScrollEdgeElementContainerInteraction()
-        bottomEdge.scrollView = collectionView
-        bottomEdge.edge = .bottom
-        claimBar.addInteraction(bottomEdge)
-
-        claimButton.configuration?.cornerStyle = .capsule
-        // The brand's prominent glass (#1124): on the window's dark-mode
-        // tint the glass's white label was 1.9:1.
-        claimButton.tintColor = Palette.prominentGlassTint
-        if Palette.rules.heroButton == .gradient {
-            // The brand's signature on the key moment (#1169's rule to compare
-            // on the device): the gradient as the ground, a white bold label.
-            var gradient = UIButton.Configuration.filled()
-            gradient.cornerStyle = .capsule
-            gradient.background.customView = BrandGradientView()
-            gradient.baseForegroundColor = .white
-            claimButton.configuration = gradient
-            claimButton.configurationUpdateHandler = { button in
-                button.configuration?.background.customView?.alpha = button.isEnabled ? 1 : 0.4
-            }
-        }
-        claimButton.addAction(UIAction { [weak self] _ in self?.claimTapped() }, for: .primaryActionTriggered)
-        PressFeedback.attach(to: claimButton, sound: nil)
-        claimButton.translatesAutoresizingMaskIntoConstraints = false
-        claimBar.addSubview(claimButton)
-
-        let margin = WalletSheetMetrics.sideMargin
-        let leading = claimButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: margin)
-        let trailing = claimButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -margin)
-        let bottom = claimButton.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -margin)
-        NSLayoutConstraint.activate([
-            claimButton.heightAnchor.constraint(equalToConstant: WalletSheetMetrics.claimHeight),
-            leading, trailing, bottom,
-            // The container spans from just above the button to the foot —
-            // the extent the edge effect covers.
-            claimBar.topAnchor.constraint(equalTo: claimButton.topAnchor, constant: -Spacing.sm),
-            claimBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            claimBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            claimBar.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
-        buttonLeading = leading
-        buttonTrailing = trailing
-        buttonBottom = bottom
-        applyListBottomInset()
-    }
-
-    /// The list's last row can always scroll clear of the button.
-    private func applyListBottomInset() {
-        collectionView.contentInset.bottom = WalletSheetMetrics.claimHeight + buttonMargin + Spacing.lg
-        collectionView.verticalScrollIndicatorInsets.bottom = collectionView.contentInset.bottom
-    }
-
-    /// Nests the button in the screen's bottom corners — which the sheet's
-    /// bottom edge follows whatever its own radius: margin = device radius −
-    /// capsule radius on all three edges, so the pill stays concentric with
-    /// the corners on every screen. The sheet keeps UIKit's radius (see init).
-    private func applyButtonMargins() {
-        guard view.window != nil else { return }
-        let device = ScreenGeometry.cornerRadius(behind: view)
-        guard device > 0, abs(device - appliedSheetRadius) > 0.5 else { return }
-        appliedSheetRadius = device
-        buttonMargin = max(WalletSheetMetrics.sideMargin, device - WalletSheetMetrics.claimHeight / 2)
-        buttonLeading?.constant = buttonMargin
-        buttonTrailing?.constant = -buttonMargin
-        buttonBottom?.constant = -buttonMargin
-        applyListBottomInset()
-    }
-
-    /// The SMALL detent: the summary and the first `smallDetentRows` rows of
-    /// the list, then the button. Measured from the laid-out list rather than
-    /// typed, so Dynamic Type, a longer streak line or a list of one cannot
-    /// cut a row in half. Skipped once the sheet has forgotten the detent.
-    private func updateSmallDetent() {
-        guard let sheet,
-              sheet.detents.contains(where: { $0.identifier == Self.smallDetent }) else { return }
-        var bottom: CGFloat?
-        let rows = dataSource.snapshot().itemIdentifiers
-            .filter { $0 != .summary }.prefix(Self.smallDetentRows)
-        for item in rows {
-            guard let path = dataSource.indexPath(for: item),
-                  let frame = collectionView.layoutAttributesForItem(at: path)?.frame else { continue }
-            bottom = max(bottom ?? 0, frame.maxY)
-        }
-        if bottom == nil, let summary = collectionView.layoutAttributesForItem(at: IndexPath(item: 0, section: 0)) {
-            bottom = summary.frame.maxY
-        }
-        guard let bottom else { return }
-        // ⚠️ A custom detent's height EXCLUDES the bottom safe area — the
-        // sheet adds it back. Read from the PRESENTER's window too: this is
-        // measured in `viewDidLoad`, before the sheet has a window of its own.
-        let window = view.window ?? presentingViewController?.view.window
-        let bottomInset = window?.safeAreaInsets.bottom ?? 0
-        // `Spacing.xl` above the button: the bottom blur starts there, so the
-        // last row shown ends where the dissolve begins and reads whole.
-        let height = (barClearance() + Self.topInset + bottom + Spacing.xl + WalletSheetMetrics.claimHeight
-            + buttonMargin - bottomInset).rounded()
-        guard abs(height - smallDetentHeight) > 0.5 else { return }
-        smallDetentHeight = height
-        sheet.invalidateDetents()
-    }
-
-    /// The band the navigation bar takes at the sheet's top, which the list
-    /// starts under: the top safe area once laid out; before that (the first
-    /// measure, in `viewDidLoad`) the bar's own fitted height, so the sheet
-    /// does not present at a guess and then jump to the answer.
-    private func barClearance() -> CGFloat {
-        if view.safeAreaInsets.top > 0 { return view.safeAreaInsets.top }
-        guard let bar = navigationController?.navigationBar else { return 0 }
-        return bar.sizeThatFits(CGSize(width: view.bounds.width, height: 0)).height
     }
 
     // MARK: - Bar
 
-    /// `[storefront Shop] ······ [✕]` — no title: the summary under it says
-    /// what the sheet is.
+    /// `‹ ······ Wallet ······ [✕]`: back to the Claim sheet, or close.
     private func buildBar() {
+        title = "Wallet"
         navigationItem.largeTitleDisplayMode = .never
         let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
             self?.dismiss(animated: true)
@@ -564,43 +356,6 @@ final class WalletClaimViewController: UIViewController {
         close.identifier = Self.closeItemIdentifier
         close.accessibilityIdentifier = Self.closeItemIdentifier
         navigationItem.rightBarButtonItem = close
-        if countries != nil {
-            navigationItem.leftBarButtonItem = makeShopItem()
-        }
-    }
-
-    /// The Shop: the store's own glyph (`CountryShopEntry.symbolName`, the
-    /// Explore header's door) AND its name. A stock bar item draws one or the
-    /// other, never both, so it is a PLAIN button as the item's custom view —
-    /// no material of its own, the bar's glass is the only capsule (a glass
-    /// button inside would stack a second one).
-    private func makeShopItem() -> UIBarButtonItem {
-        var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: CountryShopEntry.symbolName)
-        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
-            pointSize: 15, weight: .semibold
-        )
-        configuration.title = CountryShopEntry.title
-        configuration.imagePadding = 6
-        configuration.baseForegroundColor = .label
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
-        configuration.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
-            var attributes = attributes
-            attributes.font = UIFont.scaledSystemFont(
-                ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 22
-            )
-            return attributes
-        }
-        let button = UIButton(configuration: configuration)
-        // The Explore header's door is also "Shop": the identifier tells
-        // the two apart in the accessibility tree.
-        button.accessibilityIdentifier = Self.shopItemIdentifier
-        button.addAction(UIAction { [weak self] _ in self?.openShop() }, for: .primaryActionTriggered)
-        button.sizeToFit()
-        let item = UIBarButtonItem(customView: button)
-        item.identifier = Self.shopItemIdentifier
-        item.accessibilityLabel = CountryShopEntry.title
-        return item
     }
 
     /// The Shop — where the gems go. A pushed screen since 2026-10-13: this
@@ -619,8 +374,34 @@ final class WalletClaimViewController: UIViewController {
 
     // MARK: - State
 
-    private func configureSummary(_ summary: WalletSummaryView) {
-        summary.configure(with: snapshot)
+    private func configureHeader(_ header: WalletHubHeaderView) {
+        header.configure(
+            with: snapshot, claimTitle: WalletClaimer.title(for: snapshot, pending: claimer.isPending),
+            canClaim: snapshot.claimAvailable && !claimer.isPending, sellsShop: countries != nil
+        )
+        header.onClaim = { [weak self] in
+            guard let self else { return }
+            claimer.claim(presentingFrom: self)
+        }
+        header.onStake = { [weak self] in self?.showActiveStakes() }
+        header.onShop = { [weak self] in self?.openShop() }
+        header.onActivity = { [weak self] in self?.openActivity() }
+        header.onGems = { [weak self] in self?.openShop() }
+    }
+
+    /// Stake: the active stakes, where staking shows (staking itself is a
+    /// like on a post, in the feeds).
+    private func showActiveStakes() {
+        guard let index = dataSource.snapshot().indexOfSection(.active) else { return }
+        let path = IndexPath(item: 0, section: index)
+        guard collectionView.numberOfItems(inSection: index) > 0 else { return }
+        collectionView.scrollToItem(at: path, at: .top, animated: true)
+    }
+
+    /// Activity: the wallet's history, pushed in the sheet (slice 4 groups
+    /// it by day, #1478).
+    private func openActivity() {
+        navigationController?.pushViewController(WalletHistoryViewController(wallet: wallet), animated: true)
     }
 
     private func refresh() {
@@ -628,8 +409,7 @@ final class WalletClaimViewController: UIViewController {
         stakes = wallet.stakes()
         stakesByID = Dictionary(uniqueKeysWithValues: stakes.map { ($0.targetID, $0) })
 
-        summaryCell.map { configureSummary($0.summary) }
-        applyClaimButtonState()
+        headerCell.map { configureHeader($0.header) }
 
         // Marked loading BEFORE the list is built, so a new stake's row
         // arrives as bones rather than as a row about nothing.
@@ -641,15 +421,15 @@ final class WalletClaimViewController: UIViewController {
         lookUp(missing)
     }
 
-    /// The list as it stands: the summary, then the stakes as
+    /// The list as it stands: the header, then the stakes as
     /// `WalletStakeList` lays them out — the failed row at their head when a
     /// post could not be loaded, the empty card when no stake is active.
     /// `stakeIDs` names the stake rows to redraw in place.
     private func applyList(reconfiguring stakeIDs: Set<String>) {
         let layout = WalletStakeList(stakes: stakes, loads: postLoads)
         var list = NSDiffableDataSourceSnapshot<Section, Item>()
-        list.appendSections([.summary, .active])
-        list.appendItems([.summary], toSection: .summary)
+        list.appendSections([.header, .active])
+        list.appendItems([.header], toSection: .header)
         list.appendItems(layout.active.map(Self.item), toSection: .active)
         if let settled = layout.settled {
             list.appendSections([.settled])
@@ -753,7 +533,7 @@ final class WalletClaimViewController: UIViewController {
     /// Try Again — the failed row's button, or a tap on a failed stake row:
     /// the failed posts only. Their rows go back to bones; the failed row
     /// STAYS, "Trying Again…" with its button off, so nothing below it moves
-    /// (`WalletStakeList`). The summary and the rest of the list are not
+    /// (`WalletStakeList`). The header and the rest of the list are not
     /// touched.
     private func retryFailedPosts() {
         let ids = postLoads.retry()
@@ -768,82 +548,6 @@ final class WalletClaimViewController: UIViewController {
         }
         applyList(reconfiguring: offscreen)
         lookUp(ids)
-    }
-
-    private func applyClaimButtonState() {
-        claimButton.isEnabled = snapshot.claimAvailable && pendingClaimKey == nil
-        var title: AttributedString
-        if pendingClaimKey != nil {
-            title = AttributedString("Claiming…")
-        } else if snapshot.claimAvailable {
-            title = AttributedString("Claim \(snapshot.claimAmount) likes")
-        } else if snapshot.claimedToday >= snapshot.dailyClaimCap, let next = snapshot.nextClaimAt {
-            title = AttributedString("Daily cap reached — resets in \(Self.countdownString(to: next))")
-        } else if let next = snapshot.nextClaimAt {
-            title = AttributedString("Next claim in \(Self.countdownString(to: next))")
-        } else if let cap = snapshot.likesCap, snapshot.balance >= cap {
-            // The points cap (#901): no wait opens it, only spending does.
-            title = AttributedString("Your likes are full — stake some to claim again")
-        } else {
-            title = AttributedString("Claim")
-        }
-        title.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24
-        )
-        claimButton.configuration?.attributedTitle = title
-    }
-
-    /// A member's sheet only (#1146): the claim needs no gate.
-    private func claimTapped() {
-        commitClaim()
-    }
-
-    /// The claim on its way (#1098): its key, minted once for the tap and
-    /// sent again by a retry — the server credits a key at most once — and
-    /// dropped once the server has answered.
-    private var pendingClaimKey: String?
-
-    private func commitClaim() {
-        guard pendingClaimKey == nil else { return }
-        let key = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        pendingClaimKey = key
-        applyClaimButtonState()
-        send(claimKey: key)
-    }
-
-    private func send(claimKey key: String) {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let outcome = await wallet.claim(idempotencyKey: key)
-            switch outcome {
-            case .claimed:
-                pendingClaimKey = nil
-                HapticNotification().notificationOccurred(.success)
-                // Explicit refresh, not the observer's: its queue hop is UIKit's
-                // business, and the pop below must scale the NEW number.
-                refresh()
-                summaryCell?.summary.likesTile.pop()
-            case .tooEarly, .dailyCapReached, .balanceFull:
-                pendingClaimKey = nil
-                HapticNotification().notificationOccurred(.warning)
-                refresh()
-            case .unavailable:
-                // Not answered: the same key goes again with the retry, so a
-                // claim whose answer was lost is never paid twice.
-                HapticNotification().notificationOccurred(.error)
-                let alert = UIAlertController(
-                    title: nil, message: "Couldn't reach the server to claim. Try again.", preferredStyle: .alert
-                )
-                alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
-                    self?.pendingClaimKey = nil
-                    self?.refresh()
-                })
-                alert.addAction(UIAlertAction(title: "Retry", style: .default) { [weak self] _ in
-                    self?.send(claimKey: key)
-                })
-                present(alert, animated: true)
-            }
-        }
     }
 
     // MARK: - Opening a stake
@@ -977,7 +681,10 @@ final class WalletClaimViewController: UIViewController {
             return
         }
         snapshot = wallet.snapshot()
-        applyClaimButtonState()
+        headerCell?.header.applyClaim(
+            title: WalletClaimer.title(for: snapshot, pending: claimer.isPending),
+            canClaim: snapshot.claimAvailable && !claimer.isPending
+        )
         for cell in collectionView.visibleCells {
             guard let cell = cell as? WalletStakeCell,
                   let indexPath = collectionView.indexPath(for: cell),
@@ -986,18 +693,9 @@ final class WalletClaimViewController: UIViewController {
             cell.applyStatus(stake: stake, now: now)
         }
     }
-
-    /// "42:07" under an hour, "3h 12m" above it.
-    private static func countdownString(to date: Date) -> String {
-        let remaining = max(0, Int(date.timeIntervalSinceNow.rounded(.up)))
-        if remaining >= 3600 {
-            return "\(remaining / 3600)h \((remaining % 3600) / 60)m"
-        }
-        return String(format: "%d:%02d", remaining / 60, remaining % 60)
-    }
 }
 
-extension WalletClaimViewController: UICollectionViewDelegate {
+extension WalletHubViewController: UICollectionViewDelegate {
     /// A stake row opens its post, or tries again when its post could not be
     /// loaded; nothing else on the list is pressable (the failed row has its
     /// own button).
@@ -1025,7 +723,7 @@ extension WalletClaimViewController: UICollectionViewDelegate {
 /// the tokens are only written on the main actor at setup time. `nonisolated`,
 /// because the App target's default-MainActor isolation would otherwise pin
 /// `tokens` to the main actor and put it out of deinit's reach.
-private nonisolated final class WalletObserverTokenBag: @unchecked Sendable {
+nonisolated final class WalletObserverTokenBag: @unchecked Sendable {
     var tokens: [NSObjectProtocol] = []
     deinit {
         for token in tokens { NotificationCenter.default.removeObserver(token) }
