@@ -80,6 +80,45 @@ enum TimingTolerance {
         return answer()
     }
 
+    /// `firstAnswer`, with its budget spent only while nothing is on its way.
+    ///
+    /// ⚠️ **A FRESH COMPOSED READER DECODES FROM THE KEYFRAME BEFORE ITS FIRST
+    /// FRAME (#1021)**, and in a full parallel run beside CPU hogs that took
+    /// longer than the twenty seconds of looks the tests gave it — the failure
+    /// read `reading: true, frames: 0`: running, nothing failed, an answer on
+    /// its way. While `decoding` says so the looks are not counted, up to
+    /// `ceiling` looks in all; a reader that has stopped, or that sits on
+    /// frames that do not answer, spends the budget as before, so a broken one
+    /// still fails in the same time.
+    static func firstAnswer<T>(
+        looks: Int, whileDecoding decoding: () -> Bool, ceiling: Int,
+        step: Duration = .milliseconds(5),
+        isolation: isolated (any Actor)? = #isolation, _ answer: () -> T?
+    ) async throws -> T? {
+        var spent = 0
+        for _ in 0..<max(looks, ceiling) {
+            if let value = answer() { return value }
+            if !decoding() {
+                spent += 1
+                if spent >= looks { break }
+            }
+            try await Task.sleep(for: step)
+        }
+        return answer()
+    }
+
+    /// The longest a wait follows a composed reader still decoding toward its
+    /// frame, in seconds of looks — a ceiling, never a pace: an answer ends
+    /// the wait.
+    static let decodingCeiling: Double = 180
+
+    /// Whether a composed reader is decoding toward a frame it has not
+    /// produced: running, with nothing waiting to be handed out.
+    static func decoding(_ state: (frames: Int, reading: Bool, generation: Int)?) -> Bool {
+        guard let state else { return false }
+        return state.reading && state.frames == 0
+    }
+
     /// Whether `samples` clear `bound` as a property of the code, not of one
     /// lucky or unlucky turn: the median does, and at most `missFraction` of
     /// them (rounded up, at least one) fall at or below it.

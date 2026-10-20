@@ -703,6 +703,9 @@ final class VideoFrameRenderer {
     /// runs suites in parallel and under `AVSBDL_RENDER=1` the controller suite
     /// registers renderers of its own — a global count is a race, this is not.
     var debugIsRegisteredWithClock: Bool { isRegistered }
+
+    /// The composed reader's state — see `VideoFrameSource.debugComposedState`.
+    var debugComposedState: (frames: Int, reading: Bool, generation: Int)? { source.debugComposedState }
     #endif
 
     private func log(_ message: @autoclosure () -> String) {

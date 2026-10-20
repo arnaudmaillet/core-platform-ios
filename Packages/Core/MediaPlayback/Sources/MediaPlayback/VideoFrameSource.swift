@@ -358,6 +358,11 @@ final class VideoFrameSource {
     }
 
     #if DEBUG
+    /// The composed reader's state — see `ComposedFrameReader.debugState`. What
+    /// a test waits on while a fresh reader decodes from the keyframe toward
+    /// its first frame (#1021). Nil without one.
+    var debugComposedState: (frames: Int, reading: Bool, generation: Int)? { composed?.debugState }
+
     /// Whether the output would hand over a frame at `hostTime` — asked
     /// WITHOUT taking it, for the producer log.
     func debugHasNewBuffer(atHostTime hostTime: CFTimeInterval) -> String {
