@@ -205,6 +205,14 @@ public final class PersonPill: UIView {
         ring.isUserInteractionEnabled = false
         ring.layer.borderWidth = PersonPillRing.width
         ring.layer.borderColor = UIColor.clear.cgColor
+        // The friends' ring is the accent (#1379): a border holds a CGColor
+        // and re-resolves nothing itself.
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+        ) { (pill: PersonPill, _: UITraitCollection) in
+            pill.ring.layer.borderColor = PersonPillRing.ink(for: pill.ringRelation)
+                .resolvedColor(with: pill.traitCollection).cgColor
+        }
         ring.layer.cornerCurve = .circular
         ring.layer.cornerRadius = AvatarImageView.bubbleDiameter / 2 + PersonPillRing.width
         ring.constrain(in: self) { _ in
@@ -349,7 +357,7 @@ public final class PersonPill: UIView {
     public func setRing(_ relation: Badge, animated: Bool) {
         guard statusBadge != nil, relation != ringRelation else { return }
         ringRelation = relation
-        let ink = PersonPillRing.ink(for: relation).cgColor
+        let ink = PersonPillRing.ink(for: relation).resolvedColor(with: traitCollection).cgColor
         if animated, window != nil {
             let fade = CABasicAnimation(keyPath: "borderColor")
             fade.fromValue = ring.layer.presentation()?.borderColor ?? ring.layer.borderColor
@@ -540,8 +548,10 @@ final class PersonPillBadgeView: UIButton {
 public enum PersonPillBadgeInks {
     public static let restingDisc = UIColor.black
     public static let glyph = UIColor.white
-    /// The accent pink.
-    public static let accent = Palette.tint.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
+    /// The tint's light value in the viewer's accent theme (#1379).
+    public static let accent = UIColor { traits in
+        Palette.tint.resolvedColor(with: traits.modifyingTraits { $0.userInterfaceStyle = .light })
+    }
     /// A quiet grey disc.
     public static let quietDisc = UIColor.systemGray5.resolvedColor(with: UITraitCollection(userInterfaceStyle: .light))
 }

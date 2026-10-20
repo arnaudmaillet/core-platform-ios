@@ -238,6 +238,10 @@ final class AppContainer {
     /// until then.
     func enterStorageScope(for state: AuthState) {
         let scope = StorageScope.shared
+        // The viewer's accent theme (#1379): a guest draws in pink, an account
+        // in the theme it chose on this device.
+        let accountID: String? = if case .authenticated(let account) = state { account.rawValue } else { nil }
+        AccentThemePreference.apply(AccentThemePreference.theme(for: accountID))
         switch state {
         case .unauthenticated:
             scope.owner = .guest

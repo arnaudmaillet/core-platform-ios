@@ -2741,16 +2741,30 @@ private final class BadgeView: UIView {
 
     /// The gradient the fill is, when the host states one (`badgeGradient`).
     private var gradientLayer: CAGradientLayer?
+    /// Its stops as stated, re-resolved on an appearance or accent theme
+    /// change (#1379): a layer holds CGColors and re-resolves nothing itself.
+    private var gradientStops: [UIColor]?
+    private var observesGradientTraits = false
 
     func setGradient(_ colours: [UIColor]?) {
+        gradientStops = colours
         guard let colours else {
             gradientLayer?.removeFromSuperlayer()
             gradientLayer = nil
             applyFill()
             return
         }
+        if !observesGradientTraits {
+            observesGradientTraits = true
+            registerForTraitChanges(
+                [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+            ) { (badge: Self, _: UITraitCollection) in
+                guard let stops = badge.gradientStops else { return }
+                badge.gradientLayer?.colors = stops.map { $0.resolvedColor(with: badge.traitCollection).cgColor }
+            }
+        }
         let gradient = gradientLayer ?? CAGradientLayer()
-        gradient.colors = colours.map(\.cgColor)
+        gradient.colors = colours.map { $0.resolvedColor(with: traitCollection).cgColor }
         gradient.startPoint = Palette.accentGradientStart
         gradient.endPoint = Palette.accentGradientEnd
         gradient.cornerCurve = .continuous

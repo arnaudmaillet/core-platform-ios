@@ -19,7 +19,7 @@ struct LikesCoinTests {
         #expect(coin.isSymbolImage == false, "a symbol is re-rendered by the bar's glass")
         #expect(coin.renderingMode == .alwaysOriginal)
 
-        let pink = Palette.tint.resolvedColor(with: badge.traitCollection)
+        let pink = Palette.likesPink.resolvedColor(with: badge.traitCollection)
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         pink.getRed(&r, green: &g, blue: &b, alpha: &a)
         let pixels = try Self.opaquePixels(of: coin)

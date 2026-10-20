@@ -14,7 +14,7 @@ public enum LikesSymbol {
     public static let coin = "heart.circle.fill"
     /// Points' colour: the pink (#1178, the owner 2026-10-15). It was a
     /// like's red (25 September 2026).
-    public static var tint: UIColor { Palette.tint }
+    public static var tint: UIColor { Palette.likesPink }
     /// The heart's fill for an appearance — the pink, solid (#1178; it was
     /// #1124's yellow → orange → pink, then a solid red).
     public static func gradient(for traits: UITraitCollection) -> [UIColor] {

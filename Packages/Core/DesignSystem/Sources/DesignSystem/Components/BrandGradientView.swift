@@ -5,8 +5,8 @@ import UIKit
 /// `Palette.rules.heroButton = .gradient`, #1169) by default, or the stops a
 /// caller gives — the prominent button's fill (`Palette.primaryGradient`,
 /// #1178).
-/// Dynamic stops re-resolve on an appearance change. Takes no touch: a
-/// button's background, not a control.
+/// Dynamic stops re-resolve on an appearance or accent theme change (#1379).
+/// Takes no touch: a button's background, not a control.
 public final class BrandGradientView: UIView {
     override public class var layerClass: AnyClass { CAGradientLayer.self }
     private var gradient: CAGradientLayer { layer as! CAGradientLayer }
@@ -19,7 +19,9 @@ public final class BrandGradientView: UIView {
         gradient.startPoint = CGPoint(x: 0, y: 1)
         gradient.endPoint = CGPoint(x: 1, y: 0)
         resolveColours()
-        registerForTraitChanges([UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]) { (view: Self, _) in
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+        ) { (view: Self, _) in
             view.resolveColours()
         }
     }

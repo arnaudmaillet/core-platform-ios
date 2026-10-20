@@ -54,39 +54,57 @@ public enum Palette {
     /// theme's pink, `F37AB4`, in both appearances): about 2.3:1 on white, a
     /// mark rather than text strength — chosen knowingly. Increased Contrast
     /// keeps the deep pink (`B0256A`, 6:1).
-    public static let tint = dynamic(light: 0xF37AB4, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
+    ///
+    /// Per accent theme (#1379): violet `A78BFA`, red `E5484D` — starting
+    /// values, tuned on the device.
+    public static let tint = themed(pink: accentPink, violet: accentViolet, red: accentRed)
 
     /// Text that carries the accent (≥ 4.5:1): the tint itself, which
     /// already reads as text. Mentions and hashtags do NOT wear it (#1168).
-    public static let brandText = dynamic(light: 0xF37AB4, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
+    public static let brandText = themed(pink: accentPink, violet: accentViolet, red: accentRed)
 
     /// A prominent filled button's ground, an active chip.
-    public static let primaryFill = dynamic(light: 0xF37AB4, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
+    public static let primaryFill = themed(pink: accentPink, violet: accentViolet, red: accentRed)
 
     /// The label on `primaryFill`: white in the light (4.53:1), a deep ink
     /// on the brighter dark fill.
-    public static let onPrimary = dynamic(light: 0xFFFFFF, dark: 0x2B0716)
+    public static let onPrimary = themed(
+        pink: Shade(0xFFFFFF, 0x2B0716), violet: Shade(0xFFFFFF, 0x1A1033), red: Shade(0xFFFFFF, 0x2B0709)
+    )
 
     /// `primaryFill` pressed or highlighted.
-    public static let primaryFillPressed = dynamic(light: 0xE86AA6, dark: 0xE86AA6, lightIC: 0x9C1F5E, darkIC: 0xE86AA6)
+    public static let primaryFillPressed = themed(
+        pink: Shade(0xE86AA6, 0xE86AA6, ic: (0x9C1F5E, 0xE86AA6)),
+        violet: Shade(0x9478EE, 0x9478EE, ic: (0x4E38A3, 0x9478EE)),
+        red: Shade(0xD63B40, 0xD63B40, ic: (0x9A1C2A, 0xD63B40))
+    )
 
     /// A PROMINENT GLASS button's tint (the wallet's Claim, a country's
     /// Unlock): the primary pink in both appearances (#1190). ⚠️ The glass
     /// draws its label white and vibrant whatever ink is asked for.
-    public static let prominentGlassTint = rgb(0xF37AB4)
+    public static let prominentGlassTint = themed(
+        pink: Shade(0xF37AB4, 0xF37AB4), violet: Shade(0xA78BFA, 0xA78BFA), red: Shade(0xE5484D, 0xE5484D)
+    )
 
     /// A soft selected background, an info banner, a "New" badge.
-    public static let primaryContainer = dynamic(light: 0xFDE3EF, dark: 0x3A0A22)
+    public static let primaryContainer = themed(
+        pink: Shade(0xFDE3EF, 0x3A0A22), violet: Shade(0xEFEEFF, 0x211944), red: Shade(0xFDE4E4, 0x3A0A0C)
+    )
 
     /// The prominent button's fill (#1178, the owner 2026-10-15: "pink, a
     /// pink-to-white gradient"): the tint at the bottom-left lightening
     /// toward a pale pink at the top-right, under white words — 4.53:1 where
     /// the words start, lighter toward the far corner. The same in both
     /// appearances.
-    public static let primaryGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xFAC8DF)]
+    public static let primaryGradient: [UIColor] = [
+        themed(pink: Shade(0xF37AB4, 0xF37AB4), violet: Shade(0xA78BFA, 0xA78BFA), red: Shade(0xE5484D, 0xE5484D)),
+        themed(pink: Shade(0xFAC8DF, 0xFAC8DF), violet: Shade(0xDCD2FD, 0xDCD2FD), red: Shade(0xF7C1C3, 0xF7C1C3)),
+    ]
 
     /// Text on `primaryContainer`.
-    public static let onPrimaryContainer = dynamic(light: 0xB8296C, dark: 0xF8ABCF)
+    public static let onPrimaryContainer = themed(
+        pink: Shade(0xB8296C, 0xF8ABCF), violet: Shade(0x6852C6, 0xA78BFA), red: Shade(0xB42332, 0xFF8A8F)
+    )
 
     /// Every solid unread mark — the tab bar's badges, the Messages
     /// selector's, the bell's dot, a menu row's count (#1169: one colour
@@ -102,7 +120,11 @@ public enum Palette {
         }
     }
 
-    static let counterViolet = rgb(0x7C5CF0)
+    /// The secondary's solid mark — violet, or a deep pink in the violet
+    /// theme (#1379: the two hues swap), deep enough for a white count.
+    static let counterViolet = themed(
+        pink: Shade(0x7C5CF0, 0x7C5CF0), violet: Shade(0xB8296C, 0xB8296C), red: Shade(0x7C5CF0, 0x7C5CF0)
+    )
 
     /// THE ICON'S GRADIENT (#1169; pink → violet since the icon was redrawn,
     /// #1176): pink at the bottom-left → violet at the top-right, as the icon
@@ -113,7 +135,13 @@ public enum Palette {
     /// coloured mark on any ground. Worn by the unread pills on the inbox's
     /// avatars and by the unseen-story ring — NOT by the tab bar's badges, the
     /// selector's nor the bell's dot: those stay solid (`counter`).
-    public static let accentGradient: [UIColor] = [rgb(0xF37AB4), rgb(0xA78BFA)]
+    ///
+    /// Its first stop is the theme's accent, its far stop the secondary
+    /// (#1379): violet → pink in the violet theme.
+    public static let accentGradient: [UIColor] = [
+        themed(pink: Shade(0xF37AB4, 0xF37AB4), violet: Shade(0xA78BFA, 0xA78BFA), red: Shade(0xE5484D, 0xE5484D)),
+        themed(pink: Shade(0xA78BFA, 0xA78BFA), violet: Shade(0xF37AB4, 0xF37AB4), red: Shade(0xA78BFA, 0xA78BFA)),
+    ]
 
     /// `@mentions`, `#hashtags` and links in text on a plain surface (#1174,
     /// the owner 2026-10-14: "the pink as accent, used subtly and
@@ -180,14 +208,20 @@ public enum Palette {
 
     // MARK: - Secondary: violet
 
-    /// Gems and secondary emphasis. A white label on it passes too (5.82:1).
-    public static let secondary = dynamic(light: 0x6852C6, dark: 0xA78BFA, lightIC: 0x5C44B7, darkIC: 0xB59EFF)
+    /// Secondary emphasis. A white label on it passes too (5.82:1). Pink in
+    /// the violet theme (#1379: the two hues swap); gems keep their own
+    /// violet whatever the theme (`gemViolet`).
+    public static let secondary = themed(pink: violetFamily, violet: pinkSecondary, red: violetFamily)
 
-    /// The gem shop's shelf ground, a gem badge.
-    public static let secondaryContainer = dynamic(light: 0xEFEEFF, dark: 0x211944)
+    /// A secondary shelf ground, a badge.
+    public static let secondaryContainer = themed(
+        pink: Shade(0xEFEEFF, 0x211944), violet: Shade(0xFDE3EF, 0x3A0A22), red: Shade(0xEFEEFF, 0x211944)
+    )
 
     /// Text on `secondaryContainer`.
-    public static let onSecondaryContainer = dynamic(light: 0x6852C6, dark: 0xA78BFA)
+    public static let onSecondaryContainer = themed(
+        pink: Shade(0x6852C6, 0xA78BFA), violet: Shade(0xB8296C, 0xF8ABCF), red: Shade(0x6852C6, 0xA78BFA)
+    )
 
     // MARK: - The loader (#1329)
 
@@ -218,10 +252,19 @@ public enum Palette {
     public static func likesGradient(for traits: UITraitCollection) -> [UIColor] {
         // ⚠️ SOLID: the pink (#1178, the owner 2026-10-15, after a pink →
         // violet pass). Two equal stops, so the heart's mask and layer — built
-        // for a gradient — are untouched.
-        let pink = tint.resolvedColor(with: traits)
+        // for a gradient — are untouched. The ECONOMY's pink, never the
+        // theme's accent (#1379).
+        let pink = likesPink.resolvedColor(with: traits)
         return [pink, pink]
     }
+
+    /// The likes' pink (#1379): the heart, the likes glyph and coin — the
+    /// pink accent's values, fixed whatever the accent theme.
+    public static let likesPink = dynamic(light: 0xF37AB4, dark: 0xF37AB4, lightIC: 0xB0256A, darkIC: 0xF8ABCF)
+
+    /// The gems' violet (#1379): the secondary's values when the accent is
+    /// pink, fixed whatever the accent theme.
+    public static let gemViolet = dynamic(light: 0x6852C6, dark: 0xA78BFA, lightIC: 0x5C44B7, darkIC: 0xB59EFF)
 
     /// The icon's own gradient, pink → violet (#1176), deep enough to carry a
     /// white label, for brand moments only (splash, onboarding, empty-state
@@ -229,6 +272,48 @@ public enum Palette {
     public static let brandGradient: [UIColor] = [rgb(0xE0559A), rgb(0x7C5CF0)]
 
     // MARK: - Building
+
+    /// One role's values in one theme: light, dark, and the Increased
+    /// Contrast pair (the ordinary ones without it).
+    struct Shade: Equatable {
+        let light: UInt32
+        let dark: UInt32
+        let lightIC: UInt32
+        let darkIC: UInt32
+
+        init(_ light: UInt32, _ dark: UInt32, ic: (light: UInt32, dark: UInt32)? = nil) {
+            self.light = light
+            self.dark = dark
+            self.lightIC = ic?.light ?? light
+            self.darkIC = ic?.dark ?? dark
+        }
+    }
+
+    /// The accents (#1379): pink (#1169), violet (the secondary's family),
+    /// red — clear of the system red `FF3B30` and the heart's pink.
+    static let accentPink = Shade(0xF37AB4, 0xF37AB4, ic: (0xB0256A, 0xF8ABCF))
+    static let accentViolet = Shade(0xA78BFA, 0xA78BFA, ic: (0x5C44B7, 0xB59EFF))
+    static let accentRed = Shade(0xE5484D, 0xE5484D, ic: (0xB42332, 0xFF8A8F))
+    /// The secondary: violet, and its pink stand-in in the violet theme.
+    static let violetFamily = Shade(0x6852C6, 0xA78BFA, ic: (0x5C44B7, 0xB59EFF))
+    static let pinkSecondary = Shade(0xB8296C, 0xF37AB4, ic: (0xB0256A, 0xF8ABCF))
+
+    /// A role that resolves per accent theme, appearance and contrast.
+    static func themed(pink: Shade, violet: Shade, red: Shade) -> UIColor {
+        let colours = (pink: dynamic(pink), violet: dynamic(violet), red: dynamic(red))
+        return UIColor { traits in
+            switch traits.accentTheme {
+            case .pink: colours.pink.resolvedColor(with: traits)
+            case .violet: colours.violet.resolvedColor(with: traits)
+            case .red: colours.red.resolvedColor(with: traits)
+            }
+        }
+    }
+
+    /// One theme's shade as an appearance- and contrast-dynamic colour.
+    private static func dynamic(_ shade: Shade) -> UIColor {
+        dynamic(light: shade.light, dark: shade.dark, lightIC: shade.lightIC, darkIC: shade.darkIC)
+    }
 
     /// A colour from its sRGB hex.
     static func rgb(_ hex: UInt32) -> UIColor {

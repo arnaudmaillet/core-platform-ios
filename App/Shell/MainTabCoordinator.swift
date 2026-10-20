@@ -278,8 +278,10 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.memberGate = container.memberGate
         // The badged bell is a baked bitmap per appearance (#1178): the bars
         // pick the variant when the image is set, so a light/dark switch sets
-        // it again.
-        tabBarController.view.registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: UIView, _) in
+        // it again — and an accent theme change (#1379), the badge's colour.
+        tabBarController.view.registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, AccentThemeTrait.self]
+        ) { [weak self] (_: UIView, _) in
             self?.notificationsBell.repaint()
             self?.refreshTabGlyphs()
         }
