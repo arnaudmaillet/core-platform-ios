@@ -67,6 +67,8 @@ final class CommentsDiskTier: Sendable {
         var authorName: String
         var authorHandle: String
         var authorAvatarURL: URL?
+        /// Absent from a record written before #943: decodes as none.
+        var authorAvatarFrameID: String?
         var body: String
         var createdAt: Date
         var parentID: String?
@@ -80,6 +82,7 @@ final class CommentsDiskTier: Sendable {
             authorName = entry.authorName
             authorHandle = entry.authorHandle
             authorAvatarURL = entry.authorAvatarURL
+            authorAvatarFrameID = entry.authorAvatarFrameID
             body = entry.body
             createdAt = entry.createdAt
             parentID = entry.parentID
@@ -90,7 +93,8 @@ final class CommentsDiskTier: Sendable {
         var entry: CommentEntry {
             CommentEntry(
                 id: id, authorID: ProfileID(authorID), authorName: authorName, authorHandle: authorHandle,
-                authorAvatarURL: authorAvatarURL, body: body, createdAt: createdAt, parentID: parentID, isHeld: isHeld,
+                authorAvatarURL: authorAvatarURL, authorAvatarFrameID: authorAvatarFrameID, body: body,
+                createdAt: createdAt, parentID: parentID, isHeld: isHeld,
                 replyCount: replyCount
             )
         }

@@ -23,6 +23,8 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
     /// avatar, and a failed fetch are all the same outcome — the monogram
     /// stands.
     public let avatarURL: URL?
+    /// The author's avatar frame (#943); nil for none.
+    public var avatarFrameID: String?
     /// The thread parent's id for level-2 replies; nil at top level.
     public let parentID: String?
     /// When it was written — what the day pills group by. Nil for a row built
@@ -58,6 +60,7 @@ public struct CommentDisplayModel: Equatable, Sendable, Identifiable {
         parentID = entry.parentID
         monogram = MonogramAvatarView.monogram(name: entry.authorName, handle: "")
         avatarURL = entry.authorAvatarURL
+        avatarFrameID = entry.authorAvatarFrameID
         metaText = RelativeAgeFormatter.short(from: entry.createdAt, to: now)
         createdAt = entry.createdAt
         isHeld = entry.isHeld

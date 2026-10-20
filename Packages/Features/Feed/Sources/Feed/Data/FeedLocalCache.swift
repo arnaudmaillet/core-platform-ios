@@ -323,6 +323,7 @@ public final class FeedLocalCache: Sendable {
         view.handle = author.handle
         view.displayName = author.displayName
         view.avatarURL = author.avatarURL?.absoluteString ?? ""
+        view.avatarFrameID = author.avatarFrameID ?? ""
         return view
     }
 
@@ -330,7 +331,8 @@ public final class FeedLocalCache: Sendable {
         guard entity.format == 1, let view = try? Profile_V1_ProfileSummaryView(serializedBytes: entity.payload) else { return nil }
         return AuthorSummary(
             id: ProfileID(view.profileID), handle: view.handle, displayName: view.displayName,
-            avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL)
+            avatarURL: view.avatarURL.isEmpty ? nil : URL(string: view.avatarURL),
+            avatarFrameID: view.avatarFrameID.isEmpty ? nil : view.avatarFrameID
         )
     }
 

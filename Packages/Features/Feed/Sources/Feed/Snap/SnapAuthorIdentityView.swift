@@ -178,6 +178,8 @@ final class SnapAuthorIdentityView: UIView {
             // same pass as the name — nothing to fade in after the pill
             // appears. Any other lands later, on THIS author's content.
             self.pill.avatar.setPicture(faceURL, pipeline: pipeline)
+            // The frame the author wears (#943), with the face.
+            self.pill.avatar.frameID = model.avatarFrameID
         }
     }
 
@@ -193,6 +195,7 @@ final class SnapAuthorIdentityView: UIView {
         model.authorID == authorID
             && model.authorName == renderedModel?.authorName
             && model.avatarURL == renderedModel?.avatarURL
+            && model.avatarFrameID == renderedModel?.avatarFrameID
     }
 
     /// The author on the pill, if one has been set with `setAuthor`.

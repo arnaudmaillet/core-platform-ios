@@ -417,7 +417,8 @@ public actor FeedRepository: FeedProviding {
             id: ProfileID(view.profileID),
             handle: view.handle,
             displayName: view.displayName,
-            avatarURL: URL(string: view.avatarURL)
+            avatarURL: URL(string: view.avatarURL),
+            avatarFrameID: view.avatarFrameID.isEmpty ? nil : view.avatarFrameID
         )
         authorCache[author.id] = author
         return author
@@ -471,7 +472,8 @@ public actor FeedRepository: FeedProviding {
                             id: ProfileID(view.profileID),
                             handle: view.handle,
                             displayName: view.displayName,
-                            avatarURL: URL(string: view.avatarURL)
+                            avatarURL: URL(string: view.avatarURL),
+                            avatarFrameID: view.avatarFrameID.isEmpty ? nil : view.avatarFrameID
                         )
                     }
                 }
