@@ -25,8 +25,14 @@ final class AccessoryCollapseUITests: XCTestCase {
     /// name is a silent no-op that lands on Explore and fakes a missing
     /// selector. For You has no band since 2026-09-29, and its bar never
     /// collapses (#758).
+    ///
+    /// ⚠️ NOT PROFILE (#1154). Its root puts a band up only with two
+    /// sources holding something (#742, Posts included since #1422), and the
+    /// mock viewer holds posts alone: no band, `env=no-accessory`, which is
+    /// the rule working, not the band failing. The leg comes back the day the
+    /// mock seeds a second source for the viewer.
     private static let accessorySurfaces: [(name: String, tab: Int)] = [
-        ("Messages", 2), ("Profile", 3),
+        ("Messages", 2),
     ]
 
     override func setUp() { continueAfterFailure = false }
