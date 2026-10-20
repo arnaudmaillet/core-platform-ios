@@ -1705,11 +1705,10 @@ final class ProfileViewController: UIViewController, HeaderAccessoryHosting, Pro
     private func leaveAfterBlock() {
         // An open menu-spawned alert would otherwise ride out the pop.
         presentedViewController?.dismiss(animated: false)
-        if let nav = navigationController, nav.viewControllers.count > 1 {
-            nav.popViewController(animated: true)
-        } else if presentingViewController != nil {
-            dismiss(animated: true)
-        }
+        // THIS profile, wherever it is now (#1144): the block answered after
+        // an `await`, and the viewer may have gone back or pushed on since —
+        // a plain pop would have closed that other screen.
+        closeScreen()
     }
 
     // MARK: - Setup

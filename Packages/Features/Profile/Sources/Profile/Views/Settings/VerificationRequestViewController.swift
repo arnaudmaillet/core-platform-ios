@@ -1,5 +1,6 @@
 import DesignSystem
 import UIKit
+import CoreNavigation
 
 /// Account Type → Request Verification (#415, backend #668): the badge's
 /// category and 1 to 5 supporting links. Sent as one request; the screen
@@ -208,7 +209,8 @@ final class VerificationRequestViewController: UIViewController {
                 try await manager.requestVerification(category, links: links)
                 isSubmitting = false
                 onSubmitted()
-                navigationController?.popViewController(animated: true)
+                // This screen only, if it is still here (#1144).
+                closeScreen()
             } catch {
                 isSubmitting = false
                 showAlert(Self.failureMessage(error))

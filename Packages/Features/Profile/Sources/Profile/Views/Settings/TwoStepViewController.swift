@@ -2,6 +2,7 @@ import CoreImage.CIFilterBuiltins
 import CoreNetworking
 import DesignSystem
 import UIKit
+import CoreNavigation
 
 /// Settings → Security and Login → Two-Step Sign-In (#383, backend #649).
 ///
@@ -614,7 +615,7 @@ final class TwoStepEnrollmentViewController: UIViewController {
                 )
             }
         case .back:
-            navigationController?.popViewController(animated: true)
+            closeScreen()
         }
     }
 
@@ -855,7 +856,8 @@ final class TwoStepEnrollmentViewController: UIViewController {
                 onEnabled(codes)
             } catch TwoStepError.enrollmentExpired {
                 presentMessage(TwoStepViewController.failureMessage(TwoStepError.enrollmentExpired)) { [weak self] in
-                    self?.navigationController?.popViewController(animated: true)
+                    // This screen only, if it is still here (#1144).
+                    self?.closeScreen()
                 }
             } catch {
                 codeField.text = ""

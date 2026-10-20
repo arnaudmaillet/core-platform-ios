@@ -343,6 +343,45 @@ struct ChatMediaTests {
         #expect(last.last?.delivery == .sending)
         #expect(await settle { last.last?.delivery == .sent })
     }
+
+    /// The picker's completion closes the picker only (#1144): one that was
+    /// cancelled or swiped away first never takes the thread with it —
+    /// `dismiss` on a presenter presenting nothing dismisses the presenter.
+    @Test func aLatePickerCompletionNeverClosesTheThread() async {
+        let provider = MediaStubProvider(failures: 0)
+        let viewModel = ConversationViewModel(conversationID: ConversationID("c"), repository: provider)
+        var finish: (@MainActor ([ChatMediaUpload]) -> Void)?
+        let driver = ConversationThreadDriver(
+            viewModel: viewModel, viewer: provider, avatars: nil,
+            mediaPicker: { _, done in
+                finish = done
+                return UIViewController()
+            }
+        )
+        let thread = PresentationSpy()
+        driver.pickMedia(.library, from: thread)
+        #expect(thread.presented != nil)
+        // The picker went away on its own (cancel, swipe-down), then its
+        // export delivered.
+        finish?([])
+        #expect(thread.dismissals == 0, "the thread was dismissed")
+    }
+}
+
+/// Records presentations without making them (a test host's modals never
+/// land), and every dismissal asked of it.
+@MainActor
+private final class PresentationSpy: UIViewController {
+    private(set) var presented: UIViewController?
+    private(set) var dismissals = 0
+
+    override func present(_ controller: UIViewController, animated: Bool, completion: (() -> Void)? = nil) {
+        presented = controller
+    }
+
+    override func dismiss(animated: Bool, completion: (() -> Void)? = nil) {
+        dismissals += 1
+    }
 }
 
 private struct FailingTransport: MediaUploadTransport {
