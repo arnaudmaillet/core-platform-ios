@@ -271,6 +271,25 @@ public enum Palette {
     /// art, the Shop's hero art, the wallet's hero rule).
     public static let brandGradient: [UIColor] = [rgb(0xE0559A), rgb(0x7C5CF0)]
 
+    // MARK: - Avatar frames (#943)
+
+    /// The avatar frames' rings, swept around the face from twelve o'clock
+    /// (`AvatarFrame`) — the economy's cosmetics, fixed whatever the accent
+    /// theme and the appearance: a frame is the same object for everyone who
+    /// sees it. v1 art, drawn in code (no designer yet), to tune on device.
+    ///
+    /// Gold: a warm metal, light catching at the top and the bottom-right.
+    public static let frameGold: [UIColor] = [
+        rgb(0xFFE9A8), rgb(0xE2B14A), rgb(0xA87412), rgb(0xF5D27A), rgb(0xC8901E), rgb(0xFFE9A8),
+    ]
+    /// Neon: cyan and violet, with a glow of the cyan.
+    public static let frameNeon: [UIColor] = [rgb(0x22D3EE), rgb(0xA855F7), rgb(0x22D3EE), rgb(0xA855F7), rgb(0x22D3EE)]
+    public static let frameNeonGlow = rgb(0x22D3EE)
+    /// Aurora: green into cyan, violet and pink, and round again.
+    public static let frameAurora: [UIColor] = [
+        rgb(0x34D399), rgb(0x22D3EE), rgb(0xA78BFA), rgb(0xF472B6), rgb(0x34D399),
+    ]
+
     // MARK: - Building
 
     /// One role's values in one theme: light, dark, and the Increased

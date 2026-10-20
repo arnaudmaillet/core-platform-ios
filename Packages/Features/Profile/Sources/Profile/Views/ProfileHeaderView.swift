@@ -765,6 +765,7 @@ final class ProfileHeaderView: UIView {
             return old[keyPath: field] != model[keyPath: field]
         }
         if changed(\.avatarMonogram) { avatar.setMonogram(model.avatarMonogram) }
+        if changed(\.avatarFrameID) { avatar.frameID = model.avatarFrameID }
         if changed(\.displayName) { nameLabel.text = model.displayName }
         if changed(\.handleLine) { handleLabel.text = model.handleLine }
         if changed(\.isVerified) { verifiedBadge.isHidden = !model.isVerified }
@@ -847,6 +848,7 @@ final class ProfileHeaderView: UIView {
         // the "this is someone else now" signal, and the name says it outright.
         dissolve([bannerView, avatarView, nameLabel, handleLabel, verifiedBadge], after: 0, generation: generation) {
             self.avatar.setMonogram(model.avatarMonogram)
+            self.avatar.frameID = model.avatarFrameID
             self.nameLabel.text = model.displayName
             self.handleLabel.text = model.handleLine
             self.verifiedBadge.isHidden = !model.isVerified

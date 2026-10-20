@@ -174,6 +174,9 @@ public struct UserProfile: Equatable, Sendable {
     public let accountType: AccountType
     /// A business's category ("Bakery"), shown beside its handle.
     public let businessCategory: String?
+    /// The avatar frame the profile wears (#943, `avatar_frame_id`): a
+    /// catalogue item id, nil for none. Everyone sees it.
+    public let avatarFrameID: String?
 
     public init(
         id: ProfileID,
@@ -193,7 +196,8 @@ public struct UserProfile: Equatable, Sendable {
         followingCount: CountEstimate,
         reactionCount: CountEstimate,
         accountType: AccountType = .personal,
-        businessCategory: String? = nil
+        businessCategory: String? = nil,
+        avatarFrameID: String? = nil
     ) {
         self.id = id
         self.handle = handle
@@ -211,6 +215,7 @@ public struct UserProfile: Equatable, Sendable {
         self.reactionCount = reactionCount
         self.accountType = accountType
         self.businessCategory = businessCategory
+        self.avatarFrameID = avatarFrameID
     }
 }
 
@@ -881,7 +886,8 @@ public actor ProfileRepository: ProfileProviding, ProfileSwitching, ProfileVisib
             followingCount: counts.following,
             reactionCount: counts.reactions,
             accountType: AccountType(view.profileKind),
-            businessCategory: view.profileKind == .brand && !view.businessInfo.category.isEmpty ? view.businessInfo.category : nil
+            businessCategory: view.profileKind == .brand && !view.businessInfo.category.isEmpty ? view.businessInfo.category : nil,
+            avatarFrameID: view.avatarFrameID.isEmpty ? nil : view.avatarFrameID
         )
     }
 }

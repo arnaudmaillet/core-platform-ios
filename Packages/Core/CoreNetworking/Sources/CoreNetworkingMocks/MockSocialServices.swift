@@ -1065,6 +1065,9 @@ public final class MockSocialServices: @unchecked Sendable {
             view.handle = snapshot.handle
             view.displayName = snapshot.name
             view.avatarURL = MockPostStore.viewer.avatarURL
+            // The viewer wears none until Equip exists (#938); `-avatar-frame
+            // <id>` dresses them for QA.
+            view.avatarFrameID = Self.viewerFrameID ?? ""
             if let clip = lock.withLock({ viewerBannerClip }) { Self.applyVideoBanner(clipID: clip, to: &view) }
             view.bio = snapshot.bio
             view.websiteURL = snapshot.website
@@ -1104,6 +1107,7 @@ public final class MockSocialServices: @unchecked Sendable {
         view.handle = author.handle
         view.displayName = author.displayName
         view.avatarURL = author.avatarURL
+        view.avatarFrameID = Self.demoFrameID(for: author.profileID) ?? ""
         // An animated avatar has no photo: its author's banner is its own
         // (#1444). A video banner still wins.
         if !author.bannerURL.isEmpty { view.bannerURL = author.bannerURL }
@@ -1123,6 +1127,28 @@ public final class MockSocialServices: @unchecked Sendable {
         // The viewer's other profiles answer here too.
         if let settings = lock.withLock({ feedSettings[author.profileID] }) { view.feedSettings = settings }
         return .success(view)
+    }
+
+    /// The frames the backend's default catalogue sells (#943, backend #913).
+    static let demoFrames = ["frame.gold", "frame.neon", "frame.aurora"]
+
+    /// About one author in four wears a frame (#943), the same one on every
+    /// launch: chosen from the id's characters, not its (seeded) hash.
+    static func demoFrameID(for profileID: String) -> String? {
+        let sum = profileID.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+        guard sum % 4 == 0 else { return nil }
+        return demoFrames[(sum / 4) % demoFrames.count]
+    }
+
+    /// DEBUG `-avatar-frame <id>`: the frame the viewer wears.
+    static var viewerFrameID: String? {
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-avatar-frame"), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+        #else
+        nil
+        #endif
     }
 
     /// A `@handle` in text, to the profile it names (#524): the same view

@@ -119,6 +119,9 @@ struct ProfileDiskRecord: Codable, Equatable {
         var reactions: Count
         var accountType: String
         var businessCategory: String?
+        /// The avatar frame (#943); optional, so a header stored before it
+        /// decodes with none.
+        var avatarFrameID: String?
 
         struct Link: Codable, Equatable {
             var label: String
@@ -202,6 +205,7 @@ extension ProfileDiskRecord.Header {
         case .bot: "bot"
         }
         businessCategory = profile.businessCategory
+        avatarFrameID = profile.avatarFrameID
     }
 
     var userProfile: UserProfile {
@@ -230,7 +234,8 @@ extension ProfileDiskRecord.Header {
             followingCount: following.estimate,
             reactionCount: reactions.estimate,
             accountType: storedType,
-            businessCategory: businessCategory
+            businessCategory: businessCategory,
+            avatarFrameID: avatarFrameID
         )
     }
 }

@@ -20,6 +20,8 @@ public struct ProfileDisplayModel: Equatable, Sendable {
     /// One- or two-letter fallback drawn in the avatar circle when there is no
     /// image (or it hasn't loaded).
     public let avatarMonogram: String
+    /// The frame over the avatar (#943); nil for none.
+    public let avatarFrameID: String?
     public let isVerified: Bool
     /// Abbreviated counts ("1.2K"), or "—" when the counter service was
     /// unreachable — never a misleading "0".
@@ -50,6 +52,7 @@ public struct ProfileDisplayModel: Equatable, Sendable {
         hasBio = !profile.bio.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         avatarURL = profile.avatarURL
         avatarMonogram = MonogramAvatarView.monogram(name: profile.displayName, handle: profile.handle)
+        avatarFrameID = profile.avatarFrameID
         isVerified = profile.isVerified
         followerText = Self.format(profile.followerCount)
         followingText = Self.format(profile.followingCount)

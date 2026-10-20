@@ -1996,6 +1996,10 @@ public final class ProfileViewModel {
             displayName: profile.displayName,
             bio: profile.bio,
             avatarURL: profile.avatarURL,
+            // The banner too (#944): defaulted, a follow toggle dropped it and
+            // the header fell back to the avatar.
+            bannerURL: profile.bannerURL,
+            bannerVideoURL: profile.bannerVideoURL,
             websiteURL: profile.websiteURL,
             // Carried through explicitly: the initializer defaults links and
             // visibility, so omitting them here would drop the profile's custom
@@ -2008,7 +2012,8 @@ public final class ProfileViewModel {
             followingCount: profile.followingCount,
             reactionCount: profile.reactionCount,
             accountType: profile.accountType,
-            businessCategory: profile.businessCategory
+            businessCategory: profile.businessCategory,
+            avatarFrameID: profile.avatarFrameID
         )
         self.profile = updated
         phase = .content(ProfileDisplayModel(profile: updated))
