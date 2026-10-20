@@ -96,13 +96,20 @@ final class BadgedAvatarView: UIView {
 
         // An inbox avatar's unread pill wears the icon's gradient (#1169).
         let gradient = CAGradientLayer()
-        gradient.colors = Palette.accentGradient.map(\.cgColor)
+        gradient.colors = Palette.accentGradient.map { $0.resolvedColor(with: traitCollection).cgColor }
         gradient.startPoint = Palette.accentGradientStart
         gradient.endPoint = Palette.accentGradientEnd
         gradient.cornerCurve = .continuous
         badge.layer.insertSublayer(gradient, at: 0)
         badge.clipsToBounds = true
         badgeGradient = gradient
+        // The gradient's stops follow the accent theme (#1379) and the
+        // appearance: a layer holds CGColors and re-resolves nothing itself.
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, AccentThemeTrait.self]
+        ) { (view: BadgedAvatarView, _: UITraitCollection) in
+            view.badgeGradient?.colors = Palette.accentGradient.map { $0.resolvedColor(with: view.traitCollection).cgColor }
+        }
         badge.layer.borderWidth = Metrics.ringWidth
         badge.layer.cornerCurve = .continuous
         badge.isHidden = true

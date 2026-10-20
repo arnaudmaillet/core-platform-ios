@@ -8,7 +8,7 @@ public enum GemSymbol {
     public static let glyph = AppSymbol.gemFilled.rawValue
     /// The brand's secondary, violet (#1124): it was the system cyan, which
     /// clashed with nothing but said nothing either.
-    public static let tint: UIColor = Palette.secondary
+    public static let tint: UIColor = Palette.gemViolet
     /// The display name.
     public static let name = "Gems"
 

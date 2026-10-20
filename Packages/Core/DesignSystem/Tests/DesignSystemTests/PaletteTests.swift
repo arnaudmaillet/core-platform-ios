@@ -132,7 +132,7 @@ struct PaletteTests {
                 #expect(Self.contrast(stop, on: .systemBackground, traits) >= 3)
             }
         }
-        #expect(LikesSymbol.tint === Palette.tint)
+        #expect(LikesSymbol.tint === Palette.likesPink)
     }
 
     /// Links and tokens in text (#1174): a greyed violet (#1176) — blue over
@@ -154,7 +154,7 @@ struct PaletteTests {
     /// The hues the palette took over (#1124): gems are violet, a warning's
     /// glyph is yellow — orange is the tint's now.
     @Test func gemsAreVioletAndWarningsYellow() {
-        #expect(GemSymbol.tint === Palette.secondary)
+        #expect(GemSymbol.tint === Palette.gemViolet)
         #expect(ToastView.Style.warning.glyphTint == .systemYellow)
     }
 

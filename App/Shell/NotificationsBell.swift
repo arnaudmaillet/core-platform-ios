@@ -67,7 +67,7 @@ final class NotificationsBell {
     }
 
     /// Sets every live bell's image again — the badged one is baked per
-    /// appearance, so a light/dark switch asks for it anew.
+    /// appearance and accent theme, so a switch of either asks for it anew.
     func repaint() {
         let image = Self.image(unread: isUnread)
         for item in items.allObjects { item.image = image }
@@ -107,8 +107,12 @@ final class NotificationsBell {
         for style in [UIUserInterfaceStyle.light, .dark] {
             let traits = UITraitCollection(userInterfaceStyle: style)
             let format = UIGraphicsImageRendererFormat(for: traits)
+            // Drawn in the applied accent theme (#1379): the badge is the
+            // accent, and a bitmap re-resolves nothing — a theme change bakes
+            // it anew (`MainTabCoordinator`).
+            let drawing = traits.modifyingTraits { $0.accentTheme = AccentThemePreference.applied }
             let baked = UIGraphicsImageRenderer(size: symbol.size, format: format).image { _ in
-                traits.performAsCurrent { symbol.draw(at: .zero) }
+                drawing.performAsCurrent { symbol.draw(at: .zero) }
             }
             asset.register(
                 baked.withBaselineOffset(fromBottom: symbol.baselineOffsetFromBottom ?? 0),

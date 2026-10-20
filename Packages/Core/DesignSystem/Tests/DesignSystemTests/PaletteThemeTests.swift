@@ -82,16 +82,18 @@ struct PaletteThemeTests {
     /// violet since the icon was redrawn (#1176), in the icon's tone — the
     /// owner's call over 3:1. A white count still stands out (≥ 1.8:1).
     @Test func theAccentGradientRunsPinkToVioletInTheIconsTone() {
-        #expect(Palette.accentGradient == [Palette.rgb(0xF37AB4), Palette.rgb(0xA78BFA)])
+        let pink = Self.traits[0]
+        let accent = Palette.accentGradient.map { $0.resolvedColor(with: pink) }
+        #expect(accent == [Palette.rgb(0xF37AB4), Palette.rgb(0xA78BFA)])
         #expect(Palette.brandGradient == [Palette.rgb(0xE0559A), Palette.rgb(0x7C5CF0)])
-        for gradient in [Palette.accentGradient, Palette.brandGradient] {
+        for gradient in [accent, Palette.brandGradient] {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
             gradient[0].getRed(&r, green: &g, blue: &b, alpha: &a)
             #expect(r > b, "the start is pink")
             gradient[1].getRed(&r, green: &g, blue: &b, alpha: &a)
             #expect(b > r, "the end is violet")
         }
-        for stop in Palette.accentGradient {
+        for stop in accent {
             #expect(Self.contrast(.white, stop) >= 1.8, "white on a stop is \(Self.contrast(.white, stop)):1")
         }
         #expect(Palette.accentGradientStart == CGPoint(x: 0, y: 1), "pink starts at the bottom-left, as the icon")
@@ -102,8 +104,9 @@ struct PaletteThemeTests {
         #expect(rules == Palette.Rules())
         #expect(rules.selectedTabIsNeutral)
         #expect(rules.counters == .violet, "unread marks are the violet (decided, #1178)")
-        #expect(Palette.rgb(0x7C5CF0) == Palette.counterViolet)
-        #expect(Self.contrast(.white, Palette.counterViolet) >= 4.5, "a white count on the violet")
+        let violet = Palette.counterViolet.resolvedColor(with: Self.traits[0])
+        #expect(Palette.rgb(0x7C5CF0) == violet)
+        #expect(Self.contrast(.white, violet) >= 4.5, "a white count on the violet")
         #expect(rules.storyRing == .gradient, "the ring wears the icon's gradient (decided)")
         #expect(rules.heroButton == .accent)
     }
