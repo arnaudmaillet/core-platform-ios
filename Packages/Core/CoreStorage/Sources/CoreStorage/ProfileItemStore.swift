@@ -62,11 +62,25 @@ public final class ProfileItemStore: @unchecked Sendable {
     /// was.
     @discardableResult
     public func grant(_ item: ProfileItem, to accountID: String) -> Bool {
+        grant(itemID: item.rawValue, to: accountID)
+    }
+
+    /// Whether `accountID` owns the catalogue item `itemID` — any family,
+    /// e.g. a theme (`theme.violet`, #1379): the inventory as
+    /// `ListOwnedItems` gives it, a set of item ids.
+    public func owns(itemID: String, accountID: String) -> Bool {
+        lock.withLock { ids(accountID).contains(itemID) }
+    }
+
+    /// Records the catalogue item `itemID` as owned by `accountID`. Returns
+    /// false when it already was.
+    @discardableResult
+    public func grant(itemID: String, to accountID: String) -> Bool {
         let inserted: Bool = lock.withLock {
-            var ids = ids(accountID)
-            let (inserted, _) = ids.insert(item.rawValue)
-            if inserted { defaults.set(ids.sorted(), forKey: Self.key(accountID)) }
-            return inserted
+            var owned = self.ids(accountID)
+            let (added, _) = owned.insert(itemID)
+            if added { defaults.set(owned.sorted(), forKey: Self.key(accountID)) }
+            return added
         }
         if inserted { NotificationCenter.default.post(name: Self.didChangeNotification, object: self) }
         return inserted

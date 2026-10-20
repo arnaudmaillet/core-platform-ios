@@ -126,11 +126,14 @@ public final class CountryShopViewController: UIViewController {
     public static func storefront(
         access: any CountryAccess, stakePacks: (any StakePackSelling)? = nil,
         profileItems: (any ProfileItemSelling)? = nil,
+        themes: (any ThemeSelling)? = nil,
         focus: Focus? = nil,
         media: ShopMedia? = nil,
         onShowCountry: ((String) -> Void)? = nil
     ) -> UIViewController {
-        let shop = ShopStorefrontViewController(access: access, stakePacks: stakePacks, profileItems: profileItems, media: media)
+        let shop = ShopStorefrontViewController(
+            access: access, stakePacks: stakePacks, profileItems: profileItems, themes: themes, media: media
+        )
         shop.focus = focus
         shop.onShowCountry = onShowCountry
         return shop

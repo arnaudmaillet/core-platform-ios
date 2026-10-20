@@ -58,6 +58,8 @@ final class WalletHubViewController: UIViewController {
     /// The Shop's Boosts — the ×100 cartridge pack. Nil sells none.
     private let stakePacks: (any StakePackSelling)?
     private let profileItems: (any ProfileItemSelling)?
+    /// The Shop's Themes (#1379). Nil sells none.
+    private let themes: (any ThemeSelling)?
 
     private nonisolated enum Section: Hashable { case header, active, settled }
     private nonisolated enum Item: Hashable {
@@ -103,6 +105,7 @@ final class WalletHubViewController: UIViewController {
         countries: (any CountryAccess)? = nil,
         stakePacks: (any StakePackSelling)? = nil,
         profileItems: (any ProfileItemSelling)? = nil,
+        themes: (any ThemeSelling)? = nil,
         shopMedia: ShopMedia? = nil
     ) {
         self.shopMedia = shopMedia
@@ -111,6 +114,7 @@ final class WalletHubViewController: UIViewController {
         self.countries = countries
         self.stakePacks = stakePacks
         self.profileItems = profileItems
+        self.themes = themes
         self.wallet = wallet
         self.lookUpPosts = lookUpPosts
         self.imagePipeline = imagePipeline
@@ -384,7 +388,8 @@ final class WalletHubViewController: UIViewController {
               let root = view.window?.rootViewController else { return }
         StakeShop.push(
             CountryShopViewController.storefront(
-                access: countries, stakePacks: stakePacks, profileItems: profileItems, media: shopMedia
+                access: countries, stakePacks: stakePacks, profileItems: profileItems, themes: themes,
+                media: shopMedia
             ),
             over: root
         )

@@ -63,6 +63,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
     private let locator: (any CurrentCountryLocating)?
     private let stakePacks: (any StakePackSelling)?
     private let profileItems: (any ProfileItemSelling)?
+    private let themes: (any ThemeSelling)?
     private let isMember: @MainActor () -> Bool
     /// One for the app's lifetime: every map the builder makes reads and
     /// folds into the same stored pins.
@@ -97,6 +98,8 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         stakePacks: (any StakePackSelling)? = nil,
         /// What the Shop's Profile shelf sells (#944). Nil sells none.
         profileItems: (any ProfileItemSelling)? = nil,
+        /// What the Shop's Themes shelf sells (#1379). Nil sells none.
+        themes: (any ThemeSelling)? = nil,
         /// Whether the viewer has an account. A guest has no people: no
         /// favourites dock, no Friends / Following rows.
         isMember: @escaping @MainActor () -> Bool = { true },
@@ -111,6 +114,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
         self.countryAccess = countryAccess
         self.stakePacks = stakePacks
         self.profileItems = profileItems
+        self.themes = themes
         self.iconCatalog = iconCatalog
         self.previewCatalog = previewCatalog
         self.repository = repository
@@ -278,6 +282,7 @@ public struct MapsFeatureBuilder: MapsFeatureBuilding {
             countryAccess: countryAccess,
             stakePacks: stakePacks,
             profileItems: profileItems,
+            themes: themes,
             isMember: isMember,
             // Always: the locked guest map's card is its only way out, on
             // the fleet too, where there is no country access yet (#564).
