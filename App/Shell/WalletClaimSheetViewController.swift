@@ -17,6 +17,8 @@ import UIKit
 ///   ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 ///              282 of 2,000
 ///   🔥 3-day streak · Kept for today   25 / 200 today
+///   M  T  W  T  F  S  S          ( ×1.3 tomorrow )
+///   ●  ●  ◉  ○  ○  ○  ○
 ///   ┌───────────────────────────────────┐
 ///   │         Claim 25 likes            │
 ///   └───────────────────────────────────┘
@@ -50,6 +52,10 @@ final class WalletClaimSheetViewController: UIViewController {
     private let streakIcon = UIImageView()
     private let streakLine = UILabel()
     private let earnedLine = UILabel()
+    /// The week's claims and what the streak pays next (#1479).
+    private let week = WalletWeekStrip()
+    /// The balance rolls to its new value on a claim or a stake (#1479).
+    private lazy var rollingBalance = WalletRollingNumber(label: balance)
     private let claimButton = UIButton(configuration: .prominentGlass())
     private let walletRow = WalletHubRowButton()
     private let column = UIStackView()
@@ -276,13 +282,14 @@ final class WalletClaimSheetViewController: UIViewController {
         walletRow.accessibilityIdentifier = Self.walletRowIdentifier
         walletRow.addAction(UIAction { [weak self] _ in self?.openHub() }, for: .touchUpInside)
 
-        [coin, balance, unit, gauge, streak, claimButton, walletRow].forEach(column.addArrangedSubview)
+        [coin, balance, unit, gauge, streak, week, claimButton, walletRow].forEach(column.addArrangedSubview)
         column.axis = .vertical
         column.alignment = .fill
         column.spacing = Spacing.xs
         column.setCustomSpacing(Spacing.md, after: unit)
         column.setCustomSpacing(Spacing.md, after: gauge)
-        column.setCustomSpacing(Spacing.lg, after: streak)
+        column.setCustomSpacing(Spacing.sm, after: streak)
+        column.setCustomSpacing(Spacing.lg, after: week)
         column.setCustomSpacing(Spacing.md, after: claimButton)
         column.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(column)
@@ -403,10 +410,11 @@ final class WalletClaimSheetViewController: UIViewController {
 
     private func refresh() {
         snapshot = wallet.snapshot()
-        balance.text = snapshot.balance.formatted()
+        rollingBalance.show(snapshot.balance, animated: viewIfLoaded?.window != nil)
         balance.accessibilityLabel = "\(snapshot.balance.formatted()) likes"
         gauge.configure(with: snapshot)
         applyStreak()
+        week.configure(with: snapshot)
         walletRow.configure(gems: snapshot.gems)
         applyClaimButton()
     }

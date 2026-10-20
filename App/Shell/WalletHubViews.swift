@@ -112,6 +112,7 @@ final class WalletHubHeaderView: UIView {
 
     private let coin = UIImageView()
     private let balance = UILabel()
+    private lazy var rollingBalance = WalletRollingNumber(label: balance)
     private let unit = UILabel()
     private let gauge = WalletLikesGauge()
     private let claim = WalletHubAction(
@@ -188,7 +189,8 @@ final class WalletHubHeaderView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(with snapshot: WalletSnapshot, claimTitle: String, canClaim: Bool, sellsShop: Bool) {
-        balance.text = snapshot.balance.formatted()
+        // Rolls to a new value on a claim or a stake (#1479).
+        rollingBalance.show(snapshot.balance, animated: window != nil)
         balance.accessibilityLabel = "\(snapshot.balance.formatted()) likes"
         gauge.configure(with: snapshot)
         gemsCard.configure(gems: snapshot.gems)
