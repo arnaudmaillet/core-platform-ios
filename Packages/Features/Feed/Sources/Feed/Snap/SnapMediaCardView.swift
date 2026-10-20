@@ -947,7 +947,7 @@ final class SnapMediaCardView: UIView {
         view.pageFraming = SnapMediaAspect.presentation(for:)
         // The side list (#1425) waits for a leftward drag past the last
         // photo, or born at the trailing edge.
-        view.yieldsLeftwardDrags = SnapSideList.isEnabled
+        view.yieldsLeftwardDrags = true
         view.onPageChanged = { [weak self] page in self?.onPageChanged?(page) }
         view.onScrollPosition = { [weak self] position in self?.onScrollPosition?(position) }
         // Below nothing — it is the media, and everything else on the page is

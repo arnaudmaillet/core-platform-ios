@@ -4,28 +4,16 @@ import MediaCore
 import PostGrid
 import UIKit
 
-/// ⚠️ EXPERIMENTAL (#1425), behind `-snap-side-list`: a leftward swipe on a
-/// post shrinks the whole page — its interface included, nothing faded or
-/// re-laid out — into a card, and slides a narrow vertical list of other
-/// current posts in on the right (Kuaishou's "Works" strip). A tap on one
-/// puts it after the post on show and moves to it; a rightward swipe puts
-/// everything back. Off — the default, and always in Release — no recognizer
-/// is installed and the feed is today's.
+/// The side list (#1425): a leftward swipe on a post shrinks the whole
+/// page — its interface included, nothing faded or re-laid out — into a
+/// card, and slides a narrow vertical list of other current posts in on the
+/// right (Kuaishou's "Works" strip). A tap on one puts it after the post on
+/// show and moves to it; a rightward swipe puts everything back.
+///
+/// On every vertical feed by default since #1473 (the owner, 2026-10-20);
+/// it was an experiment behind `-snap-side-list` before. A screen opts out
+/// with `SnapFeedViewController.installsSideList` (tests do).
 enum SnapSideList {
-    static let launchArgument = "-snap-side-list"
-
-    /// Whether `arguments` ask for it. Release builds never do.
-    static func isEnabled(arguments: [String]) -> Bool {
-        #if DEBUG
-        arguments.contains(launchArgument)
-        #else
-        false
-        #endif
-    }
-
-    /// This process's answer — the screen's default; tests pass their own.
-    static let isEnabled = isEnabled(arguments: ProcessInfo.processInfo.arguments)
-
     /// Where everything sits at a `progress` from 0 (closed) to 1 (open).
     /// Pure, for tests.
     struct Geometry: Equatable {

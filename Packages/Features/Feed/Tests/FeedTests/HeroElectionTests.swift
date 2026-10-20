@@ -94,8 +94,9 @@ struct HeroElectionTests {
         #expect(owner.debugSavedDelegate is ZoomTransitionController,
                 "it took the slot from the flight and saved nothing to give back")
         let pushed = try #require(stack.nav.viewControllers.last)
+        // The side list's own pan (#1473) is not a way home.
         let pans = pushed.view.gestureRecognizers?
-            .filter { $0 is UIPanGestureRecognizer } ?? []
+            .filter { $0 is UIPanGestureRecognizer && !($0.delegate is SnapSideListController) } ?? []
         #expect(pans.count == 2,
                 "expected the flight and the card-shaped close, found \(pans.count)")
         let slides = pans.compactMap { $0.delegate as? InteractiveSlideDismissal }
@@ -128,8 +129,9 @@ struct HeroElectionTests {
         )
 
         let pushed = try #require(stack.nav.viewControllers.last)
+        // The side list's own pan (#1473) is not a way home.
         let pans = pushed.view.gestureRecognizers?
-            .filter { $0 is UIPanGestureRecognizer } ?? []
+            .filter { $0 is UIPanGestureRecognizer && !($0.delegate is SnapSideListController) } ?? []
         #expect(pans.count == 1)
     }
 
