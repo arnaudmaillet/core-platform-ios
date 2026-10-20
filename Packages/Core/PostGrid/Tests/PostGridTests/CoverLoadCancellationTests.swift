@@ -76,14 +76,19 @@ struct CoverLoadCancellationTests {
             try? await Task.sleep(for: .milliseconds(5))
         }
         #expect(await fetcher.fetchCount == 1)
-        // Join the carousel's own fetch (held, so it is still in flight), let
-        // it fail, then wait for the carousel's completion to retire the page:
-        // on a look budget, not a yield count — the completion runs after the
-        // pipeline hands the failure back and the load's task gets the main
-        // actor again, which a loaded runner did not do within 100 yields.
-        let failure = Task { await fetcher.fail() }
-        #expect(await (try? pipeline.image(for: url)) == nil)
-        await failure.value
+        // Fail the carousel's own fetch (held, so it is still in flight), then
+        // wait for the carousel's completion to retire the page: on a look
+        // budget, not a yield count — the completion runs after the pipeline
+        // hands the failure back and the load's task gets the main actor
+        // again, which a loaded runner did not do within 100 yields.
+        //
+        // ⚠️ NO SECOND FETCH TO WATCH IT FAIL (#1004, reopened 2026-10-20).
+        // The test used to join the held fetch with its own
+        // `pipeline.image(for:)` while a task failed it; on a loaded runner
+        // the failure won the race, the held fetch left the pipeline, and the
+        // test's "join" became a fresh fetch — which `FailOnceFetcher` lets
+        // succeed. The carousel's own completion is what the test is about.
+        await fetcher.fail()
         for _ in 0..<Self.looks where carousel.loadedPages.contains(0) {
             try? await Task.sleep(for: .milliseconds(5))
         }
