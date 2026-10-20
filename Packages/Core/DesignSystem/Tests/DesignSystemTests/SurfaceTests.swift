@@ -30,6 +30,17 @@ struct SurfaceTests {
         #expect(Surface.cardEdge.resolvedColor(with: dark).cgColor.alpha > 0)
     }
 
+    /// The card contract (#1494): the card's tone, the For You card's
+    /// corner, continuous, and the edge.
+    @Test func aDressedCardWearsTheContract() {
+        let view = UIView()
+        Surface.dressCard(view)
+        #expect(view.backgroundColor == Surface.card)
+        #expect(view.layer.cornerRadius == Surface.cardCornerRadius)
+        #expect(view.layer.cornerCurve == .continuous)
+        #expect(view.layer.borderWidth > 0)
+    }
+
     /// One device pixel, not one point: at 3x that is a third of a point.
     @Test func theHairlineIsOneDevicePixel() {
         #expect(abs(Surface.hairline(for: UITraitCollection(displayScale: 3)) - 1 / 3) < 0.0001)

@@ -1232,7 +1232,7 @@ public final class PostGridListRowCell: UICollectionViewCell, UIGestureRecognize
     /// angle) and is simply too round for a card. Matching a transient overlay
     /// was the wrong target — the card is on screen all the time, and it should
     /// look like the platform.
-    public static let cardCornerRadius: CGFloat = 26
+    public static let cardCornerRadius: CGFloat = Surface.cardCornerRadius
 
     /// How far every child of a card is held off its edges: the caption, the
     /// author band, the closing metric line, and the media preview, which is

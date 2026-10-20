@@ -103,6 +103,19 @@ final class WalletClaimer {
         return "Claim"
     }
 
+    /// The toolbar's words (#1494): short enough for a capsule at the bar's
+    /// trailing end — "Claim 25 likes", "Claim in 42:07".
+    static func shortTitle(for snapshot: WalletSnapshot, pending: Bool) -> String {
+        if pending { return "Claiming…" }
+        if snapshot.claimAvailable { return "Claim \(snapshot.claimAmount) likes" }
+        if snapshot.claimedToday >= snapshot.dailyClaimCap, let next = snapshot.nextClaimAt {
+            return "Cap reached · \(countdownString(to: next))"
+        }
+        if let next = snapshot.nextClaimAt { return "Claim in \(countdownString(to: next))" }
+        if let cap = snapshot.likesCap, snapshot.balance >= cap { return "Likes full" }
+        return "Claim"
+    }
+
     /// "42:07" under an hour, "3h 12m" above it.
     static func countdownString(to date: Date, now: Date = Date()) -> String {
         let remaining = max(0, Int(date.timeIntervalSince(now).rounded(.up)))

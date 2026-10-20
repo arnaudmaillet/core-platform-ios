@@ -5,7 +5,7 @@ import FeedInterface
 import PostGrid
 import UIKit
 
-/// How a stake row opens its post (#1476, #1477) — the hub's preview and the
+/// How a stake row opens its post (#1476, #1477) — the Wallet sheet's preview and the
 /// Stakes screen alike: the feed flies out of the row the way a For You or
 /// Profile card opens, the thumbnail for a media post, the card itself (the
 /// text reveal) for a text post.
@@ -32,7 +32,7 @@ enum WalletStakeHero {
     static func open(
         stake id: String, order: [String], posts: [PostID: GalleryPost], from presenter: UIViewController,
         list: UICollectionView, cell: @escaping (String) -> WalletStakeCell?,
-        openFeedHero: @escaping WalletHubViewController.OpenFeedHero
+        openFeedHero: @escaping WalletSheetViewController.OpenFeedHero
     ) {
         guard presenter.presentedViewController == nil, let post = posts[PostID(id)],
               let start = order.firstIndex(of: id) else { return }
@@ -84,8 +84,8 @@ enum WalletStakeHero {
             hasHero: flies,
             cover: cell()?.heroCover,
             // `.listMedia`: no counter chips riding the card (a tile's
-            // furniture flashed over the 48pt thumbnail on landing), and the
-            // same 12pt corner the thumbnail wears.
+            // furniture flashed over the 48pt thumbnail on landing); its
+            // corner is the thumbnail's (`cornerRadius` below).
             style: .listMedia,
             frame: { [weak list] space in
                 guard let list else { return nil }
@@ -109,10 +109,15 @@ enum WalletStakeHero {
                 makePresentStandIn: standIn,
                 alignsPageToSource: false,
                 pageFit: .covering,
-                cornerRadius: WalletSheetMetrics.rowCorner,
+                // A row inside its card (#1494): square, as the row is.
+                cornerRadius: 0,
                 fill: Surface.card,
                 setConcealed: { concealed in cell()?.setHeroConcealed(concealed, wholeCard: true) }
-            )
+            ),
+            // The thumbnail's own corner (#1494), concentric with its card.
+            cornerRadius: WalletSheetMetrics.thumbnailCorner,
+            // ⚠️ A squircle, as the thumbnail's: a radius alone flies a circle's curve.
+            cornerCurve: .continuous
         )
     }
 }

@@ -2,16 +2,12 @@ import CoreStorage
 import DesignSystem
 import UIKit
 
-/// How the wallet works (#1480), as a numbered list — claim, stake, settle,
-/// gems, Shop — that ends on the action that starts the loop: the claim.
+/// How Rewards work (#1480), as a numbered list — claim, stake, settle,
+/// gems, Shop. Nothing to press (#1494): the Claim is the Rewards sheet's.
 ///
-/// Pushed in the wallet sheet: once per account, the first time the hub
-/// opens (`WalletHowItWorks.shouldShow`, CoreStorage), then only from the hub's **?**.
+/// Pushed in the Rewards sheet: once per account, the first time the sheet
+/// opens (`WalletHowItWorks.shouldShow`, CoreStorage), then only from the sheet's **?**.
 final class WalletHowItWorksViewController: UIViewController {
-    private let wallet: WalletStore
-    private let claimer: WalletClaimer
-    private let claimButton = UIButton(configuration: .prominentGlass())
-    private let observers = WalletObserverTokenBag()
 
     /// The steps, in the loop's order.
     static let steps: [(symbol: String, title: String, detail: String)] = [
@@ -22,9 +18,7 @@ final class WalletHowItWorksViewController: UIViewController {
         ("storefront.fill", "Spend them", "In the Shop: themes, countries, boosts and more."),
     ]
 
-    init(wallet: WalletStore, claimer: WalletClaimer) {
-        self.wallet = wallet
-        self.claimer = claimer
+    init() {
         super.init(nibName: nil, bundle: nil)
         title = "How it works"
     }
@@ -34,7 +28,7 @@ final class WalletHowItWorksViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Clear: the sheet's own ground is the surface (the hub's note).
+        // Clear: the sheet's own ground is the surface (the Wallet sheet's note).
         view.backgroundColor = .clear
         navigationItem.largeTitleDisplayMode = .never
 
@@ -54,54 +48,14 @@ final class WalletHowItWorksViewController: UIViewController {
             column.addArrangedSubview(Self.stepRow(number: index + 1, step: step))
         }
 
-        claimButton.configuration?.cornerStyle = .capsule
-        claimButton.tintColor = Palette.prominentGlassTint
-        claimButton.accessibilityIdentifier = "wallet.howItWorks.claim"
-        claimButton.addAction(UIAction { [weak self] _ in
-            guard let self else { return }
-            claimer.claim(presentingFrom: self)
-            // Back to where the claim shows.
-            navigationController?.popViewController(animated: true)
-        }, for: .primaryActionTriggered)
-        PressFeedback.attach(to: claimButton, sound: nil)
-        column.addArrangedSubview(claimButton)
-        column.setCustomSpacing(Spacing.xl, after: column.arrangedSubviews[column.arrangedSubviews.count - 2])
-
         let margin = WalletSheetMetrics.sideMargin
         NSLayoutConstraint.activate([
-            claimButton.heightAnchor.constraint(equalToConstant: WalletSheetMetrics.claimHeight),
             column.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor, constant: Spacing.md),
             column.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor, constant: -Spacing.xl),
             column.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: margin),
             column.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -margin),
             column.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor, constant: -2 * margin),
         ])
-
-        observers.tokens = [
-            NotificationCenter.default.addObserver(
-                forName: WalletStore.didChangeNotification, object: wallet, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.applyClaim() }
-            },
-            NotificationCenter.default.addObserver(
-                forName: WalletClaimer.didChangeNotification, object: claimer, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.applyClaim() }
-            },
-        ]
-        applyClaim()
-    }
-
-    /// The loop's first action: the claim, as the Claim sheet's button says
-    /// it — "Next claim in 42:07" while there is none.
-    private func applyClaim() {
-        let snapshot = wallet.snapshot()
-        claimButton.isEnabled = snapshot.claimAvailable && !claimer.isPending
-        var title = AttributedString(WalletClaimer.title(for: snapshot, pending: claimer.isPending))
-        title.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24
-        )
-        claimButton.configuration?.attributedTitle = title
     }
 
     /// "① (glyph) Claim likes / Free likes every hour…"

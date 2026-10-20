@@ -7,8 +7,8 @@ import PostGrid
 import UIKit
 
 /// The Stakes screen (#1477, wallet structure B, slice 3): every stake,
-/// Active or Settled, by UTC day — pushed in the wallet sheet from the hub's
-/// stake headings and its Stake action.
+/// Active or Settled, by UTC day — pushed in the Wallet sheet from its stake
+/// headings.
 ///
 /// A row reads like a position: the post leads (thumbnail and caption), the
 /// author follows; an active stake's ring fills toward its settlement, and a
@@ -16,7 +16,7 @@ import UIKit
 /// (`WalletStakeCell`).
 ///
 /// The stakes are the wallet's (`WalletStore.stakes()`, the server's
-/// `ListMyStakes` for a member, #903); their posts are looked up as the hub
+/// `ListMyStakes` for a member, #903); their posts are looked up as the Wallet sheet
 /// looks them up, starting from the ones it already has.
 final class WalletStakesViewController: UIViewController {
     enum Segment: Int, CaseIterable {
@@ -33,17 +33,20 @@ final class WalletStakesViewController: UIViewController {
     private nonisolated enum Section: Hashable {
         case failed
         case day(Date)
+        /// The rows' bones while the listing is out (#1494).
+        case loading
     }
 
     private nonisolated enum Item: Hashable {
         case postsFailed
         case stake(String)
+        case bone(Int)
     }
 
     private let wallet: WalletStore
-    private let lookUpPosts: WalletHubViewController.PostLookup?
+    private let lookUpPosts: WalletSheetViewController.PostLookup?
     private let imagePipeline: ImagePipeline?
-    private let openFeedHero: WalletHubViewController.OpenFeedHero?
+    private let openFeedHero: WalletSheetViewController.OpenFeedHero?
     private(set) var segment: Segment
     private let segments = UISegmentedControl(items: Segment.allCases.map(\.title))
 
@@ -56,16 +59,13 @@ final class WalletStakesViewController: UIViewController {
     private var postLoads = WalletStakePostLoads()
     private var countdownTimer: Timer?
     private let walletObservers = WalletObserverTokenBag()
-    /// The app's loader while the listing is on its way and nothing is shown
-    /// (the stock spinner is not the app's, `StockSpinnerGuardTests`).
-    private let loader = AppLoaderView(size: .large)
     /// A Try Again on its way.
     private var isRetrying = false
 
     init(
         wallet: WalletStore, segment: Segment, posts: [PostID: GalleryPost] = [:],
-        lookUpPosts: WalletHubViewController.PostLookup? = nil, imagePipeline: ImagePipeline? = nil,
-        openFeedHero: WalletHubViewController.OpenFeedHero? = nil
+        lookUpPosts: WalletSheetViewController.PostLookup? = nil, imagePipeline: ImagePipeline? = nil,
+        openFeedHero: WalletSheetViewController.OpenFeedHero? = nil
     ) {
         self.wallet = wallet
         self.segment = segment
@@ -84,22 +84,26 @@ final class WalletStakesViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Clear: the sheet's own ground is the surface (the hub's note).
+        // Clear: the sheet's own ground is the surface (the Wallet sheet's note).
         view.backgroundColor = .clear
-        navigationItem.largeTitleDisplayMode = .never
-        // Active | Settled where the title is: two lists of one thing.
+        // Large, at the page's leading edge (#1494); collapsed into the bar,
+        // still leading, beside the chevron — as Activity's (`.browser`: a
+        // navigator item centres it whenever the trailing item leaves room).
+        navigationItem.largeTitleDisplayMode = .always
+        navigationItem.style = .browser
+        // Active | Settled at the bar's trailing end (#1494), the Activity
+        // screen's bar, so the Rewards sheet's two lists match.
         segments.selectedSegmentIndex = segment.rawValue
         segments.addAction(UIAction { [weak self] _ in
             guard let self, let next = Segment(rawValue: segments.selectedSegmentIndex) else { return }
             select(next)
         }, for: .valueChanged)
         segments.accessibilityLabel = "Stakes"
-        navigationItem.titleView = segments
+        let filter = UIBarButtonItem(customView: segments)
+        // The control is its own capsule: no bubble in a bubble.
+        filter.hidesSharedBackground = true
+        navigationItem.rightBarButtonItem = filter
         buildCollection()
-        loader.constrain(in: view) { parent in
-            loader.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            loader.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
 
         walletObservers.tokens = [
             NotificationCenter.default.addObserver(
@@ -144,39 +148,17 @@ final class WalletStakesViewController: UIViewController {
     // MARK: - Layout
 
     private func buildCollection() {
+        // The Activity screen's list (#1494): inset grouped, a day per
+        // section under the system's header, its stakes rows of one card.
+        // The rows draw their own hairline (`WalletGroupedStakeCell`).
         let layout = UICollectionViewCompositionalLayout { [weak self] index, environment in
-            let section = self?.dataSource?.sectionIdentifier(for: index)
-            let traits = environment.traitCollection
-            let item = NSCollectionLayoutItem(layoutSize: NSCollectionLayoutSize(
-                widthDimension: .fractionalWidth(1), heightDimension: .estimated(72)
-            ))
-            let group = NSCollectionLayoutGroup.vertical(
-                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .estimated(72)),
-                subitems: [item]
-            )
-            let layoutSection = NSCollectionLayoutSection(group: group)
-            layoutSection.interGroupSpacing = Spacing.sm
-            let margin = WalletSheetMetrics.sideMargin
-            let isLast = index == (self?.dataSource?.snapshot().numberOfSections ?? 1) - 1
-            if case .day = section {
-                layoutSection.contentInsets = NSDirectionalEdgeInsets(
-                    top: SectionTitleView.gapBelow(traits: traits), leading: margin,
-                    bottom: isLast ? 0 : SectionTitleView.gapAbove(traits: traits), trailing: margin
-                )
-                let header = NSCollectionLayoutBoundarySupplementaryItem(
-                    layoutSize: NSCollectionLayoutSize(
-                        widthDimension: .fractionalWidth(1),
-                        heightDimension: .absolute(SectionTitleView.barHeight(traits: traits))
-                    ),
-                    elementKind: WalletSectionHeader.kind, alignment: .top
-                )
-                layoutSection.boundarySupplementaryItems = [header]
-            } else {
-                layoutSection.contentInsets = NSDirectionalEdgeInsets(
-                    top: 0, leading: margin, bottom: Spacing.md, trailing: margin
-                )
-            }
-            return layoutSection
+            var configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+            // The failed row stands alone, under no day.
+            let isDay = if case .day? = self?.dataSource?.sectionIdentifier(for: index) { true } else { false }
+            configuration.headerMode = isDay ? .supplementary : .none
+            configuration.showsSeparators = false
+            configuration.backgroundColor = .clear
+            return NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
         }
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
@@ -189,8 +171,9 @@ final class WalletStakesViewController: UIViewController {
         collectionView.pin(to: view)
         setContentScrollView(collectionView, for: .top)
 
-        let stakeRegistration = UICollectionView.CellRegistration<WalletStakeCell, Item> { [weak self] cell, _, item in
+        let stakeRegistration = UICollectionView.CellRegistration<WalletGroupedStakeCell, Item> { [weak self] cell, indexPath, item in
             guard let self, case .stake(let id) = item else { return }
+            cell.showsSeparator = indexPath.item > 0
             configure(cell, stakeID: id, animated: false)
         }
         let failedRegistration = UICollectionView.CellRegistration<WalletStakesFailedCell, Item> { [weak self] cell, _, _ in
@@ -198,19 +181,25 @@ final class WalletStakesViewController: UIViewController {
             cell.configure(retrying: postLoads.isRetrying, failedAfterRetry: postLoads.failedAfterRetry)
             cell.onRetry = { [weak self] in self?.retryFailedPosts() }
         }
+        let boneRegistration = UICollectionView.CellRegistration<WalletStakeBoneCell, Item> { _, _, _ in }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .stake:
                 collectionView.dequeueConfiguredReusableCell(using: stakeRegistration, for: indexPath, item: item)
             case .postsFailed:
                 collectionView.dequeueConfiguredReusableCell(using: failedRegistration, for: indexPath, item: item)
+            case .bone:
+                collectionView.dequeueConfiguredReusableCell(using: boneRegistration, for: indexPath, item: item)
             }
         }
-        let headerRegistration = UICollectionView.SupplementaryRegistration<WalletSectionHeader>(
-            elementKind: WalletSectionHeader.kind
+        let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionHeader
         ) { [weak self] header, _, indexPath in
-            guard case .day(let day)? = self?.dataSource.sectionIdentifier(for: indexPath.section) else { return }
-            header.configure(title: Self.dayTitle(for: day), detail: nil)
+            var content = UIListContentConfiguration.header()
+            if case .day(let day)? = self?.dataSource.sectionIdentifier(for: indexPath.section) {
+                content.text = Self.dayTitle(for: day)
+            }
+            header.contentConfiguration = content
         }
         dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
             collectionView.dequeueConfiguredReusableSupplementary(using: headerRegistration, for: indexPath)
@@ -243,36 +232,52 @@ final class WalletStakesViewController: UIViewController {
             list.appendSections([.failed])
             list.appendItems([.postsFailed], toSection: .failed)
         }
+        // Nothing to show yet and the listing on its way: the rows' bones,
+        // not a spinner (#1494).
+        if isLoading {
+            list.appendSections([.loading])
+            list.appendItems((0..<WalletHistoryViewController.boneRows).map(Item.bone), toSection: .loading)
+        }
         for day in WalletStakeDays.group(rows) {
             list.appendSections([.day(day.start)])
             list.appendItems(day.stakes.map { .stake($0.targetID) }, toSection: .day(day.start))
         }
-        let previous = Set(dataSource.snapshot().itemIdentifiers)
+        let before = dataSource.snapshot()
+        let previous = Set(before.itemIdentifiers)
         list.reconfigureItems(list.itemIdentifiers.filter {
             switch $0 {
-            case .stake(let id): stakeIDs.contains(id) && previous.contains($0)
+            // A row's hairline follows its place in its day: a row that
+            // became, or stopped being, its day's first is redrawn too.
+            case .stake(let id):
+                previous.contains($0) && (stakeIDs.contains(id) || Self.isFirst($0, in: before) != Self.isFirst($0, in: list))
             case .postsFailed: previous.contains($0)
+            case .bone: false
             }
         })
         dataSource.apply(list, animatingDifferences: false)
         setNeedsUpdateContentUnavailableConfiguration()
     }
 
-    /// Loading (the app's loader), failed or empty, over the list — nothing
+    /// Whether `item` opens its section in `list`.
+    private static func isFirst(_ item: Item, in list: NSDiffableDataSourceSnapshot<Section, Item>) -> Bool {
+        guard let section = list.sectionIdentifier(containingItem: item) else { return false }
+        return list.itemIdentifiers(inSection: section).first == item
+    }
+
+    /// Nothing to show, and the listing on its way.
+    private var isLoading: Bool {
+        shown.isEmpty && (wallet.awaitsServerStakes || isRetrying)
+    }
+
+    /// Failed or empty, over the list (loading is the rows' bones) — nothing
     /// while there are stakes to show.
     override func updateContentUnavailableConfiguration(using state: UIContentUnavailableConfigurationState) {
-        let loading = shown.isEmpty && (wallet.awaitsServerStakes || isRetrying)
-        if loading {
-            loader.startAnimating()
-        } else {
-            loader.stopAnimating()
-        }
-        contentUnavailableConfiguration = loading ? nil : Self.unavailable(
+        contentUnavailableConfiguration = isLoading ? nil : Self.unavailable(
             segment: segment, isEmpty: shown.isEmpty, failed: wallet.stakesListingFailed
         ) { [weak self] in
             guard let self else { return }
             isRetrying = true
-            setNeedsUpdateContentUnavailableConfiguration()
+            refresh()
             Task { [weak self] in await self?.reloadListing() }
         }
     }
@@ -328,7 +333,7 @@ final class WalletStakesViewController: UIViewController {
         guard let stake = stakesByID[id] else { return }
         cell.configure(
             stake: stake, post: entries[PostID(id)], phase: postPhase(for: id),
-            pressable: isPressable(stakeID: id), now: Date(), imagePipeline: imagePipeline, animated: animated,
+            now: Date(), imagePipeline: imagePipeline, animated: animated,
             verdictPending: wallet.awaitsServerStakes
         )
     }
@@ -339,7 +344,7 @@ final class WalletStakesViewController: UIViewController {
     }
 
     /// Asks for the posts behind `ids` — already marked loading. An empty
-    /// answer is an answer: every post it lacks failed (the hub's rule).
+    /// answer is an answer: every post it lacks failed (the Wallet sheet's rule).
     private func lookUp(_ ids: [String]) {
         guard let lookUpPosts, !ids.isEmpty else { return }
         Task { [weak self] in
@@ -427,8 +432,13 @@ extension WalletStakesViewController: UICollectionViewDelegate {
         return isPressable(stakeID: id)
     }
 
+    /// UIKit's own highlight (#1494), only where a tap does something.
+    func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        self.collectionView(collectionView, shouldSelectItemAt: indexPath)
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: false)
+        collectionView.deselectItem(at: indexPath, animated: true)
         guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
         if postPhase(for: id) == .failed {
             retryFailedPosts()
