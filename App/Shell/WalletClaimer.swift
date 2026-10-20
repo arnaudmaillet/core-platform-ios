@@ -43,9 +43,15 @@ final class WalletClaimer {
             guard let self else { return }
             let outcome = await wallet.claim(idempotencyKey: key)
             switch outcome {
-            case .claimed:
+            case .claimed(let awarded):
                 pendingKey = nil
-                HapticNotification().notificationOccurred(.success)
+                // One haptic and one toast per claim (#1479): the toast's own
+                // success haptic is the claim's.
+                if let host {
+                    Feedback.success(Self.toastText(awarded: awarded), from: host)
+                } else {
+                    HapticNotification().notificationOccurred(.success)
+                }
                 changed()
                 NotificationCenter.default.post(name: Self.didClaimNotification, object: self)
             case .tooEarly, .dailyCapReached, .balanceFull:
@@ -75,6 +81,11 @@ final class WalletClaimer {
                 host.present(alert, animated: true)
             }
         }
+    }
+
+    /// The claim's toast: "+25 likes".
+    static func toastText(awarded: Int) -> String {
+        awarded == 1 ? "+1 like" : "+\(awarded.formatted()) likes"
     }
 
     /// What the Claim button says for `snapshot`.
