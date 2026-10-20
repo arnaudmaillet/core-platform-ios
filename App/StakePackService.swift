@@ -6,10 +6,9 @@ import Maps
 /// `StakePackSelling`, as `CountryAccessService` is to `CountryAccess`.
 ///
 /// The pack lives in `WalletStore` beside the gems that buy it and the points
-/// its shots stake: one store, one persistence, one change post. Mock-only
-/// today like the rest of the wallet; the real one is `wallet.v1`'s
-/// `BuyStakePack` and `Wallet.stake_shots` (`BACKEND_VIRTUAL_CURRENCY.md`
-/// §3.3), behind this same seam.
+/// its shots stake: one store, one persistence, one change post. A member's
+/// pack is the server's (#1475): `wallet.v1`'s `BuyStakePack`, its packs on
+/// sale and `Wallet.stake_shots`; a guest's is the device's mock.
 @MainActor
 final class StakePackService: StakePackSelling {
     private let wallet: WalletStore
@@ -35,7 +34,7 @@ final class StakePackService: StakePackSelling {
     var offers: [StakePackOffer] {
         let loaded = wallet.stakePackTierID
         let shotsLeft = wallet.stakeShots
-        return WalletStore.Policy.StakePack.tiers.map { tier in
+        return wallet.stakePackTiers.map { tier in
             StakePackOffer(
                 id: tier.id, shotsPerPack: tier.shots,
                 likesPerShot: WalletStore.Policy.StakePack.likesPerShot,
@@ -44,16 +43,20 @@ final class StakePackService: StakePackSelling {
         }
     }
 
-    func buyPack() -> StakePackPurchase {
-        buyPack(offer)
+    func buyPack() async -> StakePackPurchase {
+        await buyPack(offer)
     }
 
-    func buyPack(_ offer: StakePackOffer) -> StakePackPurchase {
-        let tier = WalletStore.Policy.StakePack.tiers.first { $0.id == offer.id } ?? WalletStore.Policy.StakePack.standard
-        return switch wallet.buyStakePack(tier) {
+    func buyPack(_ offer: StakePackOffer) async -> StakePackPurchase {
+        let tier = wallet.stakePackTiers.first { $0.id == offer.id } ?? WalletStore.Policy.StakePack.standard
+        // One key per purchase: a retry the server already answered charges
+        // nothing more.
+        let key = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        return switch await wallet.buyStakePack(tier, idempotencyKey: key) {
         case .bought(let shots, let remainingGems): .bought(shots: shots, remainingGems: remainingGems)
         case .packStillActive(let shotsLeft): .packStillActive(shotsLeft: shotsLeft)
         case .insufficientGems(let needed, let have): .insufficientGems(needed: needed, have: have)
+        case .unavailable: .unavailable
         }
     }
 }

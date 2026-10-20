@@ -319,7 +319,9 @@ public final class ShopStorefrontViewController: UIViewController {
     func packMenu(_ offer: StakePackOffer, blockedBy loaded: StakePackOffer?) -> UIMenu {
         let buy = UIAction(title: "Buy for \(offer.price) gems", image: GemSymbol.glyphImage()) { [weak self] _ in
             guard let self else { return }
-            MemberGates.perform(.shop, from: self) { [weak self] in self?.buyStakePack(offer) }
+            MemberGates.perform(.shop, from: self) { [weak self] in
+                Task { [weak self] in await self?.buyStakePack(offer) }
+            }
         }
         if access.purchasesRestricted {
             buy.attributes = .disabled
@@ -342,7 +344,8 @@ public final class ShopStorefrontViewController: UIViewController {
         itemCards = seller.items.map { item in
             let owned = seller.owns(item)
             return ShopProfileItemCardView(
-                item: item, owned: owned, affordable: access.gems >= item.gemPrice,
+                item: item, price: seller.price(of: item), owned: owned,
+                affordable: access.gems >= seller.price(of: item),
                 menu: itemMenu(item, owned: owned)
             )
         }
@@ -367,37 +370,29 @@ public final class ShopStorefrontViewController: UIViewController {
             used.subtitle = item.whereToUse
             return UIMenu(title: item.shopTitle, children: [used])
         }
-        let buy = UIAction(title: "Buy for \(item.gemPrice) gems", image: GemSymbol.glyphImage()) { [weak self] _ in
+        let price = profileItems?.price(of: item) ?? item.gemPrice
+        let buy = UIAction(title: "Buy for \(price) gems", image: GemSymbol.glyphImage()) { [weak self] _ in
             guard let self else { return }
-            MemberGates.perform(.shop, from: self) { [weak self] in self?.buyItem(item) }
+            MemberGates.perform(.shop, from: self) { [weak self] in
+                Task { [weak self] in await self?.buyItem(item) }
+            }
         }
         if access.purchasesRestricted {
             buy.attributes = .disabled
             buy.subtitle = PurchaseRestriction.message
-        } else if access.gems < item.gemPrice {
+        } else if access.gems < price {
             buy.attributes = .disabled
-            buy.subtitle = "\(item.gemPrice - access.gems) more gems needed"
+            buy.subtitle = "\(price - access.gems) more gems needed"
         }
         return UIMenu(title: "\(item.shopTitle) — yours for good", children: [buy])
     }
 
     /// Buys `item`. Internal for tests — the menu cannot be raised in one.
     @discardableResult
-    func buyItem(_ item: ProfileItem) -> ProfileItemPurchase? {
+    func buyItem(_ item: ProfileItem) async -> ProfileItemPurchase? {
         guard let profileItems, !access.purchasesRestricted else { return nil }
-        let outcome = profileItems.buy(item)
-        switch outcome {
-        case .bought:
-            HapticNotification().notificationOccurred(.success)
-            Feedback.success("\(item.shopTitle) unlocked", from: self)
-        case .alreadyOwned:
-            break
-        case .insufficientGems(let needed, let have):
-            let missing = max(needed - have, 1)
-            Feedback.failure(missing == 1 ? "1 more gem needed" : "\(missing) more gems needed", from: self)
-        case .unavailable:
-            Feedback.failure(PurchaseRestriction.message, from: self)
-        }
+        let outcome = await profileItems.buy(item)
+        ShopPurchaseFeedback.show(outcome, title: item.shopTitle, from: self)
         return outcome
     }
 
@@ -441,7 +436,9 @@ public final class ShopStorefrontViewController: UIViewController {
         }
         let buy = UIAction(title: "Buy for \(offer.price) gems", image: GemSymbol.glyphImage()) { [weak self] _ in
             guard let self else { return }
-            MemberGates.perform(.shop, from: self) { [weak self] in self?.buyTheme(offer) }
+            MemberGates.perform(.shop, from: self) { [weak self] in
+                Task { [weak self] in await self?.buyTheme(offer) }
+            }
         }
         if access.purchasesRestricted {
             buy.attributes = .disabled
@@ -456,25 +453,14 @@ public final class ShopStorefrontViewController: UIViewController {
     /// Buys a theme; once bought, its toast offers to apply it. Internal for
     /// tests — the menu cannot be raised in one.
     @discardableResult
-    func buyTheme(_ offer: ThemeOffer) -> ProfileItemPurchase? {
+    func buyTheme(_ offer: ThemeOffer) async -> ProfileItemPurchase? {
         guard let themes, !access.purchasesRestricted else { return nil }
-        let outcome = themes.buy(offer.theme)
-        switch outcome {
-        case .bought:
-            HapticNotification().notificationOccurred(.success)
-            let theme = offer.theme
-            Feedback.success(
-                "\(theme.title) unlocked", from: self,
-                action: ToastView.Action("Apply") { [weak self] in self?.applyTheme(theme) }
-            )
-        case .alreadyOwned:
-            break
-        case .insufficientGems(let needed, let have):
-            let missing = max(needed - have, 1)
-            Feedback.failure(missing == 1 ? "1 more gem needed" : "\(missing) more gems needed", from: self)
-        case .unavailable:
-            Feedback.failure(PurchaseRestriction.message, from: self)
-        }
+        let theme = offer.theme
+        let outcome = await themes.buy(theme)
+        ShopPurchaseFeedback.show(
+            outcome, title: theme.title, from: self,
+            action: ToastView.Action("Apply") { [weak self] in self?.applyTheme(theme) }
+        )
         return outcome
     }
 
@@ -611,9 +597,9 @@ public final class ShopStorefrontViewController: UIViewController {
     /// Buys a pack — only ever from its confirmation menu. Internal for
     /// tests, which cannot raise a menu.
     @discardableResult
-    func buyStakePack(_ offer: StakePackOffer) -> StakePackPurchase? {
+    func buyStakePack(_ offer: StakePackOffer) async -> StakePackPurchase? {
         guard let stakePacks else { return nil }
-        return CountryShopViewController.buyStakePack(offer, from: stakePacks, access: access, presenter: self)
+        return await CountryShopViewController.buyStakePack(offer, from: stakePacks, access: access, presenter: self)
     }
 
     // MARK: - Pages
@@ -1541,7 +1527,7 @@ final class ShopProfileItemCardView: ShopCardView {
     let owned: Bool
     let priceBubble = UIView()
 
-    init(item: ProfileItem, owned: Bool, affordable: Bool, menu: UIMenu) {
+    init(item: ProfileItem, price: Int, owned: Bool, affordable: Bool, menu: UIMenu) {
         self.item = item
         self.owned = owned
         super.init(menu: menu)
@@ -1583,7 +1569,7 @@ final class ShopProfileItemCardView: ShopCardView {
             foot = label
             priceBubble.backgroundColor = .quaternarySystemFill
         } else {
-            foot = ShopPriceLabel(price: item.gemPrice, inReach: affordable)
+            foot = ShopPriceLabel(price: price, inReach: affordable)
             priceBubble.backgroundColor = affordable ? GemSymbol.tint.withAlphaComponent(0.16) : .quaternarySystemFill
         }
         priceBubble.layer.cornerRadius = ShopPackCardView.bubbleRadius
@@ -1609,7 +1595,7 @@ final class ShopProfileItemCardView: ShopCardView {
             foot.topAnchor.constraint(greaterThanOrEqualTo: priceBubble.topAnchor, constant: 6),
         ])
         accessibilityLabel = "\(item.shopTitle). \(item.shopDetail)"
-        accessibilityValue = owned ? "Owned" : "\(item.gemPrice) gems"
+        accessibilityValue = owned ? "Owned" : "\(price) gems"
     }
 
     @available(*, unavailable)

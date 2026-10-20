@@ -26,7 +26,7 @@ struct ShopProfileItemsTests {
         init(access: Access) { self.access = access }
         var items: [ProfileItem] { [.videoBanner] }
         func owns(_ item: ProfileItem) -> Bool { owned.contains(item) }
-        func buy(_ item: ProfileItem) -> ProfileItemPurchase {
+        func buy(_ item: ProfileItem) async -> ProfileItemPurchase {
             guard !owned.contains(item) else { return .alreadyOwned }
             guard access.gems >= item.gemPrice else { return .insufficientGems(needed: item.gemPrice, have: access.gems) }
             access.gems -= item.gemPrice
@@ -64,16 +64,16 @@ struct ShopProfileItemsTests {
 
     /// Bought, the card says Owned and the gems are spent; a second buy
     /// spends nothing.
-    @Test func buyingTurnsTheCardOwned() throws {
+    @Test func buyingTurnsTheCardOwned() async throws {
         let access = Access()
         let items = Items(access: access)
         let (front, _) = front(access, items: items)
-        #expect(front.buyItem(.videoBanner) == .bought(remainingGems: 100))
+        #expect(await front.buyItem(.videoBanner) == .bought(remainingGems: 100))
         front.rebuild()
         let card = try #require(front.itemCards.first)
         #expect(card.owned)
         #expect(card.accessibilityValue == "Owned")
-        #expect(front.buyItem(.videoBanner) == .alreadyOwned)
+        #expect(await front.buyItem(.videoBanner) == .alreadyOwned)
         #expect(access.gems == 100)
     }
 

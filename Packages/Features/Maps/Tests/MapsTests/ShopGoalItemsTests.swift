@@ -11,7 +11,7 @@ struct ShopGoalItemsTests {
         var owned: Set<ProfileItem> = []
         var items: [ProfileItem] { [.videoBanner] }
         func owns(_ item: ProfileItem) -> Bool { owned.contains(item) }
-        func buy(_ item: ProfileItem) -> ProfileItemPurchase { .unavailable }
+        func buy(_ item: ProfileItem) async -> ProfileItemPurchase { .unavailable }
     }
 
     private final class Themes: ThemeSelling {
@@ -21,7 +21,7 @@ struct ShopGoalItemsTests {
             [ThemeOffer(theme: .pink, price: 0), ThemeOffer(theme: .violet, price: 50), ThemeOffer(theme: .red, price: 50)]
         }
         func owns(_ theme: AccentTheme) -> Bool { owned.contains(theme) }
-        func buy(_ theme: AccentTheme) -> ProfileItemPurchase { .unavailable }
+        func buy(_ theme: AccentTheme) async -> ProfileItemPurchase { .unavailable }
         func apply(_ theme: AccentTheme) {}
     }
 

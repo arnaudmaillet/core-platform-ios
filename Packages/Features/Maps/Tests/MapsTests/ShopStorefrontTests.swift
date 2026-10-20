@@ -51,8 +51,8 @@ struct ShopStorefrontTests {
             }
         }
         var offer: StakePackOffer { offers.first(where: \.isActive) ?? offers[0] }
-        func buyPack() -> StakePackPurchase { buyPack(offers[0]) }
-        func buyPack(_ offer: StakePackOffer) -> StakePackPurchase {
+        func buyPack() async -> StakePackPurchase { await buyPack(offers[0]) }
+        func buyPack(_ offer: StakePackOffer) async -> StakePackPurchase {
             if let loaded { return .packStillActive(shotsLeft: loaded.shotsLeft) }
             guard access.gems >= offer.price else { return .insufficientGems(needed: offer.price, have: access.gems) }
             bought.append(offer.id)
@@ -131,14 +131,14 @@ struct ShopStorefrontTests {
     }
 
     /// Buying goes through the pack the menu belongs to.
-    @Test func buyingABiggerPackLoadsItsShots() throws {
+    @Test func buyingABiggerPackLoadsItsShots() async throws {
         let access = FakeAccess()
         access.gems = 400
         let packs = FakePacks(access: access)
         let front = ShopStorefrontViewController(access: access, stakePacks: packs)
         front.loadViewIfNeeded()
         let tier = try #require(packs.offers.first { $0.id == "shots_25" })
-        #expect(front.buyStakePack(tier) == .bought(shots: 25, remainingGems: 75))
+        #expect(await front.buyStakePack(tier) == .bought(shots: 25, remainingGems: 75))
         #expect(packs.bought == ["shots_25"])
     }
 

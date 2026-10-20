@@ -48,7 +48,11 @@ final class WalletServerSync {
     private func refresh() {
         guard case .member = scope.owner else { return }
         let wallet = wallet
-        Task { await wallet.refreshFromServer() }
+        Task {
+            await wallet.refreshFromServer()
+            // What the member owns and the catalogue's prices (#1475).
+            await wallet.refreshItemsFromServer()
+        }
     }
 
     private func refreshAgain(after delay: TimeInterval) {

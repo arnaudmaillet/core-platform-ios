@@ -477,7 +477,9 @@ public final class CountryShopViewController: UIViewController {
     private func packPriceButton(_ offer: StakePackOffer) -> AppButton {
         Self.packPriceButton(offer, access: access) { [weak self] in
             guard let self else { return }
-            MemberGates.perform(.shop, from: self) { [weak self] in self?.buyStakePack() }
+            MemberGates.perform(.shop, from: self) { [weak self] in
+                Task { [weak self] in await self?.buyStakePack() }
+            }
         }
     }
 
@@ -515,9 +517,14 @@ public final class CountryShopViewController: UIViewController {
     static func buyStakePack(
         _ offer: StakePackOffer? = nil,
         from stakePacks: any StakePackSelling, access: any CountryAccess, presenter: UIViewController
-    ) -> StakePackPurchase? {
+    ) async -> StakePackPurchase? {
         guard !access.purchasesRestricted else { return nil }
-        let outcome = offer.map { stakePacks.buyPack($0) } ?? stakePacks.buyPack()
+        let outcome: StakePackPurchase
+        if let offer {
+            outcome = await stakePacks.buyPack(offer)
+        } else {
+            outcome = await stakePacks.buyPack()
+        }
         if let refusal = refusalMessage(for: outcome) {
             Feedback.failure(refusal, from: presenter)
         } else {
@@ -529,13 +536,13 @@ public final class CountryShopViewController: UIViewController {
     /// Buys the pack. Internal for tests — the confirmation menu cannot be
     /// raised in one.
     @discardableResult
-    func buyStakePack() -> StakePackPurchase? {
+    func buyStakePack() async -> StakePackPurchase? {
         // A refusal says WHY (#803): a vibration with no words reads as a
         // tap that missed; the failure toast carries the error haptic. Bought,
         // the row turns into "Active — N left" on the spot, so the hand only
         // needs to feel it.
         guard let stakePacks else { return nil }
-        return Self.buyStakePack(from: stakePacks, access: access, presenter: self)
+        return await Self.buyStakePack(from: stakePacks, access: access, presenter: self)
     }
 
     /// Why the store refused a pack, in the toast's words — nil when it was
@@ -549,6 +556,8 @@ public final class CountryShopViewController: UIViewController {
         case .insufficientGems(let needed, let have):
             let missing = max(needed - have, 1)
             return missing == 1 ? "1 more gem needed" : "\(missing) more gems needed"
+        case .unavailable:
+            return ShopPurchaseFeedback.unreachable
         }
     }
 

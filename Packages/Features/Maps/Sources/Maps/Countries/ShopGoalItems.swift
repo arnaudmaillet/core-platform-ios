@@ -13,7 +13,7 @@ public enum ShopGoalItems {
         let profile = (profileItems?.items ?? []).map { item in
             WalletGemGoal.Item(
                 id: item.rawValue, name: "the \(item.shopTitle.lowercased())",
-                price: item.gemPrice, owned: profileItems?.owns(item) ?? false
+                price: profileItems?.price(of: item) ?? item.gemPrice, owned: profileItems?.owns(item) ?? false
             )
         }
         let accents = (themes?.offers ?? []).map { offer in

@@ -243,7 +243,7 @@ struct CountryShopViewControllerTests {
             StakePackOffer(shotsPerPack: 3, likesPerShot: 100, price: 50, shotsLeft: shotsLeft)
         }
 
-        func buyPack() -> StakePackPurchase {
+        func buyPack() async -> StakePackPurchase {
             guard shotsLeft == 0 else { return .packStillActive(shotsLeft: shotsLeft) }
             guard access.gems >= 50 else { return .insufficientGems(needed: 50, have: access.gems) }
             access.gems -= 50
@@ -302,16 +302,16 @@ struct CountryShopViewControllerTests {
 
     /// A refused pack says why (#803) — it used to be a vibration with no
     /// words — in a failure toast over the shop.
-    @Test func aRefusedPackSaysWhy() throws {
+    @Test func aRefusedPackSaysWhy() async throws {
         let access = FakeAccess()
         access.gems = 70
         let packs = FakePacks(access: access)
         let shop = CountryShopViewController(access: access, stakePacks: packs)
         shop.loadViewIfNeeded()
-        shop.buyStakePack()
+        await shop.buyStakePack()
         #expect(Self.toast(in: shop.view) == nil, "a bought pack raised a toast over its own row")
 
-        #expect(shop.buyStakePack() == .packStillActive(shotsLeft: 3))
+        #expect(await shop.buyStakePack() == .packStillActive(shotsLeft: 3))
         let toast = try #require(Self.toast(in: shop.view), "the refusal was a vibration with no words")
         #expect(toast.style == .failure)
 
@@ -337,7 +337,7 @@ struct CountryShopViewControllerTests {
 
     /// Teen protections (#401): an account aged 13–17 buys nothing, and its
     /// gems stay where they are.
-    @Test func aTeenAccountCannotBuyThePack() {
+    @Test func aTeenAccountCannotBuyThePack() async {
         let access = FakeAccess()
         access.gems = 70
         access.purchasesRestricted = true
@@ -345,27 +345,27 @@ struct CountryShopViewControllerTests {
         let shop = CountryShopViewController(access: access, stakePacks: packs)
         shop.loadViewIfNeeded()
 
-        #expect(shop.buyStakePack() == nil)
+        #expect(await shop.buyStakePack() == nil)
         #expect(access.gems == 70)
         #expect(PurchaseRestriction.message.contains("under 18"))
     }
 
     /// Buying spends the gems and turns the price into "Active — 10 left";
     /// while it lasts, a second pack is refused (packs don't stack).
-    @Test func buyingThePackShowsItActiveAndRefusesAnother() throws {
+    @Test func buyingThePackShowsItActiveAndRefusesAnother() async throws {
         let access = FakeAccess()
         access.gems = 70
         let packs = FakePacks(access: access)
         let shop = CountryShopViewController(access: access, stakePacks: packs)
         shop.loadViewIfNeeded()
 
-        #expect(shop.buyStakePack() == .bought(shots: 3, remainingGems: 20))
+        #expect(await shop.buyStakePack() == .bought(shots: 3, remainingGems: 20))
         #expect(access.gems == 20)
         let row = try packRow(shop)
         #expect(row.accessibilityValue == "Active — 3 left")
         #expect(CountryShopViewController.activeText(packs.offer) == "Active — 3 left")
 
-        #expect(shop.buyStakePack() == .packStillActive(shotsLeft: 3))
+        #expect(await shop.buyStakePack() == .packStillActive(shotsLeft: 3))
         #expect(access.gems == 20)
 
         // Spent down (in the feed), the price comes back.
