@@ -64,6 +64,8 @@ final class WalletHubViewController: UIViewController {
     private nonisolated enum Section: Hashable { case header, active, settled }
     private nonisolated enum Item: Hashable {
         case header
+        /// The gem goal (#1480), under the header.
+        case goal
         case stake(String)
         case noActiveStakes
         case postsFailed
@@ -162,6 +164,12 @@ final class WalletHubViewController: UIViewController {
             ) { [weak self] _ in
                 MainActor.assumeIsolated { self?.headerCell?.header.popBalance() }
             },
+            // A purchase moves the gem goal on (#1480).
+            NotificationCenter.default.addObserver(
+                forName: ProfileItemStore.didChangeNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.refresh() }
+            },
         ]
         refresh()
 
@@ -216,6 +224,20 @@ final class WalletHubViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         startCountdownTimer()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        // How it works shows by itself once per account (#1480), the first
+        // time its hub has landed.
+        guard WalletHowItWorks.shouldShow(for: StorageScope.shared.owner) else { return }
+        #if DEBUG
+        // A QA run drives the hub itself: `-wallet-how-it-works-seen`, or
+        // any of the hub's own hooks, keeps the page away.
+        let hooks = ["-wallet-how-it-works-seen", "-wallet-open-stake", "-wallet-open-stakes", "-wallet-sheet-scroll"]
+        if ProcessInfo.processInfo.arguments.contains(where: hooks.contains) { return }
+        #endif
+        openHowItWorks()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -287,6 +309,12 @@ final class WalletHubViewController: UIViewController {
             // landing on a visible row is cross-faded by `postsArrived`.
             configure(cell, stakeID: id, animated: false)
         }
+        let goalRegistration = UICollectionView.CellRegistration<WalletGoalCardCell, Item> { [weak self] cell, _, _ in
+            guard let self, let goal = currentGoal else { return }
+            cell.card.configure(goal: goal, gems: snapshot.gems)
+            cell.card.removeTarget(nil, action: nil, for: .allEvents)
+            cell.card.addAction(UIAction { [weak self] _ in self?.openShop() }, for: .touchUpInside)
+        }
         let emptyRegistration = UICollectionView.CellRegistration<WalletEmptyStakesCell, Item> { _, _, _ in }
         let failedRegistration = UICollectionView.CellRegistration<WalletStakesFailedCell, Item> { [weak self] cell, _, _ in
             guard let self else { return }
@@ -297,6 +325,8 @@ final class WalletHubViewController: UIViewController {
             switch item {
             case .header:
                 collectionView.dequeueConfiguredReusableCell(using: headerRegistration, for: indexPath, item: item)
+            case .goal:
+                collectionView.dequeueConfiguredReusableCell(using: goalRegistration, for: indexPath, item: item)
             case .stake:
                 collectionView.dequeueConfiguredReusableCell(using: stakeRegistration, for: indexPath, item: item)
             case .noActiveStakes:
@@ -377,7 +407,35 @@ final class WalletHubViewController: UIViewController {
         })
         close.identifier = Self.closeItemIdentifier
         close.accessibilityIdentifier = Self.closeItemIdentifier
-        navigationItem.rightBarButtonItem = close
+        // How it works (#1480), whenever it is wanted again.
+        let help = UIBarButtonItem(
+            image: UIImage(systemName: "questionmark"),
+            primaryAction: UIAction { [weak self] _ in self?.openHowItWorks() }
+        )
+        help.accessibilityLabel = "How it works"
+        help.identifier = Self.helpItemIdentifier
+        help.accessibilityIdentifier = Self.helpItemIdentifier
+        navigationItem.rightBarButtonItems = [close, help]
+    }
+
+    static let helpItemIdentifier = "wallet.hub.help"
+
+    /// How it works (#1480), pushed in the sheet.
+    private func openHowItWorks() {
+        guard navigationController?.topViewController === self else { return }
+        WalletHowItWorks.markSeen(by: StorageScope.shared.owner)
+        navigationController?.pushViewController(
+            WalletHowItWorksViewController(wallet: wallet, claimer: claimer), animated: true
+        )
+    }
+
+    /// The gem goal (#1480) among what the Shop sells for keeps; nil without
+    /// a Shop (no door to send the viewer to) or with nothing left to buy.
+    private var currentGoal: WalletGemGoal.Goal? {
+        guard countries != nil else { return nil }
+        return WalletGemGoal.goal(
+            among: ShopGoalItems.items(profileItems: profileItems, themes: themes), gems: snapshot.gems
+        )
     }
 
     /// The Shop — where the gems go. A pushed screen since 2026-10-13: this
@@ -457,6 +515,7 @@ final class WalletHubViewController: UIViewController {
         var list = NSDiffableDataSourceSnapshot<Section, Item>()
         list.appendSections([.header, .active])
         list.appendItems([.header], toSection: .header)
+        if currentGoal != nil { list.appendItems([.goal], toSection: .header) }
         list.appendItems(Self.preview(layout.active).map(Self.item), toSection: .active)
         if let settled = layout.settled {
             list.appendSections([.settled])
@@ -466,8 +525,9 @@ final class WalletHubViewController: UIViewController {
         list.reconfigureItems(list.itemIdentifiers.filter {
             switch $0 {
             case .stake(let id): stakeIDs.contains(id) && previous.contains($0)
-            // The failed row's message follows the latest answer.
-            case .postsFailed: previous.contains($0)
+            // The failed row's message follows the latest answer; the goal,
+            // the gems and what is owned.
+            case .postsFailed, .goal: previous.contains($0)
             default: false
             }
         })

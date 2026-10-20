@@ -14,7 +14,7 @@ final class WalletSheetUITests: XCTestCase {
 
     func testTheLikesSheetBarOpensTheShopScreen() {
         let app = XCUIApplication()
-        app.launchArguments = ["-mock-auto-login", "-open-wallet"]
+        app.launchArguments = ["-mock-auto-login", "-open-wallet", "-wallet-how-it-works-seen"]
         app.launch()
 
         // `[storefront Shop] ······ [✕]` — the bar's two items.
@@ -51,7 +51,7 @@ final class WalletSheetUITests: XCTestCase {
     /// the Claim sheet.
     func testTheWalletRowPushesTheHubAndBackReturns() {
         let app = XCUIApplication()
-        app.launchArguments = ["-mock-auto-login", "-open-wallet"]
+        app.launchArguments = ["-mock-auto-login", "-open-wallet", "-wallet-how-it-works-seen"]
         app.launch()
 
         let claim = app.buttons["wallet.claim"]
