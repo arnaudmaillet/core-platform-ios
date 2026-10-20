@@ -27,15 +27,15 @@ import UIKit
 ///   ┌──────────────────┐ ┌────────┐ ┌────────┐
 ///   │      127 ◆       │ │   ✓    │ │   ≡    │
 ///   │       Shop       │ │Settled │ │Activity│
-///   └──────────────────┘ └────────┘ └────────┘   ← the small height ends here
+///   └──────────────────┘ └────────┘ └────────┘
+///   ┌──────────────────────────────────────────┐
+///   │            Claim 25 likes                │   ← the small height ends here
+///   └──────────────────────────────────────────┘
 ///   Active stakes ›                  46 ♥ at stake
 ///   ┌──────────────────────────────────────────┐
 ///   │ ▢ Standup moved to nine…           1 ♥   │
 ///   │ ──────────────────────────────────────── │
 ///   │ ▢ Refactor landed and…             8 ♥   │
-///   └──────────────────────────────────────────┘
-///   ┌──────────────────────────────────────────┐
-///   │            Claim 25 likes                │   ← the toolbar
 ///   └──────────────────────────────────────────┘
 /// ```
 ///
@@ -59,8 +59,10 @@ import UIKit
 /// # Surfaces
 /// The app's grouped page and cards (`Surface`), at both heights: the page
 /// is painted, so the small sheet is opaque too — a card on the glass read
-/// darker than its ground (the owner, 2026-10-20). The Claim is the
-/// toolbar's one item, the whole width, always in reach.
+/// darker than its ground (the owner, 2026-10-20). The Claim is the head's,
+/// the whole width under the doors — no toolbar: a toolbar's custom view
+/// reached the bar ~0.4 s after the sheet (filmed, 2026-10-20), and a native
+/// item stays at its words' width.
 final class WalletSheetViewController: UIViewController {
     /// Resolves stake targets to their posts — the Feed feature's, handed in
     /// by the composition root (`AppContainer.makeWalletSheet`).
@@ -100,10 +102,8 @@ final class WalletSheetViewController: UIViewController {
     private var collectionView: UICollectionView!
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
     private let claimer: WalletClaimer
-    /// The toolbar's Claim (#1494): a NATIVE prominent item at the trailing
-    /// end, so UIKit draws and animates it with the bar — a custom view
-    /// arrived a frame after the sheet and jumped into place.
-    private let claimItem = UIBarButtonItem()
+    /// The likes gauge, the bar's subtitle.
+    private let titleGauge = WalletTitleGauge()
 
     private var snapshot: WalletSnapshot
     private var stakes: [WalletStake] = []
@@ -127,9 +127,6 @@ final class WalletSheetViewController: UIViewController {
     /// number, because a detent resolver must read nothing that could load a
     /// view.
     private var detentHeight: CGFloat = 560
-    /// The toolbar's band over the bottom safe area: the bar's own estimate
-    /// first, then read off the safe area once on screen.
-    private var toolbarBand: CGFloat = 52
     static let smallDetent = UISheetPresentationController.Detent.Identifier("wallet.small")
 
     /// Stable identifiers: a reused bar item identifier is how iOS 26 matches
@@ -168,7 +165,7 @@ final class WalletSheetViewController: UIViewController {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The sheet as it is presented: this screen as the root of a navigation
-    /// controller that shows its bar and its toolbar, as a page sheet at its
+    /// controller that shows its bar, as a page sheet at its
     /// small height.
     ///
     /// ⚠️ The sheet's configuration lives on the NAVIGATION controller's
@@ -176,7 +173,9 @@ final class WalletSheetViewController: UIViewController {
     func wrappedInSheet() -> UINavigationController {
         let navigation = UINavigationController(rootViewController: self)
         navigation.modalPresentationStyle = .pageSheet
-        navigation.setToolbarHidden(false, animated: false)
+        // Settled and Activity wear their title large (#1494); Rewards keeps
+        // its inline title and gauge.
+        navigation.navigationBar.prefersLargeTitles = true
         if let sheet = navigation.sheetPresentationController {
             let small = UISheetPresentationController.Detent.custom(identifier: Self.smallDetent) { [weak self] context in
                 min(self?.detentHeight ?? 560, context.maximumDetentValue)
@@ -225,7 +224,6 @@ final class WalletSheetViewController: UIViewController {
         buildCollection()
         buildChrome()
         buildBar()
-        buildToolbar()
         // The server's wallet as of now (#1098): its change notice redraws.
         let wallet = wallet
         Task {
@@ -254,10 +252,6 @@ final class WalletSheetViewController: UIViewController {
         refresh()
         // Measured NOW, before the sheet asks its first detent: a guess here
         // would present at the guess and then jump to the answer.
-        if let toolbar = navigationController?.toolbar {
-            let estimate = toolbar.sizeThatFits(CGSize(width: view.bounds.width, height: 0)).height
-            if estimate > 0 { toolbarBand = estimate }
-        }
         view.layoutIfNeeded()
         updateDetent()
 
@@ -269,18 +263,6 @@ final class WalletSheetViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         startCountdownTimer()
-    }
-
-    override func viewIsAppearing(_ animated: Bool) {
-        super.viewIsAppearing(animated)
-        // On screen: the toolbar's real band, read off the safe area (the
-        // bar's own estimate answered 48 where the sheet gave 52, the sound
-        // sheet's measure).
-        guard let window = view.window, navigationController?.topViewController === self else { return }
-        let band = max(0, view.safeAreaInsets.bottom - window.safeAreaInsets.bottom)
-        guard band > 0, band < 120, abs(band - toolbarBand) > 0.5 else { return }
-        toolbarBand = band
-        updateDetent(force: true)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -332,38 +314,28 @@ final class WalletSheetViewController: UIViewController {
                     top: 0, leading: margin, bottom: SectionTitleView.gapAbove(traits: traits), trailing: margin
                 )
             case .active:
-                // The stakes are rows of ONE card (#1494): the section's
-                // background, under the heading.
+                // The stakes are rows of ONE inset-grouped card (#1494), the
+                // Settled and Activity screens' list: UIKit's ground, its
+                // highlight under the finger. The rows draw their hairlines.
                 let titleBar = SectionTitleView.barHeight(traits: traits)
-                let gap = SectionTitleView.gapBelow(traits: traits)
-                // Nothing active: the empty message fills what the sheet has
-                // left under the heading.
-                if self?.dataSource?.snapshot().itemIdentifiers(inSection: .active) == [.noActiveStakes],
-                   let fill = self?.emptyHeight(below: titleBar + gap) {
-                    let size = NSCollectionLayoutSize(widthDimension: .fractionalWidth(1), heightDimension: .absolute(fill))
-                    layoutSection = NSCollectionLayoutSection(group: .vertical(
-                        layoutSize: size, subitems: [NSCollectionLayoutItem(layoutSize: size)]
-                    ))
-                }
-                layoutSection.contentInsets = NSDirectionalEdgeInsets(
-                    top: gap, leading: margin, bottom: 0, trailing: margin
+                var configuration = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+                configuration.showsSeparators = false
+                configuration.backgroundColor = .clear
+                let list = NSCollectionLayoutSection.list(using: configuration, layoutEnvironment: environment)
+                list.contentInsetsReference = .none
+                list.contentInsets = NSDirectionalEdgeInsets(
+                    top: SectionTitleView.gapBelow(traits: traits), leading: margin, bottom: 0, trailing: margin
                 )
-                let header = NSCollectionLayoutBoundarySupplementaryItem(
+                list.boundarySupplementaryItems = [NSCollectionLayoutBoundarySupplementaryItem(
                     layoutSize: NSCollectionLayoutSize(
                         widthDimension: .fractionalWidth(1), heightDimension: .absolute(titleBar)
                     ),
                     elementKind: WalletSectionHeader.kind, alignment: .top
-                )
-                layoutSection.boundarySupplementaryItems = [header]
-                let card = NSCollectionLayoutDecorationItem.background(elementKind: WalletCardBackground.kind)
-                card.contentInsets = NSDirectionalEdgeInsets(
-                    top: titleBar + gap, leading: margin, bottom: 0, trailing: margin
-                )
-                layoutSection.decorationItems = [card]
+                )]
+                layoutSection = list
             }
             return layoutSection
         }
-        layout.register(WalletCardBackground.self, forDecorationViewOfKind: WalletCardBackground.kind)
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear
         collectionView.delegate = self
@@ -384,6 +356,7 @@ final class WalletSheetViewController: UIViewController {
             cell.header.onShop = { [weak self] in self?.openShop() }
             cell.header.onSettled = { [weak self] in self?.openStakes(.settled) }
             cell.header.onActivity = { [weak self] in self?.openActivity() }
+            cell.header.onClaim = { [weak self] in self?.claim() }
         }
         let stakeRegistration = UICollectionView.CellRegistration<WalletGroupedStakeCell, Item> { [weak self] cell, indexPath, item in
             guard let self, case .stake(let id) = item else { return }
@@ -393,8 +366,10 @@ final class WalletSheetViewController: UIViewController {
             configure(cell, stakeID: id, animated: false)
         }
         let emptyRegistration = UICollectionView.CellRegistration<WalletEmptyStakesCell, Item> { [weak self] cell, _, _ in
-            guard let self, findPosts != nil else { return }
-            cell.onFindPosts = { [weak self] in self?.findPosts?() }
+            guard let self else { return }
+            cell.minimumHeight = emptyHeight
+            drawnEmptyHeight = cell.minimumHeight
+            if findPosts != nil { cell.onFindPosts = { [weak self] in self?.findPosts?() } }
         }
         let failedRegistration = UICollectionView.CellRegistration<WalletStakesFailedCell, Item> { [weak self] cell, _, _ in
             guard let self else { return }
@@ -423,11 +398,11 @@ final class WalletSheetViewController: UIViewController {
         }
     }
 
-    /// The height an empty Active stakes card takes: what the large sheet
-    /// leaves under the head and the heading (`below`), never less than
-    /// its message needs.
-    private func emptyHeight(below heading: CGFloat) -> CGFloat? {
-        guard let collectionView, headerHeight > 0 else { return nil }
+    /// The height an empty Active stakes card takes: what the sheet leaves
+    /// under the head and the heading, never less than its message needs.
+    private var emptyHeight: CGFloat {
+        guard collectionView != nil, headerHeight > 0 else { return Self.emptyMinimum }
+        let heading = SectionTitleView.barHeight(traits: traitCollection) + SectionTitleView.gapBelow(traits: traitCollection)
         let visible = collectionView.bounds.height - collectionView.adjustedContentInset.top
             - collectionView.adjustedContentInset.bottom
         return max(Self.emptyMinimum, (visible - headerHeight - heading).rounded(.down))
@@ -435,6 +410,22 @@ final class WalletSheetViewController: UIViewController {
 
     /// The empty message's own height, at the least.
     private static let emptyMinimum: CGFloat = 220
+
+    /// The empty card's height drawn now: a sheet that changed height, or a
+    /// head that did, redraws it.
+    private var drawnEmptyHeight: CGFloat = 0
+
+    private func refillEmptyCard() {
+        guard abs(emptyHeight - drawnEmptyHeight) > 0.5, dataSource.indexPath(for: .noActiveStakes) != nil else { return }
+        // Out of the layout pass this is called from.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, abs(emptyHeight - drawnEmptyHeight) > 0.5,
+                  dataSource.indexPath(for: .noActiveStakes) != nil else { return }
+            var list = dataSource.snapshot()
+            list.reconfigureItems([.noActiveStakes])
+            dataSource.apply(list, animatingDifferences: false)
+        }
+    }
 
     /// "Active stakes ›" and "46 ♥ at stake": the heading leads to every
     /// active stake (#1477), once there is one.
@@ -451,23 +442,20 @@ final class WalletSheetViewController: UIViewController {
         header.configure(title: "Active stakes", detail: detail, isLink: hasStakes)
     }
 
-    /// The soft edges under the bar and over the toolbar: the system draws
-    /// each under the bar it tracks, so the list passes under the Claim
-    /// blurred rather than read through its glass.
+    /// The soft edge under the bar: the system draws the effect under the
+    /// bar it tracks.
     private func buildChrome() {
         collectionView.topEdgeEffect.style = .soft
-        collectionView.bottomEdgeEffect.style = .soft
-        // Named, not searched for: the bars' edge effects read THIS list.
+        // Named, not searched for: the bar's edge effect reads THIS list.
         setContentScrollView(collectionView, for: .top)
-        setContentScrollView(collectionView, for: .bottom)
     }
 
-    /// The small detent: from the sheet's top to just under the three doors,
-    /// then the toolbar's band. Measured from the laid-out list rather than
+    /// The small detent: from the sheet's top to just under the Claim.
+    /// Measured from the laid-out list rather than
     /// typed, so Dynamic Type cannot cut it.
     ///
     /// ⚠️ Every input is stable — the head's height in the list's content,
-    /// the bar, the toolbar's band — never the live sheet's: re-measuring
+    /// the bar — never the live sheet's: re-measuring
     /// the sheet itself from layout recursed during grabber drags.
     private func updateDetent(force: Bool = false) {
         guard let sheet, dataSource != nil, let path = dataSource.indexPath(for: .header) else { return }
@@ -476,13 +464,15 @@ final class WalletSheetViewController: UIViewController {
         cell.layoutIfNeeded()
         // The empty card fills what is left under the head: it follows it.
         let head = cell.frame.maxY + SectionTitleView.gapAbove(traits: traitCollection)
-        if abs(head - headerHeight) > 0.5 {
-            headerHeight = head
-            collectionView.collectionViewLayout.invalidateLayout()
-        }
+        if abs(head - headerHeight) > 0.5 { headerHeight = head }
+        refillEmptyCard()
         // ⚠️ A custom detent's height EXCLUDES the bottom safe area — the
-        // sheet adds it back, under the toolbar's band.
-        let height = (barClearance() + Self.topInset + cell.frame.maxY + Spacing.xl + toolbarBand).rounded()
+        // sheet adds it back: the margin is what is left of the band. Read
+        // from the PRESENTER's window too: this is measured in `viewDidLoad`,
+        // before the sheet has a window of its own.
+        let window = view.window ?? presentingViewController?.view.window
+        let bottomInset = window?.safeAreaInsets.bottom ?? 0
+        let height = (barClearance() + Self.topInset + cell.frame.maxY + max(Spacing.sm, Spacing.lg - bottomInset)).rounded()
         guard force || abs(height - detentHeight) > 0.5 else { return }
         detentHeight = height
         sheet.animateChanges { sheet.invalidateDetents() }
@@ -502,6 +492,8 @@ final class WalletSheetViewController: UIViewController {
     private func buildBar() {
         // Rewards, not "Wallet" (#1494): likes and gems are not money.
         title = "Rewards"
+        // The likes against their cap, under the title (#1494).
+        navigationItem.subtitleView = titleGauge
         navigationItem.largeTitleDisplayMode = .never
         let close = UIBarButtonItem(systemItem: .close, primaryAction: UIAction { [weak self] _ in
             self?.dismiss(animated: true)
@@ -520,34 +512,12 @@ final class WalletSheetViewController: UIViewController {
         navigationItem.rightBarButtonItem = close
     }
 
-    /// `[ ······ (Claim 25 likes) ]`: the toolbar's one item, UIKit's own.
-    ///
-    /// ⚠️ The action carries no title or image: a `UIAction`'s image is
-    /// re-applied to its item when it fires, so the words are the item's.
-    private func buildToolbar() {
-        claimItem.primaryAction = UIAction { [weak self] _ in self?.claim() }
-        claimItem.style = .prominent
-        claimItem.tintColor = Palette.prominentGlassTint
-        claimItem.identifier = Self.claimItemIdentifier
-        claimItem.accessibilityIdentifier = Self.claimItemIdentifier
-        // A countdown's digits must not jostle the capsule's width.
-        let font = UIFont.monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
-        for state: UIControl.State in [.normal, .disabled, .highlighted] {
-            claimItem.setTitleTextAttributes([.font: font], for: state)
-        }
-        toolbarItems = [.flexibleSpace(), claimItem]
-    }
-
-    static let claimItemIdentifier = "wallet.claim"
-
     // MARK: - Navigation
 
     /// Pushes `controller` in the sheet AT ITS HEIGHT (#1494): collapsed
-    /// stays collapsed, expanded stays expanded. The toolbar's Claim stays
-    /// with Rewards.
+    /// stays collapsed, expanded stays expanded.
     private func pushInSheet(_ controller: UIViewController) {
         guard let navigationController, navigationController.topViewController === self else { return }
-        controller.hidesBottomBarWhenPushed = true
         navigationController.pushViewController(controller, animated: true)
     }
 
@@ -598,17 +568,19 @@ final class WalletSheetViewController: UIViewController {
 
     private func configureHeader(_ header: WalletHeaderView) {
         header.configure(with: snapshot, sellsShop: countries != nil)
+        header.applyClaim(
+            title: WalletClaimer.title(for: snapshot, pending: claimer.isPending),
+            canClaim: snapshot.claimAvailable && !claimer.isPending
+        )
     }
 
-    /// The toolbar's Claim: what the claim does now or when it opens. Once a
+    /// The head's Claim: what the claim does now or when it opens. Once a
     /// second while shown (the countdown).
     private func applyClaim() {
-        let enabled = snapshot.claimAvailable && !claimer.isPending
-        if claimItem.isEnabled != enabled { claimItem.isEnabled = enabled }
-        let title = WalletClaimer.shortTitle(for: snapshot, pending: claimer.isPending)
-        // Only a change re-lays the bar out.
-        if claimItem.title != title { claimItem.title = title }
-        claimItem.accessibilityLabel = WalletClaimer.title(for: snapshot, pending: claimer.isPending)
+        headerCell?.header.applyClaim(
+            title: WalletClaimer.title(for: snapshot, pending: claimer.isPending),
+            canClaim: snapshot.claimAvailable && !claimer.isPending
+        )
     }
 
     private func refresh() {
@@ -617,6 +589,7 @@ final class WalletSheetViewController: UIViewController {
         stakesByID = Dictionary(uniqueKeysWithValues: stakes.map { ($0.targetID, $0) })
 
         headerCell.map { configureHeader($0.header) }
+        titleGauge.configure(with: snapshot)
         applyClaim()
 
         // Marked loading BEFORE the list is built, so a new stake's row
@@ -703,7 +676,7 @@ final class WalletSheetViewController: UIViewController {
         guard let stake = stakesByID[id] else { return }
         cell.configure(
             stake: stake, post: entries[PostID(id)], phase: postPhase(for: id),
-            pressable: isPressable(stakeID: id), now: Date(), imagePipeline: imagePipeline, animated: animated,
+            now: Date(), imagePipeline: imagePipeline, animated: animated,
             verdictPending: verdictsPending
         )
     }
@@ -921,7 +894,7 @@ extension WalletSheetViewController: UICollectionViewDelegate {
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: false)
+        collectionView.deselectItem(at: indexPath, animated: true)
         guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
         if postPhase(for: id) == .failed {
             retryFailedPosts()
@@ -938,21 +911,6 @@ extension WalletSheetViewController: UISheetPresentationControllerDelegate {
         guard sheet.selectedDetentIdentifier == Self.smallDetent, navigationController?.topViewController === self else { return }
         collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: true)
     }
-}
-
-/// The Active stakes card (#1494): the section's one card, its rows inside
-/// (`WalletGroupedStakeCell`).
-final class WalletCardBackground: UICollectionReusableView {
-    static let kind = "wallet.card"
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        Surface.dressCard(self)
-        clipsToBounds = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
 /// Holds notification tokens and unregisters them on its own deallocation

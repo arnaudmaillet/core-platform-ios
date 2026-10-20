@@ -1,9 +1,8 @@
 import XCTest
 
 /// The Rewards sheet (#1494) through real taps and drags: one sheet with two
-/// heights, opening expanded, the Claim as its toolbar's trailing item, three
-/// doors under the balance — the Shop, Settled and Activity — and the active
-/// stakes below.
+/// heights, opening expanded, three doors under the balance — the Shop,
+/// Settled and Activity — the Claim under them, and the active stakes below.
 ///
 /// ⚠️ **THE SHEET LIVES IN THE APP TARGET**, which has no unit-test bundle:
 /// `WalletSheetViewController` is the shell's (it joins the wallet store, the
@@ -25,8 +24,8 @@ final class WalletSheetUITests: XCTestCase {
         return app
     }
 
-    /// Collapsed: `[?] Rewards [✕]`, one Claim at the toolbar's trailing
-    /// end, the three doors — no Shop item in the bar. The Shop door opens
+    /// Collapsed: `[?] Rewards [✕]`, the three doors and one Claim under
+    /// them — no Shop item in the bar. The Shop door opens
     /// the Shop.
     func testCollapsedRewardsAndTheShopDoorOpensTheShop() {
         let app = launch(["-wallet-sheet-small"])
@@ -46,10 +45,12 @@ final class WalletSheetUITests: XCTestCase {
         for door in [shopDoor, settled, activity] {
             XCTAssertTrue(door.isHittable, "a door is missing at the small height")
         }
-        // The Shop is the large door, and the Claim is under the doors.
+        // The Shop is the large door, and the Claim is under the doors, the
+        // whole width.
         XCTAssertGreaterThan(shopDoor.frame.width, settled.frame.width * 1.5)
-        XCTAssertGreaterThan(claim.frame.minY, shopDoor.frame.maxY, "the Claim is not the toolbar's")
-        XCTAssertGreaterThan(claim.frame.midX, app.windows.firstMatch.frame.midX, "the Claim is not the toolbar's trailing item")
+        XCTAssertGreaterThan(claim.frame.minY, shopDoor.frame.maxY, "the Claim is not under the doors")
+        XCTAssertGreaterThan(claim.frame.width, shopDoor.frame.width * 1.5, "the Claim is not the whole width")
+        XCTAssertTrue(claim.isHittable, "the small height cuts the Claim")
         XCTAssertGreaterThan(shopDoor.frame.minY, app.windows.firstMatch.frame.height / 3,
                              "the sheet did not collapse")
 
@@ -65,8 +66,7 @@ final class WalletSheetUITests: XCTestCase {
     }
 
     /// Pulled up, the collapsed sheet grows to large without moving the top
-    /// in it; the active stakes are below it, and the Claim stays in the
-    /// toolbar.
+    /// in it; the active stakes are below it, and the Claim claims.
     func testPullingUpGrowsTheSheetAndTheClaimStays() {
         let app = launch(["-wallet-claim-ready", "-wallet-sheet-small"])
 
@@ -102,7 +102,7 @@ final class WalletSheetUITests: XCTestCase {
         let active = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Active stakes'"))
         XCTAssertGreaterThan(active.count, 0, "the large Wallet has no Active stakes")
 
-        // The Claim is the toolbar's: still there, and it claims.
+        // The Claim claims.
         XCTAssertTrue(claim.isHittable)
         let before = claim.label
         claim.tap()

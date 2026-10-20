@@ -2,50 +2,54 @@ import CoreStorage
 import DesignSystem
 import UIKit
 
-// The pieces of the Wallet sheet (#1494): its top block, the daily glance at
-// both of the sheet's heights; the compact line pinned under the bar once
-// that block has scrolled away; and the likes gauge the top block shows.
+// The pieces of the Rewards sheet (#1494): its head, the daily glance at
+// both of the sheet's heights, and the likes gauge — in the bar, under the
+// title.
 
-// MARK: - Gauge
+// MARK: - Title gauge
 
-/// How full the likes are against the server's cap (#901): a thin bar and its
-/// line — "282 of 2,000", or, full, that only staking opens the claim again.
-/// The device's mock has no cap: the line says what likes are for.
-final class WalletLikesGauge: UIView {
+/// The likes gauge as the bar's subtitle (#1494, the owner 2026-10-20),
+/// under "Rewards": a short bar and its words — "249 of 2,000".
+///
+/// ```
+///                 Rewards
+///          ▬▬▬░░░░░  249 of 2,000
+/// ```
+final class WalletTitleGauge: UIView {
     private let track = UIView()
     private let fill = UIView()
     private let caption = UILabel()
     private var fillWidth: NSLayoutConstraint?
 
+    static let trackWidth: CGFloat = 48
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         track.backgroundColor = .tertiarySystemFill
-        track.layer.cornerRadius = 3
+        track.layer.cornerRadius = 2
         track.clipsToBounds = true
         fill.backgroundColor = LikesSymbol.tint
-        fill.layer.cornerRadius = 3
-        caption.font = .scaledMonospacedDigitSystemFont(ofSize: 12, weight: .medium, relativeTo: .caption1, maximumPointSize: 16)
+        fill.layer.cornerRadius = 2
+        caption.font = .scaledMonospacedDigitSystemFont(ofSize: 12, weight: .medium, relativeTo: .caption1, maximumPointSize: 15)
         caption.adjustsFontForContentSizeCategory = true
         caption.textColor = .secondaryLabel
-        caption.textAlignment = .center
-        caption.numberOfLines = 2
-
-        [track, fill, caption].forEach { $0.translatesAutoresizingMaskIntoConstraints = false }
-        addSubview(track)
+        fill.translatesAutoresizingMaskIntoConstraints = false
         track.addSubview(fill)
-        addSubview(caption)
+        let row = UIStackView(arrangedSubviews: [track, caption])
+        row.spacing = Spacing.xs + 2
+        row.alignment = .center
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
         NSLayoutConstraint.activate([
-            track.topAnchor.constraint(equalTo: topAnchor),
-            track.leadingAnchor.constraint(equalTo: leadingAnchor),
-            track.trailingAnchor.constraint(equalTo: trailingAnchor),
-            track.heightAnchor.constraint(equalToConstant: 6),
+            track.widthAnchor.constraint(equalToConstant: Self.trackWidth),
+            track.heightAnchor.constraint(equalToConstant: 4),
             fill.topAnchor.constraint(equalTo: track.topAnchor),
             fill.bottomAnchor.constraint(equalTo: track.bottomAnchor),
             fill.leadingAnchor.constraint(equalTo: track.leadingAnchor),
-            caption.topAnchor.constraint(equalTo: track.bottomAnchor, constant: Spacing.xs),
-            caption.leadingAnchor.constraint(equalTo: leadingAnchor),
-            caption.trailingAnchor.constraint(equalTo: trailingAnchor),
-            caption.bottomAnchor.constraint(equalTo: bottomAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         isAccessibilityElement = true
         accessibilityTraits = .staticText
@@ -67,9 +71,12 @@ final class WalletLikesGauge: UIView {
         fillWidth = fill.widthAnchor.constraint(equalTo: track.widthAnchor, multiplier: Self.fraction(for: snapshot))
         fillWidth?.isActive = true
         accessibilityLabel = text
+        invalidateIntrinsicContentSize()
     }
 
-    /// "282 of 2,000"; full, the way out; no cap, what likes are for.
+    /// How full the likes are against the server's cap (#901): "282 of
+    /// 2,000"; full, that only staking opens the claim again; with no cap
+    /// (the device's mock), what likes are for.
     static func caption(for snapshot: WalletSnapshot) -> String {
         guard let cap = snapshot.likesCap else { return "To stake on posts" }
         if snapshot.balance >= cap { return "Full · stake to claim again" }
@@ -83,12 +90,11 @@ final class WalletLikesGauge: UIView {
     }
 }
 
-
 // MARK: - Claim button
 
-/// The Claim capsule's look, the big one's and the compact line's: the
-/// brand's ONE pink action (#1124) — prominent glass in the brand's tint, or
-/// the brand's gradient where the palette's rules ask for it.
+/// The Claim capsule's look: the brand's ONE pink action (#1124) —
+/// prominent glass in the brand's tint, or the brand's gradient where the
+/// palette's rules ask for it.
 enum WalletClaimButtonStyle {
     static func apply(to button: UIButton) {
         button.configuration?.cornerStyle = .capsule
@@ -115,8 +121,6 @@ enum WalletClaimButtonStyle {
 ///                  282
 ///                 Likes
 ///
-///   ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
-///              282 of 2,000
 ///   ┌───────────────────────────────────────────┐
 ///   │ 🔥 3-day streak · Kept for today  25 / 200 │
 ///   │ M  T  W  T  F  S  S       ( ×1.3 tomorrow )│
@@ -125,18 +129,20 @@ enum WalletClaimButtonStyle {
 ///   │      ◆ 127        │ │   ✓    │ │   ≡    │
 ///   │       Shop        │ │Settled │ │Activity│
 ///   └───────────────────┘ └────────┘ └────────┘
+///   ┌───────────────────────────────────────────┐
+///   │              Claim 25 likes               │
+///   └───────────────────────────────────────────┘
 /// ```
-/// The Claim is the sheet's toolbar (`WalletSheetViewController`); the
-/// small height ends under the doors.
+/// The small height ends under the Claim.
 final class WalletHeaderView: UIView {
     var onShop: (() -> Void)?
     var onSettled: (() -> Void)?
     var onActivity: (() -> Void)?
+    var onClaim: (() -> Void)?
 
     private let coin = UIImageView()
     private let balance = UILabel()
     private let unit = UILabel()
-    private let gauge = WalletLikesGauge()
     private let streakIcon = UIImageView()
     private let streakLine = UILabel()
     private let earnedLine = UILabel()
@@ -147,9 +153,13 @@ final class WalletHeaderView: UIView {
     let shopTile = WalletActionTile(identifier: "wallet.gems.shop")
     let settledTile = WalletActionTile(identifier: "wallet.settled")
     let activityTile = WalletActionTile(identifier: "wallet.activity")
+    /// The Claim (#1494, the owner 2026-10-20): the whole width, under the
+    /// doors — not a toolbar item, whose custom view reached the bar late.
+    let claimButton = UIButton(configuration: .prominentGlass())
 
     /// The air under the balance, before the day's progress.
     static let balanceAir: CGFloat = 40
+    static let claimHeight: CGFloat = 52
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -207,17 +217,24 @@ final class WalletHeaderView: UIView {
         Surface.dressCard(streakCard)
         days.pin(to: streakCard)
 
-        let column = UIStackView(arrangedSubviews: [coin, balance, unit, gauge, streakCard, tiles])
+        WalletClaimButtonStyle.apply(to: claimButton)
+        claimButton.accessibilityIdentifier = "wallet.claim"
+        claimButton.addAction(UIAction { [weak self] _ in self?.onClaim?() }, for: .primaryActionTriggered)
+        PressFeedback.attach(to: claimButton, sound: nil)
+
+        // The gauge is the bar's subtitle (`WalletTitleGauge`).
+        let column = UIStackView(arrangedSubviews: [coin, balance, unit, streakCard, tiles, claimButton])
         column.axis = .vertical
         column.alignment = .fill
         column.spacing = Spacing.xs
         column.setCustomSpacing(Self.balanceAir, after: unit)
-        column.setCustomSpacing(Spacing.lg, after: gauge)
         column.setCustomSpacing(Spacing.sm, after: streakCard)
+        column.setCustomSpacing(Spacing.md, after: tiles)
         column.translatesAutoresizingMaskIntoConstraints = false
         addSubview(column)
         NSLayoutConstraint.activate([
             coin.heightAnchor.constraint(equalToConstant: 40),
+            claimButton.heightAnchor.constraint(equalToConstant: Self.claimHeight),
             // The Shop is the large door: twice the others.
             shopTile.widthAnchor.constraint(equalTo: settledTile.widthAnchor, multiplier: 2),
             activityTile.widthAnchor.constraint(equalTo: settledTile.widthAnchor),
@@ -235,7 +252,6 @@ final class WalletHeaderView: UIView {
     func configure(with snapshot: WalletSnapshot, sellsShop: Bool) {
         rollingBalance.show(snapshot.balance, animated: window != nil)
         balance.accessibilityLabel = "\(snapshot.balance.formatted()) likes"
-        gauge.configure(with: snapshot)
         applyStreak(snapshot)
         week.configure(with: snapshot)
         shopTile.configure(gems: snapshot.gems)
@@ -258,6 +274,19 @@ final class WalletHeaderView: UIView {
         guard snapshot.streakDays > 0 else { return "No streak yet · claim daily for up to ×2" }
         let kept = snapshot.claimedToday > 0 ? "Kept for today" : "Claim to keep it"
         return "\(snapshot.streakDays)-day streak · \(kept)"
+    }
+
+    /// The Claim's words and state: once a second while shown (the
+    /// countdown).
+    func applyClaim(title: String, canClaim: Bool) {
+        claimButton.isEnabled = canClaim
+        var text = AttributedString(title)
+        // A countdown's digits must not jostle.
+        text.font = .scaledMonospacedDigitSystemFont(
+            ofSize: 17, weight: .semibold, relativeTo: .headline, maximumPointSize: 24
+        )
+        guard claimButton.configuration?.attributedTitle != text else { return }
+        claimButton.configuration?.attributedTitle = text
     }
 
     /// The claim's payoff: the new number pops.

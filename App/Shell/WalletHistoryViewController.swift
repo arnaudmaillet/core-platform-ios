@@ -68,16 +68,16 @@ final class WalletHistoryViewController: UIViewController {
 
     private enum Phase { case loading, loaded, failed }
 
-    /// In the Rewards sheet (#1494): the filter at the bar's trailing end and
-    /// no title, the Stakes screen's bar; in Settings, the titled page with
-    /// the filter as its first row.
+    /// In the Rewards sheet (#1494): "Activity", large, and the filter at the
+    /// bar's trailing end — the Stakes screen's bar; in Settings, "Wallet and
+    /// Purchases" with the filter as its first row.
     private let filterInBar: Bool
 
     init(wallet: WalletStore, filterInBar: Bool = false) {
         self.wallet = wallet
         self.filterInBar = filterInBar
         super.init(nibName: nil, bundle: nil)
-        if !filterInBar { title = "Wallet and Purchases" }
+        title = filterInBar ? "Activity" : "Wallet and Purchases"
         hidesBottomBarWhenPushed = true
     }
 
@@ -99,9 +99,13 @@ final class WalletHistoryViewController: UIViewController {
         view.addSubview(collectionView)
         configureDataSource()
         if filterInBar {
+            navigationItem.largeTitleDisplayMode = .always
             let control = makeFilterControl()
             control.accessibilityLabel = "Activity"
-            navigationItem.rightBarButtonItem = UIBarButtonItem(customView: control)
+            let item = UIBarButtonItem(customView: control)
+            // The control is its own capsule: no bubble in a bubble.
+            item.hidesSharedBackground = true
+            navigationItem.rightBarButtonItem = item
         }
         reload()
     }

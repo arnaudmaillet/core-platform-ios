@@ -78,8 +78,8 @@ func walletAgoText(since date: Date, now: Date) -> String {
 /// violet only beside a gem amount: the server's "Rewarded" (shadow mode, no
 /// gems credited) is in the secondary ink.
 ///
-/// A card, and a pressable one: it opens the post in the feed, flying from
-/// its thumbnail (media) or revealing from the card (text) — see
+/// A row of a list's card, selectable: it opens the post in the feed, flying
+/// from its thumbnail (media) or revealing from the row (text) — see
 /// `WalletSheetViewController.openFeed`.
 ///
 /// The stake is local and always known; the POST is a lookup (#834). While
@@ -110,19 +110,14 @@ class WalletStakeCell: UICollectionViewListCell {
     private var shownURL: URL?
     /// The post state drawn now; nil on a fresh or recycled row.
     private var shownPhase: WalletStakePostLoads.State?
-    private var pressRecognizers: [UIGestureRecognizer] = []
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // A row of its section's one card (#1494): the card is the
-        // section's — the Rewards sheet's decoration, the Stakes screen's
-        // inset-grouped list — so the row draws no ground of its own.
-        backgroundConfiguration = .clear()
-        // The app's one press: the card gives a little under the finger.
-        PressFeedback.attach(toView: contentView, sound: nil)
-        // Its watcher, switched off while a tap would do nothing (a row on
-        // its bones): a card that gives and then opens nothing lies.
-        pressRecognizers = contentView.gestureRecognizers ?? []
+        // A row of an inset-grouped list (#1494): the list's card ground,
+        // and UIKit's own highlight under the finger — no scale. A row that
+        // would do nothing (on its bones) is not highlighted
+        // (`shouldHighlightItemAt`).
+        backgroundConfiguration = .listGroupedCell()
 
         thumbnail.contentMode = .scaleAspectFill
         thumbnail.clipsToBounds = true
@@ -251,17 +246,14 @@ class WalletStakeCell: UICollectionViewListCell {
 
     /// `phase` is where the post's lookup stands; `animated` cross-fades the
     /// bones out when it has just landed — false from inside a data source
-    /// apply, which swallows the animation anyway. `pressable` is whether a
-    /// tap does anything (opens the post, or retries a failed one): the card
-    /// gives under the finger only then.
+    /// apply, which swallows the animation anyway.
     /// `verdictPending`: the server's verdict on a settled stake is still to
     /// come (`WalletStore.awaitsServerStakes`), so its outcome is a bone.
     func configure(
         stake: WalletStake, post: GalleryPost?, phase: WalletStakePostLoads.State,
-        pressable: Bool, now: Date, imagePipeline: ImagePipeline?, animated: Bool,
+        now: Date, imagePipeline: ImagePipeline?, animated: Bool,
         verdictPending: Bool = false
     ) {
-        for recognizer in pressRecognizers { recognizer.isEnabled = pressable }
         // The post: its opening words (a photograph with no caption says what
         // it is instead), then who wrote it.
         if let post {
@@ -514,7 +506,7 @@ final class WalletGroupedStakeCell: WalletStakeCell {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 }
 
-final class WalletEmptyStakesCell: UICollectionViewCell {
+final class WalletEmptyStakesCell: UICollectionViewListCell {
     /// "Find a post to stake" (#1494): where staking is — a like on a post,
     /// in the feeds. Nil hides the button.
     var onFindPosts: (() -> Void)? {
@@ -522,11 +514,20 @@ final class WalletEmptyStakesCell: UICollectionViewCell {
     }
 
     private let findButton = UIButton(configuration: .tinted())
+    private lazy var fill = contentView.heightAnchor.constraint(greaterThanOrEqualToConstant: 0)
+
+    /// The height the message fills at the least: what the Rewards sheet
+    /// has left under its head (#1494).
+    var minimumHeight: CGFloat {
+        get { fill.constant }
+        set { fill.constant = newValue }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // The Active stakes card's whole content (#1494): no card of its own,
-        // centred in what is left of the sheet's height (the list sizes it).
+        // The Active stakes card's whole content (#1494): the list's card,
+        // the message centred in what is left of the sheet's height.
+        backgroundConfiguration = .listGroupedCell()
         let icon = UIImageView(image: LikesSymbol.glyphImage(UIImage.SymbolConfiguration(pointSize: 32, weight: .regular)))
         icon.contentMode = .center
         let title = UILabel()
@@ -574,6 +575,7 @@ final class WalletEmptyStakesCell: UICollectionViewCell {
             column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.xl),
             column.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -Spacing.xl),
             column.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            fill,
         ])
     }
 
@@ -598,7 +600,8 @@ final class WalletStakesFailedCell: UICollectionViewListCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // A row of the Active stakes card (#1494): no card of its own.
+        // A row of its list's card (#1494).
+        backgroundConfiguration = .listGroupedCell()
         titleLabel.text = "Couldn't load some posts"
         titleLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
         titleLabel.adjustsFontForContentSizeCategory = true

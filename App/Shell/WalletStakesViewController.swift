@@ -74,6 +74,7 @@ final class WalletStakesViewController: UIViewController {
         self.imagePipeline = imagePipeline
         self.openFeedHero = openFeedHero
         super.init(nibName: nil, bundle: nil)
+        title = "Stakes"
     }
 
     @available(*, unavailable)
@@ -85,16 +86,20 @@ final class WalletStakesViewController: UIViewController {
         super.viewDidLoad()
         // Clear: the sheet's own ground is the surface (the Wallet sheet's note).
         view.backgroundColor = .clear
-        navigationItem.largeTitleDisplayMode = .never
-        // Active | Settled at the bar's trailing end, no title (#1494): the
-        // Activity screen's bar, so the Rewards sheet's two lists match.
+        // Large, at the page's leading edge (#1494).
+        navigationItem.largeTitleDisplayMode = .always
+        // Active | Settled at the bar's trailing end (#1494), the Activity
+        // screen's bar, so the Rewards sheet's two lists match.
         segments.selectedSegmentIndex = segment.rawValue
         segments.addAction(UIAction { [weak self] _ in
             guard let self, let next = Segment(rawValue: segments.selectedSegmentIndex) else { return }
             select(next)
         }, for: .valueChanged)
         segments.accessibilityLabel = "Stakes"
-        navigationItem.rightBarButtonItem = UIBarButtonItem(customView: segments)
+        let filter = UIBarButtonItem(customView: segments)
+        // The control is its own capsule: no bubble in a bubble.
+        filter.hidesSharedBackground = true
+        navigationItem.rightBarButtonItem = filter
         buildCollection()
         loader.constrain(in: view) { parent in
             loader.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
@@ -170,14 +175,12 @@ final class WalletStakesViewController: UIViewController {
         let stakeRegistration = UICollectionView.CellRegistration<WalletGroupedStakeCell, Item> { [weak self] cell, indexPath, item in
             guard let self, case .stake(let id) = item else { return }
             cell.showsSeparator = indexPath.item > 0
-            cell.backgroundConfiguration = .listGroupedCell()
             configure(cell, stakeID: id, animated: false)
         }
         let failedRegistration = UICollectionView.CellRegistration<WalletStakesFailedCell, Item> { [weak self] cell, _, _ in
             guard let self else { return }
             cell.configure(retrying: postLoads.isRetrying, failedAfterRetry: postLoads.failedAfterRetry)
             cell.onRetry = { [weak self] in self?.retryFailedPosts() }
-            cell.backgroundConfiguration = .listGroupedCell()
         }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
@@ -322,7 +325,7 @@ final class WalletStakesViewController: UIViewController {
         guard let stake = stakesByID[id] else { return }
         cell.configure(
             stake: stake, post: entries[PostID(id)], phase: postPhase(for: id),
-            pressable: isPressable(stakeID: id), now: Date(), imagePipeline: imagePipeline, animated: animated,
+            now: Date(), imagePipeline: imagePipeline, animated: animated,
             verdictPending: wallet.awaitsServerStakes
         )
     }
@@ -421,8 +424,13 @@ extension WalletStakesViewController: UICollectionViewDelegate {
         return isPressable(stakeID: id)
     }
 
+    /// UIKit's own highlight (#1494), only where a tap does something.
+    func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
+        self.collectionView(collectionView, shouldSelectItemAt: indexPath)
+    }
+
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        collectionView.deselectItem(at: indexPath, animated: false)
+        collectionView.deselectItem(at: indexPath, animated: true)
         guard case .stake(let id) = dataSource.itemIdentifier(for: indexPath) else { return }
         if postPhase(for: id) == .failed {
             retryFailedPosts()
