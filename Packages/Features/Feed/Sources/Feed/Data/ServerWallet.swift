@@ -125,6 +125,15 @@ public actor ServerWallet: WalletServer {
         case .countryUnlock: .countryUnlock
         case .stake: .stake
         case .welcomeGift: .welcomeGift
+        case .appIcon: .appIcon
+        case .theme: .theme
+        case .countryVisa: .countryVisa
+        case .profileSlot: .profileSlot
+        case .handleChange: .handleChange
+        case .avatarFrame: .avatarFrame
+        case .animatedBanner: .animatedBanner
+        case .cardStyle: .cardStyle
+        case .animatedAvatar: .animatedAvatar
         case .unspecified, .UNRECOGNIZED: .other
         }
         return WalletTransaction(

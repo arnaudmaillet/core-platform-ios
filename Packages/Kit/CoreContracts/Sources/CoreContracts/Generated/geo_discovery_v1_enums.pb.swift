@@ -248,6 +248,63 @@ public nonisolated enum GeoDiscovery_V1_UnlockCountryOutcome: SwiftProtobuf.Enum
 
 }
 
+/// What became of a 24 h visa purchase (#910).
+public nonisolated enum GeoDiscovery_V1_CountryVisaOutcome: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// The visa runs until `expires_at` (24 h more than its previous end, or
+  /// than now).
+  case granted // = 1
+
+  /// The home country, or unlocked for good: no visa, nothing charged.
+  case alreadyUnlocked // = 2
+
+  /// `price_gems` is what it costs, `gems` what the wallet holds.
+  case insufficientGems // = 3
+
+  /// The rank moved since the app showed the price: `price_gems` is the new
+  /// one. Nothing charged; ask again with it.
+  case priceChanged // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .granted
+    case 2: self = .alreadyUnlocked
+    case 3: self = .insufficientGems
+    case 4: self = .priceChanged
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .granted: return 1
+    case .alreadyUnlocked: return 2
+    case .insufficientGems: return 3
+    case .priceChanged: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [GeoDiscovery_V1_CountryVisaOutcome] = [
+    .unspecified,
+    .granted,
+    .alreadyUnlocked,
+    .insufficientGems,
+    .priceChanged,
+  ]
+
+}
+
 /// The order of a place page (#833).
 public nonisolated enum GeoDiscovery_V1_PlaceSort: SwiftProtobuf.Enum, Swift.CaseIterable {
   public typealias RawValue = Int
@@ -361,6 +418,10 @@ nonisolated extension GeoDiscovery_V1_CountryAccessOutcome: SwiftProtobuf._Proto
 
 nonisolated extension GeoDiscovery_V1_UnlockCountryOutcome: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0UNLOCK_COUNTRY_OUTCOME_UNSPECIFIED\0\u{1}UNLOCK_COUNTRY_OUTCOME_UNLOCKED\0\u{1}UNLOCK_COUNTRY_OUTCOME_ALREADY_UNLOCKED\0\u{1}UNLOCK_COUNTRY_OUTCOME_INSUFFICIENT_GEMS\0\u{1}UNLOCK_COUNTRY_OUTCOME_PRICE_CHANGED\0")
+}
+
+nonisolated extension GeoDiscovery_V1_CountryVisaOutcome: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0COUNTRY_VISA_OUTCOME_UNSPECIFIED\0\u{1}COUNTRY_VISA_OUTCOME_GRANTED\0\u{1}COUNTRY_VISA_OUTCOME_ALREADY_UNLOCKED\0\u{1}COUNTRY_VISA_OUTCOME_INSUFFICIENT_GEMS\0\u{1}COUNTRY_VISA_OUTCOME_PRICE_CHANGED\0")
 }
 
 nonisolated extension GeoDiscovery_V1_PlaceSort: SwiftProtobuf._ProtoNameProviding {

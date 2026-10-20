@@ -262,6 +262,18 @@ public nonisolated struct Post_V1_PostView: @unchecked Sendable {
     set {_uniqueStorage()._likeCountsHidden = newValue}
   }
 
+  /// #914: the card style its author applied, a wallet catalogue item id
+  /// (`card.<name>`); empty: the default card. Withheld from every reader but
+  /// the author while the post is in its experiment window (24 h after
+  /// publication, until #889 defines it), except for a GetPost with
+  /// `detail` set, so that the control and test cohorts see the default
+  /// card. The app draws it from bundled art keyed by id, at the default
+  /// card's visual weight.
+  public var cardStyleID: String {
+    get {_storage._cardStyleID}
+    set {_uniqueStorage()._cardStyleID = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -328,6 +340,10 @@ public nonisolated struct Post_V1_PostSummary: Sendable {
   public var isRepost: Bool = false
 
   public var hasPlace_p: Bool = false
+
+  /// #914: the post's card style (the author's profile shows it at all times,
+  /// the owner's agreed exception to the experiment window).
+  public var cardStyleID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -538,6 +554,10 @@ public nonisolated struct Post_V1_GetPostRequest: Sendable {
 
   public var postID: String = String()
 
+  /// #914: the read is the post detail screen, where a card style shows even
+  /// during the post's experiment window. Feed cards leave it unset.
+  public var detail: Bool = false
+
   /// Mesh only (the GDPR data export, #653): read the post as its author —
   /// the location as the author sees it, whatever their sharing (#657).
   /// Honoured only from a mesh caller and only when it names the post's
@@ -576,6 +596,25 @@ public nonisolated struct Post_V1_ListPostsByProfileResponse: Sendable {
   public var posts: [Post_V1_PostSummary] = []
 
   public var nextToken: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Post_V1_SetPostCardStyleRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var postID: String = String()
+
+  /// The post's author (the edge caller's own profile).
+  public var profileID: String = String()
+
+  /// A `card.<name>` item the author's account owns (wallet
+  /// ListOwnedItems); empty: the default card.
+  public var cardStyleID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -787,7 +826,7 @@ nonisolated extension Post_V1_MediaAttachmentView: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PostView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0\u{1}status\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{3}published_at_ms\0\u{3}deleted_at_ms\0\u{3}audio_ref\0\u{1}location\0\u{1}moderation\0\u{3}allow_remix\0\u{3}allow_sound_reuse\0\u{3}outside_window\0\u{3}visible_until_ms\0\u{3}downloads_disabled\0\u{3}like_counts_hidden\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{1}kind\0\u{1}status\0\u{1}caption\0\u{1}attachments\0\u{3}parent_id\0\u{3}root_id\0\u{3}created_at_ms\0\u{3}updated_at_ms\0\u{3}published_at_ms\0\u{3}deleted_at_ms\0\u{3}audio_ref\0\u{1}location\0\u{1}moderation\0\u{3}allow_remix\0\u{3}allow_sound_reuse\0\u{3}outside_window\0\u{3}visible_until_ms\0\u{3}downloads_disabled\0\u{3}like_counts_hidden\0\u{3}card_style_id\0")
 
   fileprivate class _StorageClass {
     var _postID: String = String()
@@ -811,6 +850,7 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _visibleUntilMs: Int64 = 0
     var _downloadsDisabled: Bool = false
     var _likeCountsHidden: Bool = false
+    var _cardStyleID: String = String()
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -842,6 +882,7 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
       _visibleUntilMs = source._visibleUntilMs
       _downloadsDisabled = source._downloadsDisabled
       _likeCountsHidden = source._likeCountsHidden
+      _cardStyleID = source._cardStyleID
     }
   }
 
@@ -881,6 +922,7 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 19: try { try decoder.decodeSingularInt64Field(value: &_storage._visibleUntilMs) }()
         case 20: try { try decoder.decodeSingularBoolField(value: &_storage._downloadsDisabled) }()
         case 21: try { try decoder.decodeSingularBoolField(value: &_storage._likeCountsHidden) }()
+        case 22: try { try decoder.decodeSingularStringField(value: &_storage._cardStyleID) }()
         default: break
         }
       }
@@ -956,6 +998,9 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
       if _storage._likeCountsHidden != false {
         try visitor.visitSingularBoolField(value: _storage._likeCountsHidden, fieldNumber: 21)
       }
+      if !_storage._cardStyleID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._cardStyleID, fieldNumber: 22)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -986,6 +1031,7 @@ nonisolated extension Post_V1_PostView: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._visibleUntilMs != rhs_storage._visibleUntilMs {return false}
         if _storage._downloadsDisabled != rhs_storage._downloadsDisabled {return false}
         if _storage._likeCountsHidden != rhs_storage._likeCountsHidden {return false}
+        if _storage._cardStyleID != rhs_storage._cardStyleID {return false}
         return true
       }
       if !storagesAreEqual {return false}
@@ -1097,7 +1143,7 @@ nonisolated extension Post_V1_BatchGetLikeVisibilityResponse: SwiftProtobuf.Mess
 
 nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".PostSummary"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}kind\0\u{1}status\0\u{3}created_at_ms\0\u{1}moderation\0\u{3}is_repost\0\u{3}has_place\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{1}kind\0\u{1}status\0\u{3}created_at_ms\0\u{1}moderation\0\u{3}is_repost\0\u{3}has_place\0\u{3}card_style_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1112,6 +1158,7 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
       case 5: try { try decoder.decodeSingularEnumField(value: &self.moderation) }()
       case 6: try { try decoder.decodeSingularBoolField(value: &self.isRepost) }()
       case 7: try { try decoder.decodeSingularBoolField(value: &self.hasPlace_p) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.cardStyleID) }()
       default: break
       }
     }
@@ -1139,6 +1186,9 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
     if self.hasPlace_p != false {
       try visitor.visitSingularBoolField(value: self.hasPlace_p, fieldNumber: 7)
     }
+    if !self.cardStyleID.isEmpty {
+      try visitor.visitSingularStringField(value: self.cardStyleID, fieldNumber: 8)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1150,6 +1200,7 @@ nonisolated extension Post_V1_PostSummary: SwiftProtobuf.Message, SwiftProtobuf.
     if lhs.moderation != rhs.moderation {return false}
     if lhs.isRepost != rhs.isRepost {return false}
     if lhs.hasPlace_p != rhs.hasPlace_p {return false}
+    if lhs.cardStyleID != rhs.cardStyleID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1536,7 +1587,7 @@ nonisolated extension Post_V1_ListRecentlyDeletedResponse: SwiftProtobuf.Message
 
 nonisolated extension Post_V1_GetPostRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GetPostRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}as_author_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}as_author_id\0\u{1}detail\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1546,6 +1597,7 @@ nonisolated extension Post_V1_GetPostRequest: SwiftProtobuf.Message, SwiftProtob
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.asAuthorID) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.detail) }()
       default: break
       }
     }
@@ -1558,11 +1610,15 @@ nonisolated extension Post_V1_GetPostRequest: SwiftProtobuf.Message, SwiftProtob
     if !self.asAuthorID.isEmpty {
       try visitor.visitSingularStringField(value: self.asAuthorID, fieldNumber: 2)
     }
+    if self.detail != false {
+      try visitor.visitSingularBoolField(value: self.detail, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Post_V1_GetPostRequest, rhs: Post_V1_GetPostRequest) -> Bool {
     if lhs.postID != rhs.postID {return false}
+    if lhs.detail != rhs.detail {return false}
     if lhs.asAuthorID != rhs.asAuthorID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
@@ -1644,6 +1700,46 @@ nonisolated extension Post_V1_ListPostsByProfileResponse: SwiftProtobuf.Message,
   public static func ==(lhs: Post_V1_ListPostsByProfileResponse, rhs: Post_V1_ListPostsByProfileResponse) -> Bool {
     if lhs.posts != rhs.posts {return false}
     if lhs.nextToken != rhs.nextToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Post_V1_SetPostCardStyleRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SetPostCardStyleRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}post_id\0\u{3}profile_id\0\u{3}card_style_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.postID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.cardStyleID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.postID.isEmpty {
+      try visitor.visitSingularStringField(value: self.postID, fieldNumber: 1)
+    }
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 2)
+    }
+    if !self.cardStyleID.isEmpty {
+      try visitor.visitSingularStringField(value: self.cardStyleID, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Post_V1_SetPostCardStyleRequest, rhs: Post_V1_SetPostCardStyleRequest) -> Bool {
+    if lhs.postID != rhs.postID {return false}
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.cardStyleID != rhs.cardStyleID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

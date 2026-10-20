@@ -85,9 +85,37 @@ public nonisolated enum Wallet_V1_TransactionKind: SwiftProtobuf.Enum, Swift.Cas
   /// `post:<id>` or `comment:<id>`.
   case stake // = 5
 
-  /// The likes a guest collected (50, then 25 a day for 3 days), credited
-  /// once when its device became a member (points; #827).
+  /// The welcome gift: a flat 50 likes, credited once when a guest's device
+  /// became a member (points; #827, #943).
   case welcomeGift // = 6
+
+  /// An alternate app icon bought (gems; #892); `ref_id` is the item id.
+  case appIcon // = 7
+
+  /// An accent theme bought (gems; #946); `ref_id` is the item id.
+  case theme // = 8
+
+  /// A 24 h country visa on the map (gems; #910); `ref_id` is the country
+  /// code.
+  case countryVisa // = 9
+
+  /// A profile slot bought (gems; #916); `ref_id` is the slot number.
+  case profileSlot // = 10
+
+  /// A paid handle change (gems; #911); `ref_id` is the profile id.
+  case handleChange // = 11
+
+  /// An avatar frame bought (gems; #913); `ref_id` is the item id.
+  case avatarFrame // = 12
+
+  /// The animated profile banner bought (gems; #915); `ref_id` is the item id.
+  case animatedBanner // = 13
+
+  /// A post card style bought (gems; #914); `ref_id` is the item id.
+  case cardStyle // = 14
+
+  /// The animated avatar bought (gems; #945); `ref_id` is the item id.
+  case animatedAvatar // = 15
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -103,6 +131,15 @@ public nonisolated enum Wallet_V1_TransactionKind: SwiftProtobuf.Enum, Swift.Cas
     case 4: self = .countryUnlock
     case 5: self = .stake
     case 6: self = .welcomeGift
+    case 7: self = .appIcon
+    case 8: self = .theme
+    case 9: self = .countryVisa
+    case 10: self = .profileSlot
+    case 11: self = .handleChange
+    case 12: self = .avatarFrame
+    case 13: self = .animatedBanner
+    case 14: self = .cardStyle
+    case 15: self = .animatedAvatar
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -116,6 +153,15 @@ public nonisolated enum Wallet_V1_TransactionKind: SwiftProtobuf.Enum, Swift.Cas
     case .countryUnlock: return 4
     case .stake: return 5
     case .welcomeGift: return 6
+    case .appIcon: return 7
+    case .theme: return 8
+    case .countryVisa: return 9
+    case .profileSlot: return 10
+    case .handleChange: return 11
+    case .avatarFrame: return 12
+    case .animatedBanner: return 13
+    case .cardStyle: return 14
+    case .animatedAvatar: return 15
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -129,6 +175,153 @@ public nonisolated enum Wallet_V1_TransactionKind: SwiftProtobuf.Enum, Swift.Cas
     .countryUnlock,
     .stake,
     .welcomeGift,
+    .appIcon,
+    .theme,
+    .countryVisa,
+    .profileSlot,
+    .handleChange,
+    .avatarFrame,
+    .animatedBanner,
+    .cardStyle,
+    .animatedAvatar,
+  ]
+
+}
+
+/// What kind of thing a catalogue item is (#892). An item id is
+/// `<family>.<name>`: `icon.<name>`, `theme.<name>`, `frame.<name>`,
+/// `banner.<name>`, `card.<name>`, `badge.<name>`, `avatar.<name>`.
+public nonisolated enum Wallet_V1_ItemFamily: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+
+  /// An alternate app icon; applied on the device, nothing stored server-side.
+  case appIcon // = 1
+
+  /// An app accent theme; applied on the device, nothing stored server-side.
+  case theme // = 2
+
+  /// An avatar frame (#913): equipped per profile (profile.v1
+  /// EquipAvatarFrame), seen by everyone on the profile's reads.
+  case avatarFrame // = 3
+
+  /// The animated profile banner (#915): lets the account's profiles set a
+  /// video of their own as their banner (profile.v1 UpdateBanner).
+  case animatedBanner // = 4
+
+  /// A post card style (#914): an author applies it to their own posts
+  /// (post.v1 SetPostCardStyle).
+  case cardStyle // = 5
+
+  /// A badge (#912): earned, never sold (AwardBadge, from the service whose
+  /// rule it is), owned by the account, shown in profiles' showcases.
+  case badge // = 6
+
+  /// The animated avatar (#945): lets the account's profiles set a clip as
+  /// their avatar (profile.v1 UpdateAvatar), baked into sprite sheets.
+  case animatedAvatar // = 7
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .appIcon
+    case 2: self = .theme
+    case 3: self = .avatarFrame
+    case 4: self = .animatedBanner
+    case 5: self = .cardStyle
+    case 6: self = .badge
+    case 7: self = .animatedAvatar
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .appIcon: return 1
+    case .theme: return 2
+    case .avatarFrame: return 3
+    case .animatedBanner: return 4
+    case .cardStyle: return 5
+    case .badge: return 6
+    case .animatedAvatar: return 7
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Wallet_V1_ItemFamily] = [
+    .unspecified,
+    .appIcon,
+    .theme,
+    .avatarFrame,
+    .animatedBanner,
+    .cardStyle,
+    .badge,
+    .animatedAvatar,
+  ]
+
+}
+
+/// The outcome of a catalogue purchase: ordinary states the app renders.
+public nonisolated enum Wallet_V1_PurchaseOutcome: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case purchased // = 1
+
+  /// The account owns it already (or it is free): nothing charged.
+  case alreadyOwned // = 2
+  case insufficientGems // = 3
+
+  /// `expected_price` is not the item's price: nothing charged; ListCatalog
+  /// has the current one.
+  case priceChanged // = 4
+
+  /// No item with that id is on sale: nothing charged.
+  case unknownItem // = 5
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .purchased
+    case 2: self = .alreadyOwned
+    case 3: self = .insufficientGems
+    case 4: self = .priceChanged
+    case 5: self = .unknownItem
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .purchased: return 1
+    case .alreadyOwned: return 2
+    case .insufficientGems: return 3
+    case .priceChanged: return 4
+    case .unknownItem: return 5
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Wallet_V1_PurchaseOutcome] = [
+    .unspecified,
+    .purchased,
+    .alreadyOwned,
+    .insufficientGems,
+    .priceChanged,
+    .unknownItem,
   ]
 
 }
@@ -513,7 +706,15 @@ nonisolated extension Wallet_V1_Currency: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Wallet_V1_TransactionKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TRANSACTION_KIND_UNSPECIFIED\0\u{1}TRANSACTION_KIND_CLAIM\0\u{1}TRANSACTION_KIND_STARTER_GIFT\0\u{1}TRANSACTION_KIND_STAKE_PACK\0\u{1}TRANSACTION_KIND_COUNTRY_UNLOCK\0\u{1}TRANSACTION_KIND_STAKE\0\u{1}TRANSACTION_KIND_WELCOME_GIFT\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0TRANSACTION_KIND_UNSPECIFIED\0\u{1}TRANSACTION_KIND_CLAIM\0\u{1}TRANSACTION_KIND_STARTER_GIFT\0\u{1}TRANSACTION_KIND_STAKE_PACK\0\u{1}TRANSACTION_KIND_COUNTRY_UNLOCK\0\u{1}TRANSACTION_KIND_STAKE\0\u{1}TRANSACTION_KIND_WELCOME_GIFT\0\u{1}TRANSACTION_KIND_APP_ICON\0\u{1}TRANSACTION_KIND_THEME\0\u{1}TRANSACTION_KIND_COUNTRY_VISA\0\u{1}TRANSACTION_KIND_PROFILE_SLOT\0\u{1}TRANSACTION_KIND_HANDLE_CHANGE\0\u{1}TRANSACTION_KIND_AVATAR_FRAME\0\u{1}TRANSACTION_KIND_ANIMATED_BANNER\0\u{1}TRANSACTION_KIND_CARD_STYLE\0\u{1}TRANSACTION_KIND_ANIMATED_AVATAR\0")
+}
+
+nonisolated extension Wallet_V1_ItemFamily: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ITEM_FAMILY_UNSPECIFIED\0\u{1}ITEM_FAMILY_APP_ICON\0\u{1}ITEM_FAMILY_THEME\0\u{1}ITEM_FAMILY_AVATAR_FRAME\0\u{1}ITEM_FAMILY_ANIMATED_BANNER\0\u{1}ITEM_FAMILY_CARD_STYLE\0\u{1}ITEM_FAMILY_BADGE\0\u{1}ITEM_FAMILY_ANIMATED_AVATAR\0")
+}
+
+nonisolated extension Wallet_V1_PurchaseOutcome: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PURCHASE_OUTCOME_UNSPECIFIED\0\u{1}PURCHASE_OUTCOME_PURCHASED\0\u{1}PURCHASE_OUTCOME_ALREADY_OWNED\0\u{1}PURCHASE_OUTCOME_INSUFFICIENT_GEMS\0\u{1}PURCHASE_OUTCOME_PRICE_CHANGED\0\u{1}PURCHASE_OUTCOME_UNKNOWN_ITEM\0")
 }
 
 nonisolated extension Wallet_V1_ClaimOutcome: SwiftProtobuf._ProtoNameProviding {

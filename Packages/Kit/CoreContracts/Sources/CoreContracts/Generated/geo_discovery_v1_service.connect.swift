@@ -45,16 +45,19 @@ public protocol GeoDiscovery_V1_GeoDiscoveryServiceClientInterface: Sendable {
     /// The country ladder (#665): every country the map draws, ranked by the
     /// likes on posts published there over the last 30 days (ties by country
     /// code), with what unlocking it costs in gems by rank (1–10: 50, 11–30:
-    /// 30, beyond: 15). Returned whole (≈ 240 rows); the same for every
-    /// reader, refreshed at most every minute. A member's home country costs 0.
+    /// 30, beyond: 15) and what a 24 h visa costs (#910: 20 % of it, 10 / 6 / 3).
+    /// Returned whole (≈ 240 rows); the same for every reader, refreshed at
+    /// most every minute. A member's home country costs 0.
     @available(iOS 13, *)
     func `getCountryStandings`(request: GeoDiscovery_V1_GetCountryStandingsRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_GetCountryStandingsResponse>
 
     /// A member's countries (#665): the home country (free: the account's
     /// country of residence, else the network's country at the first visit,
-    /// kept for good) and those unlocked with gems. When the member map
-    /// filter is on (`filtering`), QueryTile and GetGeoTimeline show only
-    /// posts in these countries (and at sea). Edge: the caller's account.
+    /// kept for good), those unlocked with gems, and its running 24 h visas
+    /// (#910). When the member map filter is on (`filtering`), QueryTile,
+    /// GetGeoTimeline and ListPlacePosts show only posts in these countries
+    /// (and at sea); a visa's country until its `expires_at`, checked by the
+    /// server on every read. Edge: the caller's account.
     @available(iOS 13, *)
     func `getCountryUnlocks`(request: GeoDiscovery_V1_GetCountryUnlocksRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_GetCountryUnlocksResponse>
 
@@ -64,6 +67,26 @@ public protocol GeoDiscovery_V1_GeoDiscoveryServiceClientInterface: Sendable {
     /// or with an unknown age. Edge: the caller's account.
     @available(iOS 13, *)
     func `unlockCountry`(request: GeoDiscovery_V1_UnlockCountryRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_UnlockCountryResponse>
+
+    /// Buys a 24 h visa to a country with gems (#910): a temporary unlock, at
+    /// the price the app showed (the standings' `visa_price_gems`), answered
+    /// in-band (GRANTED, ALREADY_UNLOCKED, INSUFFICIENT_GEMS, PRICE_CHANGED).
+    /// A visa to a country with a running visa extends it by 24 h from its
+    /// current end; unlocking the country for good ends it (no refund). No
+    /// visa to the home country or an unlocked one. Idempotent per
+    /// `idempotency_key`: a retry charges once and grants the same end.
+    /// GEO-3001 (PERMISSION_DENIED) under 18 or with an unknown age. Edge: the
+    /// caller's account.
+    @available(iOS 13, *)
+    func `buyCountryVisa`(request: GeoDiscovery_V1_BuyCountryVisaRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_BuyCountryVisaResponse>
+
+    /// The continents (#912): each one's countries and badge. A member who
+    /// holds every country of a continent for good — home and permanent
+    /// unlocks, never a 24 h visa — earns its badge (`badge.continent_<code>`,
+    /// wallet AwardBadge), told by a notification; the app draws progress
+    /// ("Europe 31 / 44") from this same table. The same for every reader.
+    @available(iOS 13, *)
+    func `listContinents`(request: GeoDiscovery_V1_ListContinentsRequest, headers: Connect.Headers) async -> ResponseMessage<GeoDiscovery_V1_ListContinentsResponse>
 }
 
 /// Concrete implementation of `GeoDiscovery_V1_GeoDiscoveryServiceClientInterface`.
@@ -109,6 +132,16 @@ public final class GeoDiscovery_V1_GeoDiscoveryServiceClient: GeoDiscovery_V1_Ge
         return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/UnlockCountry", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `buyCountryVisa`(request: GeoDiscovery_V1_BuyCountryVisaRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<GeoDiscovery_V1_BuyCountryVisaResponse> {
+        return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/BuyCountryVisa", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listContinents`(request: GeoDiscovery_V1_ListContinentsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<GeoDiscovery_V1_ListContinentsResponse> {
+        return await self.client.unary(path: "/geo_discovery.v1.GeoDiscoveryService/ListContinents", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let queryTile = Connect.MethodSpec(name: "QueryTile", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
@@ -118,6 +151,8 @@ public final class GeoDiscovery_V1_GeoDiscoveryServiceClient: GeoDiscovery_V1_Ge
             public static let getCountryStandings = Connect.MethodSpec(name: "GetCountryStandings", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let getCountryUnlocks = Connect.MethodSpec(name: "GetCountryUnlocks", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
             public static let unlockCountry = Connect.MethodSpec(name: "UnlockCountry", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
+            public static let buyCountryVisa = Connect.MethodSpec(name: "BuyCountryVisa", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
+            public static let listContinents = Connect.MethodSpec(name: "ListContinents", service: "geo_discovery.v1.GeoDiscoveryService", type: .unary)
         }
     }
 }

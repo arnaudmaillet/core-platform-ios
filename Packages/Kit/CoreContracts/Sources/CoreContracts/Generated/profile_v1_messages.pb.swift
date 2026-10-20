@@ -313,11 +313,55 @@ public nonisolated struct Profile_V1_ProfileView: @unchecked Sendable {
   /// Clears the value of `banner`. Subsequent reads from it will return its default value.
   public mutating func clearBanner() {_uniqueStorage()._banner = nil}
 
+  /// #913: the avatar frame the profile wears, a wallet catalogue item id
+  /// (`frame.<name>`); empty: none. Shown to everyone; the app draws it from
+  /// bundled art keyed by id (an unknown id draws no frame). No effect on
+  /// any size, order or ranking.
+  public var avatarFrameID: String {
+    get {_storage._avatarFrameID}
+    set {_uniqueStorage()._avatarFrameID = newValue}
+  }
+
+  /// #912: the badges the profile shows, in order (at most three), each a
+  /// wallet badge its account earned; everyone sees them. The owner edits
+  /// them with SetBadgeShowcase, picking from the account's badges (wallet
+  /// ListOwnedItems, family BADGE).
+  public var badges: [Profile_V1_ShowcasedBadge] {
+    get {_storage._badges}
+    set {_uniqueStorage()._badges = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// A badge a profile shows (#912).
+public nonisolated struct Profile_V1_ShowcasedBadge: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// `badge.<name>`, e.g. `badge.continent_eu`; the app's art key.
+  public var badgeID: String = String()
+
+  /// When the account earned it.
+  public var awardedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_awardedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_awardedAt = newValue}
+  }
+  /// Returns true if `awardedAt` has been explicitly set.
+  public var hasAwardedAt: Bool {self._awardedAt != nil}
+  /// Clears the value of `awardedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearAwardedAt() {self._awardedAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _awardedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
 }
 
 /// Which of a profile's tabs others see (#829). post serves the Reposts and
@@ -372,6 +416,9 @@ public nonisolated struct Profile_V1_ProfileSummaryView: Sendable {
   /// Clears the value of `avatar`. Subsequent reads from it will return its default value.
   public mutating func clearAvatar() {self._avatar = nil}
 
+  /// #913: as on ProfileView.
+  public var avatarFrameID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -387,6 +434,16 @@ public nonisolated struct Profile_V1_CommandResponse: Sendable {
   public var success: Bool = false
 
   public var profileID: String = String()
+
+  /// CreateProfile only (#916): every profile slot of the account is in use;
+  /// nothing was created (`success` is false). GetProfileSlots says what the
+  /// next slot costs.
+  public var noFreeSlot: Bool = false
+
+  /// ChangeHandle only (#911): CHANGED, or why nothing changed (`success` is
+  /// false); GetHandleChangePrice says the price or when the next free change
+  /// opens.
+  public var handleChange: Profile_V1_HandleChangeOutcome = .unspecified
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -450,9 +507,57 @@ public nonisolated struct Profile_V1_ChangeHandleRequest: Sendable {
 
   public var newHandle: String = String()
 
+  /// The price the app showed (HandleChangePrice.price_gems; 0 for a free
+  /// change, #911). Another one answers PRICE_CHANGED, nothing charged.
+  public var expectedPrice: Int64 = 0
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
+}
+
+public nonisolated struct Profile_V1_GetHandleChangePriceRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profileID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// The next handle change of a profile's account (#911).
+public nonisolated struct Profile_V1_HandleChangePrice: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// In gems; 0 = free (the account's first change, or a caller who may not
+  /// spend gems).
+  public var priceGems: Int64 = 0
+
+  /// The caller may not spend gems (under 18, or age unknown): free changes,
+  /// one per 30 days.
+  public var gemSpendingRestricted: Bool = false
+
+  /// gem_spending_restricted only: when the next free change opens; unset
+  /// when it is open.
+  public var nextChangeAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_nextChangeAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_nextChangeAt = newValue}
+  }
+  /// Returns true if `nextChangeAt` has been explicitly set.
+  public var hasNextChangeAt: Bool {self._nextChangeAt != nil}
+  /// Clears the value of `nextChangeAt`. Subsequent reads from it will return its default value.
+  public mutating func clearNextChangeAt() {self._nextChangeAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _nextChangeAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
 }
 
 public nonisolated struct Profile_V1_UpdateAvatarRequest: Sendable {
@@ -483,10 +588,46 @@ public nonisolated struct Profile_V1_UpdateBannerRequest: Sendable {
 
   public var profileID: String = String()
 
+  /// A still banner's URL. Empty with `banner_asset_id` set: an animated
+  /// banner (#915, #947). Both empty: no banner.
   public var bannerURL: String = String()
 
-  /// #907: as UpdateAvatarRequest.avatar_asset_id.
+  /// #907: as UpdateAvatarRequest.avatar_asset_id. Without `banner_url`
+  /// (#947): a READY VIDEO asset of the account's own (one of its posts'
+  /// videos), for an account owning the `banner.animated` catalogue item.
   public var bannerAssetID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Profile_V1_EquipAvatarFrameRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profileID: String = String()
+
+  /// A `frame.<name>` item the profile's account owns (wallet
+  /// ListOwnedItems); empty: wear none.
+  public var frameID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Profile_V1_SetBadgeShowcaseRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var profileID: String = String()
+
+  /// In order, at most three, distinct, each a badge the profile's account
+  /// earned; empty: show none.
+  public var badgeIds: [String] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -1341,6 +1482,85 @@ public nonisolated struct Profile_V1_ResolveShareTokenRequest: Sendable {
   public init() {}
 }
 
+public nonisolated struct Profile_V1_GetProfileSlotsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Profile_V1_ProfileSlots: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Slots the account owns (one free, plus the bought or grandfathered).
+  public var slots: Int32 = 0
+
+  /// Profiles alive.
+  public var used: Int32 = 0
+
+  /// The most slots an account may own.
+  public var maxSlots: Int32 = 0
+
+  /// The next slot's price in gems; 0 at the cap.
+  public var nextPrice: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Profile_V1_BuyProfileSlotRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  /// The price the app showed (ProfileSlots.next_price).
+  public var expectedPrice: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Profile_V1_BuyProfileSlotResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var outcome: Profile_V1_ProfileSlotOutcome = .unspecified
+
+  /// The account's slots after the call.
+  public var slots: Profile_V1_ProfileSlots {
+    get {_slots ?? Profile_V1_ProfileSlots()}
+    set {_slots = newValue}
+  }
+  /// Returns true if `slots` has been explicitly set.
+  public var hasSlots: Bool {self._slots != nil}
+  /// Clears the value of `slots`. Subsequent reads from it will return its default value.
+  public mutating func clearSlots() {self._slots = nil}
+
+  /// The wallet's gems, when it was asked (BOUGHT, INSUFFICIENT_GEMS).
+  public var gems: Int64 = 0
+
+  /// The slot's price (the current one on PRICE_CHANGED).
+  public var priceGems: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _slots: Profile_V1_ProfileSlots? = nil
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "profile.v1"
@@ -1386,7 +1606,7 @@ nonisolated extension Profile_V1_ProfileLinkProto: SwiftProtobuf.Message, SwiftP
 
 nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ProfileView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}account_id\0\u{1}handle\0\u{3}display_name\0\u{1}bio\0\u{3}avatar_url\0\u{3}banner_url\0\u{3}website_url\0\u{3}custom_links\0\u{3}profile_kind\0\u{1}visibility\0\u{1}verified\0\u{3}verification_kind\0\u{1}locale\0\u{1}timezone\0\u{1}status\0\u{3}masking_reason\0\u{3}masked_at\0\u{3}created_at\0\u{3}updated_at\0\u{1}version\0\u{3}interaction_settings\0\u{3}location_settings\0\u{3}discovery_settings\0\u{3}comment_filters\0\u{3}tab_settings\0\u{3}feed_settings\0\u{3}business_info\0\u{3}visible_tabs\0\u{3}avatar_asset_id\0\u{3}banner_asset_id\0\u{1}avatar\0\u{1}banner\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}account_id\0\u{1}handle\0\u{3}display_name\0\u{1}bio\0\u{3}avatar_url\0\u{3}banner_url\0\u{3}website_url\0\u{3}custom_links\0\u{3}profile_kind\0\u{1}visibility\0\u{1}verified\0\u{3}verification_kind\0\u{1}locale\0\u{1}timezone\0\u{1}status\0\u{3}masking_reason\0\u{3}masked_at\0\u{3}created_at\0\u{3}updated_at\0\u{1}version\0\u{3}interaction_settings\0\u{3}location_settings\0\u{3}discovery_settings\0\u{3}comment_filters\0\u{3}tab_settings\0\u{3}feed_settings\0\u{3}business_info\0\u{3}visible_tabs\0\u{3}avatar_asset_id\0\u{3}banner_asset_id\0\u{1}avatar\0\u{1}banner\0\u{3}avatar_frame_id\0\u{1}badges\0")
 
   fileprivate class _StorageClass {
     var _profileID: String = String()
@@ -1422,6 +1642,8 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
     var _bannerAssetID: String = String()
     var _avatar: Media_V1_DeliveredMedia? = nil
     var _banner: Media_V1_DeliveredMedia? = nil
+    var _avatarFrameID: String = String()
+    var _badges: [Profile_V1_ShowcasedBadge] = []
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -1465,6 +1687,8 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
       _bannerAssetID = source._bannerAssetID
       _avatar = source._avatar
       _banner = source._banner
+      _avatarFrameID = source._avatarFrameID
+      _badges = source._badges
     }
   }
 
@@ -1516,6 +1740,8 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
         case 31: try { try decoder.decodeSingularStringField(value: &_storage._bannerAssetID) }()
         case 32: try { try decoder.decodeSingularMessageField(value: &_storage._avatar) }()
         case 33: try { try decoder.decodeSingularMessageField(value: &_storage._banner) }()
+        case 34: try { try decoder.decodeSingularStringField(value: &_storage._avatarFrameID) }()
+        case 35: try { try decoder.decodeRepeatedMessageField(value: &_storage._badges) }()
         default: break
         }
       }
@@ -1627,6 +1853,12 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
       try { if let v = _storage._banner {
         try visitor.visitSingularMessageField(value: v, fieldNumber: 33)
       } }()
+      if !_storage._avatarFrameID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._avatarFrameID, fieldNumber: 34)
+      }
+      if !_storage._badges.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._badges, fieldNumber: 35)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -1669,10 +1901,51 @@ nonisolated extension Profile_V1_ProfileView: SwiftProtobuf.Message, SwiftProtob
         if _storage._bannerAssetID != rhs_storage._bannerAssetID {return false}
         if _storage._avatar != rhs_storage._avatar {return false}
         if _storage._banner != rhs_storage._banner {return false}
+        if _storage._avatarFrameID != rhs_storage._avatarFrameID {return false}
+        if _storage._badges != rhs_storage._badges {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_ShowcasedBadge: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ShowcasedBadge"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}badge_id\0\u{3}awarded_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.badgeID) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._awardedAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.badgeID.isEmpty {
+      try visitor.visitSingularStringField(value: self.badgeID, fieldNumber: 1)
+    }
+    try { if let v = self._awardedAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_ShowcasedBadge, rhs: Profile_V1_ShowcasedBadge) -> Bool {
+    if lhs.badgeID != rhs.badgeID {return false}
+    if lhs._awardedAt != rhs._awardedAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1725,7 +1998,7 @@ nonisolated extension Profile_V1_VisibleTabs: SwiftProtobuf.Message, SwiftProtob
 
 nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ProfileSummaryView"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}handle\0\u{3}display_name\0\u{3}avatar_url\0\u{3}profile_kind\0\u{1}visibility\0\u{1}status\0\u{3}avatar_asset_id\0\u{1}avatar\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{1}handle\0\u{3}display_name\0\u{3}avatar_url\0\u{3}profile_kind\0\u{1}visibility\0\u{1}status\0\u{3}avatar_asset_id\0\u{1}avatar\0\u{3}avatar_frame_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1742,6 +2015,7 @@ nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, Swif
       case 7: try { try decoder.decodeSingularEnumField(value: &self.status) }()
       case 8: try { try decoder.decodeSingularStringField(value: &self.avatarAssetID) }()
       case 9: try { try decoder.decodeSingularMessageField(value: &self._avatar) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.avatarFrameID) }()
       default: break
       }
     }
@@ -1779,6 +2053,9 @@ nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, Swif
     try { if let v = self._avatar {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 9)
     } }()
+    if !self.avatarFrameID.isEmpty {
+      try visitor.visitSingularStringField(value: self.avatarFrameID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1792,6 +2069,7 @@ nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, Swif
     if lhs.status != rhs.status {return false}
     if lhs.avatarAssetID != rhs.avatarAssetID {return false}
     if lhs._avatar != rhs._avatar {return false}
+    if lhs.avatarFrameID != rhs.avatarFrameID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1799,7 +2077,7 @@ nonisolated extension Profile_V1_ProfileSummaryView: SwiftProtobuf.Message, Swif
 
 nonisolated extension Profile_V1_CommandResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CommandResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}success\0\u{3}profile_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}success\0\u{3}profile_id\0\u{3}no_free_slot\0\u{3}handle_change\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1809,6 +2087,8 @@ nonisolated extension Profile_V1_CommandResponse: SwiftProtobuf.Message, SwiftPr
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularBoolField(value: &self.success) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.noFreeSlot) }()
+      case 4: try { try decoder.decodeSingularEnumField(value: &self.handleChange) }()
       default: break
       }
     }
@@ -1821,12 +2101,20 @@ nonisolated extension Profile_V1_CommandResponse: SwiftProtobuf.Message, SwiftPr
     if !self.profileID.isEmpty {
       try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 2)
     }
+    if self.noFreeSlot != false {
+      try visitor.visitSingularBoolField(value: self.noFreeSlot, fieldNumber: 3)
+    }
+    if self.handleChange != .unspecified {
+      try visitor.visitSingularEnumField(value: self.handleChange, fieldNumber: 4)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Profile_V1_CommandResponse, rhs: Profile_V1_CommandResponse) -> Bool {
     if lhs.success != rhs.success {return false}
     if lhs.profileID != rhs.profileID {return false}
+    if lhs.noFreeSlot != rhs.noFreeSlot {return false}
+    if lhs.handleChange != rhs.handleChange {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1954,7 +2242,7 @@ nonisolated extension Profile_V1_UpdateProfileRequest: SwiftProtobuf.Message, Sw
 
 nonisolated extension Profile_V1_ChangeHandleRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ChangeHandleRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}new_handle\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}new_handle\0\u{3}expected_price\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1964,6 +2252,7 @@ nonisolated extension Profile_V1_ChangeHandleRequest: SwiftProtobuf.Message, Swi
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.newHandle) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.expectedPrice) }()
       default: break
       }
     }
@@ -1976,12 +2265,90 @@ nonisolated extension Profile_V1_ChangeHandleRequest: SwiftProtobuf.Message, Swi
     if !self.newHandle.isEmpty {
       try visitor.visitSingularStringField(value: self.newHandle, fieldNumber: 2)
     }
+    if self.expectedPrice != 0 {
+      try visitor.visitSingularInt64Field(value: self.expectedPrice, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Profile_V1_ChangeHandleRequest, rhs: Profile_V1_ChangeHandleRequest) -> Bool {
     if lhs.profileID != rhs.profileID {return false}
     if lhs.newHandle != rhs.newHandle {return false}
+    if lhs.expectedPrice != rhs.expectedPrice {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_GetHandleChangePriceRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetHandleChangePriceRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_GetHandleChangePriceRequest, rhs: Profile_V1_GetHandleChangePriceRequest) -> Bool {
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_HandleChangePrice: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".HandleChangePrice"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}price_gems\0\u{3}gem_spending_restricted\0\u{3}next_change_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt64Field(value: &self.priceGems) }()
+      case 2: try { try decoder.decodeSingularBoolField(value: &self.gemSpendingRestricted) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._nextChangeAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.priceGems != 0 {
+      try visitor.visitSingularInt64Field(value: self.priceGems, fieldNumber: 1)
+    }
+    if self.gemSpendingRestricted != false {
+      try visitor.visitSingularBoolField(value: self.gemSpendingRestricted, fieldNumber: 2)
+    }
+    try { if let v = self._nextChangeAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_HandleChangePrice, rhs: Profile_V1_HandleChangePrice) -> Bool {
+    if lhs.priceGems != rhs.priceGems {return false}
+    if lhs.gemSpendingRestricted != rhs.gemSpendingRestricted {return false}
+    if lhs._nextChangeAt != rhs._nextChangeAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2062,6 +2429,76 @@ nonisolated extension Profile_V1_UpdateBannerRequest: SwiftProtobuf.Message, Swi
     if lhs.profileID != rhs.profileID {return false}
     if lhs.bannerURL != rhs.bannerURL {return false}
     if lhs.bannerAssetID != rhs.bannerAssetID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_EquipAvatarFrameRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".EquipAvatarFrameRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}frame_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.frameID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
+    }
+    if !self.frameID.isEmpty {
+      try visitor.visitSingularStringField(value: self.frameID, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_EquipAvatarFrameRequest, rhs: Profile_V1_EquipAvatarFrameRequest) -> Bool {
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.frameID != rhs.frameID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_SetBadgeShowcaseRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SetBadgeShowcaseRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}profile_id\0\u{3}badge_ids\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.profileID) }()
+      case 2: try { try decoder.decodeRepeatedStringField(value: &self.badgeIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.profileID.isEmpty {
+      try visitor.visitSingularStringField(value: self.profileID, fieldNumber: 1)
+    }
+    if !self.badgeIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.badgeIds, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_SetBadgeShowcaseRequest, rhs: Profile_V1_SetBadgeShowcaseRequest) -> Bool {
+    if lhs.profileID != rhs.profileID {return false}
+    if lhs.badgeIds != rhs.badgeIds {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -3612,6 +4049,165 @@ nonisolated extension Profile_V1_ResolveShareTokenRequest: SwiftProtobuf.Message
 
   public static func ==(lhs: Profile_V1_ResolveShareTokenRequest, rhs: Profile_V1_ResolveShareTokenRequest) -> Bool {
     if lhs.token != rhs.token {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_GetProfileSlotsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".GetProfileSlotsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_GetProfileSlotsRequest, rhs: Profile_V1_GetProfileSlotsRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_ProfileSlots: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ProfileSlots"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}slots\0\u{1}used\0\u{3}max_slots\0\u{3}next_price\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularInt32Field(value: &self.slots) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.used) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.maxSlots) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.nextPrice) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.slots != 0 {
+      try visitor.visitSingularInt32Field(value: self.slots, fieldNumber: 1)
+    }
+    if self.used != 0 {
+      try visitor.visitSingularInt32Field(value: self.used, fieldNumber: 2)
+    }
+    if self.maxSlots != 0 {
+      try visitor.visitSingularInt32Field(value: self.maxSlots, fieldNumber: 3)
+    }
+    if self.nextPrice != 0 {
+      try visitor.visitSingularInt64Field(value: self.nextPrice, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_ProfileSlots, rhs: Profile_V1_ProfileSlots) -> Bool {
+    if lhs.slots != rhs.slots {return false}
+    if lhs.used != rhs.used {return false}
+    if lhs.maxSlots != rhs.maxSlots {return false}
+    if lhs.nextPrice != rhs.nextPrice {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_BuyProfileSlotRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".BuyProfileSlotRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}expected_price\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularInt64Field(value: &self.expectedPrice) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if self.expectedPrice != 0 {
+      try visitor.visitSingularInt64Field(value: self.expectedPrice, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_BuyProfileSlotRequest, rhs: Profile_V1_BuyProfileSlotRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.expectedPrice != rhs.expectedPrice {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Profile_V1_BuyProfileSlotResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".BuyProfileSlotResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}outcome\0\u{1}slots\0\u{1}gems\0\u{3}price_gems\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.outcome) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._slots) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.gems) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.priceGems) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.outcome != .unspecified {
+      try visitor.visitSingularEnumField(value: self.outcome, fieldNumber: 1)
+    }
+    try { if let v = self._slots {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    if self.gems != 0 {
+      try visitor.visitSingularInt64Field(value: self.gems, fieldNumber: 3)
+    }
+    if self.priceGems != 0 {
+      try visitor.visitSingularInt64Field(value: self.priceGems, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Profile_V1_BuyProfileSlotResponse, rhs: Profile_V1_BuyProfileSlotResponse) -> Bool {
+    if lhs.outcome != rhs.outcome {return false}
+    if lhs._slots != rhs._slots {return false}
+    if lhs.gems != rhs.gems {return false}
+    if lhs.priceGems != rhs.priceGems {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

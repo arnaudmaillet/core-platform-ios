@@ -113,7 +113,7 @@ public nonisolated struct Wallet_V1_Wallet: @unchecked Sendable {
   /// Clears the value of `lastClaimAt`. Subsequent reads from it will return its default value.
   public mutating func clearLastClaimAt() {_uniqueStorage()._lastClaimAt = nil}
 
-  /// Shots left in the ×100 stake pack; 0 = none.
+  /// Shots left in the stake pack; 0 = none.
   public var stakeShots: Int32 {
     get {_storage._stakeShots}
     set {_uniqueStorage()._stakeShots = newValue}
@@ -126,7 +126,8 @@ public nonisolated struct Wallet_V1_Wallet: @unchecked Sendable {
     set {_uniqueStorage()._gemSpendingRestricted = newValue}
   }
 
-  /// The ×100 stake pack's terms (server policy).
+  /// The default stake pack's terms (server policy): the first of
+  /// `stake_packs`, kept for clients that predate several packs.
   public var stakePackPrice: Int64 {
     get {_storage._stakePackPrice}
     set {_uniqueStorage()._stakePackPrice = newValue}
@@ -137,6 +138,7 @@ public nonisolated struct Wallet_V1_Wallet: @unchecked Sendable {
     set {_uniqueStorage()._stakePackShots = newValue}
   }
 
+  /// Points per shot, for every pack.
   public var pointsPerShot: Int32 {
     get {_storage._pointsPerShot}
     set {_uniqueStorage()._pointsPerShot = newValue}
@@ -157,11 +159,42 @@ public nonisolated struct Wallet_V1_Wallet: @unchecked Sendable {
     set {_uniqueStorage()._convictionProbabilities = newValue}
   }
 
+  /// The stake packs on sale (#941, server policy), the default pack first.
+  public var stakePacks: [Wallet_V1_StakePackOffer] {
+    get {_storage._stakePacks}
+    set {_uniqueStorage()._stakePacks = newValue}
+  }
+
+  /// The pack the `stake_shots` left came from; empty when none are left.
+  public var stakePackID: String {
+    get {_storage._stakePackID}
+    set {_uniqueStorage()._stakePackID = newValue}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _storage = _StorageClass.defaultInstance
+}
+
+/// One stake pack on sale (#941).
+public nonisolated struct Wallet_V1_StakePackOffer: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Stable id, `shots_<shots>` (e.g. `shots_10`); BuyStakePack names it.
+  public var packID: String = String()
+
+  public var shots: Int32 = 0
+
+  /// In gems.
+  public var price: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct Wallet_V1_GetWalletRequest: Sendable {
@@ -246,7 +279,8 @@ public nonisolated struct Wallet_V1_WalletTransaction: Sendable {
   /// Clears the value of `createdAt`. Subsequent reads from it will return its default value.
   public mutating func clearCreatedAt() {self._createdAt = nil}
 
-  /// What it was for, when it names something (COUNTRY_UNLOCK: the country).
+  /// What it was for, when it names something (COUNTRY_UNLOCK: the country;
+  /// STAKE_PACK: the pack id, empty before #941).
   public var refID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
@@ -287,6 +321,10 @@ public nonisolated struct Wallet_V1_BuyStakePackRequest: Sendable {
   /// As for ClaimReward: a retry with the same key charges at most once.
   public var idempotencyKey: String = String()
 
+  /// One of `Wallet.stake_packs` (#941); empty = the default pack. A
+  /// `pack_id` not on sale is WAL-9005 (INVALID_ARGUMENT).
+  public var packID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -326,7 +364,8 @@ public nonisolated struct Wallet_V1_SpendGemsRequest: Sendable {
   /// Gems to spend, > 0.
   public var amount: Int64 = 0
 
-  /// What for: COUNTRY_UNLOCK only for now.
+  /// What for: COUNTRY_UNLOCK or COUNTRY_VISA (#910), PROFILE_SLOT (#916),
+  /// HANDLE_CHANGE (#911).
   public var kind: Wallet_V1_TransactionKind = .unspecified
 
   /// What it names (the country code), at most 64 characters.
@@ -494,6 +533,9 @@ public nonisolated struct Wallet_V1_ExportWalletResponse: Sendable {
   public var hasWallet: Bool {self._wallet != nil}
   /// Clears the value of `wallet`. Subsequent reads from it will return its default value.
   public mutating func clearWallet() {self._wallet = nil}
+
+  /// The catalogue items the account bought (#892); free ones are not listed.
+  public var ownedItems: [Wallet_V1_OwnedItem] = []
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -833,13 +875,193 @@ public nonisolated struct Wallet_V1_ListMyStakesResponse: Sendable {
   public init() {}
 }
 
+/// One item of the gem catalogue (#892).
+public nonisolated struct Wallet_V1_CatalogItem: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// `<family>.<name>`, e.g. `theme.violet`; stable, the app's art key.
+  public var itemID: String = String()
+
+  public var family: Wallet_V1_ItemFamily = .unspecified
+
+  /// In gems; 0 = free, owned by every account.
+  public var price: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Wallet_V1_ListCatalogRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Wallet_V1_ListCatalogResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var items: [Wallet_V1_CatalogItem] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Wallet_V1_PurchaseItemRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  /// As for ClaimReward: a retry with the same key charges at most once.
+  public var idempotencyKey: String = String()
+
+  public var itemID: String = String()
+
+  /// The price the app showed; another one answers PRICE_CHANGED.
+  public var expectedPrice: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Wallet_V1_PurchaseItemResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var outcome: Wallet_V1_PurchaseOutcome = .unspecified
+
+  /// The wallet after the call.
+  public var wallet: Wallet_V1_Wallet {
+    get {_wallet ?? Wallet_V1_Wallet()}
+    set {_wallet = newValue}
+  }
+  /// Returns true if `wallet` has been explicitly set.
+  public var hasWallet: Bool {self._wallet != nil}
+  /// Clears the value of `wallet`. Subsequent reads from it will return its default value.
+  public mutating func clearWallet() {self._wallet = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _wallet: Wallet_V1_Wallet? = nil
+}
+
+/// A catalogue item an account owns.
+public nonisolated struct Wallet_V1_OwnedItem: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var itemID: String = String()
+
+  public var family: Wallet_V1_ItemFamily = .unspecified
+
+  /// When it was bought; unset for a free item.
+  public var acquiredAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_acquiredAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_acquiredAt = newValue}
+  }
+  /// Returns true if `acquiredAt` has been explicitly set.
+  public var hasAcquiredAt: Bool {self._acquiredAt != nil}
+  /// Clears the value of `acquiredAt`. Subsequent reads from it will return its default value.
+  public mutating func clearAcquiredAt() {self._acquiredAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _acquiredAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
+public nonisolated struct Wallet_V1_ListOwnedItemsRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Wallet_V1_ListOwnedItemsResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Free items first, then the bought ones, oldest first.
+  public var items: [Wallet_V1_OwnedItem] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Wallet_V1_AwardBadgeRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var accountID: String = String()
+
+  /// `badge.<name>`, e.g. `badge.continent_eu`.
+  public var badgeID: String = String()
+
+  /// The account's profiles to tell (the caller's edge token `pids`); may
+  /// be empty.
+  public var profileIds: [String] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public nonisolated struct Wallet_V1_AwardBadgeResponse: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// This call awarded it (false: it was before).
+  public var newlyAwarded: Bool = false
+
+  public var awardedAt: SwiftProtobuf.Google_Protobuf_Timestamp {
+    get {_awardedAt ?? SwiftProtobuf.Google_Protobuf_Timestamp()}
+    set {_awardedAt = newValue}
+  }
+  /// Returns true if `awardedAt` has been explicitly set.
+  public var hasAwardedAt: Bool {self._awardedAt != nil}
+  /// Clears the value of `awardedAt`. Subsequent reads from it will return its default value.
+  public mutating func clearAwardedAt() {self._awardedAt = nil}
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+
+  fileprivate var _awardedAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 fileprivate nonisolated let _protobuf_package = "wallet.v1"
 
 nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Wallet"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}points\0\u{1}gems\0\u{3}points_earned\0\u{3}points_spent\0\u{3}gems_earned\0\u{3}gems_spent\0\u{3}claim_available\0\u{3}next_claim_at\0\u{3}claim_amount\0\u{3}claimed_today\0\u{3}daily_claim_cap\0\u{3}streak_days\0\u{3}last_claim_at\0\u{3}stake_shots\0\u{3}gem_spending_restricted\0\u{3}stake_pack_price\0\u{3}stake_pack_shots\0\u{3}points_per_shot\0\u{3}points_cap\0\u{3}conviction_probabilities\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{1}points\0\u{1}gems\0\u{3}points_earned\0\u{3}points_spent\0\u{3}gems_earned\0\u{3}gems_spent\0\u{3}claim_available\0\u{3}next_claim_at\0\u{3}claim_amount\0\u{3}claimed_today\0\u{3}daily_claim_cap\0\u{3}streak_days\0\u{3}last_claim_at\0\u{3}stake_shots\0\u{3}gem_spending_restricted\0\u{3}stake_pack_price\0\u{3}stake_pack_shots\0\u{3}points_per_shot\0\u{3}points_cap\0\u{3}conviction_probabilities\0\u{3}stake_packs\0\u{3}stake_pack_id\0")
 
   fileprivate class _StorageClass {
     var _accountID: String = String()
@@ -863,6 +1085,8 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
     var _pointsPerShot: Int32 = 0
     var _pointsCap: Int64 = 0
     var _convictionProbabilities: [Double] = []
+    var _stakePacks: [Wallet_V1_StakePackOffer] = []
+    var _stakePackID: String = String()
 
       // This property is used as the initial default value for new instances of the type.
       // The type itself is protecting the reference to its storage via CoW semantics.
@@ -894,6 +1118,8 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
       _pointsPerShot = source._pointsPerShot
       _pointsCap = source._pointsCap
       _convictionProbabilities = source._convictionProbabilities
+      _stakePacks = source._stakePacks
+      _stakePackID = source._stakePackID
     }
   }
 
@@ -933,6 +1159,8 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
         case 19: try { try decoder.decodeSingularInt32Field(value: &_storage._pointsPerShot) }()
         case 20: try { try decoder.decodeSingularInt64Field(value: &_storage._pointsCap) }()
         case 21: try { try decoder.decodeRepeatedDoubleField(value: &_storage._convictionProbabilities) }()
+        case 22: try { try decoder.decodeRepeatedMessageField(value: &_storage._stakePacks) }()
+        case 23: try { try decoder.decodeSingularStringField(value: &_storage._stakePackID) }()
         default: break
         }
       }
@@ -1008,6 +1236,12 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
       if !_storage._convictionProbabilities.isEmpty {
         try visitor.visitPackedDoubleField(value: _storage._convictionProbabilities, fieldNumber: 21)
       }
+      if !_storage._stakePacks.isEmpty {
+        try visitor.visitRepeatedMessageField(value: _storage._stakePacks, fieldNumber: 22)
+      }
+      if !_storage._stakePackID.isEmpty {
+        try visitor.visitSingularStringField(value: _storage._stakePackID, fieldNumber: 23)
+      }
     }
     try unknownFields.traverse(visitor: &visitor)
   }
@@ -1038,10 +1272,52 @@ nonisolated extension Wallet_V1_Wallet: SwiftProtobuf.Message, SwiftProtobuf._Me
         if _storage._pointsPerShot != rhs_storage._pointsPerShot {return false}
         if _storage._pointsCap != rhs_storage._pointsCap {return false}
         if _storage._convictionProbabilities != rhs_storage._convictionProbabilities {return false}
+        if _storage._stakePacks != rhs_storage._stakePacks {return false}
+        if _storage._stakePackID != rhs_storage._stakePackID {return false}
         return true
       }
       if !storagesAreEqual {return false}
     }
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_StakePackOffer: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".StakePackOffer"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}pack_id\0\u{1}shots\0\u{1}price\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.packID) }()
+      case 2: try { try decoder.decodeSingularInt32Field(value: &self.shots) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.price) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.packID.isEmpty {
+      try visitor.visitSingularStringField(value: self.packID, fieldNumber: 1)
+    }
+    if self.shots != 0 {
+      try visitor.visitSingularInt32Field(value: self.shots, fieldNumber: 2)
+    }
+    if self.price != 0 {
+      try visitor.visitSingularInt64Field(value: self.price, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_StakePackOffer, rhs: Wallet_V1_StakePackOffer) -> Bool {
+    if lhs.packID != rhs.packID {return false}
+    if lhs.shots != rhs.shots {return false}
+    if lhs.price != rhs.price {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1267,7 +1543,7 @@ nonisolated extension Wallet_V1_ListWalletTransactionsRequest: SwiftProtobuf.Mes
 
 nonisolated extension Wallet_V1_BuyStakePackRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".BuyStakePackRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}idempotency_key\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}idempotency_key\0\u{3}pack_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1277,6 +1553,7 @@ nonisolated extension Wallet_V1_BuyStakePackRequest: SwiftProtobuf.Message, Swif
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.idempotencyKey) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.packID) }()
       default: break
       }
     }
@@ -1289,12 +1566,16 @@ nonisolated extension Wallet_V1_BuyStakePackRequest: SwiftProtobuf.Message, Swif
     if !self.idempotencyKey.isEmpty {
       try visitor.visitSingularStringField(value: self.idempotencyKey, fieldNumber: 2)
     }
+    if !self.packID.isEmpty {
+      try visitor.visitSingularStringField(value: self.packID, fieldNumber: 3)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Wallet_V1_BuyStakePackRequest, rhs: Wallet_V1_BuyStakePackRequest) -> Bool {
     if lhs.accountID != rhs.accountID {return false}
     if lhs.idempotencyKey != rhs.idempotencyKey {return false}
+    if lhs.packID != rhs.packID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1632,7 +1913,7 @@ nonisolated extension Wallet_V1_ExportWalletRequest: SwiftProtobuf.Message, Swif
 
 nonisolated extension Wallet_V1_ExportWalletResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ExportWalletResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}wallet\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}wallet\0\u{3}owned_items\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1641,6 +1922,7 @@ nonisolated extension Wallet_V1_ExportWalletResponse: SwiftProtobuf.Message, Swi
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularMessageField(value: &self._wallet) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.ownedItems) }()
       default: break
       }
     }
@@ -1654,11 +1936,15 @@ nonisolated extension Wallet_V1_ExportWalletResponse: SwiftProtobuf.Message, Swi
     try { if let v = self._wallet {
       try visitor.visitSingularMessageField(value: v, fieldNumber: 1)
     } }()
+    if !self.ownedItems.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.ownedItems, fieldNumber: 2)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Wallet_V1_ExportWalletResponse, rhs: Wallet_V1_ExportWalletResponse) -> Bool {
     if lhs._wallet != rhs._wallet {return false}
+    if lhs.ownedItems != rhs.ownedItems {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -2113,6 +2399,362 @@ nonisolated extension Wallet_V1_ListMyStakesResponse: SwiftProtobuf.Message, Swi
   public static func ==(lhs: Wallet_V1_ListMyStakesResponse, rhs: Wallet_V1_ListMyStakesResponse) -> Bool {
     if lhs.stakes != rhs.stakes {return false}
     if lhs.nextPageToken != rhs.nextPageToken {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_CatalogItem: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".CatalogItem"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}item_id\0\u{1}family\0\u{1}price\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.itemID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.family) }()
+      case 3: try { try decoder.decodeSingularInt64Field(value: &self.price) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.itemID.isEmpty {
+      try visitor.visitSingularStringField(value: self.itemID, fieldNumber: 1)
+    }
+    if self.family != .unspecified {
+      try visitor.visitSingularEnumField(value: self.family, fieldNumber: 2)
+    }
+    if self.price != 0 {
+      try visitor.visitSingularInt64Field(value: self.price, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_CatalogItem, rhs: Wallet_V1_CatalogItem) -> Bool {
+    if lhs.itemID != rhs.itemID {return false}
+    if lhs.family != rhs.family {return false}
+    if lhs.price != rhs.price {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_ListCatalogRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListCatalogRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    // Load everything into unknown fields
+    while try decoder.nextFieldNumber() != nil {}
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_ListCatalogRequest, rhs: Wallet_V1_ListCatalogRequest) -> Bool {
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_ListCatalogResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListCatalogResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}items\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.items) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.items.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.items, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_ListCatalogResponse, rhs: Wallet_V1_ListCatalogResponse) -> Bool {
+    if lhs.items != rhs.items {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_PurchaseItemRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PurchaseItemRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}idempotency_key\0\u{3}item_id\0\u{3}expected_price\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.idempotencyKey) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.itemID) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.expectedPrice) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.idempotencyKey.isEmpty {
+      try visitor.visitSingularStringField(value: self.idempotencyKey, fieldNumber: 2)
+    }
+    if !self.itemID.isEmpty {
+      try visitor.visitSingularStringField(value: self.itemID, fieldNumber: 3)
+    }
+    if self.expectedPrice != 0 {
+      try visitor.visitSingularInt64Field(value: self.expectedPrice, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_PurchaseItemRequest, rhs: Wallet_V1_PurchaseItemRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.idempotencyKey != rhs.idempotencyKey {return false}
+    if lhs.itemID != rhs.itemID {return false}
+    if lhs.expectedPrice != rhs.expectedPrice {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_PurchaseItemResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PurchaseItemResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}outcome\0\u{1}wallet\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularEnumField(value: &self.outcome) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._wallet) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.outcome != .unspecified {
+      try visitor.visitSingularEnumField(value: self.outcome, fieldNumber: 1)
+    }
+    try { if let v = self._wallet {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_PurchaseItemResponse, rhs: Wallet_V1_PurchaseItemResponse) -> Bool {
+    if lhs.outcome != rhs.outcome {return false}
+    if lhs._wallet != rhs._wallet {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_OwnedItem: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".OwnedItem"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}item_id\0\u{1}family\0\u{3}acquired_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.itemID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.family) }()
+      case 3: try { try decoder.decodeSingularMessageField(value: &self._acquiredAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if !self.itemID.isEmpty {
+      try visitor.visitSingularStringField(value: self.itemID, fieldNumber: 1)
+    }
+    if self.family != .unspecified {
+      try visitor.visitSingularEnumField(value: self.family, fieldNumber: 2)
+    }
+    try { if let v = self._acquiredAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 3)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_OwnedItem, rhs: Wallet_V1_OwnedItem) -> Bool {
+    if lhs.itemID != rhs.itemID {return false}
+    if lhs.family != rhs.family {return false}
+    if lhs._acquiredAt != rhs._acquiredAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_ListOwnedItemsRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListOwnedItemsRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_ListOwnedItemsRequest, rhs: Wallet_V1_ListOwnedItemsRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_ListOwnedItemsResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ListOwnedItemsResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}items\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeRepeatedMessageField(value: &self.items) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.items.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.items, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_ListOwnedItemsResponse, rhs: Wallet_V1_ListOwnedItemsResponse) -> Bool {
+    if lhs.items != rhs.items {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_AwardBadgeRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AwardBadgeRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}account_id\0\u{3}badge_id\0\u{3}profile_ids\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.accountID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.badgeID) }()
+      case 3: try { try decoder.decodeRepeatedStringField(value: &self.profileIds) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.accountID.isEmpty {
+      try visitor.visitSingularStringField(value: self.accountID, fieldNumber: 1)
+    }
+    if !self.badgeID.isEmpty {
+      try visitor.visitSingularStringField(value: self.badgeID, fieldNumber: 2)
+    }
+    if !self.profileIds.isEmpty {
+      try visitor.visitRepeatedStringField(value: self.profileIds, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_AwardBadgeRequest, rhs: Wallet_V1_AwardBadgeRequest) -> Bool {
+    if lhs.accountID != rhs.accountID {return false}
+    if lhs.badgeID != rhs.badgeID {return false}
+    if lhs.profileIds != rhs.profileIds {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Wallet_V1_AwardBadgeResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AwardBadgeResponse"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}newly_awarded\0\u{3}awarded_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularBoolField(value: &self.newlyAwarded) }()
+      case 2: try { try decoder.decodeSingularMessageField(value: &self._awardedAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    // The use of inline closures is to circumvent an issue where the compiler
+    // allocates stack space for every if/case branch local when no optimizations
+    // are enabled. https://github.com/apple/swift-protobuf/issues/1034 and
+    // https://github.com/apple/swift-protobuf/issues/1182
+    if self.newlyAwarded != false {
+      try visitor.visitSingularBoolField(value: self.newlyAwarded, fieldNumber: 1)
+    }
+    try { if let v = self._awardedAt {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 2)
+    } }()
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Wallet_V1_AwardBadgeResponse, rhs: Wallet_V1_AwardBadgeResponse) -> Bool {
+    if lhs.newlyAwarded != rhs.newlyAwarded {return false}
+    if lhs._awardedAt != rhs._awardedAt {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

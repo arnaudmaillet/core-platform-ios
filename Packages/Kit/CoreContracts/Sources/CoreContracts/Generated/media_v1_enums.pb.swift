@@ -47,6 +47,15 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
   /// a short-lived signed link to staff over the mesh (GetPrivateDocumentUrl).
   /// Purged 30 days after the request's decision, and with the account.
   case privateDocument // = 4
+
+  /// An animated avatar's clip (#945, #948): MP4 or QuickTime, ≤ 20 MiB, at
+  /// least 2 s (its first 3 s are used, muted). The worker bakes it into two
+  /// sprite sheets (SHEET_SMALL, SHEET_LARGE: 24 frames at 12 fps, square
+  /// 128 / 256 px cells, 4 columns, a 2 px transparent gutter inside each
+  /// cell, AVIF) that loop seamlessly (the last frame flows into the first),
+  /// and a POSTER: the sheet's last frame, for consumers that cannot play a
+  /// sheet (push images, link previews, web). Never served as a video.
+  case avatarClip // = 5
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -60,6 +69,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     case 2: self = .postImage
     case 3: self = .video
     case 4: self = .privateDocument
+    case 5: self = .avatarClip
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -71,6 +81,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     case .postImage: return 2
     case .video: return 3
     case .privateDocument: return 4
+    case .avatarClip: return 5
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -82,6 +93,7 @@ public nonisolated enum Media_V1_MediaKind: SwiftProtobuf.Enum, Swift.CaseIterab
     .postImage,
     .video,
     .privateDocument,
+    .avatarClip,
   ]
 
 }
@@ -186,8 +198,17 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
   /// Concrete packaging (HLS m3u8 / DASH mpd) rides in its mime_type.
   case mediaRenditionKindManifest // = 6
 
-  /// A still poster frame for feed first-paint before playback starts.
+  /// A still poster frame for feed first-paint before playback starts. For an
+  /// AVATAR_CLIP: its sheet's last frame (#948), the same picture the sheet
+  /// rests on.
   case mediaRenditionKindPoster // = 7
+
+  /// An animated avatar's sprite sheet (#945), 128 px cells; its layout rides
+  /// in DeliveredRendition.sheet.
+  case mediaRenditionKindSheetSmall // = 8
+
+  /// The same with 256 px cells.
+  case mediaRenditionKindSheetLarge // = 9
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -204,6 +225,8 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     case 5: self = .mediaRenditionKindLarge
     case 6: self = .mediaRenditionKindManifest
     case 7: self = .mediaRenditionKindPoster
+    case 8: self = .mediaRenditionKindSheetSmall
+    case 9: self = .mediaRenditionKindSheetLarge
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -218,6 +241,8 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     case .mediaRenditionKindLarge: return 5
     case .mediaRenditionKindManifest: return 6
     case .mediaRenditionKindPoster: return 7
+    case .mediaRenditionKindSheetSmall: return 8
+    case .mediaRenditionKindSheetLarge: return 9
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -232,6 +257,8 @@ public nonisolated enum Media_V1_RenditionKind: SwiftProtobuf.Enum, Swift.CaseIt
     .mediaRenditionKindLarge,
     .mediaRenditionKindManifest,
     .mediaRenditionKindPoster,
+    .mediaRenditionKindSheetSmall,
+    .mediaRenditionKindSheetLarge,
   ]
 
 }
@@ -281,7 +308,7 @@ public nonisolated enum Media_V1_DeliveryVisibility: SwiftProtobuf.Enum, Swift.C
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Media_V1_MediaKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_KIND_UNSPECIFIED\0\u{1}MEDIA_KIND_AVATAR\0\u{1}MEDIA_KIND_POST_IMAGE\0\u{1}MEDIA_KIND_VIDEO\0\u{1}MEDIA_KIND_PRIVATE_DOCUMENT\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_KIND_UNSPECIFIED\0\u{1}MEDIA_KIND_AVATAR\0\u{1}MEDIA_KIND_POST_IMAGE\0\u{1}MEDIA_KIND_VIDEO\0\u{1}MEDIA_KIND_PRIVATE_DOCUMENT\0\u{1}MEDIA_KIND_AVATAR_CLIP\0")
 }
 
 nonisolated extension Media_V1_AssetState: SwiftProtobuf._ProtoNameProviding {
@@ -289,7 +316,7 @@ nonisolated extension Media_V1_AssetState: SwiftProtobuf._ProtoNameProviding {
 }
 
 nonisolated extension Media_V1_RenditionKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_RENDITION_KIND_UNSPECIFIED\0\u{1}MEDIA_RENDITION_KIND_ORIGINAL\0\u{1}MEDIA_RENDITION_KIND_THUMBNAIL\0\u{1}MEDIA_RENDITION_KIND_SMALL\0\u{1}MEDIA_RENDITION_KIND_MEDIUM\0\u{1}MEDIA_RENDITION_KIND_LARGE\0\u{1}MEDIA_RENDITION_KIND_MANIFEST\0\u{1}MEDIA_RENDITION_KIND_POSTER\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0MEDIA_RENDITION_KIND_UNSPECIFIED\0\u{1}MEDIA_RENDITION_KIND_ORIGINAL\0\u{1}MEDIA_RENDITION_KIND_THUMBNAIL\0\u{1}MEDIA_RENDITION_KIND_SMALL\0\u{1}MEDIA_RENDITION_KIND_MEDIUM\0\u{1}MEDIA_RENDITION_KIND_LARGE\0\u{1}MEDIA_RENDITION_KIND_MANIFEST\0\u{1}MEDIA_RENDITION_KIND_POSTER\0\u{1}MEDIA_RENDITION_KIND_SHEET_SMALL\0\u{1}MEDIA_RENDITION_KIND_SHEET_LARGE\0")
 }
 
 nonisolated extension Media_V1_DeliveryVisibility: SwiftProtobuf._ProtoNameProviding {

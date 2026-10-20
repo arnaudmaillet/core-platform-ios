@@ -118,6 +118,36 @@ final class StubProfileServiceClient: Profile_V1_ProfileServiceClientInterface, 
         ResponseMessage(result: .success(Profile_V1_CommandResponse()))
     }
 
+    func getHandleChangePrice(
+        request: Profile_V1_GetHandleChangePriceRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_HandleChangePrice> {
+        ResponseMessage(result: .success(Profile_V1_HandleChangePrice()))
+    }
+
+    func equipAvatarFrame(
+        request: Profile_V1_EquipAvatarFrameRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func setBadgeShowcase(
+        request: Profile_V1_SetBadgeShowcaseRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        ResponseMessage(result: .success(Profile_V1_CommandResponse()))
+    }
+
+    func getProfileSlots(
+        request: Profile_V1_GetProfileSlotsRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_ProfileSlots> {
+        ResponseMessage(result: .success(Profile_V1_ProfileSlots()))
+    }
+
+    func buyProfileSlot(
+        request: Profile_V1_BuyProfileSlotRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Profile_V1_BuyProfileSlotResponse> {
+        ResponseMessage(result: .success(Profile_V1_BuyProfileSlotResponse()))
+    }
+
     func setVisibility(
         request: Profile_V1_SetVisibilityRequest, headers: Connect.Headers
     ) async -> ResponseMessage<Profile_V1_CommandResponse> {

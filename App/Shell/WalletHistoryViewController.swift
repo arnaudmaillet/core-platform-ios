@@ -297,6 +297,15 @@ final class WalletHistoryViewController: UIViewController {
         case .stake: "Stake"
         case .stakePack: "×100 stake pack"
         case .countryUnlock: transaction.reference.map { "Country unlocked · \($0)" } ?? "Country unlocked"
+        case .countryVisa: transaction.reference.map { "Country visa · \($0)" } ?? "Country visa"
+        case .appIcon: "App icon"
+        case .theme: "Theme"
+        case .profileSlot: "Profile slot"
+        case .handleChange: "Handle change"
+        case .avatarFrame: "Avatar frame"
+        case .animatedBanner: "Animated banner"
+        case .cardStyle: "Card style"
+        case .animatedAvatar: "Animated avatar"
         case .other: transaction.delta >= 0 ? "Credit" : "Spend"
         }
     }
@@ -317,6 +326,15 @@ final class WalletHistoryViewController: UIViewController {
         case .stake: AppSymbol.like.rawValue
         case .stakePack: "bolt"
         case .countryUnlock: "globe.europe.africa"
+        case .countryVisa: "airplane"
+        case .appIcon: "app.badge"
+        case .theme: "paintpalette"
+        case .profileSlot: "person.crop.circle.badge.plus"
+        case .handleChange: "at"
+        case .avatarFrame: "circle.dashed.inset.filled"
+        case .animatedBanner: "rectangle.on.rectangle.angled"
+        case .cardStyle: "rectangle.portrait.on.rectangle.portrait"
+        case .animatedAvatar: "person.crop.circle.badge.checkmark"
         case .other: "circle.dashed"
         }
     }

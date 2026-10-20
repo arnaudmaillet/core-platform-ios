@@ -198,6 +198,12 @@ private struct StubPostClient: Post_V1_PostServiceClientInterface {
         ResponseMessage(result: .success(Post_V1_CommandResponse()))
     }
 
+    func setPostCardStyle(
+        request: Post_V1_SetPostCardStyleRequest, headers: Connect.Headers
+    ) async -> ResponseMessage<Post_V1_CommandResponse> {
+        ResponseMessage(result: .success(Post_V1_CommandResponse()))
+    }
+
     func listRecentlyDeleted(
         request: Post_V1_ListRecentlyDeletedRequest, headers: Connect.Headers
     ) async -> ResponseMessage<Post_V1_ListRecentlyDeletedResponse> {

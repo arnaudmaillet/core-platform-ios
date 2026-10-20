@@ -627,11 +627,47 @@ public nonisolated struct Media_V1_DeliveredRendition: Sendable {
 
   public var height: UInt32 = 0
 
+  /// SHEET_SMALL / SHEET_LARGE only (#945): how the sheet is laid out.
+  public var sheet: Media_V1_SheetGeometry {
+    get {_sheet ?? Media_V1_SheetGeometry()}
+    set {_sheet = newValue}
+  }
+  /// Returns true if `sheet` has been explicitly set.
+  public var hasSheet: Bool {self._sheet != nil}
+  /// Clears the value of `sheet`. Subsequent reads from it will return its default value.
+  public mutating func clearSheet() {self._sheet = nil}
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 
   fileprivate var _urlExpiresAt: SwiftProtobuf.Google_Protobuf_Timestamp? = nil
+  fileprivate var _sheet: Media_V1_SheetGeometry? = nil
+}
+
+/// A sprite sheet's layout (#945): `frame_count` square cells of `cell_px`,
+/// row by row over `columns`, each frame drawn inside a `gutter_px`
+/// transparent margin. It plays at `frame_duration_ms` a frame and loops
+/// seamlessly (the last frame flows into the first); at rest it shows its last
+/// frame.
+public nonisolated struct Media_V1_SheetGeometry: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var frameCount: UInt32 = 0
+
+  public var columns: UInt32 = 0
+
+  public var frameDurationMs: UInt32 = 0
+
+  public var gutterPx: UInt32 = 0
+
+  public var cellPx: UInt32 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
 }
 
 public nonisolated struct Media_V1_BatchResolveDeliveryRequest: Sendable {
@@ -1758,7 +1794,7 @@ nonisolated extension Media_V1_SignedCookie: SwiftProtobuf.Message, SwiftProtobu
 
 nonisolated extension Media_V1_DeliveredRendition: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".DeliveredRendition"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}url\0\u{1}visibility\0\u{3}url_expires_at\0\u{1}width\0\u{1}height\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}kind\0\u{1}url\0\u{1}visibility\0\u{3}url_expires_at\0\u{1}width\0\u{1}height\0\u{1}sheet\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1772,6 +1808,7 @@ nonisolated extension Media_V1_DeliveredRendition: SwiftProtobuf.Message, SwiftP
       case 4: try { try decoder.decodeSingularMessageField(value: &self._urlExpiresAt) }()
       case 5: try { try decoder.decodeSingularUInt32Field(value: &self.width) }()
       case 6: try { try decoder.decodeSingularUInt32Field(value: &self.height) }()
+      case 7: try { try decoder.decodeSingularMessageField(value: &self._sheet) }()
       default: break
       }
     }
@@ -1800,6 +1837,9 @@ nonisolated extension Media_V1_DeliveredRendition: SwiftProtobuf.Message, SwiftP
     if self.height != 0 {
       try visitor.visitSingularUInt32Field(value: self.height, fieldNumber: 6)
     }
+    try { if let v = self._sheet {
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 7)
+    } }()
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1810,6 +1850,57 @@ nonisolated extension Media_V1_DeliveredRendition: SwiftProtobuf.Message, SwiftP
     if lhs._urlExpiresAt != rhs._urlExpiresAt {return false}
     if lhs.width != rhs.width {return false}
     if lhs.height != rhs.height {return false}
+    if lhs._sheet != rhs._sheet {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+nonisolated extension Media_V1_SheetGeometry: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".SheetGeometry"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}frame_count\0\u{1}columns\0\u{3}frame_duration_ms\0\u{3}gutter_px\0\u{3}cell_px\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularUInt32Field(value: &self.frameCount) }()
+      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.columns) }()
+      case 3: try { try decoder.decodeSingularUInt32Field(value: &self.frameDurationMs) }()
+      case 4: try { try decoder.decodeSingularUInt32Field(value: &self.gutterPx) }()
+      case 5: try { try decoder.decodeSingularUInt32Field(value: &self.cellPx) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if self.frameCount != 0 {
+      try visitor.visitSingularUInt32Field(value: self.frameCount, fieldNumber: 1)
+    }
+    if self.columns != 0 {
+      try visitor.visitSingularUInt32Field(value: self.columns, fieldNumber: 2)
+    }
+    if self.frameDurationMs != 0 {
+      try visitor.visitSingularUInt32Field(value: self.frameDurationMs, fieldNumber: 3)
+    }
+    if self.gutterPx != 0 {
+      try visitor.visitSingularUInt32Field(value: self.gutterPx, fieldNumber: 4)
+    }
+    if self.cellPx != 0 {
+      try visitor.visitSingularUInt32Field(value: self.cellPx, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Media_V1_SheetGeometry, rhs: Media_V1_SheetGeometry) -> Bool {
+    if lhs.frameCount != rhs.frameCount {return false}
+    if lhs.columns != rhs.columns {return false}
+    if lhs.frameDurationMs != rhs.frameDurationMs {return false}
+    if lhs.gutterPx != rhs.gutterPx {return false}
+    if lhs.cellPx != rhs.cellPx {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

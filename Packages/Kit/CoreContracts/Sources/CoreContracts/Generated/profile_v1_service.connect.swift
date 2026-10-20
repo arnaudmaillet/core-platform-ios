@@ -20,7 +20,10 @@ import SwiftProtobuf
 public protocol Profile_V1_ProfileServiceClientInterface: Sendable {
 
     /// Create a new public profile linked to an account.
-    /// One account can own multiple profiles (1-to-N relationship).
+    /// One account can own multiple profiles (1-to-N relationship), one per
+    /// profile slot (#916): every account has one free, more are bought
+    /// (BuyProfileSlot). With every slot in use nothing is created and the
+    /// response says so in-band: `success = false`, `no_free_slot = true`.
     @available(iOS 13, *)
     func `createProfile`(request: Profile_V1_CreateProfileRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
 
@@ -30,16 +33,54 @@ public protocol Profile_V1_ProfileServiceClientInterface: Sendable {
 
     /// Atomically swap the public @handle using ScyllaDB LWT.
     /// The old handle enters a 30-day tombstone reservation period.
+    /// A gem sink (#911): an account's first handle change is free, later ones
+    /// cost gems (server policy, GetHandleChangePrice), charged once and only
+    /// when the new handle is claimed. A caller who may not spend gems (under
+    /// 18, or age unknown) changes for free once per 30 days. Refusals are
+    /// in-band (`CommandResponse.handle_change`: PRICE_CHANGED,
+    /// INSUFFICIENT_GEMS, COOLDOWN; nothing changed, nothing charged). Asking
+    /// for the profile's current handle changes nothing.
     @available(iOS 13, *)
     func `changeHandle`(request: Profile_V1_ChangeHandleRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// What the profile's next handle change costs its account (#911): the
+    /// price (0 when free), and for a caller who may not spend gems when the
+    /// next free change opens. Edge: the profile's owner.
+    @available(iOS 13, *)
+    func `getHandleChangePrice`(request: Profile_V1_GetHandleChangePriceRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_HandleChangePrice>
 
     /// Replace the avatar CDN URL.
     @available(iOS 13, *)
     func `updateAvatar`(request: Profile_V1_UpdateAvatarRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
 
     /// Replace the banner CDN URL.
+    /// An animated banner (#915, #947): `banner_asset_id` alone names a READY
+    /// VIDEO asset of the profile's account (one of its posts' videos), for an
+    /// account owning the `banner.animated` catalogue item (wallet). Reads then
+    /// carry `ProfileView.banner` with the video's MANIFEST (the loop) and
+    /// POSTER renditions, and `banner_url` is the poster. The server neither
+    /// trims nor caps the video: it is the post's own; the app plays it muted,
+    /// looping, and shows the poster under Reduce Motion, Low Power Mode and
+    /// when idle. PRF-5007 (FAILED_PRECONDITION) for an asset that is not the
+    /// account's READY video; PRF-6007 (PERMISSION_DENIED) without the item.
     @available(iOS 13, *)
     func `updateBanner`(request: Profile_V1_UpdateBannerRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Wears an avatar frame, or none (#913): a catalogue item the profile's
+    /// account owns (bought with wallet PurchaseItem), equipped per profile;
+    /// every read of the profile then carries `avatar_frame_id`. PRF-6007
+    /// (PERMISSION_DENIED) for a frame the account does not own; PRF-6003
+    /// (UNAVAILABLE) when the wallet cannot tell. Edge: the profile's owner.
+    @available(iOS 13, *)
+    func `equipAvatarFrame`(request: Profile_V1_EquipAvatarFrameRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
+
+    /// Picks the badges the profile shows (#912): in order, at most three,
+    /// each one its account earned (wallet ListOwnedItems, family BADGE);
+    /// every read then carries them (`ProfileView.badges`). PRF-6007
+    /// (PERMISSION_DENIED) for a badge the account has not earned; PRF-9001
+    /// for more than three or a repeat. Edge: the profile's owner.
+    @available(iOS 13, *)
+    func `setBadgeShowcase`(request: Profile_V1_SetBadgeShowcaseRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_CommandResponse>
 
     /// Toggle profile visibility between Public and Private.
     @available(iOS 13, *)
@@ -147,6 +188,23 @@ public protocol Profile_V1_ProfileServiceClientInterface: Sendable {
     /// active, or one whose owner turned "reachable by QR / shared link" off.
     @available(iOS 13, *)
     func `resolveShareToken`(request: Profile_V1_ResolveShareTokenRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_ProfileView>
+
+    /// The caller's account's profile slots: owned, in use, the cap and the
+    /// next slot's price (server policy: 100 / 200 / 400 / 800 gems for the
+    /// 2nd to the 5th). A slot is kept for good: deleting a profile frees it.
+    /// An account holding more profiles than slots from before keeps them.
+    /// Edge: the caller's account.
+    @available(iOS 13, *)
+    func `getProfileSlots`(request: Profile_V1_GetProfileSlotsRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_ProfileSlots>
+
+    /// Buys the account's next profile slot with gems, at the price the app
+    /// showed: answered in-band (BOUGHT, MAX_REACHED, INSUFFICIENT_GEMS,
+    /// PRICE_CHANGED). Each slot is charged at most once, whatever the retries.
+    /// PRF-6002 (PERMISSION_DENIED) under 18 or with an unknown age (a minor
+    /// keeps one profile); PRF-6003 (UNAVAILABLE) when the wallet cannot
+    /// answer. Edge: the caller's account.
+    @available(iOS 13, *)
+    func `buyProfileSlot`(request: Profile_V1_BuyProfileSlotRequest, headers: Connect.Headers) async -> ResponseMessage<Profile_V1_BuyProfileSlotResponse>
 }
 
 /// Concrete implementation of `Profile_V1_ProfileServiceClientInterface`.
@@ -173,6 +231,11 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
     }
 
     @available(iOS 13, *)
+    public func `getHandleChangePrice`(request: Profile_V1_GetHandleChangePriceRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_HandleChangePrice> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/GetHandleChangePrice", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `updateAvatar`(request: Profile_V1_UpdateAvatarRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
         return await self.client.unary(path: "/profile.v1.ProfileService/UpdateAvatar", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -180,6 +243,16 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
     @available(iOS 13, *)
     public func `updateBanner`(request: Profile_V1_UpdateBannerRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
         return await self.client.unary(path: "/profile.v1.ProfileService/UpdateBanner", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `equipAvatarFrame`(request: Profile_V1_EquipAvatarFrameRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/EquipAvatarFrame", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `setBadgeShowcase`(request: Profile_V1_SetBadgeShowcaseRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_CommandResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/SetBadgeShowcase", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
     @available(iOS 13, *)
@@ -307,13 +380,26 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
         return await self.client.unary(path: "/profile.v1.ProfileService/ResolveShareToken", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `getProfileSlots`(request: Profile_V1_GetProfileSlotsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_ProfileSlots> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/GetProfileSlots", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `buyProfileSlot`(request: Profile_V1_BuyProfileSlotRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Profile_V1_BuyProfileSlotResponse> {
+        return await self.client.unary(path: "/profile.v1.ProfileService/BuyProfileSlot", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let createProfile = Connect.MethodSpec(name: "CreateProfile", service: "profile.v1.ProfileService", type: .unary)
             public static let updateProfile = Connect.MethodSpec(name: "UpdateProfile", service: "profile.v1.ProfileService", type: .unary)
             public static let changeHandle = Connect.MethodSpec(name: "ChangeHandle", service: "profile.v1.ProfileService", type: .unary)
+            public static let getHandleChangePrice = Connect.MethodSpec(name: "GetHandleChangePrice", service: "profile.v1.ProfileService", type: .unary)
             public static let updateAvatar = Connect.MethodSpec(name: "UpdateAvatar", service: "profile.v1.ProfileService", type: .unary)
             public static let updateBanner = Connect.MethodSpec(name: "UpdateBanner", service: "profile.v1.ProfileService", type: .unary)
+            public static let equipAvatarFrame = Connect.MethodSpec(name: "EquipAvatarFrame", service: "profile.v1.ProfileService", type: .unary)
+            public static let setBadgeShowcase = Connect.MethodSpec(name: "SetBadgeShowcase", service: "profile.v1.ProfileService", type: .unary)
             public static let setVisibility = Connect.MethodSpec(name: "SetVisibility", service: "profile.v1.ProfileService", type: .unary)
             public static let setInteractionSettings = Connect.MethodSpec(name: "SetInteractionSettings", service: "profile.v1.ProfileService", type: .unary)
             public static let setInteractionLimit = Connect.MethodSpec(name: "SetInteractionLimit", service: "profile.v1.ProfileService", type: .unary)
@@ -339,6 +425,8 @@ public final class Profile_V1_ProfileServiceClient: Profile_V1_ProfileServiceCli
             public static let getShareToken = Connect.MethodSpec(name: "GetShareToken", service: "profile.v1.ProfileService", type: .unary)
             public static let rotateShareToken = Connect.MethodSpec(name: "RotateShareToken", service: "profile.v1.ProfileService", type: .unary)
             public static let resolveShareToken = Connect.MethodSpec(name: "ResolveShareToken", service: "profile.v1.ProfileService", type: .unary)
+            public static let getProfileSlots = Connect.MethodSpec(name: "GetProfileSlots", service: "profile.v1.ProfileService", type: .unary)
+            public static let buyProfileSlot = Connect.MethodSpec(name: "BuyProfileSlot", service: "profile.v1.ProfileService", type: .unary)
         }
     }
 }
