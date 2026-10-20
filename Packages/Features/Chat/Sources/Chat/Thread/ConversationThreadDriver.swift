@@ -2,6 +2,7 @@ import CoreModels
 import FeedInterface
 import Foundation
 import UIKit
+import CoreNavigation
 
 /// Makes the sheet a message's photo or video is picked (or captured) in:
 /// the upload flow's own (#681), built by the app. It calls back with what
@@ -159,10 +160,14 @@ final class ConversationThreadDriver: ConversationThreadDriving {
 
     func pickMedia(_ source: ConversationThreadMediaSource, from presenter: UIViewController) {
         guard let mediaPicker, presenter.presentedViewController == nil else { return }
+        weak var shown: UIViewController?
         let picker = mediaPicker(source) { [weak self, weak presenter] uploads in
-            presenter?.dismiss(animated: true)
+            // The picker only, if it is still up (#1144): after a cancel or a
+            // swipe-down, `dismiss` on the presenter would close the thread.
+            if let picker = shown { presenter?.dismiss(presented: picker) }
             self?.viewModel.send(media: uploads)
         }
+        shown = picker
         presenter.present(picker, animated: true)
     }
 

@@ -1,5 +1,6 @@
 import DesignSystem
 import UIKit
+import CoreNavigation
 
 /// Settings → Account → Date of Birth (#394), when none is on file.
 ///
@@ -120,7 +121,9 @@ final class BirthDateViewController: UIViewController {
                 _ = try await setter.setDateOfBirth(birthDate)
                 HapticNotification().notificationOccurred(.success)
                 onSaved()
-                navigationController?.popViewController(animated: true)
+                // This screen only, if it is still here (#1144): the viewer
+                // may have gone back while the save was out.
+                closeScreen()
             } catch {
                 isSaving = false
                 refresh()
