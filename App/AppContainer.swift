@@ -238,10 +238,8 @@ final class AppContainer {
     /// until then.
     func enterStorageScope(for state: AuthState) {
         let scope = StorageScope.shared
-        // The viewer's accent theme (#1379): a guest draws in pink, an account
-        // in the theme it chose on this device.
-        let accountID: String? = if case .authenticated(let account) = state { account.rawValue } else { nil }
-        AccentThemePreference.apply(AccentThemePreference.theme(for: accountID))
+        // Once the stores point at the viewer, early return included.
+        defer { applyAccentTheme(for: state) }
         switch state {
         case .unauthenticated:
             scope.owner = .guest
@@ -256,6 +254,16 @@ final class AppContainer {
         }
         observeStorageScope()
         restoreEntitiesFromDevice()
+    }
+
+    /// The viewer's accent theme (#1379): a guest draws in pink, an account
+    /// in the theme it chose on this device — pink again if it does not own
+    /// it (another account's purchase, a refund).
+    private func applyAccentTheme(for state: AuthState) {
+        let accountID: String? = if case .authenticated(let account) = state { account.rawValue } else { nil }
+        let chosen = AccentThemePreference.theme(for: accountID)
+        let owned = accountID.map { accentThemes?.isOwned(chosen, by: $0) ?? true } ?? true
+        AccentThemePreference.apply(owned ? chosen : .pink)
     }
 
     /// Rebuilds the app's posts from the device store (#896) once per
@@ -777,6 +785,7 @@ final class AppContainer {
             countries: countryAccess,
             stakePacks: stakePacks,
             profileItems: profileItems,
+            themes: accentThemes,
             shopMedia: shopMedia,
             makeHub: { [unowned self] claimer in
                 WalletHubViewController(
@@ -792,6 +801,7 @@ final class AppContainer {
                     countries: self.countryAccess,
                     stakePacks: self.stakePacks,
                     profileItems: self.profileItems,
+                    themes: self.accentThemes,
                     shopMedia: shopMedia
                 )
             }
@@ -806,7 +816,8 @@ final class AppContainer {
     func makeStakeShopScreen() -> UIViewController? {
         guard let countryAccess, let stakePacks else { return nil }
         return CountryShopViewController.storefront(
-            access: countryAccess, stakePacks: stakePacks, profileItems: profileItems, focus: .boosts,
+            access: countryAccess, stakePacks: stakePacks, profileItems: profileItems, themes: accentThemes,
+            focus: .boosts,
             media: ShopMedia(images: imagePipeline, videos: videoPlayback)
         )
     }
@@ -1093,6 +1104,19 @@ final class AppContainer {
         )
     }()
 
+    /// The accent themes the Shop sells (#1379): the account's, bought with
+    /// the wallet's gems. Mock mode only, like the rest of the Shop: the
+    /// fleet's purchase debits the server's gems (#1475).
+    private(set) lazy var accentThemes: AccentThemeService? = {
+        guard environment == .mock else { return nil }
+        return AccentThemeService(
+            accountID: MockAuthService.accountID,
+            wallet: walletStore,
+            store: ProfileItemStore(),
+            isMember: { [unowned self] in self.memberGate.isMember }
+        )
+    }()
+
     /// Where the device is, as a country — asked for in context from the map
     /// (guest mode §3.1), never at launch. Opens that country for free.
     private(set) lazy var currentCountry: CurrentCountryProvider = CurrentCountryProvider(
@@ -1167,6 +1191,7 @@ final class AppContainer {
         countryAccess: countryAccess,
         stakePacks: stakePacks,
         profileItems: profileItems,
+        themes: accentThemes,
         // A guest has no people: no favourites dock, no Friends / Following.
         isMember: { [unowned self] in self.memberGate.isMember },
         locator: currentCountry,

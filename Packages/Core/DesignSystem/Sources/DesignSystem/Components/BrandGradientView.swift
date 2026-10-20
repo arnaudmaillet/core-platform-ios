@@ -30,7 +30,7 @@ public final class BrandGradientView: UIView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     /// The stops as drawn now, resolved for the view's appearance.
-    var drawnColours: [UIColor] { stops.map { $0.resolvedColor(with: traitCollection) } }
+    public var drawnColours: [UIColor] { stops.map { $0.resolvedColor(with: traitCollection) } }
 
     private func resolveColours() {
         gradient.colors = drawnColours.map(\.cgColor)

@@ -256,6 +256,7 @@ final class MapsViewController: UIViewController {
     private let stakePacks: (any StakePackSelling)?
     /// What the Shop's Profile shelf sells (#944); nil sells none.
     private let profileItems: (any ProfileItemSelling)?
+    private let themes: (any ThemeSelling)?
     /// Whether the viewer has an account. A guest follows no one, so the
     /// favourites dock and the people rows stay empty for them.
     private let isMember: @MainActor () -> Bool
@@ -423,6 +424,7 @@ final class MapsViewController: UIViewController {
         countryAccess: (any CountryAccess)? = nil,
         stakePacks: (any StakePackSelling)? = nil,
         profileItems: (any ProfileItemSelling)? = nil,
+        themes: (any ThemeSelling)? = nil,
         isMember: @escaping @MainActor () -> Bool = { true },
         locator: (any CurrentCountryLocating)? = nil
     ) {
@@ -431,6 +433,7 @@ final class MapsViewController: UIViewController {
         self.countryAccess = countryAccess
         self.stakePacks = stakePacks
         self.profileItems = profileItems
+        self.themes = themes
         self.viewModel = viewModel
         self.favoritesRepository = favoritesRepository
         self.pinService = pinService
@@ -829,7 +832,7 @@ final class MapsViewController: UIViewController {
               navigationController.topViewController === self, transitionCoordinator == nil else { return }
         let media = ShopMedia(images: imagePipeline, videos: videoPool)
         let shop = CountryShopViewController.storefront(
-            access: countryAccess, stakePacks: stakePacks, profileItems: profileItems, media: media
+            access: countryAccess, stakePacks: stakePacks, profileItems: profileItems, themes: themes, media: media
         ) {
             [weak self] code in
             guard let self, let navigationController = self.navigationController else { return }

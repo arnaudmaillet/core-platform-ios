@@ -41,6 +41,7 @@ final class WalletClaimSheetViewController: UIViewController {
     private let countries: (any CountryAccess)?
     private let stakePacks: (any StakePackSelling)?
     private let profileItems: (any ProfileItemSelling)?
+    private let themes: (any ThemeSelling)?
     private let shopMedia: ShopMedia?
 
     private let coin = UIImageView()
@@ -75,6 +76,7 @@ final class WalletClaimSheetViewController: UIViewController {
         countries: (any CountryAccess)?,
         stakePacks: (any StakePackSelling)?,
         profileItems: (any ProfileItemSelling)?,
+        themes: (any ThemeSelling)? = nil,
         shopMedia: ShopMedia?,
         makeHub: @escaping (WalletClaimer) -> WalletHubViewController
     ) {
@@ -83,6 +85,7 @@ final class WalletClaimSheetViewController: UIViewController {
         self.countries = countries
         self.stakePacks = stakePacks
         self.profileItems = profileItems
+        self.themes = themes
         self.shopMedia = shopMedia
         self.makeHub = makeHub
         self.snapshot = wallet.snapshot()
@@ -384,7 +387,8 @@ final class WalletClaimSheetViewController: UIViewController {
               let root = view.window?.rootViewController else { return }
         StakeShop.push(
             CountryShopViewController.storefront(
-                access: countries, stakePacks: stakePacks, profileItems: profileItems, media: shopMedia
+                access: countries, stakePacks: stakePacks, profileItems: profileItems, themes: themes,
+                media: shopMedia
             ),
             over: root
         )
