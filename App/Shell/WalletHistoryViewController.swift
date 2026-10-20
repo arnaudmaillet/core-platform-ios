@@ -4,9 +4,11 @@ import DesignSystem
 import PostGrid
 import UIKit
 
-/// Settings → Wallet and Purchases (#400): the wallet's history, from the
-/// server (wallet.v1 `ListWalletTransactions`) — every claim, stake and gift,
-/// newest first, page by page, for both currencies or one.
+/// The wallet's history (#400), from the server (wallet.v1
+/// `ListWalletTransactions`) — every claim, stake, gift and purchase, newest
+/// first, page by page, for both currencies or one, grouped by day (#1478).
+/// Settings → Wallet and Purchases opens it, and so does the wallet hub's
+/// Activity.
 ///
 /// Nothing is sold for real money (the backend's decision of 2026-10-08), so
 /// there is no Restore Purchases and no spending limit: the page is the
@@ -34,6 +36,15 @@ final class WalletHistoryViewController: UIViewController {
         }
     }
 
+    /// The list's sections: the filter, one per day of movements (the
+    /// viewer's calendar), the undated ones, and the status rows.
+    private nonisolated enum Section: Hashable {
+        case filter
+        case day(Date)
+        case undated
+        case status
+    }
+
     private nonisolated enum Item: Hashable {
         case filter
         case transaction(WalletTransaction)
@@ -53,7 +64,7 @@ final class WalletHistoryViewController: UIViewController {
     /// filter the viewer left lands nowhere.
     private var pageLoad: Task<Void, Never>?
     private var collectionView: UICollectionView!
-    private var dataSource: UICollectionViewDiffableDataSource<Int, Item>!
+    private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
     private enum Phase { case loading, loaded, failed }
 
@@ -71,6 +82,7 @@ final class WalletHistoryViewController: UIViewController {
         super.viewDidLoad()
         navigationItem.largeTitleDisplayMode = .never
         var config = UICollectionLayoutListConfiguration(appearance: .insetGrouped)
+        config.headerMode = .supplementary
         config.footerMode = .supplementary
         collectionView = UICollectionView(
             frame: view.bounds, collectionViewLayout: UICollectionViewCompositionalLayout.list(using: config)
@@ -172,7 +184,7 @@ final class WalletHistoryViewController: UIViewController {
             }
             cell.contentConfiguration = content
         }
-        dataSource = UICollectionViewDiffableDataSource<Int, Item>(collectionView: collectionView) { collectionView, indexPath, item in
+        dataSource = UICollectionViewDiffableDataSource<Section, Item>(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .filter:
                 collectionView.dequeueConfiguredReusableCell(using: filterRegistration, for: indexPath, item: item)
@@ -182,33 +194,97 @@ final class WalletHistoryViewController: UIViewController {
                 collectionView.dequeueConfiguredReusableCell(using: messageRegistration, for: indexPath, item: item)
             }
         }
+        let header = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
+            elementKind: UICollectionView.elementKindSectionHeader
+        ) { [weak self] view, _, indexPath in
+            var content = UIListContentConfiguration.header()
+            if case .day(let day)? = self?.dataSource.sectionIdentifier(for: indexPath.section) {
+                content.text = Self.dayTitle(for: day)
+            } else if self?.dataSource.sectionIdentifier(for: indexPath.section) == .undated {
+                content.text = "Earlier"
+            }
+            view.contentConfiguration = content
+        }
         let footer = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
             elementKind: UICollectionView.elementKindSectionFooter
-        ) { view, _, indexPath in
+        ) { [weak self] view, _, indexPath in
             var content = UIListContentConfiguration.footer()
-            content.text = indexPath.section == 1
+            // Under the last section only.
+            let isLast = indexPath.section == (self?.dataSource.snapshot().numberOfSections ?? 0) - 1
+            content.text = isLast && indexPath.section > 0
                 ? "Nothing in the app is sold for real money: likes are claimed and staked, gems are earned."
                 : nil
             view.contentConfiguration = content
         }
-        dataSource.supplementaryViewProvider = { collectionView, _, indexPath in
-            collectionView.dequeueConfiguredReusableSupplementary(using: footer, for: indexPath)
+        dataSource.supplementaryViewProvider = { collectionView, kind, indexPath in
+            kind == UICollectionView.elementKindSectionHeader
+                ? collectionView.dequeueConfiguredReusableSupplementary(using: header, for: indexPath)
+                : collectionView.dequeueConfiguredReusableSupplementary(using: footer, for: indexPath)
         }
     }
 
     private func applySnapshot() {
-        var snapshot = NSDiffableDataSourceSnapshot<Int, Item>()
-        snapshot.appendSections([0, 1])
-        snapshot.appendItems([.filter], toSection: 0)
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
+        snapshot.appendSections([.filter])
+        snapshot.appendItems([.filter], toSection: .filter)
         switch phase {
-        case .loading: snapshot.appendItems([.loading], toSection: 1)
-        case .failed: snapshot.appendItems([.failed], toSection: 1)
-        case .loaded where transactions.isEmpty: snapshot.appendItems([.empty], toSection: 1)
+        case .loading:
+            snapshot.appendSections([.status])
+            snapshot.appendItems([.loading], toSection: .status)
+        case .failed:
+            snapshot.appendSections([.status])
+            snapshot.appendItems([.failed], toSection: .status)
+        case .loaded where transactions.isEmpty:
+            snapshot.appendSections([.status])
+            snapshot.appendItems([.empty], toSection: .status)
         case .loaded:
-            snapshot.appendItems(transactions.map(Item.transaction), toSection: 1)
-            if pageLoad != nil { snapshot.appendItems([.loadingMore], toSection: 1) }
+            for group in Self.days(of: transactions) {
+                let section: Section = group.day.map(Section.day) ?? .undated
+                snapshot.appendSections([section])
+                snapshot.appendItems(group.rows.map(Item.transaction), toSection: section)
+            }
+            if pageLoad != nil {
+                snapshot.appendSections([.status])
+                snapshot.appendItems([.loadingMore], toSection: .status)
+            }
         }
         dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    /// The movements by day of the viewer's calendar, newest day first, in
+    /// the server's order within a day; the undated ones last.
+    nonisolated static func days(
+        of transactions: [WalletTransaction], calendar: Calendar = .current
+    ) -> [(day: Date?, rows: [WalletTransaction])] {
+        var groups: [(day: Date?, rows: [WalletTransaction])] = []
+        var undated: [WalletTransaction] = []
+        for transaction in transactions {
+            guard let date = transaction.createdAt else {
+                undated.append(transaction)
+                continue
+            }
+            let day = calendar.startOfDay(for: date)
+            if let last = groups.indices.last, groups[last].day == day {
+                groups[last].rows.append(transaction)
+            } else if let index = groups.firstIndex(where: { $0.day == day }) {
+                groups[index].rows.append(transaction)
+            } else {
+                groups.append((day, [transaction]))
+            }
+        }
+        if !undated.isEmpty { groups.append((nil, undated)) }
+        return groups
+    }
+
+    /// "Today", "Yesterday", then the weekday and date.
+    nonisolated static func dayTitle(for day: Date, now: Date = Date(), calendar: Calendar = .current) -> String {
+        if calendar.isDate(day, inSameDayAs: now) { return "Today" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now),
+           calendar.isDate(day, inSameDayAs: yesterday) { return "Yesterday" }
+        let sameYear = calendar.component(.year, from: day) == calendar.component(.year, from: now)
+        return day.formatted(sameYear
+            ? .dateTime.weekday(.abbreviated).day().month(.abbreviated)
+            : .dateTime.day().month(.abbreviated).year())
     }
 
     // MARK: Wording
@@ -265,7 +341,9 @@ final class WalletHistoryViewController: UIViewController {
 extension WalletHistoryViewController: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
         // The last rows on screen: the next page.
-        if indexPath.section == 1, indexPath.item >= transactions.count - 5 { loadMoreIfNeeded() }
+        guard case .transaction(let transaction)? = dataSource.itemIdentifier(for: indexPath),
+              let index = transactions.firstIndex(of: transaction) else { return }
+        if index >= transactions.count - 5 { loadMoreIfNeeded() }
     }
 
     func collectionView(_ collectionView: UICollectionView, shouldHighlightItemAt indexPath: IndexPath) -> Bool {
