@@ -137,6 +137,6 @@ struct OfferCloseFlightTests {
             CountryStanding(code: code, rank: 4, likes: 12_400, posts: 86, price: 50)
         }
         func standings() -> [CountryStanding] { [] }
-        func unlock(_ code: String) -> CountryUnlockOutcome { .unlocked(remainingGems: 50) }
+        func unlock(_ code: String) async -> CountryUnlockOutcome { .unlocked(remainingGems: 50) }
     }
 }

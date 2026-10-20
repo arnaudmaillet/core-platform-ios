@@ -26,7 +26,7 @@ struct CountryShopViewControllerTests {
         func standing(of code: String) -> CountryStanding? { all.first { $0.code == code } }
         // Deliberately NOT busiest first: the shop orders by rank itself.
         func standings() -> [CountryStanding] { all.reversed() }
-        func unlock(_ code: String) -> CountryUnlockOutcome {
+        func unlock(_ code: String) async -> CountryUnlockOutcome {
             unlocked.insert(code)
             NotificationCenter.default.post(name: .countryAccessDidChange, object: self)
             return .unlocked(remainingGems: gems)
@@ -106,10 +106,10 @@ struct CountryShopViewControllerTests {
     }
 
     /// An unlock moves the row from Locked to Unlocked, in rank order.
-    @Test func anUnlockMovesTheRowBetweenSections() {
+    @Test func anUnlockMovesTheRowBetweenSections() async {
         let access = FakeAccess()
         let shop = makeShop(access)
-        _ = access.unlock("CN")
+        _ = await access.unlock("CN")
         #expect(codes(shop, in: .unlocked) == ["FR", "US", "CN", "ES"])
         #expect(codes(shop, in: .locked) == ["IN", "DE", "IT"])
         #expect(header(shop, .locked) == "Locked 3")
@@ -143,12 +143,12 @@ struct CountryShopViewControllerTests {
     }
 
     /// The gems item is rebuilt, not mutated, when the balance moves.
-    @Test func theGemsItemFollowsTheBalance() throws {
+    @Test func theGemsItemFollowsTheBalance() async throws {
         let access = FakeAccess()
         let shop = makeShop(access)
         let before = shop.navigationItem.rightBarButtonItem
         access.gems = 1_250
-        _ = access.unlock("IT")
+        _ = await access.unlock("IT")
         let after = try #require(shop.navigationItem.rightBarButtonItem)
         #expect(after !== before)
         #expect(after.identifier == CountryShopViewController.balanceItemIdentifier)

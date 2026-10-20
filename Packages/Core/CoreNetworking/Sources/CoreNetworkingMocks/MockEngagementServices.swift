@@ -639,6 +639,25 @@ public final class MockWalletService: @unchecked Sendable {
         lock.withLock { accountLocked(account).likes }
     }
 
+    /// The account's gems, as the server holds them.
+    public func gems(of account: String) -> Int64 {
+        lock.withLock { accountLocked(account).gems }
+    }
+
+    /// Spends `amount` gems for another service (the wallet's `SpendGems`,
+    /// #1475: a country unlock, a visa), written to the history as `kind`;
+    /// the gems left, or nil when there are not enough.
+    func spendGems(account: String, amount: Int64, kind: Wallet_V1_TransactionKind, ref: String) -> Int64? {
+        lock.withLock {
+            var wallet = accountLocked(account)
+            guard amount >= 0, wallet.gems >= amount else { return nil }
+            wallet.gems -= amount
+            if amount > 0 { wallet.recordGems(kind, delta: -amount, at: now(), ref: ref) }
+            accounts[account] = wallet
+            return wallet.gems
+        }
+    }
+
     /// The welcome gift (backend #934, #1008, #943): a flat 50, credited
     /// once per device — whoever signs in on it — when a guest becomes a
     /// member (the owner, 2026-10-14, #1146: the daily growth is gone).

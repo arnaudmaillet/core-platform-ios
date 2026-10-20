@@ -10,14 +10,15 @@ import Maps
 /// Which countries the account has unlocked on the map, and unlocking more
 /// with gems — the shell's answer to `CountryAccess`.
 ///
-/// - The UNLOCKS are the account's (`CountryUnlockStore`, keyed by account id,
-///   never by profile), plus the account's home country, always open — a
-///   MEMBER's: a guest has neither (guest mode decision 9).
+/// - The UNLOCKS are the account's, plus its home country, always open — a
+///   MEMBER's: a guest has neither (guest mode decision 9). For a member
+///   whose wallet is the server's (#1475) they are geo_discovery.v1's
+///   (`GetCountryUnlocks`) and an unlock is its `UnlockCountry`, which spends
+///   the wallet's gems; otherwise `CountryUnlockStore`, keyed by account id.
 /// - The CURRENT country is the device's, while location is allowed
 ///   (`CurrentCountryLocating`) — open for guests and members alike, for as
 ///   long as the device is there, and never written to the unlocks.
-/// - The GEMS are the wallet's (`WalletStore.spendGems`) — points never buy a
-///   country.
+/// - The GEMS are the wallet's — likes never buy a country.
 /// - The STANDINGS (rank, likes, posts) are the backend's once it carries
 ///   them (`dev/issues/BACKEND_COUNTRY_UNLOCKS.md`). Until then, mock mode
 ///   builds them here: the likes and posts of the mock corpus placed in each
@@ -43,14 +44,20 @@ final class CountryAccessService: CountryAccess {
     private let postedCountries: Set<String>
     private let covers: [String: CountryCover]
     private var observers: [NSObjectProtocol] = []
+    /// geo_discovery.v1, for a member whose wallet is the server's (#1475).
+    private let geo: (any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface)?
+    /// The countries the server last listed for the account, home included.
+    private var serverUnlocks: Set<String>?
 
     init(
         accountID: String, homeCountry: String, wallet: WalletStore, unlocks: CountryUnlockStore,
         activity: [String: (likes: Int64, posts: Int)],
         isMember: @escaping @MainActor () -> Bool = { true },
         locator: (any CurrentCountryLocating)? = nil,
-        covers: [String: CountryCover] = [:]
+        covers: [String: CountryCover] = [:],
+        geo: (any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface)? = nil
     ) {
+        self.geo = geo
         self.covers = covers
         self.accountID = accountID
         self.accountHomeCountry = homeCountry
@@ -72,6 +79,31 @@ final class CountryAccessService: CountryAccess {
                 NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
             })
         }
+        // The server's list (#1475): read now, and again for each viewer.
+        observers.append(NotificationCenter.default.addObserver(forName: .viewerDidChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.serverUnlocks = nil
+                self?.refreshUnlocks()
+            }
+        })
+        refreshUnlocks()
+    }
+
+    /// Whether the account's countries are the server's: a member whose
+    /// wallet is the server's, with geo_discovery to ask.
+    private var isServerBacked: Bool { geo != nil && isMember() && wallet.isServerBacked }
+
+    /// Reads the account's countries from the server.
+    func refreshUnlocks() {
+        guard isServerBacked, let geo else { return }
+        var request = GeoDiscovery_V1_GetCountryUnlocksRequest()
+        request.accountID = accountID
+        Task { [weak self] in
+            let response = await geo.getCountryUnlocks(request: request, headers: [:])
+            guard let listed = response.message?.unlockedCountries else { return }
+            self?.serverUnlocks = Set(listed.map { $0.uppercased() })
+            NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
+        }
     }
 
     var homeCountry: String? { isMember() ? accountHomeCountry : nil }
@@ -86,7 +118,10 @@ final class CountryAccessService: CountryAccess {
         let code = code.uppercased()
         if code == currentCountry { return true }
         guard isMember() else { return false }
-        return code == accountHomeCountry || unlocks.unlocked(for: accountID).contains(code)
+        if code == accountHomeCountry { return true }
+        // The server's list once read; nothing more until then.
+        if isServerBacked { return serverUnlocks?.contains(code) ?? false }
+        return unlocks.unlocked(for: accountID).contains(code)
     }
 
     func standing(of code: String) -> CountryStanding? { byCode[code.uppercased()] }
@@ -98,7 +133,7 @@ final class CountryAccessService: CountryAccess {
     /// would say every country has some.
     func hasPosts(in code: String) -> Bool { postedCountries.contains(code.uppercased()) }
 
-    func unlock(_ code: String) -> CountryUnlockOutcome {
+    func unlock(_ code: String) async -> CountryUnlockOutcome {
         guard let standing = standing(of: code) else { return .unknownCountry }
         guard !isUnlocked(code) else { return .alreadyUnlocked }
         // The sheet refuses first (#401); never spend a teen's gems regardless.
@@ -106,12 +141,36 @@ final class CountryAccessService: CountryAccess {
         // A guest's unlock is gated before it gets here (`.unlockCountry`);
         // a guest has no account to keep the country in.
         guard isMember() else { return .insufficientGems(needed: standing.price, have: 0) }
+        if isServerBacked, let geo { return await unlockOnServer(standing, geo: geo) }
         switch wallet.spendGems(standing.price) {
         case .spent(let remaining):
             unlocks.unlock(standing.code, for: accountID)
             return .unlocked(remainingGems: remaining)
         case .insufficient(let gems):
             return .insufficientGems(needed: standing.price, have: gems)
+        }
+    }
+
+    /// geo_discovery.v1's `UnlockCountry` at the price shown (#1475): the
+    /// wallet's gems are spent there, and its balance read again.
+    private func unlockOnServer(
+        _ standing: CountryStanding, geo: any GeoDiscovery_V1_GeoDiscoveryServiceClientInterface
+    ) async -> CountryUnlockOutcome {
+        var request = GeoDiscovery_V1_UnlockCountryRequest()
+        request.accountID = accountID
+        request.countryCode = standing.code
+        request.expectedPrice = Int64(standing.price)
+        let response = await geo.unlockCountry(request: request, headers: [:])
+        guard let answer = response.message else { return .failed }
+        serverUnlocks = Set(answer.unlockedCountries.map { $0.uppercased() })
+        await wallet.refreshFromServer()
+        NotificationCenter.default.post(name: .countryAccessDidChange, object: nil)
+        return switch answer.outcome {
+        case .unlocked: .unlocked(remainingGems: Int(clamping: answer.gems))
+        case .alreadyUnlocked: .alreadyUnlocked
+        case .insufficientGems: .insufficientGems(needed: Int(clamping: answer.priceGems), have: Int(clamping: answer.gems))
+        case .priceChanged: .priceChanged(price: Int(clamping: answer.priceGems))
+        case .unspecified, .UNRECOGNIZED: .failed
         }
     }
 

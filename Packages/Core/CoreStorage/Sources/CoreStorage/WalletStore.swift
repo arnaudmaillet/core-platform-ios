@@ -519,10 +519,6 @@ public final class WalletStore: @unchecked Sendable {
         /// spent. Gems EARNED stay derived from the settled stakes.
         static let gemsGranted = "wallet.gemsGranted"
         static let gemsSpent = "wallet.gemsSpent"
-        /// A member's gems spent where no server call carries them yet (#1475:
-        /// the mock's country unlocks, until geo_discovery's UnlockCountry is
-        /// bound) — taken off the server's balance on this device.
-        static let gemsSpentOffServer = "wallet.gemsSpentOffServer"
         /// Shots left in the ×100 cartridge pack.
         static let stakeShots = "wallet.stakeShots"
         /// Which pack (`Policy.StakePack.Tier.id`) those shots came from.
@@ -614,7 +610,7 @@ public final class WalletStore: @unchecked Sendable {
             for key in [k(Key.balance), k(Key.lifetimeEarned), k(Key.lifetimeSpent), k(Key.lastClaimAt),
                         k(Key.claimedToday), k(Key.claimedTodayDay), k(Key.streakDays), k(Key.boostTotals),
                         k(Key.stakedAt), k(Key.seeded), k(Key.demoStakesSeeded), k(Key.gemsGranted), k(Key.gemsSpent),
-                        k(Key.gemsSpentOffServer), k(Key.stakeShots), k(Key.stakePackTier)] {
+                        k(Key.stakeShots), k(Key.stakePackTier)] {
                 defaults.removeObject(forKey: key)
             }
         }
@@ -1240,9 +1236,8 @@ public final class WalletStore: @unchecked Sendable {
                 claimedToday: server.claimedToday,
                 dailyClaimCap: server.dailyClaimCap,
                 streakDays: server.streakDays,
-                // The server's gems (#1475), less what this device spent
-                // where no server call carries it yet.
-                gems: serverGemsLocked(server),
+                // The server's gems (#1475).
+                gems: server.gems,
                 stakeShots: defaults.integer(forKey: k(Key.stakeShots)),
                 likesCap: server.likesCap
             )
@@ -1290,24 +1285,14 @@ public final class WalletStore: @unchecked Sendable {
         return max(0, earned + defaults.integer(forKey: k(Key.gemsGranted)) - defaults.integer(forKey: k(Key.gemsSpent)))
     }
 
-    /// The server's gems, less what this device spent off the server.
-    private func serverGemsLocked(_ server: WalletServerState) -> Int {
-        max(0, server.gems - defaults.integer(forKey: k(Key.gemsSpentOffServer)))
-    }
-
-    /// Spends `amount` gems on the device, all or nothing — a guest's mock,
-    /// and, for a member whose gems are the server's (#1475), a spend no
-    /// server call carries yet (the mock's country unlocks): it comes off the
-    /// server's balance here.
+    /// Spends `amount` gems on the device, all or nothing — the mock of a
+    /// wallet that is not the server's. ⚠️ A member's gems are the server's
+    /// (#1475): every spend goes through its RPC, never here — refused.
     public func spendGems(_ amount: Int) -> WalletGemSpend {
         let outcome: WalletGemSpend = lock.withLock {
             if let server = serverStateLocked() {
-                let gems = serverGemsLocked(server)
-                guard amount > 0, gems >= amount else { return .insufficient(gems: gems) }
-                defaults.set(
-                    defaults.integer(forKey: k(Key.gemsSpentOffServer)) + amount, forKey: k(Key.gemsSpentOffServer)
-                )
-                return .spent(remaining: gems - amount)
+                assertionFailure("a member's gems are spent through the server (#1475)")
+                return .insufficient(gems: server.gems)
             }
             let gems = gemsLocked(at: now())
             guard amount > 0, gems >= amount else { return .insufficient(gems: gems) }
