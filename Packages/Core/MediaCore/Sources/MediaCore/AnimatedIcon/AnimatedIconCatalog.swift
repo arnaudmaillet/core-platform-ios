@@ -146,43 +146,67 @@ public final class AnimatedIconCatalog: NSObject, AnimatedIconProviding {
         return steps.allSatisfy { abs($0 / base - ($0 / base).rounded()) * base <= 0.5 }
     }
 
+    /// Where every asset is read and decoded: ONE serial GCD queue, never
+    /// Swift's cooperative pool (#1466).
+    ///
+    /// ⚠️ The assets are HEIC, and the simulator's software HEVC decoder
+    /// never returns when several decodes run at once (see `load`). A
+    /// `UIImage(data:)` handed out undecoded only moved that decode to
+    /// whoever drew it first: the animated avatar bakes and the emote
+    /// mattes, seven and two `Task.detached` drawing at once, parked every
+    /// thread of the cooperative pool (8 on the simulator host) in the
+    /// decoder, and nothing async in the app ever ran again, XCTest's
+    /// queries included. So the catalogue decodes here, one asset at a time,
+    /// and hands out bitmaps. Drawing one costs no decode.
+    private nonisolated static let decodeQueue = DispatchQueue(
+        label: "MediaCore.AnimatedIconCatalog.decode", qos: .utility
+    )
+
     private nonisolated static func load(
         _ entry: Entry, from bundle: Bundle
     ) async throws -> AnimatedIconArt {
-        try await Task.detached(priority: .utility) {
-            let name = (entry.asset as NSString).deletingPathExtension
-            let ext = (entry.asset as NSString).pathExtension
-            guard let url = bundle.url(forResource: name, withExtension: ext),
-                  let data = try? Data(contentsOf: url),
-                  // ⚠️ `UIImage(data:)`, NOT `ImagePipeline.decodeDownsampled`.
-                  //
-                  // Two reasons, and the second is a live defect. Downsampling a
-                  // GRID is a broken grid — every frame boundary lands
-                  // mid-pixel. And `CGImageSourceCreateThumbnailAtIndex` with
-                  // `kCGImageSourceShouldCacheImmediately`, which is what that
-                  // helper does, NEVER RETURNS on HEIC under concurrent load in
-                  // the iOS 26 simulator: 128 markers sat on their fallback
-                  // forever, no error, 7% CPU. Same bytes through `UIImage`
-                  // resolved in 0.12 s.
-                  let image = UIImage(data: data)
-            else { throw URLError(.cannotDecodeContentData) }
-
-            let step = CFTimeInterval(entry.stepMS ?? Double(entry.frameMS)) / 1000
-            if entry.kind == "still", let scale = entry.scale,
-               let rotation = entry.rotation, let opacity = entry.opacity {
-                return .decomposed(AnimatedIconStill(
-                    mark: image,
-                    track: AnimatedIconMotionTrack(
-                        scales: scale, rotations: rotation, alphas: opacity, step: step
-                    )
-                ))
+        try await withCheckedThrowingContinuation { continuation in
+            decodeQueue.async {
+                continuation.resume(with: Result { try decode(entry, from: bundle) })
             }
-            return .sheet(AnimatedIconSheet(
-                sheet: image, frameCount: entry.frameCount,
-                columns: entry.columns ?? 4, frameDuration: step,
-                gutterPX: entry.gutterPX ?? 0,
-                startTime: entry.startMS.map { TimeInterval($0) / 1000 }
+        }
+    }
+
+    private nonisolated static func decode(_ entry: Entry, from bundle: Bundle) throws -> AnimatedIconArt {
+        let name = (entry.asset as NSString).deletingPathExtension
+        let ext = (entry.asset as NSString).pathExtension
+        guard let url = bundle.url(forResource: name, withExtension: ext),
+              let data = try? Data(contentsOf: url),
+              // ⚠️ `UIImage(data:)`, NOT `ImagePipeline.decodeDownsampled`.
+              //
+              // Two reasons, and the second is a live defect. Downsampling a
+              // GRID is a broken grid — every frame boundary lands
+              // mid-pixel. And `CGImageSourceCreateThumbnailAtIndex` with
+              // `kCGImageSourceShouldCacheImmediately`, which is what that
+              // helper does, NEVER RETURNS on HEIC under concurrent load in
+              // the iOS 26 simulator: 128 markers sat on their fallback
+              // forever, no error, 7% CPU. Same bytes through `UIImage`
+              // resolved in 0.12 s.
+              let encoded = UIImage(data: data)
+        else { throw URLError(.cannotDecodeContentData) }
+        // Decoded now, on this queue (see `decodeQueue`).
+        let image = encoded.preparingForDisplay() ?? encoded
+
+        let step = CFTimeInterval(entry.stepMS ?? Double(entry.frameMS)) / 1000
+        if entry.kind == "still", let scale = entry.scale,
+           let rotation = entry.rotation, let opacity = entry.opacity {
+            return .decomposed(AnimatedIconStill(
+                mark: image,
+                track: AnimatedIconMotionTrack(
+                    scales: scale, rotations: rotation, alphas: opacity, step: step
+                )
             ))
-        }.value
+        }
+        return .sheet(AnimatedIconSheet(
+            sheet: image, frameCount: entry.frameCount,
+            columns: entry.columns ?? 4, frameDuration: step,
+            gutterPX: entry.gutterPX ?? 0,
+            startTime: entry.startMS.map { TimeInterval($0) / 1000 }
+        ))
     }
 }
