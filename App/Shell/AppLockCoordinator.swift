@@ -63,7 +63,7 @@ final class AppLockCoordinator {
 
     private func showLock() {
         guard lockWindow == nil else { return }
-        let window = UIWindow(windowScene: scene)
+        let window = AppWindow(windowScene: scene)
         window.windowLevel = .alert + 1
         window.overrideUserInterfaceStyle = mainWindow.overrideUserInterfaceStyle
         CareModePreference.apply(to: [window])

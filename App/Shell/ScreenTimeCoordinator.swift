@@ -197,7 +197,7 @@ final class ScreenTimeCoordinator {
 
     /// A reminder in its own window, above the app's sheets and alerts.
     private func show(_ controller: ScreenTimeReminderViewController) {
-        let window = UIWindow(windowScene: scene)
+        let window = AppWindow(windowScene: scene)
         // Above the app's sheets and alerts, below App Lock's `.alert + 1`.
         window.windowLevel = .alert
         window.overrideUserInterfaceStyle = mainWindow.overrideUserInterfaceStyle

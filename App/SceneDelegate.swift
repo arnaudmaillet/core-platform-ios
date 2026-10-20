@@ -44,15 +44,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
         let window: UIWindow = shakeWindow
         #else
-        let window = UIWindow(windowScene: windowScene)
+        // An `AppWindow`: it carries the bar tap shield — taps in a bar's area
+        // never reach the content under it; pans still scroll it (#562, #1145).
+        let window = AppWindow(windowScene: windowScene)
         #endif
         // The brand's pink (#1169): every system control and every
         // `.tintColor` read follows it. The asset catalog's AccentColor carries
         // the same values for what the window does not reach.
         window.tintColor = Palette.tint
-        // Taps in a bar's area never reach the content under it; pans still
-        // scroll it (#562).
-        window.addGestureRecognizer(BarTapShield())
         // Endless decoration rests once nobody has touched the app for a
         // while, and wakes on the next touch (#580). `-idle-calm-off` keeps it
         // moving for QA that watches an animation without touching.

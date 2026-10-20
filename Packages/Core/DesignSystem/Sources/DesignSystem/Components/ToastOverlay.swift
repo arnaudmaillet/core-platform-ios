@@ -386,7 +386,7 @@ final class ToastOverlay {
 /// and the toast that Retry fired went to `Feedback`'s in-screen fallback
 /// (`ToastOverlay.overlay(for:)` serves the key window only) — and the
 /// keyboard's first responder lives in the key window too.
-final class ToastOverlayWindow: UIWindow {
+final class ToastOverlayWindow: AppWindow {
     override var canBecomeKey: Bool { false }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
