@@ -277,7 +277,9 @@ final class CountryUnlockSheetViewController: UIViewController {
                 present(alert, animated: true)
                 return
             }
-            MemberGates.perform(.unlockCountry, from: self) { [weak self] in self?.unlock() }
+            MemberGates.perform(.unlockCountry, from: self) { [weak self] in
+                Task { [weak self] in await self?.unlock() }
+            }
         }, for: .primaryActionTriggered)
         unlockButton.setContentHuggingPriority(.init(1), for: .horizontal)
         let fill = unlockButton.widthAnchor.constraint(equalToConstant: 10_000)
@@ -306,8 +308,11 @@ final class CountryUnlockSheetViewController: UIViewController {
         }
     }
 
-    private func unlock() {
-        switch access.unlock(country.code) {
+    private func unlock() async {
+        // One unlock at a time: the server is being asked.
+        unlockButton.isEnabled = false
+        let outcome = await access.unlock(country.code)
+        switch outcome {
         case .unlocked, .alreadyUnlocked:
             HapticNotification().notificationOccurred(.success)
             let code = country.code
@@ -316,6 +321,13 @@ final class CountryUnlockSheetViewController: UIViewController {
         case .insufficientGems(let needed, _):
             HapticNotification().notificationOccurred(.error)
             refreshBalance(price: needed)
+        case .priceChanged(let price):
+            // The new price, to confirm again (#1475): nothing was charged.
+            Feedback.failure("The price changed: now \(price) gems. Nothing was charged.", from: self)
+            refreshBalance(price: price)
+        case .failed:
+            Feedback.failure(ShopPurchaseFeedback.unreachable, from: self)
+            unlockButton.isEnabled = true
         case .unknownCountry:
             dismiss(animated: true)
         }

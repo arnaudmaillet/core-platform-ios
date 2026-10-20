@@ -47,6 +47,11 @@ public enum CountryUnlockOutcome: Equatable, Sendable {
     case alreadyUnlocked
     case insufficientGems(needed: Int, have: Int)
     case unknownCountry
+    /// The rank moved since the price was shown (#1475): nothing charged;
+    /// the new price.
+    case priceChanged(price: Int)
+    /// The server could not be asked (#1475): nothing charged; try again.
+    case failed
 }
 
 /// Which countries this ACCOUNT has opened on the map, and opening more with
@@ -78,7 +83,9 @@ public protocol CountryAccess: AnyObject {
     func standing(of code: String) -> CountryStanding?
     /// Every country's standing, busiest first — the shop's list.
     func standings() -> [CountryStanding]
-    func unlock(_ code: String) -> CountryUnlockOutcome
+    /// Unlocks it with gems — through the server for a member (#1475), so it
+    /// waits.
+    func unlock(_ code: String) async -> CountryUnlockOutcome
     /// Whether anything at all has been posted in `code` — not whether the
     /// map's current query brought any of it. A country with posts never
     /// wears the empty country's disc (`CountryLayer.wantsFlag`), even where

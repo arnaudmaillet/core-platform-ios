@@ -145,7 +145,7 @@ struct CountryLayerTests {
             }
         }
         func standings() -> [CountryStanding] { [] }
-        func unlock(_ code: String) -> CountryUnlockOutcome { .unknownCountry }
+        func unlock(_ code: String) async -> CountryUnlockOutcome { .unknownCountry }
         func hasPosts(in code: String) -> Bool { posted.contains(code) }
     }
 
@@ -158,6 +158,6 @@ struct CountryLayerTests {
             code == "ES" ? CountryStanding(code: "ES", rank: 2, likes: 10, posts: 3, price: 50) : nil
         }
         func standings() -> [CountryStanding] { [] }
-        func unlock(_ code: String) -> CountryUnlockOutcome { .unknownCountry }
+        func unlock(_ code: String) async -> CountryUnlockOutcome { .unknownCountry }
     }
 }

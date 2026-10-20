@@ -28,7 +28,7 @@ struct ShopStorefrontTests {
         func isUnlocked(_ code: String) -> Bool { unlocked.contains(code) }
         func standing(of code: String) -> CountryStanding? { all.first { $0.code == code } }
         func standings() -> [CountryStanding] { all.reversed() }
-        func unlock(_ code: String) -> CountryUnlockOutcome {
+        func unlock(_ code: String) async -> CountryUnlockOutcome {
             unlocks.append(code)
             unlocked.insert(code)
             return .unlocked(remainingGems: gems)

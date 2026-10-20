@@ -112,6 +112,9 @@ public struct MockBackend: Sendable {
             }
         )
         wallet.register(on: bff)
+        // The account's countries (#1475): unlocked with the wallet's gems,
+        // kept across launches as the fleet keeps them.
+        MockCountryUnlockService(wallet: wallet, persistence: .standard).register(on: bff)
         // A guest signing up is credited the welcome gift by the wallet
         // (#1008): a flat 50, once per device (#1146). The upgrade itself is
         // the "a guest was here" — no date is needed for the amount.

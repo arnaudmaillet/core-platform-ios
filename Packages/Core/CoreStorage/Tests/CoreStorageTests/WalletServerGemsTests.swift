@@ -148,16 +148,6 @@ struct WalletServerGemsTests {
         #expect(await fixture.store.purchaseItem("banner.animated", price: 60, idempotencyKey: "key-00003") == .failed)
     }
 
-    /// A spend no server call carries yet (the mock's country unlocks) comes
-    /// off the server's balance on this device; never below it.
-    @Test func aSpendOffTheServerComesOffItsBalance() async {
-        let fixture = Fixture(state(gems: 40))
-        await fixture.store.refreshFromServer()
-        #expect(fixture.store.spendGems(15) == .spent(remaining: 25))
-        #expect(fixture.store.snapshot().gems == 25)
-        #expect(fixture.store.spendGems(30) == .insufficient(gems: 25))
-    }
-
     /// A guest's wallet is not the server's: nothing goes through it.
     @Test func aGuestsWalletIsNotTheServers() async {
         let defaults = UserDefaults(suiteName: "wallet-gems-\(UUID().uuidString)")!

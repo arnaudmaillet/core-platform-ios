@@ -17,7 +17,7 @@ struct ShopProfileItemsTests {
         func isUnlocked(_ code: String) -> Bool { code == "FR" }
         func standing(of code: String) -> CountryStanding? { nil }
         func standings() -> [CountryStanding] { [] }
-        func unlock(_ code: String) -> CountryUnlockOutcome { .unknownCountry }
+        func unlock(_ code: String) async -> CountryUnlockOutcome { .unknownCountry }
     }
 
     private final class Items: ProfileItemSelling {

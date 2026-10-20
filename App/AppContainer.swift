@@ -1087,7 +1087,9 @@ final class AppContainer {
             activity: CountryAccessService.mockActivity(in: mockBackend),
             isMember: { [unowned self] in self.memberGate.isMember },
             locator: currentCountry,
-            covers: CountryAccessService.mockCovers(in: mockBackend)
+            covers: CountryAccessService.mockCovers(in: mockBackend),
+            // A member's countries are the server's (#1475).
+            geo: GeoDiscovery_V1_GeoDiscoveryServiceClient(client: authenticatedRPCClient)
         )
     }()
 

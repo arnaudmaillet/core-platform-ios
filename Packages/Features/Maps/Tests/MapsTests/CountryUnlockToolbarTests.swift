@@ -19,7 +19,7 @@ struct CountryUnlockToolbarTests {
             CountryStanding(code: code, rank: 4, likes: 8_700, posts: 86, price: 50)
         }
         func standings() -> [CountryStanding] { [] }
-        func unlock(_ code: String) -> CountryUnlockOutcome { .unlocked(remainingGems: gems - 50) }
+        func unlock(_ code: String) async -> CountryUnlockOutcome { .unlocked(remainingGems: gems - 50) }
     }
 
     private func makeSheet(gems: Int = 100) throws -> (CountryUnlockSheetViewController, UINavigationController) {

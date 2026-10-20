@@ -144,7 +144,7 @@ struct CurrentCountryTests {
         func standings() -> [CountryStanding] {
             ["FR", "ES", "JP"].enumerated().map { CountryStanding(code: $1, rank: $0 + 1, likes: 1, posts: 1, price: 15) }
         }
-        func unlock(_ code: String) -> CountryUnlockOutcome { .unknownCountry }
+        func unlock(_ code: String) async -> CountryUnlockOutcome { .unknownCountry }
     }
 
     private final class NoLocationAccess: CountryAccess {
@@ -153,6 +153,6 @@ struct CurrentCountryTests {
         func isUnlocked(_ code: String) -> Bool { code == "FR" }
         func standing(of code: String) -> CountryStanding? { nil }
         func standings() -> [CountryStanding] { [] }
-        func unlock(_ code: String) -> CountryUnlockOutcome { .unknownCountry }
+        func unlock(_ code: String) async -> CountryUnlockOutcome { .unknownCountry }
     }
 }
