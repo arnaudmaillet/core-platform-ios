@@ -111,16 +111,16 @@ public final class EditProfileViewModel {
 
     public var videoBannerRow: VideoBannerRow {
         guard banner != nil, gallery != nil, let items else { return .hidden }
-        guard items.owns(.videoBanner) else { return .locked(price: ProfileItem.videoBanner.gemPrice) }
+        guard items.owns(.videoBanner) else { return .locked(price: items.price(of: .videoBanner)) }
         return bannerVideoURL == nil ? .off : .on
     }
 
     public var gems: Int { items?.gems ?? 0 }
 
     /// Buys the item with gems — bought once, for the account, for good.
-    public func buyVideoBanner() -> ProfileItemPurchase {
+    public func buyVideoBanner() async -> ProfileItemPurchase {
         guard let items else { return .unavailable }
-        let purchase = items.buy(.videoBanner)
+        let purchase = await items.buy(.videoBanner)
         onBannerChange?()
         return purchase
     }

@@ -104,8 +104,94 @@ struct MockWalletServiceTests {
     @Test func aShotThatDoesNotFitIsRefused() async throws {
         let (wallet, _, _) = make()
         let post = someoneElsesPost
+        #expect(try await buyPack(wallet).outcome == .bought)
         _ = try await stake(wallet, post: post, likes: 200)
         #expect(try await stake(wallet, post: post, likes: 0, shot: true).outcome == .shotDoesNotFit)
+    }
+
+    // MARK: Spending gems (#1475)
+
+    private func newKey() -> String { UUID().uuidString.replacingOccurrences(of: "-", with: "") }
+
+    private func buyPack(
+        _ wallet: Wallet_V1_WalletServiceClient, packID: String = "", key: String? = nil
+    ) async throws -> Wallet_V1_BuyStakePackResponse {
+        var request = Wallet_V1_BuyStakePackRequest()
+        request.accountID = MockAuthService.accountID
+        request.packID = packID
+        request.idempotencyKey = key ?? newKey()
+        return try #require(await wallet.buyStakePack(request: request, headers: [:]).message)
+    }
+
+    private func purchase(
+        _ wallet: Wallet_V1_WalletServiceClient, item: String, price: Int64, key: String? = nil
+    ) async throws -> Wallet_V1_PurchaseItemResponse {
+        var request = Wallet_V1_PurchaseItemRequest()
+        request.accountID = MockAuthService.accountID
+        request.itemID = item
+        request.expectedPrice = price
+        request.idempotencyKey = key ?? newKey()
+        return try #require(await wallet.purchaseItem(request: request, headers: [:]).message)
+    }
+
+    /// A pack costs its gems once, loads its shots, and does not stack; a
+    /// shot spends one of them, and none left fires none.
+    @Test func aPackIsBoughtOnceAndItsShotsAreTheServers() async throws {
+        let (wallet, _, _) = make()
+        let key = newKey()
+        let bought = try await buyPack(wallet, key: key)
+        #expect(bought.outcome == .bought)
+        #expect(bought.wallet.gems == 50)
+        #expect(bought.wallet.stakeShots == 3)
+        #expect(bought.wallet.stakePackID == "shots_3")
+        // A retry with the same key charges nothing more.
+        let replay = try await buyPack(wallet, key: key)
+        #expect(replay.outcome == .bought)
+        #expect(replay.wallet.gems == 50)
+        #expect(try await buyPack(wallet).outcome == .packStillActive)
+
+        let post = someoneElsesPost
+        #expect(try await stake(wallet, post: post, likes: 0, shot: true).outcome == .staked)
+        var read = Wallet_V1_GetWalletRequest()
+        read.accountID = MockAuthService.accountID
+        #expect(try #require(await wallet.getWallet(request: read, headers: [:]).message).stakeShots == 2)
+    }
+
+    @Test func noPackNoShot() async throws {
+        let (wallet, _, _) = make()
+        #expect(try await stake(wallet, post: someoneElsesPost, likes: 0, shot: true).outcome == .noStakeShots)
+    }
+
+    @Test func aPackBeyondTheGemsIsRefused() async throws {
+        let (wallet, _, _) = make()
+        let answer = try await buyPack(wallet, packID: "shots_10")
+        #expect(answer.outcome == .insufficientGems)
+        #expect(answer.wallet.gems == 100)
+        #expect(answer.wallet.stakeShots == 0)
+    }
+
+    /// A catalogue item: bought once at its price, then owned; another price
+    /// or too few gems charge nothing; free ones are owned by everyone.
+    @Test func aCatalogueItemIsBoughtOnceAndOwned() async throws {
+        let (wallet, _, _) = make()
+        #expect(try await purchase(wallet, item: "theme.violet", price: 40).outcome == .priceChanged)
+        #expect(try await purchase(wallet, item: "banner.animated", price: 500).outcome == .insufficientGems)
+        #expect(try await purchase(wallet, item: "theme.pink", price: 0).outcome == .alreadyOwned)
+        #expect(try await purchase(wallet, item: "theme.teal", price: 50).outcome == .unknownItem)
+        let key = newKey()
+        let bought = try await purchase(wallet, item: "theme.violet", price: 50, key: key)
+        #expect(bought.outcome == .purchased)
+        #expect(bought.wallet.gems == 50)
+        #expect(try await purchase(wallet, item: "theme.violet", price: 50, key: key).wallet.gems == 50, "a retry charges once")
+        #expect(try await purchase(wallet, item: "theme.violet", price: 50).outcome == .alreadyOwned)
+
+        var owned = Wallet_V1_ListOwnedItemsRequest()
+        owned.accountID = MockAuthService.accountID
+        let items = try #require(await wallet.listOwnedItems(request: owned, headers: [:]).message).items.map(\.itemID)
+        #expect(items == ["theme.pink", "theme.violet"])
+        let catalog = try #require(await wallet.listCatalog(request: Wallet_V1_ListCatalogRequest(), headers: [:]).message)
+        #expect(catalog.items.first { $0.itemID == "banner.animated" }?.price == 500)
+        #expect(catalog.items.first { $0.itemID == "theme.red" }?.family == .theme)
     }
 
     @Test func aBatchOverADayOldExpires() async throws {

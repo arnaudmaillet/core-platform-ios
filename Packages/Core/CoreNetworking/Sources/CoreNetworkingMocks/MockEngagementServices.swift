@@ -290,6 +290,19 @@ public final class MockWalletService: @unchecked Sendable {
     static let starterGems: Int64 = 100
     static let stakePackPrice: Int64 = 50
     static let stakePackShots: Int32 = 3
+    /// The packs on sale (#941), smallest first — the client's mock tiers.
+    static let stakePacks: [(id: String, shots: Int32, price: Int64)] = [
+        ("shots_3", 3, 50), ("shots_10", 10, 150), ("shots_25", 25, 325),
+    ]
+    /// The gem catalogue (#892): the wallet service's default
+    /// `WALLET_CATALOG`, in display order; 0 = free, owned by everyone.
+    static let catalog: [(id: String, price: Int64)] = [
+        ("theme.pink", 0), ("theme.violet", 50), ("theme.red", 50),
+        ("frame.gold", 60), ("frame.neon", 60), ("frame.aurora", 60),
+        ("banner.animated", 500),
+        ("card.paper", 80), ("card.night", 80), ("card.mint", 80),
+        ("avatar.animated", 500),
+    ]
     private static let persistenceKey = "mock.wallet.accounts"
 
     /// One account's wallet, as the server keeps it.
@@ -309,6 +322,10 @@ public final class MockWalletService: @unchecked Sendable {
         var positions: [Position]?
         /// The wallet's history, oldest first (#400). Optional, as above.
         var ledger: [LedgerEntry]?
+        /// The pack the shots came from (#941), and the catalogue items
+        /// bought (#892). Optional, as above.
+        var stakePackID: String?
+        var owned: [String]?
 
         /// The mock's wallets are kept under `mock.wallet.accounts` with
         /// their "points" keys (#1397): renamed, every kept wallet would
@@ -319,6 +336,17 @@ public final class MockWalletService: @unchecked Sendable {
             case likesEarned = "pointsEarned"
             case likesSpent = "pointsSpent"
             case stakeShots, claimedToday, claimDay, streakDays, lastClaimAt, positions, ledger
+            case stakePackID, owned
+        }
+
+        /// Records one movement of the gems, with the balance right after.
+        mutating func recordGems(_ kind: Wallet_V1_TransactionKind, delta: Int64, at moment: Date, ref: String = "") {
+            var entries = ledger ?? []
+            entries.append(LedgerEntry(
+                id: "tx-\(entries.count + 1)", gems: true, delta: delta, balanceAfter: gems,
+                kind: kind.rawValue, at: moment, ref: ref
+            ))
+            ledger = entries
         }
 
         /// Records one movement, with the balance right after.
@@ -377,6 +405,8 @@ public final class MockWalletService: @unchecked Sendable {
     }
     private var hourLedger: [String: [(Date, Int64)]] = [:]
     private var answers: [String: Wallet_V1_StakeResponse] = [:]
+    /// A pack's or an item's answer per key (#1475): a retry charges once.
+    private var spendAnswers: [String: Int] = [:]
     private var claimAnswers: [String: Wallet_V1_ClaimRewardResponse] = [:]
     /// Whether `account` may stake on `postID` at all: a post it may not
     /// read (taken down, deleted, withheld — `MockSocialServices.mayReadPost`)
@@ -405,7 +435,25 @@ public final class MockWalletService: @unchecked Sendable {
         }
         accounts = persistence?.data(forKey: Self.persistenceKey)
             .flatMap { try? JSONDecoder().decode([String: Account].self, from: $0) } ?? [:]
+        #if DEBUG
+        // `-wallet-gems N` (the app's QA hook): every wallet holds exactly N
+        // gems, the server's balance now that a member's gems are its (#1475).
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "-wallet-gems"), index + 1 < arguments.count,
+           let gems = Int64(arguments[index + 1]) {
+            debugGems = gems
+            accounts = accounts.mapValues { account in
+                var dressed = account
+                dressed.gems = gems
+                return dressed
+            }
+        }
+        #endif
     }
+
+    /// DEBUG `-wallet-gems N`: what a wallet opens with instead of the
+    /// starter gems.
+    private var debugGems: Int64?
 
     public func register(on bff: MockBFF) {
         bff.register(path: "/wallet.v1.WalletService/Stake") { [self] (request: Wallet_V1_StakeRequest, headers: Headers) -> Result<Wallet_V1_StakeResponse, ConnectError> in
@@ -432,6 +480,147 @@ public final class MockWalletService: @unchecked Sendable {
             }
             return .success(lock.withLock { myStakesLocked(request) })
         }
+        bff.register(path: "/wallet.v1.WalletService/BuyStakePack") { [self] (request: Wallet_V1_BuyStakePackRequest, headers: Headers) -> Result<Wallet_V1_BuyStakePackResponse, ConnectError> in
+            buyStakePack(request, caller: MockEngagementService.account(from: headers))
+        }
+        bff.register(path: "/wallet.v1.WalletService/PurchaseItem") { [self] (request: Wallet_V1_PurchaseItemRequest, headers: Headers) -> Result<Wallet_V1_PurchaseItemResponse, ConnectError> in
+            purchaseItem(request, caller: MockEngagementService.account(from: headers))
+        }
+        bff.register(path: "/wallet.v1.WalletService/ListOwnedItems") { [self] (request: Wallet_V1_ListOwnedItemsRequest, headers: Headers) -> Result<Wallet_V1_ListOwnedItemsResponse, ConnectError> in
+            if let refusal = Self.refusal(request.accountID, caller: MockEngagementService.account(from: headers)) {
+                return .failure(refusal)
+            }
+            return .success(lock.withLock { ownedItemsLocked(request.accountID) })
+        }
+        bff.register(path: "/wallet.v1.WalletService/ListCatalog") { (_: Wallet_V1_ListCatalogRequest, _: Headers) -> Result<Wallet_V1_ListCatalogResponse, ConnectError> in
+            var response = Wallet_V1_ListCatalogResponse()
+            response.items = Self.catalog.map { entry in
+                var item = Wallet_V1_CatalogItem()
+                item.itemID = entry.id
+                item.family = Self.family(of: entry.id)
+                item.price = entry.price
+                return item
+            }
+            return .success(response)
+        }
+    }
+
+    // MARK: Spending gems (#1475)
+
+    /// The catalogue family an item id names (`<family>.<name>`).
+    static func family(of itemID: String) -> Wallet_V1_ItemFamily {
+        switch itemID.split(separator: ".").first {
+        case "theme": .theme
+        case "icon": .appIcon
+        case "frame": .avatarFrame
+        case "banner": .animatedBanner
+        case "card": .cardStyle
+        case "avatar": .animatedAvatar
+        default: .unspecified
+        }
+    }
+
+    /// The history row a purchase of `family` writes.
+    private static func kind(of family: Wallet_V1_ItemFamily) -> Wallet_V1_TransactionKind {
+        switch family {
+        case .theme: .theme
+        case .appIcon: .appIcon
+        case .avatarFrame: .avatarFrame
+        case .animatedBanner: .animatedBanner
+        case .cardStyle: .cardStyle
+        case .animatedAvatar: .animatedAvatar
+        default: .unspecified
+        }
+    }
+
+    /// A pack bought with gems: refused while the current one has shots
+    /// (packs don't stack). A replayed key answers the first answer.
+    func buyStakePack(_ request: Wallet_V1_BuyStakePackRequest, caller: String?) -> Result<Wallet_V1_BuyStakePackResponse, ConnectError> {
+        if let refusal = Self.refusal(request.accountID, caller: caller) { return .failure(refusal) }
+        guard Self.isValidKey(request.idempotencyKey) else {
+            return .failure(ConnectError(code: .invalidArgument, message: "WAL-9002: idempotency_key"))
+        }
+        let packID = request.packID.isEmpty ? Self.stakePacks[0].id : request.packID
+        guard let pack = Self.stakePacks.first(where: { $0.id == packID }) else {
+            return .failure(ConnectError(code: .invalidArgument, message: "WAL-9005: pack_id"))
+        }
+        return .success(lock.withLock {
+            let replayKey = "pack/\(request.accountID)/\(request.idempotencyKey)"
+            var response = Wallet_V1_BuyStakePackResponse()
+            if let outcome = spendAnswers[replayKey] {
+                response.outcome = Wallet_V1_StakePackOutcome(rawValue: outcome) ?? .unspecified
+            } else {
+                var wallet = accountLocked(request.accountID)
+                if wallet.stakeShots > 0 {
+                    response.outcome = .packStillActive
+                } else if wallet.gems < pack.price {
+                    response.outcome = .insufficientGems
+                } else {
+                    wallet.gems -= pack.price
+                    wallet.recordGems(.stakePack, delta: -pack.price, at: now(), ref: pack.id)
+                    wallet.stakeShots = pack.shots
+                    wallet.stakePackID = pack.id
+                    accounts[request.accountID] = wallet
+                    response.outcome = .bought
+                }
+                spendAnswers[replayKey] = response.outcome.rawValue
+            }
+            response.wallet = walletLocked(request.accountID, at: now())
+            return response
+        })
+    }
+
+    /// A catalogue item bought with gems, once for good; free and owned ones
+    /// charge nothing. A replayed key answers the first answer.
+    func purchaseItem(_ request: Wallet_V1_PurchaseItemRequest, caller: String?) -> Result<Wallet_V1_PurchaseItemResponse, ConnectError> {
+        if let refusal = Self.refusal(request.accountID, caller: caller) { return .failure(refusal) }
+        guard Self.isValidKey(request.idempotencyKey) else {
+            return .failure(ConnectError(code: .invalidArgument, message: "WAL-9002: idempotency_key"))
+        }
+        return .success(lock.withLock {
+            let replayKey = "item/\(request.accountID)/\(request.idempotencyKey)"
+            var response = Wallet_V1_PurchaseItemResponse()
+            if let outcome = spendAnswers[replayKey] {
+                response.outcome = Wallet_V1_PurchaseOutcome(rawValue: outcome) ?? .unspecified
+            } else {
+                var wallet = accountLocked(request.accountID)
+                let owned = Set(wallet.owned ?? [])
+                if let item = Self.catalog.first(where: { $0.id == request.itemID }) {
+                    if item.price == 0 || owned.contains(item.id) {
+                        response.outcome = .alreadyOwned
+                    } else if request.expectedPrice != item.price {
+                        response.outcome = .priceChanged
+                    } else if wallet.gems < item.price {
+                        response.outcome = .insufficientGems
+                    } else {
+                        wallet.gems -= item.price
+                        wallet.recordGems(Self.kind(of: Self.family(of: item.id)), delta: -item.price, at: now(), ref: item.id)
+                        wallet.owned = (wallet.owned ?? []) + [item.id]
+                        accounts[request.accountID] = wallet
+                        response.outcome = .purchased
+                    }
+                } else {
+                    response.outcome = .unknownItem
+                }
+                spendAnswers[replayKey] = response.outcome.rawValue
+            }
+            response.wallet = walletLocked(request.accountID, at: now())
+            return response
+        })
+    }
+
+    /// Free items first, then the bought ones, oldest first.
+    private func ownedItemsLocked(_ account: String) -> Wallet_V1_ListOwnedItemsResponse {
+        var response = Wallet_V1_ListOwnedItemsResponse()
+        let free = Self.catalog.filter { $0.price == 0 }.map(\.id)
+        let bought = accountLocked(account).owned ?? []
+        response.items = (free + bought).map { id in
+            var item = Wallet_V1_OwnedItem()
+            item.itemID = id
+            item.family = Self.family(of: id)
+            return item
+        }
+        return response
     }
 
     private static func refusal(_ account: String, caller: String?) -> ConnectError? {
@@ -475,7 +664,7 @@ public final class MockWalletService: @unchecked Sendable {
 
     private func accountLocked(_ id: String) -> Account {
         if let account = accounts[id] { return account }
-        var opened = Account(likes: startingLikes, gems: Self.starterGems)
+        var opened = Account(likes: startingLikes, gems: debugGems ?? Self.starterGems)
         // The wallet opens with its starter gems — and, in the mock, its
         // starting points — as the first rows of its history.
         let openedAt = now().addingTimeInterval(-7 * 86_400)
@@ -544,6 +733,14 @@ public final class MockWalletService: @unchecked Sendable {
         wallet.pointsEarned = account.likesEarned
         wallet.pointsSpent = account.likesSpent
         wallet.stakeShots = account.stakeShots
+        wallet.stakePackID = account.stakeShots > 0 ? account.stakePackID ?? Self.stakePacks[0].id : ""
+        wallet.stakePacks = Self.stakePacks.map { pack in
+            var offer = Wallet_V1_StakePackOffer()
+            offer.packID = pack.id
+            offer.shots = pack.shots
+            offer.price = pack.price
+            return offer
+        }
         wallet.claimedToday = Int32(account.claimDay == Self.day(moment) ? account.claimedToday : 0)
         wallet.dailyClaimCap = Int32(Self.dailyClaimCap)
         wallet.streakDays = Self.streak(account, at: moment)
@@ -753,6 +950,8 @@ public final class MockWalletService: @unchecked Sendable {
         let room = Self.perTargetCap - mine
         let spend: Int64
         if request.useStakeShot {
+            // The pack's shots are the server's (#1475): none left, none fired.
+            guard wallet.stakeShots > 0 else { return answer(.noStakeShots) }
             guard room > 0 else { return answer(.targetCapReached) }
             guard room >= Self.likesPerShot else { return answer(.shotDoesNotFit) }
             guard balance >= Self.likesPerShot else { return answer(.insufficientBalance) }
@@ -766,6 +965,7 @@ public final class MockWalletService: @unchecked Sendable {
         }
         wallet.likes -= spend
         wallet.likesSpent += spend
+        if request.useStakeShot { wallet.stakeShots -= 1 }
         wallet.record(.stake, likes: -spend, at: moment, ref: target)
         var positions = wallet.positions ?? []
         if let index = positions.firstIndex(where: { $0.target == target }) {

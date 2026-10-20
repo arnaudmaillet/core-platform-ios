@@ -154,7 +154,17 @@ public actor ServerWallet: WalletServer {
 
     /// The wire's wallet, as the store keeps it.
     static func state(_ wallet: Wallet_V1_Wallet) -> WalletServerState {
-        WalletServerState(
+        // The packs on sale (#941); an older server's one default pack.
+        var packs = wallet.stakePacks.map {
+            WalletStore.Policy.StakePack.Tier(id: $0.packID, shots: Int($0.shots), price: Int(clamping: $0.price))
+        }
+        if packs.isEmpty, wallet.stakePackShots > 0 {
+            packs = [WalletStore.Policy.StakePack.Tier(
+                id: "shots_\(wallet.stakePackShots)", shots: Int(wallet.stakePackShots),
+                price: Int(clamping: wallet.stakePackPrice)
+            )]
+        }
+        return WalletServerState(
             likes: Int(clamping: wallet.points),
             claimAvailable: wallet.claimAvailable,
             nextClaimAt: wallet.hasNextClaimAt ? wallet.nextClaimAt.date : nil,
@@ -162,8 +172,77 @@ public actor ServerWallet: WalletServer {
             claimedToday: Int(wallet.claimedToday),
             dailyClaimCap: Int(wallet.dailyClaimCap),
             streakDays: Int(wallet.streakDays),
-            likesCap: Int(clamping: wallet.pointsCap)
+            likesCap: Int(clamping: wallet.pointsCap),
+            gems: Int(clamping: wallet.gems),
+            stakeShots: Int(wallet.stakeShots),
+            stakePackID: wallet.stakePackID.isEmpty ? nil : wallet.stakePackID,
+            stakePacks: packs,
+            gemSpendingRestricted: wallet.gemSpendingRestricted
         )
+    }
+
+    // MARK: - Spending gems (#1475)
+
+    public func buyStakePack(packID: String, idempotencyKey: String) async throws
+        -> (outcome: WalletStakePackPurchase, wallet: WalletServerState) {
+        var request = Wallet_V1_BuyStakePackRequest()
+        request.accountID = try await account()
+        request.idempotencyKey = idempotencyKey
+        request.packID = packID
+        let response = await walletClient.buyStakePack(request: request, headers: [:])
+        if let error = response.error {
+            // Adults only (WAL-3001): a refusal, not a failure to ask.
+            if error.code == .permissionDenied { return (.unavailable, try await wallet()) }
+            throw NetworkFailureError(NetworkFailure(error))
+        }
+        guard let answer = response.message else { throw NetworkFailureError(.server(code: "empty_response")) }
+        let state = Self.state(answer.wallet)
+        let price = state.stakePacks.first { $0.id == packID }?.price ?? 0
+        let outcome: WalletStakePackPurchase = switch answer.outcome {
+        case .bought: .bought(shots: state.stakeShots, remainingGems: state.gems)
+        case .packStillActive: .packStillActive(shotsLeft: state.stakeShots)
+        case .insufficientGems: .insufficientGems(needed: price, have: state.gems)
+        case .unspecified, .UNRECOGNIZED: .unavailable
+        }
+        return (outcome, state)
+    }
+
+    public func purchaseItem(itemID: String, expectedPrice: Int, idempotencyKey: String) async throws
+        -> (outcome: WalletItemPurchase, wallet: WalletServerState) {
+        var request = Wallet_V1_PurchaseItemRequest()
+        request.accountID = try await account()
+        request.idempotencyKey = idempotencyKey
+        request.itemID = itemID
+        request.expectedPrice = Int64(expectedPrice)
+        let response = await walletClient.purchaseItem(request: request, headers: [:])
+        if let error = response.error {
+            if error.code == .permissionDenied { return (.unavailable, try await wallet()) }
+            throw NetworkFailureError(NetworkFailure(error))
+        }
+        guard let answer = response.message else { throw NetworkFailureError(.server(code: "empty_response")) }
+        let state = Self.state(answer.wallet)
+        let outcome: WalletItemPurchase = switch answer.outcome {
+        case .purchased: .purchased(remainingGems: state.gems)
+        case .alreadyOwned: .alreadyOwned
+        case .insufficientGems: .insufficientGems(needed: expectedPrice, have: state.gems)
+        case .priceChanged: .priceChanged(price: nil)
+        case .unknownItem, .unspecified, .UNRECOGNIZED: .unavailable
+        }
+        return (outcome, state)
+    }
+
+    public func ownedItems() async throws -> [String] {
+        var request = Wallet_V1_ListOwnedItemsRequest()
+        request.accountID = try await account()
+        let response = await walletClient.listOwnedItems(request: request, headers: [:])
+        if let error = response.error { throw NetworkFailureError(NetworkFailure(error)) }
+        return (response.message?.items ?? []).map(\.itemID)
+    }
+
+    public func catalog() async throws -> [WalletCatalogItem] {
+        let response = await walletClient.listCatalog(request: Wallet_V1_ListCatalogRequest(), headers: [:])
+        if let error = response.error { throw NetworkFailureError(NetworkFailure(error)) }
+        return (response.message?.items ?? []).map { WalletCatalogItem(id: $0.itemID, price: Int(clamping: $0.price)) }
     }
 }
 

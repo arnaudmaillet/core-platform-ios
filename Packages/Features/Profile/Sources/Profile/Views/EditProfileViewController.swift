@@ -489,7 +489,7 @@ extension EditProfileViewController {
         if gems < price { message += "\n\nYou have \(gems) gems: \(price - gems) more needed." }
         let sheet = UIAlertController(title: "Video Banner", message: message, preferredStyle: .actionSheet)
         let buy = UIAlertAction(title: "Buy for \(price) gems", style: .default) { [weak self] _ in
-            self?.buyVideoBanner()
+            Task { [weak self] in await self?.buyVideoBanner() }
         }
         buy.isEnabled = gems >= price
         sheet.addAction(buy)
@@ -501,8 +501,8 @@ extension EditProfileViewController {
         present(sheet, animated: true)
     }
 
-    private func buyVideoBanner() {
-        switch viewModel.buyVideoBanner() {
+    private func buyVideoBanner() async {
+        switch await viewModel.buyVideoBanner() {
         case .bought, .alreadyOwned:
             HapticNotification().notificationOccurred(.success)
             Feedback.success("Video banner unlocked", from: self)
@@ -512,6 +512,13 @@ extension EditProfileViewController {
             Feedback.warning("\(needed - have) more gems needed", from: self)
         case .unavailable:
             Feedback.warning("Not available on this account", from: self)
+        // The server's answers (#1475): nothing was charged.
+        case .priceChanged(let price):
+            Feedback.warning(
+                price.map { "The price changed: now \($0) gems" } ?? "The price changed", from: self
+            )
+        case .failed:
+            Feedback.warning("Couldn't reach the Shop. Nothing was charged — try again.", from: self)
         }
     }
 

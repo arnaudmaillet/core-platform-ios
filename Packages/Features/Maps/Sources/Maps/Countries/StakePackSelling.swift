@@ -34,6 +34,8 @@ public enum StakePackPurchase: Equatable, Sendable {
     case bought(shots: Int, remainingGems: Int)
     case packStillActive(shotsLeft: Int)
     case insufficientGems(needed: Int, have: Int)
+    /// The server could not be asked, or refused the account (#1475).
+    case unavailable
 }
 
 /// The Shop's Boosts section: the ×100 cartridge pack, and buying it with gems.
@@ -44,16 +46,17 @@ public enum StakePackPurchase: Equatable, Sendable {
 public protocol StakePackSelling: AnyObject {
     /// The pack, as of now.
     var offer: StakePackOffer { get }
-    func buyPack() -> StakePackPurchase
+    /// Buys a pack — through the server for a member (#1475), so it waits.
+    func buyPack() async -> StakePackPurchase
     /// Every pack on sale, smallest first (backend #941). Packs don't stack:
     /// while one is loaded, none can be bought.
     var offers: [StakePackOffer] { get }
-    func buyPack(_ offer: StakePackOffer) -> StakePackPurchase
+    func buyPack(_ offer: StakePackOffer) async -> StakePackPurchase
 }
 
 public extension StakePackSelling {
     var offers: [StakePackOffer] { [offer] }
-    func buyPack(_ offer: StakePackOffer) -> StakePackPurchase { buyPack() }
+    func buyPack(_ offer: StakePackOffer) async -> StakePackPurchase { await buyPack() }
 }
 
 public extension Notification.Name {

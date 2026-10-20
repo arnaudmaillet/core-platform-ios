@@ -52,7 +52,7 @@ struct EditProfileVideoBannerTests {
         var owned: Set<ProfileItem> = []
         init(gems: Int) { self.gems = gems }
         func owns(_ item: ProfileItem) -> Bool { owned.contains(item) }
-        func buy(_ item: ProfileItem) -> ProfileItemPurchase {
+        func buy(_ item: ProfileItem) async -> ProfileItemPurchase {
             guard !owned.contains(item) else { return .alreadyOwned }
             guard gems >= item.gemPrice else { return .insufficientGems(needed: item.gemPrice, have: gems) }
             gems -= item.gemPrice
@@ -87,18 +87,18 @@ struct EditProfileVideoBannerTests {
         #expect(makeModel(items: Items(gems: 0)).videoBannerRow == .locked(price: 500))
     }
 
-    @Test func buyingWithEnoughGemsOwnsItOnce() {
+    @Test func buyingWithEnoughGemsOwnsItOnce() async {
         let items = Items(gems: 650)
         let model = makeModel(items: items)
-        #expect(model.buyVideoBanner() == .bought(remainingGems: 150))
+        #expect(await model.buyVideoBanner() == .bought(remainingGems: 150))
         #expect(model.videoBannerRow == .off)
-        #expect(model.buyVideoBanner() == .alreadyOwned, "bought once, for good")
+        #expect(await model.buyVideoBanner() == .alreadyOwned, "bought once, for good")
         #expect(items.gems == 150)
     }
 
-    @Test func notEnoughGemsBuysNothing() {
+    @Test func notEnoughGemsBuysNothing() async {
         let model = makeModel(items: Items(gems: 82))
-        #expect(model.buyVideoBanner() == .insufficientGems(needed: 500, have: 82))
+        #expect(await model.buyVideoBanner() == .insufficientGems(needed: 500, have: 82))
         #expect(model.videoBannerRow == .locked(price: 500))
     }
 
@@ -117,7 +117,7 @@ struct EditProfileVideoBannerTests {
         let items = Items(gems: 500)
         let banner = Banner()
         let model = makeModel(items: items, banner: banner)
-        _ = model.buyVideoBanner()
+        _ = await model.buyVideoBanner()
         model.setVideoBanner(Self.video("ok", asset: "asset-ok"))
         for _ in 0..<100 where model.videoBannerRow != .on { try await Task.sleep(for: .milliseconds(10)) }
         #expect(await banner.sent == ["asset-ok"])

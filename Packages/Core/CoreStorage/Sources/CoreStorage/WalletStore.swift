@@ -46,19 +46,34 @@ public struct WalletServerState: Codable, Equatable, Sendable {
     public var dailyClaimCap: Int
     public var streakDays: Int
     public var likesCap: Int
+    /// The member's gems (#1475): the server's balance, the one the Shop
+    /// spends — never a device count.
+    public var gems: Int
+    /// Shots left in the stake pack, and the pack they came from.
+    public var stakeShots: Int
+    public var stakePackID: String?
+    /// The packs on sale (#941), smallest first; empty from a server that
+    /// predates them.
+    public var stakePacks: [WalletStore.Policy.StakePack.Tier]
+    /// Under 18 or age unknown: no gem may be spent (`WAL-3001`).
+    public var gemSpendingRestricted: Bool
 
     /// ⚠️ THE STORED KEYS ARE TODAY'S (#1397): the last wallet the server
     /// sent is kept as JSON and read with `try?`; a renamed key would drop
-    /// it on the update.
+    /// it on the update. The gems' keys came later (#1475) and decode with a
+    /// default, so a wallet stored before them still reads.
     enum CodingKeys: String, CodingKey {
         case likes = "points"
         case claimAvailable, nextClaimAt, claimAmount, claimedToday, dailyClaimCap, streakDays
         case likesCap = "pointsCap"
+        case gems, stakeShots, stakePackID, stakePacks, gemSpendingRestricted
     }
 
     public init(
         likes: Int, claimAvailable: Bool, nextClaimAt: Date?, claimAmount: Int,
-        claimedToday: Int, dailyClaimCap: Int, streakDays: Int, likesCap: Int
+        claimedToday: Int, dailyClaimCap: Int, streakDays: Int, likesCap: Int,
+        gems: Int = 0, stakeShots: Int = 0, stakePackID: String? = nil,
+        stakePacks: [WalletStore.Policy.StakePack.Tier] = [], gemSpendingRestricted: Bool = false
     ) {
         self.likes = likes
         self.claimAvailable = claimAvailable
@@ -68,6 +83,28 @@ public struct WalletServerState: Codable, Equatable, Sendable {
         self.dailyClaimCap = dailyClaimCap
         self.streakDays = streakDays
         self.likesCap = likesCap
+        self.gems = gems
+        self.stakeShots = stakeShots
+        self.stakePackID = stakePackID
+        self.stakePacks = stakePacks
+        self.gemSpendingRestricted = gemSpendingRestricted
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        likes = try container.decode(Int.self, forKey: .likes)
+        claimAvailable = try container.decode(Bool.self, forKey: .claimAvailable)
+        nextClaimAt = try container.decodeIfPresent(Date.self, forKey: .nextClaimAt)
+        claimAmount = try container.decode(Int.self, forKey: .claimAmount)
+        claimedToday = try container.decode(Int.self, forKey: .claimedToday)
+        dailyClaimCap = try container.decode(Int.self, forKey: .dailyClaimCap)
+        streakDays = try container.decode(Int.self, forKey: .streakDays)
+        likesCap = try container.decode(Int.self, forKey: .likesCap)
+        gems = try container.decodeIfPresent(Int.self, forKey: .gems) ?? 0
+        stakeShots = try container.decodeIfPresent(Int.self, forKey: .stakeShots) ?? 0
+        stakePackID = try container.decodeIfPresent(String.self, forKey: .stakePackID)
+        stakePacks = (try? container.decodeIfPresent([WalletStore.Policy.StakePack.Tier].self, forKey: .stakePacks)) ?? []
+        gemSpendingRestricted = try container.decodeIfPresent(Bool.self, forKey: .gemSpendingRestricted) ?? false
     }
 }
 
@@ -86,6 +123,18 @@ public protocol WalletServer: Sendable {
     /// A page of the wallet's history (wallet.v1 `ListWalletTransactions`,
     /// #400), newest first; nil `currency` lists both.
     func transactions(currency: WalletTransaction.Currency?, after pageToken: String?) async throws -> WalletTransactionPage
+    /// Buys a stake pack with the member's gems (wallet.v1 `BuyStakePack`,
+    /// #1475). A retry with the same key charges at most once.
+    func buyStakePack(packID: String, idempotencyKey: String) async throws
+        -> (outcome: WalletStakePackPurchase, wallet: WalletServerState)
+    /// Buys a catalogue item (wallet.v1 `PurchaseItem`, #1475) at the price
+    /// the app showed; another price answers `priceChanged`.
+    func purchaseItem(itemID: String, expectedPrice: Int, idempotencyKey: String) async throws
+        -> (outcome: WalletItemPurchase, wallet: WalletServerState)
+    /// The catalogue items the member owns (wallet.v1 `ListOwnedItems`).
+    func ownedItems() async throws -> [String]
+    /// The gem catalogue (wallet.v1 `ListCatalog`): every item's price.
+    func catalog() async throws -> [WalletCatalogItem]
 }
 
 public extension WalletServer {
@@ -95,6 +144,52 @@ public extension WalletServer {
     func transactions(currency: WalletTransaction.Currency?, after pageToken: String?) async throws -> WalletTransactionPage {
         WalletTransactionPage(transactions: [], nextPageToken: nil)
     }
+    /// Servers that sell nothing.
+    func buyStakePack(packID: String, idempotencyKey: String) async throws
+        -> (outcome: WalletStakePackPurchase, wallet: WalletServerState) {
+        throw WalletServerUnsupported()
+    }
+    func purchaseItem(itemID: String, expectedPrice: Int, idempotencyKey: String) async throws
+        -> (outcome: WalletItemPurchase, wallet: WalletServerState) {
+        throw WalletServerUnsupported()
+    }
+    func ownedItems() async throws -> [String] { throw WalletServerUnsupported() }
+    func catalog() async throws -> [WalletCatalogItem] { throw WalletServerUnsupported() }
+}
+
+/// A server that does not carry what was asked.
+public struct WalletServerUnsupported: Error, Equatable {
+    public init() {}
+}
+
+/// One item of the gem catalogue (wallet.v1 `CatalogItem`).
+public struct WalletCatalogItem: Equatable, Sendable {
+    /// `<family>.<name>`, e.g. `theme.violet`.
+    public let id: String
+    /// In gems; 0 = free, owned by every account.
+    public let price: Int
+
+    public init(id: String, price: Int) {
+        self.id = id
+        self.price = price
+    }
+}
+
+/// What buying a catalogue item did (wallet.v1 `PurchaseOutcome`, #1475).
+public enum WalletItemPurchase: Equatable, Sendable {
+    case purchased(remainingGems: Int)
+    /// Owned already, or free: nothing charged.
+    case alreadyOwned
+    case insufficientGems(needed: Int, have: Int)
+    /// The price is no longer the one shown: nothing charged. The current
+    /// one when the catalogue could be read again.
+    case priceChanged(price: Int?)
+    /// Not on sale, or not for this account (a guest, an under-18 —
+    /// `WAL-3001`): nothing charged.
+    case unavailable
+    /// The server could not be asked: nothing changed, and the same key goes
+    /// again with a retry.
+    case failed
 }
 
 /// One movement of the wallet (#400): a claim, a stake, a gift…
@@ -250,6 +345,9 @@ public enum WalletStakePackPurchase: Equatable, Sendable {
     /// Packs don't stack: the current one still has shots, nothing changed.
     case packStillActive(shotsLeft: Int)
     case insufficientGems(needed: Int, have: Int)
+    /// The server could not be asked, or refused the account (#1475):
+    /// nothing changed.
+    case unavailable
 }
 
 /// What a boost spend did (the backend spec's `BoostOutcome`, minus the
@@ -344,7 +442,7 @@ public final class WalletStore: @unchecked Sendable {
 
             /// One size of pack: its shots, its price. Server policy once
             /// wallet.v1 sells several (backend #941); mock tiers until then.
-            public struct Tier: Equatable, Sendable, Identifiable {
+            public struct Tier: Equatable, Sendable, Identifiable, Codable {
                 public let id: String
                 public let shots: Int
                 public let price: Int
@@ -421,6 +519,10 @@ public final class WalletStore: @unchecked Sendable {
         /// spent. Gems EARNED stay derived from the settled stakes.
         static let gemsGranted = "wallet.gemsGranted"
         static let gemsSpent = "wallet.gemsSpent"
+        /// A member's gems spent where no server call carries them yet (#1475:
+        /// the mock's country unlocks, until geo_discovery's UnlockCountry is
+        /// bound) — taken off the server's balance on this device.
+        static let gemsSpentOffServer = "wallet.gemsSpentOffServer"
         /// Shots left in the ×100 cartridge pack.
         static let stakeShots = "wallet.stakeShots"
         /// Which pack (`Policy.StakePack.Tier.id`) those shots came from.
@@ -512,7 +614,7 @@ public final class WalletStore: @unchecked Sendable {
             for key in [k(Key.balance), k(Key.lifetimeEarned), k(Key.lifetimeSpent), k(Key.lastClaimAt),
                         k(Key.claimedToday), k(Key.claimedTodayDay), k(Key.streakDays), k(Key.boostTotals),
                         k(Key.stakedAt), k(Key.seeded), k(Key.demoStakesSeeded), k(Key.gemsGranted), k(Key.gemsSpent),
-                        k(Key.stakeShots), k(Key.stakePackTier)] {
+                        k(Key.gemsSpentOffServer), k(Key.stakeShots), k(Key.stakePackTier)] {
                 defaults.removeObject(forKey: key)
             }
         }
@@ -714,12 +816,16 @@ public final class WalletStore: @unchecked Sendable {
     @discardableResult
     public func apply(_ state: WalletServerState, readAs owner: StorageScope.Owner) -> Bool {
         guard case .member(let account, _) = owner else { return false }
-        let pending = (likeOutbox?.batches ?? [])
-            .filter { ($0.accountID ?? account) == account }
-            .reduce(0) { $0 + $1.likes }
+        let unsent = (likeOutbox?.batches ?? []).filter { ($0.accountID ?? account) == account }
+        let pending = unsent.reduce(0) { $0 + $1.likes }
+        // The pack's shots are the server's too (#1475), minus those fired
+        // and not sent yet.
+        let pendingShots = unsent.filter(\.usesStakeShot).count
         let applied: Bool = lock.withLock {
             guard scope.owner == owner else { return false }
             defaults.set(max(0, state.likes - pending), forKey: k(Key.balance))
+            defaults.set(max(0, state.stakeShots - pendingShots), forKey: k(Key.stakeShots))
+            if let pack = state.stakePackID, !pack.isEmpty { defaults.set(pack, forKey: k(Key.stakePackTier)) }
             if let data = try? JSONEncoder().encode(state) {
                 defaults.set(data, forKey: k(Key.serverState))
             }
@@ -728,6 +834,11 @@ public final class WalletStore: @unchecked Sendable {
         if applied { postDidChange() }
         return applied
     }
+
+    /// What the member owns (#1475), for the account it was listed for, and
+    /// the catalogue's prices. Memory only: read again on each opening.
+    private var _ownedItems: (owner: StorageScope.Owner, items: Set<String>)?
+    private var _catalog: [String: Int] = [:]
 
     /// The member's stakes as the server last listed them (#903), with the
     /// account they belong to. Memory only: the sheet asks again on opening.
@@ -800,6 +911,111 @@ public final class WalletStore: @unchecked Sendable {
         guard _server != nil, case .member = scope.owner,
               let data = defaults.data(forKey: k(Key.serverState)) else { return nil }
         return try? JSONDecoder().decode(WalletServerState.self, from: data)
+    }
+
+    // MARK: - The server's gems (#1475)
+
+    /// Whether this wallet's gems are the server's: a member, with a server.
+    /// Then every spend goes through it, and the balance is its answer.
+    public var isServerBacked: Bool {
+        lock.withLock {
+            guard _server != nil, case .member = scope.owner else { return false }
+            return true
+        }
+    }
+
+    /// No gem may be spent by this account (under 18 or age unknown,
+    /// `WAL-3001`), as the server last said.
+    public var gemSpendingRestricted: Bool {
+        lock.withLock { serverStateLocked()?.gemSpendingRestricted ?? false }
+    }
+
+    /// The stake packs on sale: the server's, once read; the policy's mock
+    /// tiers otherwise.
+    public var stakePackTiers: [Policy.StakePack.Tier] {
+        lock.withLock {
+            let served = serverStateLocked()?.stakePacks ?? []
+            return served.isEmpty ? Policy.StakePack.tiers : served
+        }
+    }
+
+    /// Buys a stake pack — through the server for a member whose gems are
+    /// its (one charge per key), the device's mock otherwise.
+    public func buyStakePack(_ tier: Policy.StakePack.Tier, idempotencyKey: String) async -> WalletStakePackPurchase {
+        guard let server, case .member = scope.owner else { return buyStakePack(tier) }
+        let owner = scope.owner
+        do {
+            let answer = try await server.buyStakePack(packID: tier.id, idempotencyKey: idempotencyKey)
+            apply(answer.wallet, readAs: owner)
+            return answer.outcome
+        } catch {
+            return .unavailable
+        }
+    }
+
+    /// The catalogue items the member owns, as the server last listed them;
+    /// nil until listed (or for a wallet that is not the server's).
+    public var ownedItems: Set<String>? {
+        lock.withLock {
+            guard let owned = _ownedItems, owned.owner == scope.owner else { return nil }
+            return owned.items
+        }
+    }
+
+    /// A catalogue item's price, as the server last listed it.
+    public func catalogPrice(of itemID: String) -> Int? {
+        lock.withLock { _catalog[itemID] }
+    }
+
+    /// Reads what the member owns and the catalogue's prices from the
+    /// server. Returns whether the ownership was read.
+    @discardableResult
+    public func refreshItemsFromServer() async -> Bool {
+        guard let server, case .member = scope.owner else { return false }
+        let owner = scope.owner
+        async let owned = try? server.ownedItems()
+        async let catalog = try? server.catalog()
+        let (items, prices) = await (owned, catalog)
+        let changed: Bool = lock.withLock {
+            guard scope.owner == owner else { return false }
+            if let prices { _catalog = Dictionary(prices.map { ($0.id, $0.price) }, uniquingKeysWith: { first, _ in first }) }
+            if let items { _ownedItems = (owner, Set(items)) }
+            return items != nil || prices != nil
+        }
+        if changed { postDidChange() }
+        return items != nil
+    }
+
+    /// Buys a catalogue item at `price` through the server (#1475), one
+    /// charge per key; the item is owned at once on success.
+    public func purchaseItem(_ itemID: String, price: Int, idempotencyKey: String) async -> WalletItemPurchase {
+        guard let server, case .member = scope.owner else { return .unavailable }
+        let owner = scope.owner
+        let answer: (outcome: WalletItemPurchase, wallet: WalletServerState)
+        do {
+            answer = try await server.purchaseItem(itemID: itemID, expectedPrice: price, idempotencyKey: idempotencyKey)
+        } catch {
+            return .failed
+        }
+        apply(answer.wallet, readAs: owner)
+        switch answer.outcome {
+        case .purchased, .alreadyOwned:
+            let owned: Bool = lock.withLock {
+                guard scope.owner == owner else { return false }
+                var items = _ownedItems?.owner == owner ? _ownedItems?.items ?? [] : []
+                items.insert(itemID)
+                _ownedItems = (owner, items)
+                return true
+            }
+            if owned { postDidChange() }
+            return answer.outcome
+        case .priceChanged:
+            // The catalogue again, so the shelf shows the price to pay.
+            await refreshItemsFromServer()
+            return .priceChanged(price: catalogPrice(of: itemID))
+        default:
+            return answer.outcome
+        }
     }
 
     // MARK: - Mutations
@@ -1024,7 +1240,9 @@ public final class WalletStore: @unchecked Sendable {
                 claimedToday: server.claimedToday,
                 dailyClaimCap: server.dailyClaimCap,
                 streakDays: server.streakDays,
-                gems: gemsLocked(at: moment),
+                // The server's gems (#1475), less what this device spent
+                // where no server call carries it yet.
+                gems: serverGemsLocked(server),
                 stakeShots: defaults.integer(forKey: k(Key.stakeShots)),
                 likesCap: server.likesCap
             )
@@ -1072,9 +1290,25 @@ public final class WalletStore: @unchecked Sendable {
         return max(0, earned + defaults.integer(forKey: k(Key.gemsGranted)) - defaults.integer(forKey: k(Key.gemsSpent)))
     }
 
-    /// Spends `amount` gems, all or nothing.
+    /// The server's gems, less what this device spent off the server.
+    private func serverGemsLocked(_ server: WalletServerState) -> Int {
+        max(0, server.gems - defaults.integer(forKey: k(Key.gemsSpentOffServer)))
+    }
+
+    /// Spends `amount` gems on the device, all or nothing — a guest's mock,
+    /// and, for a member whose gems are the server's (#1475), a spend no
+    /// server call carries yet (the mock's country unlocks): it comes off the
+    /// server's balance here.
     public func spendGems(_ amount: Int) -> WalletGemSpend {
         let outcome: WalletGemSpend = lock.withLock {
+            if let server = serverStateLocked() {
+                let gems = serverGemsLocked(server)
+                guard amount > 0, gems >= amount else { return .insufficient(gems: gems) }
+                defaults.set(
+                    defaults.integer(forKey: k(Key.gemsSpentOffServer)) + amount, forKey: k(Key.gemsSpentOffServer)
+                )
+                return .spent(remaining: gems - amount)
+            }
             let gems = gemsLocked(at: now())
             guard amount > 0, gems >= amount else { return .insufficient(gems: gems) }
             defaults.set(defaults.integer(forKey: k(Key.gemsSpent)) + amount, forKey: k(Key.gemsSpent))

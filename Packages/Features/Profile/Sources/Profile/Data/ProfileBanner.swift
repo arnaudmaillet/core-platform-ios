@@ -10,7 +10,14 @@ import Foundation
 public protocol ProfileItemAccess: AnyObject {
     var gems: Int { get }
     func owns(_ item: ProfileItem) -> Bool
-    func buy(_ item: ProfileItem) -> ProfileItemPurchase
+    /// Its price in gems: the catalogue's, as last read (#1475).
+    func price(of item: ProfileItem) -> Int
+    /// Buys it — through the server for a member (#1475), so it waits.
+    func buy(_ item: ProfileItem) async -> ProfileItemPurchase
+}
+
+public extension ProfileItemAccess {
+    func price(of item: ProfileItem) -> Int { item.gemPrice }
 }
 
 /// Edit Profile → Video banner (#944): the viewer's banner from the loop of

@@ -27,7 +27,8 @@ public protocol ThemeSelling: AnyObject {
     func owns(_ theme: AccentTheme) -> Bool
     /// The theme the app draws in now.
     var applied: AccentTheme { get }
-    func buy(_ theme: AccentTheme) -> ProfileItemPurchase
+    /// Buys it — through the server for a member (#1475), so it waits.
+    func buy(_ theme: AccentTheme) async -> ProfileItemPurchase
     /// Draws the app in `theme`, at once — an owned one only.
     func apply(_ theme: AccentTheme)
 }

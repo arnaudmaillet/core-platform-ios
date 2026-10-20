@@ -31,7 +31,7 @@ struct ShopThemesTests {
             [ThemeOffer(theme: .pink, price: 0), ThemeOffer(theme: .violet, price: 50), ThemeOffer(theme: .red, price: 50)]
         }
         func owns(_ theme: AccentTheme) -> Bool { owned.contains(theme) }
-        func buy(_ theme: AccentTheme) -> ProfileItemPurchase {
+        func buy(_ theme: AccentTheme) async -> ProfileItemPurchase {
             guard !owned.contains(theme) else { return .alreadyOwned }
             guard access.gems >= 50 else { return .insufficientGems(needed: 50, have: access.gems) }
             access.gems -= 50
@@ -92,16 +92,16 @@ struct ShopThemesTests {
 
     /// Bought: the gems are spent, the card turns Owned, nothing is applied
     /// until asked; a second buy spends nothing.
-    @Test func buyingTurnsTheCardOwnedWithoutApplyingIt() throws {
+    @Test func buyingTurnsTheCardOwnedWithoutApplyingIt() async throws {
         let access = Access()
         let themes = Themes(access: access)
         let (front, _) = front(access, themes: themes)
         let violet = try #require(themes.offers.first { $0.theme == .violet })
-        #expect(front.buyTheme(violet) == .bought(remainingGems: 30))
+        #expect(await front.buyTheme(violet) == .bought(remainingGems: 30))
         front.rebuild()
         #expect(front.themeCards.map(\.accessibilityValue) == ["In use", "Owned", "50 gems"])
         #expect(themes.appliedLog.isEmpty, "buying never applies by itself")
-        #expect(front.buyTheme(violet) == .alreadyOwned)
+        #expect(await front.buyTheme(violet) == .alreadyOwned)
         #expect(access.gems == 30)
     }
 

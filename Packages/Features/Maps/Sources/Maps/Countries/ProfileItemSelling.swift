@@ -9,7 +9,14 @@ public protocol ProfileItemSelling: AnyObject {
     /// What the shelf shows, in order.
     var items: [ProfileItem] { get }
     func owns(_ item: ProfileItem) -> Bool
-    func buy(_ item: ProfileItem) -> ProfileItemPurchase
+    /// Its price in gems: the catalogue's, as last read (#1475).
+    func price(of item: ProfileItem) -> Int
+    /// Buys it — through the server for a member (#1475), so it waits.
+    func buy(_ item: ProfileItem) async -> ProfileItemPurchase
+}
+
+public extension ProfileItemSelling {
+    func price(of item: ProfileItem) -> Int { item.gemPrice }
 }
 
 extension ProfileItem {

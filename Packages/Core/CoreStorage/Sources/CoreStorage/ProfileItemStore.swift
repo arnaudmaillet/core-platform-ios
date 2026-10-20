@@ -7,10 +7,18 @@ public enum ProfileItem: String, CaseIterable, Sendable {
     /// top of the profile (#944; the owner, 2026-10-18).
     case videoBanner = "video-banner"
 
-    /// What it costs, in gems (the owner, 2026-10-18: 500, once, forever).
+    /// What it costs, in gems (the owner, 2026-10-18: 500, once, forever) —
+    /// the catalogue's price once it has been read (`WalletStore.catalogPrice`).
     public var gemPrice: Int {
         switch self {
         case .videoBanner: 500
+        }
+    }
+
+    /// The gem catalogue's item id (backend #892, #915).
+    public var catalogID: String {
+        switch self {
+        case .videoBanner: "banner.animated"
         }
     }
 }
@@ -23,6 +31,23 @@ public enum ProfileItemPurchase: Equatable, Sendable {
     case insufficientGems(needed: Int, have: Int)
     /// Not for this account: a guest, or a teen's purchases (#401).
     case unavailable
+    /// The price is no longer the one shown (#1475): nothing charged. The
+    /// current one, when known.
+    case priceChanged(price: Int?)
+    /// The server could not be asked (#1475): nothing charged; try again.
+    case failed
+
+    /// What a catalogue purchase through the wallet did, in these words.
+    public init(_ purchase: WalletItemPurchase) {
+        self = switch purchase {
+        case .purchased(let remaining): .bought(remainingGems: remaining)
+        case .alreadyOwned: .alreadyOwned
+        case .insufficientGems(let needed, let have): .insufficientGems(needed: needed, have: have)
+        case .priceChanged(let price): .priceChanged(price: price)
+        case .unavailable: .unavailable
+        case .failed: .failed
+        }
+    }
 }
 
 /// The profile items an ACCOUNT owns — not a profile's, as with countries
