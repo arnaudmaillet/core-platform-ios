@@ -378,7 +378,12 @@ struct LiveLookTests {
         _ matching: (RGB) -> Bool
     ) async throws -> RGB? {
         // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
-        return try await TimingTolerance.firstAnswer(looks: Int(limit * 100), step: .milliseconds(10)) {
+        // And none while the composed reader decodes toward a frame (#1021).
+        let renderer = controller.debugRenderer(in: view)
+        return try await TimingTolerance.firstAnswer(
+            looks: Int(limit * 100), whileDecoding: { TimingTolerance.decoding(renderer?.debugComposedState) },
+            ceiling: Int(TimingTolerance.decodingCeiling * 100), step: .milliseconds(10)
+        ) {
             shown(controller, view).flatMap { matching($0) ? $0 : nil }
         }
     }
@@ -450,9 +455,13 @@ struct LiveLookTests {
         var shownAt = renderer.currentFrameTime
         var seen: [(time: Double, colour: RGB)] = []
         // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
+        // And none while a restarted reader decodes toward its first frame
+        // (#1021), up to the ceiling.
         var looks = 0
-        while Set(seen.map(\.time)).count < 4, looks < 6000 {
-            looks += 1
+        var ticks = 0
+        while Set(seen.map(\.time)).count < 4, looks < 6000, ticks < Int(TimingTolerance.decodingCeiling * 100) {
+            ticks += 1
+            if !TimingTolerance.decoding(renderer.debugComposedState) { looks += 1 }
             try await Task.sleep(for: .milliseconds(10))
             if let head = controller.playheadSeconds(in: view) {
                 // The whole four-second item loops: a step back past half of
@@ -564,7 +573,11 @@ struct ComposedFrameRefreshTests {
         _ reader: ComposedFrameReader, at seconds: Double, within limit: Double = 20
     ) async throws -> (buffer: CVPixelBuffer, time: CMTime)? {
         // Counted in LOOKS, not wall clock (#599): a descheduled runner spends none.
-        try await TimingTolerance.firstAnswer(looks: Int(limit * 200)) { reader.frame(at: time(seconds)) }
+        // And none while the reader decodes toward a frame (#1021).
+        try await TimingTolerance.firstAnswer(
+            looks: Int(limit * 200), whileDecoding: { TimingTolerance.decoding(reader.debugState) },
+            ceiling: Int(TimingTolerance.decodingCeiling * 200)
+        ) { reader.frame(at: time(seconds)) }
     }
 
     private func colour(of buffer: CVPixelBuffer) -> RGB {
