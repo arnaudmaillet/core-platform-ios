@@ -648,7 +648,8 @@ public actor PostComposer: PostComposing {
                 id: ProfileID(profile.profileID),
                 handle: profile.handle,
                 displayName: profile.displayName,
-                avatarURL: URL(string: profile.avatarURL)
+                avatarURL: URL(string: profile.avatarURL),
+                avatarFrameID: profile.avatarFrameID.isEmpty ? nil : profile.avatarFrameID
             )
         }
         let resolved = (accountID, profiles)

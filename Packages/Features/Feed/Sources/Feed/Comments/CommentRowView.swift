@@ -243,6 +243,8 @@ final class CommentRowView: UIView {
         isReplyRow = model.isReply
         refreshTypeDrivenGeometry()
         loadAvatar(model.avatarURL, for: model.id, using: imagePipeline)
+        // The frame the author wears (#943).
+        avatarView.frameID = model.avatarFrameID
     }
 
     /// Restates everything sized from the text: the disc's diameter and a
@@ -275,6 +277,7 @@ final class CommentRowView: UIView {
         caption: String,
         monogram: String,
         avatarURL: URL?,
+        avatarFrameID: String? = nil,
         likeCount: Int64?,
         imagePipeline: ImagePipeline?
     ) {
@@ -288,6 +291,8 @@ final class CommentRowView: UIView {
         setCaptionLikeCount(likeCount)
         becomeCaption()
         loadAvatar(avatarURL, for: nil, using: imagePipeline)
+        // The post author's frame (#943) — never a recycled comment's.
+        avatarView.frameID = avatarFrameID
     }
 
     /// The counter as a READING: the heart is quiet, the number is the post's,

@@ -34,6 +34,8 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
     /// rather than parsed back out of `metaText`.
     let authorHandle: String?
     let avatarURL: URL?
+    /// The author's avatar frame (#943); nil for none.
+    let avatarFrameID: String?
     let caption: String?
     let mediaURL: URL?
     let mediaKind: MediaKind
@@ -109,8 +111,10 @@ public struct FeedItemDisplayModel: Identifiable, Sendable, Equatable {
         cardMetrics: PostCardMetrics? = nil,
         extraMedia: [GalleryPost.MediaPage] = [],
         headAspectRatio: Double? = nil,
-        authorHandle: String? = nil
+        authorHandle: String? = nil,
+        avatarFrameID: String? = nil
     ) {
+        self.avatarFrameID = avatarFrameID
         self.authorHandle = authorHandle.flatMap { $0.isEmpty ? nil : $0 }
         self.headAspectRatio = headAspectRatio.flatMap { $0 > 0 && $0.isFinite ? $0 : nil }
         self.id = id
@@ -201,7 +205,8 @@ public struct FeedDisplayModelBuilder: Sendable {
             headAspectRatio: attachment.flatMap {
                 $0.pixelWidth > 0 && $0.pixelHeight > 0 ? $0.aspectRatio : nil
             },
-            authorHandle: entry.author.handle
+            authorHandle: entry.author.handle,
+            avatarFrameID: entry.author.avatarFrameID
         )
     }
 

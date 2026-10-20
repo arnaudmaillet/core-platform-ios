@@ -76,12 +76,17 @@ public struct AuthorSummary: Sendable, Equatable, Codable {
     public let handle: String
     public let displayName: String
     public let avatarURL: URL?
+    /// The avatar frame the author wears (#943, `avatar_frame_id`): a
+    /// catalogue item id, nil for none. Optional, so a snapshot stored
+    /// before it decodes with none.
+    public let avatarFrameID: String?
 
-    public init(id: ProfileID, handle: String, displayName: String, avatarURL: URL?) {
+    public init(id: ProfileID, handle: String, displayName: String, avatarURL: URL?, avatarFrameID: String? = nil) {
         self.id = id
         self.handle = handle
         self.displayName = displayName
         self.avatarURL = avatarURL
+        self.avatarFrameID = avatarFrameID
     }
 }
 

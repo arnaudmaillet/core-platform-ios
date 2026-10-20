@@ -50,7 +50,11 @@ private func cachedEntry(
             publishedAt: Date(timeIntervalSince1970: 1_760_000_000),
             likeCountsHidden: hidden
         ),
-        author: AuthorSummary(id: ProfileID(author), handle: "h-\(author)", displayName: "Name \(author)", avatarURL: avatar),
+        author: AuthorSummary(
+            id: ProfileID(author), handle: "h-\(author)", displayName: "Name \(author)", avatarURL: avatar,
+            // One author wears a frame (#943): it round-trips with the rest.
+            avatarFrameID: author == "author-2" ? "frame.neon" : nil
+        ),
         likeCount: likes
     )
 }
