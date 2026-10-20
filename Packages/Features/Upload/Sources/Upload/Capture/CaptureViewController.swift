@@ -90,6 +90,11 @@ final class CaptureViewController: UIViewController {
     private let lensChips = CaptureLensChipsView()
     private let band = MediaEditorBandView()
     private let libraryButton = UIButton(type: .custom)
+    /// The shutter row's band (#1145): the library, the shutter and undo
+    /// float over the preview with gaps between them, and a tap in a gap
+    /// focused the camera. Declared a bar, a tap there reaches nothing; the
+    /// controls take theirs, and a pinch still zooms.
+    private let shutterRowBand = UIView()
     private lazy var undoButton: UIButton = {
         let button = UIButton(configuration: .glass())
         button.configuration?.image = UIImage(systemName: "delete.left.fill")
@@ -543,6 +548,15 @@ final class CaptureViewController: UIViewController {
             shutter.widthAnchor.constraint(equalToConstant: CaptureShutterView.side)
             shutter.heightAnchor.constraint(equalToConstant: CaptureShutterView.side)
         }
+
+        shutterRowBand.isUserInteractionEnabled = false
+        shutterRowBand.constrain(in: view) { view in
+            shutterRowBand.leadingAnchor.constraint(equalTo: view.leadingAnchor)
+            shutterRowBand.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            shutterRowBand.topAnchor.constraint(equalTo: shutter.topAnchor, constant: -Spacing.sm)
+            shutterRowBand.bottomAnchor.constraint(equalTo: shutter.bottomAnchor, constant: Spacing.sm)
+        }
+        BarTouchGuard.declareBar(shutterRowBand, items: [shutter, libraryButton, undoButton, lockView])
 
         lockView.alpha = 0
         lockView.constrain(in: view) { _ in

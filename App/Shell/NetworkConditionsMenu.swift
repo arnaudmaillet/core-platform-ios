@@ -1,5 +1,6 @@
 #if DEBUG
 import CoreNetworkingMocks
+import DesignSystem
 import UIKit
 
 /// The mock network's runtime switch (#790): shake the device (Simulator:
@@ -53,7 +54,7 @@ enum NetworkConditionsMenu {
 }
 
 /// A window that reports a shake — the debug sheets' trigger.
-final class DebugShakeWindow: UIWindow {
+final class DebugShakeWindow: AppWindow {
     var onShake: (() -> Void)?
 
     override func motionEnded(_ motion: UIEvent.EventSubtype, with event: UIEvent?) {
