@@ -41,12 +41,12 @@ import UIKit
 ///
 /// # Two heights, one top
 ///   • SMALL (it opens here): the daily glance, measured to end under the
-///     three doors — a stored number, see `updateDetent`.
+///     Claim — a stored number, see `updateDetent`.
 ///   • LARGE (pulled up, or scrolled: a scroll in the small sheet grows it
 ///     before anything scrolls): the same list, the same top at the same
-///     place — growing only uncovers the active stakes.
-///   Dragging down goes large → small → dismissed. Pushing Stakes, Activity
-///   or How it works grows the sheet to large; back keeps large.
+///     place — growing only uncovers the active stakes. From there the
+///     sheet keeps large alone, so a drag down closes it (`expand`).
+///   Pushing Stakes, Activity or How it works keeps the sheet's height.
 ///
 /// # The economy it shows (`dev/economy/`, charter V5.3)
 ///   • **Likes** (currency A, the heart) — curation capacity: claimed, spent
@@ -180,7 +180,7 @@ final class WalletSheetViewController: UIViewController {
             let small = UISheetPresentationController.Detent.custom(identifier: Self.smallDetent) { [weak self] context in
                 min(self?.detentHeight ?? 560, context.maximumDetentValue)
             }
-            let large = UISheetPresentationController.Detent.large()
+            let large = largeDetent
             // ⚠️ OPAQUE AT BOTH HEIGHTS (#1494, the owner 2026-10-20): the
             // small height's default glass re-inked the grouped tones — the
             // page drew white and the cards grey, the wrong way round. The
@@ -192,17 +192,18 @@ final class WalletSheetViewController: UIViewController {
             // until it landed (filmed on the device, 2026-10-21).
             if #available(iOS 26.1, *) {
                 small.backgroundEffect = UIColorEffect(color: Surface.page)
-                large.backgroundEffect = UIColorEffect(color: Surface.page)
                 sheet.backgroundEffect = UIColorEffect(color: Surface.page)
             }
+            // Collapsed first (#1494, the owner 2026-10-21): the daily glance.
+            // Pulled up, it expands — and from there a drag down closes it,
+            // never back to collapsed (`expand`).
             sheet.detents = [small, large]
-            // Expanded first (#1494, the owner 2026-10-20); dragged down, it
-            // collapses to the daily glance.
-            sheet.selectedDetentIdentifier = .large
+            sheet.selectedDetentIdentifier = Self.smallDetent
             #if DEBUG
-            // `-wallet-sheet-small`: opens collapsed, for screenshots and tests.
-            if ProcessInfo.processInfo.arguments.contains("-wallet-sheet-small") {
-                sheet.selectedDetentIdentifier = Self.smallDetent
+            // `-wallet-sheet-large`: opens expanded, for screenshots and tests.
+            if ProcessInfo.processInfo.arguments.contains("-wallet-sheet-large") {
+                sheet.detents = [large]
+                sheet.selectedDetentIdentifier = .large
             }
             #endif
             // A scroll in the small sheet grows it before anything scrolls:
@@ -214,6 +215,24 @@ final class WalletSheetViewController: UIViewController {
             // the device.
         }
         return navigation
+    }
+
+    /// The large detent, opaque as the small one (see `wrappedInSheet`).
+    private lazy var largeDetent: UISheetPresentationController.Detent = {
+        let large = UISheetPresentationController.Detent.large()
+        if #available(iOS 26.1, *) { large.backgroundEffect = UIColorEffect(color: Surface.page) }
+        return large
+    }()
+
+    /// Expanded, the sheet keeps the large detent alone (#1494, the owner
+    /// 2026-10-21): a drag down then closes it outright rather than stopping
+    /// at the collapsed height on its way out.
+    private func expand(_ sheet: UISheetPresentationController) {
+        guard sheet.detents.count > 1 else { return }
+        sheet.animateChanges {
+            sheet.detents = [largeDetent]
+            sheet.selectedDetentIdentifier = .large
+        }
     }
 
     private var sheet: UISheetPresentationController? {
@@ -880,8 +899,8 @@ final class WalletSheetViewController: UIViewController {
     /// The large height, for a hook that needs the rows below the top.
     private func growForQA() {
         QAWait.until("-wallet grow", { [weak self] in self?.sheet != nil }) { [weak self] in
-            guard let sheet = self?.sheet else { return }
-            sheet.animateChanges { sheet.selectedDetentIdentifier = .large }
+            guard let self, let sheet else { return }
+            expand(sheet)
         }
     }
     #endif
@@ -914,11 +933,11 @@ extension WalletSheetViewController: UICollectionViewDelegate {
 }
 
 extension WalletSheetViewController: UISheetPresentationControllerDelegate {
-    /// Back at the small height, the list goes back to its top: the balance
-    /// never sits scrolled away inside a half sheet.
+    /// Pulled up (or scrolled) to large: large alone from then on — the next
+    /// drag down closes the sheet.
     func sheetPresentationControllerDidChangeSelectedDetentIdentifier(_ sheet: UISheetPresentationController) {
-        guard sheet.selectedDetentIdentifier == Self.smallDetent, navigationController?.topViewController === self else { return }
-        collectionView.setContentOffset(CGPoint(x: 0, y: -collectionView.adjustedContentInset.top), animated: true)
+        guard sheet.selectedDetentIdentifier == .large else { return }
+        expand(sheet)
     }
 }
 

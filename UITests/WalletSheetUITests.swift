@@ -28,7 +28,7 @@ final class WalletSheetUITests: XCTestCase {
     /// them — no Shop item in the bar. The Shop door opens
     /// the Shop.
     func testCollapsedRewardsAndTheShopDoorOpensTheShop() {
-        let app = launch(["-wallet-sheet-small"])
+        let app = launch()
 
         let claim = app.buttons["wallet.claim"]
         XCTAssertTrue(claim.waitForExistence(timeout: 25), "the Wallet has no Claim")
@@ -68,7 +68,7 @@ final class WalletSheetUITests: XCTestCase {
     /// Pulled up, the collapsed sheet grows to large without moving the top
     /// in it; the active stakes are below it, and the Claim claims.
     func testPullingUpGrowsTheSheetAndTheClaimStays() {
-        let app = launch(["-wallet-claim-ready", "-wallet-sheet-small"])
+        let app = launch(["-wallet-claim-ready"])
 
         let claim = app.buttons["wallet.claim"]
         XCTAssertTrue(claim.waitForExistence(timeout: 25))
@@ -111,16 +111,17 @@ final class WalletSheetUITests: XCTestCase {
         app.terminate()
     }
 
-    /// Expanded as it opens; the Activity and Settled doors push their
-    /// screens in the sheet — the filter in the bar, no title — and back
-    /// returns to Rewards; drag down goes large → small → dismissed.
-    func testTheDoorsPushAndDragDownStepsDown() {
+    /// Collapsed as it opens; the Activity and Settled doors push their
+    /// screens in the sheet — the filter in the bar — and back returns to
+    /// Rewards; pulled up, a drag down then closes it outright, never back
+    /// to collapsed (the owner, 2026-10-21).
+    func testTheDoorsPushAndASwipeFromLargeCloses() {
         let app = launch()
 
         let close = app.buttons["wallet.close"]
         XCTAssertTrue(close.waitForExistence(timeout: 25))
-        let largeTop = close.frame.minY
-        XCTAssertLessThan(largeTop, app.windows.firstMatch.frame.height / 4, "Rewards did not open expanded")
+        let smallTop = close.frame.minY
+        XCTAssertGreaterThan(smallTop, app.windows.firstMatch.frame.height / 4, "Rewards did not open collapsed")
         app.buttons["wallet.activity"].tap()
         let gems = app.segmentedControls.buttons["Gems"]
         XCTAssertTrue(gems.waitForExistence(timeout: 8), "the Activity door did not push the history")
@@ -135,18 +136,21 @@ final class WalletSheetUITests: XCTestCase {
         XCTAssertTrue(settled.isSelected, "the Settled door did not open on Settled")
         app.navigationBars.firstMatch.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(rewards.waitForExistence(timeout: 8), "back did not return to Rewards")
-        let wallet = rewards
+        XCTAssertEqual(close.frame.minY, smallTop, accuracy: 2, "a push changed the sheet's height")
 
-        // Large → small, the bar dragged down.
-        wallet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: wallet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 6)))
-        let small = NSPredicate { _, _ in close.exists && close.frame.minY > largeTop + Self.heightStep }
-        wait(for: [expectation(for: small, evaluatedWith: nil)], timeout: 8)
+        // Pulled up to large…
+        rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.05, thenDragTo: rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: -6)))
+        let large = NSPredicate { _, _ in close.frame.minY < smallTop - Self.heightStep }
+        wait(for: [expectation(for: large, evaluatedWith: nil)], timeout: 8)
 
-        // Small → dismissed.
-        wallet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.05, thenDragTo: wallet.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 12)))
-        XCTAssertTrue(close.waitForNonExistence(timeout: 8), "dragging the small Wallet down did not dismiss it")
+        // …a swipe down closes it outright: with large its only height, the
+        // sheet has nowhere to stop on the way.
+        rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(
+            forDuration: 0.05, thenDragTo: rewards.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 6)),
+            withVelocity: .fast, thenHoldForDuration: 0
+        )
+        XCTAssertTrue(close.waitForNonExistence(timeout: 8), "a drag down from large did not close Rewards")
         app.terminate()
     }
 }

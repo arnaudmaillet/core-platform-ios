@@ -454,10 +454,11 @@ class WalletStakeCell: UICollectionViewListCell {
             guard !Task.isCancelled, let self, self.shownURL == url else { return }
             // The picture takes the bone's place; a picture that never came
             // leaves the tile's quiet ground, not a bone that shimmers on.
-            UIView.transition(with: self.thumbnail, duration: 0.2, options: .transitionCrossDissolve) {
-                self.thumbnail.image = image
-                self.imageBone.isHidden = true
-            }
+            // ⚠️ No hand-written dissolve: a hero source's picture arrives on
+            // the loading ladder once #1088 moves it there
+            // (`HandWrittenImageLoadGuardTests`).
+            self.thumbnail.image = image
+            self.imageBone.isHidden = true
         }
     }
 
