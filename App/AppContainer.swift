@@ -1750,7 +1750,9 @@ final class AppContainer {
         },
         // A tapped `@handle`, a `core-platform.click/@handle` link (#524), a scanned QR
         // code and a `core-platform.click/s/<token>` link (#412).
-        lookupProfile: { [weak self] reference in await self?.profileID(for: reference) ?? .unavailable }
+        lookupProfile: { [weak self] reference in await self?.profileID(for: reference) ?? .unavailable },
+        // A shared place link (#985).
+        makePlacePage: { [unowned self] link in MapsFeatureBuilder.placePage(for: link, feed: self.feedFeature) }
     )
 
     var router: any Router { routeResolver }

@@ -7,6 +7,9 @@ import Foundation
 ///     https://core-platform.click/tag/travel     →  .hashtag("travel")
 ///     https://core-platform.click/s/Ab3_x-…      →  .profileShareToken("Ab3_x-…")
 ///     https://core-platform.click/family/K7M2…   →  .supervisionInvite("K7M2…")
+///     https://core-platform.click/place/country/FR  →  .place(.country(code: "FR"))
+///     https://core-platform.click/place/city/48.8566,2.3522?name=Paris&country=FR
+///                                                →  .place(.city(…, name: "Paris", countryCode: "FR"))
 ///     wynn://@kenji.dev, wynn:/tag/travel   (the same paths)
 ///
 /// The web form is what `ProfileShareLink` and a place's share URL already
@@ -38,6 +41,10 @@ public extension AppRoute {
         case 2 where parts[0].lowercased() == "family":
             guard let code = SupervisionInviteCode.normalized(parts[1]) else { return nil }
             self = .supervisionInvite(code)
+        case 3 where parts[0].lowercased() == "place":
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            guard let place = PlaceLink(path: Array(parts.dropFirst()), query: query) else { return nil }
+            self = .place(place)
         default:
             return nil
         }

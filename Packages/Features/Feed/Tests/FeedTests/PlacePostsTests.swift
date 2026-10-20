@@ -165,6 +165,24 @@ struct PlacePostsTests {
         #expect(profile.renderedActivity.map(\.id.rawValue) == ["pin-a"])
     }
 
+    /// A page opened ALONE (a shared place link, #985) has no pins: it asks
+    /// the place's first page at once, never showing the empty state before
+    /// the server has answered, and pages on from there.
+    @Test func aPageOpenedAloneStartsWithThePlacesFirstPage() async {
+        let pages = Pages()
+        pages.answers = [
+            "": PlacePostsPage(posts: [post("x1", reactions: 9), post("x2")], nextPageToken: "t1"),
+            "t1": PlacePostsPage(posts: [post("x3")], nextPageToken: nil),
+        ]
+        let profile = makeProfile(pages)
+        profile.beginLoading()
+        #expect(await settle { pages.asked == [nil] && !profile.renderedActivity.isEmpty }, "the first page was never asked")
+        #expect(Array(profile.renderedActivity.map(\.id.rawValue).prefix(2)) == ["x1", "x2"])
+        profile.loadMorePosts()
+        #expect(await settle { profile.renderedActivity.count == 3 })
+        #expect(pages.asked == [nil, "t1"])
+    }
+
     /// Done when: a refresh doesn't drop loaded pages.
     @Test func aRefreshKeepsThePagesLoaded() async {
         let pages = Pages()

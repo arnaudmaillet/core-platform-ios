@@ -123,6 +123,10 @@ final class PlaceProfileViewController: UIViewController {
     /// The place's next page — geo_discovery.v1 `ListPlacePosts`, past the
     /// map's pins. Nil: the pins are the whole page, as before.
     private let loadMore: ((String?) async throws -> PlacePostsPage)?
+    /// Opened with no pins — a shared place link (#985): its first posts are
+    /// the place's first page.
+    private var opensAlone: Bool { postIDs.isEmpty }
+    private var hasAppeared = false
     /// The posts those pages brought, in the server's order, after the
     /// ranked pins: appended, so no tile on screen ever moves for one.
     private var extraPosts: [GalleryPost] = []
@@ -257,6 +261,9 @@ final class PlaceProfileViewController: UIViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // A page opened alone (a link, #985) starts at its header.
+        if opensAlone, !hasAppeared { activityPage.restAtTop() }
+        hasAppeared = true
         // The BACKSTOP, on UIKit's own animation like every other install
         // (native chrome is UIKit's — see `TabBarRevealPolicy`). A tab switch
         // and a committed close install from `viewWillAppear` and find nothing
@@ -1652,9 +1659,17 @@ final class PlaceProfileViewController: UIViewController {
         if let landedHead {
             recent = [landedHead] + recent.filter { $0.id != landedHead.id }
         }
-        activityPage.render(recent.isEmpty
-            ? .empty(.init(title: "Nothing has happened here yet"))
-            : .content(recent))
+        // ⚠️ A PAGE OPENED ALONE HAS NO PINS (a shared link, #985): its first
+        // posts are the place's first page, asked for now, behind the
+        // skeleton — never the empty state before the server has answered.
+        if recent.isEmpty, hasMorePosts, emptyPagesInARow < Self.maxEmptyPagesInARow {
+            activityPage.render(.loading)
+            loadMorePosts()
+        } else {
+            activityPage.render(recent.isEmpty
+                ? .empty(.init(title: "Nothing has happened here yet"))
+                : .content(recent))
+        }
         shelf.apply(.init(title: "Popular", posts: Self.popular(self.corpus, limit: Self.popularRowCount)))
         updateLeadHeight()
         // ⚠️ THE WHOLE CORPUS. These are the PLACE's numbers, and a check-in
@@ -1686,7 +1701,11 @@ final class PlaceProfileViewController: UIViewController {
             activityPage.setPaging(false)
             // Whatever the answer, a feed waiting on the next page hears it.
             defer { feedContinuation.answered() }
-            guard let answer else { return }
+            guard let answer else {
+                // Nothing on screen to keep (a page opened alone): say it.
+                if corpus.isEmpty { activityPage.render(.failed(message: "Couldn't load this place's posts.")) }
+                return
+            }
             moreCursor = answer.nextPageToken.map(MoreCursor.token) ?? .exhausted
             let known = Set((renderedMembers ?? []).map(\.id) + extraPosts.map(\.id))
             var seen = known
@@ -1700,10 +1719,21 @@ final class PlaceProfileViewController: UIViewController {
             // A page that ended the place re-plans the tail; one that brought
             // posts appends them. Neither moves a tile already shown.
             if !fresh.isEmpty || !hasMorePosts { renderCorpus(reset: false) }
+            // No pins to lead the banner (a page opened alone): the first
+            // page's top post does — and the first page, landing under a
+            // header that grew with it, starts the list at its top.
+            if (renderedMembers ?? []).isEmpty, !fresh.isEmpty {
+                renderBanner(for: Self.bannerPost(in: Self.gallery(extraPosts)))
+                if extraPosts.count == fresh.count, view.window != nil { activityPage.restAtTop() }
+            }
             // Nothing new but more behind: no row reaches the end to ask, so
             // the next page is asked now — a few times, not forever.
             if fresh.isEmpty, hasMorePosts, emptyPagesInARow < Self.maxEmptyPagesInARow {
                 loadMorePosts()
+            } else if fresh.isEmpty, hasMorePosts, corpus.isEmpty {
+                // Empty pages ran out with nothing shown: the empty state,
+                // not a skeleton for ever.
+                renderCorpus(reset: false)
             }
         }
     }

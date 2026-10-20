@@ -42,6 +42,9 @@ final class RouteResolver: Router {
     /// (`ResolveShareToken`) names — handed to the profile pushed for
     /// `.profileHandle` / `.profileShareToken`, which asks it once on screen.
     private let lookupProfile: ProfileLookingUp
+    /// A place's page from a link (#985) — built by Maps, which owns the
+    /// atlas and the flags; nil for a place it cannot name.
+    private let makePlacePage: (PlaceLink) -> UIViewController?
     private let logger = Logger(subsystem: "cn.wynn.core-platform-ios", category: "navigation")
     /// The profile the router pushed last — what turns a second tap on the
     /// same author into nothing while that profile is the top screen, or
@@ -55,9 +58,11 @@ final class RouteResolver: Router {
         feedFeature: @escaping () -> any FeedFeatureBuilding,
         chatFeature: @escaping () -> any ChatFeatureBuilding,
         attachBalance: @escaping (UIViewController) -> Void,
-        lookupProfile: @escaping ProfileLookingUp = { _ in .unavailable }
+        lookupProfile: @escaping ProfileLookingUp = { _ in .unavailable },
+        makePlacePage: @escaping (PlaceLink) -> UIViewController? = { _ in nil }
     ) {
         self.lookupProfile = lookupProfile
+        self.makePlacePage = makePlacePage
         self.searchFeature = searchFeature
         self.profileFeature = profileFeature
         self.feedFeature = feedFeature
@@ -259,6 +264,15 @@ final class RouteResolver: Router {
             // once and resolved by the screen, like a handle. A token the owner
             // reset, or links they switched off, read as no one.
             routeToReference(.shareToken(token), for: route, using: navigator)
+
+        case .place(let link):
+            // A shared place (#985): the page alone, a plain push like a
+            // hashtag's.
+            guard let page = makePlacePage(link) else {
+                logger.info("route .place: no page for \(String(describing: link), privacy: .public)")
+                return
+            }
+            push(page, using: navigator)
 
         case .hashtag(let tag):
             // A tapped `#tag`, a hashtag completion, a searched `#tag` (#524):

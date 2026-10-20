@@ -686,6 +686,13 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         return surface
     }
 
+    public func makePlacePage(title: String, identity: PlaceIdentity) -> UIViewController {
+        placeGallery(
+            postIDs: [], title: title, rank: nil, identity: identity, following: nil,
+            feed: nil, mapReturn: nil, markerClose: nil
+        )
+    }
+
     public func makeClusterGallery(
         postIDs: [PostID],
         title: String,
@@ -694,6 +701,24 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         following: ClusterGalleryFollowing?,
         feed: UIViewController,
         mapReturn: @escaping (@escaping () -> UIImage?) -> (any ZoomTransitionSource)?,
+        markerClose: ((UIViewController) -> RevealGeometry?)?
+    ) -> UIViewController {
+        placeGallery(
+            postIDs: postIDs, title: title, rank: rank, identity: identity, following: following,
+            feed: feed, mapReturn: mapReturn, markerClose: markerClose
+        )
+    }
+
+    /// The place page, from the map (pins, the feed above it, a way home to
+    /// the marker) or alone (a link: none of those).
+    private func placeGallery(
+        postIDs: [PostID],
+        title: String,
+        rank: PlaceRankBadge?,
+        identity: PlaceIdentity?,
+        following: ClusterGalleryFollowing?,
+        feed: UIViewController?,
+        mapReturn: ((@escaping () -> UIImage?) -> (any ZoomTransitionSource)?)?,
         markerClose: ((UIViewController) -> RevealGeometry?)?
     ) -> UIViewController {
         let base = repository

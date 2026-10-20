@@ -299,7 +299,7 @@ extension MapsFeatureBuilder {
         return PlaceIdentity(
             flag: country.flatMap { FlagPalette.largeRoundFlag(for: $0.code) ?? FlagPalette.image(for: $0.code) },
             subtitle: country.map { place.kind == .country ? $0.continent : $0.name },
-            shareURL: shareURL(of: place),
+            shareURL: shareURL(of: place, countryCode: countryCode, centre: centre),
             query: placeQuery(of: place, countryCode: countryCode, centre: centre)
         )
     }
@@ -315,16 +315,47 @@ extension MapsFeatureBuilder {
         }
     }
 
-    /// A place's public web address: `https://<AppRoute.webHost>/place/<id>`.
-    ///
-    /// Synthesized client-side from the place's identity, as a profile's is
-    /// from its handle (`ProfileShareLink`, same host): no service returns
-    /// one, and the place identity itself is mock-only today (`MapPlace`).
-    static func shareURL(of place: MapPlace) -> URL? {
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = AppRoute.webHost
-        components.path = "/place/" + place.id
-        return components.url
+    /// A place's public web address (#985): what the server lists its posts
+    /// by — a country's code, a city's point with its name — on
+    /// `AppRoute.webHost` (`PlaceLink`). Never the mock's own `MapPlace.id`,
+    /// which no other device or mode could open. Nil when the place has
+    /// neither (at sea).
+    static func shareURL(of place: MapPlace, countryCode: String, centre: CLLocationCoordinate2D?) -> URL? {
+        placeLink(of: place, countryCode: countryCode, centre: centre)?.url
+    }
+
+    static func placeLink(of place: MapPlace, countryCode: String, centre: CLLocationCoordinate2D?) -> PlaceLink? {
+        switch place.kind {
+        case .country:
+            return countryCode.isEmpty ? nil : .country(code: countryCode.uppercased())
+        case .city:
+            return centre.map {
+                .city(latitude: $0.latitude, longitude: $0.longitude, name: place.name,
+                      countryCode: countryCode.isEmpty ? nil : countryCode.uppercased())
+            }
+        }
+    }
+
+    /// A place's page opened from a link (#985): alone, its posts from the
+    /// server page by page, its identity from the atlas — a country's name,
+    /// flag and continent; a city's name, its country's flag and name. Nil
+    /// for a country the atlas does not know.
+    public static func placePage(for link: PlaceLink, feed: any FeedFeatureBuilding) -> UIViewController? {
+        let place: MapPlace
+        let countryCode: String
+        let centre: CLLocationCoordinate2D?
+        switch link {
+        case .country(let code):
+            guard let country = CountryAtlas.shared.country(code: code) else { return nil }
+            place = MapPlace(id: "country:" + code.lowercased(), name: country.name, kind: .country)
+            countryCode = code
+            centre = nil
+        case .city(let latitude, let longitude, let name, let code):
+            place = MapPlace(id: "city:" + name.lowercased(), name: name, kind: .city)
+            countryCode = code ?? ""
+            centre = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
+        guard let identity = placeIdentity(of: place, countryCode: countryCode, centre: centre) else { return nil }
+        return feed.makePlacePage(title: place.galleryTitle, identity: identity)
     }
 }
