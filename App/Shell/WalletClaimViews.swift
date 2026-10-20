@@ -5,18 +5,15 @@ import MediaCore
 import PostGrid
 import UIKit
 
-// The pieces of the wallet sheet (`WalletClaimViewController`): the summary at
-// its head — the two currencies side by side over the streak and today's
-// earnings — the stake rows under it, and their section headers.
+// The pieces of the wallet's lists (#1476: the hub, `WalletHubViewController`):
+// the stake rows and their section headers. The hub's head and the likes gauge
+// are `WalletHubViews.swift`.
 //
-// ⚠️ **CARDS ONLY FOR WHAT CAN BE PRESSED** (26 September 2026). The summary
-// used to sit in three filled cards — two balances and a streak card — and a
-// card is the app's promise that a thing can be pressed: nothing in the summary
-// can. So the summary is BARE, big numbers straight on the sheet with
-// hairlines between them, and the only cards on the sheet are the stake rows,
-// which open their post. The sheet's ground is the SYSTEM's (glass while
-// small, opaque once large), so the rows wear a translucent fill that reads
-// on both.
+// ⚠️ **CARDS ONLY FOR WHAT CAN BE PRESSED** (26 September 2026): a card is the
+// app's promise that a thing can be pressed, so balances sit bare on the sheet
+// and the cards are the stake rows (which open their post), the Gems card and
+// the Wallet row. The sheet's ground is the SYSTEM's (glass while small,
+// opaque once large), so the rows wear a translucent fill that reads on both.
 
 // MARK: - Shared
 
@@ -69,292 +66,6 @@ func walletAgoText(since date: Date, now: Date) -> String {
     return "\(seconds / 86_400)d ago"
 }
 
-// MARK: - Summary
-
-/// One currency: its token, its name, its balance, and a word for what it is —
-/// on the page itself, no card (see the file's note).
-final class WalletBalanceTile: UIView {
-    private let iconView = UIImageView()
-    private let nameLabel = UILabel()
-    private let valueLabel = UILabel()
-    private let noteLabel = UILabel()
-
-    /// `icon` draws the token for an appearance: a baked coin is re-baked
-    /// when the appearance changes (`LikesSymbol.coinImage`).
-    init(icon: @escaping (UITraitCollection) -> UIImage?, name: String, note: String) {
-        super.init(frame: .zero)
-        iconView.image = icon(traitCollection)
-        registerForTraitChanges(
-            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self, UITraitDisplayScale.self]
-        ) { (tile: WalletBalanceTile, _: UITraitCollection) in tile.iconView.image = icon(tile.traitCollection) }
-        iconView.contentMode = .scaleAspectFit
-        nameLabel.text = name
-        nameLabel.font = .scaledSystemFont(ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17)
-        nameLabel.adjustsFontForContentSizeCategory = true
-        nameLabel.textColor = .secondaryLabel
-        // Rounded and monospaced: a balance is a figure that changes under
-        // the viewer's eyes, and its digits must not jostle when it does.
-        let base = UIFont.monospacedDigitSystemFont(ofSize: WalletSheetMetrics.balanceSize, weight: .bold)
-        valueLabel.font = base.fontDescriptor.withDesign(.rounded).map { UIFont(descriptor: $0, size: 0) } ?? base
-        valueLabel.textColor = .label
-        valueLabel.textAlignment = .center
-        valueLabel.adjustsFontSizeToFitWidth = true
-        valueLabel.minimumScaleFactor = 0.5
-        noteLabel.text = note
-        noteLabel.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 16)
-        noteLabel.adjustsFontForContentSizeCategory = true
-        noteLabel.textColor = .tertiaryLabel
-        noteLabel.textAlignment = .center
-
-        let top = UIStackView(arrangedSubviews: [iconView, nameLabel])
-        top.spacing = Spacing.xs
-        top.alignment = .center
-        let column = UIStackView(arrangedSubviews: [top, valueLabel, noteLabel])
-        column.axis = .vertical
-        column.alignment = .center
-        column.spacing = 0
-        column.setCustomSpacing(Spacing.xs, after: top)
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
-        NSLayoutConstraint.activate([
-            iconView.widthAnchor.constraint(equalToConstant: 18),
-            iconView.heightAnchor.constraint(equalToConstant: 18),
-            column.topAnchor.constraint(equalTo: topAnchor, constant: Spacing.sm),
-            column.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor),
-            column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
-            column.centerXAnchor.constraint(equalTo: centerXAnchor),
-            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm),
-            valueLabel.widthAnchor.constraint(lessThanOrEqualTo: widthAnchor),
-        ])
-        isAccessibilityElement = true
-        accessibilityLabel = name
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func setValue(_ value: Int) {
-        // The FULL number: the sheet is the ledger view, where "100 000" is
-        // the honest reading and the toolbar's "100K" stays glanceable.
-        valueLabel.text = value.formatted()
-        accessibilityValue = valueLabel.text
-    }
-
-    /// The line under the figure, and its tone.
-    func setNote(_ note: String, color: UIColor = .tertiaryLabel) {
-        noteLabel.attributedText = nil
-        noteLabel.text = note
-        noteLabel.textColor = color
-    }
-
-    /// A note that warns: the yellow triangle, the words neutral (#1124).
-    func setWarningNote(_ note: String) {
-        noteLabel.attributedText = Warning.note(note, font: noteLabel.font)
-    }
-
-    /// The claim's payoff: the new number pops.
-    func pop() {
-        valueLabel.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
-        UIView.animate(withDuration: 0.5, delay: 0, usingSpringWithDamping: 0.5, initialSpringVelocity: 2) {
-            self.valueLabel.transform = .identity
-        }
-    }
-}
-
-/// The head of the sheet: Points and Gems side by side, a hairline, then the
-/// streak on the left and today's earnings on the right.
-///
-/// ```
-///        ♥ Points      │      💎 Gems
-///          250         │         37
-///     To stake on posts│ Earned by your stakes
-///   ─────────────────────────────────────────
-///   🔥 3-day streak    │  Earned today  25 / 200
-///      Kept for today  │  ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
-/// ```
-///
-/// Bare, on the page: nothing here can be pressed, so nothing here wears a
-/// card. The balances get the height — they are what the sheet is for.
-final class WalletSummaryView: UIView {
-    let likesTile = WalletBalanceTile(
-        icon: { LikesSymbol.coinImage(traits: $0) },
-        name: "Likes", note: "To stake on posts"
-    )
-    let gemsTile = WalletBalanceTile(
-        icon: { _ in GemSymbol.glyphImage(UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)) },
-        name: GemSymbol.name, note: "Earned by your stakes"
-    )
-
-    private let streakDisc = UIView()
-    private let streakIcon = UIImageView()
-    private let streakTitle = UILabel()
-    private let streakSubtitle = UILabel()
-    private let earnedTitle = UILabel()
-    private let earnedValue = UILabel()
-    private let progressTrack = UIView()
-    private let progressFill = UIView()
-    private var progressWidth: NSLayoutConstraint?
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        let balancesDivider = Self.hairline()
-        let balances = UIStackView(arrangedSubviews: [likesTile, balancesDivider, gemsTile])
-        balances.alignment = .center
-        balances.spacing = Spacing.sm
-
-        // — Streak, left half —
-        streakDisc.layer.cornerRadius = 16
-        streakIcon.contentMode = .center
-        streakIcon.translatesAutoresizingMaskIntoConstraints = false
-        streakDisc.addSubview(streakIcon)
-        // Capped: the streak and today's earnings share one row, half each.
-        streakTitle.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 18)
-        streakTitle.adjustsFontForContentSizeCategory = true
-        streakTitle.textColor = .label
-        streakSubtitle.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 15)
-        streakSubtitle.adjustsFontForContentSizeCategory = true
-        streakSubtitle.textColor = .secondaryLabel
-        streakSubtitle.numberOfLines = 2
-        let streakText = UIStackView(arrangedSubviews: [streakTitle, streakSubtitle])
-        streakText.axis = .vertical
-        streakText.spacing = 1
-        let streak = UIStackView(arrangedSubviews: [streakDisc, streakText])
-        streak.spacing = Spacing.sm
-        streak.alignment = .center
-
-        // — Today's earnings, right half —
-        earnedTitle.text = "Earned today"
-        earnedTitle.font = .scaledSystemFont(ofSize: 12, relativeTo: .caption1, maximumPointSize: 15)
-        earnedTitle.adjustsFontForContentSizeCategory = true
-        earnedTitle.textColor = .secondaryLabel
-        earnedValue.font = .scaledMonospacedDigitSystemFont(
-            ofSize: 15, weight: .semibold, relativeTo: .subheadline, maximumPointSize: 18
-        )
-        earnedValue.adjustsFontForContentSizeCategory = true
-        earnedValue.textColor = .label
-        progressTrack.backgroundColor = .tertiarySystemFill
-        progressTrack.layer.cornerRadius = 2
-        progressFill.backgroundColor = LikesSymbol.tint
-        progressFill.layer.cornerRadius = 2
-        progressFill.translatesAutoresizingMaskIntoConstraints = false
-        progressTrack.addSubview(progressFill)
-        let earned = UIStackView(arrangedSubviews: [earnedTitle, earnedValue, progressTrack])
-        earned.axis = .vertical
-        earned.spacing = 3
-        earned.setCustomSpacing(Spacing.xs, after: earnedValue)
-
-        let halvesDivider = Self.hairline()
-        let halves = UIStackView(arrangedSubviews: [streak, halvesDivider, earned])
-        halves.alignment = .center
-        halves.spacing = Spacing.md
-
-        let rule = UIView()
-        rule.backgroundColor = .separator
-
-        let column = UIStackView(arrangedSubviews: [balances, rule, halves])
-        column.axis = .vertical
-        column.spacing = Spacing.md
-        column.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(column)
-        NSLayoutConstraint.activate([
-            column.topAnchor.constraint(equalTo: topAnchor),
-            column.leadingAnchor.constraint(equalTo: leadingAnchor),
-            column.trailingAnchor.constraint(equalTo: trailingAnchor),
-            column.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Spacing.sm),
-            // The two balances share the width evenly, the hairline between.
-            gemsTile.widthAnchor.constraint(equalTo: likesTile.widthAnchor),
-            balancesDivider.heightAnchor.constraint(equalTo: balances.heightAnchor, multiplier: 0.7),
-            rule.heightAnchor.constraint(equalToConstant: 0.5),
-            streakDisc.widthAnchor.constraint(equalToConstant: 32),
-            streakDisc.heightAnchor.constraint(equalToConstant: 32),
-            streakIcon.centerXAnchor.constraint(equalTo: streakDisc.centerXAnchor),
-            streakIcon.centerYAnchor.constraint(equalTo: streakDisc.centerYAnchor),
-            halvesDivider.heightAnchor.constraint(equalTo: halves.heightAnchor),
-            // The two halves share the row evenly too.
-            earned.widthAnchor.constraint(equalTo: streak.widthAnchor),
-            progressTrack.heightAnchor.constraint(equalToConstant: 4),
-            progressTrack.widthAnchor.constraint(equalTo: earned.widthAnchor),
-            progressFill.leadingAnchor.constraint(equalTo: progressTrack.leadingAnchor),
-            progressFill.topAnchor.constraint(equalTo: progressTrack.topAnchor),
-            progressFill.bottomAnchor.constraint(equalTo: progressTrack.bottomAnchor),
-        ])
-    }
-
-    /// A vertical hairline between two halves.
-    private static func hairline() -> UIView {
-        let line = UIView()
-        line.backgroundColor = .separator
-        line.translatesAutoresizingMaskIntoConstraints = false
-        line.widthAnchor.constraint(equalToConstant: 0.5).isActive = true
-        return line
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    func configure(with snapshot: WalletSnapshot) {
-        likesTile.setValue(snapshot.balance)
-        // The server's points cap (#901): how far the claim can fill the
-        // balance, and — at it — that only spending opens the claim again.
-        if let cap = snapshot.likesCap {
-            if snapshot.balance >= cap {
-                likesTile.setWarningNote("Full — stake to claim again")
-            } else {
-                likesTile.setNote("Up to \(cap.formatted())")
-            }
-        } else {
-            likesTile.setNote("To stake on posts")
-        }
-        gemsTile.setValue(snapshot.gems)
-
-        // The streak's three faces: none yet (invitation), fed today (kept),
-        // not yet fed (urgent) — each says what to DO, in a line.
-        let active = snapshot.streakDays > 0
-        streakIcon.image = UIImage(
-            systemName: active ? "flame.fill" : "flame",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-        )?.withTintColor(active ? .systemOrange : .secondaryLabel, renderingMode: .alwaysOriginal)
-        streakDisc.backgroundColor = active
-            ? UIColor.systemOrange.withAlphaComponent(0.15) : .quaternarySystemFill
-        if !active {
-            streakTitle.text = "No streak yet"
-            streakSubtitle.text = "Claim daily for up to ×2"
-        } else if snapshot.claimedToday > 0 {
-            streakTitle.text = "\(snapshot.streakDays)-day streak"
-            streakSubtitle.text = "Kept for today"
-        } else {
-            streakTitle.text = "\(snapshot.streakDays)-day streak"
-            streakSubtitle.text = "Claim to keep it"
-        }
-
-        earnedValue.text = "\(snapshot.claimedToday) / \(snapshot.dailyClaimCap)"
-        let fraction = snapshot.dailyClaimCap > 0
-            ? min(1, CGFloat(snapshot.claimedToday) / CGFloat(snapshot.dailyClaimCap)) : 0
-        progressWidth?.isActive = false
-        progressWidth = progressFill.widthAnchor.constraint(equalTo: progressTrack.widthAnchor, multiplier: fraction)
-        progressWidth?.isActive = true
-    }
-}
-
-final class WalletSummaryCell: UICollectionViewCell {
-    let summary = WalletSummaryView()
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        summary.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(summary)
-        NSLayoutConstraint.activate([
-            summary.topAnchor.constraint(equalTo: contentView.topAnchor),
-            summary.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            summary.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            summary.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-        ])
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-}
-
 // MARK: - Stakes
 
 /// One stake: the post it was placed on, and where it stands.
@@ -370,7 +81,7 @@ final class WalletSummaryCell: UICollectionViewCell {
 ///
 /// A card, and a pressable one: it opens the post in the feed, flying from
 /// its thumbnail (media) or revealing from the card (text) — see
-/// `WalletClaimViewController.openFeed`.
+/// `WalletHubViewController.openFeed`.
 ///
 /// The stake is local and always known; the POST is a lookup (#834). While
 /// it is out, the post part — thumbnail, author, caption — is bones laid over
@@ -716,7 +427,7 @@ final class WalletStakeCell: UICollectionViewCell {
     }
 
     /// The row as drawn now — the stand-in a text post's window crossfades
-    /// to and from (`WalletClaimViewController.heroOrigin`).
+    /// to and from (`WalletHubViewController.heroOrigin`).
     func renderedImage() -> UIImage? {
         guard bounds.width > 0, bounds.height > 0 else { return nil }
         return UIGraphicsImageRenderer(bounds: bounds).image { _ in
