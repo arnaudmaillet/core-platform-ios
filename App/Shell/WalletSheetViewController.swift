@@ -185,9 +185,15 @@ final class WalletSheetViewController: UIViewController {
             // small height's default glass re-inked the grouped tones — the
             // page drew white and the cards grey, the wrong way round. The
             // page's own colour is the sheet's ground instead.
+            //
+            // ⚠️ ON THE PRESENTATION TOO, not only the detents: during the
+            // rise the sheet was still glass, and its labels drew vibrant —
+            // "Likes" and the authors' names took the map's colour behind
+            // until it landed (filmed on the device, 2026-10-21).
             if #available(iOS 26.1, *) {
                 small.backgroundEffect = UIColorEffect(color: Surface.page)
                 large.backgroundEffect = UIColorEffect(color: Surface.page)
+                sheet.backgroundEffect = UIColorEffect(color: Surface.page)
             }
             sheet.detents = [small, large]
             // Expanded first (#1494, the owner 2026-10-20); dragged down, it
@@ -221,6 +227,9 @@ final class WalletSheetViewController: UIViewController {
         // The app's grouped page (#1494): cards lighter than their ground, at
         // both heights — the small sheet's glass is painted over on purpose.
         view.backgroundColor = Surface.page
+        // The foot's blur, every screen's (#1002): over Rewards and what it
+        // pushes, under the bar — the tab stacks' band, in this sheet's stack.
+        if let navigationController { BottomEdgeBlurView.install(in: navigationController) }
         buildCollection()
         buildChrome()
         buildBar()

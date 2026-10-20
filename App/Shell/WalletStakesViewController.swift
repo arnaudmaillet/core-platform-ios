@@ -33,11 +33,14 @@ final class WalletStakesViewController: UIViewController {
     private nonisolated enum Section: Hashable {
         case failed
         case day(Date)
+        /// The rows' bones while the listing is out (#1494).
+        case loading
     }
 
     private nonisolated enum Item: Hashable {
         case postsFailed
         case stake(String)
+        case bone(Int)
     }
 
     private let wallet: WalletStore
@@ -56,9 +59,6 @@ final class WalletStakesViewController: UIViewController {
     private var postLoads = WalletStakePostLoads()
     private var countdownTimer: Timer?
     private let walletObservers = WalletObserverTokenBag()
-    /// The app's loader while the listing is on its way and nothing is shown
-    /// (the stock spinner is not the app's, `StockSpinnerGuardTests`).
-    private let loader = AppLoaderView(size: .large)
     /// A Try Again on its way.
     private var isRetrying = false
 
@@ -86,8 +86,11 @@ final class WalletStakesViewController: UIViewController {
         super.viewDidLoad()
         // Clear: the sheet's own ground is the surface (the Wallet sheet's note).
         view.backgroundColor = .clear
-        // Large, at the page's leading edge (#1494).
+        // Large, at the page's leading edge (#1494); collapsed into the bar,
+        // still leading, beside the chevron — as Activity's (`.browser`: a
+        // navigator item centres it whenever the trailing item leaves room).
         navigationItem.largeTitleDisplayMode = .always
+        navigationItem.style = .browser
         // Active | Settled at the bar's trailing end (#1494), the Activity
         // screen's bar, so the Rewards sheet's two lists match.
         segments.selectedSegmentIndex = segment.rawValue
@@ -101,10 +104,6 @@ final class WalletStakesViewController: UIViewController {
         filter.hidesSharedBackground = true
         navigationItem.rightBarButtonItem = filter
         buildCollection()
-        loader.constrain(in: view) { parent in
-            loader.centerXAnchor.constraint(equalTo: parent.centerXAnchor)
-            loader.centerYAnchor.constraint(equalTo: parent.centerYAnchor)
-        }
 
         walletObservers.tokens = [
             NotificationCenter.default.addObserver(
@@ -182,12 +181,15 @@ final class WalletStakesViewController: UIViewController {
             cell.configure(retrying: postLoads.isRetrying, failedAfterRetry: postLoads.failedAfterRetry)
             cell.onRetry = { [weak self] in self?.retryFailedPosts() }
         }
+        let boneRegistration = UICollectionView.CellRegistration<WalletStakeBoneCell, Item> { _, _, _ in }
         dataSource = UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, item in
             switch item {
             case .stake:
                 collectionView.dequeueConfiguredReusableCell(using: stakeRegistration, for: indexPath, item: item)
             case .postsFailed:
                 collectionView.dequeueConfiguredReusableCell(using: failedRegistration, for: indexPath, item: item)
+            case .bone:
+                collectionView.dequeueConfiguredReusableCell(using: boneRegistration, for: indexPath, item: item)
             }
         }
         let headerRegistration = UICollectionView.SupplementaryRegistration<UICollectionViewListCell>(
@@ -230,6 +232,12 @@ final class WalletStakesViewController: UIViewController {
             list.appendSections([.failed])
             list.appendItems([.postsFailed], toSection: .failed)
         }
+        // Nothing to show yet and the listing on its way: the rows' bones,
+        // not a spinner (#1494).
+        if isLoading {
+            list.appendSections([.loading])
+            list.appendItems((0..<WalletHistoryViewController.boneRows).map(Item.bone), toSection: .loading)
+        }
         for day in WalletStakeDays.group(rows) {
             list.appendSections([.day(day.start)])
             list.appendItems(day.stakes.map { .stake($0.targetID) }, toSection: .day(day.start))
@@ -243,6 +251,7 @@ final class WalletStakesViewController: UIViewController {
             case .stake(let id):
                 previous.contains($0) && (stakeIDs.contains(id) || Self.isFirst($0, in: before) != Self.isFirst($0, in: list))
             case .postsFailed: previous.contains($0)
+            case .bone: false
             }
         })
         dataSource.apply(list, animatingDifferences: false)
@@ -255,21 +264,20 @@ final class WalletStakesViewController: UIViewController {
         return list.itemIdentifiers(inSection: section).first == item
     }
 
-    /// Loading (the app's loader), failed or empty, over the list — nothing
+    /// Nothing to show, and the listing on its way.
+    private var isLoading: Bool {
+        shown.isEmpty && (wallet.awaitsServerStakes || isRetrying)
+    }
+
+    /// Failed or empty, over the list (loading is the rows' bones) — nothing
     /// while there are stakes to show.
     override func updateContentUnavailableConfiguration(using state: UIContentUnavailableConfigurationState) {
-        let loading = shown.isEmpty && (wallet.awaitsServerStakes || isRetrying)
-        if loading {
-            loader.startAnimating()
-        } else {
-            loader.stopAnimating()
-        }
-        contentUnavailableConfiguration = loading ? nil : Self.unavailable(
+        contentUnavailableConfiguration = isLoading ? nil : Self.unavailable(
             segment: segment, isEmpty: shown.isEmpty, failed: wallet.stakesListingFailed
         ) { [weak self] in
             guard let self else { return }
             isRetrying = true
-            setNeedsUpdateContentUnavailableConfiguration()
+            refresh()
             Task { [weak self] in await self?.reloadListing() }
         }
     }

@@ -265,7 +265,7 @@ final class WalletHeaderView: UIView {
         streakIcon.image = UIImage(
             systemName: active ? "flame.fill" : "flame",
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
-        )?.withTintColor(active ? .systemOrange : .secondaryLabel, renderingMode: .alwaysOriginal)
+        )?.withTintColor(active ? WalletWeekStrip.ink : .secondaryLabel, renderingMode: .alwaysOriginal)
         streakLine.text = Self.streakText(for: snapshot)
         earnedLine.text = "\(snapshot.claimedToday) / \(snapshot.dailyClaimCap) today"
     }

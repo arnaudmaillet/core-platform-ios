@@ -107,6 +107,9 @@ class WalletStakeCell: UICollectionViewListCell {
     private let postContent = UIStackView()
     private let bones = UIView()
     private var imageTask: Task<Void, Never>?
+    /// The thumbnail's bone while its picture downloads (#1494): a shimmer,
+    /// not a grey square.
+    private let imageBone = SkeletonBoneView(rounding: .fixed(WalletSheetMetrics.thumbnailCorner))
     private var shownURL: URL?
     /// The post state drawn now; nil on a fresh or recycled row.
     private var shownPhase: WalletStakePostLoads.State?
@@ -127,6 +130,16 @@ class WalletStakeCell: UICollectionViewListCell {
         thumbnail.layer.cornerCurve = .continuous
         thumbnail.backgroundColor = .tertiarySystemFill
         thumbnail.tintColor = .secondaryLabel
+        imageBone.isHidden = true
+        imageBone.isUserInteractionEnabled = false
+        imageBone.translatesAutoresizingMaskIntoConstraints = false
+        thumbnail.addSubview(imageBone)
+        NSLayoutConstraint.activate([
+            imageBone.topAnchor.constraint(equalTo: thumbnail.topAnchor),
+            imageBone.leadingAnchor.constraint(equalTo: thumbnail.leadingAnchor),
+            imageBone.trailingAnchor.constraint(equalTo: thumbnail.trailingAnchor),
+            imageBone.bottomAnchor.constraint(equalTo: thumbnail.bottomAnchor),
+        ])
 
         titleLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
         titleLabel.adjustsFontForContentSizeCategory = true
@@ -235,6 +248,7 @@ class WalletStakeCell: UICollectionViewListCell {
         imageTask = nil
         shownURL = nil
         thumbnail.image = nil
+        imageBone.isHidden = true
         // Concealment is per-FLIGHT state and must not ride a recycled row.
         thumbnail.alpha = 1
         contentView.alpha = 1
@@ -415,6 +429,7 @@ class WalletStakeCell: UICollectionViewListCell {
             // read as still loading.
             imageTask?.cancel()
             shownURL = nil
+            imageBone.isHidden = true
             thumbnail.contentMode = .center
             let symbol = post != nil ? "text.quote" : failed ? "exclamationmark.triangle" : "circle.dotted"
             thumbnail.image = UIImage(
@@ -427,15 +442,22 @@ class WalletStakeCell: UICollectionViewListCell {
         shownURL = url
         thumbnail.contentMode = .scaleAspectFill
         if let cached = imagePipeline.cachedImage(for: url) {
+            imageBone.isHidden = true
             thumbnail.image = cached
             return
         }
         thumbnail.image = nil
+        imageBone.isHidden = false
         imageTask?.cancel()
         imageTask = Task { [weak self] in
-            guard let image = try? await imagePipeline.image(for: url),
-                  !Task.isCancelled, let self, self.shownURL == url else { return }
-            self.thumbnail.image = image
+            let image = try? await imagePipeline.image(for: url)
+            guard !Task.isCancelled, let self, self.shownURL == url else { return }
+            // The picture takes the bone's place; a picture that never came
+            // leaves the tile's quiet ground, not a bone that shimmers on.
+            UIView.transition(with: self.thumbnail, duration: 0.2, options: .transitionCrossDissolve) {
+                self.thumbnail.image = image
+                self.imageBone.isHidden = true
+            }
         }
     }
 

@@ -48,6 +48,8 @@ final class WalletHistoryViewController: UIViewController {
     private nonisolated enum Item: Hashable {
         case filter
         case transaction(WalletTransaction)
+        /// A row's bones while the first page is out (#1494).
+        case bone(Int)
         case loading
         case failed
         case empty
@@ -67,6 +69,18 @@ final class WalletHistoryViewController: UIViewController {
     private var dataSource: UICollectionViewDiffableDataSource<Section, Item>!
 
     private enum Phase { case loading, loaded, failed }
+
+    /// Each filter's listing as it was left (#1494): switching back shows it
+    /// at once — no loading pass, no glitch (filmed, 2026-10-21).
+    private struct Listing {
+        var transactions: [WalletTransaction]
+        var nextPageToken: String?
+        var phase: Phase
+    }
+    private var listings: [Filter: Listing] = [:]
+
+    /// How many rows the first page's bones stand for.
+    static let boneRows = 6
 
     /// In the Rewards sheet (#1494): "Activity", large, and the filter at the
     /// bar's trailing end — the Stakes screen's bar; in Settings, "Wallet and
@@ -100,6 +114,9 @@ final class WalletHistoryViewController: UIViewController {
         configureDataSource()
         if filterInBar {
             navigationItem.largeTitleDisplayMode = .always
+            // Collapsed into the bar, the title stays leading (`.browser`),
+            // as the Stakes screen's.
+            navigationItem.style = .browser
             let control = makeFilterControl()
             control.accessibilityLabel = "Activity"
             let item = UIBarButtonItem(customView: control)
@@ -111,6 +128,22 @@ final class WalletHistoryViewController: UIViewController {
     }
 
     // MARK: Loading
+
+    /// Shows `next`: its listing as left, or its first page.
+    private func show(_ next: Filter) {
+        listings[filter] = Listing(transactions: transactions, nextPageToken: nextPageToken, phase: phase)
+        pageLoad?.cancel()
+        pageLoad = nil
+        filter = next
+        guard let kept = listings[next], kept.phase == .loaded else {
+            reload()
+            return
+        }
+        transactions = kept.transactions
+        nextPageToken = kept.nextPageToken
+        phase = kept.phase
+        applySnapshot()
+    }
 
     private func reload() {
         pageLoad?.cancel()
@@ -180,11 +213,12 @@ final class WalletHistoryViewController: UIViewController {
             amount.adjustsFontForContentSizeCategory = true
             cell.accessories = [.customView(configuration: .init(customView: amount, placement: .trailing()))]
         }
+        let boneRegistration = UICollectionView.CellRegistration<WalletHistoryBoneCell, Item> { _, _, _ in }
         let messageRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, item in
             var content = UIListContentConfiguration.cell()
             content.textProperties.color = .secondaryLabel
             switch item {
-            case .loading, .loadingMore: content.text = "Loading…"
+            case .loading, .loadingMore, .bone: content.text = "Loading…"
             case .failed:
                 content.text = FailureCopy.row(for: self?.failure, fallback: "Couldn't load your wallet's history. Tap to try again.")
             case .empty: content.text = "Nothing here yet. Claims, stakes and gifts show up here."
@@ -196,6 +230,8 @@ final class WalletHistoryViewController: UIViewController {
             switch item {
             case .filter:
                 collectionView.dequeueConfiguredReusableCell(using: filterRegistration, for: indexPath, item: item)
+            case .bone:
+                collectionView.dequeueConfiguredReusableCell(using: boneRegistration, for: indexPath, item: item)
             case .transaction(let transaction):
                 collectionView.dequeueConfiguredReusableCell(using: rowRegistration, for: indexPath, item: transaction)
             default:
@@ -239,8 +275,7 @@ final class WalletHistoryViewController: UIViewController {
         control.addAction(UIAction { [weak self] action in
             guard let self, let control = action.sender as? UISegmentedControl,
                   let next = Filter(rawValue: control.selectedSegmentIndex), next != filter else { return }
-            filter = next
-            reload()
+            show(next)
         }, for: .valueChanged)
         return control
     }
@@ -253,8 +288,9 @@ final class WalletHistoryViewController: UIViewController {
         }
         switch phase {
         case .loading:
+            // Bones in a list's card, not a "Loading…" line (#1494).
             snapshot.appendSections([.status])
-            snapshot.appendItems([.loading], toSection: .status)
+            snapshot.appendItems((0..<Self.boneRows).map(Item.bone), toSection: .status)
         case .failed:
             snapshot.appendSections([.status])
             snapshot.appendItems([.failed], toSection: .status)
@@ -347,7 +383,9 @@ final class WalletHistoryViewController: UIViewController {
         switch kind {
         case .claim: "clock.arrow.circlepath"
         case .starterGift, .welcomeGift: "gift"
-        case .stake: AppSymbol.like.rawValue
+        // Likes placed on a post, going out (#1494, the owner 2026-10-21):
+        // not the heart, which reads as a like given.
+        case .stake: "arrow.up.forward.circle"
         case .stakePack: "bolt"
         case .countryUnlock: "globe.europe.africa"
         case .countryVisa: "airplane"
@@ -396,4 +434,55 @@ extension WalletHistoryViewController: UICollectionViewDelegate {
         collectionView.deselectItem(at: indexPath, animated: true)
         if dataSource.itemIdentifier(for: indexPath) == .failed { reload() }
     }
+}
+
+/// A movement's row while the history loads (#1494): the row's bones — its
+/// symbol, its two lines and its amount — where the row will be.
+class WalletHistoryBoneCell: UICollectionViewListCell {
+    /// The leading bone's side and rounding: a symbol's, or (a stake row) a
+    /// thumbnail's.
+    class var leadingSide: CGFloat { 24 }
+    class var leadingRounding: SkeletonBoneView.Rounding { .capsule }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        let icon = SkeletonBoneView(rounding: Self.leadingRounding)
+        let title = SkeletonBoneView()
+        let subtitle = SkeletonBoneView()
+        let amount = SkeletonBoneView()
+        let lines = UIStackView(arrangedSubviews: [title, subtitle])
+        lines.axis = .vertical
+        lines.alignment = .leading
+        lines.spacing = Spacing.xs + 2
+        let row = UIStackView(arrangedSubviews: [icon, lines, UIView(), amount])
+        row.alignment = .center
+        row.spacing = Spacing.md
+        row.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(row)
+        NSLayoutConstraint.activate([
+            icon.widthAnchor.constraint(equalToConstant: Self.leadingSide),
+            icon.heightAnchor.constraint(equalToConstant: Self.leadingSide),
+            title.widthAnchor.constraint(equalToConstant: 110),
+            title.heightAnchor.constraint(equalToConstant: 12),
+            subtitle.widthAnchor.constraint(equalToConstant: 150),
+            subtitle.heightAnchor.constraint(equalToConstant: 10),
+            amount.widthAnchor.constraint(equalToConstant: 44),
+            amount.heightAnchor.constraint(equalToConstant: 12),
+            row.topAnchor.constraint(equalTo: contentView.layoutMarginsGuide.topAnchor, constant: Spacing.xs),
+            row.bottomAnchor.constraint(equalTo: contentView.layoutMarginsGuide.bottomAnchor, constant: -Spacing.xs),
+            row.leadingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: contentView.layoutMarginsGuide.trailingAnchor),
+        ])
+        isAccessibilityElement = true
+        accessibilityLabel = "Loading"
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+/// A stake row while the stakes load (#1494): a thumbnail's bone first.
+final class WalletStakeBoneCell: WalletHistoryBoneCell {
+    override class var leadingSide: CGFloat { WalletSheetMetrics.thumbnail }
+    override class var leadingRounding: SkeletonBoneView.Rounding { .fixed(WalletSheetMetrics.thumbnailCorner) }
 }

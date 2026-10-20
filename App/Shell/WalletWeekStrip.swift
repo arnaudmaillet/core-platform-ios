@@ -3,7 +3,8 @@ import DesignSystem
 import UIKit
 
 /// The Claim sheet's week (#1479): seven dots for the current UTC week,
-/// Monday first — a claimed day filled in the streak's orange, today ringed —
+/// Monday first — a claimed day filled in the streak's violet (#1494, the
+/// owner 2026-10-21), today ringed —
 /// and, at the trailing end, what the streak pays next as a chip
 /// ("×1.3 tomorrow").
 ///
@@ -14,7 +15,7 @@ import UIKit
 final class WalletWeekStrip: UIView {
     private let dots = UIStackView()
     private let chip = UILabel()
-    private let chipGround = UIView()
+    private let chipGround = WalletCapsuleView()
     private var columns: [(letter: UILabel, dot: WalletWeekDot)] = []
 
     static let dotDiameter: CGFloat = 12
@@ -43,10 +44,9 @@ final class WalletWeekStrip: UIView {
 
         chip.font = .scaledMonospacedDigitSystemFont(ofSize: 13, weight: .semibold, relativeTo: .footnote, maximumPointSize: 17)
         chip.adjustsFontForContentSizeCategory = true
-        chip.textColor = .systemOrange
+        chip.textColor = WalletWeekStrip.ink
         chip.setContentCompressionResistancePriority(.required, for: .horizontal)
-        chipGround.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.14)
-        chipGround.layer.cornerCurve = .continuous
+        chipGround.backgroundColor = WalletWeekStrip.ink.withAlphaComponent(0.14)
         chip.translatesAutoresizingMaskIntoConstraints = false
         chipGround.addSubview(chip)
 
@@ -72,10 +72,8 @@ final class WalletWeekStrip: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        chipGround.layer.cornerRadius = chipGround.bounds.height / 2
-    }
+    /// The streak's colour (#1494): the brand's violet, the flame's too.
+    static let ink: UIColor = Palette.gemViolet
 
     func configure(with snapshot: WalletSnapshot, now: Date = Date()) {
         let claimedToday = snapshot.claimedToday > 0
@@ -102,7 +100,7 @@ final class WalletWeekStrip: UIView {
     var drawnChip: String? { chip.text }
 }
 
-/// One day's dot: filled orange when claimed, a hollow ring otherwise; today
+/// One day's dot: filled violet when claimed, a hollow ring otherwise; today
 /// wears an outer ring in the label's ink.
 final class WalletWeekDot: UIView {
     private let fill = CAShapeLayer()
@@ -153,12 +151,30 @@ final class WalletWeekDot: UIView {
     private func applyColours() {
         let traits = traitCollection
         if isClaimed {
-            fill.fillColor = UIColor.systemOrange.resolvedColor(with: traits).cgColor
+            fill.fillColor = WalletWeekStrip.ink.resolvedColor(with: traits).cgColor
             fill.strokeColor = nil
         } else {
             fill.fillColor = nil
             fill.strokeColor = UIColor.tertiaryLabel.resolvedColor(with: traits).cgColor
         }
         ring.strokeColor = isToday ? UIColor.label.resolvedColor(with: traits).cgColor : nil
+    }
+}
+
+/// A capsule: its corner is half its height, at every size it is laid out
+/// at — set in its OWN layout, where its bounds are final (the chip's parent
+/// set it before the chip had a height, and drew a square, 2026-10-21).
+final class WalletCapsuleView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        layer.cornerCurve = .continuous
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        layer.cornerRadius = bounds.height / 2
     }
 }
