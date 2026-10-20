@@ -25,9 +25,10 @@ import UIKit
 /// # Anatomy, top to bottom
 ///   • the HEADER (`WalletHubHeaderView`) — one big likes balance, four round
 ///     actions (Claim, Stake, Shop, Activity), and the Gems card;
-///   • ACTIVE STAKES — each post, the likes on it, and how long until it
-///     settles;
-///   • SETTLED — each post and what it earned in gems, or "No reward".
+///   • ACTIVE STAKES — a preview: the newest few, each post, the likes on
+///     it, and how long until it settles;
+///   • SETTLED — a preview: each post and its outcome.
+/// Each heading is a link to the Stakes screen (#1477), every stake by day.
 ///
 /// Its ground is the SYSTEM's large sheet (opaque), so the view is clear and
 /// paints nothing of its own; the list passes under the bar through the
@@ -188,6 +189,12 @@ final class WalletHubViewController: UIViewController {
                 self?.openFeed(fromStake: id)
             }
         }
+        // `-wallet-open-stakes active|settled`: the Stakes screen (#1477), the
+        // headings' own way.
+        if let index = arguments.firstIndex(of: "-wallet-open-stakes"), index + 1 < arguments.count {
+            let segment: WalletStakesViewController.Segment = arguments[index + 1] == "settled" ? .settled : .active
+            QAWait.until("-wallet-open-stakes", landed) { [weak self] in self?.openStakes(segment) }
+        }
         // `-wallet-sheet-scroll <pt>`: scrolls the list, so the rows under
         // the bar can be screenshotted.
         if let index = arguments.firstIndex(of: "-wallet-sheet-scroll"), index + 1 < arguments.count,
@@ -306,6 +313,17 @@ final class WalletHubViewController: UIViewController {
     }
 
     private func configure(_ header: WalletSectionHeader, for section: Section) {
+        // Each heading leads to every stake of its kind (#1477), once there
+        // is one.
+        let segment: WalletStakesViewController.Segment? = switch section {
+        case .header: nil
+        case .active: .active
+        case .settled: .settled
+        }
+        if let segment {
+            let hasStakes = stakes.contains { $0.isSettled == (segment == .settled) }
+            header.onSeeAll = hasStakes ? { [weak self] in self?.openStakes(segment) } : nil
+        }
         let font = UIFont.scaledMonospacedDigitSystemFont(ofSize: 13, weight: .medium, relativeTo: .footnote, maximumPointSize: 16)
         switch section {
         case .header:
@@ -317,7 +335,7 @@ final class WalletHubViewController: UIViewController {
                 detail.append(walletAmount("\(staked)", glyph: LikesSymbol.glyphImage(), font: font, color: .secondaryLabel))
                 detail.append(NSAttributedString(string: " at stake", attributes: [.font: font]))
             }
-            header.configure(title: "Active stakes", detail: detail)
+            header.configure(title: "Active stakes", detail: detail, isLink: header.onSeeAll != nil)
         case .settled:
             // The sum of the gem amounts the rows SHOW (#1395): none while
             // their outcomes are bones (`verdictsPending`).
@@ -325,14 +343,14 @@ final class WalletHubViewController: UIViewController {
             // The server's settlement credits no gems yet (shadow mode,
             // #903): a total of none is not shown as "+0".
             guard earned > 0 else {
-                header.configure(title: "Settled", detail: NSAttributedString())
+                header.configure(title: "Settled", detail: NSAttributedString(), isLink: header.onSeeAll != nil)
                 return
             }
             let detail = NSMutableAttributedString(attributedString: walletAmount(
                 "+\(earned)", glyph: GemSymbol.glyphImage(), font: font, color: GemSymbol.tint
             ))
             detail.append(NSAttributedString(string: " earned", attributes: [.font: font]))
-            header.configure(title: "Settled", detail: detail)
+            header.configure(title: "Settled", detail: detail, isLink: header.onSeeAll != nil)
         }
     }
 
@@ -383,19 +401,23 @@ final class WalletHubViewController: UIViewController {
             guard let self else { return }
             claimer.claim(presentingFrom: self)
         }
-        header.onStake = { [weak self] in self?.showActiveStakes() }
+        header.onStake = { [weak self] in self?.openStakes(.active) }
         header.onShop = { [weak self] in self?.openShop() }
         header.onActivity = { [weak self] in self?.openActivity() }
         header.onGems = { [weak self] in self?.openShop() }
     }
 
-    /// Stake: the active stakes, where staking shows (staking itself is a
-    /// like on a post, in the feeds).
-    private func showActiveStakes() {
-        guard let index = dataSource.snapshot().indexOfSection(.active) else { return }
-        let path = IndexPath(item: 0, section: index)
-        guard collectionView.numberOfItems(inSection: index) > 0 else { return }
-        collectionView.scrollToItem(at: path, at: .top, animated: true)
+    /// The Stakes screen (#1477) on `segment`, pushed in the sheet: every
+    /// stake by day. Stake opens it on Active — where staking shows (staking
+    /// itself is a like on a post, in the feeds).
+    private func openStakes(_ segment: WalletStakesViewController.Segment) {
+        navigationController?.pushViewController(
+            WalletStakesViewController(
+                wallet: wallet, segment: segment, posts: entries, lookUpPosts: lookUpPosts,
+                imagePipeline: imagePipeline, openFeedHero: openFeedHero
+            ),
+            animated: true
+        )
     }
 
     /// Activity: the wallet's history, pushed in the sheet (slice 4 groups
@@ -430,10 +452,10 @@ final class WalletHubViewController: UIViewController {
         var list = NSDiffableDataSourceSnapshot<Section, Item>()
         list.appendSections([.header, .active])
         list.appendItems([.header], toSection: .header)
-        list.appendItems(layout.active.map(Self.item), toSection: .active)
+        list.appendItems(Self.preview(layout.active).map(Self.item), toSection: .active)
         if let settled = layout.settled {
             list.appendSections([.settled])
-            list.appendItems(settled.map(Self.item), toSection: .settled)
+            list.appendItems(Self.preview(settled).map(Self.item), toSection: .settled)
         }
         let previous = Set(dataSource.snapshot().itemIdentifiers)
         list.reconfigureItems(list.itemIdentifiers.filter {
@@ -452,6 +474,21 @@ final class WalletHubViewController: UIViewController {
                       forElementKind: WalletSectionHeader.kind, at: IndexPath(item: 0, section: index)
                   ) as? WalletSectionHeader else { continue }
             configure(header, for: kind)
+        }
+    }
+
+    /// How many stakes each section previews; its heading leads to the rest
+    /// (#1477).
+    static let previewCount = 3
+
+    /// `rows` with no more than `previewCount` stakes — the failed and empty
+    /// rows kept.
+    private static func preview(_ rows: [WalletStakeRow]) -> [WalletStakeRow] {
+        var shown = 0
+        return rows.filter { row in
+            guard case .stake = row else { return true }
+            shown += 1
+            return shown <= previewCount
         }
     }
 
@@ -552,112 +589,22 @@ final class WalletHubViewController: UIViewController {
 
     // MARK: - Opening a stake
 
-    /// Opens the feed on the staked posts, from the tapped one on, flying out
-    /// of its row the way a For You or Profile card opens — the thumbnail for
-    /// a media post, the card itself (the text reveal) for a text post.
-    ///
-    /// ⚠️ **OVER THE SHEET, NOT INSIDE IT.** The feed flies with a navigation
-    /// push, and a sheet's own stack would keep the feed in the sheet's shape.
-    /// So a clear, full-screen stack is presented over the sheet without
-    /// animation (`OverSheetFeedHost`), the feed is pushed onto IT, and the flight
-    /// measures the row through the clear host — the sheet stays visible
-    /// underneath for the whole trip. The host dismisses itself, unanimated,
-    /// once the feed has flown home.
-    ///
-    /// The window is the list's own order from the tapped row down, so the
-    /// feed pages through the stakes exactly as the sheet lists them; and a
-    /// dismissal lands on the row that opened it, whatever the viewer paged
-    /// to — the product rule of every ranked list in the app — crossfading
-    /// when the page it closes is another post's.
+    /// Opens the feed on the previewed stakes, from the tapped one on
+    /// (`WalletStakeHero`).
     private func openFeed(fromStake id: String) {
-        guard let openFeedHero, presentedViewController == nil,
-              let post = entries[PostID(id)] else { return }
+        guard let openFeedHero else { return }
         let order = dataSource.snapshot().itemIdentifiers.compactMap { item -> String? in
             if case .stake(let stake) = item { stake } else { nil }
         }
-        guard let start = order.firstIndex(of: id) else { return }
-        let stream = Array(order[start...].compactMap { entries[PostID($0)] }.prefix(Self.feedWindow))
-        let origin = heroOrigin(for: post, stakeID: id, stream: stream)
-
-        OverSheetFeedHost.present(over: self) { host in
-            openFeedHero(stream.map(\.id), host, origin)
-        }
+        WalletStakeHero.open(
+            stake: id, order: order, posts: entries, from: self, list: collectionView,
+            cell: { [weak self] id in self?.stakeCell(for: id) }, openFeedHero: openFeedHero
+        )
     }
-
-    /// How many stakes the feed is opened on, from the tapped one down.
-    private static let feedWindow = 20
 
     private func stakeCell(for id: String) -> WalletStakeCell? {
         guard let path = dataSource.indexPath(for: .stake(id)) else { return nil }
         return collectionView.cellForItem(at: path) as? WalletStakeCell
-    }
-
-    /// The row's thumbnail (media) or card (text), in `space` — nil once it
-    /// has scrolled out of the list's visible part.
-    private func stakeFrame(for id: String, card: Bool, in space: UICoordinateSpace) -> CGRect? {
-        guard let cell = stakeCell(for: id) else { return nil }
-        let inList = cell.convert(cell.bounds, to: collectionView)
-        guard collectionView.bounds.intersects(inList) else { return nil }
-        return card ? cell.convert(cell.bounds, to: space) : cell.heroFrame(in: space)
-    }
-
-    private func heroOrigin(for post: GalleryPost, stakeID id: String, stream: [GalleryPost]) -> SnapFeedHeroOrigin {
-        let cell = stakeCell(for: id)
-        let cover = cell?.heroCover
-        let flies = post.kind != .text
-        // ⚠️ THE ROW IS NOT THE PAGE, so a text post's window needs a
-        // stand-in at both ends — the map marker's case, not the For You
-        // card's. A card's caption IS the page's caption, so its window can
-        // show the real page from frame 0; this row is an author, a snippet
-        // and a stake amount, and without a stand-in the window landed as a
-        // blank white card that sat there until the row popped back in
-        // (filmed: a third of a second). A picture of the row, taken now
-        // while it is still drawn, is what the window crossfades to and from.
-        let rowImage = cell?.renderedImage()
-        let standIn: () -> UIView? = {
-            guard let rowImage else { return nil }
-            let view = UIImageView(image: rowImage)
-            // At its own size, pinned top-left: the window is the row's rect
-            // only at the two ends, and a stretched row between them read as
-            // a smear (filmed on the opening).
-            view.contentMode = .topLeft
-            view.clipsToBounds = true
-            return view
-        }
-        return SnapFeedHeroOrigin(
-            post: post,
-            stream: stream,
-            hasHero: flies,
-            cover: cover,
-            // `.listMedia`: no counter chips riding the card (a tile's
-            // furniture flashed over the 48pt thumbnail on landing), and the
-            // same 12pt corner the thumbnail wears.
-            style: .listMedia,
-            frame: { [weak self] space in self?.stakeFrame(for: id, card: false, in: space) },
-            isOnScreen: { [weak self] in
-                guard let self else { return false }
-                return stakeFrame(for: id, card: false, in: view) != nil
-            },
-            setConcealed: { [weak self] concealed in
-                self?.stakeCell(for: id)?.setHeroConcealed(concealed, wholeCard: false)
-            },
-            // No depth cue for the FLIGHT: the list it would recede is the
-            // very surface the landing is measured on (see the PR).
-            textReveal: flies ? nil : TextRevealOrigin(
-                rowFrame: { [weak self] space in self?.stakeFrame(for: id, card: true, in: space) },
-                captionEnd: nil,
-                depthView: { [weak self] in self?.collectionView },
-                makeDismissStandIn: { _ in standIn() },
-                makePresentStandIn: standIn,
-                alignsPageToSource: false,
-                pageFit: .covering,
-                cornerRadius: WalletSheetMetrics.rowCorner,
-                fill: Surface.card,
-                setConcealed: { [weak self] concealed in
-                    self?.stakeCell(for: id)?.setHeroConcealed(concealed, wholeCard: true)
-                }
-            )
-        )
     }
 
     // MARK: - Clock

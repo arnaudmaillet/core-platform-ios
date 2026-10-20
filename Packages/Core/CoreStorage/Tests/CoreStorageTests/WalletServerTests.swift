@@ -213,13 +213,17 @@ struct WalletServerTests {
     /// draws them rather than bones that never resolve.
     @Test func aFailedListingAwaitsNothing() async {
         let fixture = Fixture(serverState(likes: 300))
+        #expect(!fixture.store.stakesListingFailed, "not failed before it is read")
         await fixture.server.setFails(true)
         #expect(await !fixture.store.refreshStakesFromServer())
         #expect(!fixture.store.awaitsServerStakes)
+        // The Stakes screen's failed state (#1477).
+        #expect(fixture.store.stakesListingFailed)
         // And a later listing that answers is the truth again.
         await fixture.server.setFails(false)
         #expect(await fixture.store.refreshStakesFromServer())
         #expect(!fixture.store.awaitsServerStakes)
+        #expect(!fixture.store.stakesListingFailed)
     }
 
     /// No server, or a guest: there is no listing to wait for.

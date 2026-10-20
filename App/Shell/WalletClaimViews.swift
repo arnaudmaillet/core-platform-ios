@@ -94,7 +94,14 @@ final class WalletStakeCell: UICollectionViewCell {
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
     private let resultLabel = UILabel()
+    /// The outcome as a chip once settled (#1477): a ground under the
+    /// verdict, grey for words, the gems' violet only for gems. Bare for an
+    /// active stake's amount.
+    private let resultChip = UIStackView()
     private let detailLabel = UILabel()
+    /// How far an active stake is toward settling (#1477), before its
+    /// "Settles in" line.
+    private let settleRing = WalletSettleRing()
     /// Over the outcome while the server's verdict is on its way (#1395).
     private let resultBone = SkeletonBoneView()
     /// The thumbnail and the two lines: what the bones stand in for.
@@ -158,7 +165,13 @@ final class WalletStakeCell: UICollectionViewCell {
         postContent.addArrangedSubview(text)
         postContent.spacing = Spacing.sm
         postContent.alignment = .center
-        let trailing = UIStackView(arrangedSubviews: [resultLabel, detailLabel])
+        resultChip.addArrangedSubview(resultLabel)
+        resultChip.isLayoutMarginsRelativeArrangement = true
+        resultChip.layer.cornerCurve = .continuous
+        let detailLine = UIStackView(arrangedSubviews: [settleRing, detailLabel])
+        detailLine.spacing = 4
+        detailLine.alignment = .center
+        let trailing = UIStackView(arrangedSubviews: [resultChip, detailLine])
         trailing.axis = .vertical
         trailing.alignment = .trailing
         trailing.spacing = 2
@@ -377,8 +390,39 @@ final class WalletStakeCell: UICollectionViewCell {
             spoken = [staked, "settled \(ago)", "result tomorrow"]
         }
         resultLabel.attributedText = result
+        applyChip(for: pending ? nil : stake.outcome, pending: pending)
+        settleRing.isHidden = stake.isSettled
+        settleRing.progress = stake.settleProgress(at: now)
         accessibilityValue = spoken.joined(separator: ", ")
     }
+
+    /// The outcome's chip: gems on the gems' violet wash, every verdict in
+    /// words on a grey one — so violet always means gems (#1477). An active
+    /// stake's amount, and a verdict still on its way, wear none.
+    private func applyChip(for outcome: WalletStake.Outcome?, pending: Bool) {
+        let ground: UIColor? = switch outcome {
+        case nil: nil
+        case .gems: GemSymbol.tint.withAlphaComponent(0.16)
+        case .noReward, .notRewarded, .rewarded, .pending: .tertiarySystemFill
+        }
+        resultChip.backgroundColor = ground
+        resultChip.directionalLayoutMargins = ground == nil
+            ? .zero
+            : NSDirectionalEdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8)
+        resultChip.layer.cornerRadius = ground == nil ? 0 : resultChip.bounds.height / 2
+        resultChip.setNeedsLayout()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // A capsule at whatever height the text size gives it.
+        if resultChip.backgroundColor != nil { resultChip.layer.cornerRadius = resultChip.bounds.height / 2 }
+    }
+
+    /// The chip's ground now. Tests and QA.
+    var drawnChipGround: UIColor? { resultChip.backgroundColor }
+    /// The ring's progress, or nil when it is not shown.
+    var drawnSettleProgress: Double? { settleRing.isHidden ? nil : settleRing.progress }
 
     private func applyThumbnail(post: GalleryPost?, failed: Bool, imagePipeline: ImagePipeline?) {
         let url = post.flatMap { $0.kind == .text ? nil : $0.thumbnailURL }
@@ -586,10 +630,74 @@ final class WalletSectionHeader: UICollectionReusableView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    func configure(title: String, detail: NSAttributedString?) {
-        titleView.content = .init(title: title)
+    /// The heading's tap, when it leads somewhere (`isLink`).
+    var onSeeAll: (() -> Void)? {
+        didSet { titleView.onTap = onSeeAll }
+    }
+
+    func configure(title: String, detail: NSAttributedString?, isLink: Bool = false) {
+        titleView.content = .init(title: title, isLink: isLink)
         detailLabel.attributedText = detail
         detailLabel.isHidden = (detail?.length ?? 0) == 0
         titleView.setNeedsLayout()
+    }
+}
+
+/// A small ring that fills as a stake nears its settlement (#1477): a quiet
+/// track, the likes' pink for the time gone — the likes it holds are the
+/// ones that come back.
+final class WalletSettleRing: UIView {
+    static let diameter: CGFloat = 11
+    private let track = CAShapeLayer()
+    private let fill = CAShapeLayer()
+
+    /// 0 when placed, 1 at settlement.
+    var progress: Double = 0 {
+        didSet { fill.strokeEnd = CGFloat(min(1, max(0, progress))) }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        for shape in [track, fill] {
+            shape.fillColor = nil
+            shape.lineWidth = 2
+            shape.lineCap = .round
+            layer.addSublayer(shape)
+        }
+        fill.strokeEnd = 0
+        applyColours()
+        registerForTraitChanges(
+            [UITraitUserInterfaceStyle.self, UITraitAccessibilityContrast.self]
+        ) { (ring: WalletSettleRing, _: UITraitCollection) in
+            ring.applyColours()
+        }
+        isAccessibilityElement = false
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override var intrinsicContentSize: CGSize { CGSize(width: Self.diameter, height: Self.diameter) }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let inset = track.lineWidth / 2
+        let rect = bounds.insetBy(dx: inset, dy: inset)
+        // From twelve o'clock, clockwise — a clock's way.
+        let path = UIBezierPath(
+            arcCenter: CGPoint(x: rect.midX, y: rect.midY), radius: min(rect.width, rect.height) / 2,
+            startAngle: -.pi / 2, endAngle: 1.5 * .pi, clockwise: true
+        ).cgPath
+        track.frame = bounds
+        fill.frame = bounds
+        track.path = path
+        fill.path = path
+    }
+
+    private func applyColours() {
+        track.strokeColor = UIColor.tertiaryLabel.resolvedColor(with: traitCollection).cgColor
+        fill.strokeColor = LikesSymbol.tint.resolvedColor(with: traitCollection).cgColor
     }
 }
