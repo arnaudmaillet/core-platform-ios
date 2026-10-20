@@ -34,6 +34,9 @@ final class NotificationsBell {
     private(set) var isUnread = false
     /// Every bell handed out and still alive, for the repaint.
     private let items = NSHashTable<UIBarButtonItem>.weakObjects()
+    /// The traits the badged bell is drawn for: the shell's window's, which
+    /// carry the app's own appearance (#1501). The shell sets it.
+    var traits: () -> UITraitCollection = { UITraitCollection.current }
 
     init(onTap: @escaping () -> Void) {
         self.onTap = onTap
@@ -47,7 +50,7 @@ final class NotificationsBell {
     /// this one — each stands in its own bubble.
     func makeItem() -> UIBarButtonItem {
         let item = UIBarButtonItem(
-            image: Self.image(unread: isUnread),
+            image: Self.image(unread: isUnread, traits: traits()),
             primaryAction: UIAction { [weak self] _ in self?.onTap() }
         )
         // `.label` so it renders dark in its glass bubble, not system blue.
@@ -69,7 +72,7 @@ final class NotificationsBell {
     /// Sets every live bell's image again — the badged one is baked per
     /// appearance and accent theme, so a switch of either asks for it anew.
     func repaint() {
-        let image = Self.image(unread: isUnread)
+        let image = Self.image(unread: isUnread, traits: traits())
         for item in items.allObjects { item.image = image }
     }
 
@@ -81,12 +84,11 @@ final class NotificationsBell {
     /// `.label`); otherwise a plain
     /// template `bell` that the tint draws dark.
     ///
-    /// ⚠️ BAKED, per appearance (#1178). A bar item re-renders a SYMBOL image
-    /// with its own configuration: the palette was dropped and the badge came
-    /// out in the system red whatever `counter` said. So the badged bell is
-    /// drawn into bitmaps — one per appearance, registered in an image asset
-    /// so it still follows light and dark.
-    static func image(unread: Bool) -> UIImage? {
+    /// ⚠️ BAKED (#1178). A bar item re-renders a SYMBOL image with its own
+    /// configuration: the palette was dropped and the badge came out in the
+    /// system red whatever `counter` said. So the badged bell is drawn into a
+    /// bitmap, for `traits` (see `baked`).
+    static func image(unread: Bool, traits: UITraitCollection) -> UIImage? {
         guard unread else { return UIImage(systemName: "bell") }
         // `bell.badge`'s first layer is the BADGE, its second the bell.
         // ⚠️ AT THE BAR'S SIZE (#1191): a bitmap is not re-sized as a symbol
@@ -96,29 +98,12 @@ final class NotificationsBell {
         let config = barSymbolConfiguration
             .applying(UIImage.SymbolConfiguration(paletteColors: [TabGlyph.badgeTint, .label]))
         guard let symbol = UIImage(systemName: "bell.badge", withConfiguration: config) else { return nil }
-        return baked(symbol)
+        return baked(symbol, traits: traits)
     }
 
-    /// `symbol` drawn into bitmaps, one per appearance, registered in an image
-    /// asset so it follows light and dark — for a bar that would re-render a
-    /// symbol in its own mode (the bell, the tab bar's badged glyphs, #1191).
-    static func baked(_ symbol: UIImage) -> UIImage {
-        let asset = UIImageAsset()
-        for style in [UIUserInterfaceStyle.light, .dark] {
-            let traits = UITraitCollection(userInterfaceStyle: style)
-            let format = UIGraphicsImageRendererFormat(for: traits)
-            // Drawn in the applied accent theme (#1379): the badge is the
-            // accent, and a bitmap re-resolves nothing — a theme change bakes
-            // it anew (`MainTabCoordinator`).
-            let drawing = traits.modifyingTraits { $0.accentTheme = AccentThemePreference.applied }
-            let baked = UIGraphicsImageRenderer(size: symbol.size, format: format).image { _ in
-                drawing.performAsCurrent { symbol.draw(at: .zero) }
-            }
-            asset.register(
-                baked.withBaselineOffset(fromBottom: symbol.baselineOffsetFromBottom ?? 0),
-                with: UITraitCollection(traitsFrom: [traits, UITraitCollection(displayScale: format.scale)])
-            )
-        }
-        return asset.image(with: UITraitCollection.current).withRenderingMode(.alwaysOriginal)
+    /// `symbol` drawn into a bitmap for `traits` (`BarSymbol.baked`): the
+    /// window's traits, the app's appearance included (#1501).
+    static func baked(_ symbol: UIImage, traits: UITraitCollection) -> UIImage {
+        BarSymbol.baked(symbol, traits: traits)
     }
 }

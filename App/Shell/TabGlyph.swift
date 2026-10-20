@@ -6,7 +6,8 @@ extension TabGlyph {
     /// inks every tab; badged, the glyph in the label's ink and its badge in
     /// the accent.
     ///
-    /// ⚠️ THE BADGED ONE IS BAKED, per appearance, as the top bar's bell is
+    /// ⚠️ THE BADGED ONE IS BAKED, for `traits` — the window's, the app's own
+    /// appearance included (#1501) — as the top bar's bell is
     /// (`NotificationsBell.image`): the bar re-renders a symbol image in its
     /// own mode, and the badge layer came out in the system red whatever the
     /// palette said. Baked at the bar's symbol size, or the bitmap would stand
@@ -23,13 +24,13 @@ extension TabGlyph {
     /// around the badge, and the paper plane showed its tip cut off with no
     /// badge in sight (the owner, on a device).
     @MainActor
-    func image(selected: Bool, badged: Bool) -> UIImage? {
+    func image(selected: Bool, badged: Bool, traits: UITraitCollection = .current) -> UIImage? {
         let badge = symbol(selected: selected, badged: true)
         if badged {
             let config = NotificationsBell.barSymbolConfiguration
                 .applying(UIImage.SymbolConfiguration(paletteColors: [.label, TabGlyph.badgeTint]))
             guard let image = badge.image(config) else { return nil }
-            return NotificationsBell.baked(image)
+            return NotificationsBell.baked(image, traits: traits)
         }
         let config = NotificationsBell.barSymbolConfiguration
         guard let box = badge.image(config),

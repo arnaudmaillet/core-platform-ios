@@ -55,11 +55,17 @@ final class MainTabCoordinator: NSObject, Coordinator {
     /// state and the tap live here once, and each header is handed a FRESH item
     /// bound to them (`NotificationsBell`) — a bar item lives in one bar, so the
     /// single item this used to be could only ever lead the map's.
-    private lazy var notificationsBell: NotificationsBell = NotificationsBell { [weak self] in
-        // A member's only: a guest has no bell (#1146), and the drawer's edge
-        // swipe is gated on its own (`NotificationsDrawer`).
-        self?.notificationsDrawer.open()
-    }
+    private lazy var notificationsBell: NotificationsBell = {
+        let bell = NotificationsBell { [weak self] in
+            // A member's only: a guest has no bell (#1146), and the drawer's
+            // edge swipe is gated on its own (`NotificationsDrawer`).
+            self?.notificationsDrawer.open()
+        }
+        // Baked for the shell's traits — the app's appearance, not iOS's
+        // (#1501).
+        bell.traits = { [weak self] in self?.tabBarController.view.traitCollection ?? .current }
+        return bell
+    }()
     /// Notifications, as a drawer BEHIND the shell: the whole tab bar
     /// controller slides right to reveal it. See `NotificationsDrawer`.
     ///
@@ -276,9 +282,9 @@ final class MainTabCoordinator: NSObject, Coordinator {
         tabBarController.textCompletions = container.textCompletions
         // The gate every write asks before it runs, found up the chain.
         tabBarController.memberGate = container.memberGate
-        // The badged bell is a baked bitmap per appearance (#1178): the bars
-        // pick the variant when the image is set, so a light/dark switch sets
-        // it again — and an accent theme change (#1379), the badge's colour.
+        // The badged bell and tabs are bitmaps baked for the window's traits
+        // (#1178, #1501): a light/dark switch — iOS's or the app's own —
+        // bakes them again, and so does an accent theme change (#1379).
         tabBarController.view.registerForTraitChanges(
             [UITraitUserInterfaceStyle.self, AccentThemeTrait.self]
         ) { [weak self] (_: UIView, _) in
@@ -492,11 +498,15 @@ extension MainTabCoordinator: UITabBarControllerDelegate {
         for (_, coordinator) in orderedTabs {
             guard let glyphTab = coordinator as? any GlyphTab else { continue }
             let tab = glyphTab.tab
-            tab.image = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread)
+            // Baked for the window's traits — the app's appearance (#1501).
+            let traits = tabBarController.view.traitCollection
+            tab.image = glyphTab.glyph.image(selected: false, badged: glyphTab.hasUnread, traits: traits)
             // The badge said aloud (#1196): an image tells VoiceOver nothing.
             tab.accessibilityValue = glyphTab.hasUnread ? glyphTab.glyph.unreadAccessibilityValue : nil
             if tab.responds(to: NSSelectorFromString("setSelectedImage:")) {
-                tab.setValue(glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread), forKey: "selectedImage")
+                tab.setValue(
+                    glyphTab.glyph.image(selected: true, badged: glyphTab.hasUnread, traits: traits), forKey: "selectedImage"
+                )
             }
         }
     }
