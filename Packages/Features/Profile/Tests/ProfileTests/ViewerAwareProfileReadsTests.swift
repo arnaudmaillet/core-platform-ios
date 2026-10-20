@@ -211,6 +211,33 @@ struct ViewerAwareProfileReadsTests {
         #expect(await settle { !viewModel.isPrivateToViewer })
         #expect(await settle { if case .restricted = seen.gallery?.activity { false } else { seen.gallery != nil } })
     }
+
+    /// A follow toggle redraws the header from the same profile: its banner
+    /// (#944) and its avatar frame (#943) stay — the banner used to fall back
+    /// to the avatar.
+    @Test func aFollowToggleKeepsTheBannerAndTheFrame() async throws {
+        let dressed = UserProfile(
+            id: id, handle: "nadia", displayName: "Nadia", bio: "",
+            avatarURL: URL(string: "https://cdn.example/face.jpg"),
+            bannerURL: URL(string: "https://cdn.example/banner.jpg"),
+            bannerVideoURL: URL(string: "https://cdn.example/banner.m3u8"), websiteURL: nil,
+            isVerified: false, visibility: .public,
+            followerCount: .exact(3), followingCount: .exact(3), reactionCount: .unavailable,
+            avatarFrameID: "frame.gold"
+        )
+        let profiles = Profiles(dressed, relationship: .other(isFollowing: false, isBlocked: false))
+        let (viewModel, seen) = open(profiles, gallery: Gallery([]))
+        try #require(await settle { seen.isContent && viewModel.isRelationshipSettled })
+        viewModel.toggleFollow()
+        guard case .content(let model) = seen.phase else {
+            Issue.record("no content after the toggle")
+            return
+        }
+        #expect(model.followerText == "4")
+        #expect(model.bannerImageURL == dressed.bannerURL)
+        #expect(model.bannerVideoURL == dressed.bannerVideoURL)
+        #expect(model.avatarFrameID == "frame.gold")
+    }
 }
 
 private struct MemberSession: AuthSessionProviding {

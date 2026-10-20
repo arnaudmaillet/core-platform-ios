@@ -7,7 +7,7 @@ import UIKit
 /// ```
 ///   placeholder: the initials (MonogramAvatarView) — a PERMANENT floor
 ///   content:     the picture (AvatarImageView), dissolved in over it
-///   (overlay:    the avatar frame, later — #943 step 2)
+///   overlay:     the avatar frame (`frameID`, #943) — a ring on the rim
 /// ```
 ///
 /// The avatar rendering contract, unchanged: **the initials are the rendered
@@ -31,6 +31,8 @@ public final class AvatarView: UIView {
     public let standIn = AvatarImageView()
     /// The ladder the avatar runs on.
     public let ladder: LoadingLadder
+    /// The frame the profile wears (#943), over the face's rim.
+    public let frameView = AvatarFrameView()
     private let load: ImageLoadSlot
     private var token: LoadingLadder.Token?
 
@@ -55,6 +57,10 @@ public final class AvatarView: UIView {
             addSubview(view)
             view.pin(to: monogram)
         }
+        // The frame rides on top of the face (last in the disc), in its
+        // bounds: it changes no size.
+        frameView.translatesAutoresizingMaskIntoConstraints = false
+        frameView.pin(to: monogram)
         ladder.setView(monogram, for: .placeholder, drivesAlpha: false, permanent: true)
         ladder.setView(standIn, for: .preview)
         ladder.setView(picture, for: .content)
@@ -78,7 +84,15 @@ public final class AvatarView: UIView {
         set {
             monogram.shape = newValue
             picture.shape = newValue
+            frameView.shape = newValue
         }
+    }
+
+    /// The profile's `avatar_frame_id` (#943): the frame drawn over the
+    /// face. Nil, empty or an id this build has no art for: none.
+    public var frameID: String? {
+        get { frameView.frameStyle?.rawValue }
+        set { frameView.frameStyle = AvatarFrame(id: newValue) }
     }
 
     /// Resizes the disc, initials included.

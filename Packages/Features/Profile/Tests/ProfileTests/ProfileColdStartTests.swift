@@ -50,7 +50,7 @@ private func person(_ id: String, visibility: ProfileVisibility = .public) -> Us
         customLinks: [ProfileLink(label: "Shop", url: "https://shop.example")],
         isVerified: true, visibility: visibility,
         followerCount: .exact(12), followingCount: .atLeast(500), reactionCount: .unavailable,
-        accountType: .business, businessCategory: "Bakery"
+        accountType: .business, businessCategory: "Bakery", avatarFrameID: "frame.neon"
     )
 }
 
@@ -254,6 +254,18 @@ final class ProfileColdStartTests {
         for relationship in relationships {
             #expect(ProfileDiskRecord.Relationship(relationship).relationship == relationship)
         }
+    }
+
+    /// A header stored before the avatar frame (#943) decodes with none.
+    @Test func aHeaderStoredBeforeTheFrameDecodesWithNone() throws {
+        let header = ProfileDiskRecord.Header(person("prof-1"))
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(header)) as? [String: Any])
+        json.removeValue(forKey: "avatarFrameID")
+        let decoded = try JSONDecoder().decode(
+            ProfileDiskRecord.Header.self, from: JSONSerialization.data(withJSONObject: json)
+        )
+        #expect(decoded.userProfile.avatarFrameID == nil)
+        #expect(header.userProfile.avatarFrameID == "frame.neon")
     }
 
     @Test func aVisitedProfileOpensOnItsLastContentAfterAColdStart() async throws {

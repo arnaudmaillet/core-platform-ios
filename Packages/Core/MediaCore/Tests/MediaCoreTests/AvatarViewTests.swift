@@ -104,4 +104,22 @@ struct AvatarViewTests {
         #expect(settledAfterLoad == 1)
     }
 
+    /// The frame (#943): from the profile's id, over the face, in its shape,
+    /// changing no size; an unknown id draws none.
+    @Test func theFrameRidesOverTheFace() {
+        let avatar = AvatarView(diameter: 40, size: .avatar)
+        let size = avatar.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize)
+        #expect(avatar.frameView.isHidden)
+        avatar.frameID = "frame.aurora"
+        #expect(avatar.frameID == "frame.aurora")
+        #expect(!avatar.frameView.isHidden)
+        #expect(avatar.frameView.superview === avatar.picture.superview)
+        #expect(avatar.frameView.superview?.subviews.last === avatar.frameView, "drawn over the picture")
+        #expect(avatar.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize) == size)
+        avatar.shape = .roundedTile
+        #expect(avatar.frameView.shape == .roundedTile)
+        avatar.frameID = "frame.mystery"
+        #expect(avatar.frameID == nil)
+        #expect(avatar.frameView.isHidden)
+    }
 }
