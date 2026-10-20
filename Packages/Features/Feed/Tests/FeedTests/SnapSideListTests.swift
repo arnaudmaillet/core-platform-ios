@@ -6,7 +6,7 @@ import Testing
 import UIKit
 @testable import Feed
 
-/// The side list experiment (#1425, `-snap-side-list`).
+/// The side list (#1425), on every vertical feed since #1473.
 @MainActor
 struct SnapSideListTests {
     // MARK: - Geometry
@@ -80,14 +80,23 @@ struct SnapSideListTests {
         return controller
     }
 
-    /// Flag off: nothing installed, and the dismissal answers as it always
-    /// did.
-    @Test func withTheFlagOffNothingIsInstalled() {
+    /// On by default (#1473): a vertical feed installs it with no flag.
+    @Test func everyVerticalFeedInstallsItByDefault() {
+        let controller = SnapFeedViewController(
+            viewModel: FeedViewModel(repository: SideListProvider()),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            reporting: SideListReporter()
+        )
+        #expect(controller.installsSideList)
+    }
+
+    /// A screen that opts out installs nothing, and the dismissal answers as
+    /// it always did.
+    @Test func aScreenThatOptsOutInstallsNothing() {
         let feed = feed(sideList: false)
         #expect(feed.sideList == nil)
         #expect(!feed.view.subviews.contains { $0 is SnapSideListView })
         #expect(feed.isReadyForInteractiveDismissal)
-        #expect(SnapSideList.isEnabled(arguments: []) == false)
     }
 
     /// Open: the pager is a card, the list is on screen, the dismissals stand

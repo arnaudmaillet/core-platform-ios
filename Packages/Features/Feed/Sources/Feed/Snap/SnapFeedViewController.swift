@@ -422,11 +422,11 @@ final class SnapFeedViewController: UIViewController {
     /// never aborted (the pager lock can only land once the page has
     /// settled — disabling it mid-drag would freeze the user's scroll).
     private var commentsEngagementIsResting = false
-    /// The side list (#1425, `-snap-side-list`): nil with the flag off.
+    /// The side list (#1425): nil on a screen that opted out.
     private(set) var sideList: SnapSideListController?
-    /// Whether this screen installs the side list — the process's flag; a
-    /// test sets its own before the view loads.
-    var installsSideList = SnapSideList.isEnabled
+    /// Whether this screen installs the side list — every vertical feed does
+    /// (#1473); a test sets its own before the view loads.
+    var installsSideList = true
     /// The current posts the side list samples from (#1425). Nil: an empty
     /// list.
     public var sideListEntries: (@MainActor () async -> [FeedEntry])?

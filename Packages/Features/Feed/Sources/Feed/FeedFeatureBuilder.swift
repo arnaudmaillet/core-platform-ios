@@ -1502,14 +1502,12 @@ public struct FeedFeatureBuilder: FeedFeatureBuilding {
         )
         // Every vertical feed records what the viewer viewed (#1344).
         feed.viewHistory = .shared
-        // The side list's posts (#1425, `-snap-side-list`): For You's
-        // discovery pool as the app already holds it, else as it loads.
-        if SnapSideList.isEnabled {
-            let source: any FeedProviding = discovery ?? repository
-            feed.sideListEntries = {
-                if let cached = await source.cachedFirstPage(), !cached.isEmpty { return cached }
-                return (try? await source.loadFirstPage())?.entries ?? []
-            }
+        // The side list's posts (#1425, #1473): For You's discovery pool as
+        // the app already holds it, else as it loads.
+        let source: any FeedProviding = discovery ?? repository
+        feed.sideListEntries = {
+            if let cached = await source.cachedFirstPage(), !cached.isEmpty { return cached }
+            return (try? await source.loadFirstPage())?.entries ?? []
         }
         return feed
     }

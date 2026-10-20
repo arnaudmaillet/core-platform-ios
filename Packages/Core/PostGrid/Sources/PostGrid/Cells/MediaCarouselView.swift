@@ -245,8 +245,8 @@ public final class MediaCarouselView: UIView, UIScrollViewDelegate, UIGestureRec
     }
 
     /// Whether a LEFTWARD drag is given up too — opted into by a screen that
-    /// has something waiting for it (#1425: the snap feed's side list, behind
-    /// `-snap-side-list`). Off, the end-of-run rubber-band stays the answer
+    /// has something waiting for it (#1425: the snap feed's side list, on by
+    /// default since #1473). Off, the end-of-run rubber-band stays the answer
     /// (see `yieldsRightwardDrag`).
     public var yieldsLeftwardDrags = false
 
