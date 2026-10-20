@@ -7,7 +7,7 @@ import UIKit
 /// The wallet's history (#400), from the server (wallet.v1
 /// `ListWalletTransactions`) — every claim, stake, gift and purchase, newest
 /// first, page by page, for both currencies or one, grouped by day (#1478).
-/// Settings → Wallet and Purchases opens it, and so does the wallet hub's
+/// Settings → Wallet and Purchases opens it, and so does the Wallet sheet's
 /// Activity.
 ///
 /// Nothing is sold for real money (the backend's decision of 2026-10-08), so
@@ -68,10 +68,16 @@ final class WalletHistoryViewController: UIViewController {
 
     private enum Phase { case loading, loaded, failed }
 
-    init(wallet: WalletStore) {
+    /// In the Rewards sheet (#1494): the filter at the bar's trailing end and
+    /// no title, the Stakes screen's bar; in Settings, the titled page with
+    /// the filter as its first row.
+    private let filterInBar: Bool
+
+    init(wallet: WalletStore, filterInBar: Bool = false) {
         self.wallet = wallet
+        self.filterInBar = filterInBar
         super.init(nibName: nil, bundle: nil)
-        title = "Wallet and Purchases"
+        if !filterInBar { title = "Wallet and Purchases" }
         hidesBottomBarWhenPushed = true
     }
 
@@ -92,6 +98,11 @@ final class WalletHistoryViewController: UIViewController {
         collectionView.delegate = self
         view.addSubview(collectionView)
         configureDataSource()
+        if filterInBar {
+            let control = makeFilterControl()
+            control.accessibilityLabel = "Activity"
+            navigationItem.rightBarButtonItem = UIBarButtonItem(customView: control)
+        }
         reload()
     }
 
@@ -140,14 +151,7 @@ final class WalletHistoryViewController: UIViewController {
     private func configureDataSource() {
         let filterRegistration = UICollectionView.CellRegistration<UICollectionViewListCell, Item> { [weak self] cell, _, _ in
             guard let self else { return }
-            let control = UISegmentedControl(items: Filter.allCases.map(\.title))
-            control.selectedSegmentIndex = filter.rawValue
-            control.addAction(UIAction { [weak self] action in
-                guard let self, let control = action.sender as? UISegmentedControl,
-                      let next = Filter(rawValue: control.selectedSegmentIndex), next != filter else { return }
-                filter = next
-                reload()
-            }, for: .valueChanged)
+            let control = makeFilterControl()
             control.translatesAutoresizingMaskIntoConstraints = false
             cell.contentView.subviews.forEach { $0.removeFromSuperview() }
             cell.contentView.addSubview(control)
@@ -211,7 +215,8 @@ final class WalletHistoryViewController: UIViewController {
             var content = UIListContentConfiguration.footer()
             // Under the last section only.
             let isLast = indexPath.section == (self?.dataSource.snapshot().numberOfSections ?? 0) - 1
-            content.text = isLast && indexPath.section > 0
+            let isFilter = self?.dataSource.sectionIdentifier(for: indexPath.section) == .filter
+            content.text = isLast && !isFilter
                 ? "Nothing in the app is sold for real money: likes are claimed and staked, gems are earned."
                 : nil
             view.contentConfiguration = content
@@ -223,10 +228,25 @@ final class WalletHistoryViewController: UIViewController {
         }
     }
 
+    /// All | Likes | Gems, on `filter`.
+    private func makeFilterControl() -> UISegmentedControl {
+        let control = UISegmentedControl(items: Filter.allCases.map(\.title))
+        control.selectedSegmentIndex = filter.rawValue
+        control.addAction(UIAction { [weak self] action in
+            guard let self, let control = action.sender as? UISegmentedControl,
+                  let next = Filter(rawValue: control.selectedSegmentIndex), next != filter else { return }
+            filter = next
+            reload()
+        }, for: .valueChanged)
+        return control
+    }
+
     private func applySnapshot() {
         var snapshot = NSDiffableDataSourceSnapshot<Section, Item>()
-        snapshot.appendSections([.filter])
-        snapshot.appendItems([.filter], toSection: .filter)
+        if !filterInBar {
+            snapshot.appendSections([.filter])
+            snapshot.appendItems([.filter], toSection: .filter)
+        }
         switch phase {
         case .loading:
             snapshot.appendSections([.status])

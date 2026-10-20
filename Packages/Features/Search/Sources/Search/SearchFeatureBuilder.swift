@@ -22,7 +22,7 @@ public struct SearchFeatureBuilder: SearchFeatureBuilding {
     /// The viewer's point balance, for the results screen's header. `nil` in a
     /// composition without a wallet — the badge simply does not appear.
     private let wallet: WalletStore?
-    /// The shell owns the claim sheet (`WalletClaimSheetViewController` lives in
+    /// The shell owns the Wallet sheet (`WalletSheetViewController` lives in
     /// App/Shell), so it arrives as a closure rather than a type.
     private let makeWalletSheet: (@MainActor () -> UIViewController)?
     /// Whether the results header wears the balance: not for a guest (#1146).

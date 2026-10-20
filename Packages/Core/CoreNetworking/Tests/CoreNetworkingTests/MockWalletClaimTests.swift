@@ -27,13 +27,13 @@ struct MockWalletClaimTests {
     private let account = MockAuthService.accountID
 
     private func make(
-        startingLikes: Int64 = 250, demoPositions: [String] = []
+        startingLikes: Int64 = 250, demoPositions: [String] = [], keepsDemoStakesActive: Bool = false
     ) -> (Wallet_V1_WalletServiceClient, MockWalletService) {
         let bff = MockBFF()
         let clock = clock
         let service = MockWalletService(
             store: MockCounterStore(dataset: dataset), dataset: dataset, startingLikes: startingLikes,
-            demoPositions: demoPositions, now: { clock.now }
+            demoPositions: demoPositions, keepsDemoStakesActive: keepsDemoStakesActive, now: { clock.now }
         )
         service.register(on: bff)
         let client = ConnectClientFactory.makeAuthenticated(
@@ -148,6 +148,29 @@ struct MockWalletClaimTests {
         #expect(settled.first?.verdict == .pending)
         clock.now = clock.now.addingTimeInterval(3_600)
         #expect(try await list(.settled).first.map { [.rewarded, .notRewarded].contains($0.verdict) } == true)
+    }
+
+    /// The app's mock keeps a few demo stakes active however old the
+    /// account (#1494): days on, the oldest demo stakes are staked again.
+    @Test func theAppsMockKeepsDemoStakesActive() async throws {
+        let posts = dataset.posts.prefix(8).map(\.postID)
+        let (client, _) = make(demoPositions: posts, keepsDemoStakesActive: true)
+        func list(_ status: Wallet_V1_StakeStatusFilter) async throws -> [Wallet_V1_MyStake] {
+            var request = Wallet_V1_ListMyStakesRequest()
+            request.accountID = account
+            request.status = status
+            return try #require(await client.listMyStakes(request: request, headers: [:]).message).stakes
+        }
+        #expect(try await list(.active).count >= MockWalletService.demoActiveFloor)
+        // A claim keeps the account (an untouched one opens afresh each read).
+        _ = try await claim(client, key: "claim-key-0200")
+        clock.now = clock.now.addingTimeInterval(5 * 86_400)
+        let active = try await list(.active)
+        #expect(active.count == MockWalletService.demoActiveFloor)
+        // One position per post: nothing listed twice.
+        let all = try await list(.unspecified).map(\.postID)
+        #expect(Set(all).count == all.count)
+        #expect(all.count == posts.count)
     }
 
     /// The pages follow the token, newest first stake first.

@@ -104,6 +104,9 @@ public struct MockBackend: Sendable {
             // Stakes the wallet opens with, so the sheet's lists show
             // something on a fresh install (#903).
             demoPositions: dataset.posts.prefix(8).map(\.postID),
+            // ... and keeps a few of them active, however old the install
+            // (#1494).
+            keepsDemoStakesActive: true,
             // A post the account may not read takes no stake (#1409).
             mayStakeOnPost: { account, postID in
                 socialServices.mayReadPost(

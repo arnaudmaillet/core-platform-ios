@@ -396,6 +396,12 @@ public final class MockWalletService: @unchecked Sendable {
     /// Posts a new wallet opens with stakes on, some settled — so the
     /// sheet's lists are not empty on a fresh install (the app's mock).
     private let demoPositions: [String]
+    /// The app's mock keeps a few demo stakes ACTIVE whatever the install's
+    /// age (#1494): an account opened days ago would otherwise only list
+    /// settled ones.
+    private let keepsDemoStakesActive: Bool
+    /// How many stakes the app's mock keeps active.
+    public static let demoActiveFloor = 3
     private let lock = NSLock()
     private var accounts: [String: Account] {
         didSet {
@@ -419,11 +425,13 @@ public final class MockWalletService: @unchecked Sendable {
         startingLikes: Int64 = MockWalletService.generousStartingLikes,
         persistence: UserDefaults? = nil,
         demoPositions: [String] = [],
+        keepsDemoStakesActive: Bool = false,
         now: @escaping @Sendable () -> Date = { Date() },
         mayStakeOnPost: @escaping @Sendable (_ account: String, _ postID: String) -> Bool = { _, _ in true }
     ) {
         self.mayStakeOnPost = mayStakeOnPost
         self.demoPositions = demoPositions
+        self.keepsDemoStakesActive = keepsDemoStakesActive
         self.store = store
         self.dataset = dataset
         self.startingLikes = startingLikes
@@ -821,6 +829,7 @@ public final class MockWalletService: @unchecked Sendable {
     /// hour, then REWARDED or NOT_REWARDED (stable per target).
     private func myStakesLocked(_ request: Wallet_V1_ListMyStakesRequest) -> Wallet_V1_ListMyStakesResponse {
         let moment = now()
+        topUpDemoStakesLocked(request.accountID, at: moment)
         let positions = (accountLocked(request.accountID).positions ?? [])
             .sorted { $0.firstAt > $1.firstAt }
             .filter { position in
@@ -860,6 +869,31 @@ public final class MockWalletService: @unchecked Sendable {
         }
         response.nextPageToken = end < positions.count ? String(end) : ""
         return response
+    }
+
+    /// Keeps `demoActiveFloor` demo stakes active (`keepsDemoStakesActive`):
+    /// the demo posts whose stake is oldest are staked again, a few hours
+    /// apart. One position per post, as the server keeps.
+    private func topUpDemoStakesLocked(_ id: String, at moment: Date) {
+        guard keepsDemoStakesActive, !demoPositions.isEmpty else { return }
+        var account = accountLocked(id)
+        var positions = account.positions ?? []
+        let isActive = { (position: Position) in moment < position.firstAt.addingTimeInterval(Self.settlementDelay) }
+        let missing = Self.demoActiveFloor - positions.filter(isActive).count
+        guard missing > 0 else { return }
+        let demoTargets = Set(demoPositions.map { "post:" + $0 })
+        let restaked = positions.filter { demoTargets.contains($0.target) && !isActive($0) }
+            .sorted { $0.firstAt < $1.firstAt }
+            .prefix(missing)
+            .map(\.target)
+        for (index, target) in restaked.enumerated() {
+            guard let at = positions.firstIndex(where: { $0.target == target }) else { continue }
+            let first = moment.addingTimeInterval(-Double(index) * 5 * 3_600 - 1_800)
+            positions[at].firstAt = first
+            positions[at].lastAt = first
+        }
+        account.positions = positions
+        accounts[id] = account
     }
 
     // MARK: The claim

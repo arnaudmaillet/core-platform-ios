@@ -41,6 +41,21 @@ public enum Surface {
     /// the card.
     public static let card: UIColor = .secondarySystemGroupedBackground
 
+    /// A card's corner (#1494): the For You card's, every card of the app's.
+    /// A CARD — a surface that holds content, lighter than its page — not a
+    /// thumbnail or a media tile, whose corners are their own.
+    public static let cardCornerRadius: CGFloat = 26
+
+    /// Dresses `view` as a card: the card's tone, its corner and its edge —
+    /// the one contract every card follows (#1494).
+    @MainActor
+    public static func dressCard(_ view: UIView) {
+        view.backgroundColor = card
+        view.layer.cornerRadius = cardCornerRadius
+        view.layer.cornerCurve = .continuous
+        applyCardEdge(to: view)
+    }
+
     /// The card's outline: `separator` in the dark, clear in the light.
     public static let cardEdge = UIColor { traits in
         traits.userInterfaceStyle == .dark

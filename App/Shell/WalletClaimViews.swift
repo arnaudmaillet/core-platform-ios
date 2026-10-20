@@ -5,27 +5,26 @@ import MediaCore
 import PostGrid
 import UIKit
 
-// The pieces of the wallet's lists (#1476: the hub, `WalletHubViewController`):
-// the stake rows and their section headers. The hub's head and the likes gauge
-// are `WalletHubViews.swift`.
+// The pieces of the Wallet sheet's lists (#1494, `WalletSheetViewController`):
+// the stake rows and their section headers. The sheet's top block and the
+// likes gauge are `WalletSheetViews.swift`.
 //
 // ⚠️ **CARDS ONLY FOR WHAT CAN BE PRESSED** (26 September 2026): a card is the
 // app's promise that a thing can be pressed, so balances sit bare on the sheet
-// and the cards are the stake rows (which open their post), the Gems card and
-// the Wallet row. The sheet's ground is the SYSTEM's (glass while small,
+// and the cards are the stake rows (which open their post), the gems card and
+// the activity. The sheet's ground is the SYSTEM's (glass while small,
 // opaque once large), so the rows wear a translucent fill that reads on both.
 
 // MARK: - Shared
 
 enum WalletSheetMetrics {
     static let sideMargin: CGFloat = Spacing.lg
-    static let rowCorner: CGFloat = 18
-    static let claimHeight: CGFloat = 52
     static let thumbnail: CGFloat = 48
+    /// The thumbnail's corner (#1494): concentric with its card's, which it
+    /// sits `Spacing.sm` inside — a little rounder than a list's media.
+    static let thumbnailCorner: CGFloat = Surface.cardCornerRadius - Spacing.sm
     /// The balances: the sheet's main information, so its biggest type.
     static let balanceSize: CGFloat = 40
-    /// The stake rows' ground — see `WalletStakeCell`.
-    static let cardFill: UIColor = .tertiarySystemFill
 }
 
 /// A number followed by its currency's glyph — "20 ♥", "+10 💎" — the ONE order
@@ -81,7 +80,7 @@ func walletAgoText(since date: Date, now: Date) -> String {
 ///
 /// A card, and a pressable one: it opens the post in the feed, flying from
 /// its thumbnail (media) or revealing from the card (text) — see
-/// `WalletHubViewController.openFeed`.
+/// `WalletSheetViewController.openFeed`.
 ///
 /// The stake is local and always known; the POST is a lookup (#834). While
 /// it is out, the post part — thumbnail, author, caption — is bones laid over
@@ -89,7 +88,7 @@ func walletAgoText(since date: Date, now: Date) -> String {
 /// countdown stay real; when it lands the bones cross-fade to the post (P10).
 /// A lookup that failed says so in the caption line, and a tap on the row
 /// tries again.
-final class WalletStakeCell: UICollectionViewCell {
+class WalletStakeCell: UICollectionViewListCell {
     private let thumbnail = UIImageView()
     private let titleLabel = UILabel()
     private let subtitleLabel = UILabel()
@@ -115,18 +114,10 @@ final class WalletStakeCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        // A card the sheet's OWN ground can carry in both of its states —
-        // the one thing on the sheet that can be pressed (it opens the post).
-        //
-        // ⚠️ A system FILL, not `Surface.card`. The sheet's ground is the
-        // system's now (glass while small, opaque white once large), and a
-        // white card vanished on the large sheet — only the thumbnails were
-        // left, floating (filmed, 26 September 2026). A translucent fill
-        // stands off both grounds by the same amount.
-        contentView.backgroundColor = WalletSheetMetrics.cardFill
-        contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
-        contentView.layer.cornerCurve = .continuous
-        Surface.applyCardEdge(to: contentView)
+        // A row of its section's one card (#1494): the card is the
+        // section's — the Rewards sheet's decoration, the Stakes screen's
+        // inset-grouped list — so the row draws no ground of its own.
+        backgroundConfiguration = .clear()
         // The app's one press: the card gives a little under the finger.
         PressFeedback.attach(toView: contentView, sound: nil)
         // Its watcher, switched off while a tap would do nothing (a row on
@@ -135,9 +126,9 @@ final class WalletStakeCell: UICollectionViewCell {
 
         thumbnail.contentMode = .scaleAspectFill
         thumbnail.clipsToBounds = true
-        // The flight card's own corner (`.listMedia`), so a post flying home
-        // lands on exactly the shape it left.
-        thumbnail.layer.cornerRadius = PostGridListRowCell.mediaCornerRadius
+        // Concentric with the card (#1494) — and the flight's corner too
+        // (`WalletStakeHero`), so a post flying home lands on its shape.
+        thumbnail.layer.cornerRadius = WalletSheetMetrics.thumbnailCorner
         thumbnail.layer.cornerCurve = .continuous
         thumbnail.backgroundColor = .tertiarySystemFill
         thumbnail.tintColor = .secondaryLabel
@@ -209,7 +200,7 @@ final class WalletStakeCell: UICollectionViewCell {
         bones.isUserInteractionEnabled = false
         bones.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(bones)
-        let tile = SkeletonBoneView(rounding: .fixed(PostGridListRowCell.mediaCornerRadius))
+        let tile = SkeletonBoneView(rounding: .fixed(WalletSheetMetrics.thumbnailCorner))
         let title = SkeletonBoneView()
         let subtitle = SkeletonBoneView()
         for bone in [tile, title, subtitle] {
@@ -471,7 +462,7 @@ final class WalletStakeCell: UICollectionViewCell {
     }
 
     /// The row as drawn now — the stand-in a text post's window crossfades
-    /// to and from (`WalletHubViewController.heroOrigin`).
+    /// to and from (`WalletSheetViewController.heroOrigin`).
     func renderedImage() -> UIImage? {
         guard bounds.width > 0, bounds.height > 0 else { return nil }
         return UIGraphicsImageRenderer(bounds: bounds).image { _ in
@@ -491,17 +482,58 @@ final class WalletStakeCell: UICollectionViewCell {
 }
 
 /// No active stake: what staking is, in a sentence, where the list would be.
-final class WalletEmptyStakesCell: UICollectionViewCell {
+/// A stake row inside its section's one card (#1494, the Wallet sheet's
+/// Active stakes): no card of its own, a hairline between rows.
+final class WalletGroupedStakeCell: WalletStakeCell {
+    private let separator = UIView()
+
+    /// Whether the hairline over the row shows: every row but the first.
+    var showsSeparator = false {
+        didSet { separator.isHidden = !showsSeparator }
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = WalletSheetMetrics.cardFill
-        contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
-        contentView.layer.cornerCurve = .continuous
-        Surface.applyCardEdge(to: contentView)
+        separator.backgroundColor = .separator
+        separator.isHidden = true
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(separator)
+        let hairline = separator.heightAnchor.constraint(equalToConstant: Surface.hairline(for: traitCollection))
+        NSLayoutConstraint.activate([
+            hairline,
+            separator.topAnchor.constraint(equalTo: topAnchor),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Spacing.sm + WalletSheetMetrics.thumbnail + Spacing.sm),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor),
+        ])
+        registerForTraitChanges([UITraitDisplayScale.self]) { (cell: WalletGroupedStakeCell, _: UITraitCollection) in
+            hairline.constant = Surface.hairline(for: cell.traitCollection)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+}
+
+final class WalletEmptyStakesCell: UICollectionViewCell {
+    /// "Find a post to stake" (#1494): where staking is — a like on a post,
+    /// in the feeds. Nil hides the button.
+    var onFindPosts: (() -> Void)? {
+        didSet { findButton.isHidden = onFindPosts == nil }
+    }
+
+    private let findButton = UIButton(configuration: .tinted())
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // The Active stakes card's whole content (#1494): no card of its own,
+        // centred in what is left of the sheet's height (the list sizes it).
+        let icon = UIImageView(image: LikesSymbol.glyphImage(UIImage.SymbolConfiguration(pointSize: 32, weight: .regular)))
+        icon.contentMode = .center
         let title = UILabel()
         title.text = "No active stakes"
-        title.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
+        title.font = .scaledSystemFont(ofSize: 17, weight: .semibold, relativeTo: .headline)
         title.adjustsFontForContentSizeCategory = true
+        title.textAlignment = .center
         let body = UILabel()
         let hours = Int(WalletStore.Policy.settlementDelay / 3600)
         body.text = "Stake likes on a post you believe in. Each stake settles \(hours) hours later — and may earn gems."
@@ -509,27 +541,55 @@ final class WalletEmptyStakesCell: UICollectionViewCell {
         body.adjustsFontForContentSizeCategory = true
         body.textColor = .secondaryLabel
         body.numberOfLines = 0
-        let column = UIStackView(arrangedSubviews: [title, body])
+        body.textAlignment = .center
+
+        // The failed row's tinted capsule (`WalletStakesFailedCell`).
+        var button = UIButton.Configuration.tinted()
+        button.cornerStyle = .capsule
+        button.baseForegroundColor = Palette.tint
+        button.baseBackgroundColor = Palette.tint
+        button.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 14, bottom: 6, trailing: 14)
+        button.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = UIFont.appFont(forTextStyle: .subheadline)
+            return attributes
+        }
+        button.title = "Find a post to stake"
+        findButton.configuration = button
+        findButton.accessibilityIdentifier = "wallet.stakes.find"
+        findButton.isHidden = true
+        findButton.addAction(UIAction { [weak self] _ in self?.onFindPosts?() }, for: .primaryActionTriggered)
+
+        let column = UIStackView(arrangedSubviews: [icon, title, body, findButton])
         column.axis = .vertical
-        column.spacing = 2
+        column.alignment = .center
+        column.spacing = Spacing.xs
+        column.setCustomSpacing(Spacing.sm, after: icon)
+        column.setCustomSpacing(Spacing.md, after: body)
         column.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(column)
         NSLayoutConstraint.activate([
-            column.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Spacing.md),
-            column.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.md),
-            column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.md),
-            column.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Spacing.md),
+            column.topAnchor.constraint(greaterThanOrEqualTo: contentView.topAnchor, constant: Spacing.xl),
+            column.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Spacing.xl),
+            column.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Spacing.xl),
+            column.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -Spacing.xl),
+            column.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
         ])
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        onFindPosts = nil
+    }
 }
 
 /// Some stakes' posts could not be loaded (#834): says so at the head of a
 /// section whose rows failed (`WalletStakeList`), with Try Again — which asks for those posts only, never the whole
 /// sheet. The empty card's shape and type, so the list keeps one voice.
-final class WalletStakesFailedCell: UICollectionViewCell {
+final class WalletStakesFailedCell: UICollectionViewListCell {
     private let titleLabel = UILabel()
     private let bodyLabel = UILabel()
     private let retryButton = UIButton(configuration: .plain())
@@ -538,10 +598,7 @@ final class WalletStakesFailedCell: UICollectionViewCell {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        contentView.backgroundColor = WalletSheetMetrics.cardFill
-        contentView.layer.cornerRadius = WalletSheetMetrics.rowCorner
-        contentView.layer.cornerCurve = .continuous
-        Surface.applyCardEdge(to: contentView)
+        // A row of the Active stakes card (#1494): no card of its own.
         titleLabel.text = "Couldn't load some posts"
         titleLabel.font = .scaledSystemFont(ofSize: 15, weight: .semibold, relativeTo: .subheadline)
         titleLabel.adjustsFontForContentSizeCategory = true

@@ -778,40 +778,31 @@ final class AppContainer {
     func makeWalletSheet() -> UIViewController {
         assert(memberGate.isMember, "the wallet sheet was asked for a guest (#1146)")
         let shopMedia = ShopMedia(images: imagePipeline, videos: videoPlayback)
-        // Structure B (#1476): the Claim sheet, and the hub its Wallet row
-        // pushes in the same sheet.
-        return WalletClaimSheetViewController(
+        // One sheet with two heights (#1494): the daily glance, and the rest
+        // of the wallet below it.
+        return WalletSheetViewController(
             wallet: walletStore,
+            lookUpPosts: { [unowned self] ids in await self.feedFeature.galleryPosts(ids) },
+            imagePipeline: imagePipeline,
+            // A stake row opens its post the way a For You or Profile card
+            // does — the same flight, owned by Feed.
+            openFeedHero: { [unowned self] ids, presenter, origin in
+                self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
+            },
+            // "Find a post to stake": the feed, the sheet down.
+            findPosts: { [unowned self] in self.router.route(to: .feed) },
             countries: countryAccess,
             stakePacks: stakePacks,
             profileItems: profileItems,
             themes: accentThemes,
-            shopMedia: shopMedia,
-            makeHub: { [unowned self] claimer in
-                WalletHubViewController(
-                    wallet: self.walletStore,
-                    claimer: claimer,
-                    lookUpPosts: { [unowned self] ids in await self.feedFeature.galleryPosts(ids) },
-                    imagePipeline: self.imagePipeline,
-                    // A stake row opens its post the way a For You or Profile
-                    // card does — the same flight, owned by Feed.
-                    openFeedHero: { [unowned self] ids, presenter, origin in
-                        self.feedFeature.presentSnapFeedHero(postIDs: ids, from: presenter, origin: origin)
-                    },
-                    countries: self.countryAccess,
-                    stakePacks: self.stakePacks,
-                    profileItems: self.profileItems,
-                    themes: self.accentThemes,
-                    shopMedia: shopMedia
-                )
-            }
+            shopMedia: shopMedia
         ).wrappedInSheet()
     }
 
     /// The Shop opened on its Boosts — where the stake menu's "Get ×100
     /// cartridges in the Shop" goes, from the feed rail, the composer and
     /// every card (`ShellTabBarController`, `StakeShopOpening`). The SAME
-    /// screen the points sheet's Shop and the Explore header push, with the
+    /// screen the Wallet's gems card and the Explore header push, with the
     /// same sellers; nil where they sell nothing (no shop door either).
     func makeStakeShopScreen() -> UIViewController? {
         guard let countryAccess, let stakePacks else { return nil }
