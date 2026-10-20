@@ -174,7 +174,7 @@ final class WalletClaimSheetViewController: UIViewController {
         }
         // `-wallet-open-hub` (and the hub's own hooks, `-wallet-sheet-large`,
         // `-wallet-open-stake`, `-wallet-sheet-scroll`): the Wallet row's path.
-        if ["-wallet-open-hub", "-wallet-sheet-large", "-wallet-open-stake", "-wallet-sheet-scroll"]
+        if ["-wallet-open-hub", "-wallet-sheet-large", "-wallet-open-stake", "-wallet-sheet-scroll", "-wallet-open-stakes"]
             .contains(where: arguments.contains) {
             QAWait.until("-wallet-open-hub", landed) { [weak self] in self?.openHub() }
         }

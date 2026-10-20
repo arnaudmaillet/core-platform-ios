@@ -738,6 +738,15 @@ public final class WalletStore: @unchecked Sendable {
     /// device's guess. The server's verdict replaces it once listed (shadow
     /// mode: "Rewarded" where the device said "+1"), so the sheet shows the
     /// outcome as a bone meanwhile rather than a number that will flip.
+    /// Whether the member's last read of the server's stakes failed, with
+    /// none read before for them — the Stakes screen's failed state (#1477).
+    public var stakesListingFailed: Bool {
+        lock.withLock {
+            guard _server != nil, case .member = scope.owner else { return false }
+            return _serverStakesFailedOwner == scope.owner && _serverStakes?.owner != scope.owner
+        }
+    }
+
     public var awaitsServerStakes: Bool {
         lock.withLock {
             guard _server != nil, case .member = scope.owner else { return false }
