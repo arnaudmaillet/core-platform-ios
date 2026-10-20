@@ -89,4 +89,17 @@ struct ServerWalletTests {
         wire.kind = .UNRECOGNIZED(42)
         #expect(ServerWallet.transaction(wire).kind == .other)
     }
+
+    /// The catalogue's purchases (#892) keep their own kind, not "other".
+    @Test(arguments: [
+        (Wallet_V1_TransactionKind.appIcon, WalletTransaction.Kind.appIcon),
+        (.theme, .theme), (.countryVisa, .countryVisa), (.profileSlot, .profileSlot),
+        (.handleChange, .handleChange), (.avatarFrame, .avatarFrame),
+        (.animatedBanner, .animatedBanner), (.cardStyle, .cardStyle), (.animatedAvatar, .animatedAvatar),
+    ])
+    func aCataloguePurchaseKeepsItsKind(_ wire: Wallet_V1_TransactionKind, _ kind: WalletTransaction.Kind) {
+        var transaction = Wallet_V1_WalletTransaction()
+        transaction.kind = wire
+        #expect(ServerWallet.transaction(transaction).kind == kind)
+    }
 }

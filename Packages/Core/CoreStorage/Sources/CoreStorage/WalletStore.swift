@@ -102,6 +102,10 @@ public struct WalletTransaction: Equatable, Sendable, Identifiable, Hashable {
     public enum Currency: Equatable, Sendable, Hashable { case likes, gems }
     public enum Kind: Equatable, Sendable, Hashable {
         case claim, starterGift, stakePack, countryUnlock, stake, welcomeGift
+        /// Gem purchases from the catalogue (wallet.v1, #892); `reference`
+        /// names the item, the country, the slot or the profile.
+        case appIcon, theme, countryVisa, profileSlot, handleChange
+        case avatarFrame, animatedBanner, cardStyle, animatedAvatar
         /// A kind this build does not know — shown plainly, never hidden.
         case other
     }

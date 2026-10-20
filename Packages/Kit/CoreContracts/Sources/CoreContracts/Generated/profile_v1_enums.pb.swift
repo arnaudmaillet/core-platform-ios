@@ -547,6 +547,111 @@ public nonisolated enum Profile_V1_LimitAudience: SwiftProtobuf.Enum, Swift.Case
 
 }
 
+/// What became of a profile slot purchase (#916).
+public nonisolated enum Profile_V1_ProfileSlotOutcome: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case bought // = 1
+
+  /// The account owns the most slots already: nothing charged.
+  case maxReached // = 2
+  case insufficientGems // = 3
+
+  /// The price moved since the app showed it: `price_gems` is the new one.
+  /// Nothing charged.
+  case priceChanged // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .bought
+    case 2: self = .maxReached
+    case 3: self = .insufficientGems
+    case 4: self = .priceChanged
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .bought: return 1
+    case .maxReached: return 2
+    case .insufficientGems: return 3
+    case .priceChanged: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_ProfileSlotOutcome] = [
+    .unspecified,
+    .bought,
+    .maxReached,
+    .insufficientGems,
+    .priceChanged,
+  ]
+
+}
+
+/// What became of a handle change (#911).
+public nonisolated enum Profile_V1_HandleChangeOutcome: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unspecified // = 0
+  case changed // = 1
+
+  /// `expected_price` is not the change's price: nothing charged.
+  case priceChanged // = 2
+
+  /// The wallet holds fewer gems than the price: nothing changed.
+  case insufficientGems // = 3
+
+  /// A caller who may not spend gems changed less than 30 days ago.
+  case cooldown // = 4
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unspecified
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unspecified
+    case 1: self = .changed
+    case 2: self = .priceChanged
+    case 3: self = .insufficientGems
+    case 4: self = .cooldown
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unspecified: return 0
+    case .changed: return 1
+    case .priceChanged: return 2
+    case .insufficientGems: return 3
+    case .cooldown: return 4
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Profile_V1_HandleChangeOutcome] = [
+    .unspecified,
+    .changed,
+    .priceChanged,
+    .insufficientGems,
+    .cooldown,
+  ]
+
+}
+
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Profile_V1_ProfileStatus: SwiftProtobuf._ProtoNameProviding {
@@ -595,4 +700,12 @@ nonisolated extension Profile_V1_SensitiveContent: SwiftProtobuf._ProtoNameProvi
 
 nonisolated extension Profile_V1_LimitAudience: SwiftProtobuf._ProtoNameProviding {
   public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LIMIT_AUDIENCE_UNSPECIFIED\0\u{1}LIMIT_AUDIENCE_NON_FOLLOWERS\0\u{1}LIMIT_AUDIENCE_RECENT_FOLLOWERS\0")
+}
+
+nonisolated extension Profile_V1_ProfileSlotOutcome: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0PROFILE_SLOT_OUTCOME_UNSPECIFIED\0\u{1}PROFILE_SLOT_OUTCOME_BOUGHT\0\u{1}PROFILE_SLOT_OUTCOME_MAX_REACHED\0\u{1}PROFILE_SLOT_OUTCOME_INSUFFICIENT_GEMS\0\u{1}PROFILE_SLOT_OUTCOME_PRICE_CHANGED\0")
+}
+
+nonisolated extension Profile_V1_HandleChangeOutcome: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0HANDLE_CHANGE_OUTCOME_UNSPECIFIED\0\u{1}HANDLE_CHANGE_OUTCOME_CHANGED\0\u{1}HANDLE_CHANGE_OUTCOME_PRICE_CHANGED\0\u{1}HANDLE_CHANGE_OUTCOME_INSUFFICIENT_GEMS\0\u{1}HANDLE_CHANGE_OUTCOME_COOLDOWN\0")
 }

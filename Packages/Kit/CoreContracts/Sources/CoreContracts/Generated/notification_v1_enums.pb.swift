@@ -68,6 +68,12 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
 
   /// The supervision ended because the teen turned 18.
   case supervisionCameOfAge // = 12
+
+  /// The recipient's account earned a badge (#912, from the platform: no
+  /// sender; subject: SUBJECT_KIND_ACCOUNT, the account — the app finds the
+  /// badge, the newest of family BADGE, in wallet ListOwnedItems, and
+  /// celebrates it). Feed only.
+  case badgeAwarded // = 13
   case UNRECOGNIZED(Int)
 
   public init() {
@@ -89,6 +95,7 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     case 10: self = .supervisionStarted
     case 11: self = .supervisionEnded
     case 12: self = .supervisionCameOfAge
+    case 13: self = .badgeAwarded
     default: self = .UNRECOGNIZED(rawValue)
     }
   }
@@ -108,6 +115,7 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     case .supervisionStarted: return 10
     case .supervisionEnded: return 11
     case .supervisionCameOfAge: return 12
+    case .badgeAwarded: return 13
     case .UNRECOGNIZED(let i): return i
     }
   }
@@ -127,6 +135,7 @@ public nonisolated enum Notification_V1_NotificationKind: SwiftProtobuf.Enum, Sw
     .supervisionStarted,
     .supervisionEnded,
     .supervisionCameOfAge,
+    .badgeAwarded,
   ]
 
 }
@@ -344,7 +353,7 @@ public nonisolated enum Notification_V1_PushEnvironment: SwiftProtobuf.Enum, Swi
 // MARK: - Code below here is support for the SwiftProtobuf runtime.
 
 nonisolated extension Notification_V1_NotificationKind: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NOTIFICATION_KIND_UNSPECIFIED\0\u{1}NOTIFICATION_KIND_REACTION\0\u{1}NOTIFICATION_KIND_COMMENT\0\u{1}NOTIFICATION_KIND_REPLY\0\u{1}NOTIFICATION_KIND_MENTION\0\u{1}NOTIFICATION_KIND_FOLLOW\0\u{1}NOTIFICATION_KIND_FOLLOW_REQUEST\0\u{1}NOTIFICATION_KIND_FOLLOW_ACCEPTED\0\u{1}NOTIFICATION_KIND_APPEAL_UPHELD\0\u{1}NOTIFICATION_KIND_APPEAL_OVERTURNED\0\u{1}NOTIFICATION_KIND_SUPERVISION_STARTED\0\u{1}NOTIFICATION_KIND_SUPERVISION_ENDED\0\u{1}NOTIFICATION_KIND_SUPERVISION_CAME_OF_AGE\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0NOTIFICATION_KIND_UNSPECIFIED\0\u{1}NOTIFICATION_KIND_REACTION\0\u{1}NOTIFICATION_KIND_COMMENT\0\u{1}NOTIFICATION_KIND_REPLY\0\u{1}NOTIFICATION_KIND_MENTION\0\u{1}NOTIFICATION_KIND_FOLLOW\0\u{1}NOTIFICATION_KIND_FOLLOW_REQUEST\0\u{1}NOTIFICATION_KIND_FOLLOW_ACCEPTED\0\u{1}NOTIFICATION_KIND_APPEAL_UPHELD\0\u{1}NOTIFICATION_KIND_APPEAL_OVERTURNED\0\u{1}NOTIFICATION_KIND_SUPERVISION_STARTED\0\u{1}NOTIFICATION_KIND_SUPERVISION_ENDED\0\u{1}NOTIFICATION_KIND_SUPERVISION_CAME_OF_AGE\0\u{1}NOTIFICATION_KIND_BADGE_AWARDED\0")
 }
 
 nonisolated extension Notification_V1_SubjectKind: SwiftProtobuf._ProtoNameProviding {

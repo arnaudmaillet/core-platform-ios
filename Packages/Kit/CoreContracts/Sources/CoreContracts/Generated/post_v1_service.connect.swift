@@ -20,6 +20,14 @@ public protocol Post_V1_PostServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `updatePost`(request: Post_V1_UpdatePostRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_CommandResponse>
 
+    /// Applies a card style to one of the caller's own posts, or the default
+    /// card (#914): free, one per post, changeable; the style is a catalogue
+    /// item the author's account owns. PST-1011 (PERMISSION_DENIED) for one it
+    /// does not own; PST-5003 (UNAVAILABLE) when the wallet cannot tell. Edge:
+    /// the post's author.
+    @available(iOS 13, *)
+    func `setPostCardStyle`(request: Post_V1_SetPostCardStyleRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_CommandResponse>
+
     @available(iOS 13, *)
     func `deletePost`(request: Post_V1_DeletePostRequest, headers: Connect.Headers) async -> ResponseMessage<Post_V1_CommandResponse>
 
@@ -68,6 +76,11 @@ public final class Post_V1_PostServiceClient: Post_V1_PostServiceClientInterface
     }
 
     @available(iOS 13, *)
+    public func `setPostCardStyle`(request: Post_V1_SetPostCardStyleRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Post_V1_CommandResponse> {
+        return await self.client.unary(path: "/post.v1.PostService/SetPostCardStyle", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
     public func `deletePost`(request: Post_V1_DeletePostRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Post_V1_CommandResponse> {
         return await self.client.unary(path: "/post.v1.PostService/DeletePost", idempotencyLevel: .unknown, request: request, headers: headers)
     }
@@ -102,6 +115,7 @@ public final class Post_V1_PostServiceClient: Post_V1_PostServiceClientInterface
             public static let createPost = Connect.MethodSpec(name: "CreatePost", service: "post.v1.PostService", type: .unary)
             public static let publishPost = Connect.MethodSpec(name: "PublishPost", service: "post.v1.PostService", type: .unary)
             public static let updatePost = Connect.MethodSpec(name: "UpdatePost", service: "post.v1.PostService", type: .unary)
+            public static let setPostCardStyle = Connect.MethodSpec(name: "SetPostCardStyle", service: "post.v1.PostService", type: .unary)
             public static let deletePost = Connect.MethodSpec(name: "DeletePost", service: "post.v1.PostService", type: .unary)
             public static let restorePost = Connect.MethodSpec(name: "RestorePost", service: "post.v1.PostService", type: .unary)
             public static let listRecentlyDeleted = Connect.MethodSpec(name: "ListRecentlyDeleted", service: "post.v1.PostService", type: .unary)

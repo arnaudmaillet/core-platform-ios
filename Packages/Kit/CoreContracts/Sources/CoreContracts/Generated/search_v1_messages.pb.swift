@@ -99,6 +99,10 @@ public nonisolated struct Search_V1_ProfileHit: Sendable {
 
   public var verified: Bool = false
 
+  /// #913: the avatar frame the profile wears (profile.v1
+  /// ProfileView.avatar_frame_id); empty: none.
+  public var avatarFrameID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -494,7 +498,7 @@ nonisolated extension Search_V1_SearchHit: SwiftProtobuf.Message, SwiftProtobuf.
 
 nonisolated extension Search_V1_ProfileHit: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ProfileHit"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}handle\0\u{3}display_name\0\u{3}avatar_key\0\u{1}verified\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}handle\0\u{3}display_name\0\u{3}avatar_key\0\u{1}verified\0\u{3}avatar_frame_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -506,6 +510,7 @@ nonisolated extension Search_V1_ProfileHit: SwiftProtobuf.Message, SwiftProtobuf
       case 2: try { try decoder.decodeSingularStringField(value: &self.displayName) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.avatarKey) }()
       case 4: try { try decoder.decodeSingularBoolField(value: &self.verified) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.avatarFrameID) }()
       default: break
       }
     }
@@ -524,6 +529,9 @@ nonisolated extension Search_V1_ProfileHit: SwiftProtobuf.Message, SwiftProtobuf
     if self.verified != false {
       try visitor.visitSingularBoolField(value: self.verified, fieldNumber: 4)
     }
+    if !self.avatarFrameID.isEmpty {
+      try visitor.visitSingularStringField(value: self.avatarFrameID, fieldNumber: 5)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -532,6 +540,7 @@ nonisolated extension Search_V1_ProfileHit: SwiftProtobuf.Message, SwiftProtobuf
     if lhs.displayName != rhs.displayName {return false}
     if lhs.avatarKey != rhs.avatarKey {return false}
     if lhs.verified != rhs.verified {return false}
+    if lhs.avatarFrameID != rhs.avatarFrameID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -31,10 +31,12 @@ public protocol Wallet_V1_WalletServiceClientInterface: Sendable {
     @available(iOS 13, *)
     func `listWalletTransactions`(request: Wallet_V1_ListWalletTransactionsRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_ListWalletTransactionsResponse>
 
-    /// Buys the ×100 stake pack with gems: 3 shots of 100 of the caller's own
-    /// points, 50 gems, one pack at a time (PACK_STILL_ACTIVE while shots are
-    /// left). WAL-3001 (PERMISSION_DENIED) for a caller under 18 or of
-    /// unknown age.
+    /// Buys a stake pack with gems (#941): `pack_id` names one of
+    /// `Wallet.stake_packs` (empty = the default pack: 3 shots of 100 of the
+    /// caller's own points for 50 gems), all or nothing, one pack at a time
+    /// (PACK_STILL_ACTIVE while shots are left). WAL-3001 (PERMISSION_DENIED)
+    /// for a caller under 18 or of unknown age; WAL-9005 (INVALID_ARGUMENT)
+    /// for a pack not on sale.
     @available(iOS 13, *)
     func `buyStakePack`(request: Wallet_V1_BuyStakePackRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_BuyStakePackResponse>
 
@@ -51,7 +53,8 @@ public protocol Wallet_V1_WalletServiceClientInterface: Sendable {
     func `stake`(request: Wallet_V1_StakeRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_StakeResponse>
 
     /// Mesh only: another service spends an account's gems (geo-discovery's
-    /// country unlocks). The caller checks the spender may spend gems (an
+    /// country unlocks and 24 h visas: kind COUNTRY_UNLOCK or COUNTRY_VISA;
+    /// profile's slots and paid handle changes: PROFILE_SLOT, HANDLE_CHANGE). The caller checks the spender may spend gems (an
     /// adult); the wallet records the movement. Idempotent per key.
     @available(iOS 13, *)
     func `spendGems`(request: Wallet_V1_SpendGemsRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_SpendGemsResponse>
@@ -74,6 +77,36 @@ public protocol Wallet_V1_WalletServiceClientInterface: Sendable {
     /// the balance does not hold.
     @available(iOS 13, *)
     func `listMyStakes`(request: Wallet_V1_ListMyStakesRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_ListMyStakesResponse>
+
+    /// The gem catalogue (#892): every item on sale and its price (server
+    /// policy), in display order. A free item (price 0) is owned by every
+    /// account. The app bundles each item's art keyed by its id and hides an
+    /// id it does not know. Edge: any member.
+    @available(iOS 13, *)
+    func `listCatalog`(request: Wallet_V1_ListCatalogRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_ListCatalogResponse>
+
+    /// Buys a catalogue item with gems (#892): idempotent per key, at
+    /// `expected_price` (PRICE_CHANGED otherwise), one ledger row of the item
+    /// family's kind (`ref_id` = the item id); the account then owns it.
+    /// Answered in-band (PurchaseOutcome). WAL-3001 (PERMISSION_DENIED) for a
+    /// caller under 18 or of unknown age. Edge: the caller's account.
+    @available(iOS 13, *)
+    func `purchaseItem`(request: Wallet_V1_PurchaseItemRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_PurchaseItemResponse>
+
+    /// The items the caller's account owns (#892), free ones included: the
+    /// app gates its pickers on it. Which item is applied (an icon, a theme)
+    /// is a device setting the server neither stores nor serves. Edge: the
+    /// caller's account.
+    @available(iOS 13, *)
+    func `listOwnedItems`(request: Wallet_V1_ListOwnedItemsRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_ListOwnedItemsResponse>
+
+    /// Mesh only (#912): awards a badge to an account, once — the service
+    /// whose rule earned it (geo-discovery: a continent's countries all
+    /// unlocked). The account then owns it (ListOwnedItems, family BADGE) and
+    /// `wallet.v1.events` announces `badge_awarded` to `profile_ids`
+    /// (notification). Idempotent: a later call answers the first award.
+    @available(iOS 13, *)
+    func `awardBadge`(request: Wallet_V1_AwardBadgeRequest, headers: Connect.Headers) async -> ResponseMessage<Wallet_V1_AwardBadgeResponse>
 }
 
 /// Concrete implementation of `Wallet_V1_WalletServiceClientInterface`.
@@ -129,6 +162,26 @@ public final class Wallet_V1_WalletServiceClient: Wallet_V1_WalletServiceClientI
         return await self.client.unary(path: "/wallet.v1.WalletService/ListMyStakes", idempotencyLevel: .unknown, request: request, headers: headers)
     }
 
+    @available(iOS 13, *)
+    public func `listCatalog`(request: Wallet_V1_ListCatalogRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Wallet_V1_ListCatalogResponse> {
+        return await self.client.unary(path: "/wallet.v1.WalletService/ListCatalog", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `purchaseItem`(request: Wallet_V1_PurchaseItemRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Wallet_V1_PurchaseItemResponse> {
+        return await self.client.unary(path: "/wallet.v1.WalletService/PurchaseItem", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `listOwnedItems`(request: Wallet_V1_ListOwnedItemsRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Wallet_V1_ListOwnedItemsResponse> {
+        return await self.client.unary(path: "/wallet.v1.WalletService/ListOwnedItems", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
+    @available(iOS 13, *)
+    public func `awardBadge`(request: Wallet_V1_AwardBadgeRequest, headers: Connect.Headers = [:]) async -> ResponseMessage<Wallet_V1_AwardBadgeResponse> {
+        return await self.client.unary(path: "/wallet.v1.WalletService/AwardBadge", idempotencyLevel: .unknown, request: request, headers: headers)
+    }
+
     public enum Metadata {
         public enum Methods {
             public static let getWallet = Connect.MethodSpec(name: "GetWallet", service: "wallet.v1.WalletService", type: .unary)
@@ -140,6 +193,10 @@ public final class Wallet_V1_WalletServiceClient: Wallet_V1_WalletServiceClientI
             public static let exportWallet = Connect.MethodSpec(name: "ExportWallet", service: "wallet.v1.WalletService", type: .unary)
             public static let listStakePositions = Connect.MethodSpec(name: "ListStakePositions", service: "wallet.v1.WalletService", type: .unary)
             public static let listMyStakes = Connect.MethodSpec(name: "ListMyStakes", service: "wallet.v1.WalletService", type: .unary)
+            public static let listCatalog = Connect.MethodSpec(name: "ListCatalog", service: "wallet.v1.WalletService", type: .unary)
+            public static let purchaseItem = Connect.MethodSpec(name: "PurchaseItem", service: "wallet.v1.WalletService", type: .unary)
+            public static let listOwnedItems = Connect.MethodSpec(name: "ListOwnedItems", service: "wallet.v1.WalletService", type: .unary)
+            public static let awardBadge = Connect.MethodSpec(name: "AwardBadge", service: "wallet.v1.WalletService", type: .unary)
         }
     }
 }
