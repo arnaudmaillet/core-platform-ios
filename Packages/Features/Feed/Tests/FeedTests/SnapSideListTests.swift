@@ -236,22 +236,117 @@ struct SnapSideListTests {
         #expect(list.autoplay?.playback.isPlaying(PostID("v0")) != true, "a tile kept playing once closed")
     }
 
-    /// The list offers current posts of the feed's kind, none already in it.
-    @Test func theListOffersOtherPostsOfTheFeedsKind() async {
+    /// ⚠️ THE POST ON SHOW FIRST, THEN SIMILAR POSTS (#1509): current posts
+    /// of the feed's kind, none already in it, once each — and the same
+    /// list again for the same anchor.
+    @Test func theListIsThePostOnShowThenOthersOfTheFeedsKind() async {
         let feed = feed(sideList: true)
+        var asked = 0
         feed.sideListEntries = {
-            [Self.entry("p1"), Self.entry("m1"), Self.entry("t1", media: false), Self.entry("m2"), Self.entry("m1")]
+            asked += 1
+            return [Self.entry("p1"), Self.entry("m1"), Self.entry("t1", media: false), Self.entry("m2"), Self.entry("m1")]
         }
         let ids = await feed.sideListCandidates().map(\.post.id.rawValue)
-        #expect(Set(ids) == ["m1", "m2"], "not the other media posts, once each: \(ids)")
+        #expect(ids.first == "p1", "the post on show is not first: \(ids)")
+        #expect(Set(ids.dropFirst()) == ["m1", "m2"] && ids.count == 3, "not the other media posts, once each: \(ids)")
+        #expect(await feed.sideListCandidates().map(\.post.id.rawValue) == ids, "a new list for the same anchor")
+        #expect(asked == 1)
+    }
+
+    /// A feed of `ids`, the side list installed, its "similar posts" `others`.
+    private func openableFeed(_ ids: [String], others: [String]) async throws -> SnapFeedViewController {
+        let controller = SnapFeedViewController(
+            // Its first page IS the feed: a seed alone is replaced by the
+            // first page when it lands.
+            viewModel: FeedViewModel(repository: PostsProvider(entries: ids.map { Self.entry($0) })),
+            imagePipeline: ImagePipeline(fetcher: PlaceholderImageFetcher()),
+            reporting: SideListReporter()
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        controller.view.layoutIfNeeded()
+        controller.sideListEntries = { others.map { Self.entry($0) } }
+        try #require(await settle { controller.orderedIDs.map(\.rawValue) == ids }, "guard: the feed's first page")
+        controller.view.layoutIfNeeded()
+        return controller
+    }
+
+    private func settle(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<600 where !condition() { try? await Task.sleep(for: .milliseconds(5)) }
+        return condition()
+    }
+
+    /// Opens `feed`'s list on the post on show and waits for it to drive the card.
+    private func open(_ feed: SnapFeedViewController) async throws -> SnapSideListController {
+        let sideList = try #require(feed.sideList)
+        sideList.loadIfNeeded()
+        try #require(await settle { !sideList.listView.entries.isEmpty }, "the list never loaded")
+        sideList.settle(open: true, animated: false)
+        try #require(await settle { feed.isSideListSessionActive }, "the list does not drive the card")
+        return sideList
+    }
+
+    /// ⚠️ WHILE OPEN, THE CARD PAGES THROUGH THE LIST (#1509, the owner's
+    /// choice): the feed's pages are the list's — the post on show first —
+    /// and the feed is set aside, nothing injected into it; the post on show
+    /// wears the tint border.
+    @Test func whileOpenTheCardPagesThroughTheList() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let list = sideList.listView.entries.map(\.post.id)
+        #expect(feed.orderedIDs == list, "the card does not page through the list: \(feed.orderedIDs) vs \(list)")
+        #expect(feed.activePostID == PostID("p1"), "the card left the post on show")
+        #expect(sideList.listView.outlinedPostID == PostID("p1"))
+        #expect(!feed.orderedIDs.contains(PostID("p2")), "the feed's own posts are mixed into the list")
+    }
+
+    /// ⚠️ A RIGHTWARD CLOSE MID-LIST KEEPS THE POST ON SHOW (#1509): the feed
+    /// comes back as it was, that post right after the anchor, the pager on
+    /// it — the next swipe up continues the feed after the anchor.
+    @Test func aCloseMidListKeepsThePostOnShowAfterTheAnchor() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        let picked = try #require(feed.orderedIDs.last)
+        feed.settlePager(onIndex: feed.orderedIDs.count - 1)
+        #expect(feed.activePostID == picked, "guard: the card is on the list's last post")
+
+        sideList.settle(open: false, animated: false)
+        #expect(!feed.isSideListSessionActive)
+        #expect(feed.orderedIDs == [PostID("p1"), picked, PostID("p2")], "not placed right after the anchor: \(feed.orderedIDs)")
+        #expect(feed.activePostID == picked, "the post on show did not stay full screen")
+    }
+
+    /// ⚠️ PAST THE LIST'S LAST TILE, A SWIPE UP CLOSES THE LIST (#1509) and
+    /// lands on the feed's post after the anchor — the feed untouched.
+    @Test func aSwipeUpPastTheLastTileClosesTheListOntoTheFeed() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        _ = try await open(feed)
+        feed.settlePager(onIndex: feed.orderedIDs.count - 1)
+        let pager = try #require(feed.collectionView)
+        var target = pager.contentOffset
+        withUnsafeMutablePointer(to: &target) { pointer in
+            feed.scrollViewWillEndDragging(pager, withVelocity: CGPoint(x: 0, y: 2), targetContentOffset: pointer)
+        }
+        #expect(!feed.isSideListSessionActive, "the list stayed open past its last tile")
+        #expect(feed.orderedIDs == [PostID("p1"), PostID("p2")], "the list leaked into the feed: \(feed.orderedIDs)")
+        #expect(feed.activePostID == PostID("p2"), "not the post after the anchor")
+    }
+
+    /// Closed on the post it was opened from: the feed exactly as it was.
+    @Test func aCloseOnTheAnchorRestoresTheFeedUntouched() async throws {
+        let feed = try await openableFeed(["p1", "p2"], others: ["m1", "m2"])
+        let sideList = try await open(feed)
+        sideList.settle(open: false, animated: false)
+        #expect(feed.orderedIDs == [PostID("p1"), PostID("p2")])
+        #expect(feed.activePostID == PostID("p1"))
     }
 }
 
-/// Inserting after a post (#1425): the pager's next page, paging back
-/// returns to the anchor.
+/// The side list's session in the view model (#1509): the feed set aside
+/// while the list drives the card, restored untouched on close.
 @MainActor
-struct FeedViewModelInsertTests {
-    @Test func aPickedPostGoesRightAfterTheOneOnShow() async {
+struct FeedViewModelSideListSessionTests {
+    private func loaded(_ ids: [String]) async -> (FeedViewModel, () -> [String]) {
         let viewModel = FeedViewModel(repository: SideListProvider())
         var shown: [String] = []
         var renders = 0
@@ -265,18 +360,64 @@ struct FeedViewModelInsertTests {
         for _ in 0..<6_000 where renders == 0 {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        viewModel.seed(["a", "b", "c"].map {
+        viewModel.seed(ids.map {
             FeedItemDisplayModel(
                 id: PostID($0), authorID: ProfileID("x"), authorName: "X", metaText: "", avatarURL: nil,
                 caption: "", mediaURL: nil, mediaKind: .image, thumbnailURL: nil, audioText: nil
             )
         })
-        let inserted = await viewModel.insert(SideListProvider.entry("n"), after: PostID("a"))
-        #expect(inserted)
-        #expect(shown == ["a", "n", "b", "c"], "not right after the anchor: \(shown)")
-        let again = await viewModel.insert(SideListProvider.entry("n"), after: PostID("c"))
-        #expect(!again, "a post already in the feed went in twice")
-        #expect(shown == ["a", "n", "b", "c"])
+        return (viewModel, { shown })
+    }
+
+    @Test func theListReplacesTheFeedWhileOpen() async {
+        let (viewModel, shown) = await loaded(["a", "b", "c"])
+        let began = await viewModel.beginSideListSession(
+            anchor: PostID("b"), entries: ["b", "x", "y"].map { SideListProvider.entry($0) }
+        )
+        #expect(began)
+        #expect(viewModel.isInSideListSession)
+        #expect(shown() == ["b", "x", "y"], "not the anchor then the list: \(shown())")
+        #expect(await !viewModel.beginSideListSession(anchor: PostID("x"), entries: []), "a second session began")
+    }
+
+    /// Closed mid-list: the post on show right after the anchor.
+    @Test func aMidListCloseKeepsThePostOnShowAfterTheAnchor() async {
+        let (viewModel, shown) = await loaded(["a", "b", "c"])
+        await viewModel.beginSideListSession(anchor: PostID("b"), entries: ["b", "x", "y"].map { SideListProvider.entry($0) })
+        let index = viewModel.endSideListSession(anchor: PostID("b"), keeping: PostID("y"))
+        #expect(shown() == ["a", "b", "y", "c"], "\(shown())")
+        #expect(index == 2)
+        #expect(!viewModel.isInSideListSession)
+    }
+
+    /// Past the list's end: the feed untouched, on the post after the anchor.
+    @Test func anEndOfListCloseLandsAfterTheAnchor() async {
+        let (viewModel, shown) = await loaded(["a", "b", "c"])
+        await viewModel.beginSideListSession(anchor: PostID("b"), entries: ["b", "x"].map { SideListProvider.entry($0) })
+        let index = viewModel.endSideListSession(anchor: PostID("b"), keeping: nil)
+        #expect(shown() == ["a", "b", "c"], "the list leaked into the feed: \(shown())")
+        #expect(index == 2, "not the post after the anchor")
+    }
+
+    /// Closed on the anchor: exactly the feed it was.
+    @Test func aCloseOnTheAnchorRestoresTheFeed() async {
+        let (viewModel, shown) = await loaded(["a", "b", "c"])
+        await viewModel.beginSideListSession(anchor: PostID("b"), entries: ["b", "x"].map { SideListProvider.entry($0) })
+        #expect(viewModel.endSideListSession(anchor: PostID("b"), keeping: PostID("b")) == 1)
+        #expect(shown() == ["a", "b", "c"])
+    }
+}
+
+/// A feed whose first page is `entries`, and the end.
+private final class PostsProvider: FeedProviding, @unchecked Sendable {
+    let entries: [FeedEntry]
+    init(entries: [FeedEntry]) { self.entries = entries }
+    func cachedFirstPage() async -> [FeedEntry]? { nil }
+    func loadFirstPage() async throws -> FeedPage { FeedPage(entries: entries, nextPageToken: nil, isCold: false) }
+    func loadPage(afterToken token: String) async throws -> FeedPage { FeedPage(entries: [], nextPageToken: nil, isCold: false) }
+    func loadPost(_ id: PostID) async throws -> FeedEntry {
+        guard let entry = entries.first(where: { $0.post.id == id }) else { throw URLError(.fileDoesNotExist) }
+        return entry
     }
 }
 

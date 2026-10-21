@@ -427,6 +427,10 @@ final class SnapFeedViewController: UIViewController {
     /// How far the pages' overlays sit down while the side list is open
     /// (#1509): the band the bottom toolbar covers, in the page's space.
     var sideListOverlayOffset: CGFloat = 0
+    /// The lists made so far, by the post they were opened from (#1509).
+    var sideListCache: [PostID: [FeedEntry]] = [:]
+    /// The post the side list was opened from, while it drives the card.
+    var sideListAnchor: PostID?
     /// Whether this screen installs the side list — every vertical feed does
     /// (#1473); a test sets its own before the view loads.
     var installsSideList = true
@@ -5768,6 +5772,14 @@ extension SnapFeedViewController: UICollectionViewDelegate {
     ) {
         let page = scrollView.bounds.height
         guard page > 0 else { return }
+        if sideListShouldCloseAtEnd(velocity: velocity, in: scrollView) {
+            // The feed comes back on the post after the anchor, under the
+            // finger's release, and the list slides away.
+            endSideListSession(atEnd: true)
+            targetContentOffset.pointee.y = collectionView.contentOffset.y
+            sideList?.settle(open: false)
+            return
+        }
         let ceiling = CGFloat(reachableCeiling()) * page
         if targetContentOffset.pointee.y > ceiling {
             targetContentOffset.pointee.y = ceiling
@@ -7008,30 +7020,88 @@ extension SnapFeedViewController: ZoomTransitionDestination {
         )
     }
 
-    /// The posts the list offers: current ones, of the feed's kind (#1421),
-    /// none already in the feed, in a random order.
+    /// ⚠️ THE POST ON SHOW, THEN SIMILAR POSTS (#1509): the list is
+    /// `[the post on show] + current posts of the feed's kind (#1421), none
+    /// already in the feed, in a random order` — the "similar" half behind
+    /// one seam (`sideListEntries`), so posts sharing a hashtag replace it as
+    /// a data change. One list per anchor, kept while the screen lives: the
+    /// same post opens on the same list.
     func sideListCandidates() async -> [FeedEntry] {
-        let entries = await sideListEntries?() ?? []
+        guard let anchor = activePostID else { return [] }
+        if let cached = sideListCache[anchor] { return cached }
+        async let similar = sideListEntries?() ?? []
+        async let shown = viewModel.entry(for: anchor)
+        let (entries, anchorEntry) = await (similar, shown)
         let inFeed = Set(orderedIDs)
-        let kind: SnapFeedKindScope? = activePostID.flatMap { modelsByID[$0] }.map { $0.mediaURL == nil ? .text : .media }
-        var seen = Set<PostID>()
-        return entries.filter { entry in
+        let kind: SnapFeedKindScope? = modelsByID[anchor].map { $0.mediaURL == nil ? .text : .media }
+        var seen: Set<PostID> = [anchor]
+        let others = entries.filter { entry in
             guard !inFeed.contains(entry.post.id), seen.insert(entry.post.id).inserted else { return false }
             return kind == nil || SnapFeedKindScope(entry) == kind
         }.shuffled()
+        let list = (anchorEntry.map { [$0] } ?? []) + others
+        sideListCache[anchor] = list
+        return list
     }
 
-    /// A post picked in the list: in the feed right after the one on show,
-    /// and the pager moves to it — paging back returns to the one it
-    /// replaced. Already in the feed: the pager moves to it.
-    func showSideListEntry(_ entry: FeedEntry) {
-        guard let anchor = activePostID else { return }
+    /// Whether the side list drives the card now (#1509).
+    var isSideListSessionActive: Bool { viewModel.isInSideListSession }
+
+    /// The list is open and loaded: the card pages through it (#1509) — the
+    /// feed set aside untouched, the pager on the post on show, the list's
+    /// first item.
+    func beginSideListSessionIfNeeded() {
+        guard let sideList, sideList.isOpen, !viewModel.isInSideListSession,
+              let anchor = activePostID, sideList.listView.entries.first?.post.id == anchor else { return }
+        let entries = sideList.listView.entries
         Task { [weak self] in
-            guard let self else { return }
-            await viewModel.insert(entry, after: anchor)
-            guard let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
-            collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
+            guard let self, await viewModel.beginSideListSession(anchor: anchor, entries: entries) else { return }
+            sideListAnchor = anchor
+            settlePager(onIndex: 0)
         }
+    }
+
+    /// The pager on page `index`, at once, and the page made active.
+    func settlePager(onIndex index: Int) {
+        let page = collectionView.bounds.height
+        guard page > 0, orderedIDs.indices.contains(index) else { return }
+        UIView.performWithoutAnimation {
+            collectionView.setContentOffset(CGPoint(x: 0, y: CGFloat(index) * page), animated: false)
+            collectionView.layoutIfNeeded()
+        }
+        updateActiveItem()
+    }
+
+    /// The list closed (#1509): the feed comes back as it was. Closed
+    /// mid-list, the post on show STAYS full screen — placed right after the
+    /// anchor, so a swipe up continues the feed from there. `atEnd`: the
+    /// list ran out, and the feed continues at the post after the anchor.
+    private func endSideListSession(atEnd: Bool) {
+        guard viewModel.isInSideListSession, let anchor = sideListAnchor else { return }
+        sideListAnchor = nil
+        let shown = atEnd ? nil : activePostID
+        guard let index = viewModel.endSideListSession(anchor: anchor, keeping: shown) else { return }
+        settlePager(onIndex: index)
+    }
+
+    /// A post picked in the list: the card moves to it — the list's own
+    /// item, nothing injected into the feed (#1509).
+    func showSideListEntry(_ entry: FeedEntry) {
+        guard viewModel.isInSideListSession,
+              let index = orderedIDs.firstIndex(of: entry.post.id) else { return }
+        collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
+    }
+
+    /// ⚠️ PAST THE LIST'S LAST TILE (#1509): a swipe up closes the list with
+    /// the rightward slide and lands on the feed's post after the anchor.
+    private func sideListShouldCloseAtEnd(velocity: CGPoint, in scrollView: UIScrollView) -> Bool {
+        // The page settled under the finger — `activePostID`'s answer.
+        let active = settledPageIndex
+        guard viewModel.isInSideListSession, let sideList, sideList.isOpen,
+              !orderedIDs.isEmpty, active == orderedIDs.count - 1 else { return false }
+        let page = scrollView.bounds.height
+        let overshoot = scrollView.contentOffset.y - CGFloat(active) * page
+        return velocity.y > 0.3 || overshoot > page * 0.12
     }
 
     /// What the bars cover, for the side list's card to fit between them
@@ -7066,6 +7136,11 @@ extension SnapFeedViewController: ZoomTransitionDestination {
     /// stands aside while the list is open.
     func sideListDidSettle(open: Bool) {
         (collectionView as? SnapFeedCollectionView)?.allowsBackwardPaging = open
+        if open {
+            beginSideListSessionIfNeeded()
+        } else {
+            endSideListSession(atEnd: false)
+        }
         sideList?.activePostDidChange(activePostID)
     }
 

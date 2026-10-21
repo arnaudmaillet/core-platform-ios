@@ -597,6 +597,18 @@ public final class FeedViewModel {
         do {
             let page = try await repository.loadPage(afterToken: token)
             if let models = await build(page.entries) {
+                // A page that lands while the side list drives the card is
+                // the SET-ASIDE feed's (#1509): it joins that, not the list.
+                if var aside = setAside {
+                    let known = Set(aside.items.map(\.id))
+                    aside.items += withoutDeleted(models).filter { !known.contains($0.id) }
+                    aside.nextPageToken = page.nextPageToken
+                    aside.isSourceExhausted = page.nextPageToken == nil && page.isEndOfSource
+                    setAside = aside
+                    seedEngagement(from: page.entries)
+                    if !Task.isCancelled { pagingLoad = nil }
+                    return
+                }
                 let known = Set(items.map(\.id))
                 let fresh = withoutDeleted(models).filter { !known.contains($0.id) }
                 items += fresh
@@ -647,25 +659,85 @@ public final class FeedViewModel {
         })
     }
 
-    /// Puts `entry` right after `anchor` (#1425: a post picked in the side
-    /// list): the screen moves to it, and paging back returns to `anchor`.
-    /// False when it is already in the feed (or deleted): nothing changes.
+    // MARK: - The side list's session (#1509)
+
+    /// The feed set aside while the side list drives the card: its posts and
+    /// its paging, restored untouched on close.
+    private struct SetAside {
+        var items: [FeedItemDisplayModel]
+        var nextPageToken: String?
+        var isSourceExhausted: Bool
+    }
+    private var setAside: SetAside?
+
+    /// Whether the side list drives the card now.
+    public var isInSideListSession: Bool { setAside != nil }
+
+    /// The post a list entry would show, as the feed's provider reads it —
+    /// the post on show, for the list's first tile.
+    func entry(for id: PostID) async -> FeedEntry? {
+        try? await repository.loadPost(id)
+    }
+
+    /// ⚠️ WHILE THE LIST IS OPEN, PAGING RUNS THROUGH IT (#1509, the owner's
+    /// choice): the feed's posts become `[anchor] + entries` — the post on
+    /// show first, then the list's — and the feed itself is set aside
+    /// untouched, paging included, until `endSideListSession`. Nothing is
+    /// injected into it. The list ends where it ends: no paging meanwhile.
+    /// False (nothing changed) when the anchor is not in the feed or a
+    /// session is already on.
     @discardableResult
-    public func insert(_ entry: FeedEntry, after anchor: PostID) async -> Bool {
-        guard let models = await build([entry]), let model = models.first else { return false }
-        guard !items.contains(where: { $0.id == model.id }), !entities.isDeleted(model.id) else { return false }
-        let index = items.firstIndex { $0.id == anchor }.map { $0 + 1 } ?? items.count
-        items.insert(model, at: index)
-        seedEngagement(from: [entry])
-        subscribeToCounters(for: [model.id])
-        phase = .content
+    public func beginSideListSession(anchor: PostID, entries: [FeedEntry]) async -> Bool {
+        guard setAside == nil, let anchorModel = items.first(where: { $0.id == anchor }) else { return false }
+        let others = entries.filter { $0.post.id != anchor }
+        let built = others.isEmpty ? [] : await build(others) ?? []
+        guard setAside == nil, items.contains(where: { $0.id == anchor }) else { return false }
+        setAside = SetAside(items: items, nextPageToken: nextPageToken, isSourceExhausted: isSourceExhausted)
+        items = [anchorModel] + withoutDeleted(built).filter { $0.id != anchor }
+        nextPageToken = nil
+        isSourceExhausted = true
+        seedEngagement(from: others)
+        subscribeToCounters(for: items.map(\.id))
         emit()
         return true
+    }
+
+    /// The list closed: the feed comes back as it was set aside. `shown` —
+    /// the post on show when the list closed mid-way (#1509) — goes right
+    /// after `anchor` when it is not in the feed already, so the feed
+    /// continues from the anchor's place. Returns where the feed should sit:
+    /// `shown`'s index, the anchor's, or (with `shown` nil) the post after
+    /// the anchor's.
+    @discardableResult
+    public func endSideListSession(anchor: PostID, keeping shown: PostID?) -> Int? {
+        guard let aside = setAside else { return nil }
+        setAside = nil
+        let sessionModels = items
+        items = aside.items
+        nextPageToken = aside.nextPageToken
+        isSourceExhausted = aside.isSourceExhausted
+        let anchorIndex = items.firstIndex { $0.id == anchor }
+        if let shown, shown != anchor, !items.contains(where: { $0.id == shown }),
+           let model = sessionModels.first(where: { $0.id == shown }) {
+            items.insert(model, at: anchorIndex.map { $0 + 1 } ?? items.count)
+        }
+        emit()
+        if let shown { return items.firstIndex { $0.id == shown } }
+        return anchorIndex.map { min($0 + 1, items.count - 1) }
     }
 
     /// Optimistic insert of a locally-composed post at the top of the feed.
     private func prepend(_ entry: FeedEntry) async {
         guard let models = await build([entry]), let model = models.first else { return }
+        // The side list drives the card (#1509): the post joins the feed set
+        // aside, which it heads when the list closes.
+        if var aside = setAside {
+            guard !aside.items.contains(where: { $0.id == model.id }) else { return }
+            aside.items.insert(model, at: 0)
+            setAside = aside
+            seedEngagement(from: [entry])
+            return
+        }
         // Guard against a later network refresh having already surfaced it.
         guard !items.contains(where: { $0.id == model.id }), !entities.isDeleted(model.id) else { return }
         items.insert(model, at: 0)

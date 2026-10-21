@@ -127,7 +127,10 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
     private var startProgress: CGFloat = 0
     private var isSettling = false
     private var loadTask: Task<Void, Never>?
-    private var hasLoaded = false
+    /// The post the list on show was made for (#1509: a new list per
+    /// anchor, cached while the screen lives — `SnapFeedViewController
+    /// .sideListCandidates`).
+    private var loadedAnchor: PostID?
 
     /// Open, opening or closing: the screen's dismissals stand aside.
     var isEngaged: Bool {
@@ -252,6 +255,12 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
             finish()
             return
         }
+        // A first open with no pose yet (a release before any `.changed`,
+        // the QA hook): the list starts beyond the trailing edge, not from
+        // the screen's corner where a never-placed frame sits.
+        if listView.frame == .zero {
+            UIView.performWithoutAnimation { apply(progress) }
+        }
         UIView.animate(
             withDuration: 0.42, delay: 0, usingSpringWithDamping: 0.9, initialSpringVelocity: 0,
             options: [.allowUserInteraction, .beginFromCurrentState]
@@ -262,15 +271,19 @@ final class SnapSideListController: NSObject, UIGestureRecognizerDelegate {
 
     // MARK: The list
 
-    private func loadIfNeeded() {
-        guard !hasLoaded, loadTask == nil, let host else { return }
+    func loadIfNeeded() {
+        // While the list drives the card, it is the list on show.
+        guard loadTask == nil, let host, !host.isSideListSessionActive,
+              let anchor = host.activePostID, anchor != loadedAnchor else { return }
         loadTask = Task { [weak self, weak host] in
             let entries = await host?.sideListCandidates() ?? []
             guard let self else { return }
             loadTask = nil
-            hasLoaded = true
+            loadedAnchor = anchor
             listView.show(entries)
-            if let active = host?.activePostID { listView.outline(active) }
+            listView.outline(anchor)
+            // Settled open before the list came: it drives the card now.
+            if isOpen { host?.beginSideListSessionIfNeeded() }
         }
     }
 
@@ -375,12 +388,16 @@ final class SnapSideListView: UIView, UICollectionViewDataSource, UICollectionVi
 
     private func style(_ cell: UICollectionViewCell, at path: IndexPath) {
         let isOutlined = entries.indices.contains(path.item) && entries[path.item].post.id == outlined
-        // The post on show: a bold outline. The rest: a hairline, so a text
-        // tile (a card on the page's own ground) still reads as a tile.
+        // The post on show: a 2 pt border in the app's tint, concentric with
+        // the tile's corner (#1509). The rest: a hairline, so a text tile (a
+        // card on the page's own ground) still reads as a tile.
         cell.contentView.layer.borderWidth = isOutlined ? 2 : 0.5
-        cell.contentView.layer.borderColor = (isOutlined ? UIColor.label : UIColor.separator)
+        cell.contentView.layer.borderColor = (isOutlined ? Palette.tint : UIColor.separator)
             .resolvedColor(with: traitCollection).cgColor
     }
+
+    /// Whether `id`'s tile wears the indicator border. Tests.
+    var outlinedPostID: PostID? { outlined }
 
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         entries.count
